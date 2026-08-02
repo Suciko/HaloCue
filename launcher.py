@@ -1,0 +1,293 @@
+# -*- coding: utf-8 -*-
+"""AA 自动写剧本的 Windows 一键启动与环境体检入口。"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+import webbrowser
+from pathlib import Path
+
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
+PROGRAM_DIR = Path(__file__).resolve().parent
+ENTRY_FILE = "启动AA自动写剧本.cmd"
+ERROR_LOG = PROGRAM_DIR / "启动失败日志.txt"
+MIN_PYTHON = (3, 9)
+CORE_FILES = ("webui.py", "ui.html")
+
+
+def normalize_aa_data_path(path: str | os.PathLike | None) -> Path | None:
+    """Accept either AA's ``data`` directory or its workspace parent."""
+    if not path:
+        return None
+    candidate = Path(path).expanduser()
+    try:
+        candidate = candidate.resolve()
+    except OSError:
+        return None
+    for value in (candidate, candidate / "data"):
+        if value.is_dir() and (value / "projects").is_dir():
+            return value
+    return None
+
+
+def _detected_aa_data(explicit_aa_data: str | None) -> Path | None:
+    explicit = normalize_aa_data_path(explicit_aa_data)
+    if explicit is not None:
+        return explicit
+    sys.path.insert(0, str(PROGRAM_DIR))
+    try:
+        import aapaths
+
+        detected = aapaths.detect()
+    except Exception:
+        return None
+    return normalize_aa_data_path(detected.get("data"))
+
+
+def build_environment_report(
+    program_dir: str | os.PathLike,
+    explicit_aa_data: str | None = None,
+) -> dict:
+    """Return a redacted, serializable startup-readiness report."""
+    root = Path(program_dir).resolve()
+    missing_files = [
+        name for name in CORE_FILES if not (root / name).is_file()
+    ]
+    database_ready = (root / "aa_assets.db").is_file()
+    pillow_ready = importlib.util.find_spec("PIL") is not None
+    python_ready = sys.version_info >= MIN_PYTHON
+    aa_data = _detected_aa_data(explicit_aa_data)
+    issues: list[str] = []
+    if not python_ready:
+        issues.append(
+            "Python 版本过低，需要 Python 3.9 或更高版本。"
+        )
+    for name in missing_files:
+        issues.append(f"程序文件缺失：{name}")
+    if not pillow_ready:
+        issues.append(
+            "缺少图片组件 Pillow。请运行：python -m pip install pillow"
+        )
+    if not database_ready:
+        issues.append(
+            "缺少素材数据库 aa_assets.db；请先完成素材库初始化或使用带数据库的发布包。"
+        )
+    if aa_data is None:
+        issues.append(
+            "没有找到 AA 工作区；请选择包含 projects 文件夹的 data 目录。"
+        )
+    return {
+        "ok": not issues,
+        "python": {
+            "ready": python_ready,
+            "version": (
+                f"{sys.version_info.major}."
+                f"{sys.version_info.minor}."
+                f"{sys.version_info.micro}"
+            ),
+            "executable": sys.executable,
+        },
+        "program": {
+            "ready": not missing_files,
+            "path": str(root),
+            "missing_files": missing_files,
+        },
+        "database": {
+            "ready": database_ready,
+            "path": str(root / "aa_assets.db"),
+        },
+        "pillow": {"ready": pillow_ready},
+        "aa": {
+            "connected": aa_data is not None,
+            "path": str(aa_data) if aa_data else "",
+        },
+        "entry_file": ENTRY_FILE,
+        "blocking_issues": issues,
+    }
+
+
+def is_existing_server(url: str) -> bool:
+    """Return true only when the URL identifies this local application."""
+    try:
+        with urllib.request.urlopen(
+            url.rstrip("/") + "/api/setup/status",
+            timeout=0.8,
+        ) as response:
+            if response.status != 200:
+                return False
+            payload = json.loads(response.read().decode("utf-8"))
+    except (
+        OSError,
+        ValueError,
+        urllib.error.URLError,
+    ):
+        return False
+    return payload.get("entry_file") == ENTRY_FILE
+
+
+def _choose_aa_data() -> Path | None:
+    """Ask a non-technical Windows user for the AA workspace folder."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog, messagebox
+    except Exception:
+        return None
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        while True:
+            selected = filedialog.askdirectory(
+                title=(
+                    "选择 AA 的 data 文件夹，"
+                    "或“存储文件”工作区文件夹"
+                )
+            )
+            if not selected:
+                return None
+            normalized = normalize_aa_data_path(selected)
+            if normalized is not None:
+                return normalized
+            messagebox.showerror(
+                "这里不是 AA 工作区",
+                "请选择里面含有 projects 文件夹的 data 目录，"
+                "也可以选择 data 的上一级“存储文件”目录。",
+            )
+    finally:
+        root.destroy()
+
+
+def _save_aa_path(data_dir: Path) -> None:
+    sys.path.insert(0, str(PROGRAM_DIR))
+    import aapaths
+
+    aapaths.save_config(str(data_dir))
+
+
+def _human_report(report: dict) -> str:
+    lines = [
+        "AA 自动写剧本 · 运行环境检查",
+        "",
+        f"Python：{'正常' if report['python']['ready'] else '异常'}"
+        f"（{report['python']['version']}）",
+        f"程序文件：{'正常' if report['program']['ready'] else '缺失'}",
+        f"素材数据库：{'正常' if report['database']['ready'] else '缺失'}",
+        f"图片组件：{'正常' if report['pillow']['ready'] else '缺失'}",
+        f"AA 工作区：{'已连接' if report['aa']['connected'] else '未连接'}",
+    ]
+    if report["aa"]["path"]:
+        lines.append(f"  {report['aa']['path']}")
+    if report["blocking_issues"]:
+        lines.extend(["", "需要处理："])
+        lines.extend(
+            f"{index}. {message}"
+            for index, message in enumerate(
+                report["blocking_issues"],
+                1,
+            )
+        )
+    else:
+        lines.extend(["", "全部正常，可以启动。"])
+    return "\n".join(lines)
+
+
+def _write_failure_log(report: dict) -> None:
+    ERROR_LOG.write_text(
+        _human_report(report) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _show_error(message: str) -> None:
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            message,
+            "AA 自动写剧本无法启动",
+            0x10,
+        )
+    except Exception:
+        pass
+
+
+def _start_application(aa_data: Path) -> int:
+    url = "http://127.0.0.1:8770"
+    if is_existing_server(url):
+        print("程序已经在运行，正在打开现有页面……")
+        webbrowser.open(url)
+        return 0
+    command = [
+        sys.executable,
+        str(PROGRAM_DIR / "webui.py"),
+        "--aa-data",
+        str(aa_data),
+    ]
+    print("环境检查通过，正在打开网页……")
+    print("程序运行期间请保留这个窗口；关闭窗口即可停止程序。")
+    try:
+        return subprocess.call(command, cwd=PROGRAM_DIR)
+    except KeyboardInterrupt:
+        return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="AA 自动写剧本启动器"
+    )
+    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--aa-data")
+    args = parser.parse_args(argv)
+
+    report = build_environment_report(
+        PROGRAM_DIR,
+        explicit_aa_data=args.aa_data,
+    )
+    if args.check:
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False))
+        else:
+            print(_human_report(report))
+        return 0 if report["ok"] else 1
+
+    if not report["aa"]["connected"]:
+        chosen = _choose_aa_data()
+        if chosen is not None:
+            _save_aa_path(chosen)
+            report = build_environment_report(
+                PROGRAM_DIR,
+                explicit_aa_data=str(chosen),
+            )
+
+    if not report["ok"]:
+        _write_failure_log(report)
+        message = (
+            _human_report(report)
+            + "\n\n详细结果已保存到：\n"
+            + str(ERROR_LOG)
+        )
+        print(message)
+        _show_error(message)
+        return 1
+
+    return _start_application(Path(report["aa"]["path"]))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

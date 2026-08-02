@@ -1,0 +1,315 @@
+# -*- coding: utf-8 -*-
+"""Multimodal semantic labels for rendered Spine face animations."""
+
+from __future__ import annotations
+
+import io
+import json
+from pathlib import Path
+from typing import Iterable, Sequence
+
+from PIL import Image, ImageDraw, ImageFont
+
+from spine_face_renderer import RenderedFace
+
+
+VISION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "face_id": {"type": "string"},
+                    "primary_emotion": {"type": "string"},
+                    "secondary_emotions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "valence": {
+                        "type": "string",
+                        "enum": ["positive", "neutral", "negative", "mixed"],
+                    },
+                    "arousal": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                    },
+                    "eyes": {"type": "string"},
+                    "brows": {"type": "string"},
+                    "mouth": {"type": "string"},
+                    "blush": {"type": "boolean"},
+                    "tears": {"type": "boolean"},
+                    "confidence": {"type": "number"},
+                    "description_cn": {"type": "string"},
+                },
+                "required": [
+                    "face_id",
+                    "primary_emotion",
+                    "secondary_emotions",
+                    "valence",
+                    "arousal",
+                    "eyes",
+                    "brows",
+                    "mouth",
+                    "blush",
+                    "tears",
+                    "confidence",
+                    "description_cn",
+                ],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["items"],
+    "additionalProperties": False,
+}
+
+
+_SYSTEM = """你在为视觉小说角色立绘建立可检索的表情差分语义表。
+只根据图中实际可见的眼睛、眉毛、嘴形、脸红、眼泪和整体情绪判断。
+不要根据编号猜测，不要根据文件名猜测，也不要把服装、姿势或角色身份当成情绪。
+同一批图片属于同一角色，重点比较它们之间的细微差别。
+primary_emotion 使用简洁自然的中文，例如“轻微微笑”“不满”“尴尬”“惊讶”。
+description_cn 写成一句可供剧本模型选表情时使用的中文说明。
+置信度范围为 0 到 1；确实模糊时降低置信度，不要硬猜。"""
+
+
+def _jpeg_bytes(path: Path) -> bytes:
+    source = Image.open(path).convert("RGBA")
+    background = Image.new("RGB", source.size, (232, 232, 232))
+    background.paste(source.convert("RGB"), mask=source.getchannel("A"))
+    buffer = io.BytesIO()
+    background.save(buffer, format="JPEG", quality=92, optimize=True)
+    return buffer.getvalue()
+
+
+def label_face_images(
+    provider,
+    faces: Sequence[RenderedFace],
+    *,
+    batch_size: int = 8,
+    semantic_hints: dict[str, dict] | None = None,
+    max_attempts: int = 3,
+) -> list[dict]:
+    """Label rendered heads in small comparison batches with exact ID checks."""
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1")
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be at least 1")
+    ordered = sorted(faces, key=lambda face: face.face_id)
+    hints = semantic_hints or {}
+    results: list[dict] = []
+    for start in range(0, len(ordered), batch_size):
+        batch = ordered[start : start + batch_size]
+        images = [(face.face_id, _jpeg_bytes(face.head_path)) for face in batch]
+        hint_lines = []
+        for face in batch:
+            labels = hints.get(face.face_id, {}).get("labels") or []
+            if labels:
+                hint_lines.append(
+                    f"{face.face_id}: 骨骼部件名候选={','.join(map(str, labels))}"
+                )
+        user = (
+            "请逐张标注以下 face_id，返回数量和编号必须完全一致："
+            + "、".join(face.face_id for face in batch)
+            + '\n必须只返回一个 JSON 对象，根键必须是 "items"。'
+            + "items 数组中每项必须完整包含：face_id、primary_emotion、"
+            + "secondary_emotions、valence、arousal、eyes、brows、mouth、"
+            + "blush、tears、confidence、description_cn。"
+            + "blush 和 tears 必须是 JSON 布尔值，不能写“有/无”。"
+        )
+        if hint_lines:
+            user += (
+                "\n以下只是制作者命名提供的弱提示；与画面冲突时必须以画面为准：\n"
+                + "\n".join(hint_lines)
+            )
+        expected = [face.face_id for face in batch]
+        last_error: Exception | None = None
+        items: list[dict] = []
+        required = set(VISION_SCHEMA["properties"]["items"]["items"]["required"])
+        for attempt in range(1, max_attempts + 1):
+            attempt_user = user
+            if attempt > 1:
+                attempt_user += (
+                    f"\n这是第 {attempt} 次校正请求。上次响应为空、结构错误或字段不完整。"
+                    "不要使用 Markdown 说明，不要省略字段，严格按上述 JSON 结构重答。"
+                )
+            try:
+                response = provider.complete_json_vision(
+                    _SYSTEM, images, attempt_user, VISION_SCHEMA
+                )
+                if not isinstance(response, dict):
+                    raise ValueError("response root is not an object")
+                candidate = response.get("items")
+                if not isinstance(candidate, list):
+                    raise ValueError('response root does not contain an "items" array')
+                if not all(isinstance(item, dict) for item in candidate):
+                    raise ValueError("items contains a non-object value")
+                actual = [str(item.get("face_id") or "") for item in candidate]
+                if (
+                    len(actual) != len(set(actual))
+                    or set(actual) != set(expected)
+                ):
+                    raise ValueError(
+                        f"face IDs do not match: expected {expected}, got {actual}"
+                    )
+                incomplete = [
+                    str(item.get("face_id") or "?")
+                    for item in candidate
+                    if not required.issubset(item)
+                ]
+                if incomplete:
+                    raise ValueError(
+                        "missing required fields for " + ", ".join(incomplete)
+                    )
+                items = candidate
+                last_error = None
+                break
+            except Exception as exc:
+                last_error = exc
+        if last_error is not None:
+            raise ValueError(
+                f"视觉模型连续 {max_attempts} 次未返回完整的表情标注："
+                f"{last_error}"
+            ) from last_error
+        by_id = {str(item["face_id"]): item for item in items}
+        for face in batch:
+            record = dict(by_id[face.face_id])
+            record["face_id"] = face.face_id
+            record["head_path"] = str(face.head_path)
+            record["confidence"] = max(
+                0.0, min(1.0, float(record.get("confidence") or 0.0))
+            )
+            results.append(record)
+    return results
+
+
+def persist_visual_face_labels(
+    con,
+    *,
+    ident: str,
+    spine_signature: str,
+    outfit_key: str,
+    model: str,
+    labels: Iterable[dict],
+) -> None:
+    """Replace one model's labels for exactly one registered skeleton variant."""
+    ident = str(ident)
+    signature = str(spine_signature or "")
+    outfit = str(outfit_key or "")
+    model = str(model)
+    source = f"vision:{model}"
+    records = list(labels)
+    con.execute(
+        """
+        INSERT OR IGNORE INTO character_variant(ident,spine_signature,outfit_key,spine)
+        VALUES (?, ?, ?, '')
+        """,
+        (ident, signature, outfit),
+    )
+    con.execute(
+        """
+        DELETE FROM face_visual_label
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND model=?
+        """,
+        (ident, signature, outfit, model),
+    )
+    con.execute(
+        """
+        DELETE FROM face_evidence
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND source=?
+        """,
+        (ident, signature, outfit, source),
+    )
+    for item in records:
+        face_id = str(item["face_id"])
+        primary = str(item.get("primary_emotion") or "").strip()
+        secondary = [
+            str(value).strip()
+            for value in item.get("secondary_emotions") or []
+            if str(value).strip()
+        ]
+        con.execute(
+            """
+            INSERT INTO face_visual_label
+              (ident,spine_signature,outfit_key,face_id,model,primary_emotion,
+               secondary_json,valence,arousal,eyes,brows,mouth,blush,tears,
+               confidence,description_cn,head_path,reviewed)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
+            """,
+            (
+                ident,
+                signature,
+                outfit,
+                face_id,
+                model,
+                primary,
+                json.dumps(secondary, ensure_ascii=False),
+                str(item.get("valence") or ""),
+                str(item.get("arousal") or ""),
+                str(item.get("eyes") or ""),
+                str(item.get("brows") or ""),
+                str(item.get("mouth") or ""),
+                int(bool(item.get("blush"))),
+                int(bool(item.get("tears"))),
+                float(item.get("confidence") or 0.0),
+                str(item.get("description_cn") or ""),
+                str(item.get("head_path") or ""),
+            ),
+        )
+        con.execute(
+            """
+            INSERT INTO face_evidence
+              (ident,spine_signature,outfit_key,face_id,source,raw,label,label_cn,observed_count)
+            VALUES (?,?,?,?,?,?,?,?,0)
+            """,
+            (
+                ident,
+                signature,
+                outfit,
+                face_id,
+                source,
+                json.dumps(item, ensure_ascii=False),
+                primary,
+                primary,
+            ),
+        )
+    con.commit()
+
+
+def make_contact_sheet(
+    faces: Sequence[RenderedFace],
+    output: str | Path,
+    *,
+    columns: int = 6,
+    cell_size: int = 224,
+) -> Path:
+    """Create a review sheet with a stable face ID under each cropped head."""
+    ordered = sorted(faces, key=lambda face: face.face_id)
+    rows = (len(ordered) + columns - 1) // columns
+    label_height = 30
+    sheet = Image.new(
+        "RGB",
+        (columns * cell_size, rows * (cell_size + label_height)),
+        (42, 42, 46),
+    )
+    draw = ImageDraw.Draw(sheet)
+    font = ImageFont.load_default()
+    for index, face in enumerate(ordered):
+        x = (index % columns) * cell_size
+        y = (index // columns) * (cell_size + label_height)
+        head = Image.open(face.head_path).convert("RGBA")
+        head.thumbnail((cell_size, cell_size), Image.Resampling.LANCZOS)
+        tile = Image.new("RGB", (cell_size, cell_size), (220, 220, 220))
+        tile.paste(
+            head.convert("RGB"),
+            ((cell_size - head.width) // 2, (cell_size - head.height) // 2),
+            head.getchannel("A"),
+        )
+        sheet.paste(tile, (x, y))
+        draw.text((x + 8, y + cell_size + 7), face.face_id, fill="white", font=font)
+    destination = Path(output)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(destination, format="JPEG", quality=92)
+    return destination

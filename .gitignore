@@ -1,0 +1,77 @@
+# ============================================================
+#  绝对不能传的东西
+# ============================================================
+
+# 机器相关的路径配置。每台电脑都不一样，传上去会把别人的探测搞坏。
+aa_config.json
+llm.json
+
+# API key。llm.json 本身只写环境变量名不写 key，但防一手。
+.env
+*.key
+secrets.json
+llm_profiles.json
+
+# 你自己的剧本和作品。这是创作内容，不该跟工具混在一起。
+/scripts/
+/chapters/
+*.annotated.txt
+
+# ============================================================
+#  版权素材：蔚蓝档案的美术资源属于 Nexon / Yostar，一律不能上传
+# ============================================================
+*.skel
+*.atlas
+*-avatar.png
+/assets/
+/overrides/
+/voices/
+*.ogg
+*.wav
+*.mp3
+# 背景与 CG 原图
+BG_*.jpg
+BG_*.png
+Event*.png
+UI_FX_*
+
+# ============================================================
+#  生成物与缓存
+# ============================================================
+out/
+.thumbs/
+.superpowers/
+backup-*/
+.worktrees/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+
+# 每章的演员表是作品相关的，只保留 example
+cast-*.json
+!cast.example.json
+cast.json
+
+# 根目录中的个人剧本、校准记录和临时测试文本。
+/本日行程*.md
+/测试-*.txt
+/凯伊*.txt
+
+# 资源索引是从本机 AA 扫出来的，包含本机素材库的全部文件名，
+# 而且体积不小。让使用者自己跑 build_index.py 生成。
+aa_resources.json
+
+# 素材数据库：看情况。见 UPLOAD.md 里的说明。
+# 想随仓库分发打标成果的话，把下面这行注释掉。
+aa_assets.db
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
