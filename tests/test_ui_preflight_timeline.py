@@ -115,3 +115,40 @@ const h=createHarness({request:async(p,o)=>{calls.push({p,o});if(p.startsWith('/
         "card_id": "bg-1",
         "patch": {"cmd": "bg", "arg": "sunny"},
     }
+
+
+def test_background_timeline_opens_workbench_and_applies_copy_to_same_card_from_latest_revision():
+    script = r'''
+const {createHarness}=require(process.argv[1]);const calls=[];let opened=null;
+const cards=[{card_id:'bg-card-2',kind:'dir',line_no:4,current:{cmd:'bg',arg:'old'}}];
+const h=createHarness({request:async(p,o)=>{calls.push({p,o});if(p.startsWith('/api/draft?'))return {story_token:'story-1',draft_version:7,counts:{pending:0,blocking_errors:0},cards};if(p.startsWith('/api/story/assets'))return {characters:[],backgrounds:[],sounds:[],bgms:[]};if(p==='/api/cards/update')return {ok:true,draft_version:8};return {profiles:[]};}});
+h.window.openAssetWorkbench=context=>{opened=context;};h.window.StoryStore.set({story_token:'story-1',project:'测试'});h.get('#rvDraftSelect').value='draft-1';
+(async()=>{await h.window.AppRuntime.loadReview();const node=h.get('#bgTimeline').children[1].children[0];node.children[2].dispatch('click',{target:node.children[2],stopPropagation(){}});h.window.dispatchEvent(new CustomEvent('assetworkbench:copied',{detail:{story_token:'story-1',kind:'background',aa_key:'rain_roof',context:opened}}));await h.drain();const update=calls.find(x=>x.p==='/api/cards/update');console.log(JSON.stringify({opened,update:update&&update.o.payload,refreshed:calls.filter(x=>x.p.startsWith('/api/draft?')).length,status:h.get('#rvStatus').textContent}));})();
+'''
+    result = run_runtime(script)
+    assert result["opened"] == {
+        "origin": "review",
+        "story_token": "story-1",
+        "draft_token": "draft-1",
+        "card_id": "bg-card-2",
+        "asset_kind": "background",
+    }
+    assert result["update"] == {
+        "token": "draft-1",
+        "card_id": "bg-card-2",
+        "patch": {"cmd": "bg", "arg": "rain_roof"},
+        "expected_draft_version": 7,
+    }
+    assert result["refreshed"] >= 2
+
+
+def test_background_workbench_copy_conflict_keeps_copy_and_requests_confirmation():
+    script = r'''
+const {createHarness}=require(process.argv[1]);let latest=0;
+const h=createHarness({request:async(p,o)=>{if(p.startsWith('/api/draft?')){latest++;return {story_token:'story-1',draft_version:latest===1?7:8,counts:{pending:0,blocking_errors:0},cards:[{card_id:'bg-card-2',kind:'dir',line_no:4,current:{cmd:'bg',arg:'other'}}]};}if(p==='/api/cards/update'){const error=new Error('revision conflict');error.status=409;throw error;}if(p.startsWith('/api/story/assets'))return {characters:[],backgrounds:[],sounds:[],bgms:[]};return {profiles:[]};}});
+h.window.StoryStore.set({story_token:'story-1',project:'测试'});h.get('#rvDraftSelect').value='draft-1';
+(async()=>{await h.window.AppRuntime.loadReview();await h.window.AppRuntime.applyWorkbenchBackground({origin:'review',story_token:'story-1',draft_token:'draft-1',card_id:'bg-card-2'},{aa_key:'rain_roof'});console.log(JSON.stringify({status:h.get('#rvStatus').textContent,latest}));})();
+'''
+    result = run_runtime(script)
+    assert result["latest"] == 3
+    assert result["status"] == "素材已复制；草稿已变化，请再次确认应用"

@@ -45,7 +45,8 @@
         kind: item.kind,
         aa_key: item.aa_key,
         state: result.state,
-        asset: result.asset
+        asset: result.asset,
+        context: Object.assign({}, this.workbench.context)
       };
       if (exports.dispatchEvent && typeof CustomEvent === 'function') {
         exports.dispatchEvent(new CustomEvent('assetworkbench:copied', {detail: detail}));

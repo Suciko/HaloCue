@@ -657,6 +657,13 @@
       if (custom && custom.preview_available && story) { const img = document.createElement('img'); img.loading = 'lazy'; img.alt = custom.name || card.current.arg || '背景'; img.src = '/api/story/assets/preview?story_token=' + encodeURIComponent(story.story_token) + '&kind=background&key=' + encodeURIComponent(custom.aa_key || custom.name || ''); jump.appendChild(img); } else { const placeholder = document.createElement('span'); placeholder.className = 'bg-timeline-placeholder'; placeholder.textContent = custom ? '无预览' : '待补'; jump.appendChild(placeholder); }
       const name = document.createElement('b'); name.textContent = card.current.arg || '未命名背景'; jump.appendChild(name); const meta = document.createElement('span'); meta.className = 'dim'; meta.textContent = custom ? '本剧情自定义' : '不在本剧情自定义素材中'; jump.appendChild(meta); node.appendChild(jump);
       const replace = document.createElement('button'); replace.type = 'button'; replace.className = 'ghost bg-timeline-replace'; replace.textContent = '更换'; replace.addEventListener('click', function (event) { event.stopPropagation(); openBgReplace(card, replace); }); node.appendChild(replace); track.appendChild(node);
+      if (story && window.openAssetWorkbench) {
+        const workbench = document.createElement('button'); workbench.type = 'button'; workbench.className = 'ghost bg-timeline-workbench'; workbench.textContent = '在素材工作台中查找'; workbench.dataset.bgAction = 'open-workbench'; workbench.addEventListener('click', function (event) {
+          event.stopPropagation();
+          window.openAssetWorkbench({origin: 'review', story_token: story.story_token, draft_token: state.review.token, card_id: card.card_id, asset_kind: 'background'});
+        });
+        node.appendChild(workbench);
+      }
       if (index < cards.length - 1) { const arrow = document.createElement('span'); arrow.className = 'bg-timeline-arrow'; arrow.textContent = '→'; track.appendChild(arrow); }
     });
     root.appendChild(track); applyTimelineSelection();
@@ -684,6 +691,35 @@
       draftVersion: state.review.revision,
       onApplied: function () { return loadReview(); }
     });
+  }
+  async function applyWorkbenchBackground(context, detail) {
+    const story = currentStory();
+    if (!story || !context || context.origin !== 'review' || context.story_token !== story.story_token || !context.draft_token || !context.card_id) return true;
+    const key = String(detail && detail.aa_key || detail && detail.asset && detail.asset.aa_key || '');
+    if (!key) return false;
+    try {
+      const latest = await request('/api/draft?token=' + encodeURIComponent(context.draft_token));
+      if (!latest || latest.story_token !== story.story_token) return false;
+      const card = (latest.cards || []).find(function (item) { return item.card_id === context.card_id; });
+      if (!card) throw new Error('原背景卡已不存在，请重新确认草稿。');
+      const result = await request('/api/cards/update', window.Api.json('POST', {
+        token: context.draft_token,
+        card_id: context.card_id,
+        patch: {cmd: 'bg', arg: key},
+        expected_draft_version: latest.draft_version
+      }));
+      if (!result || result.ok === false) throw new Error(result && (result.e || result.code) || '背景卡更新失败');
+      if (state.review && state.review.token === context.draft_token) state.review.revision = result.draft_version || latest.draft_version;
+      await loadReview();
+      return true;
+    } catch (error) {
+      const conflict = Number(error && (error.status || error.statusCode)) === 409 || error && (error.code === 'revision_conflict' || error.code === 'draft_conflict');
+      if (conflict) {
+        await loadReview();
+        status('素材已复制；草稿已变化，请再次确认应用');
+      } else status('素材已复制，但背景卡尚未应用：' + (error.message || '请重新确认'));
+      return false;
+    }
   }
   async function reviewPost(path, payload, method) { const review = state.review; const view = captureView(); if (!review.token || !isCurrentView(view)) return null; const body = Object.assign({token: review.token, expected_draft_version: review.revision}, payload); const result = await request(path, window.Api.json(method || 'POST', body)); if (!isCurrentView(view) || state.review !== review) return null; if (!result.ok) throw new Error(result.e || result.code); review.revision = result.draft_version || review.revision; contextStatus({save: '保存：已保存'}); return result; }
   function setBusyButton(id, busy, busyText, idleText) { const button = $(id); button.disabled = Boolean(busy); button.textContent = busy ? busyText : idleText; button.setAttribute('aria-busy', String(Boolean(busy))); }
@@ -822,8 +858,10 @@
     const detail = event && event.detail || {};
     const story = currentStory();
     if (!story || detail.story_token !== story.story_token) return;
-    refreshAfterAssetWorkbench({origin: 'preflight', story_token: detail.story_token, asset_kind: detail.kind});
+    const context = detail.context || {origin: 'preflight', story_token: detail.story_token, asset_kind: detail.kind};
+    if (context.origin === 'review') applyWorkbenchBackground(context, detail);
+    else refreshAfterAssetWorkbench(context);
   });
-  window.AppRuntime = {analyze: analyze, annotate: annotate, build: build, compile: compile, beginOperation: beginOperation, loadBackgrounds: loadBackgrounds, loadReview: loadReview, refreshDrafts: refreshDrafts, reviewPost: reviewPost, renderBackgroundRequests: renderBackgroundRequests, resolveBackground: resolveBackground, pollBuild: pollBuild, continueBackground: continueBackground, replaceStory: replaceStory, fillBackgroundFromHistory: fillBackgroundFromHistory, renderCast: renderCast, searchCharacters: searchCharacters, pickCharacter: pickCharacter, castSetKind: castSetKind, openCastPicker: openCastPicker, renderReviewCards: renderReviewCards, renderReviewAssets: renderReviewAssets, renderPreflight: renderPreflight, buildPreflightAssetTasks: buildPreflightAssetTasks, refreshAfterAssetWorkbench: refreshAfterAssetWorkbench, approvePreflight: approvePreflight, rerunPreflight: rerunPreflight, renderBackgroundTimeline: renderBackgroundTimeline, openBgReplace: openBgReplace, applyBgReplace: applyBgReplace};
+  window.AppRuntime = {analyze: analyze, annotate: annotate, build: build, compile: compile, beginOperation: beginOperation, loadBackgrounds: loadBackgrounds, loadReview: loadReview, refreshDrafts: refreshDrafts, reviewPost: reviewPost, renderBackgroundRequests: renderBackgroundRequests, resolveBackground: resolveBackground, pollBuild: pollBuild, continueBackground: continueBackground, replaceStory: replaceStory, fillBackgroundFromHistory: fillBackgroundFromHistory, renderCast: renderCast, searchCharacters: searchCharacters, pickCharacter: pickCharacter, castSetKind: castSetKind, openCastPicker: openCastPicker, renderReviewCards: renderReviewCards, renderReviewAssets: renderReviewAssets, renderPreflight: renderPreflight, buildPreflightAssetTasks: buildPreflightAssetTasks, refreshAfterAssetWorkbench: refreshAfterAssetWorkbench, applyWorkbenchBackground: applyWorkbenchBackground, approvePreflight: approvePreflight, rerunPreflight: rerunPreflight, renderBackgroundTimeline: renderBackgroundTimeline, openBgReplace: openBgReplace, applyBgReplace: applyBgReplace};
   window.addEventListener('load', function () { if (localStorage.getItem('aa-welcome-dismissed-v1') === '1') $('#welcomePanel').hidden = true; loadSetupStatus(); loadState(); loadProfiles().catch(function () {}); recentStories.refresh().catch(function () {}); });
 })();
