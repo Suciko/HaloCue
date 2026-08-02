@@ -128,11 +128,22 @@ def analyze_character_faces(
     """Render all real numbered faces and optionally add visual semantic labels."""
     source = Path(source_dir).resolve()
     _notify(progress, "rendering", "正在渲染人物表情差分")
+
+    def report_render_progress(face_id: str, current: int, total: int) -> None:
+        _notify(
+            progress,
+            "rendering",
+            f"正在渲染表情 {face_id}（{current} / {total}）",
+            current,
+            total,
+        )
+
     report = render_face_variations(
         source,
         spine_cli=spine_cli,
         cache_root=cache_root,
         workers=workers,
+        progress=report_render_progress,
     )
     face_ids = {face.face_id for face in report.faces}
     semantic_hints = _semantic_hints(source)

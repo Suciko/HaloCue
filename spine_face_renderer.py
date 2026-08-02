@@ -12,7 +12,7 @@ import json
 import re
 import shutil
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
@@ -525,6 +525,7 @@ def render_face_variations(
     runner: Callable[[Sequence[str]], str] | None = None,
     workers: int = 1,
     command_timeout_seconds: int | float = 120,
+    progress: Callable[[str, int, int], None] | None = None,
 ) -> RenderReport:
     """Render numbered expressions without modifying the source Spine bundle."""
     source = Path(source_dir).resolve()
@@ -686,11 +687,28 @@ def render_face_variations(
             face_id=face_id, portrait_path=portrait, head_path=head
         )
 
+    total = len(selected_ids)
     if workers == 1:
-        rendered = [render_one(face_id) for face_id in selected_ids]
+        rendered = []
+        for index, face_id in enumerate(selected_ids):
+            if progress:
+                progress(face_id, index, total)
+            rendered.append(render_one(face_id))
+            if progress:
+                progress(face_id, index + 1, total)
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            rendered = list(pool.map(render_one, selected_ids))
+            futures = {
+                pool.submit(render_one, face_id): face_id
+                for face_id in selected_ids
+            }
+            completed = []
+            for future in as_completed(futures):
+                face_id = futures[future]
+                completed.append(future.result())
+                if progress:
+                    progress(face_id, len(completed), total)
+            rendered = sorted(completed, key=lambda face: selected_ids.index(face.face_id))
 
     (cache_dir / "manifest.json").write_text(
         json.dumps(

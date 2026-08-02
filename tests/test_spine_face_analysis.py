@@ -98,6 +98,42 @@ def test_analysis_renders_contact_sheet_without_requiring_model_key(
     assert Path(result["contact_sheet"]).is_file()
 
 
+def test_analysis_maps_per_face_render_progress_to_job_updates(tmp_path, monkeypatch):
+    report = _report(tmp_path)
+    updates = []
+
+    def render(*args, **kwargs):
+        callback = kwargs["progress"]
+        callback("00", 0, 2)
+        callback("00", 1, 2)
+        return report
+
+    monkeypatch.setattr(spine_face_analysis, "render_face_variations", render)
+    source = tmp_path / "spine"
+    source.mkdir()
+    con = assetdb.connect(tmp_path / "assets.db")
+
+    spine_face_analysis.analyze_character_faces(
+        con,
+        source_dir=source,
+        ident="custom-1",
+        spine_signature="skel-signature",
+        outfit_key="date",
+        spine_cli=tmp_path / "Spine.com",
+        cache_root=tmp_path / "cache",
+        provider=None,
+        progress=lambda phase, message, current, total: updates.append(
+            (phase, message, current, total)
+        ),
+    )
+
+    render_updates = [update for update in updates if "00" in update[1]]
+    assert render_updates == [
+        ("rendering", "正在渲染表情 00（0 / 2）", 0, 2),
+        ("rendering", "正在渲染表情 00（1 / 2）", 1, 2),
+    ]
+
+
 def test_analysis_returns_condensed_semantics_for_web_review(tmp_path, monkeypatch):
     report = _report(tmp_path)
     monkeypatch.setattr(

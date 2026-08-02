@@ -259,6 +259,7 @@ def test_renderer_uses_content_cache_and_never_changes_source_bundle(tmp_path):
         for path in source.iterdir()
     }
     calls = []
+    progress_events = []
 
     def fake_runner(command):
         calls.append(command)
@@ -304,6 +305,9 @@ def test_renderer_uses_content_cache_and_never_changes_source_bundle(tmp_path):
         cache_root=tmp_path / "cache",
         face_ids=["00", "01"],
         runner=fake_runner,
+        progress=lambda face_id, current, total: progress_events.append(
+            (face_id, current, total)
+        ),
     )
     call_count = len(calls)
     second = render_face_variations(
@@ -318,6 +322,12 @@ def test_renderer_uses_content_cache_and_never_changes_source_bundle(tmp_path):
     assert second.cached is True
     assert len(calls) == call_count
     assert [item.face_id for item in first.faces] == ["00", "01"]
+    assert progress_events == [
+        ("00", 0, 2),
+        ("00", 1, 2),
+        ("01", 1, 2),
+        ("01", 2, 2),
+    ]
     assert all(item.portrait_path.exists() and item.head_path.exists() for item in first.faces)
     assert before == {
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()
