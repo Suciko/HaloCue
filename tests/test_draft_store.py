@@ -2,6 +2,8 @@
 import os
 import sys
 import shutil
+import hashlib
+import json
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
@@ -77,3 +79,68 @@ def test_draft_path_rejects_an_absolute_token_and_keeps_valid_token(tmp_path):
     assert store.get_draft_path("draft-compatible-1") == (
         tmp_path / "drafts" / "draft-compatible-1"
     ).resolve()
+
+
+def test_find_asset_references_reports_safe_card_locations_without_mutating_versions(tmp_path):
+    """Dropping a scanned reference or exposing script text would make this fail."""
+    store = DraftStore(base_dir=str(tmp_path / "drafts"))
+    token = "asset-reference-draft"
+    cast = {
+        "cast": {
+            "阿洛娜": {"kind": "character", "key": "custom_arona"},
+        }
+    }
+    created = store.create_draft(
+        token=token,
+        text="@bg rain_roof\n@se door_open\n阿洛娜: 欢迎回来\n",
+        cast=cast,
+    )
+    draft_dir = store.get_draft_path(token)
+    cards = json.loads((draft_dir / "identity.json").read_text(encoding="utf-8"))
+    for card, card_id in zip(cards, ("bg-1", "se-1", "line-1")):
+        card["card_id"] = card_id
+    identity_text = json.dumps(cards, ensure_ascii=False, indent=2)
+    (draft_dir / "identity.json").write_text(identity_text, encoding="utf-8")
+    session = json.loads((draft_dir / "session.json").read_text(encoding="utf-8"))
+    session["identity_sha256"] = hashlib.sha256(
+        identity_text.encode("utf-8")
+    ).hexdigest()
+    (draft_dir / "session.json").write_text(
+        json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    before = dict(session)
+    assert store.find_asset_references(
+        token=token, kind="background", aa_key="rain_roof"
+    ) == [{
+        "card_id": "bg-1",
+        "kind": "directive",
+        "label": "@bg rain_roof",
+        "line_hint": 1,
+    }]
+    assert store.find_asset_references(
+        token=token, kind="sound", aa_key="door_open"
+    ) == [{
+        "card_id": "se-1",
+        "kind": "directive",
+        "label": "@se door_open",
+        "line_hint": 2,
+    }]
+    assert store.find_asset_references(
+        token=token, kind="character", aa_key="custom_arona"
+    ) == [{
+        "card_id": "line-1",
+        "kind": "line",
+        "label": "阿洛娜",
+        "line_hint": 3,
+    }]
+
+    after = json.loads((draft_dir / "session.json").read_text(encoding="utf-8"))
+    assert after["draft_version"] == before["draft_version"]
+    assert after["content_revision"] == before["content_revision"]
+    assert "欢迎回来" not in repr(store.find_asset_references(
+        token=token, kind="character", aa_key="custom_arona"
+    ))
+    assert str(tmp_path) not in repr(store.find_asset_references(
+        token=token, kind="background", aa_key="rain_roof"
+    ))

@@ -238,6 +238,102 @@ class DraftStore:
         with self.draft_lock(token):
             return self._load_draft_locked(token, cast=cast)
 
+    def find_asset_references(
+        self, *, token: str, kind: str, aa_key: str
+    ) -> List[Dict[str, Any]]:
+        """返回可安全展示的草稿素材引用，不暴露路径或剧本全文。"""
+        command_kinds = {
+            "background": {"bg"},
+            "sound": {"se", "sound"},
+        }
+        if kind not in {*command_kinds, "character"}:
+            raise ValueError("不支持的素材类型")
+
+        expected_key = str(aa_key).strip().casefold()
+        with self.draft_lock(token):
+            draft_dir = self.get_draft_path(token)
+            session_file = draft_dir / "session.json"
+            if not session_file.is_file():
+                raise FileNotFoundError(f"草稿会话文件不存在: {session_file}")
+
+            nodes = parse_document_lossless(
+                (draft_dir / "edited.txt").read_text(encoding="utf-8")
+            )
+            cards = json.loads((draft_dir / "identity.json").read_text(encoding="utf-8"))
+            if len(nodes) != len(cards):
+                raise ValueError("Nodes and identities mismatched")
+
+            if kind == "character":
+                cast_file = draft_dir / "cast.json"
+                cast_data = (
+                    json.loads(cast_file.read_text(encoding="utf-8"))
+                    if cast_file.is_file()
+                    else {}
+                )
+                speakers = self._speakers_bound_to_asset(cast_data, expected_key)
+                return self._character_asset_references(nodes, cards, speakers)
+            return self._directive_asset_references(
+                nodes, cards, command_kinds[kind], expected_key
+            )
+
+    @staticmethod
+    def _directive_asset_references(
+        nodes: List[Any], cards: List[Dict[str, Any]], commands: set[str], aa_key: str
+    ) -> List[Dict[str, Any]]:
+        references = []
+        for line_hint, (node, card) in enumerate(zip(nodes, cards), 1):
+            command = str(node.fields.get("cmd") or "").casefold()
+            argument = str(node.fields.get("arg") or "").strip()
+            if node.kind != "dir" or command not in commands:
+                continue
+            if argument.casefold() != aa_key:
+                continue
+            references.append({
+                "card_id": card["card_id"],
+                "kind": "directive",
+                "label": f"@{command} {argument}",
+                "line_hint": line_hint,
+            })
+        return references
+
+    @staticmethod
+    def _speakers_bound_to_asset(cast_data: Dict[str, Any], aa_key: str) -> set[str]:
+        """从最终演员表和兼容的绑定表中反查角色素材。"""
+        speakers = set()
+        binding_sets = [cast_data.get("cast"), cast_data.get("bindings")]
+        if not any(isinstance(bindings, dict) for bindings in binding_sets):
+            binding_sets.append(cast_data)
+        for bindings in binding_sets:
+            if not isinstance(bindings, dict):
+                continue
+            for speaker, binding in bindings.items():
+                if not isinstance(binding, dict):
+                    continue
+                keys = [binding.get(name) for name in ("key", "aa_key", "id")]
+                custom = binding.get("custom")
+                if isinstance(custom, dict):
+                    keys.append(custom.get("asset"))
+                if any(str(value).strip().casefold() == aa_key for value in keys if value):
+                    speakers.add(str(speaker))
+        return speakers
+
+    @staticmethod
+    def _character_asset_references(
+        nodes: List[Any], cards: List[Dict[str, Any]], speakers: set[str]
+    ) -> List[Dict[str, Any]]:
+        references = []
+        for line_hint, (node, card) in enumerate(zip(nodes, cards), 1):
+            speaker = str(node.fields.get("who") or "")
+            if node.kind != "line" or speaker not in speakers:
+                continue
+            references.append({
+                "card_id": card["card_id"],
+                "kind": "line",
+                "label": speaker,
+                "line_hint": line_hint,
+            })
+        return references
+
     def _load_draft_locked(self, token: str, cast: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """加载草稿并校验 edited_sha256, identity_sha256 与卡片指纹。校验失败自动重建身份。"""
         cast = cast or {}
