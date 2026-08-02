@@ -26,6 +26,7 @@
     this.selected = null;
     this.generation = 0;
     this.timer = null;
+    this.pollFailures = 0;
     this.trigger = null;
     this.returnState = null;
     this.bind();
@@ -62,6 +63,7 @@
       workbench.root.setAttribute('aria-hidden', 'true');
     }
     this.generation += 1;
+    this.pollFailures = 0;
     this.root.classList.add('open');
     if (this.backdrop) this.backdrop.classList.add('open');
     this.root.setAttribute('aria-hidden', 'false');
@@ -82,6 +84,7 @@
     this.generation += 1;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.pollFailures = 0;
     if (!this.root) return;
     this.root.classList.remove('open');
     if (this.backdrop) this.backdrop.classList.remove('open');
@@ -145,16 +148,31 @@
     return Boolean(job.running);
   };
 
+  FaceWorkspace.prototype.scheduleRefresh = function (delay, generation) {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(function () {
+      this.timer = null;
+      if (!this.isOpen() || generation !== this.generation) return;
+      this.refresh();
+    }.bind(this), delay);
+  };
+
   FaceWorkspace.prototype.refresh = async function () {
     const generation = this.generation;
     if (!this.isOpen() || !this.selected) return;
     try {
       const job = await exports.Api.request('/api/assets/faces/job');
       if (!this.isOpen() || generation !== this.generation) return;
+      this.pollFailures = 0;
       const running = this.renderJob(job || {});
-      if (running) this.timer = setTimeout(function () { this.refresh(); }.bind(this), 850);
+      if (running) this.scheduleRefresh(850, generation);
     } catch (error) {
-      if (generation === this.generation) this.status.textContent = '无法读取表情标注进度，请重试。';
+      if (!this.isOpen() || generation !== this.generation) return;
+      this.pollFailures += 1;
+      if (this.startButton) this.startButton.disabled = true;
+      this.status.textContent = '进度连接暂时中断，正在自动重试（第 ' + this.pollFailures + ' 次）。';
+      const delay = Math.min(8000, 850 * Math.pow(2, this.pollFailures));
+      this.scheduleRefresh(delay, generation);
     }
   };
 

@@ -127,6 +127,73 @@ def test_face_workspace_hides_workbench_and_returns_to_selected_asset_and_scroll
     assert "scrollTop" in source
 
 
+def test_face_workspace_recovers_after_a_transient_job_poll_failure():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+const nodes={},timers=[];
+function node(id){
+  let own='',classes=new Set();
+  return {id:id||'',children:[],dataset:{},hidden:false,disabled:false,src:'',
+    classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},
+    appendChild(child){this.children.push(child);return child},addEventListener(){},setAttribute(){},removeAttribute(key){this[key]=''},focus(){},closest(){return null},
+    set textContent(value){own=String(value||'');this.children=[]},get textContent(){return own+this.children.map(child=>child.textContent||'').join('')}
+  };
+}
+['faceWorkspaceBackdrop','faceWorkspace','faceWorkspaceCharacter','faceWorkspacePhase','faceWorkspaceProgress','faceWorkspaceResult','faceWorkspaceForceVision','faceWorkspaceStart','faceWorkspaceStatus','faceWorkspaceSheet','faceWorkspaceLabels','faceWorkspaceLog'].forEach(id=>nodes[id]=node(id));
+nodes.faceWorkspace.classList.add('open');
+const document={activeElement:null,getElementById:id=>nodes[id]||null,createElement:tag=>node(tag),addEventListener(){}};
+let requests=0;
+const responses=[
+  new Error('temporary disconnect'),
+  {running:true,done:false,ok:false,ident:'626652156',phase:'rendering',message:'正在渲染 01',current:1,total:2,log:['正在渲染 01']},
+  {running:false,done:true,ok:true,ident:'626652156',phase:'complete',message:'渲染完成',current:2,total:2,log:['渲染完成'],result:{rendered_count:2,semantic_faces:[]}}
+];
+const window={StoryUI:{},Api:{request:()=>{requests++;const value=responses.shift();return value instanceof Error?Promise.reject(value):Promise.resolve(value)}}};
+const context={window,document,Promise,Error,console,setTimeout:(fn,delay)=>{timers.push({fn,delay});return timers.length},clearTimeout(){},setImmediate};
+vm.runInNewContext(source,context);
+(async()=>{
+  const workspace=window.FaceWorkspace;
+  workspace.selected={kind:'character',aa_key:'626652156',name:'凯伊'};
+  await workspace.refresh();
+  const afterFailure={timerCount:timers.length,delay:timers[0]&&timers[0].delay,status:nodes.faceWorkspaceStatus.textContent,disabled:nodes.faceWorkspaceStart.disabled};
+  if (!timers.length) {
+    console.log(JSON.stringify({afterFailure,afterRecovery:null,final:null}));
+    return;
+  }
+  timers.shift().fn();
+  await new Promise(resolve=>setImmediate(resolve));
+  const afterRecovery={requests,timerCount:timers.length,progress:nodes.faceWorkspaceProgress.textContent,status:nodes.faceWorkspaceStatus.textContent,pollFailures:workspace.pollFailures};
+  timers.shift().fn();
+  await new Promise(resolve=>setImmediate(resolve));
+  console.log(JSON.stringify({afterFailure,afterRecovery,final:{requests,timerCount:timers.length,phase:nodes.faceWorkspacePhase.textContent,result:nodes.faceWorkspaceResult.textContent}}));
+})();
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library_faces.js")],
+        text=True,
+        encoding="utf-8",
+    )
+    result = json.loads(output)
+
+    assert result["afterFailure"]["timerCount"] == 1
+    assert result["afterFailure"]["delay"] > 850
+    assert "自动重试" in result["afterFailure"]["status"]
+    assert result["afterFailure"]["disabled"] is True
+    assert result["afterRecovery"] == {
+        "requests": 2,
+        "timerCount": 1,
+        "progress": "1 / 2",
+        "status": "正在渲染 01",
+        "pollFailures": 0,
+    }
+    assert result["final"] == {
+        "requests": 3,
+        "timerCount": 0,
+        "phase": "complete",
+        "result": "2 个差分",
+    }
+
+
 def test_typed_preview_renders_safe_background_character_and_sound_details():
     script = r'''
 const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
