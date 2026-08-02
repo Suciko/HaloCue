@@ -40,6 +40,7 @@ from draft_store import (                                       # noqa: E402
 from install_manager import InstallManager, AARunningError, AACorruptBundleError  # noqa: E402
 from jobs import global_job_manager                             # noqa: E402
 from picker_token import register_file_token, resolve_file_token  # noqa: E402
+from story_file_picker import StoryFilePicker, StoryFilePickerError  # noqa: E402
 from story_workspace import (                                  # noqa: E402
     StoryContext,
     StoryWorkspaceRegistry,
@@ -57,6 +58,9 @@ MODEL_PROFILES = model_profiles.ModelProfileStore(
     os.path.join(HERE, "llm_profiles.json")
 )
 THUMBS = os.path.join(HERE, ".thumbs")
+STORY_FILE_PICKER = StoryFilePicker(
+    roots=[STORY_ROOT], upload_dir=os.path.join(HERE, "out", "story-uploads")
+)
 
 CFG = {"overrides": None, "aa_data": None, "spine_cli": None}
 STORY_WORKSPACE = None
@@ -1906,6 +1910,16 @@ class H(BaseHTTPRequestHandler):
                         kind=q.get("kind") or "script",
                     ),
                 )
+            if p == "/api/story-files/host":
+                try:
+                    return self._send(200, STORY_FILE_PICKER.list_directory(
+                        q.get("entry_token", ""),
+                        query=q.get("query", ""),
+                        sort=q.get("sort", "name"),
+                        direction=q.get("direction", "asc"),
+                    ))
+                except StoryFilePickerError as exc:
+                    return self._send(exc.status, {"ok": False, "code": exc.code, "e": str(exc)})
             if p == "/api/analyze":
                 path = q.get("path", "")
                 if not path:
@@ -2167,6 +2181,17 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         p = urlparse(self.path).path
         n = int(self.headers.get("Content-Length") or 0)
+        if p == "/api/story-files/upload":
+            if n > 10 * 1024 * 1024:
+                return self._send(413, {
+                    "ok": False, "code": "story_file_too_large", "e": "剧情文本不能超过 10 MiB",
+                })
+            try:
+                name = unquote(self.headers.get("X-AA-Filename", ""))
+                result = STORY_FILE_PICKER.upload(name, self.rfile.read(n))
+                return self._send(200, {"ok": True, **result})
+            except StoryFilePickerError as exc:
+                return self._send(exc.status, {"ok": False, "code": exc.code, "e": str(exc)})
         try:
             data = json.loads(self.rfile.read(n) or b"{}")
         except Exception:
@@ -2182,6 +2207,15 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "e": "路径无效或不存在"})
                 ft_token = register_file_token(path_val)
                 return self._send(200, {"ok": True, "file_token": ft_token})
+
+            if p == "/api/story-files/select":
+                try:
+                    return self._send(200, {
+                        "ok": True,
+                        **STORY_FILE_PICKER.select(str(data.get("entry_token") or "")),
+                    })
+                except StoryFilePickerError as exc:
+                    return self._send(exc.status, {"ok": False, "code": exc.code, "e": str(exc)})
 
             if p == "/api/stories/open":
                 try:
