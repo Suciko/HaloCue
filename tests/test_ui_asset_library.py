@@ -162,7 +162,7 @@ vm.runInNewContext(source,context);
   }
   timers.shift().fn();
   await new Promise(resolve=>setImmediate(resolve));
-  const afterRecovery={requests,timerCount:timers.length,progress:nodes.faceWorkspaceProgress.textContent,status:nodes.faceWorkspaceStatus.textContent,pollFailures:workspace.pollFailures};
+  const afterRecovery={requests,timerCount:timers.length,progress:nodes.faceWorkspaceProgress.textContent,status:nodes.faceWorkspaceStatus.textContent,pollFailures:workspace.pollFailures,disabled:nodes.faceWorkspaceStart.disabled};
   timers.shift().fn();
   await new Promise(resolve=>setImmediate(resolve));
   console.log(JSON.stringify({afterFailure,afterRecovery,final:{requests,timerCount:timers.length,phase:nodes.faceWorkspacePhase.textContent,result:nodes.faceWorkspaceResult.textContent}}));
@@ -185,12 +185,73 @@ vm.runInNewContext(source,context);
         "progress": "1 / 2",
         "status": "正在渲染 01",
         "pollFailures": 0,
+        "disabled": True,
     }
     assert result["final"] == {
         "requests": 3,
         "timerCount": 0,
         "phase": "complete",
         "result": "2 个差分",
+    }
+
+
+def test_face_workspace_keeps_polling_while_another_character_job_runs():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+const nodes={},timers=[];
+function node(id){let own='',classes=new Set();return {id:id||'',children:[],dataset:{},hidden:false,disabled:false,src:'',classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},appendChild(child){this.children.push(child);return child},addEventListener(){},setAttribute(){},removeAttribute(key){this[key]=''},focus(){},closest(){return null},set textContent(value){own=String(value||'');this.children=[]},get textContent(){return own+this.children.map(child=>child.textContent||'').join('')}}}
+['faceWorkspaceBackdrop','faceWorkspace','faceWorkspaceCharacter','faceWorkspacePhase','faceWorkspaceProgress','faceWorkspaceResult','faceWorkspaceForceVision','faceWorkspaceStart','faceWorkspaceStatus','faceWorkspaceSheet','faceWorkspaceLabels','faceWorkspaceLog'].forEach(id=>nodes[id]=node(id));
+nodes.faceWorkspace.classList.add('open');
+const document={activeElement:null,getElementById:id=>nodes[id]||null,createElement:tag=>node(tag),addEventListener(){}};
+const window={StoryUI:{},Api:{request:async()=>({running:true,done:false,ok:false,ident:'another-character',phase:'rendering',message:'另一项处理中',current:1,total:3,log:[]})}};
+vm.runInNewContext(source,{window,document,Promise,Error,console,setTimeout:(fn,delay)=>{timers.push({fn,delay});return timers.length},clearTimeout(){}});
+(async()=>{const workspace=window.FaceWorkspace;workspace.selected={kind:'character',aa_key:'626652156',name:'凯伊'};await workspace.refresh();console.log(JSON.stringify({timers:timers.map(timer=>timer.delay),disabled:nodes.faceWorkspaceStart.disabled,phase:nodes.faceWorkspacePhase.textContent}));})();
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library_faces.js")],
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert json.loads(output) == {
+        "timers": [850],
+        "disabled": True,
+        "phase": "另一项骨骼正在处理",
+    }
+
+
+def test_face_workspace_ignores_an_older_poll_that_finishes_after_a_newer_one():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+const nodes={},timers=[],pending=[];
+function node(id){let own='',classes=new Set();return {id:id||'',children:[],dataset:{},hidden:false,disabled:false,src:'',classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},appendChild(child){this.children.push(child);return child},addEventListener(){},setAttribute(){},removeAttribute(key){this[key]=''},focus(){},closest(){return null},set textContent(value){own=String(value||'');this.children=[]},get textContent(){return own+this.children.map(child=>child.textContent||'').join('')}}}
+['faceWorkspaceBackdrop','faceWorkspace','faceWorkspaceCharacter','faceWorkspacePhase','faceWorkspaceProgress','faceWorkspaceResult','faceWorkspaceForceVision','faceWorkspaceStart','faceWorkspaceStatus','faceWorkspaceSheet','faceWorkspaceLabels','faceWorkspaceLog'].forEach(id=>nodes[id]=node(id));
+nodes.faceWorkspace.classList.add('open');
+const document={activeElement:null,getElementById:id=>nodes[id]||null,createElement:tag=>node(tag),addEventListener(){}};
+const window={StoryUI:{},Api:{request:()=>new Promise((resolve,reject)=>pending.push({resolve,reject}))}};
+vm.runInNewContext(source,{window,document,Promise,Error,console,setTimeout:(fn,delay)=>{timers.length=0;timers.push({fn,delay});return 1},clearTimeout(){timers.length=0},setImmediate});
+(async()=>{
+  const workspace=window.FaceWorkspace;workspace.selected={kind:'character',aa_key:'626652156',name:'凯伊'};
+  const older=workspace.refresh(),newer=workspace.refresh();
+  pending[1].resolve({running:true,done:false,ok:false,ident:'626652156',phase:'rendering',message:'新进度',current:1,total:2,log:['新进度'],result:{}});
+  await newer;
+  pending[0].reject(new Error('旧请求失败'));
+  await older;
+  console.log(JSON.stringify({status:nodes.faceWorkspaceStatus.textContent,progress:nodes.faceWorkspaceProgress.textContent,pollFailures:workspace.pollFailures,timers:timers.map(timer=>timer.delay),disabled:nodes.faceWorkspaceStart.disabled}));
+})();
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library_faces.js")],
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert json.loads(output) == {
+        "status": "新进度",
+        "progress": "1 / 2",
+        "pollFailures": 0,
+        "timers": [850],
+        "disabled": True,
     }
 
 

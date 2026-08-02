@@ -27,6 +27,7 @@
     this.generation = 0;
     this.timer = null;
     this.pollFailures = 0;
+    this.pollSequence = 0;
     this.trigger = null;
     this.returnState = null;
     this.bind();
@@ -64,6 +65,7 @@
     }
     this.generation += 1;
     this.pollFailures = 0;
+    this.pollSequence = 0;
     this.root.classList.add('open');
     if (this.backdrop) this.backdrop.classList.add('open');
     this.root.setAttribute('aria-hidden', 'false');
@@ -76,6 +78,7 @@
     this.sheet.hidden = true;
     this.sheet.removeAttribute('src');
     clear(this.labels);
+    if (this.startButton) this.startButton.disabled = true;
     if (this.root.focus) this.root.focus();
     this.refresh();
   };
@@ -85,6 +88,7 @@
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.pollFailures = 0;
+    this.pollSequence = 0;
     if (!this.root) return;
     this.root.classList.remove('open');
     if (this.backdrop) this.backdrop.classList.remove('open');
@@ -123,12 +127,13 @@
     const belongsToSelected = selected && String(job.ident || '') === String(selected.aa_key || '');
     if (!belongsToSelected && job.running) {
       this.phase.textContent = '另一项骨骼正在处理'; this.progress.textContent = '等待队列'; this.result.textContent = '未开始';
-      this.status.textContent = '当前一次只能处理一个骨骼。上一项完成后可在此重新开始。'; this.startButton.disabled = true; return false;
+      this.status.textContent = '当前一次只能处理一个骨骼。上一项完成后可在此重新开始。'; this.startButton.disabled = true; return true;
     }
-    this.startButton.disabled = false;
     if (!belongsToSelected) {
+      this.startButton.disabled = false;
       this.phase.textContent = '等待开始'; this.progress.textContent = '—'; this.result.textContent = '尚未生成'; this.renderLabels([]); return false;
     }
+    this.startButton.disabled = Boolean(job.running);
     this.phase.textContent = job.phase || (job.running ? '处理中' : '等待开始');
     const current = Number(job.current || 0), total = Number(job.total || 0);
     this.progress.textContent = total > 0 ? current + ' / ' + total : (job.running ? '处理中' : '—');
@@ -159,15 +164,16 @@
 
   FaceWorkspace.prototype.refresh = async function () {
     const generation = this.generation;
+    const sequence = ++this.pollSequence;
     if (!this.isOpen() || !this.selected) return;
     try {
       const job = await exports.Api.request('/api/assets/faces/job');
-      if (!this.isOpen() || generation !== this.generation) return;
+      if (!this.isOpen() || generation !== this.generation || sequence !== this.pollSequence) return;
       this.pollFailures = 0;
       const running = this.renderJob(job || {});
       if (running) this.scheduleRefresh(850, generation);
     } catch (error) {
-      if (!this.isOpen() || generation !== this.generation) return;
+      if (!this.isOpen() || generation !== this.generation || sequence !== this.pollSequence) return;
       this.pollFailures += 1;
       if (this.startButton) this.startButton.disabled = true;
       this.status.textContent = '进度连接暂时中断，正在自动重试（第 ' + this.pollFailures + ' 次）。';
