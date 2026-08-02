@@ -310,14 +310,15 @@ def test_story_preview_rejects_catalog_paths_outside_the_story_root_and_supports
     assert invalid_status == 416
 
 
-def test_story_asset_list_survives_one_invalid_metadata_json_row(tmp_path):
+def test_story_asset_list_excludes_a_row_with_invalid_source_metadata(tmp_path):
+    """A malformed metadata record cannot prove an explicit custom source and must fail closed."""
     con = assetdb.connect(tmp_path / "assets.db")
     scope = str(tmp_path / "project")
     source = tmp_path / "one.png"; _background(source)
     upsert_candidate(con, AssetCandidate("background", source, "one", "one", "digest"), scope=scope, status="registered", install_path=str(source))
     con.execute("UPDATE asset_install SET metadata_json='{bad json' WHERE scope=?", (scope,)); con.commit()
     payload = __import__("asset_catalog").list_story_assets(con, scope=scope)
-    assert payload["backgrounds"][0]["resolution"] == "待检测"
+    assert payload["backgrounds"] == []
 
 
 def test_history_endpoints_copy_background_and_keep_history_path_private(tmp_path, monkeypatch):

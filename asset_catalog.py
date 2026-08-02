@@ -184,6 +184,9 @@ def upsert_candidate(
     error: str | None = None,
 ) -> None:
     migrate(con)
+    metadata = dict(candidate.metadata)
+    if not any(metadata.get(field) for field in ("catalog_source", "source", "origin")):
+        metadata["catalog_source"] = "custom"
     con.execute(
         """
         INSERT INTO asset_install
@@ -209,7 +212,7 @@ def upsert_candidate(
             install_path,
             status,
             error,
-            json.dumps(candidate.metadata, ensure_ascii=False),
+            json.dumps(metadata, ensure_ascii=False),
         ),
     )
     if candidate.kind == "character":
@@ -308,10 +311,7 @@ def _is_story_custom_row(row, metadata: dict) -> bool:
         return False
     if source in _CUSTOM_CATALOG_SOURCES:
         return True
-    if source:
-        return False
-    # 旧版本目录没有来源字段，按剧情 scope + registered 兼容。
-    return True
+    return False
 
 
 def _within(candidate: Path, root: Path) -> bool:

@@ -18,7 +18,7 @@ def _insert_asset(
     con, *, kind, key, name, digest, scope, source="history_import", metadata=None,
     install_path=None,
 ):
-    payload = {"catalog_source": source, **(metadata or {})}
+    payload = {**({"catalog_source": source} if source is not None else {}), **(metadata or {})}
     con.execute(
         """
         INSERT INTO asset_install
@@ -94,6 +94,38 @@ def test_library_excludes_observed_verified_and_bgm_rows(tmp_path):
     assert payload["counts"] == {
         "characters": 0, "backgrounds": 1, "sounds": 0, "bgms": 0,
     }
+
+
+def test_library_requires_an_explicit_custom_catalog_source(tmp_path):
+    """Accepting source-less or built-in records would mint reusable-copy and preview tokens for them."""
+    con, current, browser = library_fixture(tmp_path)
+    scope = str(current.project_dir)
+    for index, source in enumerate((None, "builtin", "database", "library")):
+        _insert_asset(
+            con, kind="background", key=f"excluded-{index}", name=f"排除-{index}",
+            digest=f"excluded-{index}", scope=scope, source=source,
+        )
+
+    payload = browser.list_library(con, current_context=current)
+
+    assert [row["aa_key"] for row in payload["backgrounds"]] == ["rain_roof"]
+    assert all(copy["copy_token"].startswith("copy-") for copy in payload["backgrounds"][0]["copies"])
+    assert all("excluded" not in repr(row) for row in payload["backgrounds"])
+
+
+def test_upserted_custom_candidate_is_explicitly_marked_for_library(tmp_path):
+    """Writing a new registered import without a source would make it indistinguishable from legacy catalog data."""
+    con = assetdb.connect(tmp_path / "assets.db")
+    source = tmp_path / "source.png"
+    source.write_bytes(b"source")
+    asset_catalog.upsert_candidate(
+        con, asset_catalog.AssetCandidate("background", source, "new", "new", "new-digest"),
+        scope=str(tmp_path / "project"), status="registered", install_path=str(source),
+    )
+
+    row = con.execute("SELECT metadata_json FROM asset_install WHERE aa_key='new'").fetchone()
+
+    assert json.loads(row["metadata_json"])["catalog_source"] == "custom"
 
 
 @contextlib.contextmanager
