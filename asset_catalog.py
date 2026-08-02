@@ -311,7 +311,16 @@ def _is_story_custom_row(row, metadata: dict) -> bool:
         return False
     if source in _CUSTOM_CATALOG_SOURCES:
         return True
-    return False
+    if source:
+        return False
+    try:
+        raw_metadata = json.loads(row["metadata_json"] or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if not isinstance(raw_metadata, dict):
+        return False
+    # Registrations created before catalog_source was introduced are story-local custom assets.
+    return True
 
 
 def _within(candidate: Path, root: Path) -> bool:

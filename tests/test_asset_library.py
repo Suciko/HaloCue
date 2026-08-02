@@ -96,11 +96,15 @@ def test_library_excludes_observed_verified_and_bgm_rows(tmp_path):
     }
 
 
-def test_library_requires_an_explicit_custom_catalog_source(tmp_path):
-    """Accepting source-less or built-in records would mint reusable-copy and preview tokens for them."""
+def test_library_accepts_legacy_registered_rows_without_a_catalog_source(tmp_path):
+    """Dropping legacy source-less registrations would empty upgraded material libraries."""
     con, current, browser = library_fixture(tmp_path)
     scope = str(current.project_dir)
-    for index, source in enumerate((None, "builtin", "database", "library")):
+    _insert_asset(
+        con, kind="background", key="legacy", name="Legacy custom background",
+        digest="legacy-digest", scope=scope, source=None,
+    )
+    for index, source in enumerate(("builtin", "database", "library")):
         _insert_asset(
             con, kind="background", key=f"excluded-{index}", name=f"排除-{index}",
             digest=f"excluded-{index}", scope=scope, source=source,
@@ -108,8 +112,12 @@ def test_library_requires_an_explicit_custom_catalog_source(tmp_path):
 
     payload = browser.list_library(con, current_context=current)
 
-    assert [row["aa_key"] for row in payload["backgrounds"]] == ["rain_roof"]
-    assert all(copy["copy_token"].startswith("copy-") for copy in payload["backgrounds"][0]["copies"])
+    assert {row["aa_key"] for row in payload["backgrounds"]} == {"rain_roof", "legacy"}
+    assert all(
+        copy["copy_token"].startswith("copy-")
+        for row in payload["backgrounds"]
+        for copy in row["copies"]
+    )
     assert all("excluded" not in repr(row) for row in payload["backgrounds"])
 
 
