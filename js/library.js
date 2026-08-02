@@ -132,11 +132,13 @@
     this.searchQuery = '';
     this.kindFilter = 'all';
     this.roleFilter = 'all';
+    this.visibleColumns = 3;
     this.preview = new exports.StoryUI.AssetPreview(this.detail);
     this.transfer = new exports.StoryUI.TransferController(this);
     this.copies = new exports.StoryUI.CopyManager(this);
     this.renderFilters();
     this.bind();
+    this.observeLayout();
   }
 
   AssetWorkbench.prototype.bind = function () {
@@ -151,8 +153,9 @@
         const story = currentStory() || {};
         self.open({origin: 'topbar', story_token: story.story_token || ''});
       } else if (action === 'close') self.close();
+      else if (action === 'back-catalog') self.showCatalog();
       else if (action === 'toggle-tasks') self.toggleTasks();
-      else if (action === 'select') self.select(target.dataset.assetKey);
+      else if (action === 'select') self.select(target.dataset.assetKey, {navigate: true});
       else if (action === 'filter-kind') {
         self.kindFilter = target.dataset.kind || 'all';
         self.renderFilters();
@@ -174,6 +177,33 @@
 
   AssetWorkbench.prototype.isOpen = function () {
     return Boolean(this.root && !this.root.hidden);
+  };
+
+  AssetWorkbench.prototype.observeLayout = function () {
+    const self = this;
+    const update = function (width) {
+      const columns = width <= 680 ? 1 : width <= 900 ? 2 : 3;
+      self.visibleColumns = columns;
+      if (self.root) self.root.dataset.visibleColumns = String(columns);
+      if (self.body) self.body.dataset.visibleColumns = String(columns);
+      if (columns > 1 && self.body) self.body.classList.remove('is-detail');
+    };
+    this.body = document.getElementById('assetWorkbenchBody');
+    if (typeof ResizeObserver === 'function' && this.root) {
+      this.layoutObserver = new ResizeObserver(function (entries) {
+        const entry = entries && entries[0];
+        update(entry && entry.contentRect ? entry.contentRect.width : self.root.clientWidth);
+      });
+      this.layoutObserver.observe(this.root);
+    } else if (this.root) update(Number(this.root.clientWidth || 1200));
+  };
+
+  AssetWorkbench.prototype.showCatalog = function () {
+    if (this.body) this.body.classList.remove('is-detail');
+    const selected = this.list && this.list.querySelector
+      ? this.list.querySelector('[data-asset-key="' + String(this.selectedKey || '').replace(/"/g, '\\"') + '"]')
+      : null;
+    if (selected && selected.focus) selected.focus();
   };
 
   AssetWorkbench.prototype.open = async function (context) {
@@ -292,11 +322,12 @@
     this.select(this.selectedKey);
   };
 
-  AssetWorkbench.prototype.select = function (key) {
+  AssetWorkbench.prototype.select = function (key, options) {
     this.selectedKey = key || null;
     const item = this.selected();
     this.preview.render(item);
     this.renderDetailActions(item);
+    if (item && options && options.navigate && this.visibleColumns === 1 && this.body) this.body.classList.add('is-detail');
   };
 
   AssetWorkbench.prototype.selected = function () {
@@ -305,6 +336,11 @@
 
   AssetWorkbench.prototype.renderDetailActions = function (item) {
     if (!this.detail || !item) return;
+    const back = make('button', 'ghost asset-detail-back', '返回目录');
+    back.type = 'button';
+    back.dataset.workbenchAction = 'back-catalog';
+    if (this.detail.insertBefore) this.detail.insertBefore(back, this.detail.firstChild);
+    else this.detail.appendChild(back);
     const actions = make('section', 'asset-detail-actions');
     const primary = make(
       'button', '', item.registered_in_current ? '本章已登记' : '复制到当前剧情'
