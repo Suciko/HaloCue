@@ -10,6 +10,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.request import Request, urlopen
 
+import pytest
 from PIL import Image
 
 import assetdb
@@ -17,7 +18,9 @@ import aa_project_assets
 import webui
 from asset_catalog import upsert_candidate
 from asset_models import AssetCandidate
+from asset_validation import validate_background
 from aa_registry import write_manifest_atomic
+from history_assets import HistoryAssetBrowser
 from story_workspace import StoryWorkspaceRegistry
 from webui import H
 
@@ -98,6 +101,36 @@ def _sound(path: Path):
         wav.setsampwidth(2)
         wav.setframerate(22050)
         wav.writeframes(b"\0\0" * 2205)
+
+
+@pytest.fixture
+def running_server(tmp_path, monkeypatch):
+    con = assetdb.connect(tmp_path / "assets.db")
+    project_root = tmp_path / "aa-data" / "projects" / "Chapter One"
+    preview = project_root / "bgs" / "night.png"
+    _background(preview)
+    digest = validate_background(preview).candidate.sha256
+    upsert_candidate(
+        con, AssetCandidate("background", tmp_path / "private" / "night.png", "night", "night", digest),
+        scope=str(project_root), status="registered", install_path=str(preview),
+    )
+    con.close()
+    monkeypatch.setattr(webui, "HISTORY_ASSET_BROWSER", HistoryAssetBrowser(aa_data=tmp_path / "aa-data"))
+    with _server(tmp_path, monkeypatch) as base:
+        opened = _open_story(base, tmp_path)
+        yield base, opened["story_token"], project_root
+
+
+def test_library_preview_uses_opaque_token_and_rejects_tampering(running_server):
+    """Accepting a client path or an altered token would expose arbitrary installed files."""
+    base, story_token, project_root = running_server
+    status, payload = _request(base, "/api/assets/library?story_token=" + story_token)
+    token = payload["backgrounds"][0]["preview_token"]
+
+    assert status == 200
+    assert str(project_root) not in repr(payload)
+    assert _request_bytes(base, "/api/assets/library/preview?preview_token=" + token)[0] == 200
+    assert _request_bytes(base, "/api/assets/library/preview?preview_token=" + token + "x")[0] == 404
 
 
 def test_preflight_endpoint_runs_as_a_scoped_job_without_exposing_source_path(tmp_path, monkeypatch):

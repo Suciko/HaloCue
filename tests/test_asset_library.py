@@ -10,10 +10,13 @@ import pytest
 import asset_catalog
 import assetdb
 import webui
+from history_assets import HistoryAssetBrowser
+from story_workspace import StoryContext
 
 
 def _insert_asset(
-    con, *, kind, key, name, digest, scope, source="history_import", metadata=None
+    con, *, kind, key, name, digest, scope, source="history_import", metadata=None,
+    install_path=None,
 ):
     payload = {"catalog_source": source, **(metadata or {})}
     con.execute(
@@ -24,11 +27,73 @@ def _insert_asset(
         """,
         (
             kind, str(key), name, rf"C:\private\source\{name}", digest,
-            scope, rf"C:\private\installed\{name}", "registered",
+            scope, str(install_path or rf"C:\private\installed\{name}"), "registered",
             json.dumps(payload, ensure_ascii=False),
         ),
     )
     con.commit()
+
+
+def library_fixture(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    asset_catalog.migrate(con)
+    first = tmp_path / "aa-data" / "projects" / "系列A-第一章"
+    second = tmp_path / "aa-data" / "projects" / "系列A-第二章"
+    first_preview = first / "bgs" / "rain.png"
+    second_preview = second / "bgs" / "rain.png"
+    first_preview.parent.mkdir(parents=True)
+    second_preview.parent.mkdir(parents=True)
+    first_preview.write_bytes(b"first-rain")
+    second_preview.write_bytes(b"second-rain")
+    _insert_asset(
+        con, kind="background", key="rain_roof", name="雨夜天台", digest="digest-001",
+        scope=str(first), metadata={"width": 1920, "height": 1080}, install_path=first_preview,
+    )
+    _insert_asset(
+        con, kind="background", key="rain_roof", name="雨夜天台", digest="digest-001",
+        scope=str(second), install_path=second_preview,
+    )
+    current = StoryContext(
+        story_token="story-current", project="系列A-第二章", project_dir=second,
+        save_dir=tmp_path / "aa-data" / "saves" / "系列A-第二章", source_path=None,
+        latest_draft_token=None, bgm_default={},
+    )
+    return con, current, HistoryAssetBrowser(aa_data=tmp_path / "aa-data")
+
+
+def mixed_source_library_fixture(tmp_path):
+    con, current, browser = library_fixture(tmp_path)
+    scope = str(current.project_dir)
+    _insert_asset(con, kind="sound", key="official", name="官方音效", digest="official", scope=scope, source="observed")
+    _insert_asset(con, kind="sound", key="verified", name="验证音效", digest="verified", scope=scope, source="verified")
+    _insert_asset(con, kind="bgm", key="theme", name="主题曲", digest="theme", scope=scope)
+    return con, current, browser
+
+
+def test_library_groups_custom_copies_and_marks_current_story(tmp_path):
+    """Dropping tokenized copy state or current-scope matching would break the workbench contract."""
+    con, current, browser = library_fixture(tmp_path)
+
+    payload = browser.list_library(con, current_context=current)
+    rain = payload["backgrounds"][0]
+
+    assert rain["name"] == "雨夜天台"
+    assert rain["registered_in_current"] is True
+    assert rain["copy_count"] == 2
+    assert all(copy["copy_token"].startswith("copy-") for copy in rain["copies"])
+    assert "scope" not in repr(payload)
+    assert str(tmp_path) not in repr(payload)
+
+
+def test_library_excludes_observed_verified_and_bgm_rows(tmp_path):
+    """Treating observed/verified catalog records as reusable custom assets leaks built-ins into the library."""
+    con, current, browser = mixed_source_library_fixture(tmp_path)
+
+    payload = browser.list_library(con, current_context=current)
+
+    assert payload["counts"] == {
+        "characters": 0, "backgrounds": 1, "sounds": 0, "bgms": 0,
+    }
 
 
 @contextlib.contextmanager

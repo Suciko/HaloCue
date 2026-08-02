@@ -21,6 +21,8 @@ from aa_registry import (
     register_sound,
 )
 from asset_catalog import upsert_candidate
+import asset_catalog
+import assetdb
 from asset_models import AssetCandidate, ValidationResult
 from asset_validation import validate_background, validate_sound, validate_spine
 from aa_registry import load_manifest
@@ -54,6 +56,17 @@ class _HistoryRecord:
     content_sha: str = ""
 
 
+@dataclass(frozen=True)
+class _LibraryCopy:
+    kind: str
+    aa_key: str
+    sha256: str
+    scope: str
+    chapter: str
+    install_path: Path
+    preview_path: Path | None
+
+
 class HistoryAssetBrowser:
     """Server-local opaque token registry for historical AA project assets.
 
@@ -72,6 +85,10 @@ class HistoryAssetBrowser:
         self._record_tokens: dict[tuple[str, str, str, str], str] = {}
         self._last_seen: dict[str, int] = {}
         self._clock = 0
+        self._library_copies: dict[str, _LibraryCopy] = {}
+        self._library_copy_tokens: dict[tuple[str, str, str, str], str] = {}
+        self._library_preview_tokens: dict[str, str] = {}
+        self._library_db_path: str | None = None
 
     @staticmethod
     def _token(prefix: str) -> str:
@@ -231,6 +248,155 @@ class HistoryAssetBrowser:
             self._record_tokens.pop(
                 (record.project, record.kind, record.key.casefold(), record.fingerprint), None
             )
+
+    def _remember_library_copy(self, copy: _LibraryCopy) -> str:
+        identity = (copy.kind, copy.aa_key, copy.sha256, copy.scope)
+        token = self._library_copy_tokens.get(identity)
+        if token is None:
+            token = self._token("copy")
+            self._library_copies[token] = copy
+            self._library_copy_tokens[identity] = token
+        return token
+
+    def _preview_token(self, copy_token: str) -> str:
+        for token, known_copy_token in self._library_preview_tokens.items():
+            if known_copy_token == copy_token:
+                return token
+        token = self._token("preview")
+        self._library_preview_tokens[token] = copy_token
+        return token
+
+    @staticmethod
+    def _catalog_database_path(con) -> str | None:
+        for row in con.execute("PRAGMA database_list"):
+            if row[1] == "main" and row[2]:
+                return str(row[2])
+        return None
+
+    @staticmethod
+    def _library_copy_from_row(row) -> _LibraryCopy:
+        metadata = asset_catalog._safe_metadata(row["metadata_json"])
+        install_path = Path(str(row["install_path"] or "")).resolve()
+        preview = asset_catalog._preview_path(str(row["kind"]), str(install_path), metadata)
+        if preview is not None:
+            preview = preview.resolve()
+        scope = str(row["scope"] or "")
+        return _LibraryCopy(
+            kind=str(row["kind"]), aa_key=str(row["aa_key"]), sha256=str(row["sha256"]),
+            scope=scope, chapter=Path(scope).name or "未命名章节",
+            install_path=install_path, preview_path=preview,
+        )
+
+    @staticmethod
+    def _preview_mime(kind: str, path: Path) -> str | None:
+        return {
+            "background": {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"},
+            "character": {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"},
+            "sound": {".wav": "audio/wav", ".mp3": "audio/mpeg", ".ogg": "audio/ogg"},
+        }.get(kind, {}).get(path.suffix.casefold())
+
+    def list_library(self, con, *, current_context: StoryContext | None) -> dict:
+        """Aggregate registered custom copies and issue process-local workbench tokens."""
+        with self._lock:
+            self._library_db_path = self._catalog_database_path(con)
+            current_scope = str(current_context.project_dir) if current_context else ""
+            groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+            profiles = {
+                (str(row["kind"]), str(row["aa_key"]), str(row["sha256"])): row
+                for row in con.execute(
+                    "SELECT kind,aa_key,sha256,asset_role,series_name FROM asset_library_profile"
+                )
+            }
+            for row in asset_catalog.library_custom_rows(con):
+                copy = self._library_copy_from_row(row)
+                key = (copy.kind, copy.aa_key, copy.sha256)
+                profile = profiles.get(key)
+                item = groups.setdefault(key, {
+                    "kind": copy.kind,
+                    "aa_key": asset_catalog._numeric_key(copy.aa_key),
+                    "sha256": copy.sha256,
+                    "name": asset_catalog._safe_catalog_text(row["display_name"], fallback=copy.aa_key),
+                    "asset_role": str(profile["asset_role"]) if profile else "chapter_only",
+                    "series_name": str(profile["series_name"]) if profile else "",
+                    "details": asset_catalog._library_item_details(
+                        copy.kind, asset_catalog._safe_metadata(row["metadata_json"])
+                    ),
+                    "registered_in_current": False,
+                    "preview_available": False,
+                    "preview_token": "",
+                    "copies": [],
+                })
+                copy_token = self._remember_library_copy(copy)
+                item["copies"].append({
+                    "chapter": copy.chapter,
+                    "is_current": copy.scope == current_scope,
+                    "copy_token": copy_token,
+                })
+                item["registered_in_current"] = item["registered_in_current"] or copy.scope == current_scope
+                if copy.preview_path is not None and self._inside(copy.install_path, copy.preview_path):
+                    item["preview_available"] = True
+                    item["preview_token"] = self._preview_token(copy_token)
+            out = {"characters": [], "backgrounds": [], "sounds": [], "bgms": []}
+            bucket = {"character": "characters", "background": "backgrounds", "sound": "sounds"}
+            for item in groups.values():
+                item["copies"].sort(key=lambda copy: (not copy["is_current"], copy["chapter"].casefold()))
+                item["copy_count"] = len(item["copies"])
+                out[bucket[item["kind"]]].append(item)
+            for values in out.values():
+                values.sort(key=lambda item: (item["series_name"].casefold(), item["name"].casefold()))
+            out["counts"] = {key: len(out[key]) for key in out}
+            return out
+
+    def _reload_library_copy(self, copy: _LibraryCopy) -> _LibraryCopy | None:
+        if not self._library_db_path:
+            return None
+        con = assetdb.connect(self._library_db_path)
+        try:
+            row = con.execute(
+                """
+                SELECT kind,aa_key,sha256,scope,status,metadata_json,install_path
+                FROM asset_install WHERE kind=? AND aa_key=? AND sha256=? AND scope=?
+                """,
+                (copy.kind, copy.aa_key, copy.sha256, copy.scope),
+            ).fetchone()
+            if not row:
+                return None
+            metadata = asset_catalog._safe_metadata(row["metadata_json"])
+            if not asset_catalog._is_story_custom_row(row, metadata):
+                return None
+            current = self._library_copy_from_row(row)
+            if current.preview_path is None or not self._inside(current.install_path, current.preview_path):
+                return current
+            if current.kind == "background":
+                result = validate_background(current.preview_path)
+            elif current.kind == "sound":
+                result = validate_sound(current.preview_path)
+            else:
+                files = metadata.get("files") or {}
+                stem = Path(str(files.get("skel") or "asset.skel")).stem
+                result = validate_spine(current.install_path / stem, identifier=current.aa_key)
+            if not result.ok or result.candidate is None or result.candidate.sha256 != current.sha256:
+                return replace(current, sha256="")
+            return current
+        finally:
+            con.close()
+
+    def preview_path(self, preview_token: str) -> tuple[Path, str]:
+        """Revalidate a catalog copy and return only a safe preview stream target."""
+        with self._lock:
+            copy_token = self._library_preview_tokens.get(preview_token)
+            copy = self._library_copies.get(copy_token or "")
+            if copy is None:
+                raise HistoryAssetError("invalid_preview_token", "asset preview not found", 404)
+            current = self._reload_library_copy(copy)
+            if current is None or current.sha256 != copy.sha256 or current.preview_path is None:
+                raise HistoryAssetError("preview_changed", "asset preview changed; refresh the workbench", 409)
+            if not self._inside(current.install_path, current.preview_path):
+                raise HistoryAssetError("preview_outside_copy", "asset preview not found", 404)
+            mime = self._preview_mime(current.kind, current.preview_path)
+            if not mime or not current.preview_path.is_file():
+                raise HistoryAssetError("asset_preview_missing", "asset preview not found", 404)
+            return current.preview_path, mime
 
     @staticmethod
     def _file_hash(path: Path) -> str:

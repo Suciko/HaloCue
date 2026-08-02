@@ -1943,10 +1943,30 @@ class H(BaseHTTPRequestHandler):
                 except ValueError as exc:
                     return self._send(404, {"ok": False, "code": str(exc), "e": "story not found"})
             if p == "/api/assets/library":
-                # This is a cross-chapter classification catalog only.  It never
-                # contains installation locations and cannot make an AA project
-                # reference another project's overrides.
-                return self._send(200, asset_catalog.list_library_assets(db()))
+                try:
+                    story_token = q.get("story_token", "")
+                    context = resolve_story_context(story_token) if story_token else None
+                    con = db()
+                    try:
+                        return self._send(200, history_asset_browser().list_library(
+                            con, current_context=context
+                        ))
+                    finally:
+                        con.close()
+                except ValueError:
+                    return self._send(404, {
+                        "ok": False, "code": "invalid_story_token", "e": "story not found",
+                    })
+            if p == "/api/assets/library/preview":
+                try:
+                    preview, ctype = history_asset_browser().preview_path(
+                        q.get("preview_token", "")
+                    )
+                    return self._send_preview_file(preview, ctype)
+                except HistoryAssetError as exc:
+                    return self._send(exc.status, {
+                        "ok": False, "code": exc.code, "e": str(exc),
+                    })
             if p == "/api/story/assets/preview":
                 try:
                     context = resolve_story_context(q.get("story_token", ""))

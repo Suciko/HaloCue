@@ -453,6 +453,24 @@ def _library_item_details(kind: str, metadata: dict) -> dict:
     return {}
 
 
+def library_custom_rows(con):
+    """Return server-only catalog rows for reusable registered custom copies."""
+    migrate(con)
+    rows = con.execute(
+        """
+        SELECT kind,aa_key,display_name,sha256,scope,status,metadata_json,install_path
+        FROM asset_install
+        WHERE status=? AND kind IN ('character','background','sound')
+        ORDER BY kind,display_name,aa_key,scope
+        """,
+        (STORY_ASSET_STATUS,),
+    ).fetchall()
+    return [
+        row for row in rows
+        if _is_story_custom_row(row, _safe_metadata(row["metadata_json"]))
+    ]
+
+
 def list_library_assets(con) -> dict:
     """List custom material copies across chapters without exposing server paths.
 
@@ -466,20 +484,10 @@ def list_library_assets(con) -> dict:
             "SELECT kind,aa_key,sha256,asset_role,series_name FROM asset_library_profile"
         )
     }
-    rows = con.execute(
-        """
-        SELECT kind,aa_key,display_name,sha256,scope,status,metadata_json
-        FROM asset_install
-        WHERE status=? AND kind IN ('character','background','sound')
-        ORDER BY kind,display_name,aa_key,scope
-        """,
-        (STORY_ASSET_STATUS,),
-    ).fetchall()
+    rows = library_custom_rows(con)
     groups: dict[tuple[str, str, str], dict] = {}
     for row in rows:
         metadata = _safe_metadata(row["metadata_json"])
-        if not _is_story_custom_row(row, metadata):
-            continue
         key = (str(row["kind"]), str(row["aa_key"]), str(row["sha256"]))
         profile = profiles.get(key)
         item = groups.setdefault(key, {
