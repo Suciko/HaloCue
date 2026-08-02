@@ -78,6 +78,17 @@ def _open_story(base, tmp_path):
     return opened
 
 
+def _open_named_story(base, tmp_path, name):
+    script = tmp_path / f"{name}.txt"
+    script.write_text("scene", encoding="utf-8")
+    token = webui.register_file_token(str(script))
+    status, opened = _request(base, "/api/stories/open", {
+        "file_token": token, "project": name,
+    }, "POST")
+    assert status == 200
+    return opened
+
+
 def _background(path: Path, color="navy"):
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (32, 18), color).save(path)
@@ -101,6 +112,195 @@ def _sound(path: Path):
         wav.setsampwidth(2)
         wav.setframerate(22050)
         wav.writeframes(b"\0\0" * 2205)
+
+
+def test_library_copy_refuses_stale_target_story(tmp_path, monkeypatch):
+    """A copy request from a workbench bound to another story must not write to an old scope."""
+    aa_data = tmp_path / "aa-data"
+    source_project = aa_data / "projects" / "Source"
+    source = source_project / "bgs" / "rain_roof.png"
+    _background(source)
+    write_manifest_atomic(source_project, {"BgOverrides": [r"bgs\rain_roof.png"]})
+    con = assetdb.connect(tmp_path / "assets.db")
+    digest = validate_background(source).candidate.sha256
+    upsert_candidate(
+        con, AssetCandidate(
+            "background", source, "rain_roof", "rain_roof", digest,
+            metadata={"catalog_source": "history_import"},
+        ),
+        scope=str(source_project), status="registered", install_path=str(source),
+    )
+    con.close()
+    monkeypatch.setattr(webui, "HISTORY_ASSET_BROWSER", HistoryAssetBrowser(aa_data=aa_data))
+    with _server(tmp_path, monkeypatch) as base:
+        old_story = _open_named_story(base, tmp_path, "Old Story")
+        _, library = _request(base, "/api/assets/library?story_token=" + old_story["story_token"])
+        source_copy_token = library["backgrounds"][0]["copies"][0]["copy_token"]
+        new_story = _open_named_story(base, tmp_path, "New Story")
+        _request(base, "/api/assets/library?story_token=" + new_story["story_token"])
+        status, body = _request(base, "/api/assets/library/copy-to-story", {
+            "story_token": old_story["story_token"],
+            "source_copy_token": source_copy_token,
+            "kind": "background",
+            "aa_key": "rain_roof",
+            "sha256": digest,
+        }, "POST")
+
+    assert status == 409
+    assert body["code"] == "story_context_changed"
+    assert body["message"]
+    assert body["action"]
+
+
+def test_library_copy_returns_a_safe_story_asset_card(tmp_path, monkeypatch):
+    """Returning copy paths would make a successful workbench copy leak server locations."""
+    aa_data = tmp_path / "aa-data"
+    source_project = aa_data / "projects" / "Source"
+    source = source_project / "bgs" / "rain_roof.png"
+    _background(source)
+    write_manifest_atomic(source_project, {"BgOverrides": [r"bgs\rain_roof.png"]})
+    con = assetdb.connect(tmp_path / "assets.db")
+    digest = validate_background(source).candidate.sha256
+    upsert_candidate(
+        con, AssetCandidate(
+            "background", source, "rain_roof", "rain_roof", digest,
+            metadata={"catalog_source": "history_import"},
+        ),
+        scope=str(source_project), status="registered", install_path=str(source),
+    )
+    con.close()
+    monkeypatch.setattr(webui, "HISTORY_ASSET_BROWSER", HistoryAssetBrowser(aa_data=aa_data))
+    with _server(tmp_path, monkeypatch) as base:
+        story = _open_named_story(base, tmp_path, "Current")
+        _, library = _request(base, "/api/assets/library?story_token=" + story["story_token"])
+        source_copy_token = library["backgrounds"][0]["copies"][0]["copy_token"]
+        status, body = _request(base, "/api/assets/library/copy-to-story", {
+            "story_token": story["story_token"],
+            "source_copy_token": source_copy_token,
+            "kind": "background",
+            "aa_key": "rain_roof",
+            "sha256": digest,
+        }, "POST")
+
+    assert status == 200
+    assert body["state"] == "registered"
+    assert body["asset"]["name"] == "rain_roof"
+    assert "install_path" not in repr(body)
+    assert str(aa_data) not in repr(body)
+
+
+@pytest.mark.parametrize("field, value", [
+    ("kind", "sound"),
+    ("aa_key", "other"),
+    ("sha256", "not-the-issued-digest"),
+])
+def test_library_copy_rejects_request_fields_that_do_not_match_its_token(
+    tmp_path, monkeypatch, field, value
+):
+    """Trusting client-supplied copy metadata lets one opaque token target another asset."""
+    aa_data = tmp_path / "aa-data"
+    source_project = aa_data / "projects" / "Source"
+    source = source_project / "bgs" / "rain_roof.png"
+    _background(source)
+    write_manifest_atomic(source_project, {"BgOverrides": [r"bgs\rain_roof.png"]})
+    con = assetdb.connect(tmp_path / "assets.db")
+    digest = validate_background(source).candidate.sha256
+    upsert_candidate(
+        con, AssetCandidate(
+            "background", source, "rain_roof", "rain_roof", digest,
+            metadata={"catalog_source": "history_import"},
+        ),
+        scope=str(source_project), status="registered", install_path=str(source),
+    )
+    con.close()
+    monkeypatch.setattr(webui, "HISTORY_ASSET_BROWSER", HistoryAssetBrowser(aa_data=aa_data))
+    with _server(tmp_path, monkeypatch) as base:
+        story = _open_named_story(base, tmp_path, "Current")
+        _, library = _request(base, "/api/assets/library?story_token=" + story["story_token"])
+        payload = {
+            "story_token": story["story_token"],
+            "source_copy_token": library["backgrounds"][0]["copies"][0]["copy_token"],
+            "kind": "background", "aa_key": "rain_roof", "sha256": digest,
+        }
+        payload[field] = value
+        status, body = _request(base, "/api/assets/library/copy-to-story", payload, "POST")
+
+    assert status == 409
+    assert body["code"] == "library_copy_mismatch"
+    assert body["message"]
+    assert body["action"]
+
+
+def test_library_copy_returns_a_recovery_action_when_aa_is_running(tmp_path, monkeypatch):
+    """A generic failure leaves the workbench unable to guide the user through AA's write lock."""
+    aa_data = tmp_path / "aa-data"
+    source_project = aa_data / "projects" / "Source"
+    source = source_project / "bgs" / "rain_roof.png"
+    _background(source)
+    write_manifest_atomic(source_project, {"BgOverrides": [r"bgs\rain_roof.png"]})
+    con = assetdb.connect(tmp_path / "assets.db")
+    digest = validate_background(source).candidate.sha256
+    upsert_candidate(
+        con, AssetCandidate(
+            "background", source, "rain_roof", "rain_roof", digest,
+            metadata={"catalog_source": "history_import"},
+        ),
+        scope=str(source_project), status="registered", install_path=str(source),
+    )
+    con.close()
+    monkeypatch.setattr(webui, "HISTORY_ASSET_BROWSER", HistoryAssetBrowser(aa_data=aa_data))
+    monkeypatch.setattr(aa_project_assets, "is_aa_running", lambda: True)
+    with _server(tmp_path, monkeypatch) as base:
+        story = _open_named_story(base, tmp_path, "Current")
+        _, library = _request(base, "/api/assets/library?story_token=" + story["story_token"])
+        status, body = _request(base, "/api/assets/library/copy-to-story", {
+            "story_token": story["story_token"],
+            "source_copy_token": library["backgrounds"][0]["copies"][0]["copy_token"],
+            "kind": "background", "aa_key": "rain_roof", "sha256": digest,
+        }, "POST")
+
+    assert status == 409
+    assert body == {
+        "ok": False,
+        "code": "aa_running",
+        "message": "AA 正在运行，当前不能写入素材。",
+        "action": "关闭 AA 后在原位置重试。",
+    }
+
+
+@pytest.mark.parametrize("payload", [None, ["story_token"]])
+def test_library_copy_rejects_non_object_payloads_with_a_structured_error(
+    tmp_path, monkeypatch, payload
+):
+    """Letting malformed JSON reach the handler exception path breaks workbench recovery."""
+    with _server(tmp_path, monkeypatch) as base:
+        status, body = _request(base, "/api/assets/library/copy-to-story", payload, "POST")
+
+    assert status == 400
+    assert body == {
+        "ok": False,
+        "code": "library_copy_mismatch",
+        "message": "素材信息与当前副本不一致。",
+        "action": "刷新素材工作台后重新选择素材。",
+    }
+
+
+def test_library_copy_reports_an_invalid_story_token_separately(tmp_path, monkeypatch):
+    """Mislabeling a dead story token as a copy failure sends the user to the wrong recovery flow."""
+    with _server(tmp_path, monkeypatch) as base:
+        status, body = _request(base, "/api/assets/library/copy-to-story", {
+            "story_token": "story-expired",
+            "source_copy_token": "copy-anything",
+            "kind": "background", "aa_key": "rain_roof", "sha256": "digest",
+        }, "POST")
+
+    assert status == 404
+    assert body == {
+        "ok": False,
+        "code": "invalid_story_token",
+        "message": "当前剧情已失效。",
+        "action": "重新打开剧情后刷新素材工作台。",
+    }
 
 
 @pytest.fixture

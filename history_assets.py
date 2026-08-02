@@ -89,6 +89,8 @@ class HistoryAssetBrowser:
         self._library_copy_tokens: dict[tuple[str, str, str, str], str] = {}
         self._library_preview_tokens: dict[str, str] = {}
         self._library_db_path: str | None = None
+        self._library_story_token = ""
+        self._library_story_scope = ""
 
     @staticmethod
     def _token(prefix: str) -> str:
@@ -300,6 +302,9 @@ class HistoryAssetBrowser:
         with self._lock:
             self._library_db_path = self._catalog_database_path(con)
             current_scope = str(current_context.project_dir) if current_context else ""
+            if current_context is not None:
+                self._library_story_token = current_context.story_token
+                self._library_story_scope = current_scope
             groups: dict[tuple[str, str, str], dict[str, Any]] = {}
             profiles = {
                 (str(row["kind"]), str(row["aa_key"]), str(row["sha256"])): row
@@ -397,6 +402,66 @@ class HistoryAssetBrowser:
             if not mime or not current.preview_path.is_file():
                 raise HistoryAssetError("asset_preview_missing", "asset preview not found", 404)
             return current.preview_path, mime
+
+    def _library_copy_for_token(self, copy_token: str) -> _LibraryCopy:
+        try:
+            copy = self._library_copies[copy_token]
+        except KeyError as exc:
+            raise HistoryAssetError("invalid_library_copy_token", "library copy is not available", 404) from exc
+        current = self._reload_library_copy(copy)
+        if current is None:
+            raise HistoryAssetError("library_copy_missing", "library copy is no longer available", 410)
+        if current != copy:
+            raise HistoryAssetError("library_copy_changed", "library copy changed; refresh the workbench", 409)
+        return current
+
+    def _history_token_for_copy(self, copy: _LibraryCopy) -> str:
+        """Re-discover the installed source through its AA manifest before copying it."""
+        scope = Path(copy.scope).resolve()
+        try:
+            project = validate_windows_path_component(scope.name, label="AA project name")
+        except ValueError as exc:
+            raise HistoryAssetError("library_copy_missing", "library copy is no longer available", 410) from exc
+        if scope not in self._roots(project):
+            raise HistoryAssetError("library_copy_missing", "library copy is no longer available", 410)
+        for record in self._records(project):
+            record_key = record.identifier or record.key
+            installed_source = record.source_path.parent if record.kind == "character" else record.source_path
+            if (
+                record.kind == copy.kind
+                and str(record_key).casefold() == copy.aa_key.casefold()
+                and installed_source == copy.install_path
+            ):
+                if record.content_sha != copy.sha256:
+                    raise HistoryAssetError("library_copy_changed", "library copy changed; refresh the workbench", 409)
+                return self._remember(record)
+        raise HistoryAssetError("library_copy_missing", "library copy is no longer available", 410)
+
+    def copy_library_asset(
+        self,
+        copy_token: str,
+        story_context: StoryContext,
+        *,
+        con=None,
+        running_probe=None,
+    ) -> dict[str, Any]:
+        """Copy one revalidated library source through the existing AA transaction."""
+        with self._lock:
+            if (
+                story_context.story_token != self._library_story_token
+                or str(story_context.project_dir) != self._library_story_scope
+            ):
+                raise HistoryAssetError(
+                    "story_context_changed", "the workbench story context changed", 409
+                )
+            copy = self._library_copy_for_token(copy_token)
+            history_token = self._history_token_for_copy(copy)
+            result = self.copy_to_story(
+                history_token, story_context, con=con, running_probe=running_probe
+            )
+            state = "registered" if result["changed"] else "already_registered"
+            asset = {**result, "aa_key": copy.aa_key}
+            return {"state": state, "asset": asset, **result}
 
     @staticmethod
     def _file_hash(path: Path) -> str:

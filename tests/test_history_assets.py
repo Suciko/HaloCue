@@ -54,6 +54,41 @@ def _character(root: Path) -> None:
     Image.new("RGBA", (16, 16), "white").save(root / "hero-avatar.png")
 
 
+def reusable_background_fixture(tmp_path):
+    aa_data = tmp_path / "aa-data"
+    source_project = aa_data / "projects" / "Source"
+    source = source_project / "bgs" / "rain_roof.png"
+    _background(source)
+    write_manifest_atomic(source_project, {"BgOverrides": [r"bgs\rain_roof.png"]})
+    con = assetdb.connect(tmp_path / "assets.db")
+    digest = history_assets.validate_background(source).candidate.sha256
+    history_assets.upsert_candidate(
+        con,
+        history_assets.AssetCandidate(
+            "background", source, "rain_roof", "rain_roof", digest,
+            metadata={"catalog_source": "history_import"},
+        ),
+        scope=str(source_project), status="registered", install_path=str(source),
+        display_name="Rain Roof",
+    )
+    browser = HistoryAssetBrowser(aa_data=aa_data)
+    current = _story("Current", aa_data)
+    source_token = browser.list_library(con, current_context=current)["backgrounds"][0]["copies"][0]["copy_token"]
+    return browser, con, source_token, current
+
+
+def test_library_copy_reuses_history_transaction_and_is_idempotent(tmp_path):
+    """Replacing the shared transaction would break both registration and duplicate detection."""
+    browser, con, source_token, current = reusable_background_fixture(tmp_path)
+
+    first = browser.copy_library_asset(source_token, current, con=con)
+    second = browser.copy_library_asset(source_token, current, con=con)
+
+    assert first["state"] == "registered"
+    assert second["state"] == "already_registered"
+    assert second["asset"]["aa_key"] == "rain_roof"
+
+
 def test_history_copy_survives_history_project_removal(tmp_path):
     """Replacing a copy operation with a source reference would break after deletion."""
     aa_data = tmp_path / "aa-data"

@@ -136,6 +136,38 @@ def _public_history_copy(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+_LIBRARY_COPY_ERROR_TEXT = {
+    "invalid_story_token": ("当前剧情已失效。", "重新打开剧情后刷新素材工作台。"),
+    "aa_running": ("AA 正在运行，当前不能写入素材。", "关闭 AA 后在原位置重试。"),
+    "same_name_different_content": ("当前剧情中已有同名但内容不同的素材。", "修改素材名称或处理冲突后重试。"),
+    "story_context_changed": ("素材工作台已切换到其他剧情。", "返回当前剧情后刷新素材工作台再试。"),
+    "library_copy_mismatch": ("素材信息与当前副本不一致。", "刷新素材工作台后重新选择素材。"),
+    "invalid_library_copy_token": ("素材副本已失效。", "刷新素材工作台后重试。"),
+    "library_copy_missing": ("素材副本已不存在。", "刷新素材工作台后选择其他可用副本。"),
+    "library_copy_changed": ("素材副本已变化。", "刷新素材工作台后重试。"),
+    "history_source_missing": ("素材源文件已不存在。", "刷新素材工作台后重试。"),
+    "history_asset_stale": ("素材源文件已变化。", "刷新素材工作台后重试。"),
+    "validation_failed": ("素材未通过当前校验。", "处理素材文件后重新选择。"),
+}
+
+
+def _library_copy_error(code: str) -> Dict[str, Any]:
+    message, action = _LIBRARY_COPY_ERROR_TEXT.get(
+        code, ("素材复制未完成。", "刷新素材工作台后重试。")
+    )
+    return {"ok": False, "code": code, "message": message, "action": action}
+
+
+def _library_story_asset_card(payload: Dict[str, Any], *, kind: str, aa_key: Any) -> Dict[str, Any] | None:
+    bucket = {"background": "backgrounds", "sound": "sounds", "character": "characters"}.get(kind)
+    if not bucket:
+        return None
+    for card in payload.get(bucket, []):
+        if str(card.get("aa_key")) == str(aa_key):
+            return card
+    return None
+
+
 PUBLIC_VALIDATION_MESSAGES = {
     "file_missing": "素材文件不存在，请重新选择。",
     "image_unreadable": "图片无法读取，请重新选择有效的 PNG 或 JPEG 文件。",
@@ -2209,6 +2241,42 @@ class H(BaseHTTPRequestHandler):
                     })
                 except HistoryAssetError as exc:
                     return self._send(exc.status, {"ok": False, "code": exc.code, "e": str(exc)})
+
+            if p == "/api/assets/library/copy-to-story":
+                expected_fields = {"story_token", "kind", "aa_key", "sha256", "source_copy_token"}
+                if not isinstance(data, dict) or set(data) != expected_fields:
+                    return self._send(400, _library_copy_error("library_copy_mismatch"))
+                try:
+                    context = resolve_story_context(str(data["story_token"] or ""))
+                except ValueError:
+                    return self._send(404, _library_copy_error("invalid_story_token"))
+                try:
+                    browser = history_asset_browser()
+                    copy = browser._library_copy_for_token(str(data["source_copy_token"] or ""))
+                    if (
+                        str(data["kind"]) != copy.kind
+                        or str(data["aa_key"]) != copy.aa_key
+                        or str(data["sha256"]) != copy.sha256
+                    ):
+                        raise HistoryAssetError(
+                            "library_copy_mismatch", "library copy metadata does not match", 409
+                        )
+                    con = db()
+                    try:
+                        result = browser.copy_library_asset(
+                            str(data["source_copy_token"]), context, con=con
+                        )
+                        card = _library_story_asset_card(
+                            asset_catalog.list_story_assets(con, scope=str(context.project_dir)),
+                            kind=result["kind"], aa_key=result["aa_key"],
+                        )
+                    finally:
+                        con.close()
+                    if card is None:
+                        raise HistoryAssetError("catalog_failed", "copied asset is not available", 500)
+                    return self._send(200, {"ok": True, "state": result["state"], "asset": card})
+                except HistoryAssetError as exc:
+                    return self._send(exc.status, _library_copy_error(exc.code))
 
             if p == "/api/story/assets/scan-inbox":
                 try:
