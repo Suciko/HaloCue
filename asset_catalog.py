@@ -561,6 +561,51 @@ def update_library_profile(
     }
 
 
+def remove_story_copy(
+    con, *, scope: str, kind: str, aa_key: str | int, sha256: str
+) -> dict:
+    """Delete one exact registered custom copy and prune only an orphan profile."""
+    migrate(con)
+    key = str(aa_key)
+    digest = str(sha256)
+    row = con.execute(
+        """
+        SELECT status,metadata_json FROM asset_install
+        WHERE scope=? AND kind=? AND aa_key=? AND sha256=?
+        """,
+        (str(scope), str(kind), key, digest),
+    ).fetchone()
+    if not row or not _is_story_custom_row(row, _safe_metadata(row["metadata_json"])):
+        raise KeyError("指定剧情素材副本不存在")
+    with con:
+        con.execute(
+            """
+            DELETE FROM asset_install
+            WHERE scope=? AND kind=? AND aa_key=? AND sha256=?
+            """,
+            (str(scope), str(kind), key, digest),
+        )
+        remaining = con.execute(
+            """
+            SELECT 1 FROM asset_install
+            WHERE kind=? AND aa_key=? AND sha256=? AND status=? LIMIT 1
+            """,
+            (str(kind), key, digest, STORY_ASSET_STATUS),
+        ).fetchone()
+        if not remaining:
+            con.execute(
+                "DELETE FROM asset_library_profile WHERE kind=? AND aa_key=? AND sha256=?",
+                (str(kind), key, digest),
+            )
+    return {
+        "kind": str(kind),
+        "aa_key": _numeric_key(key),
+        "sha256": digest,
+        "scope_removed": True,
+        "profile_removed": not bool(remaining),
+    }
+
+
 def library_character_analysis_target(con, *, aa_key: str | int, sha256: str) -> dict:
     """Resolve an installed custom character copy for a server-side face job."""
     migrate(con)

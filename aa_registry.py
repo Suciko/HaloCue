@@ -9,6 +9,7 @@ import os
 import shutil
 import tempfile
 import unicodedata
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
@@ -36,6 +37,10 @@ class RegistrationConflictError(AssetRegistrationError):
     """A registered AA asset already owns the requested name or identifier."""
 
 
+class AssetRemovalError(RuntimeError):
+    """A registered asset copy could not be removed without partial state."""
+
+
 @dataclass(frozen=True)
 class RegistrationResult:
     kind: str
@@ -52,6 +57,15 @@ class RegistrationResult:
     @property
     def manifest_path(self) -> Path:
         return self.manifest_paths[0]
+
+
+@dataclass(frozen=True)
+class RemovalResult:
+    kind: str
+    aa_key: str
+    install_dirs: tuple[Path, ...]
+    manifest_paths: tuple[Path, ...]
+    changed: bool
 
 
 def _empty_manifest() -> dict:
@@ -416,3 +430,212 @@ def register_character_unlocked(
         display_name=display_name,
         nickname=nickname,
     )
+
+
+_REMOVAL_LAYOUT = {
+    "background": ("BgOverrides", "bgs"),
+    "sound": ("SoundOverrides", "sounds"),
+}
+
+
+def _safe_manifest_destination(root: Path, value: str, folder: str) -> Path:
+    path = PureWindowsPath(value)
+    if (
+        path.is_absolute()
+        or not path.parts
+        or path.parts[0].casefold() != folder.casefold()
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise AssetRemovalError("manifest 中的素材路径无效")
+    try:
+        return destination_within(root, *path.parts)
+    except ValueError as exc:
+        raise AssetRemovalError("manifest 中的素材路径越界") from exc
+
+
+def _simple_removal_entry(
+    root: Path, manifest: dict, *, kind: str, aa_key: str, expected_sha256: str
+) -> tuple[str, Path]:
+    manifest_key, folder = _REMOVAL_LAYOUT[kind]
+    matches = [
+        str(value)
+        for value in manifest[manifest_key]
+        if isinstance(value, str)
+        and _name_key(PureWindowsPath(value).stem) == _name_key(aa_key)
+    ]
+    if len(matches) != 1:
+        raise AssetRemovalError("素材登记不存在或存在歧义")
+    relative = matches[0]
+    destination = _safe_manifest_destination(root, relative, folder)
+    if not destination.is_file():
+        raise AssetRemovalError("已登记素材文件不存在")
+    if kind == "background":
+        from asset_validation import validate_background
+
+        validation = validate_background(destination)
+    else:
+        from asset_validation import validate_sound
+
+        validation = validate_sound(destination)
+    if (
+        not validation.ok
+        or validation.candidate is None
+        or validation.candidate.sha256 != expected_sha256
+    ):
+        raise AssetRemovalError("素材内容与删除确认时不一致")
+    return relative, destination
+
+
+def _character_removal_entry(
+    root: Path, manifest: dict, *, aa_key: str, expected_sha256: str
+) -> tuple[dict, Path]:
+    matches = [
+        row
+        for row in manifest["CharacterOverrides"]
+        if isinstance(row, dict) and str(row.get("Identifier")) == aa_key
+    ]
+    if len(matches) != 1:
+        raise AssetRemovalError("角色素材登记不存在或存在歧义")
+    entry = matches[0]
+    base = _safe_manifest_destination(
+        root, str(entry.get("SpinePortraitPath") or ""), "characters"
+    )
+    install_dir = destination_within(root, "characters", aa_key)
+    try:
+        base.relative_to(install_dir)
+    except ValueError as exc:
+        raise AssetRemovalError("角色素材登记目录无效") from exc
+    from asset_validation import validate_spine
+
+    validation = validate_spine(base, identifier=aa_key)
+    if (
+        not validation.ok
+        or validation.candidate is None
+        or validation.candidate.sha256 != expected_sha256
+    ):
+        raise AssetRemovalError("角色素材内容与删除确认时不一致")
+    return entry, install_dir
+
+
+def _restore_manifest(path: Path, original: bytes | None) -> None:
+    if original is None:
+        path.unlink(missing_ok=True)
+        return
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".restore", dir=str(path.parent)
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(original)
+        os.replace(temporary_name, path)
+    finally:
+        try:
+            Path(temporary_name).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def remove_registered_asset(
+    target: AAProjectTarget,
+    *,
+    kind: str,
+    aa_key: str,
+    expected_sha256: str,
+    running_probe: Callable[[], bool] | None = None,
+    after_remove: Callable[[RemovalResult], None] | None = None,
+) -> RemovalResult:
+    """Remove one project/save copy, restoring both mirrors on any failure."""
+    if kind not in {*_REMOVAL_LAYOUT, "character"}:
+        raise AssetRemovalError("不支持的素材类型")
+    try:
+        key = validate_windows_path_component(str(aa_key), label="asset key")
+    except ValueError as exc:
+        raise AssetRemovalError(str(exc)) from exc
+    digest = str(expected_sha256 or "").strip()
+    if not digest:
+        raise AssetRemovalError("缺少素材内容摘要")
+    directories = (target.project_dir, target.save_dir)
+    manifest_paths = tuple(root / "manifest.json" for root in directories)
+    originals: dict[Path, bytes | None] = {}
+    staged: list[tuple[Path, Path]] = []
+    staging_roots: list[Path] = []
+
+    try:
+        with project_target_lock(target):
+            assert_aa_closed(running_probe=running_probe)
+            manifests = [load_manifest(root) for root in directories]
+            entries = []
+            install_paths = []
+            for root, manifest in zip(directories, manifests):
+                if kind == "character":
+                    entry, installed = _character_removal_entry(
+                        root, manifest, aa_key=key, expected_sha256=digest
+                    )
+                else:
+                    entry, installed = _simple_removal_entry(
+                        root,
+                        manifest,
+                        kind=kind,
+                        aa_key=key,
+                        expected_sha256=digest,
+                    )
+                entries.append(entry)
+                install_paths.append(installed)
+            if entries[0] != entries[1]:
+                raise AssetRemovalError("project/save 素材登记不一致")
+
+            result = RemovalResult(
+                kind=kind,
+                aa_key=key,
+                install_dirs=tuple(install_paths),
+                manifest_paths=manifest_paths,
+                changed=True,
+            )
+            originals = {
+                path: path.read_bytes() if path.is_file() else None
+                for path in manifest_paths
+            }
+            for root, installed in zip(directories, install_paths):
+                stage_root = root / f".aa-remove-{uuid.uuid4().hex}"
+                stage_root.mkdir(parents=True)
+                staged_path = stage_root / installed.name
+                os.replace(installed, staged_path)
+                staging_roots.append(stage_root)
+                staged.append((staged_path, installed))
+
+            for manifest, entry in zip(manifests, entries):
+                if kind == "character":
+                    manifest["CharacterOverrides"] = [
+                        row for row in manifest["CharacterOverrides"] if row != entry
+                    ]
+                else:
+                    manifest_key = _REMOVAL_LAYOUT[kind][0]
+                    manifest[manifest_key] = [
+                        value for value in manifest[manifest_key] if value != entry
+                    ]
+            for root, manifest in zip(directories, manifests):
+                write_manifest_atomic(root, manifest)
+            if after_remove is not None:
+                after_remove(result)
+    except Exception as exc:
+        for path, original in originals.items():
+            try:
+                _restore_manifest(path, original)
+            except OSError:
+                pass
+        for staged_path, installed in reversed(staged):
+            try:
+                installed.parent.mkdir(parents=True, exist_ok=True)
+                if staged_path.exists() and not installed.exists():
+                    os.replace(staged_path, installed)
+            except OSError:
+                pass
+        for stage_root in staging_roots:
+            shutil.rmtree(stage_root, ignore_errors=True)
+        if isinstance(exc, AssetRemovalError):
+            raise
+        raise AssetRemovalError(str(exc)) from exc
+
+    for stage_root in staging_roots:
+        shutil.rmtree(stage_root, ignore_errors=True)
+    return result

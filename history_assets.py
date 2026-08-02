@@ -14,11 +14,13 @@ from typing import Any
 
 from aa_project_assets import AAProjectTarget, validate_windows_path_component
 from aa_registry import (
+    AssetRemovalError,
     AssetRegistrationError,
     RegistrationConflictError,
     register_background,
     register_character,
     register_sound,
+    remove_registered_asset,
 )
 from asset_catalog import upsert_candidate
 import asset_catalog
@@ -36,10 +38,14 @@ _SOUND_SUFFIXES = {".wav", ".ogg", ".mp3"}
 class HistoryAssetError(RuntimeError):
     """An expected historical-asset failure with a stable public code."""
 
-    def __init__(self, code: str, message: str, status: int = 422):
+    def __init__(
+        self, code: str, message: str, status: int = 422,
+        details: dict[str, Any] | None = None,
+    ):
         super().__init__(message)
         self.code = code
         self.status = status
+        self.details = details or {}
 
 
 @dataclass(frozen=True)
@@ -462,6 +468,143 @@ class HistoryAssetBrowser:
             state = "registered" if result["changed"] else "already_registered"
             asset = {**result, "aa_key": copy.aa_key}
             return {"state": state, "asset": asset, **result}
+
+    def _copy_references(self, copy: _LibraryCopy, draft_store) -> list[dict]:
+        if draft_store is None or not draft_store.base_dir.is_dir():
+            return []
+        references = []
+        for draft_dir in draft_store.base_dir.iterdir():
+            session_path = draft_dir / "session.json"
+            if not draft_dir.is_dir() or not session_path.is_file():
+                continue
+            try:
+                session = json.loads(session_path.read_text(encoding="utf-8"))
+                if str(session.get("project") or "") != copy.chapter:
+                    continue
+                found = draft_store.find_asset_references(
+                    token=draft_dir.name, kind=copy.kind, aa_key=copy.aa_key
+                )
+            except (OSError, ValueError, FileNotFoundError):
+                continue
+            for reference in found:
+                references.append({
+                    **reference,
+                    "draft_token": draft_dir.name,
+                    "draft_label": copy.chapter,
+                })
+        return references
+
+    def describe_copy(self, copy_token: str, *, con, draft_store=None) -> dict:
+        """Return a browser-safe description and current draft references."""
+        with self._lock:
+            copy = self._library_copy_for_token(copy_token)
+            row = con.execute(
+                """
+                SELECT display_name FROM asset_install
+                WHERE kind=? AND aa_key=? AND sha256=? AND scope=?
+                """,
+                (copy.kind, copy.aa_key, copy.sha256, copy.scope),
+            ).fetchone()
+            return {
+                "copy_token": copy_token,
+                "kind": copy.kind,
+                "aa_key": copy.aa_key,
+                "sha256": copy.sha256,
+                "name": str(row["display_name"] or copy.aa_key) if row else copy.aa_key,
+                "chapter": copy.chapter,
+                "references": self._copy_references(copy, draft_store),
+            }
+
+    def describe_preview_copies(self, preview_token: str, *, con, draft_store=None) -> dict:
+        with self._lock:
+            representative = self._library_preview_tokens.get(preview_token)
+            copy = self._library_copies.get(representative or "")
+            if copy is None:
+                raise HistoryAssetError(
+                    "invalid_preview_token", "asset preview is not available", 404
+                )
+            copies = [
+                self.describe_copy(token, con=con, draft_store=draft_store)
+                for token, candidate in self._library_copies.items()
+                if (candidate.kind, candidate.aa_key, candidate.sha256)
+                == (copy.kind, copy.aa_key, copy.sha256)
+            ]
+            copies.sort(key=lambda item: item["chapter"].casefold())
+            return {
+                "kind": copy.kind,
+                "aa_key": copy.aa_key,
+                "sha256": copy.sha256,
+                "copies": copies,
+            }
+
+    def remove_copy(
+        self,
+        copy_token: str,
+        *,
+        con,
+        draft_store=None,
+        running_probe=None,
+        confirm_chapter: str | None = None,
+    ) -> dict:
+        """Remove one revalidated chapter copy and its matching catalog row."""
+        with self._lock:
+            copy = self._library_copy_for_token(copy_token)
+            if confirm_chapter is not None and str(confirm_chapter) != copy.chapter:
+                raise HistoryAssetError(
+                    "copy_confirmation_mismatch", "confirmed chapter does not match copy", 409
+                )
+            references = self._copy_references(copy, draft_store)
+            if references:
+                raise HistoryAssetError(
+                    "asset_in_use",
+                    "asset is referenced by a draft",
+                    409,
+                    {"references": references},
+                )
+            project_dir = self._canonical_project_root("projects", copy.chapter)
+            if project_dir is None or project_dir != Path(copy.scope).resolve():
+                raise HistoryAssetError(
+                    "library_copy_missing", "library copy is no longer available", 410
+                )
+            target = AAProjectTarget(
+                project_dir,
+                self.aa_data / "saves" / copy.chapter,
+                copy.chapter,
+            )
+
+            def remove_catalog(_result) -> None:
+                asset_catalog.remove_story_copy(
+                    con,
+                    scope=copy.scope,
+                    kind=copy.kind,
+                    aa_key=copy.aa_key,
+                    sha256=copy.sha256,
+                )
+
+            try:
+                remove_registered_asset(
+                    target,
+                    kind=copy.kind,
+                    aa_key=copy.aa_key,
+                    expected_sha256=copy.sha256,
+                    running_probe=running_probe,
+                    after_remove=remove_catalog,
+                )
+            except AssetRemovalError as exc:
+                code = "aa_running" if "aa_running" in str(exc) else "asset_remove_failed"
+                status = 409 if code == "aa_running" else 422
+                raise HistoryAssetError(code, "asset copy could not be removed", status) from exc
+            self._library_copies.pop(copy_token, None)
+            self._library_copy_tokens.pop(
+                (copy.kind, copy.aa_key, copy.sha256, copy.scope), None
+            )
+            return {
+                "removed": True,
+                "kind": copy.kind,
+                "aa_key": copy.aa_key,
+                "sha256": copy.sha256,
+                "chapter": copy.chapter,
+            }
 
     @staticmethod
     def _file_hash(path: Path) -> str:

@@ -6,12 +6,16 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+import aa_registry
+from aa_project_assets import AAProjectTarget
 from aa_registry import (
     AssetRegistrationError,
+    AssetRemovalError,
     load_manifest,
     register_background,
     register_character,
     register_sound,
+    remove_registered_asset,
 )
 from asset_validation import (
     validate_background,
@@ -132,3 +136,70 @@ def test_character_identifier_cannot_be_reused_for_different_content(tmp_path):
             project,
             display_name="凯伊（另一套）",
         )
+
+
+def _paired_target(tmp_path: Path, project: str = "Chapter") -> AAProjectTarget:
+    return AAProjectTarget(
+        tmp_path / "aa-data" / "projects" / project,
+        tmp_path / "aa-data" / "saves" / project,
+        project,
+    )
+
+
+def test_remove_registered_background_updates_both_manifests_and_files(tmp_path):
+    """Leaving either AA mirror registered would make the story copy inconsistent."""
+    source = tmp_path / "source" / "rain_roof.png"
+    source.parent.mkdir()
+    Image.new("RGB", (16, 9), "navy").save(source)
+    validation = validate_background(source)
+    target = _paired_target(tmp_path)
+    register_background(validation, target, running_probe=lambda: False)
+
+    result = remove_registered_asset(
+        target,
+        kind="background",
+        aa_key="rain_roof",
+        expected_sha256=validation.candidate.sha256,
+        running_probe=lambda: False,
+    )
+
+    assert result.changed is True
+    for root in (target.project_dir, target.save_dir):
+        assert load_manifest(root)["BgOverrides"] == []
+        assert not (root / "bgs" / "rain_roof.png").exists()
+
+
+def test_remove_registered_asset_rolls_back_files_and_manifests_on_failure(
+    tmp_path, monkeypatch
+):
+    """A failed second manifest write must restore both mirrors and their files."""
+    source = tmp_path / "source" / "door_open.wav"
+    source.parent.mkdir()
+    make_wav(source)
+    validation = validate_sound(source)
+    target = _paired_target(tmp_path)
+    register_sound(validation, target, running_probe=lambda: False)
+    original_write = aa_registry.write_manifest_atomic
+    calls = 0
+
+    def fail_second_manifest(directory, manifest):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated second manifest failure")
+        return original_write(directory, manifest)
+
+    monkeypatch.setattr(aa_registry, "write_manifest_atomic", fail_second_manifest)
+
+    with pytest.raises(AssetRemovalError):
+        remove_registered_asset(
+            target,
+            kind="sound",
+            aa_key="door_open",
+            expected_sha256=validation.candidate.sha256,
+            running_probe=lambda: False,
+        )
+
+    for root in (target.project_dir, target.save_dir):
+        assert load_manifest(root)["SoundOverrides"] == [r"sounds\door_open.wav"]
+        assert (root / "sounds" / "door_open.wav").is_file()

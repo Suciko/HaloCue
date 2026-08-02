@@ -303,6 +303,101 @@ def test_library_copy_reports_an_invalid_story_token_separately(tmp_path, monkey
     }
 
 
+def _registered_library_background(tmp_path, chapter="Chapter One"):
+    aa_data = tmp_path / "aa-data"
+    project = aa_data / "projects" / chapter
+    save = aa_data / "saves" / chapter
+    project_file = project / "bgs" / "rain_roof.png"
+    save_file = save / "bgs" / "rain_roof.png"
+    _background(project_file)
+    save_file.parent.mkdir(parents=True)
+    save_file.write_bytes(project_file.read_bytes())
+    for root in (project, save):
+        write_manifest_atomic(root, {"BgOverrides": [r"bgs\rain_roof.png"]})
+    digest = validate_background(project_file).candidate.sha256
+    con = assetdb.connect(tmp_path / "assets.db")
+    upsert_candidate(
+        con,
+        AssetCandidate(
+            "background",
+            project_file,
+            "rain_roof",
+            "rain_roof",
+            digest,
+            metadata={"catalog_source": "history_import"},
+        ),
+        scope=str(project),
+        status="registered",
+        install_path=str(project_file),
+        display_name="雨夜天台",
+    )
+    con.close()
+    return aa_data, project
+
+
+def test_library_copy_management_api_describes_and_removes_one_safe_copy(
+    tmp_path, monkeypatch
+):
+    """Copy management must not expose paths or turn one confirmation into bulk removal."""
+    aa_data, project = _registered_library_background(tmp_path)
+    monkeypatch.setattr(webui, "HISTORY_ASSET_BROWSER", HistoryAssetBrowser(aa_data=aa_data))
+    with _server(tmp_path, monkeypatch) as base:
+        story = _open_story(base, tmp_path)
+        _, library = _request(base, "/api/assets/library?story_token=" + story["story_token"])
+        item = library["backgrounds"][0]
+        copy_token = item["copies"][0]["copy_token"]
+        status, copies = _request(
+            base,
+            "/api/assets/library/copies?preview_token=" + item["preview_token"],
+        )
+        remove_status, removed = _request(
+            base,
+            "/api/assets/library/remove-copy",
+            {"copy_token": copy_token, "confirm_chapter": "Chapter One"},
+            "POST",
+        )
+
+    assert status == 200
+    assert copies["copies"][0]["chapter"] == "Chapter One"
+    assert copies["copies"][0]["references"] == []
+    assert str(tmp_path) not in repr(copies)
+    assert "scope" not in repr(copies)
+    assert remove_status == 200
+    assert removed == {
+        "ok": True,
+        "removed": True,
+        "kind": "background",
+        "aa_key": "rain_roof",
+        "sha256": item["sha256"],
+        "chapter": "Chapter One",
+    }
+    assert not (project / "bgs" / "rain_roof.png").exists()
+
+
+def test_library_remove_copy_rejects_wrong_chapter_with_structured_recovery(
+    tmp_path, monkeypatch
+):
+    """A stale confirmation must yield a recoverable conflict instead of deleting."""
+    aa_data, project = _registered_library_background(tmp_path)
+    monkeypatch.setattr(webui, "HISTORY_ASSET_BROWSER", HistoryAssetBrowser(aa_data=aa_data))
+    with _server(tmp_path, monkeypatch) as base:
+        story = _open_story(base, tmp_path)
+        _, library = _request(base, "/api/assets/library?story_token=" + story["story_token"])
+        copy_token = library["backgrounds"][0]["copies"][0]["copy_token"]
+        status, body = _request(
+            base,
+            "/api/assets/library/remove-copy",
+            {"copy_token": copy_token, "confirm_chapter": "Other"},
+            "POST",
+        )
+
+    assert status == 409
+    assert body["code"] == "copy_confirmation_mismatch"
+    assert body["message"] and body["action"]
+    assert body["details"] == {}
+    assert (project / "bgs" / "rain_roof.png").is_file()
+
+
 @pytest.fixture
 def running_server(tmp_path, monkeypatch):
     con = assetdb.connect(tmp_path / "assets.db")

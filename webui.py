@@ -148,6 +148,10 @@ _LIBRARY_COPY_ERROR_TEXT = {
     "history_source_missing": ("素材源文件已不存在。", "刷新素材工作台后重试。"),
     "history_asset_stale": ("素材源文件已变化。", "刷新素材工作台后重试。"),
     "validation_failed": ("素材未通过当前校验。", "处理素材文件后重新选择。"),
+    "copy_confirmation_mismatch": ("确认的章节与素材副本不一致。", "刷新副本记录后重新确认。"),
+    "asset_in_use": ("该素材仍被草稿引用，当前不能移除。", "先跳转到引用卡片并更换素材。"),
+    "asset_remove_failed": ("素材副本未能安全移除。", "刷新副本记录并核对 AA 工程后重试。"),
+    "invalid_preview_token": ("素材副本记录已失效。", "刷新素材工作台后重试。"),
 }
 
 
@@ -156,6 +160,12 @@ def _library_copy_error(code: str) -> Dict[str, Any]:
         code, ("素材复制未完成。", "刷新素材工作台后重试。")
     )
     return {"ok": False, "code": code, "message": message, "action": action}
+
+
+def _library_copy_management_error(exc: HistoryAssetError) -> Dict[str, Any]:
+    payload = _library_copy_error(exc.code)
+    payload["details"] = dict(exc.details)
+    return payload
 
 
 def _library_story_asset_card(payload: Dict[str, Any], *, kind: str, aa_key: Any) -> Dict[str, Any] | None:
@@ -1999,6 +2009,21 @@ class H(BaseHTTPRequestHandler):
                     return self._send(exc.status, {
                         "ok": False, "code": exc.code, "e": str(exc),
                     })
+            if p == "/api/assets/library/copies":
+                con = db()
+                try:
+                    payload = history_asset_browser().describe_preview_copies(
+                        q.get("preview_token", ""),
+                        con=con,
+                        draft_store=DraftStore(),
+                    )
+                    return self._send(200, {"ok": True, **payload})
+                except HistoryAssetError as exc:
+                    return self._send(
+                        exc.status, _library_copy_management_error(exc)
+                    )
+                finally:
+                    con.close()
             if p == "/api/story/assets/preview":
                 try:
                     context = resolve_story_context(q.get("story_token", ""))
@@ -2277,6 +2302,29 @@ class H(BaseHTTPRequestHandler):
                     return self._send(200, {"ok": True, "state": result["state"], "asset": card})
                 except HistoryAssetError as exc:
                     return self._send(exc.status, _library_copy_error(exc.code))
+
+            if p == "/api/assets/library/remove-copy":
+                expected_fields = {"copy_token", "confirm_chapter"}
+                if not isinstance(data, dict) or set(data) != expected_fields:
+                    error = HistoryAssetError(
+                        "copy_confirmation_mismatch", "invalid removal confirmation", 400
+                    )
+                    return self._send(400, _library_copy_management_error(error))
+                con = db()
+                try:
+                    result = history_asset_browser().remove_copy(
+                        str(data["copy_token"] or ""),
+                        con=con,
+                        draft_store=DraftStore(),
+                        confirm_chapter=str(data["confirm_chapter"] or ""),
+                    )
+                    return self._send(200, {"ok": True, **result})
+                except HistoryAssetError as exc:
+                    return self._send(
+                        exc.status, _library_copy_management_error(exc)
+                    )
+                finally:
+                    con.close()
 
             if p == "/api/story/assets/scan-inbox":
                 try:
