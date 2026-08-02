@@ -1,76 +1,114 @@
+# -*- coding: utf-8 -*-
+"""素材工作台前端模块、导航状态和 CSP 行为。"""
+
 import json
 import subprocess
 from pathlib import Path
 
 
 HERE = Path(__file__).resolve().parents[1]
+MODULES = (
+    "library_preview.js",
+    "library_transfer.js",
+    "library_copies.js",
+    "library.js",
+)
 
 
 def run_library(script: str) -> dict:
     output = subprocess.check_output(
-        ["node", "-e", script, str(HERE / "js" / "library.js")],
+        ["node", "-e", script, *[str(HERE / "js" / name) for name in MODULES]],
         text=True,
         encoding="utf-8",
     )
     return json.loads(output)
 
 
-def test_material_workbench_is_separate_from_current_story_assets_and_csp_safe():
+def test_material_workbench_is_full_screen_and_loads_split_csp_safe_modules():
     html = (HERE / "ui.html").read_text(encoding="utf-8")
-    assert 'id="assetLibraryDrawer"' in html
-    assert 'data-library-action="open"' in html
+
+    assert 'id="appShell"' in html
+    assert 'id="assetWorkbench"' in html
+    assert 'id="assetWorkbenchBody"' in html
+    assert 'id="assetWorkbenchList"' in html
+    assert 'id="assetWorkbenchDetail"' in html
+    assert 'id="assetWorkbenchTasks"' in html
+    assert 'aria-controls="assetWorkbench"' in html
     assert 'id="storyAssetStrip"' in html
-    assert 'id="faceWorkspace"' in html
-    assert 'id="faceWorkspaceStart"' in html
-    assert html.index('id="storyAssetStrip"') < html.index('id="assetLibraryDrawer"')
-    assert "归类不等于已导入" in html
-    assert "每章仍需" in html
-    assert '<script src="/js/library.js"></script>' in html
+    assert html.index('id="storyAssetStrip"') < html.index('id="assetWorkbench"')
+    ordered_scripts = [f'<script src="/js/{name}"></script>' for name in MODULES]
+    positions = [html.index(script) for script in ordered_scripts]
+    assert positions == sorted(positions)
     assert "onclick=" not in html
     assert "onchange=" not in html
 
 
-def test_character_card_opens_a_separate_face_workspace():
-    source = (HERE / "js" / "library.js").read_text(encoding="utf-8")
-    assert "表情标注" in source
-    assert "FaceWorkspace" in source
-    assert "/api/assets/library/character/face-analysis" in source
-    assert "/api/assets/faces/job" in source
-    assert "innerHTML" not in source
-    assert "eval(" not in source
-
-
-def test_material_workbench_loads_safe_history_and_saves_series_profile():
+def test_asset_workbench_opens_full_screen_sanitizes_context_and_restores_focus():
     script = r'''
-const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');const nodes={},listeners={},requests=[];
-function node(tag){let own='',classes=new Set(),events={};const n={tagName:tag||'div',children:[],parentNode:null,dataset:{},className:'',value:'',disabled:false,hidden:false,type:'',placeholder:'',maxLength:0,classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),toggle:(x,v)=>v?classes.add(x):classes.delete(x),contains:x=>classes.has(x)},appendChild(x){x.parentNode=this;this.children.push(x);return x},removeChild(){return this.children.shift()},get firstChild(){return this.children[0]},addEventListener(k,f){events[k]=f},dispatch(k,e){if(events[k])events[k](Object.assign({target:this},e||{}))},setAttribute(k,v){this[k]=v},focus(){this.focused=true},scrollIntoView(){this.scrolled=true},closest(selector){let p=this;while(p){if(selector==='.asset-library-card'&&String(p.className).split(/\s+/).includes('asset-library-card'))return p;if(selector==='[data-library-action]'&&p.dataset.libraryAction)return p;p=p.parentNode}return null},querySelector(selector){const match=selector.match(/^\[data-library-field="([^"]+)"\]$/);let found=null;function walk(p){p.children.forEach(c=>{if(found)return;if(match&&c.dataset.libraryField===match[1])found=c;else walk(c)})}walk(this);return found},set textContent(v){own=String(v||'');this.children=[]},get textContent(){return own+this.children.map(x=>x.textContent||'').join('')}};return n}
-['assetLibraryDrawer','assetLibraryBackdrop','assetLibraryList','assetLibrarySummary','assetLibraryStatus','assetLibrarySearch','assetLibraryKind','assetLibraryRole','assetLibraryUseCurrent','storyAssetStrip'].forEach(id=>nodes[id]=node());nodes.assetLibraryKind.value='all';nodes.assetLibraryRole.value='all';
-const response={characters:[{kind:'character',aa_key:'kei-date',sha256:'c'.repeat(64),name:'凯伊约会服',asset_role:'chapter_only',series_name:'',chapters:['第一章','第二章'],copy_count:2,details:{face_count:3,expression_status:'known'}}],backgrounds:[],sounds:[],bgms:[]};
-const window={Api:{request:async(path,opts)=>{requests.push({path,opts});if(path==='/api/assets/library')return response;if(path==='/api/assets/library/profile')return {ok:true,asset_role:'series_shared',series_name:'凯伊约会篇'};throw new Error(path)},json:(m,p)=>({method:m,payload:p})},StoryStore:{get:()=>({story_token:'story-1'})},StoryUI:{}};
-const document={getElementById:id=>nodes[id]||null,createElement:node,activeElement:node(),addEventListener:(k,f)=>listeners[k]=f};vm.runInNewContext(source,{window,document,Promise,Error,console,setTimeout:(f)=>f()});
-(async()=>{const wb=window.AssetLibraryWorkbench,trigger=node();wb.open(trigger);await Promise.resolve();await Promise.resolve();await Promise.resolve();const loaded=nodes.assetLibraryList.textContent;const card=nodes.assetLibraryList.children[0],role=card.querySelector('[data-library-field="asset-role"]'),series=card.querySelector('[data-library-field="series-name"]'),form=card.children.find(x=>x.className==='asset-library-profile'),save=form.children[2];role.value='series_shared';nodes.assetLibraryDrawer.dispatch('change',{target:role});series.value='凯伊约会篇';await wb.save(save);const post=requests.find(x=>x.path==='/api/assets/library/profile');console.log(JSON.stringify({loaded,status:nodes.assetLibraryStatus.textContent,payload:post&&post.opts.payload,summary:nodes.assetLibrarySummary.textContent,privateLeak:loaded.includes('C:\\private')}));})();
+const fs=require('fs'),vm=require('vm');
+const sources=process.argv.slice(1).map(path=>fs.readFileSync(path,'utf8'));
+const nodes={},listeners={};let document;
+function node(id){
+  let own='',attrs={},events={},classes=new Set();
+  const n={id:id||'',children:[],parentNode:null,dataset:{},className:'',hidden:false,value:'',disabled:false,
+    classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x),toggle:(x,v)=>v?classes.add(x):classes.delete(x)},
+    appendChild(child){child.parentNode=this;this.children.push(child);return child},
+    addEventListener(kind,fn){events[kind]=fn},dispatch(kind,event){if(events[kind])events[kind](Object.assign({target:this},event||{}))},
+    setAttribute(key,value){attrs[key]=String(value)},getAttribute(key){return attrs[key]},removeAttribute(key){delete attrs[key]},
+    focus(){document.activeElement=this},querySelector(){return null},closest(){return null},
+    set textContent(value){own=String(value||'');this.children=[]},get textContent(){return own+this.children.map(child=>child.textContent||'').join('')}
+  };return n;
+}
+['appShell','assetWorkbench','assetWorkbenchBack','assetWorkbenchContext','assetWorkbenchTaskToggle','assetWorkbenchBody','assetWorkbenchFilters','assetWorkbenchList','assetWorkbenchDetail','assetWorkbenchTasks','assetWorkbenchStatus'].forEach(id=>nodes[id]=node(id));
+nodes.assetWorkbench.hidden=true;nodes.appShell.hidden=false;
+const trigger=node('trigger');
+document={activeElement:trigger,getElementById:id=>nodes[id]||null,createElement:tag=>node(tag),addEventListener:(kind,fn)=>listeners[kind]=fn};
+const requests=[];
+const response={characters:[],backgrounds:[{kind:'background',aa_key:'rain',sha256:'digest',name:'雨夜天台',copies:[],copy_count:0}],sounds:[],bgms:[]};
+const window={StoryUI:{},StoryStore:{get:()=>({story_token:'story-1',project:'第一章'})},Api:{request:async path=>{requests.push(path);return response},json:(method,payload)=>({method,payload})}};
+const context={window,document,Promise,Error,console,setTimeout,clearTimeout,encodeURIComponent,CustomEvent:function(name,options){this.type=name;this.detail=options&&options.detail}};
+sources.forEach(source=>vm.runInNewContext(source,context));
+(async()=>{
+  const workbench=window.AssetWorkbench;
+  await workbench.open({origin:'preflight',story_token:'story-1',tasks:[],source_path:'C:\\private\\story.txt'});
+  const opened={workbenchHidden:nodes.assetWorkbench.hidden,appHidden:nodes.appShell.hidden,request:requests[0],context:workbench.context,modules:{preview:!!workbench.preview,transfer:!!workbench.transfer,copies:!!workbench.copies}};
+  await workbench.close();
+  console.log(JSON.stringify({opened,closed:{workbenchHidden:nodes.assetWorkbench.hidden,appHidden:nodes.appShell.hidden,focus:document.activeElement.id}}));
+})();
 '''
     result = run_library(script)
-    assert "凯伊约会服" in result["loaded"]
-    assert "第一章" in result["loaded"] and "第二章" in result["loaded"]
-    assert "已识别 3 个表情候选" in result["loaded"]
-    assert result["payload"] == {
-        "kind": "character",
-        "aa_key": "kei-date",
-        "sha256": "c" * 64,
-        "asset_role": "series_shared",
-        "series_name": "凯伊约会篇",
+
+    assert result["opened"]["workbenchHidden"] is False
+    assert result["opened"]["appHidden"] is True
+    assert result["opened"]["request"] == "/api/assets/library?story_token=story-1"
+    assert result["opened"]["context"] == {
+        "origin": "preflight",
+        "story_token": "story-1",
+        "tasks": [],
     }
-    assert "已保存" in result["status"]
-    assert "自定义素材" in result["summary"] and "章节副本" in result["summary"]
-    assert result["privateLeak"] is False
+    assert result["opened"]["modules"] == {
+        "preview": True,
+        "transfer": True,
+        "copies": True,
+    }
+    assert result["closed"] == {
+        "workbenchHidden": True,
+        "appHidden": False,
+        "focus": "trigger",
+    }
 
 
-def test_material_workbench_bgm_filter_explains_verified_gate():
-    script = r'''
-const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');const nodes={};function n(){let own='',classes=new Set();const x={children:[],dataset:{},className:'',value:'',disabled:false,classList:{add:v=>classes.add(v),remove:v=>classes.delete(v),contains:v=>classes.has(v)},appendChild(c){c.parentNode=this;this.children.push(c);return c},set textContent(v){own=String(v||'');this.children=[]},get textContent(){return own+this.children.map(c=>c.textContent||'').join('')},addEventListener(){},setAttribute(){},focus(){},closest(){return null}};return x}['assetLibraryDrawer','assetLibraryBackdrop','assetLibraryList','assetLibrarySummary','assetLibraryStatus','assetLibrarySearch','assetLibraryKind','assetLibraryRole','assetLibraryUseCurrent'].forEach(id=>nodes[id]=n());nodes.assetLibraryKind.value='bgm';nodes.assetLibraryRole.value='all';const window={Api:{request:async()=>({characters:[],backgrounds:[],sounds:[],bgms:[]})},StoryStore:{get:()=>null},StoryUI:{}};const document={getElementById:id=>nodes[id]||null,createElement:n,activeElement:n(),addEventListener(){}};vm.runInNewContext(source,{window,document,Promise,Error,console,setTimeout});window.AssetLibraryWorkbench.items=[];window.AssetLibraryWorkbench.loading=false;window.AssetLibraryWorkbench.render();console.log(JSON.stringify({text:nodes.assetLibraryList.textContent,currentDisabled:nodes.assetLibraryUseCurrent.disabled}));
-'''
-    result = run_library(script)
-    assert "BGM 登记暂未开放" in result["text"]
-    assert "BgmOverrides" in result["text"]
-    assert result["currentDisabled"] is True
+def test_asset_workbench_modules_do_not_build_untrusted_html_or_use_eval():
+    for name in MODULES:
+        source = (HERE / "js" / name).read_text(encoding="utf-8")
+        assert "innerHTML" not in source
+        assert "eval(" not in source
+
+
+def test_existing_face_workspace_keeps_contact_sheet_and_semantic_results_until_split():
+    source = (HERE / "js" / "library.js").read_text(encoding="utf-8")
+
+    assert "renderLabels" in source
+    assert "semantic_faces" in source
+    assert "/api/assets/faces/contact-sheet" in source
+    assert "rendered_count" in source

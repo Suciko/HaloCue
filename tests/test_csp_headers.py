@@ -15,6 +15,9 @@ import webui
 from webui import H, build_csp_headers
 
 
+HERE = Path(__file__).resolve().parent.parent
+
+
 def test_csp_and_security_headers():
     headers = build_csp_headers()
     assert "Content-Security-Policy" in headers
@@ -74,3 +77,20 @@ def test_static_routes_do_not_serve_real_wrong_extension_files(tmp_path, monkeyp
             assert b"do not leak" not in blocked.value.read()
     finally:
         server.shutdown(); server.server_close()
+
+
+def test_asset_workbench_scripts_are_external_and_avoid_inline_execution():
+    html = (HERE / "ui.html").read_text(encoding="utf-8")
+    scripts = (
+        "library_preview.js",
+        "library_transfer.js",
+        "library_copies.js",
+        "library.js",
+    )
+    for script in scripts:
+        assert f'<script src="/js/{script}"></script>' in html
+        source = (HERE / "js" / script).read_text(encoding="utf-8")
+        assert "innerHTML" not in source
+        assert "eval(" not in source
+    assert "onclick=" not in html
+    assert "onchange=" not in html

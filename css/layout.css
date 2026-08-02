@@ -675,6 +675,21 @@ td,th{padding:9px 7px}.av{width:40px;height:40px;border-radius:10px}.grid{paddin
 }
 @media(prefers-reduced-motion:reduce){.asset-library-drawer,.asset-library-backdrop{transition:none}.asset-library-loader,.asset-strip-attention{animation:none}}
 
+/* 全屏素材工作台：目录、详情与当前剧情任务各自滚动。 */
+.asset-workbench{position:fixed;inset:0;z-index:41;display:grid;grid-template-rows:auto minmax(0,1fr);min-width:0;height:100dvh;overflow:hidden;container-type:inline-size;background:var(--bg);color:var(--fg)}
+.asset-workbench[hidden]{display:none}
+.asset-workbench-header{min-width:0;min-height:72px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--card)}
+.asset-workbench-header>div{min-width:0}.asset-workbench-header span{display:block;color:var(--accent);font-size:10px;font-weight:800}.asset-workbench-header h2{margin:2px 0 1px;font-size:20px;line-height:1.2;letter-spacing:0}.asset-workbench-header p{margin:0;color:var(--dim);font-size:11px;overflow-wrap:anywhere}.asset-workbench-header button{min-height:38px;padding:6px 10px;white-space:nowrap}
+.asset-workbench-body{min-width:0;min-height:0;display:grid;grid-template-columns:clamp(330px,28cqw,360px) minmax(360px,1fr) clamp(280px,24cqw,300px);overflow:hidden}
+.asset-workbench-catalog,.asset-workbench-detail,.asset-workbench-tasks{min-width:0;min-height:0;overflow:auto;background:var(--card)}
+.asset-workbench-catalog{border-right:1px solid var(--line)}.asset-workbench-detail{padding:20px;background:var(--bg)}.asset-workbench-tasks{padding:16px;border-left:1px solid var(--line)}
+.asset-workbench-filters{padding:14px;border-bottom:1px solid var(--line)}.asset-workbench-status{min-height:1.4em;margin:0;padding:10px 14px;color:var(--dim);font-size:11px}.asset-workbench-list{display:grid;gap:0;padding-bottom:18px}
+.asset-workbench-row{width:100%;min-width:0;min-height:72px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;align-content:center;padding:12px 14px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent;color:var(--fg);text-align:left}
+.asset-workbench-row:hover,.asset-workbench-row:focus-visible{background:var(--surface-soft)}.asset-workbench-row .asset-name{grid-column:1/-1;font-size:14px;line-height:1.35;overflow-wrap:anywhere}.asset-workbench-row .asset-kind,.asset-workbench-row .asset-state{font-size:10px}.asset-workbench-row .asset-kind{color:var(--dim)}.asset-workbench-row .asset-state{justify-self:end;color:var(--accent);font-weight:700}
+.asset-workbench-empty{margin:0;padding:18px;color:var(--dim);font-size:12px;line-height:1.5}.asset-workbench-task{display:grid;gap:5px;padding:12px 0;border-bottom:1px solid var(--line)}.asset-workbench-task b{font-size:13px}.asset-workbench-task span{color:var(--dim);font-size:11px;line-height:1.45}
+@container (max-width:900px){.asset-workbench-body{grid-template-columns:340px minmax(0,1fr)}.asset-workbench-tasks{display:none;position:absolute;inset:72px 0 0 auto;width:min(320px,88cqw);z-index:2;box-shadow:-16px 0 36px #14203324}.asset-workbench-tasks.is-open{display:block}}
+@container (max-width:680px){.asset-workbench-body{display:block}.asset-workbench-catalog{height:100%;border-right:0}.asset-workbench-detail{display:none}.asset-workbench-header{gap:8px;padding-inline:10px}.asset-workbench-header h2{font-size:17px}.asset-workbench-header p,.asset-workbench-header span{display:none}}
+
 /* Spine 表情分析是独立工作区，避免长任务与剧本制作阶段混在一起。 */
 .face-workspace-backdrop{position:fixed;inset:0;z-index:50;background:#0b122066;opacity:0;pointer-events:none;transition:opacity .2s ease}.face-workspace-backdrop.open{opacity:1;pointer-events:auto}
 .face-workspace{position:fixed;z-index:51;inset:0 0 0 auto;width:min(900px,calc(100vw - 34px));height:100dvh;overflow:auto;background:var(--bg);box-shadow:-24px 0 70px #1420332b;transform:translateX(104%);visibility:hidden;transition:transform .22s cubic-bezier(.2,.75,.2,1),visibility .22s}.face-workspace.open{transform:translateX(0);visibility:visible}

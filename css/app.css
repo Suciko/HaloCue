@@ -16,6 +16,7 @@
   --shadow-2: 0 18px 50px #14203318;
   --radius: 14px;
 }
+.app-shell[hidden]{display:none}
 @media (prefers-color-scheme: light) {
   :root {
     --bg: #f5f6f8;
