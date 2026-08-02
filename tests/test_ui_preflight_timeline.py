@@ -34,6 +34,54 @@ const h=createHarness({poll:async()=>({state:'succeeded',result:{ai_status:'comp
     assert result["preflightCalls"] == 1
 
 
+def test_preflight_missing_asset_opens_workbench_with_safe_tasks():
+    script = r'''
+const {createHarness}=require(process.argv[1]);let opened=null;
+const h=createHarness();
+h.window.openAssetWorkbench=context=>{opened=context;};
+h.window.StoryStore.set({story_token:'story-1',project:'测试'});
+h.window.AppRuntime.renderPreflight({ai_status:'completed',characters:[],assets:[
+  {kind:'background',name:'雨夜天台',status:'missing',location:'第 46 行'},
+  {kind:'bgm',name:'紧张曲',status:'missing',location:'第 50 行'}
+],issues:[]});
+const rows=h.get('#preflightAssets').children;
+rows[0].children.find(child=>child.dataset.preflightAction==='open-workbench').click();
+console.log(JSON.stringify({opened,bgmText:rows[1].textContent,tasks:h.window.AppRuntime.buildPreflightAssetTasks({assets:[{kind:'sound',name:'敲门',status:'missing',location:'第 9 行'}]})}));
+'''
+    result = run_runtime(script)
+    assert result["opened"] == {
+        "origin": "preflight",
+        "story_token": "story-1",
+        "asset_kind": "background",
+        "tasks": [
+            {
+                "task_id": "background:雨夜天台:第 46 行",
+                "kind": "background",
+                "requested_name": "雨夜天台",
+                "source_location": {"label": "第 46 行"},
+                "reason": "剧本引用但当前剧情未登记",
+                "candidate_keys": [],
+            }
+        ],
+    }
+    assert result["tasks"][0]["task_id"] == "sound:敲门:第 9 行"
+    assert "当前版本尚未开放自定义 BGM 登记" in result["bgmText"]
+
+
+def test_workbench_copy_refreshes_assets_and_preflight_but_ignores_stale_story():
+    script = r'''
+const {createHarness}=require(process.argv[1]);const phases=[],calls=[];
+const preflight={ai_status:'completed',characters:[],assets:[],issues:[]};
+const h=createHarness({onText:(selector,value)=>{if(selector==='#preflightStatus')phases.push(value);},storyAssets:{clear(){},load:async token=>{calls.push('assets:'+token);}},request:async(p,o)=>{calls.push(p);if(p==='/api/picker')return {file_token:'file-1'};if(p==='/api/stories/open')return {story_token:'story-1',project:'测试',source_name:'story.txt'};if(p.startsWith('/api/analyze'))return {path:'server-private',lines:1,speakers:[],scenes:[]};if(p.startsWith('/api/guess'))return {};if(p==='/api/preflight')return preflight;if(p==='/api/drafts')return [];if(p.startsWith('/api/backgrounds'))return [];return {profiles:[]};}});
+(async()=>{h.get('#path').value='story.txt';await h.window.AppRuntime.analyze();calls.length=0;phases.length=0;h.window.dispatchEvent(new CustomEvent('assetworkbench:copied',{detail:{story_token:'old-story',kind:'background',aa_key:'old'}}));h.window.dispatchEvent(new CustomEvent('assetworkbench:copied',{detail:{story_token:'story-1',kind:'background',aa_key:'rain'}}));await h.drain();console.log(JSON.stringify({calls,phases,hint:h.get('#preflightHint').textContent}));})();
+'''
+    result = run_runtime(script)
+    assert result["calls"].count("assets:story-1") == 1
+    assert result["calls"].count("/api/preflight") == 1
+    assert result["phases"][-1] == "初审结果已刷新"
+    assert "AI 正在重新核对全文" in result["phases"]
+
+
 def test_format_only_mode_reaches_review_without_requesting_ai_annotation():
     script = r'''
 const {createHarness}=require(process.argv[1]);let draftReady=false,annotatePayload=null;

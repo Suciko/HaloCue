@@ -55,7 +55,10 @@ function createHarness(config) {
     };
     Object.defineProperty(result, 'textContent', {
       get() { return ownText + this.children.map(child => child && child.textContent || '').join(''); },
-      set(value) { ownText = String(value || ''); this.children.length = 0; },
+      set(value) {
+        ownText = String(value || ''); this.children.length = 0;
+        if (config.onText) config.onText(this.selector, ownText);
+      },
     });
     return result;
   }
@@ -120,12 +123,18 @@ function createHarness(config) {
     CardList: config.cardList || {renderCardList() {}},
     Player: config.Player || function () { this.pause = function () {}; this.loadCards = function () {}; this.jumpToCard = function () {}; },
     addEventListener(type, handler) { (windowListeners[type] || (windowListeners[type] = [])).push(handler); },
+    dispatchEvent(event) {
+      (windowListeners[event.type] || []).forEach(handler => handler(event));
+      return true;
+    },
   };
+  function CustomEvent(type, options) { this.type = type; this.detail = options && options.detail; }
   const sandbox = {
     window: window, document: document,
     localStorage: {getItem() { return null; }, setItem() {}, removeItem() {}},
     setTimeout: config.setTimeout || (() => {}),
     console: console, URLSearchParams: URLSearchParams, Promise: Promise, Error: Error,
+    CustomEvent: CustomEvent,
   };
   const root = path.resolve(__dirname, '..', 'js');
   vm.runInNewContext(fs.readFileSync(path.join(root, 'story.js'), 'utf8'), sandbox);

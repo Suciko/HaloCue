@@ -339,6 +339,10 @@ button:disabled {
   border-radius: 8px;
   margin-bottom: 7px;
 }
+.preflight-asset-unavailable {
+  flex: 1 0 100%;
+  color: var(--muted);
+}
 .preflight-asset-row.is-ready {
   border-color: #b8ddcf;
   background: #f4fbf8;

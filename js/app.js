@@ -214,7 +214,34 @@
       state.mapping[item.speaker] = kind === 'unset' ? {kind: 'unset'} : {kind: kind, id: item.id || '', name: item.name || item.speaker, custom: Boolean(item.custom)};
     });
   }
-  function preflightKindLabel(kind) { return kind === 'background' ? '背景' : kind === 'sound' ? '音效' : kind === 'bgm' ? 'BGM' : kind; }
+  function preflightKindLabel(kind) { return kind === 'background' ? '背景' : kind === 'sound' ? '音效' : kind === 'character' ? '骨骼' : kind === 'bgm' ? 'BGM' : kind; }
+  function buildPreflightAssetTasks(preflight) {
+    return (preflight && Array.isArray(preflight.assets) ? preflight.assets : []).filter(function (item) {
+      return item && item.status === 'missing' && ['background', 'sound', 'character'].includes(item.kind);
+    }).map(function (item) {
+      const location = String(item.location || '位置未标注');
+      const name = String(item.name || '未命名素材');
+      return {
+        task_id: [item.kind, name, location].join(':'),
+        kind: item.kind,
+        requested_name: name,
+        source_location: {label: location},
+        reason: '剧本引用但当前剧情未登记',
+        candidate_keys: []
+      };
+    });
+  }
+  function openPreflightAssetWorkbench(kind, trigger) {
+    const story = currentStory();
+    if (!story || !window.openAssetWorkbench) return;
+    const tasks = buildPreflightAssetTasks(state.preflight).filter(function (task) { return task.kind === kind; });
+    state.preflightWorkbenchReturn = {
+      x: Number(window.scrollX || 0), y: Number(window.scrollY || 0), trigger: trigger || null
+    };
+    window.openAssetWorkbench({
+      origin: 'preflight', story_token: story.story_token, asset_kind: kind, tasks: tasks
+    });
+  }
   function renderPreflight(result) {
     state.preflight = result || null;
     const root = $('#s2preflight');
@@ -255,6 +282,12 @@
       const row = document.createElement('div'); row.className = 'preflight-row preflight-asset-row ' + (item.status === 'missing' ? 'is-missing' : 'is-ready');
       const assetStatus = item.status === 'missing' ? '待补' : item.status === 'builtin' ? 'AA 内置可用' : '本章已登记';
       const text = document.createElement('span'); text.textContent = preflightKindLabel(item.kind) + ' · ' + (item.name || '未命名') + ' · ' + (item.location || '') + ' · ' + assetStatus + (item.detected_by === 'ai' ? ' · AI 全文识别' : ''); row.appendChild(text);
+      if (item.status === 'missing' && item.kind === 'bgm') {
+        const unavailable = document.createElement('small'); unavailable.className = 'preflight-asset-unavailable'; unavailable.textContent = '当前版本尚未开放自定义 BGM 登记'; row.appendChild(unavailable);
+      }
+      if (item.status === 'missing' && ['background', 'sound', 'character'].includes(item.kind) && window.openAssetWorkbench) {
+        const workbench = document.createElement('button'); workbench.type = 'button'; workbench.className = 'ghost'; workbench.dataset.preflightAction = 'open-workbench'; workbench.textContent = '去补素材'; workbench.addEventListener('click', function () { openPreflightAssetWorkbench(item.kind, workbench); }); row.appendChild(workbench);
+      }
       if (item.status === 'missing' && item.kind !== 'bgm' && window.StoryAssets && window.StoryAssets.importLocal) {
         const local = document.createElement('button'); local.type = 'button'; local.className = 'ghost'; local.textContent = '从本地导入'; local.addEventListener('click', async function () { await window.StoryAssets.importLocal(item.kind, {name: item.name}); await rerunPreflight(); }); row.appendChild(local);
       }
@@ -315,6 +348,45 @@
     } finally {
       if (isCurrentOperation('analyze', op)) $('#preflightRerun').disabled = false;
     }
+  }
+  function setWorkbenchRefreshFailure(context, error) {
+    $('#preflightStatus').textContent = '初审刷新未完成';
+    $('#preflightHint').textContent = '素材已保留；请重试初审，或返回工作台继续处理。' + (error && error.message ? ' ' + error.message : '');
+    $('#preflightRerun').textContent = '重试初审';
+    const back = $('#preflightReturnWorkbench');
+    if (back) { back.hidden = false; back.onclick = function () { if (window.openAssetWorkbench) window.openAssetWorkbench(context); }; }
+  }
+  async function refreshAfterAssetWorkbench(context) {
+    const story = currentStory();
+    const safeContext = context && typeof context === 'object' ? context : {};
+    if (!story || String(safeContext.story_token || '') !== String(story.story_token || '')) return false;
+    const back = $('#preflightReturnWorkbench');
+    if (back) back.hidden = true;
+    $('#preflightRerun').textContent = '重新检查';
+    const refreshKey = [story.story_token, safeContext.origin || '', safeContext.card_id || ''].join(':');
+    if (state.workbenchRefresh && state.workbenchRefresh.key === refreshKey) return state.workbenchRefresh.promise;
+    const refresh = (async function () {
+    try {
+      $('#preflightStatus').textContent = '正在读取当前剧情素材';
+      if (window.StoryAssets && window.StoryAssets.load) await window.StoryAssets.load(story.story_token);
+      if (safeContext.origin !== 'preflight') return true;
+      $('#preflightStatus').textContent = 'AI 正在重新核对全文';
+      const result = await rerunPreflight();
+      if (!result) throw new Error('当前剧情尚未建立初审上下文');
+      if (!currentStory() || currentStory().story_token !== story.story_token) return false;
+      $('#preflightStatus').textContent = '初审结果已刷新';
+      if (state.preflightWorkbenchReturn && window.scrollTo) {
+        window.scrollTo(state.preflightWorkbenchReturn.x, state.preflightWorkbenchReturn.y);
+      }
+      return true;
+    } catch (error) {
+      if (currentStory() && currentStory().story_token === story.story_token) setWorkbenchRefreshFailure(safeContext, error);
+      return false;
+    }
+    })();
+    state.workbenchRefresh = {key: refreshKey, promise: refresh};
+    try { return await refresh; }
+    finally { if (state.workbenchRefresh && state.workbenchRefresh.promise === refresh) state.workbenchRefresh = null; }
   }
   async function analyze() {
     const path = $('#path').value.trim(); let op; if (!path) return; const transition = beginTransition(); setScriptScanProgress('workspace', '正在建立当前章节工作区…');
@@ -745,6 +817,13 @@
   const installBox = document.querySelector ? document.querySelector('#install') : null;
   if (installBox) installBox.addEventListener('change', persistWorkbenchPreferences);
   window.replaceStory = replaceStory;
-  window.AppRuntime = {analyze: analyze, annotate: annotate, build: build, compile: compile, beginOperation: beginOperation, loadBackgrounds: loadBackgrounds, loadReview: loadReview, refreshDrafts: refreshDrafts, reviewPost: reviewPost, renderBackgroundRequests: renderBackgroundRequests, resolveBackground: resolveBackground, pollBuild: pollBuild, continueBackground: continueBackground, replaceStory: replaceStory, fillBackgroundFromHistory: fillBackgroundFromHistory, renderCast: renderCast, searchCharacters: searchCharacters, pickCharacter: pickCharacter, castSetKind: castSetKind, openCastPicker: openCastPicker, renderReviewCards: renderReviewCards, renderReviewAssets: renderReviewAssets, renderPreflight: renderPreflight, approvePreflight: approvePreflight, rerunPreflight: rerunPreflight, renderBackgroundTimeline: renderBackgroundTimeline, openBgReplace: openBgReplace, applyBgReplace: applyBgReplace};
+  window.refreshAfterAssetWorkbench = refreshAfterAssetWorkbench;
+  window.addEventListener('assetworkbench:copied', function (event) {
+    const detail = event && event.detail || {};
+    const story = currentStory();
+    if (!story || detail.story_token !== story.story_token) return;
+    refreshAfterAssetWorkbench({origin: 'preflight', story_token: detail.story_token, asset_kind: detail.kind});
+  });
+  window.AppRuntime = {analyze: analyze, annotate: annotate, build: build, compile: compile, beginOperation: beginOperation, loadBackgrounds: loadBackgrounds, loadReview: loadReview, refreshDrafts: refreshDrafts, reviewPost: reviewPost, renderBackgroundRequests: renderBackgroundRequests, resolveBackground: resolveBackground, pollBuild: pollBuild, continueBackground: continueBackground, replaceStory: replaceStory, fillBackgroundFromHistory: fillBackgroundFromHistory, renderCast: renderCast, searchCharacters: searchCharacters, pickCharacter: pickCharacter, castSetKind: castSetKind, openCastPicker: openCastPicker, renderReviewCards: renderReviewCards, renderReviewAssets: renderReviewAssets, renderPreflight: renderPreflight, buildPreflightAssetTasks: buildPreflightAssetTasks, refreshAfterAssetWorkbench: refreshAfterAssetWorkbench, approvePreflight: approvePreflight, rerunPreflight: rerunPreflight, renderBackgroundTimeline: renderBackgroundTimeline, openBgReplace: openBgReplace, applyBgReplace: applyBgReplace};
   window.addEventListener('load', function () { if (localStorage.getItem('aa-welcome-dismissed-v1') === '1') $('#welcomePanel').hidden = true; loadSetupStatus(); loadState(); loadProfiles().catch(function () {}); recentStories.refresh().catch(function () {}); });
 })();
