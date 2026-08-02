@@ -11,6 +11,7 @@ MODULES = (
     "library_preview.js",
     "library_transfer.js",
     "library_copies.js",
+    "library_faces.js",
     "library.js",
 )
 
@@ -105,13 +106,25 @@ def test_asset_workbench_modules_do_not_build_untrusted_html_or_use_eval():
         assert "eval(" not in source
 
 
-def test_existing_face_workspace_keeps_contact_sheet_and_semantic_results_until_split():
-    source = (HERE / "js" / "library.js").read_text(encoding="utf-8")
+def test_face_workspace_is_split_and_keeps_contact_sheet_and_semantic_results():
+    source = (HERE / "js" / "library_faces.js").read_text(encoding="utf-8")
+    library = (HERE / "js" / "library.js").read_text(encoding="utf-8")
 
     assert "renderLabels" in source
     assert "semantic_faces" in source
     assert "/api/assets/faces/contact-sheet" in source
     assert "rendered_count" in source
+    assert "function FaceWorkspace" not in library
+    assert "new window.StoryUI.FaceWorkspace" not in library
+
+
+def test_face_workspace_hides_workbench_and_returns_to_selected_asset_and_scroll():
+    source = (HERE / "js" / "library_faces.js").read_text(encoding="utf-8")
+
+    assert "workbench.root.hidden = true" in source
+    assert "workbench.root.hidden = false" in source
+    assert "workbench.selectedKey" in source
+    assert "scrollTop" in source
 
 
 def test_typed_preview_renders_safe_background_character_and_sound_details():
