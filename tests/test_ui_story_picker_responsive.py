@@ -1,0 +1,134 @@
+# -*- coding: utf-8 -*-
+"""Real Chromium checks for the cross-device story picker."""
+
+import socket
+import subprocess
+import sys
+import time
+from contextlib import closing
+from pathlib import Path
+
+import pytest
+from playwright.sync_api import sync_playwright
+
+
+HERE = Path(__file__).resolve().parents[1]
+
+
+def _free_port():
+    with closing(socket.socket()) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+@pytest.fixture(scope="module")
+def app_url():
+    port = _free_port()
+    sample = HERE.parent.parent / "story-picker-browser-sample.txt"
+    sample.write_text("凯伊：浏览器测试", encoding="utf-8")
+    process = subprocess.Popen(
+        [sys.executable, "webui.py", "--no-browser", "--port", str(port)],
+        cwd=HERE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+    )
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(process.stderr.read())
+        with closing(socket.socket()) as sock:
+            if sock.connect_ex(("127.0.0.1", port)) == 0:
+                break
+        time.sleep(0.1)
+    else:
+        process.terminate()
+        raise RuntimeError("webui.py did not start")
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+        sample.unlink(missing_ok=True)
+
+
+@pytest.fixture(scope="module")
+def browser():
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        yield browser
+        browser.close()
+
+
+def _open_source(page, app_url, width):
+    page.set_viewport_size({"width": width, "height": 820})
+    page.goto(app_url, wait_until="networkidle")
+    page.get_by_role("button", name="选择文件").click()
+    page.locator("#storyPickerSource").wait_for()
+
+
+@pytest.mark.parametrize("width", [1200, 390])
+def test_source_chooser_fits_desktop_and_mobile(browser, app_url, tmp_path, width):
+    page = browser.new_page()
+    try:
+        _open_source(page, app_url, width)
+        shell = page.locator(".story-picker-shell").bounding_box()
+        assert shell["x"] >= 0 and shell["x"] + shell["width"] <= width
+        assert page.evaluate("document.documentElement.scrollWidth") <= width
+        assert page.get_by_role("button", name="从此设备选择文件").is_visible()
+        assert page.get_by_role("button", name="浏览运行主机文件").is_visible()
+        page.screenshot(path=str(tmp_path / f"story-picker-source-{width}.png"), full_page=True)
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("width", [1200, 390])
+def test_host_browser_has_stable_rows_and_reachable_footer(browser, app_url, tmp_path, width):
+    page = browser.new_page()
+    errors = []
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        _open_source(page, app_url, width)
+        page.get_by_role("button", name="浏览运行主机文件").click()
+        row = page.locator(".story-picker-entry", has_text="story-picker-browser-sample.txt")
+        row.wait_for()
+        page.screenshot(path=str(tmp_path / f"story-picker-host-{width}.png"), full_page=True)
+        assert page.evaluate("document.documentElement.scrollWidth") <= width
+        assert row.bounding_box()["height"] >= 42
+        row.click()
+        assert page.locator("#storyPickerOpen").is_enabled()
+        footer = page.locator(".story-picker-footer").bounding_box()
+        assert footer["y"] >= 0 and footer["y"] + footer["height"] <= 820
+        if width == 390:
+            assert row.locator(".story-picker-entry-type").evaluate("el => getComputedStyle(el).display") == "none"
+            assert row.locator(".story-picker-entry-modified").evaluate("el => getComputedStyle(el).display") == "none"
+        else:
+            assert row.locator(".story-picker-entry-type").is_visible()
+            assert row.locator(".story-picker-entry-modified").is_visible()
+    finally:
+        page.close()
+    assert errors == []
+
+
+def test_device_upload_opens_story_through_the_real_browser(browser, app_url):
+    page = browser.new_page(viewport={"width": 1200, "height": 820})
+    errors = []
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(app_url, wait_until="networkidle")
+        page.get_by_role("button", name="选择文件").click()
+        page.locator("#storyPickerDeviceInput").set_input_files({
+            "name": "移动端上传测试.md",
+            "mimeType": "text/markdown",
+            "buffer": "凯伊：早上好".encode("utf-8"),
+        })
+        page.locator("#storyContextName", has_text="移动端上传测试.md").wait_for()
+        assert page.locator("#path").input_value() == "移动端上传测试.md"
+        assert page.locator("#storyContextName").inner_text() == "移动端上传测试.md"
+        assert page.locator("#mBrowse").is_hidden()
+    finally:
+        page.close()
+    assert errors == []

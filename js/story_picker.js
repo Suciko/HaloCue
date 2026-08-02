@@ -68,8 +68,9 @@
         headers: {'Content-Type': 'application/octet-stream', 'X-AA-Filename': encodeURIComponent(file.name || '')},
         body: file,
       });
+      this.close();
       if (this.options.onChoose) await this.options.onChoose({file_token: result.file_token, name: result.name, size: result.size});
-      this.close(); return result;
+      return result;
     } catch (error) { if (this.status) this.status.textContent = error.message || '文件上传失败'; return null; }
   };
 
@@ -148,8 +149,9 @@
     if (!this.selected) return null; if (this.status) this.status.textContent = '正在打开剧情文本…';
     try {
       const result = await exports.Api.request('/api/story-files/select', exports.Api.json ? exports.Api.json('POST', {entry_token: this.selected.entry_token}) : {method: 'POST', body: JSON.stringify({entry_token: this.selected.entry_token})});
+      this.close();
       if (this.options.onChoose) await this.options.onChoose({file_token: result.file_token, name: result.name, size: result.size});
-      this.close(); return result;
+      return result;
     } catch (error) { if (this.status) this.status.textContent = error.message || '无法打开剧情文本'; return null; }
   };
 

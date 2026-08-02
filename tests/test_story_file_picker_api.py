@@ -10,7 +10,7 @@ import pytest
 
 import webui
 from picker_token import resolve_file_token
-from story_file_picker import StoryFilePicker, StoryFilePickerError
+from story_file_picker import StoryFilePicker, StoryFilePickerError, windows_host_roots
 
 
 @contextlib.contextmanager
@@ -158,3 +158,22 @@ def test_host_http_routes_use_entry_tokens_instead_of_paths(tmp_path, monkeypatc
     assert status == selected_status == 200
     assert entry["name"] == selected["name"] == "story.txt"
     assert "path" not in entry and "path" not in selected
+
+
+def test_windows_host_roots_include_useful_existing_locations_without_duplicates(tmp_path):
+    home = tmp_path / "home"
+    desktop = home / "Desktop"
+    documents = home / "Documents"
+    downloads = home / "Downloads"
+    workspace = tmp_path / "workspace"
+    for path in (workspace, desktop, documents, downloads):
+        path.mkdir(parents=True, exist_ok=True)
+
+    roots = windows_host_roots(workspace, home=home, drives=[])
+
+    assert roots == [
+        (tmp_path / "workspace").resolve(),
+        desktop.resolve(),
+        documents.resolve(),
+        downloads.resolve(),
+    ]

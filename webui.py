@@ -40,7 +40,7 @@ from draft_store import (                                       # noqa: E402
 from install_manager import InstallManager, AARunningError, AACorruptBundleError  # noqa: E402
 from jobs import global_job_manager                             # noqa: E402
 from picker_token import register_file_token, resolve_file_token  # noqa: E402
-from story_file_picker import StoryFilePicker, StoryFilePickerError  # noqa: E402
+from story_file_picker import StoryFilePicker, StoryFilePickerError, windows_host_roots  # noqa: E402
 from story_workspace import (                                  # noqa: E402
     StoryContext,
     StoryWorkspaceRegistry,
@@ -59,7 +59,8 @@ MODEL_PROFILES = model_profiles.ModelProfileStore(
 )
 THUMBS = os.path.join(HERE, ".thumbs")
 STORY_FILE_PICKER = StoryFilePicker(
-    roots=[STORY_ROOT], upload_dir=os.path.join(HERE, "out", "story-uploads")
+    roots=windows_host_roots(STORY_ROOT),
+    upload_dir=os.path.join(HERE, "out", "story-uploads"),
 )
 
 CFG = {"overrides": None, "aa_data": None, "spine_cli": None}

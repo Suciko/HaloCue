@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import shutil
 import tempfile
 import threading
 import time
@@ -17,6 +18,30 @@ from picker_token import register_file_token
 
 MAX_STORY_BYTES = 10 * 1024 * 1024
 STORY_SUFFIXES = {".txt", ".md"}
+
+
+def windows_host_roots(
+    workspace: str | os.PathLike[str],
+    *,
+    home: str | os.PathLike[str] | None = None,
+    drives: Iterable[str | os.PathLike[str]] | None = None,
+) -> list[Path]:
+    """Return useful existing host locations while preserving stable order."""
+    user_home = Path(home).resolve() if home is not None else Path.home().resolve()
+    candidates = [Path(workspace), user_home / "Desktop", user_home / "Documents", user_home / "Downloads"]
+    if drives is None and os.name == "nt":
+        candidates.extend(Path(f"{letter}:\\") for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    else:
+        candidates.extend(Path(value) for value in (drives or []))
+    roots = []
+    for candidate in candidates:
+        try:
+            canonical = candidate.resolve()
+        except OSError:
+            continue
+        if canonical.is_dir() and canonical not in roots:
+            roots.append(canonical)
+    return roots
 
 
 class StoryFilePickerError(RuntimeError):
@@ -132,8 +157,8 @@ class StoryFilePicker:
         cutoff = time.time() - self.token_ttl
         for path in self.upload_dir.iterdir():
             try:
-                if path.is_file() and path.stat().st_mtime < cutoff:
-                    path.unlink()
+                if path.is_dir() and path.stat().st_mtime < cutoff:
+                    shutil.rmtree(path)
             except OSError:
                 continue
 
@@ -148,18 +173,20 @@ class StoryFilePicker:
         text = self._decode_story(content)
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self._clean_uploads()
-        suffix = Path(safe_name).suffix.casefold()
-        descriptor, temporary = tempfile.mkstemp(prefix="story-", suffix=suffix, dir=self.upload_dir)
+        owned_dir = Path(tempfile.mkdtemp(prefix="story-", dir=self.upload_dir))
+        target = owned_dir / safe_name
+        descriptor, temporary = tempfile.mkstemp(prefix="upload-", dir=owned_dir)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
                 handle.write(text)
                 handle.flush()
                 os.fsync(handle.fileno())
+            os.replace(temporary, target)
         except Exception:
-            Path(temporary).unlink(missing_ok=True)
+            shutil.rmtree(owned_dir, ignore_errors=True)
             raise
         return {
-            "file_token": register_file_token(temporary),
+            "file_token": register_file_token(str(target)),
             "name": safe_name,
             "size": len(content),
         }
