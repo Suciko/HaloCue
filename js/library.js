@@ -90,10 +90,35 @@
     return found ? found.label : '素材';
   }
 
+  function labelSummary(labels) {
+    if (!labels || typeof labels !== 'object') return '';
+    return Object.keys(labels).map(function (key) {
+      const value = Array.isArray(labels[key]) ? labels[key].join('、') : labels[key];
+      return String(value || '');
+    }).filter(Boolean).join(' · ');
+  }
+
+  function auxiliary(item) {
+    const details = item.details || {};
+    if (item.kind === 'background') {
+      return [details.resolution, labelSummary(details.labels)].filter(Boolean).join(' · ') || '背景信息待检测';
+    }
+    if (item.kind === 'character') {
+      const files = Number(details.file_count || 0), faces = Number(details.face_count || 0);
+      return (files ? files + ' 个文件' : '完整度待检测') + (faces ? ' · ' + faces + ' 个表情' : '');
+    }
+    if (item.kind === 'sound') {
+      const duration = Number(details.duration || 0);
+      return [duration > 0 ? duration.toFixed(2) + ' 秒' : '', details.codec].filter(Boolean).join(' · ') || '音频信息待检测';
+    }
+    return '';
+  }
+
   function AssetWorkbench(root) {
     this.root = root;
     this.appShell = document.getElementById('appShell');
     this.contextLabel = document.getElementById('assetWorkbenchContext');
+    this.filters = document.getElementById('assetWorkbenchFilters');
     this.list = document.getElementById('assetWorkbenchList');
     this.detail = document.getElementById('assetWorkbenchDetail');
     this.tasks = document.getElementById('assetWorkbenchTasks');
@@ -104,9 +129,13 @@
     this.selectedKey = null;
     this.returnFocus = null;
     this.generation = 0;
+    this.searchQuery = '';
+    this.kindFilter = 'all';
+    this.roleFilter = 'all';
     this.preview = new exports.StoryUI.AssetPreview(this.detail);
     this.transfer = new exports.StoryUI.TransferController(this);
     this.copies = new exports.StoryUI.CopyManager(this);
+    this.renderFilters();
     this.bind();
   }
 
@@ -124,6 +153,19 @@
       } else if (action === 'close') self.close();
       else if (action === 'toggle-tasks') self.toggleTasks();
       else if (action === 'select') self.select(target.dataset.assetKey);
+      else if (action === 'filter-kind') {
+        self.kindFilter = target.dataset.kind || 'all';
+        self.renderFilters();
+        self.renderCatalog();
+        self.restoreSelection();
+      }
+    });
+    if (this.filters) this.filters.addEventListener('input', function (event) {
+      if (event.target && event.target.dataset.workbenchFilter === 'search') {
+        self.searchQuery = String(event.target.value || '').trim().toLocaleLowerCase();
+        self.renderCatalog();
+        self.restoreSelection();
+      }
     });
     document.addEventListener('keydown', function (event) {
       if (event.key === 'Escape' && self.isOpen()) self.close();
@@ -187,15 +229,49 @@
     }
   };
 
+  AssetWorkbench.prototype.renderFilters = function () {
+    clear(this.filters);
+    if (!this.filters) return;
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.value = this.searchQuery;
+    search.placeholder = '搜索素材名、系列或章节';
+    search.setAttribute('aria-label', '搜索素材');
+    search.dataset.workbenchFilter = 'search';
+    this.filters.appendChild(search);
+    const segments = make('div', 'asset-kind-segments');
+    [['all', '全部'], ['character', '骨骼'], ['background', '背景'], ['sound', '音效']].forEach(function (entry) {
+      const button = make('button', this.kindFilter === entry[0] ? 'is-active' : '', entry[1]);
+      button.type = 'button';
+      button.dataset.workbenchAction = 'filter-kind';
+      button.dataset.kind = entry[0];
+      button.setAttribute('aria-pressed', String(this.kindFilter === entry[0]));
+      segments.appendChild(button);
+    }, this);
+    this.filters.appendChild(segments);
+  };
+
+  AssetWorkbench.prototype.filteredAssets = function () {
+    const query = this.searchQuery;
+    const kind = this.kindFilter;
+    return this.assets.filter(function (item) {
+      const searchable = [item.name, item.aa_key, item.series_name]
+        .concat((item.copies || []).map(function (copy) { return copy.chapter; }))
+        .concat(item.chapters || []).join(' ').toLocaleLowerCase();
+      return (kind === 'all' || item.kind === kind) && (!query || searchable.includes(query));
+    });
+  };
+
   AssetWorkbench.prototype.renderCatalog = function () {
     clear(this.list);
     if (!this.list) return;
-    if (!this.assets.length) {
+    const visible = this.filteredAssets();
+    if (!visible.length) {
       const empty = make('p', 'asset-workbench-empty', '素材完成导入登记后会出现在这里。');
       this.list.appendChild(empty);
       return;
     }
-    this.assets.forEach(function (item) {
+    visible.forEach(function (item) {
       const button = make('button', 'asset-workbench-row');
       button.type = 'button';
       button.dataset.workbenchAction = 'select';
@@ -203,24 +279,114 @@
       button.appendChild(make('b', 'asset-name', item.name || String(item.aa_key || '未命名素材')));
       button.appendChild(make('span', 'asset-kind', kindLabel(item.kind)));
       button.appendChild(make('span', 'asset-state', item.registered_in_current ? '本章已登记' : '未登记'));
+      button.appendChild(make('span', 'asset-auxiliary', auxiliary(item)));
       this.list.appendChild(button);
     }, this);
   };
 
   AssetWorkbench.prototype.restoreSelection = function () {
-    if (!this.assets.some(function (item) { return item._assetKey === this.selectedKey; }, this)) {
-      this.selectedKey = this.assets.length ? this.assets[0]._assetKey : null;
+    const visible = this.filteredAssets();
+    if (!visible.some(function (item) { return item._assetKey === this.selectedKey; }, this)) {
+      this.selectedKey = visible.length ? visible[0]._assetKey : null;
     }
     this.select(this.selectedKey);
   };
 
   AssetWorkbench.prototype.select = function (key) {
     this.selectedKey = key || null;
-    this.preview.render(this.selected());
+    const item = this.selected();
+    this.preview.render(item);
+    this.renderDetailActions(item);
   };
 
   AssetWorkbench.prototype.selected = function () {
     return this.assets.find(function (item) { return item._assetKey === this.selectedKey; }, this) || null;
+  };
+
+  AssetWorkbench.prototype.renderDetailActions = function (item) {
+    if (!this.detail || !item) return;
+    const actions = make('section', 'asset-detail-actions');
+    const primary = make(
+      'button', '', item.registered_in_current ? '本章已登记' : '复制到当前剧情'
+    );
+    primary.type = 'button';
+    primary.disabled = Boolean(item.registered_in_current);
+    primary.addEventListener('click', function () { this.transfer.copy(item); }.bind(this));
+    actions.appendChild(primary);
+    const manage = make('button', 'ghost', '管理副本');
+    manage.type = 'button';
+    manage.disabled = !item.preview_token;
+    manage.addEventListener('click', function () { this.copies.open(item); }.bind(this));
+    actions.appendChild(manage);
+    if (item.kind === 'character') {
+      const faces = make('button', 'ghost', '打开表情标注');
+      faces.type = 'button';
+      faces.dataset.assetAction = 'annotate-faces';
+      faces.addEventListener('click', function () {
+        if (exports.FaceWorkspace) exports.FaceWorkspace.open(item, faces);
+      });
+      actions.appendChild(faces);
+    }
+    this.detail.appendChild(actions);
+    this.renderProfileEditor(item);
+  };
+
+  AssetWorkbench.prototype.renderProfileEditor = function (item) {
+    const form = make('section', 'asset-profile-editor');
+    form.appendChild(make('h4', '', '素材归属'));
+    const role = document.createElement('select');
+    [['chapter_only', '章节专用'], ['series_shared', '系列共用']].forEach(function (entry) {
+      const option = make('option', '', entry[1]); option.value = entry[0]; role.appendChild(option);
+    });
+    role.value = item.asset_role || 'chapter_only';
+    const series = document.createElement('input');
+    series.type = 'text';
+    series.maxLength = 80;
+    series.placeholder = '系列名称';
+    series.value = item.series_name || '';
+    series.disabled = role.value !== 'series_shared';
+    role.addEventListener('change', function () { series.disabled = role.value !== 'series_shared'; });
+    const save = make('button', 'ghost', '保存分类');
+    save.type = 'button';
+    save.addEventListener('click', async function () {
+      if (role.value === 'series_shared' && !series.value.trim()) {
+        this.setCopyState('请先填写系列名称。');
+        series.focus();
+        return;
+      }
+      save.disabled = true;
+      try {
+        const result = await exports.Api.request('/api/assets/library/profile', exports.Api.json('POST', {
+          kind: item.kind, aa_key: item.aa_key, sha256: item.sha256,
+          asset_role: role.value, series_name: series.value.trim()
+        }));
+        item.asset_role = result.asset_role;
+        item.series_name = result.series_name;
+        this.setCopyState('素材分类已保存。');
+      } catch (error) {
+        this.setCopyState(String(error.action || '分类保存失败，请重试。'));
+      } finally {
+        save.disabled = false;
+      }
+    }.bind(this));
+    form.appendChild(role); form.appendChild(series); form.appendChild(save);
+    this.detail.appendChild(form);
+  };
+
+  AssetWorkbench.prototype.setTransferState = function (state, options) {
+    const suffix = options && options.message ? ' ' + options.message : '';
+    if (this.status) this.status.textContent = state + suffix;
+    this.renderCatalog();
+  };
+
+  AssetWorkbench.prototype.setCopyState = function (message) {
+    if (this.status) this.status.textContent = message;
+  };
+
+  AssetWorkbench.prototype.focusReference = function (reference) {
+    if (exports.dispatchEvent && typeof CustomEvent === 'function') {
+      exports.dispatchEvent(new CustomEvent('assetworkbench:focus-reference', {detail: reference}));
+    }
   };
 
   AssetWorkbench.prototype.renderTasks = function () {

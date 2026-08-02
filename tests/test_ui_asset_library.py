@@ -112,3 +112,108 @@ def test_existing_face_workspace_keeps_contact_sheet_and_semantic_results_until_
     assert "semantic_faces" in source
     assert "/api/assets/faces/contact-sheet" in source
     assert "rendered_count" in source
+
+
+def test_typed_preview_renders_safe_background_character_and_sound_details():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+function node(tag){let own='';return {tagName:tag,children:[],className:'',hidden:false,src:'',alt:'',controls:false,dataset:{},appendChild(child){this.children.push(child);return child},pause(){this.paused=true},load(){this.loaded=true},removeAttribute(key){this[key]=''},setAttribute(key,value){this[key]=String(value)},set textContent(value){own=String(value||'');this.children=[]},get textContent(){return own+this.children.map(child=>child.textContent||'').join('')}}}
+const root=node('section'),document={createElement:node};const window={StoryUI:{}};vm.runInNewContext(source,{window,document});
+const preview=new window.StoryUI.AssetPreview(root),results=[];
+preview.render({kind:'background',name:'雨夜天台',preview_token:'preview-bg',preview_available:true,details:{resolution:'1920×1080',labels:{place:'屋顶'}}});results.push({text:root.textContent,src:root.children.find(child=>child.tagName==='img').src});
+preview.render({kind:'character',name:'阿洛娜',preview_token:'preview-character',preview_available:true,details:{file_count:4,face_count:7,expression_status:'known'}});results.push({text:root.textContent});
+preview.render({kind:'sound',name:'开门声',preview_token:'preview-sound',preview_available:true,details:{duration:1.25,codec:'wav'}});const audio=root.children.find(child=>child.tagName==='audio');results.push({text:root.textContent,src:audio.src,controls:audio.controls});
+console.log(JSON.stringify(results));
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library_preview.js")],
+        text=True,
+        encoding="utf-8",
+    )
+    background, character, sound = json.loads(output)
+
+    assert "1920×1080" in background["text"] and "屋顶" in background["text"]
+    assert background["src"] == "/api/assets/library/preview?preview_token=preview-bg"
+    assert "4 个骨骼文件" in character["text"] and "7 个表情" in character["text"]
+    assert "1.25 秒" in sound["text"] and "wav" in sound["text"]
+    assert sound["src"].endswith("preview-sound") and sound["controls"] is True
+
+
+def test_copy_controller_reports_four_stable_phases_and_dispatches_safe_result():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');const phases=[],requests=[],events=[];
+const window={StoryUI:{},Api:{json:(method,payload)=>({method,payload}),request:async(path,options)=>{requests.push({path,options});return {ok:true,state:'registered',asset:{kind:'background',aa_key:'rain_roof',name:'雨夜天台'}}}},dispatchEvent:event=>events.push(event.detail)};
+const CustomEvent=function(name,options){this.type=name;this.detail=options.detail};
+vm.runInNewContext(source,{window,CustomEvent,Error,Promise});
+const workbench={context:{story_token:'story-1'},setTransferState:(state)=>phases.push(state),refresh:async()=>{workbench.refreshed=true}};
+const item={kind:'background',aa_key:'rain_roof',sha256:'digest',copies:[{copy_token:'copy-source'}]};
+(async()=>{const result=await new window.StoryUI.TransferController(workbench).copy(item);console.log(JSON.stringify({phases,requests,events,result,refreshed:workbench.refreshed}));})();
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library_transfer.js")],
+        text=True,
+        encoding="utf-8",
+    )
+    result = json.loads(output)
+
+    assert result["phases"] == ["正在校验", "正在复制", "正在登记", "本章已登记"]
+    assert result["requests"] == [{
+        "path": "/api/assets/library/copy-to-story",
+        "options": {
+            "method": "POST",
+            "payload": {
+                "story_token": "story-1",
+                "kind": "background",
+                "aa_key": "rain_roof",
+                "sha256": "digest",
+                "source_copy_token": "copy-source",
+            },
+        },
+    }]
+    assert result["events"][0]["story_token"] == "story-1"
+    assert result["events"][0]["aa_key"] == "rain_roof"
+    assert result["refreshed"] is True
+
+
+def test_copy_manager_blocks_referenced_copy_before_posting_removal():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8'),requests=[];
+function node(){let own='';return {children:[],dataset:{},className:'',type:'',disabled:false,appendChild(child){this.children.push(child);return child},addEventListener(){},set textContent(value){own=String(value||'');this.children=[]},get textContent(){return own+this.children.map(child=>child.textContent||'').join('')}}}
+const document={createElement:node};const window={StoryUI:{},Api:{request:async path=>{requests.push(path);return {ok:true,copies:[{copy_token:'copy-1',chapter:'第二章',references:[{card_id:'bg-1',label:'@bg rain_roof'}]}]}}}};
+vm.runInNewContext(source,{window,document,encodeURIComponent,Error,Promise});
+const detail=node(),states=[],workbench={detail,setCopyState:text=>states.push(text),focusReference:reference=>{workbench.focused=reference}};
+(async()=>{const manager=new window.StoryUI.CopyManager(workbench);await manager.open({name:'雨夜天台',preview_token:'preview-1'});await manager.remove(manager.copies[0]);console.log(JSON.stringify({requests,states,text:detail.textContent,focused:workbench.focused}));})();
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library_copies.js")],
+        text=True,
+        encoding="utf-8",
+    )
+    result = json.loads(output)
+
+    assert result["requests"] == [
+        "/api/assets/library/copies?preview_token=preview-1"
+    ]
+    assert "仍被草稿引用" in result["states"][-1]
+    assert "移除该章节副本" not in result["text"]
+    assert result["focused"]["card_id"] == "bg-1"
+
+
+def test_catalog_combines_filter_hierarchy_auxiliary_detail_and_explicit_actions():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),sources=process.argv.slice(1).map(path=>fs.readFileSync(path,'utf8'));const nodes={};let document;
+function node(tag){let own='',classes=new Set(),events={};return {tagName:tag,id:'',children:[],parentNode:null,dataset:{},className:'',hidden:false,value:'',type:'',disabled:false,src:'',alt:'',controls:false,classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x),toggle:(x,v)=>v?classes.add(x):classes.delete(x)},appendChild(child){child.parentNode=this;this.children.push(child);return child},addEventListener(type,handler){events[type]=handler},setAttribute(){},removeAttribute(){},focus(){document.activeElement=this},pause(){},load(){},closest(){return null},set textContent(value){own=String(value||'');this.children=[]},get textContent(){return own+this.children.map(child=>child.textContent||'').join('')}}}
+['appShell','assetWorkbench','assetWorkbenchContext','assetWorkbenchTaskToggle','assetWorkbenchFilters','assetWorkbenchList','assetWorkbenchDetail','assetWorkbenchTasks','assetWorkbenchStatus'].forEach(id=>{nodes[id]=node('div');nodes[id].id=id});nodes.assetWorkbench.hidden=true;
+document={activeElement:node('button'),getElementById:id=>nodes[id]||null,createElement:node,addEventListener(){}};
+const payload={characters:[],backgrounds:[{kind:'background',aa_key:'rain_roof',sha256:'digest',name:'雨夜天台',registered_in_current:false,preview_available:true,preview_token:'preview-bg',copy_count:1,copies:[{chapter:'第一章',copy_token:'copy-1'}],details:{resolution:'1920×1080',labels:{place:'屋顶'}}}],sounds:[],bgms:[]};
+const window={StoryUI:{},StoryStore:{get:()=>({story_token:'story-1',project:'第二章'})},Api:{request:async()=>payload,json:(method,payload)=>({method,payload})}};
+sources.forEach(source=>vm.runInNewContext(source,{window,document,Promise,Error,console,setTimeout,clearTimeout,encodeURIComponent,CustomEvent:function(){}}));
+(async()=>{await window.AssetWorkbench.open({origin:'topbar',story_token:'story-1'});console.log(JSON.stringify({filters:nodes.assetWorkbenchFilters.textContent,row:nodes.assetWorkbenchList.children[0].textContent,detail:nodes.assetWorkbenchDetail.textContent}));})();
+'''
+    result = run_library(script)
+
+    assert all(label in result["filters"] for label in ("全部", "骨骼", "背景", "音效"))
+    assert all(value in result["row"] for value in ("雨夜天台", "背景", "未登记", "1920×1080"))
+    assert "1920×1080" in result["detail"] and "屋顶" in result["detail"]
+    assert "复制到当前剧情" in result["detail"]
+    assert "管理副本" in result["detail"]
