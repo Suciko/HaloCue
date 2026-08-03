@@ -1,3 +1,4 @@
+import io
 from pathlib import Path
 
 from PIL import Image
@@ -10,6 +11,7 @@ from spine_face_labeler import (
     _SYSTEM,
     label_face_images,
     list_visual_face_labels,
+    make_vision_sheet,
     persist_visual_face_labels,
     update_visual_face_label,
 )
@@ -24,6 +26,7 @@ class FakeVisionProvider:
 
     def complete_json_vision(self, system, images, user, schema):
         self.calls.append((system, images, user, schema))
+        ids = images[0][0].split(":", 1)[1].split(",")
         return {
             "items": [
                 {
@@ -40,7 +43,7 @@ class FakeVisionProvider:
                     "confidence": 0.91,
                     "description_cn": "温和、克制的轻微微笑",
                 }
-                for tag, _ in images
+                for tag in ids
             ]
         }
 
@@ -53,19 +56,73 @@ def _face(tmp_path: Path, face_id: str, color: tuple[int, int, int]) -> Rendered
     return RenderedFace(face_id=face_id, portrait_path=portrait, head_path=head)
 
 
-def test_visual_labeler_sends_jpeg_images_and_keeps_exact_face_ids(tmp_path):
+def test_visual_labeler_sends_one_numbered_sheet_and_keeps_exact_face_ids(tmp_path):
     provider = FakeVisionProvider()
     faces = [_face(tmp_path, "05", (220, 80, 120)), _face(tmp_path, "12", (80, 120, 220))]
 
-    labels = label_face_images(provider, faces, batch_size=8)
+    labels = label_face_images(provider, faces, batch_size=9)
 
     assert [label["face_id"] for label in labels] == ["05", "12"]
     assert labels[0]["primary_emotion"] == "轻微微笑"
     sent = provider.calls[0][1]
-    assert [tag for tag, _ in sent] == ["05", "12"]
-    assert all(blob.startswith(b"\xff\xd8") for _, blob in sent)
+    assert len(sent) == 1
+    assert sent[0][0] == "编号九宫格:05,12"
+    assert sent[0][1].startswith(b"\xff\xd8")
     assert "只根据图中实际可见" in _SYSTEM
     assert "涓" not in _SYSTEM
+
+
+def test_vision_sheet_has_stable_three_by_three_dimensions(tmp_path):
+    faces = [_face(tmp_path, f"{index:02d}", (index * 20, 80, 120)) for index in range(4)]
+
+    blob, face_ids = make_vision_sheet(faces, cell_size=160, columns=3)
+    image = Image.open(io.BytesIO(blob))
+
+    assert face_ids == ["00", "01", "02", "03"]
+    assert image.size == (480, 480)
+    assert image.format == "JPEG"
+
+
+@pytest.mark.parametrize(("count", "expected_calls"), [(1, 1), (9, 1), (10, 2)])
+def test_visual_labeler_batches_at_nine_faces(tmp_path, count, expected_calls):
+    provider = FakeVisionProvider()
+    faces = [
+        _face(tmp_path, f"{index:02d}", ((index * 19) % 255, 100, 160))
+        for index in range(count)
+    ]
+
+    labels = label_face_images(provider, faces, batch_size=9, batch_workers=2)
+
+    assert len(provider.calls) == expected_calls
+    assert all(len(call[1]) == 1 for call in provider.calls)
+    assert [item["face_id"] for item in labels] == [f"{index:02d}" for index in range(count)]
+
+
+def test_visual_labeler_reviews_only_low_confidence_face(tmp_path):
+    class LowConfidenceProvider(FakeVisionProvider):
+        def complete_json_vision(self, system, images, user, schema):
+            response = super().complete_json_vision(system, images, user, schema)
+            ids = images[0][0].split(":", 1)[1].split(",")
+            for item in response["items"]:
+                item["confidence"] = 0.42 if len(ids) > 1 and item["face_id"] == "01" else 0.94
+            return response
+
+    provider = LowConfidenceProvider()
+    faces = [_face(tmp_path, f"{index:02d}", (180, 80 + index * 20, 120)) for index in range(3)]
+
+    labels = label_face_images(
+        provider,
+        faces,
+        batch_size=9,
+        batch_workers=2,
+        confidence_threshold=0.6,
+    )
+
+    assert [call[1][0][0] for call in provider.calls] == [
+        "编号九宫格:00,01,02",
+        "编号九宫格:01",
+    ]
+    assert [item["confidence"] for item in labels] == [0.94, 0.94, 0.94]
 
 
 def test_visual_labeler_retries_empty_compatible_endpoint_response(tmp_path):
@@ -74,6 +131,7 @@ def test_visual_labeler_retries_empty_compatible_endpoint_response(tmp_path):
             self.calls.append((system, images, user, schema))
             if len(self.calls) == 1:
                 raise llm.LLMError("vision endpoint returned empty text")
+            ids = images[0][0].split(":", 1)[1].split(",")
             return {
                 "items": [
                     {
@@ -90,7 +148,7 @@ def test_visual_labeler_retries_empty_compatible_endpoint_response(tmp_path):
                         "confidence": 0.9,
                         "description_cn": "平静地注视前方",
                     }
-                    for tag, _ in images
+                    for tag in ids
                 ]
             }
 

@@ -217,14 +217,33 @@ def analyze_character_faces(
     _notify(
         progress,
         "labeling",
-        f"正在使用 {model} 逐组识别表情",
+        f"正在使用 {model} 按九宫格批次识别表情",
         0,
         len(report.faces),
     )
+
+    def report_label_progress(
+        completed: int,
+        total: int,
+        completed_batches: int,
+        reviewed: int,
+    ) -> None:
+        detail = f"完成 {completed_batches} 个九宫格批次"
+        if reviewed:
+            detail += f"，单项复核 {reviewed} 个"
+        _notify(
+            progress,
+            "labeling",
+            f"AI 已识别 {completed} / {total} 个表情（{detail}）",
+            completed,
+            total,
+        )
+
     labels = label_face_images(
         provider,
         report.faces,
         semantic_hints=semantic_hints,
+        progress=report_label_progress,
     )
     persist_visual_face_labels(
         con,

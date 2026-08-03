@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import io
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -90,34 +92,96 @@ description_cn 写成一句可供剧本模型选表情时使用的中文说明�
 置信度范围为 0 到 1；确实模糊时降低置信度，不要硬猜。"""
 
 
-def _jpeg_bytes(path: Path) -> bytes:
-    source = Image.open(path).convert("RGBA")
-    background = Image.new("RGB", source.size, (232, 232, 232))
-    background.paste(source.convert("RGB"), mask=source.getchannel("A"))
+def make_vision_sheet(
+    faces: Sequence[RenderedFace],
+    *,
+    cell_size: int = 384,
+    columns: int = 3,
+) -> tuple[bytes, list[str]]:
+    """Build one fixed 3x3 comparison sheet with readable face IDs."""
+    if columns != 3:
+        raise ValueError("vision sheets must use exactly three columns")
+    if not 1 <= len(faces) <= 9:
+        raise ValueError("vision sheets must contain between 1 and 9 faces")
+    if cell_size < 120:
+        raise ValueError("vision sheet cells must be at least 120 pixels")
+    ordered = sorted(faces, key=lambda face: face.face_id)
+    face_ids = [face.face_id for face in ordered]
+    sheet = Image.new(
+        "RGB",
+        (columns * cell_size, columns * cell_size),
+        (54, 57, 63),
+    )
+    draw = ImageDraw.Draw(sheet)
+    label_height = max(38, cell_size // 7)
+    try:
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", max(22, cell_size // 11))
+    except OSError:
+        font = ImageFont.load_default()
+    for index, face in enumerate(ordered):
+        x = (index % columns) * cell_size
+        y = (index // columns) * cell_size
+        tile = Image.new("RGB", (cell_size, cell_size), (226, 228, 232))
+        head = Image.open(face.head_path).convert("RGBA")
+        head.thumbnail(
+            (cell_size - 20, cell_size - label_height - 18),
+            Image.Resampling.LANCZOS,
+        )
+        tile.paste(
+            head.convert("RGB"),
+            ((cell_size - head.width) // 2, (cell_size - label_height - head.height) // 2),
+            head.getchannel("A"),
+        )
+        sheet.paste(tile, (x, y))
+        draw.rectangle(
+            (x, y + cell_size - label_height, x + cell_size, y + cell_size),
+            fill=(19, 25, 36),
+        )
+        label = f"FACE {face.face_id}"
+        draw.text(
+            (x + 12, y + cell_size - label_height + 5),
+            label,
+            fill=(255, 255, 255),
+            font=font,
+        )
     buffer = io.BytesIO()
-    background.save(buffer, format="JPEG", quality=92, optimize=True)
-    return buffer.getvalue()
+    sheet.save(buffer, format="JPEG", quality=92, optimize=True)
+    return buffer.getvalue(), face_ids
 
 
 def label_face_images(
     provider,
     faces: Sequence[RenderedFace],
     *,
-    batch_size: int = 8,
+    batch_size: int = 9,
+    batch_workers: int = 2,
+    confidence_threshold: float = 0.6,
     semantic_hints: dict[str, dict] | None = None,
     max_attempts: int = 3,
+    progress: Callable[[int, int, int, int], None] | None = None,
 ) -> list[dict]:
-    """Label rendered heads in small comparison batches with exact ID checks."""
-    if batch_size < 1:
-        raise ValueError("batch_size must be at least 1")
+    """Label numbered 3x3 sheets concurrently, then review uncertain faces."""
+    if not 1 <= batch_size <= 9:
+        raise ValueError("batch_size must be between 1 and 9")
+    if batch_workers < 1:
+        raise ValueError("batch_workers must be at least 1")
+    if not 0 <= confidence_threshold <= 1:
+        raise ValueError("confidence_threshold must be between 0 and 1")
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
     ordered = sorted(faces, key=lambda face: face.face_id)
     hints = semantic_hints or {}
-    results: list[dict] = []
-    for start in range(0, len(ordered), batch_size):
-        batch = ordered[start : start + batch_size]
-        images = [(face.face_id, _jpeg_bytes(face.head_path)) for face in batch]
+    if not ordered:
+        return []
+    batches = [
+        ordered[start : start + batch_size]
+        for start in range(0, len(ordered), batch_size)
+    ]
+    required = set(VISION_SCHEMA["properties"]["items"]["items"]["required"])
+
+    def request_batch(batch: Sequence[RenderedFace]) -> list[dict]:
+        sheet, expected = make_vision_sheet(batch)
+        images = [("编号九宫格:" + ",".join(expected), sheet)]
         hint_lines = []
         for face in batch:
             labels = hints.get(face.face_id, {}).get("labels") or []
@@ -126,8 +190,9 @@ def label_face_images(
                     f"{face.face_id}: 骨骼部件名候选={','.join(map(str, labels))}"
                 )
         user = (
-            "请逐张标注以下 face_id，返回数量和编号必须完全一致："
-            + "、".join(face.face_id for face in batch)
+            "请读取这张带 FACE 编号的九宫格，逐格标注以下 face_id，"
+            "返回数量和编号必须完全一致："
+            + "、".join(expected)
             + '\n必须只返回一个 JSON 对象，根键必须是 "items"。'
             + "items 数组中每项必须完整包含：face_id、primary_emotion、"
             + "secondary_emotions、valence、arousal、eyes、brows、mouth、"
@@ -139,10 +204,8 @@ def label_face_images(
                 "\n以下只是制作者命名提供的弱提示；与画面冲突时必须以画面为准：\n"
                 + "\n".join(hint_lines)
             )
-        expected = [face.face_id for face in batch]
         last_error: Exception | None = None
         items: list[dict] = []
-        required = set(VISION_SCHEMA["properties"]["items"]["items"]["required"])
         for attempt in range(1, max_attempts + 1):
             attempt_user = user
             if attempt > 1:
@@ -189,6 +252,7 @@ def label_face_images(
                 f"{last_error}"
             ) from last_error
         by_id = {str(item["face_id"]): item for item in items}
+        records = []
         for face in batch:
             record = dict(by_id[face.face_id])
             record["face_id"] = face.face_id
@@ -196,8 +260,45 @@ def label_face_images(
             record["confidence"] = max(
                 0.0, min(1.0, float(record.get("confidence") or 0.0))
             )
-            results.append(record)
-    return results
+            records.append(record)
+        return records
+
+    completed = 0
+    completed_batches = 0
+    reviewed = 0
+    state_lock = threading.Lock()
+    batch_results: dict[int, list[dict]] = {}
+    with ThreadPoolExecutor(max_workers=min(2, batch_workers, len(batches))) as executor:
+        future_to_index = {
+            executor.submit(request_batch, batch): index
+            for index, batch in enumerate(batches)
+        }
+        for future in as_completed(future_to_index):
+            index = future_to_index[future]
+            records = future.result()
+            batch_results[index] = records
+            with state_lock:
+                completed += len(records)
+                completed_batches += 1
+                if progress:
+                    progress(completed, len(ordered), completed_batches, reviewed)
+
+    results = [
+        record
+        for index in range(len(batches))
+        for record in batch_results[index]
+    ]
+    face_by_id = {face.face_id: face for face in ordered}
+    for index, record in enumerate(list(results)):
+        if float(record.get("confidence") or 0.0) >= confidence_threshold:
+            continue
+        face_id = str(record["face_id"])
+        reviewed_record = request_batch([face_by_id[face_id]])[0]
+        results[index] = reviewed_record
+        reviewed += 1
+        if progress:
+            progress(completed, len(ordered), completed_batches, reviewed)
+    return sorted(results, key=lambda item: str(item["face_id"]))
 
 
 def persist_visual_face_labels(

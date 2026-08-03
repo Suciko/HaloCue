@@ -271,3 +271,47 @@ def test_analysis_persists_visual_labels_and_reuses_existing_model_rows(
         """
     ).fetchone()[0]
     assert count == 2
+
+
+def test_analysis_maps_nine_grid_and_review_progress_to_job_updates(tmp_path, monkeypatch):
+    report = _report(tmp_path)
+    updates = []
+    monkeypatch.setattr(
+        spine_face_analysis,
+        "render_face_variations",
+        lambda *args, **kwargs: report,
+    )
+
+    def label(provider, faces, **kwargs):
+        callback = kwargs["progress"]
+        callback(1, 2, 1, 0)
+        callback(2, 2, 1, 1)
+        return _labels(faces)
+
+    monkeypatch.setattr(spine_face_analysis, "label_face_images", label)
+    source = tmp_path / "spine"
+    source.mkdir()
+    con = assetdb.connect(tmp_path / "assets.db")
+
+    class Provider:
+        model = "gemini-3.6-flash"
+
+    spine_face_analysis.analyze_character_faces(
+        con,
+        source_dir=source,
+        ident="custom-1",
+        spine_signature="skel-signature",
+        outfit_key="date",
+        spine_cli=tmp_path / "Spine.com",
+        cache_root=tmp_path / "cache",
+        provider=Provider(),
+        progress=lambda phase, message, current, total: updates.append(
+            (phase, message, current, total)
+        ),
+    )
+
+    labeling = [update for update in updates if update[0] == "labeling"]
+    assert labeling[-2:] == [
+        ("labeling", "AI 已识别 1 / 2 个表情（完成 1 个九宫格批次）", 1, 2),
+        ("labeling", "AI 已识别 2 / 2 个表情（完成 1 个九宫格批次，单项复核 1 个）", 2, 2),
+    ]
