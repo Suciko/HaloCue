@@ -355,7 +355,9 @@
     const back = make('button', 'ghost asset-detail-back', '返回目录');
     back.type = 'button';
     back.dataset.workbenchAction = 'back-catalog';
-    if (this.detail.insertBefore) this.detail.insertBefore(back, this.detail.firstChild);
+    const heading = this.detail.querySelector ? this.detail.querySelector('.asset-detail-heading') : null;
+    if (heading) heading.appendChild(back);
+    else if (this.detail.insertBefore) this.detail.insertBefore(back, this.detail.firstChild);
     else this.detail.appendChild(back);
     const actions = make('section', 'asset-detail-actions');
     const primary = make(

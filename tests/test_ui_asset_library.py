@@ -382,6 +382,54 @@ vm.runInNewContext(source,{window,document,Promise,Error,console,setTimeout:(fn,
     }
 
 
+def test_face_workspace_forced_label_reload_supersedes_pending_request():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8'),pending=[];
+function node(){let own='',classes=new Set();return {children:[],dataset:{},hidden:false,disabled:false,classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},appendChild(child){this.children.push(child);return child},addEventListener(){},setAttribute(){},removeAttribute(){},focus(){},querySelector(){return null},set textContent(value){own=String(value||'');this.children=[]},get textContent(){return own}}}
+const document={activeElement:null,getElementById:()=>null,createElement:node,addEventListener(){}};
+const window={StoryUI:{},Api:{request:()=>new Promise(resolve=>pending.push(resolve))}};
+vm.runInNewContext(source,{window,document,Promise,Error,console,encodeURIComponent,setTimeout,clearTimeout});
+(async()=>{
+  const root=node();root.classList.add('open');const workspace=new window.StoryUI.FaceWorkspace(root);workspace.status=node();workspace.labels=node();workspace.renderLabels=()=>{};
+  workspace.selected={kind:'character',aa_key:'hero',sha256:'digest'};
+  const oldRequest=workspace.loadLabels();const freshRequest=workspace.loadLabels(true);
+  pending[1]({saved_count:1,faces:[{face_id:'00',version:2,effective:{primary_emotion:'new'}}]});await freshRequest;
+  pending[0]({saved_count:1,faces:[{face_id:'00',version:1,effective:{primary_emotion:'old'}}]});await oldRequest;
+  console.log(JSON.stringify({requests:pending.length,emotion:workspace.faces[0].effective.primary_emotion}));
+})();
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library_faces.js")],
+        text=True,
+        encoding="utf-8",
+    )
+    assert json.loads(output) == {"requests": 2, "emotion": "new"}
+
+
+def test_face_workspace_discards_stale_save_and_serializes_each_face():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8'),pending=[];
+function node(){let classes=new Set();return {children:[],dataset:{},hidden:false,disabled:false,value:'manual',type:'text',classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},appendChild(child){this.children.push(child);return child},addEventListener(){},setAttribute(){},removeAttribute(){},focus(){},querySelector(selector){if(selector==='.face-save-state')return {textContent:''};return null},querySelectorAll(){return [{dataset:{faceField:'primary_emotion'},type:'text',value:'manual'}]}}}
+const document={activeElement:null,getElementById:()=>null,createElement:node,addEventListener(){}};
+const window={StoryUI:{},Api:{json:(method,payload)=>({method,payload}),request:()=>new Promise(resolve=>pending.push(resolve))}};
+vm.runInNewContext(source,{window,document,Promise,Error,console,encodeURIComponent,setTimeout,clearTimeout});
+(async()=>{
+  const root=node();root.classList.add('open');const workspace=new window.StoryUI.FaceWorkspace(root),card=node();
+  workspace.selected={kind:'character',aa_key:'hero-a',sha256:'digest-a'};workspace.faces=[{face_id:'00',version:1,manual:{},effective:{primary_emotion:'old'}}];workspace.card=()=>card;workspace.renderLabels=()=>{};
+  const first=workspace.saveFace('00'),duplicate=workspace.saveFace('00');
+  workspace.generation+=1;workspace.selected={kind:'character',aa_key:'hero-b',sha256:'digest-b'};
+  pending[0]({face:{face_id:'00',version:2,effective:{primary_emotion:'stale'}},saved_at:'now'});await Promise.all([first,duplicate]);
+  console.log(JSON.stringify({requests:pending.length,emotion:workspace.faces[0].effective.primary_emotion}));
+})();
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library_faces.js")],
+        text=True,
+        encoding="utf-8",
+    )
+    assert json.loads(output) == {"requests": 1, "emotion": "old"}
+
+
 def test_typed_preview_renders_safe_background_character_and_sound_details():
     script = r'''
 const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');

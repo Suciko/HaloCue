@@ -34,6 +34,8 @@
     this.labelsLoadedKey = '';
     this.labelRequest = null;
     this.labelRequestKey = '';
+    this.labelRequestSequence = 0;
+    this.saveRequests = Object.create(null);
     this.bind();
   }
 
@@ -71,6 +73,8 @@
       workbench.root.setAttribute('aria-hidden', 'true');
     }
     this.generation += 1;
+    this.labelRequestSequence += 1;
+    this.saveRequests = Object.create(null);
     this.pollFailures = 0;
     this.pollSequence = 0;
     this.root.classList.add('open');
@@ -95,6 +99,8 @@
 
   FaceWorkspace.prototype.close = async function () {
     this.generation += 1;
+    this.labelRequestSequence += 1;
+    this.saveRequests = Object.create(null);
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.pollFailures = 0;
@@ -163,11 +169,12 @@
     }, this);
   };
 
-  FaceWorkspace.prototype.loadLabels = async function () {
+  FaceWorkspace.prototype.loadLabels = async function (force) {
     if (!this.selected) return;
     const generation = this.generation;
     const requestKey = String(this.selected.aa_key || '') + ':' + String(this.selected.sha256 || '');
-    if (this.labelRequest && this.labelRequestKey === requestKey) return this.labelRequest;
+    if (!force && this.labelRequest && this.labelRequestKey === requestKey) return this.labelRequest;
+    const sequence = ++this.labelRequestSequence;
     const query = '?aa_key=' + encodeURIComponent(this.selected.aa_key) + '&sha256=' + encodeURIComponent(this.selected.sha256 || '');
     const request = exports.Api.request('/api/assets/faces/labels' + query);
     this.labelRequest = request;
@@ -177,12 +184,12 @@
       const currentKey = this.selected
         ? String(this.selected.aa_key || '') + ':' + String(this.selected.sha256 || '')
         : '';
-      if (!this.isOpen() || generation !== this.generation || currentKey !== requestKey) return;
+      if (!this.isOpen() || generation !== this.generation || currentKey !== requestKey || sequence !== this.labelRequestSequence) return;
       this.faces = payload.faces || [];
       this.renderLabels(this.faces);
       if (payload.saved_count) this.status.textContent = '已保存到数据库：' + payload.saved_count + ' 个表情。';
     } catch (error) {
-      if (!this.isOpen() || generation !== this.generation) return;
+      if (!this.isOpen() || generation !== this.generation || sequence !== this.labelRequestSequence) return;
       this.status.textContent = '标注结果读取失败，请刷新后重试。';
     } finally {
       if (this.labelRequest === request) {
@@ -201,18 +208,35 @@
     if (editor) editor.hidden = !editor.hidden;
   };
 
-  FaceWorkspace.prototype.saveFace = async function (faceId, restore) {
+  FaceWorkspace.prototype.saveFace = function (faceId, restore) {
+    const saveKey = String(faceId);
+    if (this.saveRequests[saveKey]) return this.saveRequests[saveKey];
     const card = this.card(faceId), face = this.faces.find(function (item) { return String(item.face_id) === String(faceId); });
     if (!card || !face) return;
     const patch = {};
     if (restore) Object.keys(face.manual || {}).forEach(function (key) { patch[key] = null; });
     else Array.from(card.querySelectorAll('[data-face-field]')).forEach(function (input) { patch[input.dataset.faceField] = input.type === 'checkbox' ? Boolean(input.checked) : input.value.trim(); });
     const state = card.querySelector('.face-save-state'); if (state) state.textContent = '保存中…';
-    try {
-      const result = await exports.Api.request('/api/assets/faces/labels/' + encodeURIComponent(faceId), exports.Api.json('PATCH', {aa_key:this.selected.aa_key,sha256:this.selected.sha256,version:face.version,patch:patch}));
-      this.faces = this.faces.map(function (item) { return String(item.face_id) === String(faceId) ? result.face : item; });
-      this.renderLabels(this.faces); this.status.textContent = '已保存到数据库：表情 ' + faceId + '，' + (result.saved_at || '刚刚') + '。';
-    } catch (error) { if (state) state.textContent = '保存失败，请刷新后重试。'; }
+    const generation = this.generation;
+    const aaKey = String(this.selected.aa_key || '');
+    const sha256 = String(this.selected.sha256 || '');
+    let operation;
+    operation = (async function () {
+      try {
+        const result = await exports.Api.request('/api/assets/faces/labels/' + encodeURIComponent(faceId), exports.Api.json('PATCH', {aa_key:aaKey,sha256:sha256,version:face.version,patch:patch}));
+        const current = this.selected || {};
+        if (!this.isOpen() || generation !== this.generation || aaKey !== String(current.aa_key || '') || sha256 !== String(current.sha256 || '')) return;
+        this.faces = this.faces.map(function (item) { return String(item.face_id) === String(faceId) ? result.face : item; });
+        this.renderLabels(this.faces); this.status.textContent = '已保存到数据库：表情 ' + faceId + '，' + (result.saved_at || '刚刚') + '。';
+      } catch (error) {
+        const current = this.selected || {};
+        if (generation === this.generation && aaKey === String(current.aa_key || '') && sha256 === String(current.sha256 || '') && state) state.textContent = '保存失败，请刷新后重试。';
+      } finally {
+        if (this.saveRequests[saveKey] === operation) delete this.saveRequests[saveKey];
+      }
+    }).call(this);
+    this.saveRequests[saveKey] = operation;
+    return operation;
   };
 
   FaceWorkspace.prototype.restoreAi = function (faceId) { return this.saveFace(faceId, true); };
@@ -243,7 +267,7 @@
     if (!this.faces.length) this.renderLabels(result.semantic_faces || []);
     if (job.done && job.ok && Number(result.saved_count || result.labeled_count || 0)) {
       const key = [job.ident, result.completed_at || result.saved_count || result.labeled_count].join(':');
-      if (this.labelsLoadedKey !== key) { this.labelsLoadedKey = key; this.loadLabels(); }
+      if (this.labelsLoadedKey !== key) { this.labelsLoadedKey = key; this.loadLabels(true); }
     }
     if (job.contact_sheet_available && job.done && job.ok) {
       this.sheet.hidden = false;
