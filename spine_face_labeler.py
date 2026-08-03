@@ -28,6 +28,7 @@ _EDITABLE_FACE_FIELDS = frozenset({
     "blush",
     "tears",
     "description_cn",
+    "usage_hint_cn",
 })
 
 
@@ -69,6 +70,15 @@ def usage_hint_cn(item: Mapping) -> str:
     return str(
         item.get("usage_hint_cn") or item.get("description_cn") or ""
     ).strip()
+
+
+def selection_semantics(primary_emotion: str, usage_hint: str) -> str:
+    """Combine the two fields the story model uses to choose a face."""
+    emotion = str(primary_emotion or "").strip()
+    hint = str(usage_hint or "").strip()
+    if emotion and hint and emotion != hint:
+        return f"{emotion}｜{hint}"
+    return emotion or hint
 
 
 def _compact_vision_item(item: Mapping) -> dict:
@@ -398,7 +408,7 @@ def persist_visual_face_labels(
                 int(bool(item.get("blush"))),
                 int(bool(item.get("tears"))),
                 float(item.get("confidence") or 0.0),
-                str(item.get("description_cn") or ""),
+                usage_hint_cn(item),
                 str(item.get("head_path") or ""),
                 int(bool(manual)),
                 json.dumps(manual, ensure_ascii=False, separators=(",", ":")),
@@ -407,6 +417,10 @@ def persist_visual_face_labels(
             ),
         )
         effective_primary = str(manual.get("primary_emotion", primary))
+        effective_usage = usage_hint_cn(manual) or usage_hint_cn(item)
+        effective_semantics = selection_semantics(
+            effective_primary, effective_usage
+        )
         con.execute(
             """
             DELETE FROM face_evidence
@@ -428,8 +442,8 @@ def persist_visual_face_labels(
                 face_id,
                 source,
                 json.dumps(item, ensure_ascii=False),
-                effective_primary,
-                effective_primary,
+                effective_semantics,
+                effective_semantics,
             ),
         )
     con.commit()
@@ -464,6 +478,7 @@ def _visual_label_record(row) -> dict:
         secondary = []
     if not isinstance(secondary, list):
         secondary = []
+    hint = str(row["description_cn"] or "")
     ai = {
         "primary_emotion": str(row["primary_emotion"] or ""),
         "secondary_emotions": [str(value) for value in secondary],
@@ -476,12 +491,21 @@ def _visual_label_record(row) -> dict:
         "tears": bool(row["tears"]),
         "confidence": max(0.0, min(1.0, float(row["confidence"] or 0.0))),
         "description_cn": str(row["description_cn"] or ""),
+        "usage_hint_cn": hint,
     }
     manual = {
         key: value
         for key, value in _safe_json_object(row["manual_json"]).items()
         if key in _EDITABLE_FACE_FIELDS
     }
+    manual_hint = usage_hint_cn(manual)
+    if manual_hint:
+        manual["usage_hint_cn"] = manual_hint
+        manual["description_cn"] = manual_hint
+    effective = {**ai, **manual}
+    effective_hint = usage_hint_cn(effective)
+    effective["usage_hint_cn"] = effective_hint
+    effective["description_cn"] = effective_hint
     return {
         "ident": str(row["ident"]),
         "spine_signature": str(row["spine_signature"]),
@@ -490,7 +514,7 @@ def _visual_label_record(row) -> dict:
         "model": str(row["model"]),
         "ai": ai,
         "manual": manual,
-        "effective": {**ai, **manual},
+        "effective": effective,
         "head_path": str(row["head_path"] or ""),
         "reviewed": bool(manual),
         "version": max(1, int(row["version"] or 1)),
@@ -527,8 +551,17 @@ def _validate_manual_patch(patch: dict) -> dict:
     unknown = set(patch) - _EDITABLE_FACE_FIELDS
     if unknown:
         raise ValueError("不支持的标注字段：" + "、".join(sorted(unknown)))
+    if (
+        "usage_hint_cn" in patch
+        and "description_cn" in patch
+        and patch["usage_hint_cn"] != patch["description_cn"]
+    ):
+        raise ValueError("usage_hint_cn 与 description_cn 不能冲突")
+    normalized = dict(patch)
+    if "usage_hint_cn" in normalized:
+        normalized["description_cn"] = normalized.pop("usage_hint_cn")
     clean = {}
-    for key, value in patch.items():
+    for key, value in normalized.items():
         if value is None:
             clean[key] = None
         elif key in {"blush", "tears"}:
@@ -616,6 +649,10 @@ def update_visual_face_label(
     effective_primary = str(
         manual.get("primary_emotion", row["primary_emotion"] or "")
     )
+    effective_usage = usage_hint_cn(manual) or str(row["description_cn"] or "")
+    effective_semantics = selection_semantics(
+        effective_primary, effective_usage
+    )
     con.execute(
         """
         UPDATE face_evidence
@@ -623,7 +660,7 @@ def update_visual_face_label(
         WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id=?
           AND source LIKE 'vision:%'
         """,
-        (effective_primary, effective_primary, *scope),
+        (effective_semantics, effective_semantics, *scope),
     )
     con.commit()
     refreshed = con.execute(

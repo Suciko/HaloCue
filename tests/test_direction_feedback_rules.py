@@ -214,6 +214,44 @@ def test_expression_prompt_prefers_continuity_and_safe_repetition_over_jitter():
     assert "不要为了多样性机械轮换" in rules
 
 
+def test_expression_prompt_treats_usage_context_as_guidance_not_trigger():
+    rules = build_rules()
+
+    assert "使用语境是候选提示，不是关键词触发规则" in rules
+    assert "不能仅凭脸红、泪水等视觉现象决定表情" in rules
+    assert "没有完美差分时" in rules
+
+    idx = {
+        "bg": {},
+        "sounds": [],
+        "enums": {"emoticon": {}, "action": {}},
+        "characters": [{
+            "identifier": "kei",
+            "faces": [],
+            "expression_mode": "opaque_custom",
+        }],
+        "face_capabilities": {
+            "kei": [{
+                "spine_signature": "sig",
+                "outfit_key": "date",
+                "faces": [{
+                    "id": "37",
+                    "semantic_cn": "克制不满｜冷淡反驳、忍着不发作",
+                    "sources": ["aa_verified", "vision:model"],
+                }],
+            }],
+        },
+    }
+    cast = {"凯伊": {
+        "id": "kei", "portrait": True,
+        "spine_signature": "sig", "outfit_key": "date",
+    }}
+
+    text = build_static(idx, cast, ["凯伊"])
+
+    assert "37=克制不满｜冷淡反驳、忍着不发作" in text
+
+
 def test_custom_expression_table_overrides_official_common_face_numbers():
     rules = build_rules()
 

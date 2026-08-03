@@ -485,8 +485,9 @@ def test_visual_labels_are_scoped_to_exact_skeleton_and_preferred_over_name_pars
         ("626652156", "date-sha", "Kei_Date_Outfit", "05"),
     ).fetchone()
     assert tuple(row) == ("轻微微笑", 0.91, 0)
-    assert face["cn"] == "轻微微笑"
-    assert face["semantic_cn"] == "轻微微笑"
+    expected_semantics = "轻微微笑｜温和、克制的轻微微笑"
+    assert face["cn"] == expected_semantics
+    assert face["semantic_cn"] == expected_semantics
     assert face["sources"] == ["vision:gemini-3.6-flash", "spine_semantic"]
 
 
@@ -561,6 +562,49 @@ def test_manual_visual_label_override_survives_ai_rerun(tmp_path):
     assert current["version"] > edited["version"]
 
 
+def test_usage_hint_is_persisted_edited_and_synced_to_face_evidence(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    scope = {
+        "ident": "generic-character",
+        "spine_signature": "generic-skeleton",
+        "outfit_key": "generic-outfit",
+    }
+    label = _compact_label(
+        "00", emotion="平静", usage="普通交谈或安静倾听",
+    )
+    label["head_path"] = str(tmp_path / "00.png")
+    persist_visual_face_labels(
+        con, **scope, model="vision-model", labels=[label],
+    )
+
+    record = list_visual_face_labels(con, **scope)[0]
+    assert record["effective"]["usage_hint_cn"] == "普通交谈或安静倾听"
+    assert record["effective"]["description_cn"] == "普通交谈或安静倾听"
+
+    saved = update_visual_face_label(
+        con,
+        **scope,
+        face_id="00",
+        patch={"usage_hint_cn": "压低情绪回应，不急于表态"},
+        expected_version=record["version"],
+    )
+
+    assert saved["manual"]["usage_hint_cn"] == "压低情绪回应，不急于表态"
+    assert saved["effective"]["description_cn"] == "压低情绪回应，不急于表态"
+    evidence = con.execute(
+        """
+        SELECT label,label_cn FROM face_evidence
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id='00'
+          AND source='vision:vision-model'
+        """,
+        tuple(scope.values()),
+    ).fetchone()
+    assert tuple(evidence) == (
+        "平静｜压低情绪回应，不急于表态",
+        "平静｜压低情绪回应，不急于表态",
+    )
+
+
 def test_manual_visual_label_override_survives_different_model_rerun_and_syncs_evidence(
     tmp_path,
 ):
@@ -616,8 +660,8 @@ def test_manual_visual_label_override_survives_different_model_rerun_and_syncs_e
         (*scope.values(), "face-x"),
     ).fetchall()
     assert [tuple(row) for row in evidence] == [
-        ("vision:model-a", "人工确认", "人工确认"),
-        ("vision:model-b", "人工确认", "人工确认"),
+        ("vision:model-a", "人工确认｜模型 A 判断", "人工确认｜模型 A 判断"),
+        ("vision:model-b", "人工确认｜模型 B 判断", "人工确认｜模型 B 判断"),
     ]
 
 
