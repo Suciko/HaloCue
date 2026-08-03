@@ -299,8 +299,9 @@ def analyze_character_faces(
     _notify(
         progress,
         result["status"],
-        f"已写入 {len(labels)} 个视觉表情标注",
-        len(labels),
+        f"已写入 {saved['saved_count']} 个视觉表情标注"
+        f"，{saved['failed_count']} 个失败",
+        int(saved["saved_count"]),
         len(report.faces),
     )
     return result

@@ -213,8 +213,7 @@
     const card = this.card(faceId), face = this.faces.find(function (item) { return String(item.face_id) === String(faceId); });
     if (!card || !face) return;
     const patch = {};
-    if (restore) Object.keys(face.manual || {}).forEach(function (key) { patch[key] = null; });
-    else Array.from(card.querySelectorAll('[data-face-field]')).forEach(function (input) { patch[input.dataset.faceField] = input.type === 'checkbox' ? Boolean(input.checked) : input.value.trim(); });
+    if (!restore) Array.from(card.querySelectorAll('[data-face-field]')).forEach(function (input) { patch[input.dataset.faceField] = input.type === 'checkbox' ? Boolean(input.checked) : input.value.trim(); });
     const state = card.querySelector('.face-save-state'); if (state) state.textContent = '保存中…';
     const generation = this.generation;
     const aaKey = String(this.selected.aa_key || '');
@@ -226,8 +225,10 @@
       if (!this.isOpen() || generation !== this.generation || aaKey !== String(selected.aa_key || '') || sha256 !== String(selected.sha256 || '')) return;
       const currentFace = this.faces.find(function (item) { return String(item.face_id) === String(faceId); });
       if (!currentFace) return;
+      const requestPatch = restore ? {} : patch;
+      if (restore) Object.keys(currentFace.manual || {}).forEach(function (key) { requestPatch[key] = null; });
       try {
-        const result = await exports.Api.request('/api/assets/faces/labels/' + encodeURIComponent(faceId), exports.Api.json('PATCH', {aa_key:aaKey,sha256:sha256,version:currentFace.version,patch:patch}));
+        const result = await exports.Api.request('/api/assets/faces/labels/' + encodeURIComponent(faceId), exports.Api.json('PATCH', {aa_key:aaKey,sha256:sha256,version:currentFace.version,patch:requestPatch}));
         const current = this.selected || {};
         if (!this.isOpen() || generation !== this.generation || aaKey !== String(current.aa_key || '') || sha256 !== String(current.sha256 || '')) return;
         this.faces = this.faces.map(function (item) { return String(item.face_id) === String(faceId) ? result.face : item; });
