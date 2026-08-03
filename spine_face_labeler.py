@@ -471,6 +471,44 @@ def persist_visual_face_labels(
     }
 
 
+def refresh_visual_face_preview_paths(
+    con,
+    *,
+    ident: str,
+    spine_signature: str,
+    outfit_key: str,
+    faces: Iterable[RenderedFace],
+) -> int:
+    """Point every saved model row at the latest rendered head preview."""
+    scope = (
+        str(ident),
+        str(spine_signature or ""),
+        str(outfit_key or ""),
+    )
+    updated_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+    changed = 0
+    for face in faces:
+        head_path = str(Path(face.head_path).resolve())
+        cursor = con.execute(
+            """
+            UPDATE face_visual_label
+            SET head_path=?, version=version+1, updated_at=?
+            WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id=?
+              AND COALESCE(head_path, '')<>?
+            """,
+            (
+                head_path,
+                updated_at,
+                *scope,
+                str(face.face_id),
+                head_path,
+            ),
+        )
+        changed += max(0, int(cursor.rowcount or 0))
+    con.commit()
+    return changed
+
+
 def _safe_json_object(value) -> dict:
     try:
         parsed = json.loads(str(value or "{}"))

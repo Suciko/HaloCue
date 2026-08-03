@@ -7,6 +7,7 @@ import pytest
 
 import assetdb
 import llm
+import spine_face_labeler
 from asset_catalog import _face_capabilities
 from spine_face_labeler import (
     _SYSTEM,
@@ -456,6 +457,75 @@ def test_failed_rerun_preserves_last_saved_label_and_effective_evidence(tmp_path
         (scope["ident"], scope["spine_signature"], scope["outfit_key"]),
     ).fetchone()
     assert tuple(evidence) == ("上次成功结果", "上次成功结果")
+
+
+def test_refresh_visual_face_preview_paths_updates_every_model_without_labels(
+    tmp_path,
+):
+    con = assetdb.connect(tmp_path / "assets.db")
+    scope = {
+        "ident": "626652156",
+        "spine_signature": "date-sha",
+        "outfit_key": "Kei_Date_Outfit",
+    }
+    old_head = tmp_path / "heads-v4" / "37.png"
+    new_head = tmp_path / "heads-v7" / "37.png"
+    portrait = tmp_path / "portraits-v7" / "37.png"
+    for path in (old_head, new_head, portrait):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGBA", (64, 64), "white").save(path)
+    for model, emotion in (("model-a", "抓狂"), ("model-b", "生闷气")):
+        persist_visual_face_labels(
+            con,
+            **scope,
+            model=model,
+            labels=[{
+                **_compact_label("37", emotion=emotion),
+                "head_path": str(old_head),
+            }],
+        )
+    con.execute(
+        """
+        UPDATE face_visual_label
+        SET manual_json='{"primary_emotion":"人工抓狂"}', reviewed=1
+        WHERE model='model-a'
+        """
+    )
+    con.commit()
+    before = {
+        row["model"]: dict(row)
+        for row in con.execute(
+            "SELECT * FROM face_visual_label ORDER BY model"
+        )
+    }
+
+    changed = spine_face_labeler.refresh_visual_face_preview_paths(
+        con,
+        **scope,
+        faces=[RenderedFace("37", portrait, new_head)],
+    )
+    unchanged = spine_face_labeler.refresh_visual_face_preview_paths(
+        con,
+        **scope,
+        faces=[RenderedFace("37", portrait, new_head)],
+    )
+
+    after = {
+        row["model"]: dict(row)
+        for row in con.execute(
+            "SELECT * FROM face_visual_label ORDER BY model"
+        )
+    }
+    assert changed == 2
+    assert unchanged == 0
+    for model in ("model-a", "model-b"):
+        assert after[model]["head_path"] == str(new_head)
+        assert after[model]["version"] == before[model]["version"] + 1
+        for field in (
+            "primary_emotion", "description_cn", "confidence",
+            "manual_json", "reviewed",
+        ):
+            assert after[model][field] == before[model][field]
 
 
 def test_visual_labels_are_scoped_to_exact_skeleton_and_preferred_over_name_parser(tmp_path):

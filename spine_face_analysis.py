@@ -11,6 +11,7 @@ from typing import Callable
 from spine_face_labeler import (
     label_face_images,
     persist_visual_face_labels,
+    refresh_visual_face_preview_paths,
 )
 from spine_face_renderer import render_face_variations
 from spine_semantic_faces import extract_semantic_face_combinations
@@ -144,6 +145,13 @@ def analyze_character_faces(
         workers=workers,
         progress=report_render_progress,
     )
+    refreshed_preview_count = refresh_visual_face_preview_paths(
+        con,
+        ident=str(ident),
+        spine_signature=str(spine_signature or ""),
+        outfit_key=str(outfit_key or ""),
+        faces=report.faces,
+    )
     face_ids = {face.face_id for face in report.faces}
     semantic_hints = _semantic_hints(source)
     semantic_faces = []
@@ -183,6 +191,7 @@ def analyze_character_faces(
             else "complete"
         ),
         "rendered_count": len(report.faces),
+        "refreshed_preview_count": refreshed_preview_count,
         "render_cache": str(report.cache_dir),
         "render_cached": bool(report.cached),
         "actual_workers": report.actual_workers,

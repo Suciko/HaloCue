@@ -389,6 +389,7 @@ def test_face_label_payload_is_path_safe_and_supports_versioned_edits(tmp_path):
     assert face["face_id"] == "00"
     assert face["effective"]["primary_emotion"] == "平静"
     assert face["preview_url"].startswith("/api/assets/faces/preview?")
+    assert f"v={face['version']}" in face["preview_url"]
     assert "head_path" not in json.dumps(payload, ensure_ascii=False)
 
     saved = webui.update_face_label_payload(

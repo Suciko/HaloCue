@@ -5,6 +5,7 @@ from PIL import Image
 
 import assetdb
 import spine_face_analysis
+import spine_face_labeler
 from spine_face_renderer import RenderReport, RenderedFace
 
 
@@ -80,6 +81,21 @@ def test_analysis_keeps_contact_sheet_out_of_normal_results_without_model_key(
     source = tmp_path / "spine"
     source.mkdir()
     con = assetdb.connect(tmp_path / "assets.db")
+    old_heads = tmp_path / "heads-v4"
+    old_heads.mkdir()
+    stale = _labels(report.faces)
+    for item in stale:
+        old_head = old_heads / f"{item['face_id']}.png"
+        Image.new("RGBA", (48, 48), "gray").save(old_head)
+        item["head_path"] = str(old_head)
+    spine_face_labeler.persist_visual_face_labels(
+        con,
+        ident="custom-1",
+        spine_signature="skel-signature",
+        outfit_key="date",
+        model="old-model",
+        labels=stale,
+    )
 
     result = spine_face_analysis.analyze_character_faces(
         con,
@@ -95,6 +111,13 @@ def test_analysis_keeps_contact_sheet_out_of_normal_results_without_model_key(
     assert result["ok"] is True
     assert result["rendered_count"] == 2
     assert result["vision_status"] == "skipped_missing_key"
+    assert result["refreshed_preview_count"] == 2
+    assert {
+        row["face_id"]: row["head_path"]
+        for row in con.execute(
+            "SELECT face_id,head_path FROM face_visual_label"
+        )
+    } == {face.face_id: str(face.head_path) for face in report.faces}
     assert "contact_sheet" not in result
     assert not (report.cache_dir / "contact-sheet.jpg").exists()
 
@@ -301,6 +324,16 @@ def test_analysis_persists_visual_labels_and_reuses_existing_model_rows(
         cache_root=tmp_path / "cache",
         provider=Provider(),
     )
+    old_heads = tmp_path / "heads-v4"
+    old_heads.mkdir()
+    for face in report.faces:
+        old_head = old_heads / f"{face.face_id}.png"
+        Image.new("RGBA", (48, 48), "gray").save(old_head)
+        con.execute(
+            "UPDATE face_visual_label SET head_path=? WHERE face_id=?",
+            (str(old_head), face.face_id),
+        )
+    con.commit()
     second = spine_face_analysis.analyze_character_faces(
         con,
         source_dir=source,
@@ -318,6 +351,13 @@ def test_analysis_persists_visual_labels_and_reuses_existing_model_rows(
     assert first["failed_count"] == 0
     assert first["completed_at"]
     assert second["vision_status"] == "cached"
+    assert second["refreshed_preview_count"] == 2
+    assert {
+        row["face_id"]: row["head_path"]
+        for row in con.execute(
+            "SELECT face_id,head_path FROM face_visual_label"
+        )
+    } == {face.face_id: str(face.head_path) for face in report.faces}
     assert calls == {"render": 2, "label": 1}
     count = con.execute(
         """

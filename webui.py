@@ -506,6 +506,7 @@ def _public_visual_face(record: dict, *, aa_key: str, sha256: str) -> dict:
         "updated_at": str(record.get("updated_at") or ""),
         "preview_url": "/api/assets/faces/preview?" + urlencode({
             "aa_key": str(aa_key), "sha256": str(sha256), "face_id": face_id,
+            "v": int(record.get("version") or 1),
         }),
     }
 
