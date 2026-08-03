@@ -177,6 +177,9 @@ def label_face_images(
         ordered[start : start + batch_size]
         for start in range(0, len(ordered), batch_size)
     ]
+    initial_singletons = {
+        batch[0].face_id for batch in batches if len(batch) == 1
+    }
     required = set(VISION_SCHEMA["properties"]["items"]["items"]["required"])
 
     def request_batch(batch: Sequence[RenderedFace]) -> list[dict]:
@@ -205,7 +208,7 @@ def label_face_images(
                 + "\n".join(hint_lines)
             )
         last_error: Exception | None = None
-        items: list[dict] = []
+        items: list[dict] | None = None
         for attempt in range(1, max_attempts + 1):
             attempt_user = user
             if attempt > 1:
@@ -224,37 +227,28 @@ def label_face_images(
                     raise ValueError('response root does not contain an "items" array')
                 if not all(isinstance(item, dict) for item in candidate):
                     raise ValueError("items contains a non-object value")
-                actual = [str(item.get("face_id") or "") for item in candidate]
-                if (
-                    len(actual) != len(set(actual))
-                    or set(actual) != set(expected)
-                ):
-                    raise ValueError(
-                        f"face IDs do not match: expected {expected}, got {actual}"
-                    )
-                incomplete = [
-                    str(item.get("face_id") or "?")
-                    for item in candidate
-                    if not required.issubset(item)
-                ]
-                if incomplete:
-                    raise ValueError(
-                        "missing required fields for " + ", ".join(incomplete)
-                    )
                 items = candidate
                 last_error = None
                 break
             except Exception as exc:
                 last_error = exc
-        if last_error is not None:
-            raise ValueError(
-                f"视觉模型连续 {max_attempts} 次未返回完整的表情标注："
-                f"{last_error}"
-            ) from last_error
-        by_id = {str(item["face_id"]): item for item in items}
+        occurrences: dict[str, list[dict]] = {face_id: [] for face_id in expected}
+        for item in items or []:
+            face_id = str(item.get("face_id") or "")
+            if face_id in occurrences:
+                occurrences[face_id].append(item)
         records = []
         for face in batch:
-            record = dict(by_id[face.face_id])
+            matches = occurrences[face.face_id]
+            if len(matches) != 1 or not required.issubset(matches[0]):
+                records.append({
+                    "face_id": face.face_id,
+                    "head_path": str(face.head_path),
+                    "failed": True,
+                    "error": "vision_label_failed",
+                })
+                continue
+            record = dict(matches[0])
             record["face_id"] = face.face_id
             record["head_path"] = str(face.head_path)
             record["confidence"] = max(
@@ -290,11 +284,17 @@ def label_face_images(
     ]
     face_by_id = {face.face_id: face for face in ordered}
     for index, record in enumerate(list(results)):
-        if float(record.get("confidence") or 0.0) >= confidence_threshold:
-            continue
         face_id = str(record["face_id"])
+        if record.get("failed") and face_id in initial_singletons:
+            continue
+        if (
+            not record.get("failed")
+            and float(record.get("confidence") or 0.0) >= confidence_threshold
+        ):
+            continue
         reviewed_record = request_batch([face_by_id[face_id]])[0]
-        results[index] = reviewed_record
+        if record.get("failed") or not reviewed_record.get("failed"):
+            results[index] = reviewed_record
         reviewed += 1
         if progress:
             progress(completed, len(ordered), completed_batches, reviewed)
@@ -324,29 +324,35 @@ def persist_visual_face_labels(
         """,
         (ident, signature, outfit),
     )
-    completed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    con.execute(
-        """
-        DELETE FROM face_evidence
-        WHERE ident=? AND spine_signature=? AND outfit_key=? AND source=?
-        """,
-        (ident, signature, outfit, source),
-    )
+    completed_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
     for item in records:
         face_id = str(item["face_id"])
+        if item.get("failed"):
+            continue
         primary = str(item.get("primary_emotion") or "").strip()
         secondary = [
             str(value).strip()
             for value in item.get("secondary_emotions") or []
             if str(value).strip()
         ]
+        manual_row = con.execute(
+            """
+            SELECT manual_json FROM face_visual_label
+            WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id=?
+              AND manual_json IS NOT NULL AND manual_json!='{}'
+            ORDER BY updated_at DESC, model
+            LIMIT 1
+            """,
+            (ident, signature, outfit, face_id),
+        ).fetchone()
+        manual = _safe_json_object(manual_row["manual_json"] if manual_row else "{}")
         con.execute(
             """
             INSERT INTO face_visual_label
               (ident,spine_signature,outfit_key,face_id,model,primary_emotion,
                secondary_json,valence,arousal,eyes,brows,mouth,blush,tears,
                confidence,description_cn,head_path,reviewed,manual_json,version,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'{}',1,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(ident,spine_signature,outfit_key,face_id,model) DO UPDATE SET
               primary_emotion=excluded.primary_emotion,
               secondary_json=excluded.secondary_json,
@@ -381,8 +387,20 @@ def persist_visual_face_labels(
                 float(item.get("confidence") or 0.0),
                 str(item.get("description_cn") or ""),
                 str(item.get("head_path") or ""),
+                int(bool(manual)),
+                json.dumps(manual, ensure_ascii=False, separators=(",", ":")),
+                1,
                 completed_at,
             ),
+        )
+        effective_primary = str(manual.get("primary_emotion", primary))
+        con.execute(
+            """
+            DELETE FROM face_evidence
+            WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id=?
+              AND source=?
+            """,
+            (ident, signature, outfit, face_id, source),
         )
         con.execute(
             """
@@ -397,14 +415,23 @@ def persist_visual_face_labels(
                 face_id,
                 source,
                 json.dumps(item, ensure_ascii=False),
-                primary,
-                primary,
+                effective_primary,
+                effective_primary,
             ),
         )
     con.commit()
+    failures = [
+        {
+            "face_id": str(item["face_id"]),
+            "error": str(item.get("error") or "vision_label_failed"),
+        }
+        for item in records
+        if item.get("failed")
+    ]
     return {
-        "saved_count": len(records),
-        "failed_count": 0,
+        "saved_count": len(records) - len(failures),
+        "failed_count": len(failures),
+        "failures": failures,
         "completed_at": completed_at,
     }
 
@@ -558,6 +585,21 @@ def update_visual_face_label(
     if cursor.rowcount != 1:
         con.rollback()
         raise ValueError("标注版本已更新，请刷新后重试")
+    con.execute(
+        """
+        UPDATE face_visual_label
+        SET manual_json=?, reviewed=?, version=version+1, updated_at=?
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id=?
+          AND model!=?
+        """,
+        (
+            json.dumps(manual, ensure_ascii=False, separators=(",", ":")),
+            int(bool(manual)),
+            updated_at,
+            *scope,
+            str(row["model"]),
+        ),
+    )
     effective_primary = str(
         manual.get("primary_emotion", row["primary_emotion"] or "")
     )
@@ -565,9 +607,10 @@ def update_visual_face_label(
         """
         UPDATE face_evidence
         SET label=?, label_cn=?
-        WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id=? AND source=?
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id=?
+          AND source LIKE 'vision:%'
         """,
-        (effective_primary, effective_primary, *scope, f"vision:{row['model']}"),
+        (effective_primary, effective_primary, *scope),
     )
     con.commit()
     refreshed = con.execute(

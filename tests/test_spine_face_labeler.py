@@ -1,4 +1,5 @@
 import io
+import json
 from pathlib import Path
 
 from PIL import Image
@@ -54,6 +55,23 @@ def _face(tmp_path: Path, face_id: str, color: tuple[int, int, int]) -> Rendered
     Image.new("RGBA", (256, 256), (*color, 255)).save(portrait)
     Image.new("RGBA", (256, 256), (*color, 255)).save(head)
     return RenderedFace(face_id=face_id, portrait_path=portrait, head_path=head)
+
+
+def _vision_label(face_id: str, *, emotion: str = "平静", confidence: float = 0.9):
+    return {
+        "face_id": face_id,
+        "primary_emotion": emotion,
+        "secondary_emotions": [],
+        "valence": "neutral",
+        "arousal": "low",
+        "eyes": "自然睁眼",
+        "brows": "自然",
+        "mouth": "闭嘴",
+        "blush": False,
+        "tears": False,
+        "confidence": confidence,
+        "description_cn": emotion,
+    }
 
 
 def test_visual_labeler_sends_one_numbered_sheet_and_keeps_exact_face_ids(tmp_path):
@@ -175,14 +193,151 @@ def test_visual_labeler_rejects_incomplete_direct_object_after_retries(tmp_path)
 
     provider = IgnoringSchemaProvider()
 
-    with pytest.raises(ValueError, match="视觉模型连续"):
-        label_face_images(
-            provider,
-            [_face(tmp_path, "00", (220, 220, 220))],
-            max_attempts=2,
-        )
+    labels = label_face_images(
+        provider,
+        [_face(tmp_path, "00", (220, 220, 220))],
+        max_attempts=2,
+    )
 
     assert len(provider.calls) == 2
+    assert labels == [{
+        "face_id": "00",
+        "head_path": str(tmp_path / "00-head.png"),
+        "failed": True,
+        "error": "vision_label_failed",
+    }]
+
+
+def test_visual_labeler_preserves_valid_batch_items_and_falls_back_per_bad_face(
+    tmp_path,
+):
+    class PartialBatchProvider(FakeVisionProvider):
+        def complete_json_vision(self, system, images, user, schema):
+            self.calls.append((system, images, user, schema))
+            ids = images[0][0].split(":", 1)[1].split(",")
+            if len(ids) > 1:
+                incomplete = _vision_label("02")
+                incomplete.pop("mouth")
+                return {"items": [
+                    _vision_label("00", emotion="合法批次结果"),
+                    _vision_label("01"),
+                    _vision_label("01", emotion="重复结果"),
+                    incomplete,
+                ]}
+            if ids == ["01"]:
+                return {"items": [_vision_label("01", emotion="单图恢复")]}
+            if ids == ["03"]:
+                return {"items": [_vision_label("03", emotion="缺失项恢复")]}
+            raise llm.LLMError("single-face endpoint failed")
+
+    provider = PartialBatchProvider()
+    faces = [
+        _face(tmp_path, f"{index:02d}", (180, 80 + index * 20, 120))
+        for index in range(4)
+    ]
+
+    labels = label_face_images(provider, faces, max_attempts=2)
+
+    assert [call[1][0][0] for call in provider.calls] == [
+        "编号九宫格:00,01,02,03",
+        "编号九宫格:01",
+        "编号九宫格:02",
+        "编号九宫格:02",
+        "编号九宫格:03",
+    ]
+    assert labels[0]["primary_emotion"] == "合法批次结果"
+    assert labels[1]["primary_emotion"] == "单图恢复"
+    assert labels[2] == {
+        "face_id": "02",
+        "head_path": str(tmp_path / "02-head.png"),
+        "failed": True,
+        "error": "vision_label_failed",
+    }
+    assert labels[3]["primary_emotion"] == "缺失项恢复"
+
+    con = assetdb.connect(tmp_path / "assets.db")
+    result = persist_visual_face_labels(
+        con,
+        ident="generic-character",
+        spine_signature="generic-skeleton",
+        outfit_key="generic-outfit",
+        model="vision-model",
+        labels=labels,
+    )
+
+    assert result["saved_count"] == 3
+    assert result["failed_count"] == 1
+    assert result["failures"] == [{
+        "face_id": "02", "error": "vision_label_failed",
+    }]
+    evidence = con.execute(
+        """
+        SELECT face_id,label,raw FROM face_evidence
+        WHERE ident='generic-character' AND source='vision:vision-model'
+        ORDER BY face_id
+        """
+    ).fetchall()
+    assert [(row["face_id"], row["label"]) for row in evidence] == [
+        ("00", "合法批次结果"), ("01", "单图恢复"),
+        ("03", "缺失项恢复"),
+    ]
+
+
+def test_visual_labeler_keeps_valid_low_confidence_result_when_review_fails(tmp_path):
+    class FailedReviewProvider(FakeVisionProvider):
+        def complete_json_vision(self, system, images, user, schema):
+            ids = images[0][0].split(":", 1)[1].split(",")
+            if len(ids) == 1:
+                raise llm.LLMError("review failed")
+            self.calls.append((system, images, user, schema))
+            return {"items": [
+                _vision_label(face_id, emotion="可用结果", confidence=0.4)
+                for face_id in ids
+            ]}
+
+    provider = FailedReviewProvider()
+    faces = [
+        _face(tmp_path, f"{index:02d}", (180, 100, 120))
+        for index in range(2)
+    ]
+
+    labels = label_face_images(provider, faces, max_attempts=1)
+
+    assert [item["primary_emotion"] for item in labels] == ["可用结果", "可用结果"]
+    assert all(not item.get("failed") for item in labels)
+
+
+def test_failed_rerun_preserves_last_saved_label_and_effective_evidence(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    scope = {
+        "ident": "generic-character",
+        "spine_signature": "generic-skeleton",
+        "outfit_key": "generic-outfit",
+        "model": "vision-model",
+    }
+    label = _vision_label("face-x", emotion="上次成功结果")
+    persist_visual_face_labels(con, **scope, labels=[label])
+
+    result = persist_visual_face_labels(con, **scope, labels=[{
+        "face_id": "face-x",
+        "failed": True,
+        "error": "vision_label_failed",
+    }])
+
+    assert result["saved_count"] == 0
+    assert result["failed_count"] == 1
+    assert list_visual_face_labels(con, **{key: scope[key] for key in (
+        "ident", "spine_signature", "outfit_key",
+    )})[0]["effective"]["primary_emotion"] == "上次成功结果"
+    evidence = con.execute(
+        """
+        SELECT label,label_cn FROM face_evidence
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id='face-x'
+          AND source='vision:vision-model'
+        """,
+        (scope["ident"], scope["spine_signature"], scope["outfit_key"]),
+    ).fetchone()
+    assert tuple(evidence) == ("上次成功结果", "上次成功结果")
 
 
 def test_visual_labels_are_scoped_to_exact_skeleton_and_preferred_over_name_parser(tmp_path):
@@ -310,6 +465,66 @@ def test_manual_visual_label_override_survives_ai_rerun(tmp_path):
     assert current["effective"]["brows"] == "眉头紧锁"
     assert current["reviewed"] is True
     assert current["version"] > edited["version"]
+
+
+def test_manual_visual_label_override_survives_different_model_rerun_and_syncs_evidence(
+    tmp_path,
+):
+    con = assetdb.connect(tmp_path / "assets.db")
+    scope = {
+        "ident": "generic-character",
+        "spine_signature": "generic-skeleton",
+        "outfit_key": "generic-outfit",
+    }
+    first = _vision_label("face-x", emotion="模型 A 判断")
+    first["head_path"] = str(tmp_path / "face-x.png")
+    persist_visual_face_labels(con, **scope, model="model-a", labels=[first])
+    original = list_visual_face_labels(con, **scope)[0]
+    update_visual_face_label(
+        con,
+        **scope,
+        face_id="face-x",
+        patch={"primary_emotion": "人工确认", "brows": "眉头紧锁"},
+        expected_version=original["version"],
+    )
+
+    second = _vision_label("face-x", emotion="模型 B 判断")
+    second["brows"] = "眉毛上扬"
+    second["head_path"] = str(tmp_path / "face-x-new.png")
+    persist_visual_face_labels(con, **scope, model="model-b", labels=[second])
+
+    current = list_visual_face_labels(con, **scope)[0]
+    assert current["model"] == "model-b"
+    assert current["ai"]["primary_emotion"] == "模型 B 判断"
+    assert current["effective"]["primary_emotion"] == "人工确认"
+    assert current["effective"]["brows"] == "眉头紧锁"
+    assert current["reviewed"] is True
+    rows = con.execute(
+        """
+        SELECT model,manual_json FROM face_visual_label
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id=?
+        ORDER BY model
+        """,
+        (*scope.values(), "face-x"),
+    ).fetchall()
+    assert [row["model"] for row in rows] == ["model-a", "model-b"]
+    assert all(
+        json.loads(row["manual_json"])["primary_emotion"] == "人工确认"
+        for row in rows
+    )
+    evidence = con.execute(
+        """
+        SELECT source,label,label_cn FROM face_evidence
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id=?
+          AND source LIKE 'vision:%'
+        ORDER BY source
+        """,
+        (*scope.values(), "face-x"),
+    ).fetchall()
+    assert [tuple(row) for row in evidence] == [
+        ("vision:model-a", "人工确认", "人工确认"),
+        ("vision:model-b", "人工确认", "人工确认"),
+    ]
 
 
 def test_manual_visual_label_update_rejects_stale_version_and_unknown_fields(tmp_path):
