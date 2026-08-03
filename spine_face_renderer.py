@@ -26,7 +26,7 @@ _SOURCE_SUFFIXES = {".skel", ".atlas", ".png"}
 _IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 _FRAME_SUFFIX = re.compile(r"_(\d+)\.png$", re.IGNORECASE)
 _CACHE_VERSION = "v6"
-_RENDER_PROFILE = "dotted-attachment-path-v6"
+_RENDER_PROFILE = "shared-expression-focus-v7"
 _HEAD_PREVIEW_SIZE = 768
 _FINAL_RENDER_FRAME = 8
 
@@ -243,6 +243,139 @@ def crop_head_preview(
     destination.parent.mkdir(parents=True, exist_ok=True)
     preview.save(destination, format="PNG", optimize=True)
     return destination
+
+
+def _square_box(
+    center_x: float,
+    center_y: float,
+    side: float,
+) -> tuple[int, int, int, int]:
+    side = max(1, round(side))
+    left = round(center_x - side / 2)
+    top = round(center_y - side / 2)
+    return left, top, left + side, top + side
+
+
+def _upper_alpha_crop(image: Image.Image) -> tuple[int, int, int, int]:
+    alpha_bbox = image.getchannel("A").point(
+        lambda value: 255 if value >= 8 else 0
+    ).getbbox()
+    if not alpha_bbox:
+        raise ValueError("Rendered portrait is empty")
+    left, top, right, bottom = alpha_bbox
+    visible_width = right - left
+    head_height = max(1, round((bottom - top) * 0.34))
+    side = max(visible_width, head_height)
+    return _square_box((left + right) / 2, top + side / 2, side)
+
+
+def derive_shared_face_crop(
+    paths: Sequence[str | Path],
+) -> tuple[int, int, int, int]:
+    """Find one image-driven face crop shared by aligned expressions."""
+    images: list[Image.Image] = []
+    for path in paths:
+        try:
+            image = Image.open(path).convert("RGBA")
+            image.load()
+        except (OSError, ValueError):
+            continue
+        if image.getchannel("A").getbbox():
+            images.append(image)
+    if not images:
+        raise ValueError("No usable rendered portraits")
+    fallback = _upper_alpha_crop(images[0])
+    if len(images) < 2 or any(image.size != images[0].size for image in images[1:]):
+        return fallback
+
+    width, height = images[0].size
+    analysis_scale = min(1.0, 384 / max(width, height))
+    analysis_size = (
+        max(1, round(width * analysis_scale)),
+        max(1, round(height * analysis_scale)),
+    )
+
+    def flattened(image: Image.Image) -> Image.Image:
+        if image.size != analysis_size:
+            image = image.resize(analysis_size, Image.Resampling.LANCZOS)
+        background = Image.new("RGBA", analysis_size, (224, 226, 230, 255))
+        background.alpha_composite(image)
+        return background.convert("RGB")
+
+    base = flattened(images[0])
+    difference = Image.new("L", analysis_size, 0)
+    for image in images[1:]:
+        delta = ImageChops.difference(base, flattened(image)).convert("L")
+        difference = ImageChops.lighter(difference, delta)
+    change_bbox = difference.point(
+        lambda value: 255 if value >= 12 else 0
+    ).getbbox()
+    if not change_bbox:
+        return fallback
+
+    scale_x = width / analysis_size[0]
+    scale_y = height / analysis_size[1]
+    left, top, right, bottom = (
+        change_bbox[0] * scale_x,
+        change_bbox[1] * scale_y,
+        change_bbox[2] * scale_x,
+        change_bbox[3] * scale_y,
+    )
+    change_width = right - left
+    change_height = bottom - top
+    alpha_bbox = images[0].getchannel("A").point(
+        lambda value: 255 if value >= 8 else 0
+    ).getbbox()
+    visible_width = (alpha_bbox[2] - alpha_bbox[0]) if alpha_bbox else width
+    side = max(
+        change_width * 2.2,
+        change_height * 2.8,
+        visible_width * 0.55,
+    )
+    center_x = (left + right) / 2
+    center_y = (top + bottom) / 2 + side * 0.03
+    return _square_box(center_x, center_y, side)
+
+
+def _crop_with_transparent_padding(
+    image: Image.Image,
+    box: tuple[int, int, int, int],
+) -> Image.Image:
+    left, top, right, bottom = box
+    side = right - left
+    canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    source_box = (
+        max(0, left),
+        max(0, top),
+        min(image.width, right),
+        min(image.height, bottom),
+    )
+    if source_box[2] > source_box[0] and source_box[3] > source_box[1]:
+        canvas.alpha_composite(
+            image.crop(source_box),
+            (source_box[0] - left, source_box[1] - top),
+        )
+    return canvas
+
+
+def crop_face_previews(
+    faces: Sequence[RenderedFace],
+    *,
+    size: int = _HEAD_PREVIEW_SIZE,
+) -> tuple[RenderedFace, ...]:
+    """Write aligned previews using one crop for the complete expression set."""
+    ordered = tuple(faces)
+    if not ordered:
+        return ()
+    box = derive_shared_face_crop([face.portrait_path for face in ordered])
+    for face in ordered:
+        image = Image.open(face.portrait_path).convert("RGBA")
+        preview = _crop_with_transparent_padding(image, box).resize(
+            (size, size), Image.Resampling.LANCZOS
+        )
+        face.head_path.parent.mkdir(parents=True, exist_ok=True)
+        preview.save(face.head_path, format="PNG", optimize=True)
+    return ordered
 
 
 def parse_atlas_metadata(atlas_path: str | Path) -> dict[str, dict]:
@@ -923,7 +1056,7 @@ def render_face_variations(
     def render_one(face_id: str) -> RenderedFace:
         portrait = portraits / f"{face_id}.png"
         head = heads / f"{face_id}.png"
-        if portrait.exists() and head.exists() and is_textured_render(portrait):
+        if portrait.exists() and is_textured_render(portrait):
             return RenderedFace(
                 face_id=face_id, portrait_path=portrait, head_path=head
             )
@@ -987,7 +1120,6 @@ def render_face_variations(
                 f"{suffix}"
             )
         shutil.copy2(accepted, portrait)
-        crop_head_preview(portrait, head)
         return RenderedFace(
             face_id=face_id, portrait_path=portrait, head_path=head
         )
@@ -1032,6 +1164,8 @@ def render_face_variations(
                     if progress:
                         progress(face_id, len(completed), total)
             rendered = [completed[face_id] for face_id in selected_ids]
+
+    rendered = list(crop_face_previews(rendered, size=_HEAD_PREVIEW_SIZE))
 
     patched_json = work / f"render-warmup-{_CACHE_VERSION}.json"
     skeleton_data = json.loads(patched_json.read_text(encoding="utf-8"))

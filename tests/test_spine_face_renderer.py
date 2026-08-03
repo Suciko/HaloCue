@@ -12,6 +12,8 @@ from spine_face_renderer import (
     _run_spine,
     bundle_signature,
     crop_head_preview,
+    crop_face_previews,
+    derive_shared_face_crop,
     discover_renderable_face_ids,
     extend_face_animation_duration,
     is_textured_render,
@@ -184,6 +186,66 @@ def test_default_head_preview_is_large_enough_for_visual_labeling(tmp_path):
     crop_head_preview(source, output)
 
     assert Image.open(output).size == (768, 768)
+
+
+def _aligned_portrait(path, *, mark=None, size=(240, 400)):
+    image = Image.new("RGBA", size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((55, 18, 185, 158), fill=(230, 210, 200, 255))
+    draw.rectangle((38, 145, 202, 390), fill=(70, 100, 160, 255))
+    if mark:
+        x, y = mark
+        draw.ellipse((x - 5, y - 3, x + 5, y + 3), fill=(210, 35, 70, 255))
+    image.save(path)
+    return path
+
+
+def test_shared_face_crop_focuses_aligned_expression_differences(tmp_path):
+    paths = [
+        _aligned_portrait(tmp_path / "a.png", mark=(92, 82)),
+        _aligned_portrait(tmp_path / "b.png", mark=(144, 88)),
+        _aligned_portrait(tmp_path / "c.png", mark=(118, 108)),
+    ]
+
+    box = derive_shared_face_crop(paths)
+
+    assert box[2] - box[0] == box[3] - box[1]
+    assert box[2] - box[0] < 192
+    for x, y in ((92, 82), (144, 88), (118, 108)):
+        assert box[0] <= x < box[2]
+        assert box[1] <= y < box[3]
+
+
+def test_shared_face_crop_falls_back_for_identical_or_mismatched_portraits(tmp_path):
+    identical = [
+        _aligned_portrait(tmp_path / "same-a.png"),
+        _aligned_portrait(tmp_path / "same-b.png"),
+    ]
+    mismatched = [
+        _aligned_portrait(tmp_path / "wide.png", size=(240, 400)),
+        _aligned_portrait(tmp_path / "narrow.png", size=(180, 300)),
+    ]
+
+    for box in (derive_shared_face_crop(identical), derive_shared_face_crop(mismatched)):
+        assert box[2] > box[0]
+        assert box[3] > box[1]
+        assert box[2] - box[0] == box[3] - box[1]
+
+
+def test_face_preview_batch_uses_one_shared_crop_for_every_expression(tmp_path):
+    faces = []
+    for face_id, mark in (("a", (92, 82)), ("b", (144, 88))):
+        portrait = _aligned_portrait(tmp_path / f"{face_id}-portrait.png", mark=mark)
+        faces.append(spine_face_renderer.RenderedFace(
+            face_id, portrait, tmp_path / f"{face_id}-head.png"
+        ))
+
+    result = crop_face_previews(faces, size=256)
+
+    assert tuple(face.face_id for face in result) == ("a", "b")
+    heads = [Image.open(face.head_path).convert("RGBA") for face in result]
+    assert all(head.size == (256, 256) for head in heads)
+    assert all(head.getbbox() == heads[0].getbbox() for head in heads)
 
 
 def test_unpacked_region_images_are_restored_to_skeleton_attachment_size(tmp_path):
