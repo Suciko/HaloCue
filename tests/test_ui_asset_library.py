@@ -281,6 +281,47 @@ vm.runInNewContext(source,context);
     }
 
 
+def test_face_workspace_loads_persisted_labels_without_an_in_memory_job():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+const nodes={};
+function node(id){
+  let own='',classes=new Set();
+  return {id:id||'',children:[],dataset:{},hidden:false,disabled:false,src:'',
+    classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},
+    appendChild(child){this.children.push(child);return child},insertBefore(child){this.children.unshift(child);return child},addEventListener(){},setAttribute(){},removeAttribute(key){this[key]=''},focus(){},closest(){return null},querySelector(){return null},
+    set textContent(value){own=String(value||'');this.children=[]},get textContent(){return own+this.children.map(child=>child.textContent||'').join('')}
+  };
+}
+['faceWorkspaceBackdrop','faceWorkspace','faceWorkspaceCharacter','faceWorkspacePhase','faceWorkspaceProgress','faceWorkspaceResult','faceWorkspaceForceVision','faceWorkspaceStart','faceWorkspaceStatus','faceWorkspaceSheet','faceWorkspaceLabels','faceWorkspaceLog'].forEach(id=>nodes[id]=node(id));
+const workbenchRoot=node('assetWorkbench');
+const document={activeElement:null,getElementById:id=>nodes[id]||null,createElement:tag=>node(tag),addEventListener(){}};
+const requests=[];
+const window={StoryUI:{},AssetWorkbench:{root:workbenchRoot,selectedKey:'character:626652156',list:{scrollTop:0},refresh:async()=>{},restoreSelection(){}},Api:{request:async path=>{
+  requests.push(path);
+  if(path.startsWith('/api/assets/faces/labels')) return {saved_count:1,faces:[{face_id:'00',version:1,effective:{primary_emotion:'平静',confidence:.9,eyes:'睁眼'}}]};
+  return {running:false,done:false,ident:''};
+}}};
+vm.runInNewContext(source,{window,document,Promise,Error,console,setTimeout(){return 1},clearTimeout(){},encodeURIComponent,setImmediate});
+(async()=>{
+  window.FaceWorkspace.open({kind:'character',aa_key:'626652156',sha256:'digest',name:'凯伊（约会服）'},node('trigger'));
+  await new Promise(resolve=>setImmediate(resolve));
+  await new Promise(resolve=>setImmediate(resolve));
+  console.log(JSON.stringify({requests,text:nodes.faceWorkspaceLabels.textContent,status:nodes.faceWorkspaceStatus.textContent}));
+})();
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library_faces.js")],
+        text=True,
+        encoding="utf-8",
+    )
+    result = json.loads(output)
+
+    assert sum(path.startswith("/api/assets/faces/labels") for path in result["requests"]) == 1
+    assert "平静" in result["text"]
+    assert "已保存到数据库：1 个表情" in result["status"]
+
+
 def test_face_workspace_keeps_polling_while_another_character_job_runs():
     script = r'''
 const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');

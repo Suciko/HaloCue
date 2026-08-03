@@ -32,6 +32,8 @@
     this.returnState = null;
     this.faces = [];
     this.labelsLoadedKey = '';
+    this.labelRequest = null;
+    this.labelRequestKey = '';
     this.bind();
   }
 
@@ -87,6 +89,7 @@
     clear(this.labels);
     if (this.startButton) this.startButton.disabled = true;
     if (this.root.focus) this.root.focus();
+    this.loadLabels();
     this.refresh();
   };
 
@@ -162,14 +165,30 @@
 
   FaceWorkspace.prototype.loadLabels = async function () {
     if (!this.selected) return;
+    const generation = this.generation;
+    const requestKey = String(this.selected.aa_key || '') + ':' + String(this.selected.sha256 || '');
+    if (this.labelRequest && this.labelRequestKey === requestKey) return this.labelRequest;
     const query = '?aa_key=' + encodeURIComponent(this.selected.aa_key) + '&sha256=' + encodeURIComponent(this.selected.sha256 || '');
+    const request = exports.Api.request('/api/assets/faces/labels' + query);
+    this.labelRequest = request;
+    this.labelRequestKey = requestKey;
     try {
-      const payload = await exports.Api.request('/api/assets/faces/labels' + query);
+      const payload = await request;
+      const currentKey = this.selected
+        ? String(this.selected.aa_key || '') + ':' + String(this.selected.sha256 || '')
+        : '';
+      if (!this.isOpen() || generation !== this.generation || currentKey !== requestKey) return;
       this.faces = payload.faces || [];
       this.renderLabels(this.faces);
       if (payload.saved_count) this.status.textContent = '已保存到数据库：' + payload.saved_count + ' 个表情。';
     } catch (error) {
+      if (!this.isOpen() || generation !== this.generation) return;
       this.status.textContent = '标注结果读取失败，请刷新后重试。';
+    } finally {
+      if (this.labelRequest === request) {
+        this.labelRequest = null;
+        this.labelRequestKey = '';
+      }
     }
   };
 
@@ -207,7 +226,7 @@
     }
     if (!belongsToSelected) {
       this.startButton.disabled = false;
-      this.phase.textContent = '等待开始'; this.progress.textContent = '—'; this.result.textContent = '尚未生成'; this.renderLabels([]); return false;
+      this.phase.textContent = '等待开始'; this.progress.textContent = '—'; this.result.textContent = '尚未生成'; return false;
     }
     this.startButton.disabled = Boolean(job.running);
     this.phase.textContent = job.phase || (job.running ? '处理中' : '等待开始');
