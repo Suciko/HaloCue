@@ -104,8 +104,9 @@
       return [details.resolution, labelSummary(details.labels)].filter(Boolean).join(' · ') || '背景信息待检测';
     }
     if (item.kind === 'character') {
-      const files = Number(details.file_count || 0), faces = Number(details.face_count || 0);
-      return (files ? files + ' 个文件' : '完整度待检测') + (faces ? ' · ' + faces + ' 个表情' : '');
+      const files = details.file_count, faces = details.face_count;
+      return (files === null || files === undefined ? '文件统计中' : Number(files) + ' 个文件') +
+        ' · ' + (faces === null || faces === undefined ? '表情统计中' : Number(faces) + ' 个表情');
     }
     if (item.kind === 'sound') {
       const duration = Number(details.duration || 0);

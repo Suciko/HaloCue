@@ -44,6 +44,18 @@ def test_material_workbench_is_full_screen_and_loads_split_csp_safe_modules():
     assert "onchange=" not in html
 
 
+def test_face_workspace_uses_database_backed_editable_cards():
+    html = (HERE / "ui.html").read_text(encoding="utf-8")
+    source = (HERE / "js" / "library_faces.js").read_text(encoding="utf-8")
+    css = (HERE / "css" / "layout.css").read_text(encoding="utf-8")
+
+    assert 'class="face-workspace-cards"' in html
+    assert "/api/assets/faces/labels" in source
+    assert "已保存到数据库" in source
+    assert "face-workspace-card" in source
+    assert "grid-template-columns:repeat(4" in css
+
+
 def test_asset_workbench_opens_full_screen_sanitizes_context_and_restores_focus():
     script = r'''
 const fs=require('fs'),vm=require('vm');

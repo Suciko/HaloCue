@@ -76,8 +76,9 @@
       const labels = labelSummary(details.labels);
       if (labels) facts.appendChild(make('span', '', labels));
     } else if (item.kind === 'character') {
-      facts.appendChild(make('span', '', Number(details.file_count || 0) + ' 个骨骼文件'));
-      facts.appendChild(make('span', '', Number(details.face_count || 0) + ' 个表情'));
+      facts.appendChild(make('span', '', details.file_count === null || details.file_count === undefined ? '骨骼文件统计中' : Number(details.file_count) + ' 个骨骼文件'));
+      facts.appendChild(make('span', '', details.face_count === null || details.face_count === undefined ? '表情统计中' : Number(details.face_count) + ' 个表情'));
+      if (Number(details.labeled_count || 0)) facts.appendChild(make('span', '', Number(details.labeled_count) + ' 个标注已保存'));
     } else if (item.kind === 'sound') {
       const duration = Number(details.duration || 0);
       facts.appendChild(make('span', '', duration > 0 ? duration.toFixed(2) + ' 秒' : '时长待检测'));

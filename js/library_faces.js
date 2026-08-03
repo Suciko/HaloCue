@@ -30,6 +30,8 @@
     this.pollSequence = 0;
     this.trigger = null;
     this.returnState = null;
+    this.faces = [];
+    this.labelsLoadedKey = '';
     this.bind();
   }
 
@@ -42,6 +44,9 @@
       if (!target || target.disabled) return;
       if (target.dataset.faceAction === 'close') self.close();
       else if (target.dataset.faceAction === 'start') self.start();
+      else if (target.dataset.faceAction === 'edit') self.toggleEditor(target.dataset.faceId);
+      else if (target.dataset.faceAction === 'save') self.saveFace(target.dataset.faceId);
+      else if (target.dataset.faceAction === 'restore-ai') self.restoreAi(target.dataset.faceId);
     });
   };
 
@@ -75,6 +80,8 @@
     this.result.textContent = '尚未生成';
     this.status.textContent = '表情渲染和 AI 语义标注在这里单独执行，不影响剧本生成。';
     this.log.textContent = '';
+    this.faces = [];
+    this.labelsLoadedKey = '';
     this.sheet.hidden = true;
     this.sheet.removeAttribute('src');
     clear(this.labels);
@@ -110,17 +117,85 @@
   FaceWorkspace.prototype.renderLabels = function (faces) {
     clear(this.labels);
     if (!faces || !faces.length) {
-      this.labels.appendChild(make('p', 'face-workspace-empty', '等待渲染完成后显示表情语义。'));
+      this.labels.appendChild(make('p', 'face-workspace-empty', '尚无已保存的表情标注。'));
       return;
     }
     faces.forEach(function (face) {
-      const row = make('article', 'face-workspace-label');
-      row.appendChild(make('b', '', face.face_id || '—'));
-      const words = [face.primary_emotion].concat(face.semantic_labels || []).filter(Boolean);
-      row.appendChild(make('span', '', words.length ? Array.from(new Set(words)).join(' · ') : '未命名'));
-      this.labels.appendChild(row);
+      const value = face.effective || face;
+      const card = make('article', 'face-workspace-card');
+      card.dataset.faceId = face.face_id || '';
+      if (face.preview_url) {
+        const image = document.createElement('img'); image.src = face.preview_url;
+        image.alt = '表情 ' + face.face_id; image.loading = 'lazy'; card.appendChild(image);
+      }
+      const body = make('div', 'face-workspace-card-body');
+      const heading = make('header', '');
+      heading.appendChild(make('b', '', '表情 ' + (face.face_id || '—')));
+      heading.appendChild(make('span', 'face-confidence', Math.round(Number(value.confidence || 0) * 100) + '%'));
+      body.appendChild(heading);
+      body.appendChild(make('h4', '', value.primary_emotion || '未命名'));
+      body.appendChild(make('p', 'face-description', value.description_cn || '暂无说明'));
+      const details = make('dl', 'face-detail-list');
+      [['眼睛', value.eyes], ['眉毛', value.brows], ['嘴部', value.mouth], ['脸红', value.blush ? '有' : '无'], ['泪水', value.tears ? '有' : '无']].forEach(function (pair) {
+        details.appendChild(make('dt', '', pair[0])); details.appendChild(make('dd', '', pair[1] || '未识别'));
+      });
+      body.appendChild(details);
+      const actions = make('div', 'face-card-actions');
+      const edit = make('button', 'ghost', '修改标注'); edit.type = 'button'; edit.dataset.faceAction = 'edit'; edit.dataset.faceId = face.face_id; actions.appendChild(edit);
+      if (face.reviewed) actions.appendChild(make('span', 'face-manual-mark', '人工修改'));
+      body.appendChild(actions);
+      const editor = make('div', 'face-card-editor'); editor.hidden = true;
+      [['primary_emotion', '主情绪'], ['eyes', '眼睛'], ['brows', '眉毛'], ['mouth', '嘴部'], ['description_cn', '说明']].forEach(function (entry) {
+        const label = make('label', '', entry[1]); const input = document.createElement(entry[0] === 'description_cn' ? 'textarea' : 'input');
+        input.dataset.faceField = entry[0]; input.value = value[entry[0]] || ''; label.appendChild(input); editor.appendChild(label);
+      });
+      [['blush', '脸红'], ['tears', '泪水']].forEach(function (entry) {
+        const label = make('label', 'face-check', entry[1]); const input = document.createElement('input'); input.type = 'checkbox'; input.checked = Boolean(value[entry[0]]); input.dataset.faceField = entry[0]; label.insertBefore(input, label.firstChild); editor.appendChild(label);
+      });
+      const save = make('button', '', '保存'); save.type = 'button'; save.dataset.faceAction = 'save'; save.dataset.faceId = face.face_id; editor.appendChild(save);
+      if (face.reviewed) { const restore = make('button', 'ghost', '恢复 AI 原值'); restore.type = 'button'; restore.dataset.faceAction = 'restore-ai'; restore.dataset.faceId = face.face_id; editor.appendChild(restore); }
+      editor.appendChild(make('span', 'face-save-state', ''));
+      body.appendChild(editor); card.appendChild(body); this.labels.appendChild(card);
     }, this);
   };
+
+  FaceWorkspace.prototype.loadLabels = async function () {
+    if (!this.selected) return;
+    const query = '?aa_key=' + encodeURIComponent(this.selected.aa_key) + '&sha256=' + encodeURIComponent(this.selected.sha256 || '');
+    try {
+      const payload = await exports.Api.request('/api/assets/faces/labels' + query);
+      this.faces = payload.faces || [];
+      this.renderLabels(this.faces);
+      if (payload.saved_count) this.status.textContent = '已保存到数据库：' + payload.saved_count + ' 个表情。';
+    } catch (error) {
+      this.status.textContent = '标注结果读取失败，请刷新后重试。';
+    }
+  };
+
+  FaceWorkspace.prototype.card = function (faceId) {
+    return this.labels && this.labels.querySelector ? this.labels.querySelector('[data-face-id="' + String(faceId).replace(/"/g, '\\"') + '"]') : null;
+  };
+
+  FaceWorkspace.prototype.toggleEditor = function (faceId) {
+    const card = this.card(faceId), editor = card && card.querySelector('.face-card-editor');
+    if (editor) editor.hidden = !editor.hidden;
+  };
+
+  FaceWorkspace.prototype.saveFace = async function (faceId, restore) {
+    const card = this.card(faceId), face = this.faces.find(function (item) { return String(item.face_id) === String(faceId); });
+    if (!card || !face) return;
+    const patch = {};
+    if (restore) Object.keys(face.manual || {}).forEach(function (key) { patch[key] = null; });
+    else Array.from(card.querySelectorAll('[data-face-field]')).forEach(function (input) { patch[input.dataset.faceField] = input.type === 'checkbox' ? Boolean(input.checked) : input.value.trim(); });
+    const state = card.querySelector('.face-save-state'); if (state) state.textContent = '保存中…';
+    try {
+      const result = await exports.Api.request('/api/assets/faces/labels/' + encodeURIComponent(faceId), exports.Api.json('PATCH', {aa_key:this.selected.aa_key,sha256:this.selected.sha256,version:face.version,patch:patch}));
+      this.faces = this.faces.map(function (item) { return String(item.face_id) === String(faceId) ? result.face : item; });
+      this.renderLabels(this.faces); this.status.textContent = '已保存到数据库：表情 ' + faceId + '，' + (result.saved_at || '刚刚') + '。';
+    } catch (error) { if (state) state.textContent = '保存失败，请刷新后重试。'; }
+  };
+
+  FaceWorkspace.prototype.restoreAi = function (faceId) { return this.saveFace(faceId, true); };
 
   FaceWorkspace.prototype.renderJob = function (job) {
     const selected = this.selected;
@@ -139,13 +214,17 @@
     this.progress.textContent = total > 0 ? current + ' / ' + total : (job.running ? '处理中' : '—');
     const result = job.result || {};
     if (job.done && job.ok) {
-      const rendered = Number(result.rendered_count || 0), labeled = Number(result.labeled_count || 0);
-      this.result.textContent = rendered + ' 个差分' + (labeled ? ' · ' + labeled + ' 个 AI 标注' : '');
+      const rendered = Number(result.rendered_count || 0), labeled = Number(result.labeled_count || 0), saved = Number(result.saved_count || 0);
+      this.result.textContent = rendered + ' 个差分' + (labeled ? ' · ' + labeled + ' 个 AI 标注' : '') + (saved ? ' · ' + saved + ' 个已保存' : '');
     } else if (job.done && !job.ok) this.result.textContent = '处理失败';
     else this.result.textContent = '处理中';
     this.status.textContent = job.message || (job.error ? '表情标注失败，请检查 Spine 配置与骨骼完整性。' : '');
     this.log.textContent = (job.log || []).join('\n');
-    this.renderLabels(result.semantic_faces || []);
+    if (!this.faces.length) this.renderLabels(result.semantic_faces || []);
+    if (job.done && job.ok && Number(result.saved_count || result.labeled_count || 0)) {
+      const key = [job.ident, result.completed_at || result.saved_count || result.labeled_count].join(':');
+      if (this.labelsLoadedKey !== key) { this.labelsLoadedKey = key; this.loadLabels(); }
+    }
     if (job.contact_sheet_available && job.done && job.ok) {
       this.sheet.hidden = false;
       this.sheet.src = '/api/assets/faces/contact-sheet?ts=' + Date.now();
