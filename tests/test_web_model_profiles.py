@@ -247,7 +247,6 @@ const nodes={
   '#modelMaxTokens':{value:'24000',style:{}},
   '#modelVision':{checked:true,style:{}},
   '#modelApiKey':{value:'session-value',style:{}},
-  '#modelSaveKey':{checked:true,style:{}},
 };
 const document={
   querySelector:s=>nodes[s]||(nodes[s]={value:'',checked:false,style:{},textContent:'',innerHTML:'',classList:{add(){},remove(){}},addEventListener(){}}),
@@ -269,7 +268,7 @@ console.log(JSON.stringify({
     result = json.loads(output)
 
     assert result["passwordField"] is True
-    assert result["credentialChoice"] is True
+    assert result["credentialChoice"] is False
     assert result["payload"] == {
         "id": "profile-7",
         "name": "My endpoint",
@@ -279,7 +278,6 @@ console.log(JSON.stringify({
         "max_tokens": 24000,
         "vision": True,
         "api_key": "session-value",
-        "save_key": True,
     }
 
 

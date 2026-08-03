@@ -515,9 +515,57 @@
   function chooseCurrentDirectory() { if (state.browseMode === 'character' && state.browseDirectory) $('#path').value = state.browseDirectory; closeModal('#mBrowse'); }
 
   function modelPayload() { return window.ModelSettings.profilePayload(document); }
-  function renderProfile(profile) { profile = profile || {}; $('#modelProfileId').value = profile.id || ''; $('#modelProfileName').value = profile.name || ''; $('#modelProvider').value = profile.provider || 'openai'; $('#modelBaseUrl').value = profile.base_url || ''; $('#modelName').value = profile.model || ''; $('#modelMaxTokens').value = profile.max_tokens || 16000; $('#modelVision').checked = profile.vision !== false; $('#modelApiKey').value = ''; $('#modelSaveKey').checked = profile.secret_status === 'saved'; $('#modelStatus').textContent = profile.id ? '配置已载入' : '请填写新配置'; }
-  async function loadProfiles(selected) { const result = await request('/api/llm/profiles'); state.profiles = result.profiles || []; const select = $('#modelProfileSelect'); clearElement(select); state.profiles.forEach(function (profile) { const option = document.createElement('option'); option.value = profile.id; option.textContent = profile.name + ' · ' + profile.model; select.appendChild(option); }); const id = selected || result.active_profile_id || (state.profiles[0] || {}).id || ''; select.value = id; renderProfile(state.profiles.find(function (profile) { return profile.id === id; })); }
-  async function saveProfile() { $('#modelStatus').textContent = '正在保存…'; try { const result = await post('/api/llm/profiles/save', modelPayload()); await loadProfiles(result.id); } catch (error) { $('#modelStatus').textContent = error.message; } }
+  function renderProfile(profile) {
+    profile = profile || {};
+    $('#modelProfileId').value = profile.id || '';
+    $('#modelProfileName').value = profile.name || '';
+    $('#modelProvider').value = profile.provider || 'openai';
+    $('#modelBaseUrl').value = profile.base_url || '';
+    $('#modelName').value = profile.model || '';
+    $('#modelMaxTokens').value = profile.max_tokens || 16000;
+    $('#modelVision').checked = profile.vision !== false;
+    const keyInput = $('#modelApiKey'), saved = profile.secret_status === 'saved';
+    keyInput.value = '';
+    keyInput.placeholder = saved ? '已安全保存；留空则保持不变' : '输入 API Key';
+    const badge = $('#modelSecretStatus');
+    badge.textContent = saved ? '密钥已安全保存' : '未配置密钥';
+    badge.dataset.status = saved ? 'saved' : 'missing';
+    $('#modelSecretHint').textContent = saved ? '留空不会覆盖现有密钥' : '输入后将由 Windows 安全保存';
+    $('#modelClearKey').disabled = !saved;
+    $('#modelStatus').textContent = profile.id ? '配置已载入，可以验证连接。' : '填写连接信息并保存配置。';
+  }
+  async function loadProfiles(selected) {
+    const result = await request('/api/llm/profiles'); state.profiles = result.profiles || [];
+    const select = $('#modelProfileSelect'); clearElement(select);
+    state.profiles.forEach(function (profile) { const option = document.createElement('option'); option.value = profile.id; option.textContent = profile.name + ' · ' + profile.model; select.appendChild(option); });
+    const id = selected || result.active_profile_id || (state.profiles[0] || {}).id || '';
+    select.value = id;
+    const profile = state.profiles.find(function (item) { return item.id === id; });
+    renderProfile(profile);
+    return profile;
+  }
+  async function saveProfile() {
+    $('#modelStatus').textContent = '正在安全保存配置…';
+    try {
+      const result = await post('/api/llm/profiles/save', modelPayload());
+      const profile = await loadProfiles(result.id);
+      $('#modelStatus').textContent = profile && profile.secret_status === 'saved'
+        ? '配置和密钥已保存，可以开始验证连接。'
+        : '配置已保存；使用接口前还需要填写 API Key。';
+    } catch (error) { $('#modelStatus').textContent = error.message; }
+  }
+  async function clearProfileKey() {
+    const payload = modelPayload();
+    if (!payload.id) return;
+    payload.api_key = '';
+    payload.clear_secret = true;
+    $('#modelStatus').textContent = '正在清除密钥…';
+    try {
+      const result = await post('/api/llm/profiles/save', payload);
+      await loadProfiles(result.id);
+      $('#modelStatus').textContent = '密钥已清除。';
+    } catch (error) { $('#modelStatus').textContent = error.message; }
+  }
   function applyModelPreset(preset) {
     $('#modelProvider').value = preset.provider;
     $('#modelBaseUrl').value = preset.base_url;
@@ -551,7 +599,10 @@
       $('#aaDataInfo').textContent = result.ok ? (result.e || '已保存') : (result.e || '保存失败');
     } catch (error) { $('#aaDataInfo').textContent = error.message || '保存失败'; }
   }
-  async function testProfile(mode) { try { const result = await post('/api/llm/test', {id: $('#modelProfileId').value, mode: mode}); $('#modelStatus').textContent = '连接成功：' + result.model; } catch (error) { $('#modelStatus').textContent = error.message; } }
+  async function testProfile(mode) {
+    $('#modelStatus').textContent = mode === 'vision' ? '正在验证图片识别…' : '正在验证文字连接…';
+    try { const result = await post('/api/llm/test', {id: $('#modelProfileId').value, mode: mode}); $('#modelStatus').textContent = (mode === 'vision' ? '图片识别可用：' : '文字连接可用：') + result.model; } catch (error) { $('#modelStatus').textContent = error.message; }
+  }
 
   async function saveSpineCli() {
     const path = $('#spineCliInput').value.trim();
@@ -895,13 +946,10 @@
     'save-spine-cli': saveSpineCli,
     'browse-aa-data': function (trigger) { if (settingsFilePicker) { activeFilePicker = settingsFilePicker; settingsFilePicker.openDirectory(trigger); } },
     'browse-spine-cli': function (trigger) { if (settingsFilePicker) { activeFilePicker = settingsFilePicker; settingsFilePicker.openPath(trigger); } },
-    'show-create': function () { $('#view-create').scrollIntoView({behavior: 'smooth'}); }, 'open-script': openScript, analyze: analyze, 'retry-story-load': function () { if (state.loadFailure) replaceStory(state.loadFailure.story, state.loadFailure.options); }, 'dismiss-welcome': function () { $('#welcomePanel').hidden = true; localStorage.setItem('aa-welcome-dismissed-v1', '1'); }, 'show-welcome': function () { $('#welcomePanel').hidden = false; localStorage.removeItem('aa-welcome-dismissed-v1'); }, 'open-settings': function () { setDrawer('settings', true); loadAAData(); }, 'close-settings': function () { setDrawer('settings', false); }, 'save-aa-data': saveAAData, 'open-help': function () { setDrawer('help', true); }, 'close-help': function () { setDrawer('help', false); }, 'close-browse': function () { if (storyFilePicker) storyFilePicker.close(); else closeModal('#mBrowse'); }, 'story-picker-device': function () { if (storyFilePicker) storyFilePicker.chooseDevice(); }, 'story-picker-host': function () { if (storyFilePicker) storyFilePicker.openHost(); }, 'story-picker-refresh': function () { if (storyFilePicker) storyFilePicker.load(storyFilePicker.locationToken, false); }, 'story-picker-source': function () { if (storyFilePicker) storyFilePicker.open(storyFilePicker.trigger); }, 'choose-current-dir': chooseCurrentDirectory, 'close-cast': function () { closeModal('#mCast'); }, 'close-bg-replace': function () { closeModal('#mBgReplace'); state.bgReplaceCard = null; }, 'bg-replace-history': openBgHistory, 'approve-preflight': approvePreflight, 'rerun-preflight': rerunPreflight, 'cast-narrator': function () { castSetKind('narrator'); }, 'cast-unset': function () { castSetKind('unset'); }, 'resolve-background': function (target) { state.backgroundJob = Object.assign({}, state.backgroundJob, {resolveRequestId: target.dataset.requestId}); $('#s3').scrollIntoView({behavior: 'smooth'}); }, 'continue-background': continueBackground, 'refresh-drafts': refreshDrafts, 'load-review': loadReview, 'approve-all': approveAll, validate: validateReview, compile: compile, install: install, 'edit-card': editCard, 'save-edit': saveEdit, 'close-edit': function () { closeModal('#mEdit'); }, 'insert-line': function () { insertCard('line'); }, 'insert-dir': function () { insertCard('dir'); }, 'move-up': function () { moveCard('up'); }, 'move-down': function () { moveCard('down'); }, 'delete-card': deleteCard, 'bind-cast': bindCast, annotate: annotate, build: build, 'new-profile': function () { renderProfile(null); }, 'activate-profile': async function () { try { await post('/api/llm/profiles/activate', {id: $('#modelProfileId').value}); await loadProfiles($('#modelProfileId').value); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'delete-profile': async function () { try { await post('/api/llm/profiles/delete', {id: $('#modelProfileId').value, delete_credential: true}); await loadProfiles(); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'save-profile': saveProfile, 'discover-models': async function () { try { const result = await post('/api/llm/models', {id: $('#modelProfileId').value}); const list = $('#modelOptions'); clearElement(list); result.models.forEach(function (name) { const option = document.createElement('option'); option.value = name; list.appendChild(option); }); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'test-text': function () { testProfile('text'); }, 'test-vision': function () { testProfile('vision'); }, 'preset-openai': function () { applyModelPreset(MODEL_PRESETS[0]); }, 'preset-anthropic': function () { applyModelPreset(MODEL_PRESETS[1]); }, 'preset-deepseek': function () { applyModelPreset(MODEL_PRESETS[2]); }, 'preset-ollama': function () { applyModelPreset(MODEL_PRESETS[3]); }, 'preset-silicon': function () { applyModelPreset(MODEL_PRESETS[4]); }, 'preset-openrouter': function () { applyModelPreset(MODEL_PRESETS[5]); }
+    'show-create': function () { $('#view-create').scrollIntoView({behavior: 'smooth'}); }, 'open-script': openScript, analyze: analyze, 'retry-story-load': function () { if (state.loadFailure) replaceStory(state.loadFailure.story, state.loadFailure.options); }, 'dismiss-welcome': function () { $('#welcomePanel').hidden = true; localStorage.setItem('aa-welcome-dismissed-v1', '1'); }, 'show-welcome': function () { $('#welcomePanel').hidden = false; localStorage.removeItem('aa-welcome-dismissed-v1'); }, 'open-settings': function () { setDrawer('settings', true); loadAAData(); }, 'close-settings': function () { setDrawer('settings', false); }, 'save-aa-data': saveAAData, 'open-help': function () { setDrawer('help', true); }, 'close-help': function () { setDrawer('help', false); }, 'close-browse': function () { if (storyFilePicker) storyFilePicker.close(); else closeModal('#mBrowse'); }, 'story-picker-device': function () { if (storyFilePicker) storyFilePicker.chooseDevice(); }, 'story-picker-host': function () { if (storyFilePicker) storyFilePicker.openHost(); }, 'story-picker-refresh': function () { if (storyFilePicker) storyFilePicker.load(storyFilePicker.locationToken, false); }, 'story-picker-source': function () { if (storyFilePicker) storyFilePicker.open(storyFilePicker.trigger); }, 'choose-current-dir': chooseCurrentDirectory, 'close-cast': function () { closeModal('#mCast'); }, 'close-bg-replace': function () { closeModal('#mBgReplace'); state.bgReplaceCard = null; }, 'bg-replace-history': openBgHistory, 'approve-preflight': approvePreflight, 'rerun-preflight': rerunPreflight, 'cast-narrator': function () { castSetKind('narrator'); }, 'cast-unset': function () { castSetKind('unset'); }, 'resolve-background': function (target) { state.backgroundJob = Object.assign({}, state.backgroundJob, {resolveRequestId: target.dataset.requestId}); $('#s3').scrollIntoView({behavior: 'smooth'}); }, 'continue-background': continueBackground, 'refresh-drafts': refreshDrafts, 'load-review': loadReview, 'approve-all': approveAll, validate: validateReview, compile: compile, install: install, 'edit-card': editCard, 'save-edit': saveEdit, 'close-edit': function () { closeModal('#mEdit'); }, 'insert-line': function () { insertCard('line'); }, 'insert-dir': function () { insertCard('dir'); }, 'move-up': function () { moveCard('up'); }, 'move-down': function () { moveCard('down'); }, 'delete-card': deleteCard, 'bind-cast': bindCast, annotate: annotate, build: build, 'new-profile': function () { renderProfile(null); }, 'activate-profile': async function () { try { await post('/api/llm/profiles/activate', {id: $('#modelProfileId').value}); await loadProfiles($('#modelProfileId').value); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'delete-profile': async function () { try { await post('/api/llm/profiles/delete', {id: $('#modelProfileId').value, delete_credential: true}); await loadProfiles(); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'save-profile': saveProfile, 'clear-profile-key': clearProfileKey, 'discover-models': async function () { $('#modelStatus').textContent = '正在读取可用模型…'; try { const result = await post('/api/llm/models', {id: $('#modelProfileId').value}); const list = $('#modelOptions'); clearElement(list); result.models.forEach(function (name) { const option = document.createElement('option'); option.value = name; list.appendChild(option); }); $('#modelStatus').textContent = '已读取 ' + result.models.length + ' 个模型，可在模型输入框中选择。'; } catch (error) { $('#modelStatus').textContent = error.message; } }, 'test-text': function () { testProfile('text'); }, 'test-vision': function () { testProfile('vision'); }, 'preset-openai': function () { applyModelPreset(MODEL_PRESETS[0]); }, 'preset-anthropic': function () { applyModelPreset(MODEL_PRESETS[1]); }, 'preset-deepseek': function () { applyModelPreset(MODEL_PRESETS[2]); }, 'preset-ollama': function () { applyModelPreset(MODEL_PRESETS[3]); }, 'preset-silicon': function () { applyModelPreset(MODEL_PRESETS[4]); }, 'preset-openrouter': function () { applyModelPreset(MODEL_PRESETS[5]); }
   };
   actions['close-browse'] = function () { if (activeFilePicker) activeFilePicker.close(); else closeModal('#mBrowse'); activeFilePicker = storyFilePicker; };
-  actions['story-picker-device'] = function () { if (activeFilePicker) activeFilePicker.chooseDevice(); };
-  actions['story-picker-host'] = function () { if (activeFilePicker) activeFilePicker.openHost(); };
   actions['story-picker-refresh'] = function () { if (activeFilePicker) activeFilePicker.load(activeFilePicker.locationToken, false); };
-  actions['story-picker-source'] = function () { if (activeFilePicker) activeFilePicker.open(activeFilePicker.trigger); };
   document.addEventListener('click', function (event) { const sortTarget = event.target.closest('[data-story-sort]'); if (sortTarget && activeFilePicker) { activeFilePicker.sortBy(sortTarget.dataset.storySort); return; } const target = event.target.closest('[data-action]'); if (target && actions[target.dataset.action]) actions[target.dataset.action](target); });
   $('#bgq').addEventListener('input', loadBackgrounds); $('#bgready').addEventListener('change', loadBackgrounds); $('#rvDraftSelect').addEventListener('change', loadReview); $('#modelProfileSelect').addEventListener('change', function () { renderProfile(state.profiles.find(function (profile) { return profile.id === $('#modelProfileSelect').value; })); }); const castSearchInput = $('#castSearch'); if (castSearchInput) castSearchInput.addEventListener('input', function () { clearTimeout(castSearchTimer); const value = this.value; castSearchTimer = setTimeout(function () { searchCharacters(value); }, 180); }); document.addEventListener('keydown', function (event) { if (event.key === 'Escape') { setDrawer('settings', false); setDrawer('help', false); if ($('#mBgReplace').classList.contains('on')) { closeModal('#mBgReplace'); state.bgReplaceCard = null; } else if ($('#mCast').classList.contains('on')) closeModal('#mCast'); else if ($('#mEdit').classList.contains('on')) closeModal('#mEdit'); else if (activeFilePicker && !$('#mBrowse').hidden) { activeFilePicker.close(); activeFilePicker = storyFilePicker; } else closeModal('#mBrowse'); } });
   // 记住工作台偏好（生成方式 / 是否安装），同一浏览器内持续生效。

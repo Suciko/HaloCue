@@ -93,30 +93,46 @@ def test_saved_profile_keeps_secret_only_in_credential_store(tmp_path):
     assert reloaded.resolve_api_key(profile["id"]) == "temporary-value"
 
 
-def test_session_secret_is_not_persisted_and_is_lost_after_restart(tmp_path):
+def test_nonempty_secret_is_persisted_even_for_legacy_save_key_false(tmp_path):
     credentials = FakeCredentials()
     profiles_path = tmp_path / "llm_profiles.json"
     store = ModelProfileStore(profiles_path, credentials=credentials)
     profile = store.save_profile(
         {
-            "name": "Session model",
+            "name": "Persisted model",
             "provider": "openai",
             "base_url": "https://example.invalid/v1",
             "model": "vision-model",
-            "api_key": "one-session-only",
+            "api_key": "restart-safe",
             "save_key": False,
         }
     )
 
-    assert profile["secret_status"] == "session"
-    assert credentials.values == {}
-    assert store.resolve_api_key(profile["id"]) == "one-session-only"
-    assert (
-        ModelProfileStore(
-            profiles_path, credentials=credentials
-        ).resolve_api_key(profile["id"])
-        is None
+    assert profile["secret_status"] == "saved"
+    assert store.resolve_api_key(profile["id"]) == "restart-safe"
+    assert ModelProfileStore(
+        profiles_path, credentials=credentials
+    ).resolve_api_key(profile["id"]) == "restart-safe"
+
+
+def test_blank_secret_preserves_saved_value_until_explicitly_cleared(tmp_path):
+    credentials = FakeCredentials()
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=credentials)
+    profile = store.save_profile(
+        {"name": "Endpoint", "provider": "openai", "model": "model-a", "api_key": "saved-value"}
     )
+
+    updated = store.save_profile(
+        {"id": profile["id"], "name": "Renamed", "provider": "openai", "model": "model-b", "api_key": ""}
+    )
+    assert updated["secret_status"] == "saved"
+    assert store.resolve_api_key(profile["id"]) == "saved-value"
+
+    cleared = store.save_profile(
+        {"id": profile["id"], "name": "Renamed", "provider": "openai", "model": "model-b", "clear_secret": True}
+    )
+    assert cleared["secret_status"] == "missing"
+    assert store.resolve_api_key(profile["id"]) is None
 
 
 def test_public_profiles_are_redacted_and_can_be_activated_or_deleted(tmp_path):

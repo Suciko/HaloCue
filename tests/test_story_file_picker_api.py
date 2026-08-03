@@ -225,3 +225,25 @@ def test_windows_host_roots_include_useful_existing_locations_without_duplicates
         documents.resolve(),
         downloads.resolve(),
     ]
+
+
+def test_windows_host_roots_use_redirected_known_folders(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    desktop = tmp_path / "redirected" / "桌面"
+    documents = tmp_path / "redirected" / "文档"
+    downloads = tmp_path / "redirected" / "下载"
+    for path in (workspace, desktop, documents, downloads):
+        path.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "story_file_picker._windows_known_folders",
+        lambda: [desktop, documents, downloads],
+    )
+
+    roots = windows_host_roots(workspace, drives=[])
+
+    assert roots[:4] == [
+        workspace.resolve(),
+        desktop.resolve(),
+        documents.resolve(),
+        downloads.resolve(),
+    ]

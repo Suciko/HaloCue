@@ -11,6 +11,8 @@ static_system 是跨请求不变的部分（资源表），会被缓存；volati
 加新家只要再写一个 Provider 子类并在 make_provider 里登记。
 """
 import json, os, sys
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 
 class LLMError(RuntimeError):
@@ -172,41 +174,104 @@ class OpenAIProvider(Provider):
 
     def __init__(self, cfg):
         super().__init__(cfg)
-        try:
-            from openai import OpenAI
-        except ImportError:
-            raise LLMError("没装 openai SDK，先跑:  pip install openai")
-        self.client = OpenAI(api_key=self._key(),
-                             base_url=cfg.get("base_url") or None)
+        self.api_key = self._key()
+        self.base_url = str(cfg.get("base_url") or "https://api.openai.com/v1").rstrip("/")
+        self.timeout = max(1, int(cfg.get("timeout") or 180))
         self.model = cfg.get("model") or "gpt-5"
 
-    def complete_json(self, static_system, volatile_system, user, schema):
-        # 兼容接口没有显式缓存控制，多数服务商按前缀自动命中，所以静态部分放最前
-        system = static_system + (("\n\n" + volatile_system) if volatile_system else "")
+    @staticmethod
+    def _error_message(payload, fallback):
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            if isinstance(error, dict) and error.get("message"):
+                return str(error["message"])
+            if isinstance(error, str) and error:
+                return error
+            if payload.get("message"):
+                return str(payload["message"])
+        return fallback
+
+    def _request_json(self, path, payload=None):
+        body = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            self.base_url + path,
+            data=body,
+            method="GET" if payload is None else "POST",
+            headers={
+                "Accept": "application/json",
+                "Authorization": "Bearer " + self.api_key,
+                **({"Content-Type": "application/json; charset=utf-8"} if body is not None else {}),
+            },
+        )
         try:
-            r = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "system", "content": system},
-                          {"role": "user", "content": user}],
-                response_format={"type": "json_schema", "json_schema": {
-                    "name": "annotations", "schema": schema, "strict": True}},
-                max_completion_tokens=self.cfg.get("max_tokens", 16000),
-            )
-        except Exception as e:
-            raise LLMError(f"{self.model} 调用失败: {e}") from e
+            with urlopen(request, timeout=self.timeout) as response:
+                raw = response.read()
+        except HTTPError as exc:
+            try:
+                error_payload = json.loads(exc.read().decode("utf-8", errors="replace"))
+            except (json.JSONDecodeError, OSError):
+                error_payload = None
+            message = self._error_message(error_payload, str(exc.reason or exc))
+            raise LLMError(f"{self.model} 接口返回 HTTP {exc.code}: {message}") from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            reason = getattr(exc, "reason", None) or str(exc)
+            raise LLMError(f"{self.model} 无法连接模型接口: {reason}") from exc
+        try:
+            result = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise LLMError(f"{self.model} 接口没有返回合法 JSON") from exc
+        if not isinstance(result, dict):
+            raise LLMError(f"{self.model} 接口返回格式不正确")
+        return result
 
-        u = getattr(r, "usage", None)
+    def _record_usage(self, response):
+        usage = response.get("usage") or {}
+        details = usage.get("prompt_tokens_details") or {}
         self.stats["calls"] += 1
-        if u:
-            self.stats["in"] += getattr(u, "prompt_tokens", 0) or 0
-            self.stats["out"] += getattr(u, "completion_tokens", 0) or 0
-            det = getattr(u, "prompt_tokens_details", None)
-            self.stats["cache_read"] += getattr(det, "cached_tokens", 0) or 0
+        self.stats["in"] += int(usage.get("prompt_tokens") or 0)
+        self.stats["out"] += int(usage.get("completion_tokens") or 0)
+        self.stats["cache_read"] += int(details.get("cached_tokens") or 0)
 
-        text = r.choices[0].message.content or ""
+    def _complete(self, messages, schema, schema_name, *, vision=False):
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": schema_name, "schema": schema, "strict": True},
+            },
+            "max_tokens": self.cfg.get("max_tokens", 16000),
+        }
+        response = self._request_json("/chat/completions", payload)
+        self._record_usage(response)
+        choices = response.get("choices") or []
+        choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+        message = choice.get("message") or {}
+        text = message.get("content") if isinstance(message, dict) else ""
+        if isinstance(text, list):
+            text = "".join(
+                str(block.get("text") or "")
+                for block in text
+                if isinstance(block, dict) and block.get("type") in {"text", "output_text"}
+            )
+        text = str(text or "")
         if not text.strip():
-            raise LLMError(f"{self.model} 返回了空文本")
-        return parse_json_response(text)
+            finish_reason = choice.get("finish_reason") or "unknown"
+            prefix = "视觉调用" if vision else "调用"
+            raise LLMError(f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）")
+        try:
+            return parse_json_response(text)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            prefix = "视觉调用" if vision else "调用"
+            raise LLMError(f"{self.model} {prefix}没有返回合法 JSON") from exc
+
+    def complete_json(self, static_system, volatile_system, user, schema):
+        system = static_system + (("\n\n" + volatile_system) if volatile_system else "")
+        return self._complete(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            schema,
+            "annotations",
+        )
 
     def complete_json_vision(self, system, images, user, schema):
         import base64
@@ -217,47 +282,20 @@ class OpenAIProvider(Provider):
                 "url": "data:image/jpeg;base64," +
                        base64.standard_b64encode(blob).decode()}})
         content.append({"type": "text", "text": user})
-        try:
-            r = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "system", "content": system},
-                          {"role": "user", "content": content}],
-                response_format={"type": "json_schema", "json_schema": {
-                    "name": "labels", "schema": schema, "strict": True}},
-                max_completion_tokens=self.cfg.get("max_tokens", 16000),
-            )
-        except Exception as e:
-            raise LLMError(f"{self.model} 视觉调用失败: {e}") from e
-        u = getattr(r, "usage", None)
-        self.stats["calls"] += 1
-        if u:
-            self.stats["in"] += getattr(u, "prompt_tokens", 0) or 0
-            self.stats["out"] += getattr(u, "completion_tokens", 0) or 0
-        choice = r.choices[0]
-        text = choice.message.content or ""
-        if not text.strip():
-            finish_reason = getattr(choice, "finish_reason", None) or "unknown"
-            raise LLMError(
-                f"{self.model} 视觉调用返回了空文本"
-                f"（finish_reason={finish_reason}）"
-            )
-        try:
-            return parse_json_response(text)
-        except (TypeError, ValueError) as exc:
-            raise LLMError(
-                f"{self.model} 视觉调用没有返回合法 JSON"
-            ) from exc
+        return self._complete(
+            [{"role": "system", "content": system}, {"role": "user", "content": content}],
+            schema,
+            "labels",
+            vision=True,
+        )
 
     def list_models(self):
-        try:
-            response = self.client.models.list()
-        except Exception as exc:
-            raise LLMError(f"{self.model} 读取模型列表失败: {exc}") from exc
-        data = getattr(response, "data", response)
+        response = self._request_json("/models")
+        data = response.get("data") or []
         return sorted({
-            str(getattr(item, "id", "") or "")
+            str(item.get("id") or "")
             for item in data
-            if str(getattr(item, "id", "") or "")
+            if isinstance(item, dict) and str(item.get("id") or "")
         })
 
 

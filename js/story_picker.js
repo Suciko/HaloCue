@@ -19,8 +19,7 @@
 
   function StoryFilePicker(root, options) {
     this.root = root; this.options = options || {};
-    this.source = byId('storyPickerSource'); this.host = byId('storyPickerHost');
-    this.input = byId('storyPickerDeviceInput'); this.status = byId('storyPickerStatus');
+    this.host = byId('storyPickerHost'); this.status = byId('storyPickerStatus');
     this.entries = byId('storyPickerEntries'); this.breadcrumbs = byId('storyPickerBreadcrumbs');
     this.roots = byId('storyPickerRoots'); this.search = byId('storyPickerSearch');
     this.selectedLabel = byId('storyPickerSelected'); this.openButton = byId('storyPickerOpen');
@@ -37,7 +36,6 @@
 
   StoryFilePicker.prototype.bind = function () {
     if (this._bound) return; this._bound = true; const self = this;
-    if (this.input) this.input.addEventListener('change', function (event) { return self.upload(event.target.files && event.target.files[0]); });
     if (this.search) this.search.addEventListener('input', function () { return self.load(self.locationToken, false); });
     if (this.openButton) this.openButton.addEventListener('click', function () { return self.confirm(); });
     if (this.backButton) this.backButton.addEventListener('click', function () { return self.back(); });
@@ -51,20 +49,16 @@
     if (this.root) { this.root.hidden = false; this.root.classList.add('on'); this.root.setAttribute('aria-hidden', 'false'); }
     const title = byId('browseTitle');
     if (title && this.options.title) title.textContent = this.options.title;
-    if (this.hostOnly) return this.openHost();
-    if (this.source) this.source.hidden = false; if (this.host) this.host.hidden = true;
     if (this.status) this.status.textContent = ''; if (this.selectedLabel) this.selectedLabel.textContent = '尚未选择文件';
     if (this.openButton) this.openButton.disabled = true;
-    const first = byId('storyPickerDeviceAction'); if (first && first.focus) first.focus();
+    return this.openHost();
   };
 
   StoryFilePicker.prototype.close = function () {
     if (this.root) { this.root.hidden = true; this.root.classList.remove('on'); this.root.setAttribute('aria-hidden', 'true'); }
-    if (this.input) this.input.value = ''; const trigger = this.trigger; this.trigger = null;
+    const trigger = this.trigger; this.trigger = null;
     if (trigger && trigger.focus) trigger.focus();
   };
-
-  StoryFilePicker.prototype.chooseDevice = function () { if (this.input && this.input.click) this.input.click(); };
 
   StoryFilePicker.prototype.openHostMode = function (trigger, directoryOnly) {
     this.trigger = trigger || document.activeElement;
@@ -82,32 +76,12 @@
     return this.openHostMode(trigger, false);
   };
 
-  StoryFilePicker.prototype.upload = async function (file) {
-    if (!file) return null;
-    if (this.status) this.status.textContent = '正在读取此设备上的文件…';
-    try {
-      const result = await exports.Api.request('/api/story-files/upload', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/octet-stream', 'X-AA-Filename': encodeURIComponent(file.name || '')},
-        body: file,
-      });
-      this.close();
-      if (this.options.onChoose) {
-        const selection = this.selectEndpoint === '/api/story-files/select'
-          ? {file_token: result.file_token, name: result.name, size: result.size}
-          : result;
-        await this.options.onChoose(selection);
-      }
-      return result;
-    } catch (error) { if (this.status) this.status.textContent = error.message || '文件上传失败'; return null; }
-  };
-
   StoryFilePicker.prototype.openHost = async function () {
     this.selected = null;
     if (this.openButton) this.openButton.disabled = true;
     const title = byId('browseTitle');
     if (title && this.options.title) title.textContent = this.options.title;
-    if (this.source) this.source.hidden = true; if (this.host) this.host.hidden = false;
+    if (this.host) this.host.hidden = false;
     this.historyBack = []; this.historyForward = []; this.locationToken = '';
     return this.load('', false);
   };

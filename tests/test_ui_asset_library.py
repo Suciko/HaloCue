@@ -325,7 +325,7 @@ vm.runInNewContext(source,context);
         "disabled": True,
     }
     assert result["final"] == {
-        "requests": 3,
+        "requests": 4,
         "timerCount": 0,
         "phase": "complete",
         "result": "2 个差分",
@@ -457,6 +457,35 @@ vm.runInNewContext(source,{window,document,Promise,Error,console,encodeURICompon
         encoding="utf-8",
     )
     assert json.loads(output) == {"requests": 2, "emotion": "new"}
+
+
+def test_face_workspace_reloads_labels_when_job_only_refreshes_previews():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+function node(){let own='',classes=new Set();return {children:[],dataset:{},hidden:false,disabled:false,classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},appendChild(child){this.children.push(child);return child},addEventListener(){},setAttribute(){},removeAttribute(){},focus(){},set textContent(value){own=String(value||'');this.children=[]},get textContent(){return own}}}
+const document={activeElement:null,getElementById:()=>null,createElement:node,addEventListener(){}};
+const requests=[];const window={StoryUI:{},Api:{request:async path=>{requests.push(path);return {saved_count:1,faces:[{face_id:'00',version:7,preview_url:'/preview/00?v=7',effective:{primary_emotion:'平静'}}]}}}};
+vm.runInNewContext(source,{window,document,Promise,Error,console,encodeURIComponent,setTimeout,clearTimeout,setImmediate});
+(async()=>{
+  const root=node();root.classList.add('open');const workspace=new window.StoryUI.FaceWorkspace(root);
+  workspace.selected={kind:'character',aa_key:'hero',sha256:'digest'};workspace.phase=node();workspace.progress=node();workspace.result=node();workspace.status=node();workspace.log=node();workspace.labels=node();workspace.startButton=node();workspace.renderLabels=()=>{};
+  workspace.faces=[{face_id:'00',version:6,preview_url:'/preview/00?v=6',effective:{primary_emotion:'平静'}}];
+  workspace.renderJob({done:true,ok:true,ident:'hero',phase:'complete',message:'渲染完成',current:44,total:44,result:{rendered_count:44,refreshed_preview_count:44,labeled_count:0,saved_count:0,completed_at:'2026-08-04T10:00:00Z'}});
+  await new Promise(resolve=>setImmediate(resolve));
+  console.log(JSON.stringify({requests,version:workspace.faces[0].version,preview:workspace.faces[0].preview_url}));
+})();
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library_faces.js")],
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert json.loads(output) == {
+        "requests": ["/api/assets/faces/labels?aa_key=hero&sha256=digest"],
+        "version": 7,
+        "preview": "/preview/00?v=7",
+    }
 
 
 def test_face_workspace_serializes_each_face_save_with_the_latest_version():

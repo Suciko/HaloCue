@@ -61,24 +61,25 @@ def browser():
         browser.close()
 
 
-def _open_source(page, app_url, width):
+def _open_picker(page, app_url, width):
     page.set_viewport_size({"width": width, "height": 820})
     page.goto(app_url, wait_until="networkidle")
     page.get_by_role("button", name="选择文件").click()
-    page.locator("#storyPickerSource").wait_for()
+    page.locator("#storyPickerHost").wait_for()
 
 
 @pytest.mark.parametrize("width", [1200, 390])
-def test_source_chooser_fits_desktop_and_mobile(browser, app_url, tmp_path, width):
+def test_picker_opens_host_browser_directly_and_fits(browser, app_url, tmp_path, width):
     page = browser.new_page()
     try:
-        _open_source(page, app_url, width)
+        _open_picker(page, app_url, width)
         shell = page.locator(".story-picker-shell").bounding_box()
         assert shell["x"] >= 0 and shell["x"] + shell["width"] <= width
         assert page.evaluate("document.documentElement.scrollWidth") <= width
-        assert page.get_by_role("button", name="从此设备选择文件").is_visible()
-        assert page.get_by_role("button", name="浏览运行主机文件").is_visible()
-        page.screenshot(path=str(tmp_path / f"story-picker-source-{width}.png"), full_page=True)
+        assert page.locator("#storyPickerSource").count() == 0
+        assert page.get_by_role("button", name="返回来源选择").count() == 0
+        assert page.locator("#storyPickerHost").is_visible()
+        page.screenshot(path=str(tmp_path / f"story-picker-host-direct-{width}.png"), full_page=True)
     finally:
         page.close()
 
@@ -90,8 +91,7 @@ def test_host_browser_has_stable_rows_and_reachable_footer(browser, app_url, tmp
     page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
     page.on("pageerror", lambda error: errors.append(str(error)))
     try:
-        _open_source(page, app_url, width)
-        page.get_by_role("button", name="浏览运行主机文件").click()
+        _open_picker(page, app_url, width)
         row = page.locator(".story-picker-entry", has_text="story-picker-browser-sample.txt")
         row.wait_for()
         page.screenshot(path=str(tmp_path / f"story-picker-host-{width}.png"), full_page=True)
@@ -112,7 +112,7 @@ def test_host_browser_has_stable_rows_and_reachable_footer(browser, app_url, tmp
     assert errors == []
 
 
-def test_device_upload_opens_story_through_the_real_browser(browser, app_url):
+def test_host_selection_opens_story_through_the_real_browser(browser, app_url):
     page = browser.new_page(viewport={"width": 1200, "height": 820})
     errors = []
     page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
@@ -120,14 +120,12 @@ def test_device_upload_opens_story_through_the_real_browser(browser, app_url):
     try:
         page.goto(app_url, wait_until="networkidle")
         page.get_by_role("button", name="选择文件").click()
-        page.locator("#storyPickerDeviceInput").set_input_files({
-            "name": "移动端上传测试.md",
-            "mimeType": "text/markdown",
-            "buffer": "凯伊：早上好".encode("utf-8"),
-        })
-        page.locator("#storyContextName", has_text="移动端上传测试.md").wait_for()
-        assert page.locator("#path").input_value() == "移动端上传测试.md"
-        assert page.locator("#storyContextName").inner_text() == "移动端上传测试.md"
+        row = page.locator(".story-picker-entry", has_text="story-picker-browser-sample.txt")
+        row.wait_for()
+        row.dblclick()
+        page.locator("#storyContextName", has_text="story-picker-browser-sample.txt").wait_for()
+        assert page.locator("#path").input_value() == "story-picker-browser-sample.txt"
+        assert page.locator("#storyContextName").inner_text() == "story-picker-browser-sample.txt"
         assert page.locator("#mBrowse").is_hidden()
     finally:
         page.close()

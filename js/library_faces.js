@@ -295,8 +295,9 @@
     this.status.textContent = job.message || (job.error ? '表情标注失败，请检查 Spine 配置与骨骼完整性。' : '');
     this.log.textContent = (job.log || []).join('\n');
     if (!this.faces.length) this.renderLabels(result.semantic_faces || []);
-    if (job.done && job.ok && Number(result.saved_count || result.labeled_count || 0)) {
-      const key = [job.ident, result.completed_at || result.saved_count || result.labeled_count].join(':');
+    const refreshEvidence = Number(result.refreshed_preview_count || result.rendered_count || result.saved_count || result.labeled_count || 0);
+    if (job.done && job.ok && refreshEvidence) {
+      const key = [job.ident, result.completed_at || '', result.refreshed_preview_count || 0, result.rendered_count || 0, result.saved_count || 0, result.labeled_count || 0].join(':');
       if (this.labelsLoadedKey !== key) { this.labelsLoadedKey = key; this.loadLabels(true); }
     }
     return Boolean(job.running);

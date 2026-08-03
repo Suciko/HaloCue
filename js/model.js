@@ -14,8 +14,7 @@
       model: value(documentRef, '#modelName').value.trim(),
       max_tokens: Number(value(documentRef, '#modelMaxTokens').value || 16000),
       vision: Boolean(value(documentRef, '#modelVision').checked),
-      api_key: value(documentRef, '#modelApiKey').value,
-      save_key: Boolean(value(documentRef, '#modelSaveKey').checked)
+      api_key: value(documentRef, '#modelApiKey').value
     };
   }
 

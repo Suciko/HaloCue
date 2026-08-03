@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Model profiles with session-only or Windows Credential Manager secrets."""
+"""Model profiles with secrets stored in Windows Credential Manager."""
 
 from __future__ import annotations
 
 import json
+import os
 import threading
 import uuid
 from pathlib import Path
@@ -21,6 +22,93 @@ class CredentialStoreError(RuntimeError):
     pass
 
 
+class _CtypesWindowsCredentials:
+    """Small stdlib binding for generic Windows credentials."""
+
+    CRED_TYPE_GENERIC = 1
+    CRED_PERSIST_LOCAL_MACHINE = 2
+    ERROR_NOT_FOUND = 1168
+
+    def __init__(self):
+        import ctypes
+        from ctypes import wintypes
+
+        class Credential(ctypes.Structure):
+            _fields_ = [
+                ("Flags", wintypes.DWORD),
+                ("Type", wintypes.DWORD),
+                ("TargetName", wintypes.LPWSTR),
+                ("Comment", wintypes.LPWSTR),
+                ("LastWritten", wintypes.FILETIME),
+                ("CredentialBlobSize", wintypes.DWORD),
+                ("CredentialBlob", ctypes.POINTER(ctypes.c_ubyte)),
+                ("Persist", wintypes.DWORD),
+                ("AttributeCount", wintypes.DWORD),
+                ("Attributes", ctypes.c_void_p),
+                ("TargetAlias", wintypes.LPWSTR),
+                ("UserName", wintypes.LPWSTR),
+            ]
+
+        self._ctypes = ctypes
+        self._credential = Credential
+        self._pointer = ctypes.POINTER(Credential)
+        self._advapi = ctypes.WinDLL("Advapi32.dll", use_last_error=True)
+        self._advapi.CredReadW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.POINTER(self._pointer),
+        ]
+        self._advapi.CredReadW.restype = wintypes.BOOL
+        self._advapi.CredWriteW.argtypes = [self._pointer, wintypes.DWORD]
+        self._advapi.CredWriteW.restype = wintypes.BOOL
+        self._advapi.CredDeleteW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+        ]
+        self._advapi.CredDeleteW.restype = wintypes.BOOL
+        self._advapi.CredFree.argtypes = [ctypes.c_void_p]
+        self._advapi.CredFree.restype = None
+
+    def _raise_last_error(self):
+        error = self._ctypes.get_last_error()
+        if error == self.ERROR_NOT_FOUND:
+            raise KeyError(error)
+        raise OSError(error, self._ctypes.FormatError(error))
+
+    def CredRead(self, target, credential_type, _flags):
+        pointer = self._pointer()
+        if not self._advapi.CredReadW(target, credential_type, 0, self._ctypes.byref(pointer)):
+            self._raise_last_error()
+        try:
+            record = pointer.contents
+            blob = self._ctypes.string_at(record.CredentialBlob, record.CredentialBlobSize)
+            return {"CredentialBlob": blob}
+        finally:
+            self._advapi.CredFree(pointer)
+
+    def CredWrite(self, record, _flags):
+        blob = str(record["CredentialBlob"]).encode("utf-16-le")
+        blob_buffer = (self._ctypes.c_ubyte * len(blob)).from_buffer_copy(blob)
+        credential = self._credential()
+        credential.Type = int(record["Type"])
+        credential.TargetName = str(record["TargetName"])
+        credential.Comment = str(record.get("Comment") or "")
+        credential.CredentialBlobSize = len(blob)
+        credential.CredentialBlob = self._ctypes.cast(
+            blob_buffer, self._ctypes.POINTER(self._ctypes.c_ubyte)
+        )
+        credential.Persist = int(record["Persist"])
+        credential.UserName = str(record.get("UserName") or "")
+        if not self._advapi.CredWriteW(self._ctypes.byref(credential), 0):
+            self._raise_last_error()
+
+    def CredDelete(self, target, credential_type, _flags):
+        if not self._advapi.CredDeleteW(target, credential_type, 0):
+            self._raise_last_error()
+
+
 class WindowsCredentialStore:
     """Store generic credentials encrypted by the current Windows account."""
 
@@ -29,6 +117,11 @@ class WindowsCredentialStore:
             try:
                 import win32cred as win32cred_module
             except ImportError:
+                win32cred_module = None
+        if win32cred_module is None and os.name == "nt":
+            try:
+                win32cred_module = _CtypesWindowsCredentials()
+            except (AttributeError, OSError):
                 win32cred_module = None
         self._api = win32cred_module
         self.available = self._api is not None
@@ -272,12 +365,8 @@ class ModelProfileStore:
                 self._session_secrets.pop(profile_id, None)
                 self.credentials.delete(self._target(profile_id))
             elif secret:
-                if bool(payload.get("save_key")):
-                    self.credentials.write(self._target(profile_id), secret)
-                    self._session_secrets.pop(profile_id, None)
-                else:
-                    self._session_secrets[profile_id] = secret
-                    self.credentials.delete(self._target(profile_id))
+                self.credentials.write(self._target(profile_id), secret)
+                self._session_secrets.pop(profile_id, None)
 
             if existing is None:
                 state["profiles"].append(record)

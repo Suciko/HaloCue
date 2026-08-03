@@ -20,6 +20,52 @@ MAX_STORY_BYTES = 10 * 1024 * 1024
 STORY_SUFFIXES = {".txt", ".md"}
 
 
+def _windows_known_folders() -> list[Path]:
+    """Resolve redirected Windows user folders through the Shell API."""
+    if os.name != "nt":
+        return []
+    import ctypes
+    from ctypes import wintypes
+
+    class Guid(ctypes.Structure):
+        _fields_ = [
+            ("Data1", wintypes.DWORD),
+            ("Data2", wintypes.WORD),
+            ("Data3", wintypes.WORD),
+            ("Data4", ctypes.c_ubyte * 8),
+        ]
+
+    shell32 = ctypes.WinDLL("shell32.dll")
+    ole32 = ctypes.WinDLL("ole32.dll")
+    shell32.SHGetKnownFolderPath.argtypes = [
+        ctypes.POINTER(Guid),
+        wintypes.DWORD,
+        wintypes.HANDLE,
+        ctypes.POINTER(ctypes.c_wchar_p),
+    ]
+    shell32.SHGetKnownFolderPath.restype = ctypes.c_long
+    ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+    ole32.CoTaskMemFree.restype = None
+    identifiers = (
+        "B4BFCC3A-DB2C-424C-B029-7FE99A87C641",  # Desktop
+        "FDD39AD0-238F-46AF-ADB4-6C85480369C7",  # Documents
+        "374DE290-123F-4565-9164-39C4925E467B",  # Downloads
+    )
+    folders = []
+    for identifier in identifiers:
+        guid = Guid.from_buffer_copy(uuid.UUID(identifier).bytes_le)
+        pointer = ctypes.c_wchar_p()
+        try:
+            if shell32.SHGetKnownFolderPath(
+                ctypes.byref(guid), 0, None, ctypes.byref(pointer)
+            ) == 0 and pointer.value:
+                folders.append(Path(pointer.value))
+        finally:
+            if pointer:
+                ole32.CoTaskMemFree(pointer)
+    return folders
+
+
 def windows_host_roots(
     workspace: str | os.PathLike[str],
     *,
@@ -28,7 +74,20 @@ def windows_host_roots(
 ) -> list[Path]:
     """Return useful existing host locations while preserving stable order."""
     user_home = Path(home).resolve() if home is not None else Path.home().resolve()
-    candidates = [Path(workspace), user_home / "Desktop", user_home / "Documents", user_home / "Downloads"]
+    if home is None:
+        try:
+            personal = _windows_known_folders()
+        except (AttributeError, OSError):
+            personal = []
+    else:
+        personal = []
+    if not personal:
+        personal = [
+            user_home / "Desktop",
+            user_home / "Documents",
+            user_home / "Downloads",
+        ]
+    candidates = [Path(workspace), *personal]
     if drives is None and os.name == "nt":
         candidates.extend(Path(f"{letter}:\\") for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
     else:

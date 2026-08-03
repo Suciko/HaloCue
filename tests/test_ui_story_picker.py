@@ -15,29 +15,24 @@ def _run_picker(script: str) -> dict:
     return json.loads(output)
 
 
-def test_device_file_upload_and_host_selection_share_one_result_contract():
-    """Splitting local and host results would force app.js back to path-based branching."""
+def test_host_selection_returns_the_opaque_story_contract():
     script = r'''
 const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
 function node(tag){const listeners={};return {tagName:tag||'div',value:'',files:[],hidden:false,disabled:false,dataset:{},children:[],className:'',classList:{add(){},remove(){},toggle(){}},appendChild(x){this.children.push(x);return x},append(){for(const x of arguments)this.appendChild(x)},removeChild(){return this.children.shift()},get firstChild(){return this.children[0]},addEventListener(k,f){listeners[k]=f},fire(k,e){return listeners[k]&&listeners[k](e||{target:this})},setAttribute(){},focus(){this.focused=true},click(){return this.fire('click')},set textContent(v){this._text=String(v||'');this.children=[]},get textContent(){return this._text||''}}}
-const nodes={};const ids=['storyPicker','storyPickerDeviceInput','storyPickerSource','storyPickerHost','storyPickerStatus','storyPickerEntries','storyPickerBreadcrumbs','storyPickerRoots','storyPickerSearch','storyPickerSelected','storyPickerOpen','storyPickerBack','storyPickerForward','storyPickerUp'];ids.forEach(id=>nodes[id]=node());
-const chosen=[],requests=[];const responses=[{file_token:'ft-local',name:'phone.md',size:4},{entries:[{entry_token:'entry-host',name:'host.txt',kind:'file',size:5,modified:'2026-08-03T00:00:00Z',type:'文本文件'}],breadcrumbs:[],roots:[],parent_token:'',location_token:'dir-root'},{file_token:'ft-host',name:'host.txt',size:5}];
+const nodes={};const ids=['storyPicker','storyPickerHost','storyPickerStatus','storyPickerEntries','storyPickerBreadcrumbs','storyPickerRoots','storyPickerSearch','storyPickerSelected','storyPickerOpen','storyPickerBack','storyPickerForward','storyPickerUp'];ids.forEach(id=>nodes[id]=node());
+const chosen=[],requests=[];const responses=[{entries:[{entry_token:'entry-host',name:'host.txt',kind:'file',size:5,modified:'2026-08-03T00:00:00Z',type:'文本文件'}],breadcrumbs:[],roots:[],parent_token:'',location_token:'dir-root'},{file_token:'ft-host',name:'host.txt',size:5}];
 const window={Api:{request:async(p,o)=>{requests.push({p,o});return responses.shift()}},StoryUI:{}};const document={getElementById:id=>nodes[id],createElement:node,createDocumentFragment:()=>node('fragment'),activeElement:node('button'),addEventListener(){}};
 vm.runInNewContext(source,{window,document,encodeURIComponent,URLSearchParams,Promise,Error,console});
-(async()=>{const picker=new window.StoryUI.StoryFilePicker(nodes.storyPicker,{onChoose:x=>chosen.push(x)});nodes.storyPickerDeviceInput.files=[{name:'phone.md',size:4}];await nodes.storyPickerDeviceInput.fire('change',{target:nodes.storyPickerDeviceInput});await picker.openHost();picker.selectEntry({entry_token:'entry-host',name:'host.txt',kind:'file',size:5});await picker.confirm();console.log(JSON.stringify({chosen,paths:requests.map(x=>x.p),upload:requests[0].o}));})();
+(async()=>{const picker=new window.StoryUI.StoryFilePicker(nodes.storyPicker,{onChoose:x=>chosen.push(x)});await picker.open();picker.selectEntry({entry_token:'entry-host',name:'host.txt',kind:'file',size:5});await picker.confirm();console.log(JSON.stringify({chosen,paths:requests.map(x=>x.p)}));})();
 '''
     result = _run_picker(script)
     assert result["chosen"] == [
-        {"file_token": "ft-local", "name": "phone.md", "size": 4},
         {"file_token": "ft-host", "name": "host.txt", "size": 5},
     ]
     assert result["paths"] == [
-        "/api/story-files/upload",
         "/api/story-files/host?sort=name&direction=asc",
         "/api/story-files/select",
     ]
-    assert result["upload"]["method"] == "POST"
-    assert result["upload"]["headers"]["X-AA-Filename"] == "phone.md"
 
 
 def test_host_navigation_search_sort_keyboard_and_stale_error_are_deterministic():
@@ -63,9 +58,14 @@ vm.runInNewContext(source,{window,document,encodeURIComponent,URLSearchParams,Pr
 
 def test_picker_close_restores_focus_and_keeps_paths_out_of_browser_storage():
     script = r'''
-const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');function n(){return {hidden:false,dataset:{},children:[],classList:{add(){},remove(){},toggle(){}},appendChild(x){this.children.push(x)},addEventListener(){},setAttribute(){},focus(){this.focused=true},set textContent(v){this.children=[]}}}const nodes={};['storyPicker','storyPickerDeviceInput','storyPickerSource','storyPickerHost','storyPickerStatus','storyPickerEntries','storyPickerBreadcrumbs','storyPickerRoots','storyPickerSearch','storyPickerSelected','storyPickerOpen','storyPickerBack','storyPickerForward','storyPickerUp'].forEach(id=>nodes[id]=n());const trigger=n();const window={Api:{request:async()=>({})},StoryUI:{},localStorage:{setItem(){throw new Error('must not persist')},getItem(){throw new Error('must not read')}}};const document={getElementById:id=>nodes[id],createElement:n,createDocumentFragment:n,activeElement:trigger,addEventListener(){}};vm.runInNewContext(source,{window,document,encodeURIComponent,URLSearchParams,Promise,Error,console});const p=new window.StoryUI.StoryFilePicker(nodes.storyPicker,{onChoose(){}});p.open(trigger);p.close();console.log(JSON.stringify({closed:nodes.storyPicker.hidden,restored:trigger.focused===true}));
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');function n(){return {hidden:false,disabled:false,value:'',dataset:{},children:[],classList:{add(){},remove(){},toggle(){}},appendChild(x){this.children.push(x)},removeChild(){return this.children.shift()},get firstChild(){return this.children[0]},addEventListener(){},setAttribute(){},focus(){this.focused=true},set textContent(v){this.children=[]}}}const nodes={};['storyPicker','storyPickerDeviceInput','storyPickerSource','storyPickerHost','storyPickerStatus','storyPickerEntries','storyPickerBreadcrumbs','storyPickerRoots','storyPickerSearch','storyPickerSelected','storyPickerOpen','storyPickerBack','storyPickerForward','storyPickerUp'].forEach(id=>nodes[id]=n());const trigger=n(),requests=[];const listing={entries:[],breadcrumbs:[],roots:[],parent_token:'',location_token:'root'};const window={Api:{request:async path=>{requests.push(path);return listing}},StoryUI:{},localStorage:{setItem(){throw new Error('must not persist')},getItem(){throw new Error('must not read')}}};const document={getElementById:id=>nodes[id],createElement:n,createDocumentFragment:n,activeElement:trigger,addEventListener(){}};vm.runInNewContext(source,{window,document,encodeURIComponent,URLSearchParams,Promise,Error,console});(async()=>{const p=new window.StoryUI.StoryFilePicker(nodes.storyPicker,{onChoose(){}});await p.open(trigger);const hostVisible=!nodes.storyPickerHost.hidden;p.close();console.log(JSON.stringify({closed:nodes.storyPicker.hidden,restored:trigger.focused===true,hostVisible,requests}));})();
 '''
-    assert _run_picker(script) == {"closed": True, "restored": True}
+    assert _run_picker(script) == {
+        "closed": True,
+        "restored": True,
+        "hostVisible": True,
+        "requests": ["/api/story-files/host?sort=name&direction=asc"],
+    }
 
 
 def test_settings_picker_can_choose_a_host_directory_or_any_file():
