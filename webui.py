@@ -438,10 +438,34 @@ def face_job_snapshot() -> dict:
         name: result[name]
         for name in (
             "rendered_count", "render_cached", "vision_status", "labeled_count",
-            "saved_count", "failed_count", "completed_at", "actual_workers", "model",
+            "saved_count", "failed_count", "completed_at", "model",
         )
         if name in result
     }
+    if "status" in result:
+        public_result["status"] = public_text(result["status"], 32)
+    for name in ("actual_workers", "fallback_workers"):
+        try:
+            value = int(result[name])
+        except (KeyError, TypeError, ValueError):
+            continue
+        public_result[name] = min(4, max(0, value))
+    retried_faces = result.get("retried_faces")
+    if isinstance(retried_faces, (list, tuple)):
+        public_result["retried_faces"] = [
+            public_text(face_id, 32) for face_id in retried_faces[:100]
+        ]
+    calibration = []
+    for item in result.get("calibration") or []:
+        if not isinstance(item, dict):
+            continue
+        calibration.append({
+            name: public_text(item.get(name), 160 if name == "reason" else 80)
+            for name in ("face_id", "status", "attachment", "slot", "reason")
+            if item.get(name) is not None
+        })
+    if calibration:
+        public_result["calibration"] = calibration[:100]
     if semantic_faces:
         public_result["semantic_faces"] = semantic_faces
     return {
@@ -712,6 +736,11 @@ def run_face_job(payload: dict):
         with FACE_JOB_LOCK:
             FACE_JOB.update(
                 ok=True,
+                phase=(
+                    result.get("status")
+                    if result.get("status") in {"complete", "partial"}
+                    else "complete"
+                ),
                 result=result,
                 contact_sheet=result.get("contact_sheet"),
             )
@@ -719,7 +748,7 @@ def run_face_job(payload: dict):
         traceback.print_exc()
         with FACE_JOB_LOCK:
             FACE_JOB.update(
-                phase="error",
+                phase="failed",
                 message=f"表情解析失败：{exc}",
                 error=str(exc),
             )

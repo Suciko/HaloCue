@@ -161,6 +161,58 @@ def test_analysis_uses_four_render_workers_by_default(tmp_path, monkeypatch):
     assert observed["workers"] == 4
 
 
+def test_analysis_returns_partial_only_for_manual_calibration(tmp_path, monkeypatch):
+    report = _report(tmp_path)
+    report = RenderReport(
+        signature=report.signature,
+        cache_dir=report.cache_dir,
+        faces=report.faces,
+        cached=False,
+        actual_workers=4,
+        retried_faces=("05",),
+        fallback_workers=1,
+        calibration=(
+            {
+                "face_id": "05",
+                "status": "needs_manual_calibration",
+                "attachment": "eyes",
+                "slot": "Eyes",
+                "reason": "missing_region_geometry:height",
+            },
+            {"face_id": "00", "status": "validated"},
+        ),
+    )
+    monkeypatch.setattr(
+        spine_face_analysis,
+        "render_face_variations",
+        lambda *args, **kwargs: report,
+    )
+    updates = []
+    source = tmp_path / "spine"
+    source.mkdir()
+    con = assetdb.connect(tmp_path / "assets.db")
+
+    result = spine_face_analysis.analyze_character_faces(
+        con,
+        source_dir=source,
+        ident="custom-1",
+        spine_signature="skel-signature",
+        outfit_key="date",
+        spine_cli=tmp_path / "Spine.com",
+        cache_root=tmp_path / "cache",
+        provider=None,
+        progress=lambda phase, message, current, total: updates.append(phase),
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "partial"
+    assert result["actual_workers"] == 4
+    assert result["retried_faces"] == ["05"]
+    assert result["fallback_workers"] == 1
+    assert result["calibration"] == list(report.calibration)
+    assert updates[-1] == "partial"
+
+
 def test_analysis_returns_condensed_semantics_for_web_review(tmp_path, monkeypatch):
     report = _report(tmp_path)
     monkeypatch.setattr(

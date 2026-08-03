@@ -697,6 +697,7 @@ def test_renderer_uses_content_cache_and_never_changes_source_bundle(tmp_path):
         cache_root=tmp_path / "cache",
         face_ids=["00", "01"],
         runner=fake_runner,
+        workers=1,
         progress=lambda face_id, current, total: progress_events.append(
             (face_id, current, total)
         ),
@@ -740,3 +741,73 @@ def test_renderer_uses_content_cache_and_never_changes_source_bundle(tmp_path):
     assert repaired.cached is False
     assert len(calls) > call_count
     assert is_textured_render(repaired.faces[0].portrait_path)
+
+
+def test_parallel_render_retries_only_failed_faces_and_preserves_evidence(tmp_path):
+    """A transient parallel export failure must not discard completed faces."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "actor.skel").write_bytes(b"fake skeleton")
+    (source / "actor.atlas").write_text("actor.png\n", encoding="utf-8")
+    Image.new("RGBA", (32, 32), (200, 40, 80, 255)).save(source / "actor.png")
+    export_attempts = {}
+
+    def runner(command):
+        if "--unpack" in command:
+            output = Path(command[command.index("--output") + 1])
+            output.mkdir(parents=True, exist_ok=True)
+            Image.new("RGBA", (16, 16), (200, 40, 80, 255)).save(output / "base.png")
+        elif "--import" in command:
+            Path(command[command.index("--output") + 1]).write_bytes(b"project")
+        elif "--export" in command:
+            settings = json.loads(
+                Path(command[command.index("--export") + 1]).read_text(encoding="utf-8")
+            )
+            if settings["class"].endswith("$ExportJson"):
+                output = Path(command[command.index("--output") + 1])
+                output.mkdir(parents=True, exist_ok=True)
+                (output / "actor.json").write_text(
+                    json.dumps({
+                        "skeleton": {}, "bones": [{"name": "root"}],
+                        "animations": {"Idle_01": {}, "01": {}, "02": {}},
+                    }),
+                    encoding="utf-8",
+                )
+            else:
+                animation = settings["animation"]
+                export_attempts[animation] = export_attempts.get(animation, 0) + 1
+                if animation == "01" and export_attempts[animation] <= 2:
+                    raise RuntimeError("Spine resource exhausted")
+                output = Path(settings["output"])
+                output.parent.mkdir(parents=True, exist_ok=True)
+                image = Image.new("RGBA", (300, 600), (0, 0, 0, 0))
+                draw = ImageDraw.Draw(image)
+                draw.ellipse((75, 30, 225, 210), fill=(220, 60, 100, 255))
+                draw.rectangle((50, 190, 250, 580), fill=(40, 80, 160, 255))
+                image.save(output.with_name(output.name + "_8.png"))
+        return "Complete."
+
+    first = render_face_variations(
+        source,
+        spine_cli=tmp_path / "Spine.com",
+        cache_root=tmp_path / "cache",
+        face_ids=["02", "01", "00"],
+        runner=runner,
+    )
+    second = render_face_variations(
+        source,
+        spine_cli=tmp_path / "Spine.com",
+        cache_root=tmp_path / "cache",
+        face_ids=["00", "01", "02"],
+        runner=lambda _command: (_ for _ in ()).throw(AssertionError("cache miss")),
+    )
+
+    assert [face.face_id for face in first.faces] == ["00", "01", "02"]
+    assert first.actual_workers == 4
+    assert first.retried_faces == ("01",)
+    assert first.fallback_workers == 1
+    assert export_attempts["01"] == 3
+    assert second.cached is True
+    assert second.actual_workers == 4
+    assert second.retried_faces == ("01",)
+    assert second.fallback_workers == 1

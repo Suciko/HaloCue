@@ -177,9 +177,22 @@ def analyze_character_faces(
     )
     result = {
         "ok": True,
+        "status": (
+            "partial"
+            if any(
+                isinstance(item, dict)
+                and item.get("status") == "needs_manual_calibration"
+                for item in report.calibration
+            )
+            else "complete"
+        ),
         "rendered_count": len(report.faces),
         "render_cache": str(report.cache_dir),
         "render_cached": bool(report.cached),
+        "actual_workers": report.actual_workers,
+        "retried_faces": list(report.retried_faces),
+        "fallback_workers": report.fallback_workers,
+        "calibration": list(report.calibration),
         "contact_sheet": str(contact_sheet),
         "vision_status": "skipped_missing_key",
         "labeled_count": 0,
@@ -188,7 +201,7 @@ def analyze_character_faces(
     if provider is None:
         _notify(
             progress,
-            "complete",
+            result["status"],
             "渲染完成；未配置模型密钥，已保留语义命名解析结果",
             len(report.faces),
             len(report.faces),
@@ -222,7 +235,7 @@ def analyze_character_faces(
         )
         _notify(
             progress,
-            "complete",
+            result["status"],
             f"已复用 {len(face_ids)} 个视觉表情标注",
             len(face_ids),
             len(face_ids),
@@ -283,7 +296,7 @@ def analyze_character_faces(
     )
     _notify(
         progress,
-        "complete",
+        result["status"],
         f"已写入 {len(labels)} 个视觉表情标注",
         len(labels),
         len(report.faces),

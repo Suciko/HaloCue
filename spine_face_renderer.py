@@ -53,6 +53,9 @@ class RenderReport:
     faces: tuple[RenderedFace, ...]
     cached: bool
     calibration: tuple[dict, ...] = ()
+    actual_workers: int = 1
+    retried_faces: tuple[str, ...] = ()
+    fallback_workers: int | None = None
 
 
 def discover_renderable_face_ids(combinations: Mapping[str, Mapping]) -> list[str]:
@@ -792,6 +795,15 @@ def _load_cached_report(
         for face in faces
     ):
         return None
+    try:
+        actual_workers = bounded_render_workers(data.get("actual_workers", 1))
+    except (TypeError, ValueError):
+        actual_workers = 1
+    retry_ids = {
+        str(face_id) for face_id in (data.get("retried_faces") or [])
+    }
+    retried_faces = tuple(face_id for face_id in face_ids if face_id in retry_ids)
+    fallback_workers = 1 if retried_faces else None
     return RenderReport(
         signature=signature,
         cache_dir=cache_dir,
@@ -800,6 +812,9 @@ def _load_cached_report(
         calibration=tuple(
             item for item in (data.get("calibration") or []) if isinstance(item, dict)
         ),
+        actual_workers=actual_workers,
+        retried_faces=retried_faces,
+        fallback_workers=fallback_workers,
     )
 
 
@@ -810,7 +825,7 @@ def render_face_variations(
     cache_root: str | Path,
     face_ids: Sequence[str] | None = None,
     runner: Callable[[Sequence[str]], str] | None = None,
-    workers: int = 1,
+    workers: int = 4,
     command_timeout_seconds: int | float = 120,
     progress: Callable[[str, int, int], None] | None = None,
 ) -> RenderReport:
@@ -978,6 +993,8 @@ def render_face_variations(
         )
 
     total = len(selected_ids)
+    retried_faces: tuple[str, ...] = ()
+    fallback_workers: int | None = None
     if workers == 1:
         rendered = []
         for index, face_id in enumerate(selected_ids):
@@ -992,13 +1009,29 @@ def render_face_variations(
                 pool.submit(render_one, face_id): face_id
                 for face_id in selected_ids
             }
-            completed = []
+            completed: dict[str, RenderedFace] = {}
+            failed_face_ids: set[str] = set()
             for future in as_completed(futures):
                 face_id = futures[future]
-                completed.append(future.result())
+                try:
+                    completed[face_id] = future.result()
+                except Exception:
+                    # Exports that did finish remain usable; only the failed
+                    # expressions are retried below with a single worker.
+                    failed_face_ids.add(face_id)
+                    continue
                 if progress:
                     progress(face_id, len(completed), total)
-            rendered = sorted(completed, key=lambda face: selected_ids.index(face.face_id))
+            retried_faces = tuple(
+                face_id for face_id in selected_ids if face_id in failed_face_ids
+            )
+            if retried_faces:
+                fallback_workers = 1
+                for face_id in retried_faces:
+                    completed[face_id] = render_one(face_id)
+                    if progress:
+                        progress(face_id, len(completed), total)
+            rendered = [completed[face_id] for face_id in selected_ids]
 
     patched_json = work / f"render-warmup-{_CACHE_VERSION}.json"
     skeleton_data = json.loads(patched_json.read_text(encoding="utf-8"))
@@ -1018,6 +1051,9 @@ def render_face_variations(
                 "render_profile": _RENDER_PROFILE,
                 "head_preview_size": _HEAD_PREVIEW_SIZE,
                 "calibration": calibration,
+                "actual_workers": workers,
+                "retried_faces": list(retried_faces),
+                "fallback_workers": fallback_workers,
             },
             ensure_ascii=False,
             indent=2,
@@ -1030,4 +1066,7 @@ def render_face_variations(
         faces=tuple(rendered),
         cached=False,
         calibration=tuple(calibration),
+        actual_workers=workers,
+        retried_faces=retried_faces,
+        fallback_workers=fallback_workers,
     )

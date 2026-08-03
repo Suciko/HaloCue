@@ -544,6 +544,14 @@ def test_face_job_snapshot_never_exposes_server_paths(monkeypatch, tmp_path):
             "contact_sheet": str(tmp_path / "cache" / "sheet.jpg"),
             "vision_status": "labeled", "labeled_count": 3,
             "saved_count": 3, "failed_count": 0, "completed_at": "2026-08-03T15:00:00+00:00",
+            "status": "partial", "actual_workers": 4,
+            "retried_faces": ["03"], "fallback_workers": 1,
+            "calibration": [{
+                "face_id": "03", "status": "needs_manual_calibration",
+                "attachment": "eyes", "slot": "Eyes",
+                "reason": "missing_region_geometry:height",
+                "path": str(tmp_path / "private" / "eyes.png"),
+            }],
             "semantic_faces": [{
                 "face_id": "03", "primary_emotion": "惊讶",
                 "semantic_labels": ["惊讶", "意外"],
@@ -557,6 +565,15 @@ def test_face_job_snapshot_never_exposes_server_paths(monkeypatch, tmp_path):
     assert snapshot["contact_sheet_available"] is True
     assert snapshot["result"]["saved_count"] == 3
     assert snapshot["result"]["completed_at"] == "2026-08-03T15:00:00+00:00"
+    assert snapshot["result"]["status"] == "partial"
+    assert snapshot["result"]["actual_workers"] == 4
+    assert snapshot["result"]["retried_faces"] == ["03"]
+    assert snapshot["result"]["fallback_workers"] == 1
+    assert snapshot["result"]["calibration"] == [{
+        "face_id": "03", "status": "needs_manual_calibration",
+        "attachment": "eyes", "slot": "Eyes",
+        "reason": "missing_region_geometry:height",
+    }]
     assert snapshot["result"]["semantic_faces"] == [{
         "face_id": "03", "primary_emotion": "惊讶",
         "semantic_labels": ["惊讶", "意外"],
@@ -564,3 +581,31 @@ def test_face_job_snapshot_never_exposes_server_paths(monkeypatch, tmp_path):
     encoded = json.dumps(snapshot, ensure_ascii=False)
     assert str(tmp_path) not in encoded
     assert "render_cache" not in encoded
+
+
+def test_face_job_exception_uses_failed_terminal_phase(monkeypatch):
+    class Connection:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(webui, "FACE_JOB", {
+        "running": True, "done": False, "ok": False, "phase": "rendering",
+        "message": "", "current": 0, "total": 1, "log": [],
+        "contact_sheet": None, "result": None, "error": None,
+    })
+    monkeypatch.setattr(webui, "db", lambda: Connection())
+    monkeypatch.setattr(webui, "_optional_vision_provider", lambda: (None, None))
+    monkeypatch.setattr(
+        webui.spine_face_analysis,
+        "analyze_character_faces",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("render crashed")),
+    )
+
+    webui.run_face_job({
+        "source": "source", "ident": "hero", "spine_cli": "Spine.com",
+    })
+
+    snapshot = webui.face_job_snapshot()
+    assert snapshot["done"] is True
+    assert snapshot["ok"] is False
+    assert snapshot["phase"] == "failed"
