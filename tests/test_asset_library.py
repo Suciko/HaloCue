@@ -9,6 +9,7 @@ import pytest
 
 import asset_catalog
 import assetdb
+import spine_face_labeler
 import webui
 from history_assets import HistoryAssetBrowser
 from story_workspace import StoryContext
@@ -164,6 +165,20 @@ def _post(base, path, payload):
         return exc.code, json.loads(exc.read())
 
 
+def _patch(base, path, payload):
+    request = Request(
+        base + path,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="PATCH",
+    )
+    try:
+        with urlopen(request) as response:
+            return response.status, json.loads(response.read())
+    except HTTPError as exc:
+        return exc.code, json.loads(exc.read())
+
+
 def test_library_groups_custom_copies_by_content_without_exposing_paths(tmp_path):
     con = assetdb.connect(tmp_path / "assets.db")
     asset_catalog.migrate(con)
@@ -227,6 +242,135 @@ def test_library_profile_persists_series_classification_and_requires_series_name
     assert result["characters"][0]["asset_role"] == "series_shared"
     assert result["characters"][0]["series_name"] == "凯伊约会篇"
     assert result["characters"][0]["details"]["face_count"] == 1
+
+
+def test_character_library_counts_files_semantic_faces_and_saved_labels(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    asset_catalog.migrate(con)
+    _insert_asset(
+        con,
+        kind="character",
+        key="kei-date",
+        name="凯伊约会服",
+        digest="9" * 64,
+        scope=str(tmp_path / "projects" / "约会篇"),
+        metadata={
+            "files": {"skel": "a.skel", "atlas": "a.atlas", "texture": "a.png", "avatar": "avatar.png"},
+            "faces": [],
+            "semantic_face_count": 44,
+            "expression_status": "known",
+            "spine_signature": "sig-date",
+            "outfit_key": "date",
+        },
+    )
+    con.execute(
+        """
+        INSERT INTO face_visual_label
+          (ident,spine_signature,outfit_key,face_id,model,primary_emotion,secondary_json)
+        VALUES ('kei-date','sig-date','date','00','vision-model','平静','[]')
+        """
+    )
+    con.commit()
+
+    details = asset_catalog.list_library_assets(con)["characters"][0]["details"]
+
+    assert details["file_count"] == 4
+    assert details["face_count"] == 44
+    assert details["labeled_count"] == 1
+    assert details["expression_status"] == "known"
+
+
+def test_face_label_payload_is_path_safe_and_supports_versioned_edits(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    asset_catalog.migrate(con)
+    installed = tmp_path / "projects" / "date" / "characters" / "kei-date"
+    installed.mkdir(parents=True)
+    head = tmp_path / "cache" / "heads" / "00.png"
+    head.parent.mkdir(parents=True)
+    head.write_bytes(b"png-preview")
+    _insert_asset(
+        con,
+        kind="character",
+        key="kei-date",
+        name="凯伊约会服",
+        digest="8" * 64,
+        scope=str(tmp_path / "projects" / "date"),
+        install_path=installed,
+        metadata={"spine_signature": "sig-date", "outfit_key": "date"},
+    )
+    spine_face_labeler.persist_visual_face_labels(
+        con,
+        ident="kei-date",
+        spine_signature="sig-date",
+        outfit_key="date",
+        model="vision-model",
+        labels=[{
+            "face_id": "00", "primary_emotion": "平静", "secondary_emotions": [],
+            "valence": "neutral", "arousal": "low", "eyes": "自然睁眼",
+            "brows": "自然", "mouth": "闭嘴", "blush": False, "tears": False,
+            "confidence": 0.92, "description_cn": "平静地注视前方", "head_path": str(head),
+        }],
+    )
+
+    payload = webui.face_labels_payload(con, aa_key="kei-date", sha256="8" * 64)
+    face = payload["faces"][0]
+
+    assert face["face_id"] == "00"
+    assert face["effective"]["primary_emotion"] == "平静"
+    assert face["preview_url"].startswith("/api/assets/faces/preview?")
+    assert "head_path" not in json.dumps(payload, ensure_ascii=False)
+
+    saved = webui.update_face_label_payload(
+        con,
+        aa_key="kei-date",
+        sha256="8" * 64,
+        face_id="00",
+        patch={"primary_emotion": "认真"},
+        expected_version=face["version"],
+    )
+    assert saved["face"]["effective"]["primary_emotion"] == "认真"
+    assert saved["saved_count"] == 1
+    assert saved["saved_at"]
+
+
+def test_face_label_http_routes_read_and_patch_saved_records(tmp_path, monkeypatch):
+    con = assetdb.connect(tmp_path / "assets.db")
+    asset_catalog.migrate(con)
+    installed = tmp_path / "projects" / "date" / "characters" / "kei-date"
+    installed.mkdir(parents=True)
+    head = tmp_path / "00.png"
+    head.write_bytes(b"preview")
+    _insert_asset(
+        con, kind="character", key="kei-date", name="凯伊约会服",
+        digest="7" * 64, scope=str(tmp_path / "projects" / "date"),
+        install_path=installed,
+        metadata={"spine_signature": "sig-date", "outfit_key": "date"},
+    )
+    spine_face_labeler.persist_visual_face_labels(
+        con, ident="kei-date", spine_signature="sig-date", outfit_key="date",
+        model="vision-model", labels=[{
+            "face_id": "00", "primary_emotion": "平静", "secondary_emotions": [],
+            "valence": "neutral", "arousal": "low", "eyes": "睁眼", "brows": "自然",
+            "mouth": "闭嘴", "blush": False, "tears": False, "confidence": 0.9,
+            "description_cn": "平静", "head_path": str(head),
+        }],
+    )
+    con.close()
+
+    query = "?aa_key=kei-date&sha256=" + "7" * 64
+    with _server(tmp_path, monkeypatch) as base:
+        with urlopen(base + "/api/assets/faces/labels" + query) as response:
+            listed = json.loads(response.read())
+        version = listed["faces"][0]["version"]
+        status, saved = _patch(
+            base,
+            "/api/assets/faces/labels/00",
+            {"aa_key": "kei-date", "sha256": "7" * 64,
+             "version": version, "patch": {"primary_emotion": "认真"}},
+        )
+
+    assert status == 200
+    assert saved["face"]["effective"]["primary_emotion"] == "认真"
 
 
 def test_library_profile_rejects_builtin_registered_rows(tmp_path):
@@ -328,6 +472,7 @@ def test_face_job_snapshot_never_exposes_server_paths(monkeypatch, tmp_path):
             "rendered_count": 3, "render_cache": str(tmp_path / "cache"),
             "contact_sheet": str(tmp_path / "cache" / "sheet.jpg"),
             "vision_status": "labeled", "labeled_count": 3,
+            "saved_count": 3, "failed_count": 0, "completed_at": "2026-08-03T15:00:00+00:00",
             "semantic_faces": [{
                 "face_id": "03", "primary_emotion": "惊讶",
                 "semantic_labels": ["惊讶", "意外"],
@@ -339,6 +484,8 @@ def test_face_job_snapshot_never_exposes_server_paths(monkeypatch, tmp_path):
     snapshot = webui.face_job_snapshot()
 
     assert snapshot["contact_sheet_available"] is True
+    assert snapshot["result"]["saved_count"] == 3
+    assert snapshot["result"]["completed_at"] == "2026-08-03T15:00:00+00:00"
     assert snapshot["result"]["semantic_faces"] == [{
         "face_id": "03", "primary_emotion": "惊讶",
         "semantic_labels": ["惊讶", "意外"],

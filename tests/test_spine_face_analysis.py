@@ -134,7 +134,7 @@ def test_analysis_maps_per_face_render_progress_to_job_updates(tmp_path, monkeyp
     ]
 
 
-def test_analysis_uses_two_render_workers_by_default(tmp_path, monkeypatch):
+def test_analysis_uses_four_render_workers_by_default(tmp_path, monkeypatch):
     report = _report(tmp_path)
     observed = {}
 
@@ -158,7 +158,7 @@ def test_analysis_uses_two_render_workers_by_default(tmp_path, monkeypatch):
         provider=None,
     )
 
-    assert observed["workers"] == 2
+    assert observed["workers"] == 4
 
 
 def test_analysis_returns_condensed_semantics_for_web_review(tmp_path, monkeypatch):
@@ -261,6 +261,9 @@ def test_analysis_persists_visual_labels_and_reuses_existing_model_rows(
 
     assert first["vision_status"] == "labeled"
     assert first["labeled_count"] == 2
+    assert first["saved_count"] == 2
+    assert first["failed_count"] == 0
+    assert first["completed_at"]
     assert second["vision_status"] == "cached"
     assert calls == {"render": 2, "label": 1}
     count = con.execute(

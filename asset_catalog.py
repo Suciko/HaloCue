@@ -431,6 +431,20 @@ def list_story_assets(con, *, scope: str) -> dict:
 def _library_item_details(kind: str, metadata: dict) -> dict:
     """Return catalog details that help identify a material without paths."""
     if kind == "character":
+        files = metadata.get("files")
+        file_count = (
+            len([value for value in files.values() if value])
+            if isinstance(files, dict)
+            else None
+        )
+        faces = metadata.get("faces")
+        semantic_count = metadata.get("semantic_face_count")
+        if isinstance(faces, list) and faces:
+            face_count = len(faces)
+        elif isinstance(semantic_count, int) and semantic_count >= 0:
+            face_count = semantic_count
+        else:
+            face_count = None
         return {
             "expression_status": _safe_catalog_text(
                 metadata.get("expression_status"), fallback="待检测"
@@ -438,7 +452,8 @@ def _library_item_details(kind: str, metadata: dict) -> dict:
             "expression_mode": _safe_catalog_text(
                 metadata.get("expression_mode"), fallback="opaque_custom"
             ),
-            "face_count": len(metadata.get("faces") or []),
+            "file_count": file_count,
+            "face_count": face_count,
         }
     if kind == "background":
         details = {
@@ -494,6 +509,21 @@ def list_library_assets(con) -> dict:
         )
     }
     rows = library_custom_rows(con)
+    visual_counts = {
+        (row["ident"], row["spine_signature"], row["outfit_key"]): {
+            "labeled_count": int(row["labeled_count"] or 0),
+            "labels_updated_at": str(row["labels_updated_at"] or ""),
+        }
+        for row in con.execute(
+            """
+            SELECT ident,spine_signature,outfit_key,
+                   COUNT(DISTINCT face_id) AS labeled_count,
+                   MAX(updated_at) AS labels_updated_at
+            FROM face_visual_label
+            GROUP BY ident,spine_signature,outfit_key
+            """
+        )
+    }
     groups: dict[tuple[str, str, str], dict] = {}
     for row in rows:
         metadata = _safe_metadata(row["metadata_json"])
@@ -508,6 +538,19 @@ def list_library_assets(con) -> dict:
             "series_name": str(profile["series_name"]) if profile else "",
             "chapters": [], "details": _library_item_details(key[0], metadata),
         })
+        if key[0] == "character":
+            variant = (
+                key[1],
+                str(metadata.get("spine_signature") or ""),
+                str(metadata.get("outfit_key") or ""),
+            )
+            saved = visual_counts.get(variant)
+            item["details"]["labeled_count"] = (
+                saved["labeled_count"] if saved else 0
+            )
+            item["details"]["labels_updated_at"] = (
+                saved["labels_updated_at"] if saved else ""
+            )
         chapter = Path(str(row["scope"] or "")).name or "未命名章节"
         if chapter not in item["chapters"]:
             item["chapters"].append(chapter)

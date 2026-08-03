@@ -11,7 +11,7 @@ import argparse, io, json, mimetypes, os, re, socket, sys, threading, traceback,
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Dict, List, Any, Optional
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs, unquote
+from urllib.parse import urlparse, parse_qs, unquote, urlencode
 
 sys.stdout.reconfigure(encoding="utf-8")
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +27,7 @@ import llm                                                      # noqa: E402
 import model_profiles                                           # noqa: E402
 import script2aap as S2A                                        # noqa: E402
 import spine_face_analysis                                      # noqa: E402
+import spine_face_labeler                                       # noqa: E402
 from aa_project_assets import assert_aa_closed, validate_windows_path_component  # noqa: E402
 from aa_registry import AssetRegistrationError, RegistrationConflictError  # noqa: E402
 from build_index import faces_of                                # noqa: E402
@@ -435,7 +436,10 @@ def face_job_snapshot() -> dict:
         })
     public_result = {
         name: result[name]
-        for name in ("rendered_count", "render_cached", "vision_status", "labeled_count", "model")
+        for name in (
+            "rendered_count", "render_cached", "vision_status", "labeled_count",
+            "saved_count", "failed_count", "completed_at", "actual_workers", "model",
+        )
         if name in result
     }
     if semantic_faces:
@@ -461,6 +465,102 @@ def face_job_contact_sheet() -> str | None:
     with FACE_JOB_LOCK:
         value = FACE_JOB.get("contact_sheet")
     return str(value) if value else None
+
+
+def _public_visual_face(record: dict, *, aa_key: str, sha256: str) -> dict:
+    face_id = str(record.get("face_id") or "")
+    return {
+        "face_id": face_id,
+        "model": str(record.get("model") or ""),
+        "ai": dict(record.get("ai") or {}),
+        "manual": dict(record.get("manual") or {}),
+        "effective": dict(record.get("effective") or {}),
+        "reviewed": bool(record.get("reviewed")),
+        "version": int(record.get("version") or 1),
+        "updated_at": str(record.get("updated_at") or ""),
+        "preview_url": "/api/assets/faces/preview?" + urlencode({
+            "aa_key": str(aa_key), "sha256": str(sha256), "face_id": face_id,
+        }),
+    }
+
+
+def face_labels_payload(con, *, aa_key: str, sha256: str) -> dict:
+    """Return browser-safe persisted labels for one exact registered skeleton."""
+    target = asset_catalog.library_character_analysis_target(
+        con, aa_key=aa_key, sha256=sha256
+    )
+    records = spine_face_labeler.list_visual_face_labels(
+        con,
+        ident=target["ident"],
+        spine_signature=target["spine_signature"],
+        outfit_key=target["outfit_key"],
+    )
+    return {
+        "ok": True,
+        "ident": target["ident"],
+        "name": target["name"],
+        "saved_count": len(records),
+        "faces": [
+            _public_visual_face(record, aa_key=str(aa_key), sha256=str(sha256))
+            for record in records
+        ],
+    }
+
+
+def update_face_label_payload(
+    con,
+    *,
+    aa_key: str,
+    sha256: str,
+    face_id: str,
+    patch: dict,
+    expected_version: int,
+) -> dict:
+    """Save one manual override and return explicit database evidence."""
+    target = asset_catalog.library_character_analysis_target(
+        con, aa_key=aa_key, sha256=sha256
+    )
+    record = spine_face_labeler.update_visual_face_label(
+        con,
+        ident=target["ident"],
+        spine_signature=target["spine_signature"],
+        outfit_key=target["outfit_key"],
+        face_id=face_id,
+        patch=patch,
+        expected_version=expected_version,
+    )
+    public = _public_visual_face(
+        record, aa_key=str(aa_key), sha256=str(sha256)
+    )
+    return {
+        "ok": True,
+        "saved_count": 1,
+        "saved_at": public["updated_at"],
+        "face": public,
+    }
+
+
+def face_preview_path(con, *, aa_key: str, sha256: str, face_id: str) -> Path:
+    """Resolve a persisted preview without exposing its server-side path."""
+    target = asset_catalog.library_character_analysis_target(
+        con, aa_key=aa_key, sha256=sha256
+    )
+    records = spine_face_labeler.list_visual_face_labels(
+        con,
+        ident=target["ident"],
+        spine_signature=target["spine_signature"],
+        outfit_key=target["outfit_key"],
+    )
+    record = next(
+        (item for item in records if str(item.get("face_id")) == str(face_id)),
+        None,
+    )
+    if record is None:
+        raise KeyError("表情预览不存在")
+    path = Path(str(record.get("head_path") or ""))
+    if path.suffix.casefold() != ".png" or not path.is_file():
+        raise KeyError("表情预览不存在")
+    return path.resolve()
 
 
 def _face_progress(phase, message, current=None, total=None):
@@ -605,7 +705,7 @@ def run_face_job(payload: dict):
             provider=provider,
             force_vision=bool(payload.get("force_vision")),
             progress=_face_progress,
-            workers=2,
+            workers=4,
         )
         if provider_issue:
             result["provider_issue"] = provider_issue
@@ -2180,6 +2280,32 @@ class H(BaseHTTPRequestHandler):
                 })
             if p == "/api/assets/faces/job":
                 return self._send(200, face_job_snapshot())
+            if p == "/api/assets/faces/labels":
+                con = db()
+                try:
+                    return self._send(200, face_labels_payload(
+                        con, aa_key=q.get("aa_key", ""), sha256=q.get("sha256", "")
+                    ))
+                except KeyError as exc:
+                    return self._send(404, {"ok": False, "code": "face_labels_not_found", "e": str(exc)})
+                except ValueError as exc:
+                    return self._send(400, {"ok": False, "code": "invalid_face_labels_request", "e": str(exc)})
+                finally:
+                    con.close()
+            if p == "/api/assets/faces/preview":
+                con = db()
+                try:
+                    preview = face_preview_path(
+                        con,
+                        aa_key=q.get("aa_key", ""),
+                        sha256=q.get("sha256", ""),
+                        face_id=q.get("face_id", ""),
+                    )
+                    return self._send_preview_file(preview, "image/png")
+                except (KeyError, ValueError):
+                    return self._send(404, {"ok": False, "code": "face_preview_not_found", "e": "表情预览不存在"})
+                finally:
+                    con.close()
             if p == "/api/llm/profiles":
                 return self._send(200, MODEL_PROFILES.public_state())
             if p == "/api/assets/faces/contact-sheet":
@@ -2226,6 +2352,37 @@ class H(BaseHTTPRequestHandler):
         except Exception as e:
             traceback.print_exc()
             return self._send(500, {"e": str(e)})
+
+    def do_PATCH(self):
+        p = unquote(urlparse(self.path).path)
+        if not p.startswith("/api/assets/faces/labels/"):
+            return self._send(404, {"e": "not found"})
+        face_id = p.rsplit("/", 1)[-1]
+        n = int(self.headers.get("Content-Length") or 0)
+        try:
+            data = json.loads(self.rfile.read(n) or b"{}")
+        except (TypeError, ValueError):
+            return self._send(400, {"ok": False, "code": "invalid_json", "e": "请求内容不是有效 JSON"})
+        con = db()
+        try:
+            result = update_face_label_payload(
+                con,
+                aa_key=data.get("aa_key", ""),
+                sha256=data.get("sha256", ""),
+                face_id=face_id,
+                patch=data.get("patch") or {},
+                expected_version=int(data.get("version") or 0),
+            )
+            return self._send(200, result)
+        except KeyError as exc:
+            return self._send(404, {"ok": False, "code": "face_label_not_found", "e": str(exc)})
+        except ValueError as exc:
+            code = "face_label_conflict" if "版本" in str(exc) else "invalid_face_label"
+            return self._send(409 if code == "face_label_conflict" else 400, {
+                "ok": False, "code": code, "e": str(exc),
+            })
+        finally:
+            con.close()
 
     def do_POST(self):
         p = urlparse(self.path).path

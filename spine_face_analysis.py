@@ -123,7 +123,7 @@ def analyze_character_faces(
     provider=None,
     force_vision: bool = False,
     progress: ProgressCallback | None = None,
-    workers: int = 2,
+    workers: int = 4,
 ) -> dict:
     """Render all real numbered faces and optionally add visual semantic labels."""
     source = Path(source_dir).resolve()
@@ -204,7 +204,22 @@ def analyze_character_faces(
         model=model,
     )
     if not force_vision and face_ids and face_ids.issubset(existing):
-        result.update(vision_status="cached", labeled_count=len(face_ids), model=model)
+        saved = con.execute(
+            """
+            SELECT COUNT(DISTINCT face_id), MAX(updated_at)
+            FROM face_visual_label
+            WHERE ident=? AND spine_signature=? AND outfit_key=? AND model=?
+            """,
+            (str(ident), str(spine_signature or ""), str(outfit_key or ""), model),
+        ).fetchone()
+        result.update(
+            vision_status="cached",
+            labeled_count=len(face_ids),
+            saved_count=int(saved[0] or 0),
+            failed_count=0,
+            completed_at=str(saved[1] or ""),
+            model=model,
+        )
         _notify(
             progress,
             "complete",
@@ -245,7 +260,14 @@ def analyze_character_faces(
         semantic_hints=semantic_hints,
         progress=report_label_progress,
     )
-    persist_visual_face_labels(
+    _notify(
+        progress,
+        "persisting",
+        f"正在保存 {len(labels)} 个表情标注到数据库",
+        0,
+        len(labels),
+    )
+    saved = persist_visual_face_labels(
         con,
         ident=str(ident),
         spine_signature=str(spine_signature or ""),
@@ -257,6 +279,7 @@ def analyze_character_faces(
         vision_status="labeled",
         labeled_count=len(labels),
         model=model,
+        **saved,
     )
     _notify(
         progress,
