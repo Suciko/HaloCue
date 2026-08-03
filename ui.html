@@ -63,7 +63,7 @@
     <div class="face-workspace-shell">
       <header class="face-workspace-heading"><div><span>独立任务</span><h2 id="faceWorkspaceTitle">骨骼表情标注</h2><p id="faceWorkspaceCharacter">请选择素材工作台中的角色骨骼。</p></div><button class="ghost" type="button" data-face-action="close">关闭</button></header>
       <section class="face-workspace-overview"><div><span>当前阶段</span><b id="faceWorkspacePhase">等待开始</b></div><div><span>进度</span><b id="faceWorkspaceProgress">—</b></div><div><span>结果</span><b id="faceWorkspaceResult">尚未生成</b></div></section>
-      <div class="face-workspace-actions"><label class="choice-control"><input id="faceWorkspaceForceVision" type="checkbox">重新请求 AI 视觉标注</label><button id="faceWorkspaceStart" type="button" data-face-action="start">开始或重新标注</button></div>
+      <div class="face-workspace-actions"><details id="faceWorkspaceMore" class="face-workspace-more" hidden><summary>更多操作</summary><button id="faceWorkspaceForceButton" class="ghost" type="button" data-face-action="force-vision">强制重新请求 AI</button></details><button id="faceWorkspaceStart" type="button" data-face-action="start">开始表情解析</button></div>
       <p class="face-workspace-status" id="faceWorkspaceStatus" aria-live="polite"></p>
       <section class="face-workspace-results"><header><h3>表情标注</h3><span>图片、编号和识别结果一一对应</span></header><div id="faceWorkspaceLabels" class="face-workspace-cards"></div></section>
       <details class="face-workspace-log"><summary>处理记录</summary><pre id="faceWorkspaceLog"></pre></details>

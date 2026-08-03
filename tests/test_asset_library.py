@@ -678,3 +678,43 @@ def test_face_job_exception_uses_failed_terminal_phase(monkeypatch):
     assert snapshot["done"] is True
     assert snapshot["ok"] is False
     assert snapshot["phase"] == "failed"
+
+
+def test_face_job_missing_key_message_describes_the_current_task(monkeypatch):
+    class Connection:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(webui, "FACE_JOB", {
+        "running": True, "done": False, "ok": False, "phase": "queued",
+        "message": "", "current": 0, "total": None, "log": [],
+        "contact_sheet": None, "result": None, "error": None,
+    })
+    monkeypatch.setattr(webui, "db", lambda: Connection())
+    monkeypatch.setattr(
+        webui,
+        "_optional_vision_provider",
+        lambda: (None, "所选模型配置尚未设置 API Key"),
+    )
+    monkeypatch.setattr(
+        webui.spine_face_analysis,
+        "analyze_character_faces",
+        lambda *args, **kwargs: {
+            "ok": True, "status": "complete", "rendered_count": 2,
+            "vision_status": "skipped_missing_key",
+        },
+    )
+
+    webui.run_face_job({
+        "source": "source", "ident": "hero", "spine_cli": "Spine.com",
+    })
+
+    snapshot = webui.face_job_snapshot()
+    assert snapshot["ok"] is True
+    assert any(
+        message == (
+            "当前任务未读取到模型密钥；保存配置后请重新开始任务。"
+            "本次仍会完成渲染和语义命名解析"
+        )
+        for message in snapshot["log"]
+    )

@@ -716,9 +716,15 @@ def run_face_job(payload: dict):
         con = db()
         provider, provider_issue = _optional_vision_provider()
         if provider_issue:
+            provider_message = (
+                "当前任务未读取到模型密钥；保存配置后请重新开始任务。"
+                "本次仍会完成渲染和语义命名解析"
+                if "API Key" in provider_issue or "密钥" in provider_issue
+                else f"{provider_issue}；本次仍会完成渲染和语义命名解析"
+            )
             _face_progress(
                 "rendering",
-                f"{provider_issue}；本次仍会完成渲染和语义命名解析",
+                provider_message,
             )
         result = spine_face_analysis.analyze_character_faces(
             con,

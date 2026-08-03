@@ -17,7 +17,8 @@
     this.phase = document.getElementById('faceWorkspacePhase');
     this.progress = document.getElementById('faceWorkspaceProgress');
     this.result = document.getElementById('faceWorkspaceResult');
-    this.forceVision = document.getElementById('faceWorkspaceForceVision');
+    this.more = document.getElementById('faceWorkspaceMore');
+    this.forceButton = document.getElementById('faceWorkspaceForceButton');
     this.startButton = document.getElementById('faceWorkspaceStart');
     this.status = document.getElementById('faceWorkspaceStatus');
     this.labels = document.getElementById('faceWorkspaceLabels');
@@ -46,7 +47,11 @@
         : null;
       if (!target || target.disabled) return;
       if (target.dataset.faceAction === 'close') self.close();
-      else if (target.dataset.faceAction === 'start') self.start();
+      else if (target.dataset.faceAction === 'start') self.start(false);
+      else if (target.dataset.faceAction === 'force-vision') {
+        if (self.more) self.more.open = false;
+        self.start(true);
+      }
       else if (target.dataset.faceAction === 'edit') self.toggleEditor(target.dataset.faceId);
       else if (target.dataset.faceAction === 'save') self.saveFace(target.dataset.faceId);
       else if (target.dataset.faceAction === 'restore-ai') self.restoreAi(target.dataset.faceId);
@@ -87,6 +92,7 @@
     this.log.textContent = '';
     this.faces = [];
     this.labelsLoadedKey = '';
+    if (this.more) { this.more.hidden = true; this.more.open = false; }
     clear(this.labels);
     if (this.startButton) this.startButton.disabled = true;
     if (this.root.focus) this.root.focus();
@@ -183,6 +189,7 @@
       if (!this.isOpen() || generation !== this.generation || currentKey !== requestKey || sequence !== this.labelRequestSequence) return;
       this.faces = payload.faces || [];
       this.renderLabels(this.faces);
+      if (this.more) this.more.hidden = !Number(payload.saved_count || this.faces.length || 0);
       if (payload.saved_count) this.status.textContent = '已保存到数据库：' + payload.saved_count + ' 个表情。';
     } catch (error) {
       if (!this.isOpen() || generation !== this.generation || sequence !== this.labelRequestSequence) return;
@@ -324,14 +331,14 @@
     }
   };
 
-  FaceWorkspace.prototype.start = async function () {
+  FaceWorkspace.prototype.start = async function (forceVision) {
     if (!this.selected || (this.startButton && this.startButton.disabled)) return;
     if (this.startButton) this.startButton.disabled = true;
     this.phase.textContent = '正在生成联系表';
     try {
       const response = await exports.Api.request('/api/assets/library/character/face-analysis', exports.Api.json('POST', {
         aa_key: this.selected.aa_key, sha256: this.selected.sha256,
-        force_vision: Boolean(this.forceVision && this.forceVision.checked)
+        force_vision: Boolean(forceVision)
       }));
       if (response.ok) {
         this.phase.textContent = 'AI 正在识别表情';

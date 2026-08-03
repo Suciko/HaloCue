@@ -56,6 +56,37 @@ def test_face_workspace_uses_database_backed_editable_cards():
     assert "grid-template-columns:repeat(4" in css
 
 
+def test_face_workspace_keeps_force_relabel_out_of_the_primary_action():
+    html = (HERE / "ui.html").read_text(encoding="utf-8")
+
+    assert 'id="faceWorkspaceForceVision"' not in html
+    assert 'id="faceWorkspaceMore"' in html
+    assert 'data-face-action="force-vision"' in html
+    assert "开始表情解析" in html
+    assert "重新请求 AI 视觉标注" not in html
+
+
+def test_face_workspace_reveals_force_relabel_only_after_saved_labels():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+const nodes={},requests=[];
+function node(id){let classes=new Set();return {id:id||'',children:[],dataset:{},hidden:false,disabled:false,open:false,classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},appendChild(child){this.children.push(child);return child},addEventListener(){},setAttribute(){},removeAttribute(){},focus(){},querySelector(){return null},set textContent(value){this.children=[]},get textContent(){return this.children.map(child=>child.textContent||'').join('')}}}
+['faceWorkspaceBackdrop','faceWorkspace','faceWorkspaceCharacter','faceWorkspacePhase','faceWorkspaceProgress','faceWorkspaceResult','faceWorkspaceMore','faceWorkspaceForceButton','faceWorkspaceStart','faceWorkspaceStatus','faceWorkspaceLabels','faceWorkspaceLog'].forEach(id=>nodes[id]=node(id));
+nodes.faceWorkspace.classList.add('open');nodes.faceWorkspaceMore.hidden=true;
+const document={activeElement:null,getElementById:id=>nodes[id]||null,createElement:tag=>node(tag),addEventListener(){}};
+const window={StoryUI:{},Api:{json:(method,payload)=>({method,payload}),request:(path,options)=>{requests.push({path,options});if(path.startsWith('/api/assets/faces/labels'))return Promise.resolve({saved_count:1,faces:[{face_id:'00',version:1,effective:{primary_emotion:'平静'}}]});return Promise.resolve({ok:false,message:'test'});}}};
+vm.runInNewContext(source,{window,document,Promise,Error,console,encodeURIComponent,setTimeout,clearTimeout});
+(async()=>{const workspace=window.FaceWorkspace;workspace.selected={kind:'character',aa_key:'hero',sha256:'digest'};workspace.renderLabels=()=>{};await workspace.start();await workspace.loadLabels(true);await workspace.start(true);console.log(JSON.stringify({hidden:nodes.faceWorkspaceMore.hidden,forces:requests.filter(item=>item.options&&item.options.payload).map(item=>item.options.payload.force_vision)}));})();
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library_faces.js")],
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert json.loads(output) == {"hidden": False, "forces": [False, True]}
+
+
 def test_asset_workbench_opens_full_screen_sanitizes_context_and_restores_focus():
     script = r'''
 const fs=require('fs'),vm=require('vm');
