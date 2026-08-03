@@ -283,6 +283,40 @@ def test_visual_labeler_preserves_valid_batch_items_and_falls_back_per_bad_face(
     ]
 
 
+@pytest.mark.parametrize(("field", "invalid"), [
+    ("confidence", "not-a-number"),
+    ("confidence", 1.5),
+    ("blush", "false"),
+    ("tears", 0),
+    ("secondary_emotions", "calm"),
+    ("valence", "warm"),
+    ("arousal", "extreme"),
+    ("eyes", 123),
+])
+def test_visual_labeler_reviews_batch_items_with_invalid_schema_values(
+    tmp_path, field, invalid,
+):
+    class InvalidFieldProvider(FakeVisionProvider):
+        def complete_json_vision(self, system, images, user, schema):
+            self.calls.append((system, images, user, schema))
+            ids = images[0][0].split(":", 1)[1].split(",")
+            if len(ids) == 1:
+                return {"items": [_vision_label(ids[0], emotion="reviewed")]}
+            invalid_item = _vision_label("00", emotion="invalid batch item")
+            invalid_item[field] = invalid
+            return {"items": [invalid_item, _vision_label("01", emotion="valid")]}
+
+    provider = InvalidFieldProvider()
+    labels = label_face_images(
+        provider,
+        [_face(tmp_path, "00", (180, 100, 120)), _face(tmp_path, "01", (80, 120, 180))],
+        max_attempts=1,
+    )
+
+    assert len(provider.calls) == 2
+    assert [item["primary_emotion"] for item in labels] == ["reviewed", "valid"]
+
+
 def test_visual_labeler_keeps_valid_low_confidence_result_when_review_fails(tmp_path):
     class FailedReviewProvider(FakeVisionProvider):
         def complete_json_vision(self, system, images, user, schema):

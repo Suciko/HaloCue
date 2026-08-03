@@ -210,7 +210,6 @@
 
   FaceWorkspace.prototype.saveFace = function (faceId, restore) {
     const saveKey = String(faceId);
-    if (this.saveRequests[saveKey]) return this.saveRequests[saveKey];
     const card = this.card(faceId), face = this.faces.find(function (item) { return String(item.face_id) === String(faceId); });
     if (!card || !face) return;
     const patch = {};
@@ -220,10 +219,15 @@
     const generation = this.generation;
     const aaKey = String(this.selected.aa_key || '');
     const sha256 = String(this.selected.sha256 || '');
+    const previous = this.saveRequests[saveKey];
     let operation;
-    operation = (async function () {
+    const executeSave = (async function () {
+      const selected = this.selected || {};
+      if (!this.isOpen() || generation !== this.generation || aaKey !== String(selected.aa_key || '') || sha256 !== String(selected.sha256 || '')) return;
+      const currentFace = this.faces.find(function (item) { return String(item.face_id) === String(faceId); });
+      if (!currentFace) return;
       try {
-        const result = await exports.Api.request('/api/assets/faces/labels/' + encodeURIComponent(faceId), exports.Api.json('PATCH', {aa_key:aaKey,sha256:sha256,version:face.version,patch:patch}));
+        const result = await exports.Api.request('/api/assets/faces/labels/' + encodeURIComponent(faceId), exports.Api.json('PATCH', {aa_key:aaKey,sha256:sha256,version:currentFace.version,patch:patch}));
         const current = this.selected || {};
         if (!this.isOpen() || generation !== this.generation || aaKey !== String(current.aa_key || '') || sha256 !== String(current.sha256 || '')) return;
         this.faces = this.faces.map(function (item) { return String(item.face_id) === String(faceId) ? result.face : item; });
@@ -234,7 +238,10 @@
       } finally {
         if (this.saveRequests[saveKey] === operation) delete this.saveRequests[saveKey];
       }
-    }).call(this);
+    }).bind(this);
+    operation = previous
+      ? previous.catch(function () {}).then(executeSave)
+      : executeSave();
     this.saveRequests[saveKey] = operation;
     return operation;
   };

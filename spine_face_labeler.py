@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -81,6 +82,39 @@ VISION_SCHEMA = {
     "required": ["items"],
     "additionalProperties": False,
 }
+
+
+_VISION_STRING_FIELDS = frozenset({
+    "face_id",
+    "primary_emotion",
+    "eyes",
+    "brows",
+    "mouth",
+    "description_cn",
+})
+
+
+def _valid_vision_item(item: dict, required: set[str]) -> bool:
+    allowed = set(VISION_SCHEMA["properties"]["items"]["items"]["properties"])
+    if not required.issubset(item) or set(item) - allowed:
+        return False
+    if any(not isinstance(item.get(field), str) for field in _VISION_STRING_FIELDS):
+        return False
+    secondary = item.get("secondary_emotions")
+    if not isinstance(secondary, list) or any(
+        not isinstance(value, str) for value in secondary
+    ):
+        return False
+    if item.get("valence") not in {"positive", "neutral", "negative", "mixed"}:
+        return False
+    if item.get("arousal") not in {"low", "medium", "high"}:
+        return False
+    if not isinstance(item.get("blush"), bool) or not isinstance(item.get("tears"), bool):
+        return False
+    confidence = item.get("confidence")
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        return False
+    return math.isfinite(float(confidence)) and 0.0 <= float(confidence) <= 1.0
 
 
 _SYSTEM = """你在为视觉小说角色立绘建立可检索的表情差分语义表。
@@ -240,7 +274,7 @@ def label_face_images(
         records = []
         for face in batch:
             matches = occurrences[face.face_id]
-            if len(matches) != 1 or not required.issubset(matches[0]):
+            if len(matches) != 1 or not _valid_vision_item(matches[0], required):
                 records.append({
                     "face_id": face.face_id,
                     "head_path": str(face.head_path),

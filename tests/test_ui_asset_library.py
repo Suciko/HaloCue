@@ -161,6 +161,26 @@ sources.forEach(source=>vm.runInNewContext(source,context));
     assert result["completed"]["timers"] == []
 
 
+def test_current_tasks_drawer_lists_individual_face_failures():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+function node(){let own='',classes=new Set();return {children:[],dataset:{},className:'',classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},appendChild(child){this.children.push(child);return child},set textContent(value){own=String(value||'');this.children=[]},get textContent(){return own+this.children.map(child=>child.textContent||'').join('')}}}
+const document={getElementById:()=>null,createElement:()=>node(),addEventListener(){}};
+const window={StoryUI:{}};vm.runInNewContext(source,{window,document,console,ResizeObserver:undefined,setTimeout,clearTimeout,encodeURIComponent});
+const workbench=Object.create(window.StoryUI.AssetWorkbench.prototype);workbench.tasks=node();workbench.assets=[];
+workbench.renderFaceJob({running:false,done:true,ok:true,ident:'hero',phase:'partial',message:'partial result',result:{rendered_count:2,labeled_count:1,saved_count:1,failed_count:1,failures:[{face_id:'17',error:'vision_label_failed'}]}});
+console.log(JSON.stringify({text:workbench.tasks.textContent}));
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library.js")],
+        text=True,
+        encoding="utf-8",
+    )
+    text = json.loads(output)["text"]
+    assert "17" in text
+    assert "vision_label_failed" in text
+
+
 def test_current_tasks_drawer_retries_an_initial_job_poll_failure():
     script = r'''
 const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
@@ -406,7 +426,42 @@ vm.runInNewContext(source,{window,document,Promise,Error,console,encodeURICompon
     assert json.loads(output) == {"requests": 2, "emotion": "new"}
 
 
-def test_face_workspace_discards_stale_save_and_serializes_each_face():
+def test_face_workspace_serializes_each_face_save_with_the_latest_version():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8'),pending=[];
+function node(){let classes=new Set();const input={dataset:{faceField:'primary_emotion'},type:'text',value:'first'};return {input,children:[],dataset:{},hidden:false,disabled:false,value:'manual',type:'text',classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},appendChild(child){this.children.push(child);return child},addEventListener(){},setAttribute(){},removeAttribute(){},focus(){},querySelector(selector){if(selector==='.face-save-state')return {textContent:''};return null},querySelectorAll(){return [input]}}}
+const document={activeElement:null,getElementById:()=>null,createElement:node,addEventListener(){}};
+const requests=[];const window={StoryUI:{},Api:{json:(method,payload)=>({method,payload}),request:(path,options)=>{requests.push({path,options});return new Promise(resolve=>pending.push(resolve))}}};
+vm.runInNewContext(source,{window,document,Promise,Error,console,encodeURIComponent,setTimeout,clearTimeout});
+(async()=>{
+  const root=node();root.classList.add('open');const workspace=new window.StoryUI.FaceWorkspace(root),card=node();
+  workspace.selected={kind:'character',aa_key:'hero-a',sha256:'digest-a'};workspace.faces=[{face_id:'00',version:1,manual:{},effective:{primary_emotion:'old'}}];workspace.card=()=>card;workspace.renderLabels=()=>{};
+  const first=workspace.saveFace('00');card.input.value='second';const second=workspace.saveFace('00');
+  const queuedBeforeFirstFinishes=requests.length;
+  pending[0]({face:{face_id:'00',version:2,manual:{primary_emotion:'first'},effective:{primary_emotion:'first'}},saved_at:'one'});await first;await new Promise(resolve=>setTimeout(resolve,0));
+  const secondPayload=requests[1].options.payload;pending[1]({face:{face_id:'00',version:3,manual:{primary_emotion:'second'},effective:{primary_emotion:'second'}},saved_at:'two'});await second;
+  console.log(JSON.stringify({queuedBeforeFirstFinishes,requests:requests.length,secondPayload,emotion:workspace.faces[0].effective.primary_emotion}));
+})();
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library_faces.js")],
+        text=True,
+        encoding="utf-8",
+    )
+    assert json.loads(output) == {
+        "queuedBeforeFirstFinishes": 1,
+        "requests": 2,
+        "secondPayload": {
+            "aa_key": "hero-a",
+            "sha256": "digest-a",
+            "version": 2,
+            "patch": {"primary_emotion": "second"},
+        },
+        "emotion": "second",
+    }
+
+
+def test_face_workspace_discards_stale_save_after_character_changes():
     script = r'''
 const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8'),pending=[];
 function node(){let classes=new Set();return {children:[],dataset:{},hidden:false,disabled:false,value:'manual',type:'text',classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},appendChild(child){this.children.push(child);return child},addEventListener(){},setAttribute(){},removeAttribute(){},focus(){},querySelector(selector){if(selector==='.face-save-state')return {textContent:''};return null},querySelectorAll(){return [{dataset:{faceField:'primary_emotion'},type:'text',value:'manual'}]}}}
@@ -416,9 +471,8 @@ vm.runInNewContext(source,{window,document,Promise,Error,console,encodeURICompon
 (async()=>{
   const root=node();root.classList.add('open');const workspace=new window.StoryUI.FaceWorkspace(root),card=node();
   workspace.selected={kind:'character',aa_key:'hero-a',sha256:'digest-a'};workspace.faces=[{face_id:'00',version:1,manual:{},effective:{primary_emotion:'old'}}];workspace.card=()=>card;workspace.renderLabels=()=>{};
-  const first=workspace.saveFace('00'),duplicate=workspace.saveFace('00');
-  workspace.generation+=1;workspace.selected={kind:'character',aa_key:'hero-b',sha256:'digest-b'};
-  pending[0]({face:{face_id:'00',version:2,effective:{primary_emotion:'stale'}},saved_at:'now'});await Promise.all([first,duplicate]);
+  const save=workspace.saveFace('00');workspace.generation+=1;workspace.selected={kind:'character',aa_key:'hero-b',sha256:'digest-b'};
+  pending[0]({face:{face_id:'00',version:2,effective:{primary_emotion:'stale'}},saved_at:'now'});await save;
   console.log(JSON.stringify({requests:pending.length,emotion:workspace.faces[0].effective.primary_emotion}));
 })();
 '''

@@ -444,6 +444,16 @@ def face_job_snapshot() -> dict:
     }
     if "status" in result:
         public_result["status"] = public_text(result["status"], 32)
+    failures = []
+    for item in result.get("failures") or []:
+        if not isinstance(item, dict):
+            continue
+        failures.append({
+            "face_id": public_text(item.get("face_id"), 32),
+            "error": public_text(item.get("error"), 160),
+        })
+    if failures:
+        public_result["failures"] = failures[:100]
     for name in ("actual_workers", "fallback_workers"):
         try:
             value = int(result[name])

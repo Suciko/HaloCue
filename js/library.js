@@ -500,6 +500,16 @@
       stats.appendChild(make('span', '', entry[0] + ' ' + Number(entry[1] || 0)));
     });
     if (stats.children.length) card.appendChild(stats);
+    const failures = Array.isArray(result.failures) ? result.failures : [];
+    if (failures.length) {
+      const failureList = make('div', 'asset-face-task-log asset-face-task-failures');
+      failures.slice(0, 10).forEach(function (failure) {
+        const faceId = String(failure && failure.face_id || '未知');
+        const reason = String(failure && failure.error || 'vision_label_failed');
+        failureList.appendChild(make('span', '', '表情 ' + faceId + '：' + reason));
+      });
+      card.appendChild(failureList);
+    }
     if (result.completed_at) {
       card.appendChild(make('span', 'asset-face-task-completed', '完成时间 ' + result.completed_at));
     }

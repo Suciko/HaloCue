@@ -288,9 +288,11 @@ def analyze_character_faces(
         model=model,
         labels=labels,
     )
+    if int(saved.get("failed_count") or 0) > 0:
+        result["status"] = "partial"
     result.update(
         vision_status="labeled",
-        labeled_count=len(labels),
+        labeled_count=int(saved.get("saved_count") or 0),
         model=model,
         **saved,
     )

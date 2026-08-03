@@ -328,6 +328,58 @@ def test_analysis_persists_visual_labels_and_reuses_existing_model_rows(
     assert count == 2
 
 
+def test_analysis_reports_partial_when_individual_visual_labels_fail(
+    tmp_path, monkeypatch,
+):
+    report = _report(tmp_path)
+    updates = []
+    monkeypatch.setattr(
+        spine_face_analysis,
+        "render_face_variations",
+        lambda *args, **kwargs: report,
+    )
+    monkeypatch.setattr(
+        spine_face_analysis,
+        "label_face_images",
+        lambda *args, **kwargs: [
+            _labels(report.faces[:1])[0],
+            {
+                "face_id": report.faces[1].face_id,
+                "failed": True,
+                "error": "vision_label_failed",
+            },
+        ],
+    )
+    source = tmp_path / "spine"
+    source.mkdir()
+    con = assetdb.connect(tmp_path / "assets.db")
+
+    class Provider:
+        model = "gemini-3.6-flash"
+
+    result = spine_face_analysis.analyze_character_faces(
+        con,
+        source_dir=source,
+        ident="custom-1",
+        spine_signature="skel-signature",
+        outfit_key="date",
+        spine_cli=tmp_path / "Spine.com",
+        cache_root=tmp_path / "cache",
+        provider=Provider(),
+        progress=lambda phase, message, current, total: updates.append(phase),
+    )
+
+    assert result["status"] == "partial"
+    assert result["labeled_count"] == 1
+    assert result["saved_count"] == 1
+    assert result["failed_count"] == 1
+    assert result["failures"] == [{
+        "face_id": report.faces[1].face_id,
+        "error": "vision_label_failed",
+    }]
+    assert updates[-1] == "partial"
+
+
 def test_analysis_maps_nine_grid_and_review_progress_to_job_updates(tmp_path, monkeypatch):
     report = _report(tmp_path)
     updates = []

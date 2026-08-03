@@ -543,7 +543,12 @@ def test_face_job_snapshot_never_exposes_server_paths(monkeypatch, tmp_path):
             "rendered_count": 3, "render_cache": str(tmp_path / "cache"),
             "contact_sheet": str(tmp_path / "cache" / "sheet.jpg"),
             "vision_status": "labeled", "labeled_count": 3,
-            "saved_count": 3, "failed_count": 0, "completed_at": "2026-08-03T15:00:00+00:00",
+            "saved_count": 3, "failed_count": 1, "completed_at": "2026-08-03T15:00:00+00:00",
+            "failures": [{
+                "face_id": "04",
+                "error": f"vision failed at {tmp_path / 'private' / '04.png'}",
+                "head_path": str(tmp_path / "private" / "04.png"),
+            }],
             "status": "partial", "actual_workers": 4,
             "retried_faces": ["03"], "fallback_workers": 1,
             "calibration": [{
@@ -569,6 +574,9 @@ def test_face_job_snapshot_never_exposes_server_paths(monkeypatch, tmp_path):
     assert snapshot["result"]["actual_workers"] == 4
     assert snapshot["result"]["retried_faces"] == ["03"]
     assert snapshot["result"]["fallback_workers"] == 1
+    assert snapshot["result"]["failures"][0]["face_id"] == "04"
+    assert "vision failed" in snapshot["result"]["failures"][0]["error"]
+    assert "head_path" not in snapshot["result"]["failures"][0]
     assert snapshot["result"]["calibration"] == [{
         "face_id": "03", "status": "needs_manual_calibration",
         "attachment": "eyes", "slot": "Eyes",
