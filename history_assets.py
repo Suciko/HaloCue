@@ -318,10 +318,12 @@ class HistoryAssetBrowser:
                     "SELECT kind,aa_key,sha256,asset_role,series_name FROM asset_library_profile"
                 )
             }
+            visual_counts = asset_catalog._visual_label_summaries(con)
             for row in asset_catalog.library_custom_rows(con):
                 copy = self._library_copy_from_row(row)
                 key = (copy.kind, copy.aa_key, copy.sha256)
                 profile = profiles.get(key)
+                metadata = asset_catalog._safe_metadata(row["metadata_json"])
                 item = groups.setdefault(key, {
                     "kind": copy.kind,
                     "aa_key": asset_catalog._numeric_key(copy.aa_key),
@@ -330,13 +332,17 @@ class HistoryAssetBrowser:
                     "asset_role": str(profile["asset_role"]) if profile else "chapter_only",
                     "series_name": str(profile["series_name"]) if profile else "",
                     "details": asset_catalog._library_item_details(
-                        copy.kind, asset_catalog._safe_metadata(row["metadata_json"])
+                        copy.kind, metadata
                     ),
                     "registered_in_current": False,
                     "preview_available": False,
                     "preview_token": "",
                     "copies": [],
                 })
+                asset_catalog._merge_visual_label_summary(
+                    item["details"], kind=copy.kind, aa_key=copy.aa_key,
+                    metadata=metadata, summaries=visual_counts,
+                )
                 copy_token = self._remember_library_copy(copy)
                 item["copies"].append({
                     "chapter": copy.chapter,

@@ -280,6 +280,77 @@ def test_character_library_counts_files_semantic_faces_and_saved_labels(tmp_path
     assert details["expression_status"] == "known"
 
 
+def test_library_api_includes_visual_label_summary_without_inventing_face_count(
+    tmp_path, monkeypatch,
+):
+    con = assetdb.connect(tmp_path / "assets.db")
+    asset_catalog.migrate(con)
+    _insert_asset(
+        con,
+        kind="character",
+        key="hero-id",
+        name="Custom hero",
+        digest="6" * 64,
+        scope=str(tmp_path / "projects" / "chapter-one"),
+        metadata={"spine_signature": "sig-hero", "outfit_key": "school"},
+    )
+    _insert_asset(
+        con,
+        kind="character",
+        key="known-unlabeled",
+        name="Known unlabeled hero",
+        digest="5" * 64,
+        scope=str(tmp_path / "projects" / "chapter-two"),
+        metadata={
+            "files": {
+                "skel": "hero.skel",
+                "atlas": "hero.atlas",
+                "texture": "hero.png",
+                "avatar": "avatar.png",
+            },
+            "semantic_face_count": 44,
+            "expression_status": "known",
+            "spine_signature": "sig-unlabeled",
+            "outfit_key": "default",
+        },
+    )
+    con.executemany(
+        """
+        INSERT INTO face_visual_label
+          (ident,spine_signature,outfit_key,face_id,model,primary_emotion,
+           secondary_json,updated_at)
+        VALUES ('hero-id','sig-hero','school','00',?,?,'[]',?)
+        """,
+        [
+            ("vision-a", "calm", "2026-08-03 12:00:00"),
+            ("vision-b", "focused", "2026-08-03 13:00:00"),
+        ],
+    )
+    con.commit()
+    con.close()
+
+    with _server(tmp_path, monkeypatch) as base:
+        with urlopen(base + "/api/assets/library") as response:
+            payload = json.loads(response.read())
+
+    characters = {str(item["aa_key"]): item for item in payload["characters"]}
+    unknown = characters["hero-id"]["details"]
+    unlabeled = characters["known-unlabeled"]["details"]
+
+    assert unknown["face_count"] is None
+    assert unknown["labeled_count"] == 1
+    assert unknown["labels_updated_at"] == "2026-08-03 13:00:00"
+    assert unlabeled == {
+        "expression_status": "known",
+        "expression_mode": "opaque_custom",
+        "file_count": 4,
+        "face_count": 44,
+        "labeled_count": 0,
+        "labels_updated_at": "",
+    }
+    assert str(tmp_path) not in json.dumps(payload, ensure_ascii=False)
+
+
 def test_face_label_payload_is_path_safe_and_supports_versioned_edits(tmp_path):
     con = assetdb.connect(tmp_path / "assets.db")
     asset_catalog.migrate(con)

@@ -495,6 +495,44 @@ def library_custom_rows(con):
     ]
 
 
+def _visual_label_summaries(con) -> dict[tuple[str, str, str], dict[str, int | str]]:
+    return {
+        (str(row["ident"]), str(row["spine_signature"]), str(row["outfit_key"])): {
+            "labeled_count": int(row["labeled_count"] or 0),
+            "labels_updated_at": str(row["labels_updated_at"] or ""),
+        }
+        for row in con.execute(
+            """
+            SELECT ident,spine_signature,outfit_key,
+                   COUNT(DISTINCT face_id) AS labeled_count,
+                   MAX(updated_at) AS labels_updated_at
+            FROM face_visual_label
+            GROUP BY ident,spine_signature,outfit_key
+            """
+        )
+    }
+
+
+def _merge_visual_label_summary(
+    details: dict,
+    *,
+    kind: str,
+    aa_key: str,
+    metadata: dict,
+    summaries: dict[tuple[str, str, str], dict[str, int | str]],
+) -> None:
+    if kind != "character":
+        return
+    variant = (
+        str(aa_key),
+        str(metadata.get("spine_signature") or ""),
+        str(metadata.get("outfit_key") or ""),
+    )
+    saved = summaries.get(variant)
+    details["labeled_count"] = int(saved["labeled_count"]) if saved else 0
+    details["labels_updated_at"] = str(saved["labels_updated_at"]) if saved else ""
+
+
 def list_library_assets(con) -> dict:
     """List custom material copies across chapters without exposing server paths.
 
@@ -509,21 +547,7 @@ def list_library_assets(con) -> dict:
         )
     }
     rows = library_custom_rows(con)
-    visual_counts = {
-        (row["ident"], row["spine_signature"], row["outfit_key"]): {
-            "labeled_count": int(row["labeled_count"] or 0),
-            "labels_updated_at": str(row["labels_updated_at"] or ""),
-        }
-        for row in con.execute(
-            """
-            SELECT ident,spine_signature,outfit_key,
-                   COUNT(DISTINCT face_id) AS labeled_count,
-                   MAX(updated_at) AS labels_updated_at
-            FROM face_visual_label
-            GROUP BY ident,spine_signature,outfit_key
-            """
-        )
-    }
+    visual_counts = _visual_label_summaries(con)
     groups: dict[tuple[str, str, str], dict] = {}
     for row in rows:
         metadata = _safe_metadata(row["metadata_json"])
@@ -538,19 +562,10 @@ def list_library_assets(con) -> dict:
             "series_name": str(profile["series_name"]) if profile else "",
             "chapters": [], "details": _library_item_details(key[0], metadata),
         })
-        if key[0] == "character":
-            variant = (
-                key[1],
-                str(metadata.get("spine_signature") or ""),
-                str(metadata.get("outfit_key") or ""),
-            )
-            saved = visual_counts.get(variant)
-            item["details"]["labeled_count"] = (
-                saved["labeled_count"] if saved else 0
-            )
-            item["details"]["labels_updated_at"] = (
-                saved["labels_updated_at"] if saved else ""
-            )
+        _merge_visual_label_summary(
+            item["details"], kind=key[0], aa_key=key[1], metadata=metadata,
+            summaries=visual_counts,
+        )
         chapter = Path(str(row["scope"] or "")).name or "未命名章节"
         if chapter not in item["chapters"]:
             item["chapters"].append(chapter)
