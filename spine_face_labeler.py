@@ -5,12 +5,27 @@ from __future__ import annotations
 
 import io
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
 
 from PIL import Image, ImageDraw, ImageFont
 
 from spine_face_renderer import RenderedFace
+
+
+_EDITABLE_FACE_FIELDS = frozenset({
+    "primary_emotion",
+    "secondary_emotions",
+    "valence",
+    "arousal",
+    "eyes",
+    "brows",
+    "mouth",
+    "blush",
+    "tears",
+    "description_cn",
+})
 
 
 VISION_SCHEMA = {
@@ -193,8 +208,8 @@ def persist_visual_face_labels(
     outfit_key: str,
     model: str,
     labels: Iterable[dict],
-) -> None:
-    """Replace one model's labels for exactly one registered skeleton variant."""
+) -> dict:
+    """Upsert one model's labels while retaining user-authored overrides."""
     ident = str(ident)
     signature = str(spine_signature or "")
     outfit = str(outfit_key or "")
@@ -208,13 +223,7 @@ def persist_visual_face_labels(
         """,
         (ident, signature, outfit),
     )
-    con.execute(
-        """
-        DELETE FROM face_visual_label
-        WHERE ident=? AND spine_signature=? AND outfit_key=? AND model=?
-        """,
-        (ident, signature, outfit, model),
-    )
+    completed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     con.execute(
         """
         DELETE FROM face_evidence
@@ -235,8 +244,23 @@ def persist_visual_face_labels(
             INSERT INTO face_visual_label
               (ident,spine_signature,outfit_key,face_id,model,primary_emotion,
                secondary_json,valence,arousal,eyes,brows,mouth,blush,tears,
-               confidence,description_cn,head_path,reviewed)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
+               confidence,description_cn,head_path,reviewed,manual_json,version,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'{}',1,?)
+            ON CONFLICT(ident,spine_signature,outfit_key,face_id,model) DO UPDATE SET
+              primary_emotion=excluded.primary_emotion,
+              secondary_json=excluded.secondary_json,
+              valence=excluded.valence,
+              arousal=excluded.arousal,
+              eyes=excluded.eyes,
+              brows=excluded.brows,
+              mouth=excluded.mouth,
+              blush=excluded.blush,
+              tears=excluded.tears,
+              confidence=excluded.confidence,
+              description_cn=excluded.description_cn,
+              head_path=excluded.head_path,
+              version=face_visual_label.version+1,
+              updated_at=excluded.updated_at
             """,
             (
                 ident,
@@ -256,6 +280,7 @@ def persist_visual_face_labels(
                 float(item.get("confidence") or 0.0),
                 str(item.get("description_cn") or ""),
                 str(item.get("head_path") or ""),
+                completed_at,
             ),
         )
         con.execute(
@@ -276,6 +301,182 @@ def persist_visual_face_labels(
             ),
         )
     con.commit()
+    return {
+        "saved_count": len(records),
+        "failed_count": 0,
+        "completed_at": completed_at,
+    }
+
+
+def _safe_json_object(value) -> dict:
+    try:
+        parsed = json.loads(str(value or "{}"))
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _visual_label_record(row) -> dict:
+    try:
+        secondary = json.loads(row["secondary_json"] or "[]")
+    except (TypeError, ValueError):
+        secondary = []
+    if not isinstance(secondary, list):
+        secondary = []
+    ai = {
+        "primary_emotion": str(row["primary_emotion"] or ""),
+        "secondary_emotions": [str(value) for value in secondary],
+        "valence": str(row["valence"] or ""),
+        "arousal": str(row["arousal"] or ""),
+        "eyes": str(row["eyes"] or ""),
+        "brows": str(row["brows"] or ""),
+        "mouth": str(row["mouth"] or ""),
+        "blush": bool(row["blush"]),
+        "tears": bool(row["tears"]),
+        "confidence": max(0.0, min(1.0, float(row["confidence"] or 0.0))),
+        "description_cn": str(row["description_cn"] or ""),
+    }
+    manual = {
+        key: value
+        for key, value in _safe_json_object(row["manual_json"]).items()
+        if key in _EDITABLE_FACE_FIELDS
+    }
+    return {
+        "ident": str(row["ident"]),
+        "spine_signature": str(row["spine_signature"]),
+        "outfit_key": str(row["outfit_key"]),
+        "face_id": str(row["face_id"]),
+        "model": str(row["model"]),
+        "ai": ai,
+        "manual": manual,
+        "effective": {**ai, **manual},
+        "head_path": str(row["head_path"] or ""),
+        "reviewed": bool(manual),
+        "version": max(1, int(row["version"] or 1)),
+        "updated_at": str(row["updated_at"] or ""),
+    }
+
+
+def list_visual_face_labels(
+    con,
+    *,
+    ident: str,
+    spine_signature: str,
+    outfit_key: str,
+) -> list[dict]:
+    """Return one current, editable visual record for every face ID."""
+    rows = con.execute(
+        """
+        SELECT * FROM face_visual_label
+        WHERE ident=? AND spine_signature=? AND outfit_key=?
+        ORDER BY face_id, updated_at DESC, confidence DESC, model
+        """,
+        (str(ident), str(spine_signature or ""), str(outfit_key or "")),
+    )
+    records: dict[str, dict] = {}
+    for row in rows:
+        face_id = str(row["face_id"])
+        records.setdefault(face_id, _visual_label_record(row))
+    return [records[face_id] for face_id in sorted(records)]
+
+
+def _validate_manual_patch(patch: dict) -> dict:
+    if not isinstance(patch, dict):
+        raise ValueError("标注内容必须是对象")
+    unknown = set(patch) - _EDITABLE_FACE_FIELDS
+    if unknown:
+        raise ValueError("不支持的标注字段：" + "、".join(sorted(unknown)))
+    clean = {}
+    for key, value in patch.items():
+        if value is None:
+            clean[key] = None
+        elif key in {"blush", "tears"}:
+            if not isinstance(value, bool):
+                raise ValueError(f"标注字段 {key} 必须是布尔值")
+            clean[key] = value
+        elif key == "secondary_emotions":
+            if not isinstance(value, list):
+                raise ValueError("标注字段 secondary_emotions 必须是数组")
+            clean[key] = [str(item).strip() for item in value if str(item).strip()]
+        else:
+            clean[key] = str(value).strip()
+    return clean
+
+
+def update_visual_face_label(
+    con,
+    *,
+    ident: str,
+    spine_signature: str,
+    outfit_key: str,
+    face_id: str,
+    patch: dict,
+    expected_version: int,
+) -> dict:
+    """Apply a manual override with optimistic locking and return merged data."""
+    clean = _validate_manual_patch(patch)
+    scope = (
+        str(ident), str(spine_signature or ""), str(outfit_key or ""), str(face_id)
+    )
+    row = con.execute(
+        """
+        SELECT * FROM face_visual_label
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id=?
+        ORDER BY updated_at DESC, confidence DESC, model
+        LIMIT 1
+        """,
+        scope,
+    ).fetchone()
+    if row is None:
+        raise KeyError("表情标注不存在")
+    if int(row["version"] or 1) != int(expected_version):
+        raise ValueError("标注版本已更新，请刷新后重试")
+    manual = _safe_json_object(row["manual_json"])
+    for key, value in clean.items():
+        if value is None:
+            manual.pop(key, None)
+        else:
+            manual[key] = value
+    updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    cursor = con.execute(
+        """
+        UPDATE face_visual_label
+        SET manual_json=?, reviewed=?, version=version+1, updated_at=?
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id=?
+          AND model=? AND version=?
+        """,
+        (
+            json.dumps(manual, ensure_ascii=False, separators=(",", ":")),
+            int(bool(manual)),
+            updated_at,
+            *scope,
+            str(row["model"]),
+            int(expected_version),
+        ),
+    )
+    if cursor.rowcount != 1:
+        con.rollback()
+        raise ValueError("标注版本已更新，请刷新后重试")
+    effective_primary = str(
+        manual.get("primary_emotion", row["primary_emotion"] or "")
+    )
+    con.execute(
+        """
+        UPDATE face_evidence
+        SET label=?, label_cn=?
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id=? AND source=?
+        """,
+        (effective_primary, effective_primary, *scope, f"vision:{row['model']}"),
+    )
+    con.commit()
+    refreshed = con.execute(
+        """
+        SELECT * FROM face_visual_label
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id=? AND model=?
+        """,
+        (*scope, str(row["model"])),
+    ).fetchone()
+    return _visual_label_record(refreshed)
 
 
 def make_contact_sheet(

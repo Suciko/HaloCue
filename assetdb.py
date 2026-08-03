@@ -92,6 +92,9 @@ CREATE TABLE IF NOT EXISTS face_visual_label (
     description_cn     TEXT,
     head_path          TEXT,
     reviewed           INTEGER NOT NULL DEFAULT 0,
+    manual_json        TEXT NOT NULL DEFAULT '{}',
+    version            INTEGER NOT NULL DEFAULT 1,
+    updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (ident, spine_signature, outfit_key, face_id, model)
 );
 CREATE TABLE IF NOT EXISTS expression_part (
@@ -189,7 +192,33 @@ def connect(path):
     con = sqlite3.connect(path)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
+    migrate_visual_face_labels(con)
     return con
+
+
+def migrate_visual_face_labels(con):
+    """Add editable-label fields to databases created before workbench v2."""
+    columns = {
+        row["name"] for row in con.execute("PRAGMA table_info(face_visual_label)")
+    }
+    additions = {
+        "manual_json": "TEXT NOT NULL DEFAULT '{}'",
+        "version": "INTEGER NOT NULL DEFAULT 1",
+        "updated_at": "TEXT NOT NULL DEFAULT ''",
+    }
+    for name, declaration in additions.items():
+        if name not in columns:
+            con.execute(
+                f"ALTER TABLE face_visual_label ADD COLUMN {name} {declaration}"
+            )
+    con.execute(
+        """
+        UPDATE face_visual_label
+        SET updated_at=CURRENT_TIMESTAMP
+        WHERE updated_at IS NULL OR updated_at=''
+        """
+    )
+    con.commit()
 
 
 _LEGACY_FACE_SOURCE = {
