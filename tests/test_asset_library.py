@@ -601,7 +601,8 @@ def test_face_job_snapshot_never_exposes_server_paths(monkeypatch, tmp_path):
         "contact_sheet": str(tmp_path / "cache" / "sheet.jpg"),
         "ident": "hero-id", "outfit_key": "school", "error": None,
         "result": {
-            "rendered_count": 3, "render_cache": str(tmp_path / "cache"),
+            "rendered_count": 3, "refreshed_preview_count": 3,
+            "render_cache": str(tmp_path / "cache"),
             "contact_sheet": str(tmp_path / "cache" / "sheet.jpg"),
             "vision_status": "labeled", "labeled_count": 3,
             "saved_count": 3, "failed_count": 1, "completed_at": "2026-08-03T15:00:00+00:00",
@@ -630,6 +631,7 @@ def test_face_job_snapshot_never_exposes_server_paths(monkeypatch, tmp_path):
 
     assert "contact_sheet_available" not in snapshot
     assert snapshot["result"]["saved_count"] == 3
+    assert snapshot["result"]["refreshed_preview_count"] == 3
     assert snapshot["result"]["completed_at"] == "2026-08-03T15:00:00+00:00"
     assert snapshot["result"]["status"] == "partial"
     assert snapshot["result"]["actual_workers"] == 4

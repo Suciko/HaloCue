@@ -436,7 +436,8 @@ def face_job_snapshot() -> dict:
     public_result = {
         name: result[name]
         for name in (
-            "rendered_count", "render_cached", "vision_status", "labeled_count",
+            "rendered_count", "refreshed_preview_count", "render_cached",
+            "vision_status", "labeled_count",
             "saved_count", "failed_count", "completed_at", "model",
         )
         if name in result
