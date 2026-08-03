@@ -116,6 +116,30 @@ def test_visual_schema_accepts_selection_semantics_without_face_components(tmp_p
     assert "不得用是否脸红、是否流泪等视觉现象决定是否使用" in provider.calls[0][0]
 
 
+def test_legacy_provider_fields_remain_available_for_evidence_diagnostics(tmp_path):
+    provider = FakeVisionProvider()
+    labels = label_face_images(
+        provider,
+        [_face(tmp_path, "00", (220, 220, 220))],
+        max_attempts=1,
+    )
+
+    con = assetdb.connect(tmp_path / "assets.db")
+    persist_visual_face_labels(
+        con,
+        ident="generic-character",
+        spine_signature="generic-skeleton",
+        outfit_key="generic-outfit",
+        model="legacy-model",
+        labels=labels,
+    )
+    raw = con.execute(
+        "SELECT raw FROM face_evidence WHERE source='vision:legacy-model'"
+    ).fetchone()[0]
+
+    assert json.loads(raw)["eyes"] == "自然睁眼"
+
+
 def test_visual_labeler_allows_duplicate_selection_semantics(tmp_path):
     class DuplicateSemanticsProvider(FakeVisionProvider):
         def complete_json_vision(self, system, images, user, schema):
@@ -663,6 +687,101 @@ def test_manual_visual_label_override_survives_different_model_rerun_and_syncs_e
         ("vision:model-a", "人工确认｜模型 A 判断", "人工确认｜模型 A 判断"),
         ("vision:model-b", "人工确认｜模型 B 判断", "人工确认｜模型 B 判断"),
     ]
+
+
+def test_manual_patch_and_restore_keep_each_models_ai_usage_in_its_evidence(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    scope = {
+        "ident": "generic-character",
+        "spine_signature": "generic-skeleton",
+        "outfit_key": "generic-outfit",
+    }
+    for model, emotion, usage in (
+        ("model-a", "emotion-a", "usage-a"),
+        ("model-b", "emotion-b", "usage-b"),
+    ):
+        label = _compact_label("00", emotion=emotion, usage=usage)
+        label["head_path"] = str(tmp_path / f"{model}.png")
+        persist_visual_face_labels(con, **scope, model=model, labels=[label])
+
+    current = list_visual_face_labels(con, **scope)[0]
+    saved = update_visual_face_label(
+        con,
+        **scope,
+        face_id="00",
+        patch={"primary_emotion": "manual"},
+        expected_version=current["version"],
+    )
+    rows = con.execute(
+        """
+        SELECT source,label_cn FROM face_evidence
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id='00'
+          AND source LIKE 'vision:%'
+        ORDER BY source
+        """,
+        tuple(scope.values()),
+    ).fetchall()
+    assert [tuple(row) for row in rows] == [
+        ("vision:model-a", "manual｜usage-a"),
+        ("vision:model-b", "manual｜usage-b"),
+    ]
+
+    update_visual_face_label(
+        con,
+        **scope,
+        face_id="00",
+        patch={"primary_emotion": None},
+        expected_version=saved["version"],
+    )
+    rows = con.execute(
+        """
+        SELECT source,label_cn FROM face_evidence
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id='00'
+          AND source LIKE 'vision:%'
+        ORDER BY source
+        """,
+        tuple(scope.values()),
+    ).fetchall()
+    assert [tuple(row) for row in rows] == [
+        ("vision:model-a", "emotion-a｜usage-a"),
+        ("vision:model-b", "emotion-b｜usage-b"),
+    ]
+
+
+def test_manual_usage_hint_can_be_empty_and_restored_to_ai(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    scope = {
+        "ident": "generic-character",
+        "spine_signature": "generic-skeleton",
+        "outfit_key": "generic-outfit",
+    }
+    label = _compact_label("00", emotion="calm", usage="quiet replies")
+    label["head_path"] = str(tmp_path / "00.png")
+    persist_visual_face_labels(con, **scope, model="model-a", labels=[label])
+
+    current = list_visual_face_labels(con, **scope)[0]
+    cleared = update_visual_face_label(
+        con,
+        **scope,
+        face_id="00",
+        patch={"usage_hint_cn": ""},
+        expected_version=current["version"],
+    )
+    assert cleared["manual"]["usage_hint_cn"] == ""
+    assert cleared["effective"]["usage_hint_cn"] == ""
+    assert con.execute(
+        "SELECT label_cn FROM face_evidence WHERE source='vision:model-a'"
+    ).fetchone()[0] == "calm"
+
+    restored = update_visual_face_label(
+        con,
+        **scope,
+        face_id="00",
+        patch={"usage_hint_cn": None},
+        expected_version=cleared["version"],
+    )
+    assert "usage_hint_cn" not in restored["manual"]
+    assert restored["effective"]["usage_hint_cn"] == "quiet replies"
 
 
 def test_manual_visual_label_update_rejects_stale_version_and_unknown_fields(tmp_path):

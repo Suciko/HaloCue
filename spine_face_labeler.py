@@ -72,6 +72,15 @@ def usage_hint_cn(item: Mapping) -> str:
     ).strip()
 
 
+def _manual_usage_hint(item: Mapping) -> tuple[bool, str]:
+    """Return whether a manual hint override exists, including an empty one."""
+    if "description_cn" in item:
+        return True, str(item.get("description_cn") or "").strip()
+    if "usage_hint_cn" in item:
+        return True, str(item.get("usage_hint_cn") or "").strip()
+    return False, ""
+
+
 def selection_semantics(primary_emotion: str, usage_hint: str) -> str:
     """Combine the two fields the story model uses to choose a face."""
     emotion = str(primary_emotion or "").strip()
@@ -82,11 +91,7 @@ def selection_semantics(primary_emotion: str, usage_hint: str) -> str:
 
 
 def _compact_vision_item(item: Mapping) -> dict:
-    compact = {
-        "face_id": item.get("face_id"),
-        "primary_emotion": item.get("primary_emotion"),
-        "confidence": item.get("confidence"),
-    }
+    compact = dict(item)
     if "usage_hint_cn" in item:
         compact["usage_hint_cn"] = item.get("usage_hint_cn")
     elif "description_cn" in item:
@@ -417,7 +422,10 @@ def persist_visual_face_labels(
             ),
         )
         effective_primary = str(manual.get("primary_emotion", primary))
-        effective_usage = usage_hint_cn(manual) or usage_hint_cn(item)
+        has_manual_usage, manual_usage = _manual_usage_hint(manual)
+        effective_usage = (
+            manual_usage if has_manual_usage else usage_hint_cn(item)
+        )
         effective_semantics = selection_semantics(
             effective_primary, effective_usage
         )
@@ -498,12 +506,12 @@ def _visual_label_record(row) -> dict:
         for key, value in _safe_json_object(row["manual_json"]).items()
         if key in _EDITABLE_FACE_FIELDS
     }
-    manual_hint = usage_hint_cn(manual)
-    if manual_hint:
+    has_manual_hint, manual_hint = _manual_usage_hint(manual)
+    if has_manual_hint:
         manual["usage_hint_cn"] = manual_hint
         manual["description_cn"] = manual_hint
     effective = {**ai, **manual}
-    effective_hint = usage_hint_cn(effective)
+    effective_hint = manual_hint if has_manual_hint else hint
     effective["usage_hint_cn"] = effective_hint
     effective["description_cn"] = effective_hint
     return {
@@ -646,22 +654,40 @@ def update_visual_face_label(
             str(row["model"]),
         ),
     )
-    effective_primary = str(
-        manual.get("primary_emotion", row["primary_emotion"] or "")
-    )
-    effective_usage = usage_hint_cn(manual) or str(row["description_cn"] or "")
-    effective_semantics = selection_semantics(
-        effective_primary, effective_usage
-    )
-    con.execute(
+    has_manual_usage, manual_usage = _manual_usage_hint(manual)
+    model_rows = con.execute(
         """
-        UPDATE face_evidence
-        SET label=?, label_cn=?
+        SELECT model,primary_emotion,description_cn FROM face_visual_label
         WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id=?
-          AND source LIKE 'vision:%'
         """,
-        (effective_semantics, effective_semantics, *scope),
-    )
+        scope,
+    ).fetchall()
+    for model_row in model_rows:
+        effective_primary = str(
+            manual.get("primary_emotion", model_row["primary_emotion"] or "")
+        )
+        effective_usage = (
+            manual_usage
+            if has_manual_usage
+            else str(model_row["description_cn"] or "")
+        )
+        effective_semantics = selection_semantics(
+            effective_primary, effective_usage
+        )
+        con.execute(
+            """
+            UPDATE face_evidence
+            SET label=?, label_cn=?
+            WHERE ident=? AND spine_signature=? AND outfit_key=? AND face_id=?
+              AND source=?
+            """,
+            (
+                effective_semantics,
+                effective_semantics,
+                *scope,
+                f"vision:{model_row['model']}",
+            ),
+        )
     con.commit()
     refreshed = con.execute(
         """

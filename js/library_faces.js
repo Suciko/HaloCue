@@ -209,7 +209,17 @@
     const card = this.card(faceId), face = this.faces.find(function (item) { return String(item.face_id) === String(faceId); });
     if (!card || !face) return;
     const patch = {};
-    if (!restore) Array.from(card.querySelectorAll('[data-face-field]')).forEach(function (input) { patch[input.dataset.faceField] = input.type === 'checkbox' ? Boolean(input.checked) : input.value.trim(); });
+    if (!restore) {
+      const effective = face.effective || face;
+      Array.from(card.querySelectorAll('[data-face-field]')).forEach(function (input) {
+        const field = input.dataset.faceField;
+        const next = input.type === 'checkbox' ? Boolean(input.checked) : input.value.trim();
+        const current = field === 'usage_hint_cn'
+          ? (Object.prototype.hasOwnProperty.call(effective, field) ? effective[field] : effective.description_cn)
+          : effective[field];
+        if (next !== (input.type === 'checkbox' ? Boolean(current) : String(current || '').trim())) patch[field] = next;
+      });
+    }
     const state = card.querySelector('.face-save-state'); if (state) state.textContent = '保存中…';
     const generation = this.generation;
     const aaKey = String(this.selected.aa_key || '');

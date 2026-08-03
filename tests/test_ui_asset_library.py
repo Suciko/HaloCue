@@ -463,6 +463,28 @@ vm.runInNewContext(source,{window,document,Promise,Error,console,encodeURICompon
     }
 
 
+def test_face_workspace_only_patches_fields_changed_by_the_editor():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8'),requests=[];
+function node(){let classes=new Set();const inputs=[{dataset:{faceField:'primary_emotion'},type:'text',value:'same emotion'},{dataset:{faceField:'usage_hint_cn'},type:'text',value:'new usage'}];return {children:[],dataset:{},hidden:false,disabled:false,classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},appendChild(child){this.children.push(child);return child},addEventListener(){},setAttribute(){},removeAttribute(){},focus(){},querySelector(selector){if(selector==='.face-save-state')return {textContent:''};return null},querySelectorAll(){return inputs}}}
+const document={activeElement:null,getElementById:()=>null,createElement:node,addEventListener(){}};
+const window={StoryUI:{},Api:{json:(method,payload)=>({method,payload}),request:(path,options)=>{requests.push({path,options});return Promise.resolve({face:{face_id:'00',version:2,manual:{usage_hint_cn:'new usage'},effective:{primary_emotion:'same emotion',usage_hint_cn:'new usage'}},saved_at:'now'})}}};
+vm.runInNewContext(source,{window,document,Promise,Error,console,encodeURIComponent,setTimeout,clearTimeout});
+(async()=>{
+  const root=node();root.classList.add('open');const workspace=new window.StoryUI.FaceWorkspace(root),card=node();
+  workspace.selected={kind:'character',aa_key:'hero',sha256:'digest'};workspace.faces=[{face_id:'00',version:1,manual:{},effective:{primary_emotion:'same emotion',usage_hint_cn:'old usage'}}];workspace.card=()=>card;workspace.renderLabels=()=>{};
+  await workspace.saveFace('00');
+  console.log(JSON.stringify(requests[0].options.payload.patch));
+})();
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library_faces.js")],
+        text=True,
+        encoding="utf-8",
+    )
+    assert json.loads(output) == {"usage_hint_cn": "new usage"}
+
+
 def test_face_workspace_queued_restore_clears_manual_fields_saved_ahead_of_it():
     script = r'''
 const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8'),pending=[],requests=[];
