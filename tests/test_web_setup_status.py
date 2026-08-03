@@ -4,6 +4,7 @@ from http.server import ThreadingHTTPServer
 from urllib.request import urlopen
 
 import assetdb
+import spine_face_analysis
 import webui
 
 
@@ -93,5 +94,25 @@ def test_settings_config_updates_preserve_the_other_runtime_path(tmp_path, monke
     assert json.loads(config.read_text(encoding="utf-8")) == {
         "aa_data": "new-data",
         "spine_cli": "old-spine",
+    }
+
+
+def test_setup_status_and_spine_cli_discovery_ignore_non_object_config(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(webui, "HERE", str(tmp_path))
+    (tmp_path / "aa_config.json").write_text("[]", encoding="utf-8")
+    resolved = spine_face_analysis.resolve_spine_cli(
+        explicit=tmp_path / "missing-spine", config_path=tmp_path / "aa_config.json"
+    )
+    assert resolved is None or resolved.is_file()
+    monkeypatch.setattr(webui.spine_face_analysis, "resolve_spine_cli", lambda *args, **kwargs: None)
+
+    status = webui.setup_status()
+
+    assert status["spine"] == {
+        "configured": False,
+        "path": "",
+        "resolved_path": "",
     }
 

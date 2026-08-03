@@ -45,11 +45,11 @@ def resolve_spine_cli(
     )
     if config.is_file():
         try:
-            configured = str(
-                json.loads(config.read_text(encoding="utf-8")).get("spine_cli") or ""
-            ).strip()
-            if configured:
-                candidates.append(Path(configured).expanduser())
+            loaded = json.loads(config.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                configured = str(loaded.get("spine_cli") or "").strip()
+                if configured:
+                    candidates.append(Path(configured).expanduser())
         except (OSError, ValueError, TypeError):
             pass
 

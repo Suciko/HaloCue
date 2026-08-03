@@ -691,9 +691,9 @@ def setup_status():
     configured_spine = str(CFG.get("spine_cli") or "").strip()
     if not configured_spine and config_path.is_file():
         try:
-            configured_spine = str(
-                json.loads(config_path.read_text(encoding="utf-8")).get("spine_cli") or ""
-            ).strip()
+            loaded = json.loads(config_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                configured_spine = str(loaded.get("spine_cli") or "").strip()
         except (OSError, ValueError, TypeError):
             configured_spine = ""
     resolved_spine = spine_face_analysis.resolve_spine_cli(

@@ -178,7 +178,7 @@
   }
   async function openScript(trigger) {
     state.browseMode = 'script'; $('#browseTitle').textContent = '选择剧情文本';
-    if (storyFilePicker) { storyFilePicker.open(trigger); return; }
+    if (storyFilePicker) { activeFilePicker = storyFilePicker; storyFilePicker.open(trigger); return; }
     openModal('#mBrowse', trigger); await browse($('#path').value.trim());
   }
   async function openSelectedStory(selection) {
@@ -574,6 +574,10 @@
       (directory ? $('#aaDataInfo') : $('#spineCliInfo')).textContent = error.message || '保存失败';
     }
   }
+  async function saveSettingsEntryAndReset(selection) {
+    try { return await saveSettingsEntry(selection); }
+    finally { activeFilePicker = storyFilePicker; }
+  }
 
   function setReviewActions(enabled, bind) {
     reviewActions.forEach(function (id) { $('#' + id).disabled = !enabled || (id === 'rvBind' && !bind); });
@@ -862,7 +866,15 @@
 
   const recentStories = new window.StoryUI.RecentStories($('#recentStories'), openRecent);
   const storyFilePicker = window.StoryUI && window.StoryUI.StoryFilePicker ? new window.StoryUI.StoryFilePicker($('#mBrowse'), {title: '选择剧情文本', onChoose: openSelectedStory}) : null;
-  const settingsFilePicker = window.StoryUI && window.StoryUI.StoryFilePicker ? new window.StoryUI.StoryFilePicker($('#mBrowse'), {hostEndpoint: '/api/settings/host', selectEndpoint: '/api/settings/entry', title: '选择设置路径', emptyStatus: '这个文件夹中没有可选择的设置路径', onChoose: saveSettingsEntry}) : null;
+  const settingsFilePicker = window.StoryUI && window.StoryUI.StoryFilePicker ? new window.StoryUI.StoryFilePicker($('#mBrowse'), {hostEndpoint: '/api/settings/host', selectEndpoint: '/api/settings/entry', title: '选择设置路径', emptyStatus: '这个文件夹中没有可选择的设置路径', onChoose: saveSettingsEntryAndReset}) : null;
+  if (settingsFilePicker) {
+    const closeSettingsPicker = settingsFilePicker.close.bind(settingsFilePicker);
+    settingsFilePicker.close = function () {
+      const result = closeSettingsPicker();
+      activeFilePicker = storyFilePicker;
+      return result;
+    };
+  }
   activeFilePicker = storyFilePicker;
   new window.StoryUI.StoryContextBar($('#storyContextBar'));
   window.StoryContextStatus = window.StoryContextStatus || (window.StoryUI.StoryContextStatus ? new window.StoryUI.StoryContextStatus() : {reset: function () {}, update: function () {}});
@@ -891,7 +903,7 @@
   actions['story-picker-refresh'] = function () { if (activeFilePicker) activeFilePicker.load(activeFilePicker.locationToken, false); };
   actions['story-picker-source'] = function () { if (activeFilePicker) activeFilePicker.open(activeFilePicker.trigger); };
   document.addEventListener('click', function (event) { const sortTarget = event.target.closest('[data-story-sort]'); if (sortTarget && activeFilePicker) { activeFilePicker.sortBy(sortTarget.dataset.storySort); return; } const target = event.target.closest('[data-action]'); if (target && actions[target.dataset.action]) actions[target.dataset.action](target); });
-  $('#bgq').addEventListener('input', loadBackgrounds); $('#bgready').addEventListener('change', loadBackgrounds); $('#rvDraftSelect').addEventListener('change', loadReview); $('#modelProfileSelect').addEventListener('change', function () { renderProfile(state.profiles.find(function (profile) { return profile.id === $('#modelProfileSelect').value; })); }); const castSearchInput = $('#castSearch'); if (castSearchInput) castSearchInput.addEventListener('input', function () { clearTimeout(castSearchTimer); const value = this.value; castSearchTimer = setTimeout(function () { searchCharacters(value); }, 180); }); document.addEventListener('keydown', function (event) { if (event.key === 'Escape') { setDrawer('settings', false); setDrawer('help', false); if ($('#mBgReplace').classList.contains('on')) { closeModal('#mBgReplace'); state.bgReplaceCard = null; } else if ($('#mCast').classList.contains('on')) closeModal('#mCast'); else if ($('#mEdit').classList.contains('on')) closeModal('#mEdit'); else if (storyFilePicker && !$('#mBrowse').hidden) storyFilePicker.close(); else closeModal('#mBrowse'); } });
+  $('#bgq').addEventListener('input', loadBackgrounds); $('#bgready').addEventListener('change', loadBackgrounds); $('#rvDraftSelect').addEventListener('change', loadReview); $('#modelProfileSelect').addEventListener('change', function () { renderProfile(state.profiles.find(function (profile) { return profile.id === $('#modelProfileSelect').value; })); }); const castSearchInput = $('#castSearch'); if (castSearchInput) castSearchInput.addEventListener('input', function () { clearTimeout(castSearchTimer); const value = this.value; castSearchTimer = setTimeout(function () { searchCharacters(value); }, 180); }); document.addEventListener('keydown', function (event) { if (event.key === 'Escape') { setDrawer('settings', false); setDrawer('help', false); if ($('#mBgReplace').classList.contains('on')) { closeModal('#mBgReplace'); state.bgReplaceCard = null; } else if ($('#mCast').classList.contains('on')) closeModal('#mCast'); else if ($('#mEdit').classList.contains('on')) closeModal('#mEdit'); else if (activeFilePicker && !$('#mBrowse').hidden) { activeFilePicker.close(); activeFilePicker = storyFilePicker; } else closeModal('#mBrowse'); } });
   // 记住工作台偏好（生成方式 / 是否安装），同一浏览器内持续生效。
   function restoreWorkbenchPreferences() {
     try {

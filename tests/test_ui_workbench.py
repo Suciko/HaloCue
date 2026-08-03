@@ -59,3 +59,20 @@ const window={Api:{request:async()=>({profiles:[]}),json:()=>({})},StoryStore:{g
         "bothLocked": True,
         "restored": True,
     }
+
+
+def test_story_picker_reclaims_shared_modal_after_settings_picker_selection():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');const nodes={},listeners={};
+function node(){const classes=new Set();return {value:'',checked:false,disabled:false,textContent:'',dataset:{},children:[],classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),toggle:(x,v)=>v?classes.add(x):classes.delete(x),contains:x=>classes.has(x)},appendChild(x){this.children.push(x);return x},removeChild(){this.children.shift()},get firstChild(){return this.children[0]},addEventListener(){},setAttribute(k,v){this[k]=v},closest(sel){return sel==='[data-story-sort]'?null:this},insertRow(){return node()},insertCell(){return node()},scrollIntoView(){}}}
+function $(s){return nodes[s]||(nodes[s]=node())}['#settingsDrawer','#settingsBackdrop','#helpDrawer','#helpBackdrop','#mBrowse','#browseTitle','#recentStories','#storyContextBar','#storyAssetStrip','#rvDraftSelect','#rvStatus','#rvInstall','#rvCompile','#rvApproveAll','#rvValidate','#rvCards','#storyPlayer','#log','#go','#goAnnotate','#path','#proj','#bgq','#bgready','#backgroundRequestsPanel','#backgroundRequestList','#continueBackgroundBuild','#backgroundContinueHint','#hint','#s1info','#s2','#s3','#s4','#bggrid','#bgsel','#modelProfileSelect','#welcomePanel','#cast','#s2sum','#mBrowse'].forEach($);$('input[name=anno]:checked').value='no';
+const pickers=[];function Picker(root,options){this.options=options;this.openCalls=0;this.hostCalls=0;this.closeCalls=0;pickers.push(this)}
+Picker.prototype.open=function(){this.openCalls++};Picker.prototype.openHost=function(){this.hostCalls++};Picker.prototype.openDirectory=function(){};Picker.prototype.openPath=function(){};Picker.prototype.close=function(){this.closeCalls++};Picker.prototype.chooseDevice=function(){};Picker.prototype.load=function(){};Picker.prototype.sortBy=function(){};
+const window={Api:{request:async()=>({ok:true}),json:()=>({})},StoryStore:{get:()=>null,subscribe(){}},StoryUI:{StoryContextBar:function(){},StoryAssetStrip:function(){},RecentStories:function(){this.refresh=async()=>{}},StoryFilePicker:Picker},ModelSettings:{profilePayload:()=>({})},CardList:{renderCardList(){}},Player:function(){},addEventListener(){}};const body=node();const document={body,documentElement:node(),querySelector:$,querySelectorAll:()=>[],createElement:node,createDocumentFragment:node,addEventListener:(k,f)=>listeners[k]=f};vm.runInNewContext(source,{window,document,localStorage:{getItem(){},setItem(){},removeItem(){}},setTimeout(){},console});
+function click(action){const target=node();target.dataset.action=action;listeners.click({target})}
+click('browse-aa-data');pickers[1].options.onChoose({entry_token:'dir-1',kind:'directory',name:'aa-data'});pickers[1].close();click('open-script');click('story-picker-host');console.log(JSON.stringify({storyOpen:pickers[0].openCalls,storyHost:pickers[0].hostCalls,settingsHost:pickers[1].hostCalls}));
+'''
+    result = json.loads(subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "app.js")], text=True, encoding="utf-8"
+    ))
+    assert result == {"storyOpen": 1, "storyHost": 1, "settingsHost": 0}
