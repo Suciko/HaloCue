@@ -5,7 +5,7 @@
 打标是一次性成本：谁跑过一次，把 aa_assets.db 拷给别人就行，不用再让 AI 看一遍图。
 所有写入都是幂等的，重复跑只补空缺、不覆盖已有标注（除非 --force）。
 """
-import json, os, sqlite3
+import json, os, sqlite3, threading
 
 from tables import bg_id
 
@@ -130,6 +130,9 @@ CREATE INDEX IF NOT EXISTS ix_face_visual_label_ident ON face_visual_label(ident
 CREATE INDEX IF NOT EXISTS ix_expression_part_ident ON expression_part(ident);
 """
 
+_SCHEMA_VERSION = "1"
+_MIGRATE_LOCK = threading.RLock()
+
 # 从用户已完成的工程里核对出来的对应关系，作为初始种子。
 SEED_ALIAS = [
     ("桃井", "모모이", "portrait"), ("绿", "미도리", "portrait"),
@@ -187,12 +190,34 @@ FACE_CN = {
 }
 
 
+def _schema_is_current(con) -> bool:
+    try:
+        row = con.execute(
+            "SELECT value FROM meta WHERE key='assetdb_schema_version'"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return False
+    return bool(row and str(row[0]) == _SCHEMA_VERSION)
+
+
 def connect(path):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    con = sqlite3.connect(path)
+    con = sqlite3.connect(path, timeout=5.0)
     con.row_factory = sqlite3.Row
-    con.executescript(SCHEMA)
-    migrate_visual_face_labels(con)
+    con.execute("PRAGMA busy_timeout=5000")
+    if not _schema_is_current(con):
+        with _MIGRATE_LOCK:
+            if not _schema_is_current(con):
+                con.executescript(SCHEMA)
+                migrate_visual_face_labels(con)
+                con.execute(
+                    """
+                    INSERT INTO meta(key,value) VALUES('assetdb_schema_version',?)
+                    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                    """,
+                    (_SCHEMA_VERSION,),
+                )
+                con.commit()
     return con
 
 

@@ -1,6 +1,7 @@
 import contextlib
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -484,6 +485,65 @@ def test_character_face_analysis_target_uses_only_installed_custom_copy(tmp_path
         "source": str(installed), "ident": "hero-id", "name": "主角骨骼",
         "spine_signature": "sig-1", "outfit_key": "school",
     }
+
+
+def test_concurrent_face_preview_resolution_skips_completed_migration(
+    tmp_path, monkeypatch,
+):
+    database = tmp_path / "assets.db"
+    con = assetdb.connect(database)
+    asset_catalog.migrate(con)
+    installed = tmp_path / "projects" / "第一章" / "characters" / "hero-id"
+    installed.mkdir(parents=True)
+    _insert_asset(
+        con,
+        kind="character",
+        key="hero-id",
+        name="主角骨骼",
+        digest="2" * 64,
+        scope=str(tmp_path / "projects" / "第一章"),
+        install_path=installed,
+        metadata={"spine_signature": "sig-2", "outfit_key": "school"},
+    )
+    con.close()
+    migration_calls = 0
+    visual_migration_calls = 0
+    calls_lock = threading.Lock()
+    original = assetdb.migrate_face_evidence
+    original_visual = assetdb.migrate_visual_face_labels
+
+    def counted_migration(connection):
+        nonlocal migration_calls
+        with calls_lock:
+            migration_calls += 1
+        return original(connection)
+
+    def counted_visual_migration(connection):
+        nonlocal visual_migration_calls
+        with calls_lock:
+            visual_migration_calls += 1
+        return original_visual(connection)
+
+    monkeypatch.setattr(assetdb, "migrate_face_evidence", counted_migration)
+    monkeypatch.setattr(
+        assetdb, "migrate_visual_face_labels", counted_visual_migration
+    )
+
+    def resolve_target(_index):
+        connection = assetdb.connect(database)
+        try:
+            return asset_catalog.library_character_analysis_target(
+                connection, aa_key="hero-id", sha256="2" * 64
+            )
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(resolve_target, range(16)))
+
+    assert all(result["source"] == str(installed) for result in results)
+    assert migration_calls == 0
+    assert visual_migration_calls == 0
 
 
 def test_library_api_lists_and_updates_safe_profiles(tmp_path, monkeypatch):

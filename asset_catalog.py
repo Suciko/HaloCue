@@ -7,6 +7,7 @@ import copy
 import json
 import math
 import re
+import threading
 from pathlib import Path
 
 import assetdb
@@ -41,6 +42,8 @@ CREATE TABLE IF NOT EXISTS asset_library_profile (
 
 ALLOWED_MODEL_STATUSES = ("registered", "verified")
 STORY_ASSET_STATUS = "registered"
+_ASSET_SCHEMA_VERSION = "1"
+_MIGRATE_LOCK = threading.RLock()
 _OFFICIAL_CATALOG_SOURCES = {
     "observed", "verified", "aa_verified", "aap_observed", "official",
     "builtin", "built_in", "database", "library",
@@ -161,16 +164,29 @@ def _metadata_face_capabilities(metadata: dict) -> list[dict]:
     }]
 
 
+def _asset_schema_is_current(con) -> bool:
+    row = con.execute(
+        "SELECT value FROM meta WHERE key='asset_schema_version'"
+    ).fetchone()
+    return bool(row and str(row[0]) == _ASSET_SCHEMA_VERSION)
+
+
 def migrate(con) -> None:
-    con.executescript(ASSET_SCHEMA)
-    assetdb.migrate_face_evidence(con)
-    con.execute(
-        """
-        INSERT INTO meta(key,value) VALUES('asset_schema_version','1')
-        ON CONFLICT(key) DO UPDATE SET value=excluded.value
-        """
-    )
-    con.commit()
+    if _asset_schema_is_current(con):
+        return
+    with _MIGRATE_LOCK:
+        if _asset_schema_is_current(con):
+            return
+        con.executescript(ASSET_SCHEMA)
+        assetdb.migrate_face_evidence(con)
+        con.execute(
+            """
+            INSERT INTO meta(key,value) VALUES('asset_schema_version',?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value
+            """,
+            (_ASSET_SCHEMA_VERSION,),
+        )
+        con.commit()
 
 
 def upsert_candidate(
