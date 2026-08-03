@@ -10,7 +10,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Iterable, Mapping, Sequence
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -41,39 +41,14 @@ VISION_SCHEMA = {
                 "properties": {
                     "face_id": {"type": "string"},
                     "primary_emotion": {"type": "string"},
-                    "secondary_emotions": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                    },
-                    "valence": {
-                        "type": "string",
-                        "enum": ["positive", "neutral", "negative", "mixed"],
-                    },
-                    "arousal": {
-                        "type": "string",
-                        "enum": ["low", "medium", "high"],
-                    },
-                    "eyes": {"type": "string"},
-                    "brows": {"type": "string"},
-                    "mouth": {"type": "string"},
-                    "blush": {"type": "boolean"},
-                    "tears": {"type": "boolean"},
+                    "usage_hint_cn": {"type": "string"},
                     "confidence": {"type": "number"},
-                    "description_cn": {"type": "string"},
                 },
                 "required": [
                     "face_id",
                     "primary_emotion",
-                    "secondary_emotions",
-                    "valence",
-                    "arousal",
-                    "eyes",
-                    "brows",
-                    "mouth",
-                    "blush",
-                    "tears",
+                    "usage_hint_cn",
                     "confidence",
-                    "description_cn",
                 ],
                 "additionalProperties": False,
             },
@@ -85,31 +60,34 @@ VISION_SCHEMA = {
 
 
 _VISION_STRING_FIELDS = frozenset({
-    "face_id",
-    "primary_emotion",
-    "eyes",
-    "brows",
-    "mouth",
-    "description_cn",
+    "face_id", "primary_emotion", "usage_hint_cn",
 })
 
 
+def usage_hint_cn(item: Mapping) -> str:
+    """Return the selection hint from the compact or legacy label shape."""
+    return str(
+        item.get("usage_hint_cn") or item.get("description_cn") or ""
+    ).strip()
+
+
+def _compact_vision_item(item: Mapping) -> dict:
+    compact = {
+        "face_id": item.get("face_id"),
+        "primary_emotion": item.get("primary_emotion"),
+        "confidence": item.get("confidence"),
+    }
+    if "usage_hint_cn" in item:
+        compact["usage_hint_cn"] = item.get("usage_hint_cn")
+    elif "description_cn" in item:
+        compact["usage_hint_cn"] = item.get("description_cn")
+    return compact
+
+
 def _valid_vision_item(item: dict, required: set[str]) -> bool:
-    allowed = set(VISION_SCHEMA["properties"]["items"]["items"]["properties"])
-    if not required.issubset(item) or set(item) - allowed:
+    if not required.issubset(item):
         return False
     if any(not isinstance(item.get(field), str) for field in _VISION_STRING_FIELDS):
-        return False
-    secondary = item.get("secondary_emotions")
-    if not isinstance(secondary, list) or any(
-        not isinstance(value, str) for value in secondary
-    ):
-        return False
-    if item.get("valence") not in {"positive", "neutral", "negative", "mixed"}:
-        return False
-    if item.get("arousal") not in {"low", "medium", "high"}:
-        return False
-    if not isinstance(item.get("blush"), bool) or not isinstance(item.get("tears"), bool):
         return False
     confidence = item.get("confidence")
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
@@ -117,12 +95,14 @@ def _valid_vision_item(item: dict, required: set[str]) -> bool:
     return math.isfinite(float(confidence)) and 0.0 <= float(confidence) <= 1.0
 
 
-_SYSTEM = """你在为视觉小说角色立绘建立可检索的表情差分语义表。
-只根据图中实际可见的眼睛、眉毛、嘴形、脸红、眼泪和整体情绪判断。
+_SYSTEM = """你在为视觉小说角色立绘建立供剧情选择的表情语义表。
+只判断整体情绪、态度和适用的台词语境，不拆解或描述脸部零件。
 不要根据编号猜测，不要根据文件名猜测，也不要把服装、姿势或角色身份当成情绪。
 同一批图片属于同一角色，重点比较它们之间的细微差别。
 primary_emotion 使用简洁自然的中文，例如“轻微微笑”“不满”“尴尬”“惊讶”。
-description_cn 写成一句可供剧本模型选表情时使用的中文说明。
+usage_hint_cn 写成一句简短的使用语境，例如适合怎样的台词、语气、反应或情绪阶段。
+使用语境不是关键词触发规则，不得用是否脸红、是否流泪等视觉现象决定是否使用。
+不同 face_id 可以拥有完全相同的情绪和使用语境，不要为了区分编号强行制造差异。
 置信度范围为 0 到 1；确实模糊时降低置信度，不要硬猜。"""
 
 
@@ -232,9 +212,8 @@ def label_face_images(
             + "、".join(expected)
             + '\n必须只返回一个 JSON 对象，根键必须是 "items"。'
             + "items 数组中每项必须完整包含：face_id、primary_emotion、"
-            + "secondary_emotions、valence、arousal、eyes、brows、mouth、"
-            + "blush、tears、confidence、description_cn。"
-            + "blush 和 tears 必须是 JSON 布尔值，不能写“有/无”。"
+            + "usage_hint_cn、confidence。"
+            + "只写整体情绪和使用语境，不要描述眼睛、眉毛、嘴部、脸红或泪水。"
         )
         if hint_lines:
             user += (
@@ -261,7 +240,7 @@ def label_face_images(
                     raise ValueError('response root does not contain an "items" array')
                 if not all(isinstance(item, dict) for item in candidate):
                     raise ValueError("items contains a non-object value")
-                items = candidate
+                items = [_compact_vision_item(item) for item in candidate]
                 last_error = None
                 break
             except Exception as exc:

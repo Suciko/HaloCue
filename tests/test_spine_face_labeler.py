@@ -10,6 +10,7 @@ import llm
 from asset_catalog import _face_capabilities
 from spine_face_labeler import (
     _SYSTEM,
+    VISION_SCHEMA,
     label_face_images,
     list_visual_face_labels,
     make_vision_sheet,
@@ -74,6 +75,69 @@ def _vision_label(face_id: str, *, emotion: str = "平静", confidence: float = 
     }
 
 
+def _compact_label(
+    face_id: str,
+    *,
+    emotion: str = "平静",
+    usage: str = "普通交谈或安静倾听",
+    confidence: float = 0.9,
+):
+    return {
+        "face_id": face_id,
+        "primary_emotion": emotion,
+        "usage_hint_cn": usage,
+        "confidence": confidence,
+    }
+
+
+def test_visual_schema_accepts_selection_semantics_without_face_components(tmp_path):
+    item_schema = VISION_SCHEMA["properties"]["items"]["items"]
+    assert set(item_schema["required"]) == {
+        "face_id", "primary_emotion", "usage_hint_cn", "confidence",
+    }
+    assert not {
+        "eyes", "brows", "mouth", "blush", "tears",
+    }.intersection(item_schema["properties"])
+
+    class CompactProvider(FakeVisionProvider):
+        def complete_json_vision(self, system, images, user, schema):
+            self.calls.append((system, images, user, schema))
+            ids = images[0][0].split(":", 1)[1].split(",")
+            return {"items": [_compact_label(face_id) for face_id in ids]}
+
+    provider = CompactProvider()
+    labels = label_face_images(
+        provider,
+        [_face(tmp_path, "00", (220, 220, 220))],
+        max_attempts=1,
+    )
+
+    assert labels[0]["usage_hint_cn"] == "普通交谈或安静倾听"
+    assert "不得用是否脸红、是否流泪等视觉现象决定是否使用" in provider.calls[0][0]
+
+
+def test_visual_labeler_allows_duplicate_selection_semantics(tmp_path):
+    class DuplicateSemanticsProvider(FakeVisionProvider):
+        def complete_json_vision(self, system, images, user, schema):
+            self.calls.append((system, images, user, schema))
+            ids = images[0][0].split(":", 1)[1].split(",")
+            return {"items": [_compact_label(face_id) for face_id in ids]}
+
+    labels = label_face_images(
+        DuplicateSemanticsProvider(),
+        [
+            _face(tmp_path, "00", (220, 220, 220)),
+            _face(tmp_path, "01", (220, 220, 220)),
+        ],
+        max_attempts=1,
+    )
+
+    assert [item["primary_emotion"] for item in labels] == ["平静", "平静"]
+    assert [item["usage_hint_cn"] for item in labels] == [
+        "普通交谈或安静倾听", "普通交谈或安静倾听",
+    ]
+
+
 def test_visual_labeler_sends_one_numbered_sheet_and_keeps_exact_face_ids(tmp_path):
     provider = FakeVisionProvider()
     faces = [_face(tmp_path, "05", (220, 80, 120)), _face(tmp_path, "12", (80, 120, 220))]
@@ -86,7 +150,7 @@ def test_visual_labeler_sends_one_numbered_sheet_and_keeps_exact_face_ids(tmp_pa
     assert len(sent) == 1
     assert sent[0][0] == "编号九宫格:05,12"
     assert sent[0][1].startswith(b"\xff\xd8")
-    assert "只根据图中实际可见" in _SYSTEM
+    assert "只判断整体情绪、态度和适用的台词语境" in _SYSTEM
     assert "涓" not in _SYSTEM
 
 
@@ -217,7 +281,7 @@ def test_visual_labeler_preserves_valid_batch_items_and_falls_back_per_bad_face(
             ids = images[0][0].split(":", 1)[1].split(",")
             if len(ids) > 1:
                 incomplete = _vision_label("02")
-                incomplete.pop("mouth")
+                incomplete.pop("description_cn")
                 return {"items": [
                     _vision_label("00", emotion="合法批次结果"),
                     _vision_label("01"),
@@ -286,12 +350,8 @@ def test_visual_labeler_preserves_valid_batch_items_and_falls_back_per_bad_face(
 @pytest.mark.parametrize(("field", "invalid"), [
     ("confidence", "not-a-number"),
     ("confidence", 1.5),
-    ("blush", "false"),
-    ("tears", 0),
-    ("secondary_emotions", "calm"),
-    ("valence", "warm"),
-    ("arousal", "extreme"),
-    ("eyes", 123),
+    ("primary_emotion", 123),
+    ("usage_hint_cn", 123),
 ])
 def test_visual_labeler_reviews_batch_items_with_invalid_schema_values(
     tmp_path, field, invalid,
@@ -302,9 +362,9 @@ def test_visual_labeler_reviews_batch_items_with_invalid_schema_values(
             ids = images[0][0].split(":", 1)[1].split(",")
             if len(ids) == 1:
                 return {"items": [_vision_label(ids[0], emotion="reviewed")]}
-            invalid_item = _vision_label("00", emotion="invalid batch item")
+            invalid_item = _compact_label("00", emotion="invalid batch item")
             invalid_item[field] = invalid
-            return {"items": [invalid_item, _vision_label("01", emotion="valid")]}
+            return {"items": [invalid_item, _compact_label("01", emotion="valid")]}
 
     provider = InvalidFieldProvider()
     labels = label_face_images(
