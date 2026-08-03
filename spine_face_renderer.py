@@ -23,9 +23,10 @@ from spine_semantic_faces import extract_semantic_face_combinations
 
 
 _SOURCE_SUFFIXES = {".skel", ".atlas", ".png"}
+_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 _FRAME_SUFFIX = re.compile(r"_(\d+)\.png$", re.IGNORECASE)
-_CACHE_VERSION = "v5"
-_RENDER_PROFILE = "attachment-geometry-v5"
+_CACHE_VERSION = "v6"
+_RENDER_PROFILE = "dotted-attachment-path-v6"
 _HEAD_PREVIEW_SIZE = 768
 _FINAL_RENDER_FRAME = 8
 
@@ -251,10 +252,7 @@ def parse_atlas_metadata(atlas_path: str | Path) -> dict[str, dict]:
         nonlocal current, fields
         required = {"rotate", "size", "orig", "offset"}
         if current and required.issubset(fields):
-            name = Path(current.replace("\\", "/"))
-            if name.suffix.lower() != ".png":
-                name = name.with_suffix(".png")
-            result[name.as_posix()] = dict(fields)
+            result[_logical_image_path(current)] = dict(fields)
         current = None
         fields = {}
 
@@ -285,16 +283,20 @@ def parse_atlas_metadata(atlas_path: str | Path) -> dict[str, dict]:
     return result
 
 
+def _logical_image_path(raw_path: str) -> str:
+    normalized = raw_path.replace("\\", "/")
+    if not normalized.lower().endswith(_IMAGE_SUFFIXES):
+        normalized += ".png"
+    return Path(normalized).as_posix()
+
+
 def _attachment_path(attachment_name: str, attachment: Mapping) -> str:
     raw_path = str(
         attachment.get("path")
         or attachment.get("name")
         or attachment_name
-    ).replace("\\", "/")
-    relative = Path(raw_path)
-    if relative.suffix.lower() != ".png":
-        relative = relative.with_suffix(".png")
-    return relative.as_posix()
+    )
+    return _logical_image_path(raw_path)
 
 
 def _iter_attachments(skeleton_json: Mapping):

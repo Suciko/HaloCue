@@ -261,6 +261,74 @@ def test_atlas_metadata_parser_keeps_region_transform_fields(tmp_path):
     }
 
 
+def test_atlas_metadata_parser_appends_png_after_complete_dotted_region_name(
+    tmp_path,
+):
+    atlas = tmp_path / "actor.atlas"
+    atlas.write_text(
+        "actor.png\n"
+        "size: 512,512\n"
+        "format: RGBA8888\n"
+        "filter: Linear,Linear\n"
+        "repeat: none\n"
+        "faces/eyes.variant.1.5\n"
+        "  rotate: false\n"
+        "  xy: 10, 20\n"
+        "  size: 60, 20\n"
+        "  orig: 80, 40\n"
+        "  offset: 10, 5\n"
+        "  index: -1\n",
+        encoding="utf-8",
+    )
+
+    metadata = spine_face_renderer.parse_atlas_metadata(atlas)
+
+    assert list(metadata) == ["faces/eyes.variant.1.5.png"]
+
+
+def test_attachment_restore_resolves_nested_dotted_logical_name_and_png_path(
+    tmp_path,
+):
+    images = tmp_path / "images"
+    nested = images / "faces"
+    nested.mkdir(parents=True)
+    Image.new("RGBA", (24, 12), "red").save(
+        nested / "eyes.variant.1.5.png"
+    )
+    Image.new("RGBA", (20, 10), "blue").save(nested / "already.png")
+    skeleton = {
+        "skins": [{
+            "attachments": {
+                "Eyes": {
+                    "dotted": {
+                        "path": "faces/eyes.variant.1.5",
+                        "width": 48,
+                        "height": 24,
+                    },
+                    "existing-suffix": {
+                        "path": "faces/already.png",
+                        "width": 40,
+                        "height": 20,
+                    },
+                }
+            }
+        }]
+    }
+
+    diagnostics = spine_face_renderer.restore_attachment_images(skeleton, images)
+
+    assert [item["path"] for item in diagnostics] == [
+        "faces/eyes.variant.1.5.png",
+        "faces/already.png",
+    ]
+    assert all(
+        item["reason"] == "restored_region_without_atlas_metadata"
+        for item in diagnostics
+    )
+    assert Image.open(nested / "eyes.variant.1.5.png").size == (48, 24)
+    assert Image.open(nested / "already.png").size == (40, 20)
+
+
 def test_attachment_restore_rebuilds_trimmed_region_and_preserves_mesh_geometry(
     tmp_path,
 ):
@@ -532,8 +600,8 @@ def test_render_validation_and_report_calibration_are_backward_compatible(tmp_pa
 
 
 def test_cached_warmed_project_restores_images_overwritten_by_repeat_unpack(tmp_path):
-    warmed = tmp_path / "render-warmup-v5.spine"
-    patched = tmp_path / "render-warmup-v5.json"
+    warmed = tmp_path / "render-warmup-v6.spine"
+    patched = tmp_path / "render-warmup-v6.json"
     image = tmp_path / "eyes.png"
     warmed.write_bytes(b"project")
     Image.new("RGBA", (65, 32), "red").save(image)
