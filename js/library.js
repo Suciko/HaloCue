@@ -130,6 +130,11 @@
     this.selectedKey = null;
     this.returnFocus = null;
     this.generation = 0;
+    this.faceJob = null;
+    this.faceJobError = '';
+    this.taskTimer = null;
+    this.taskPollSequence = 0;
+    this.taskRequest = null;
     this.searchQuery = '';
     this.kindFilter = 'all';
     this.roleFilter = 'all';
@@ -156,6 +161,7 @@
       } else if (action === 'close') self.close();
       else if (action === 'back-catalog') self.showCatalog();
       else if (action === 'toggle-tasks') self.toggleTasks();
+      else if (action === 'view-face-job') self.viewFaceJob(target);
       else if (action === 'select') self.select(target.dataset.assetKey, {navigate: true});
       else if (action === 'filter-kind') {
         self.kindFilter = target.dataset.kind || 'all';
@@ -212,6 +218,9 @@
     this.context = sanitizeWorkbenchContext(context);
     this.returnFocus = document.activeElement || null;
     this.generation += 1;
+    this.faceJob = null;
+    this.faceJobError = '';
+    this.taskPollSequence += 1;
     if (this.appShell) this.appShell.hidden = true;
     this.root.hidden = false;
     this.root.setAttribute('aria-hidden', 'false');
@@ -223,13 +232,18 @@
     }
     this.renderTasks();
     if (this.root.focus) this.root.focus();
-    await this.refresh();
+    await Promise.all([this.refresh(), this.refreshTasks()]);
   };
 
   AssetWorkbench.prototype.close = async function () {
     if (!this.root) return;
     this.generation += 1;
+    this.taskPollSequence += 1;
+    if (this.taskTimer) clearTimeout(this.taskTimer);
+    this.taskTimer = null;
     this.preview.stop();
+    if (this.tasks) this.tasks.classList.remove('is-open');
+    if (this.taskToggle) this.taskToggle.setAttribute('aria-expanded', 'false');
     this.root.hidden = true;
     this.root.setAttribute('aria-hidden', 'true');
     if (this.appShell) this.appShell.hidden = false;
@@ -251,6 +265,7 @@
         ? '已读取，只显示已登记的自定义素材。'
         : '尚无可复用的自定义素材。';
       this.renderCatalog();
+      this.renderTasks();
       this.restoreSelection();
     } catch (error) {
       if (!this.isOpen() || generation !== this.generation) return;
@@ -429,16 +444,129 @@
   AssetWorkbench.prototype.renderTasks = function () {
     clear(this.tasks);
     if (!this.tasks) return;
-    if (!this.context.tasks.length) {
+    const queue = this.context.tasks || [];
+    const job = this.faceJob || {};
+    const hasFaceJob = Boolean(job.running || job.done || job.ident || job.error);
+    if (!queue.length && !hasFaceJob && !this.faceJobError) {
       this.tasks.appendChild(make('p', 'asset-workbench-empty', '当前没有待处理的素材任务。'));
       return;
     }
-    this.context.tasks.forEach(function (task) {
-      const row = make('section', 'asset-workbench-task');
-      row.appendChild(make('b', '', task.requested_name || '待补素材'));
-      row.appendChild(make('span', '', task.reason || '需要在当前剧情登记'));
-      this.tasks.appendChild(row);
-    }, this);
+    if (queue.length) {
+      this.tasks.appendChild(make('h3', 'asset-task-section-heading', '剧情待处理 · ' + queue.length + ' 项'));
+      queue.forEach(function (task) {
+        const row = make('section', 'asset-workbench-task');
+        row.appendChild(make('b', '', task.requested_name || '待补素材'));
+        row.appendChild(make('span', '', task.reason || '需要在当前剧情登记'));
+        this.tasks.appendChild(row);
+      }, this);
+    }
+    if (hasFaceJob) this.renderFaceJob(job);
+    else if (this.faceJobError) {
+      const error = make('section', 'asset-workbench-task asset-face-task is-error');
+      error.appendChild(make('b', '', '骨骼表情标注'));
+      error.appendChild(make('span', '', this.faceJobError));
+      this.tasks.appendChild(error);
+    }
+  };
+
+  AssetWorkbench.prototype.faceJobAsset = function (job) {
+    const ident = String(job && job.ident || '');
+    return this.assets.find(function (item) {
+      return item.kind === 'character' && String(item.aa_key || '') === ident;
+    }) || null;
+  };
+
+  AssetWorkbench.prototype.renderFaceJob = function (job) {
+    const result = job.result || {};
+    const asset = this.faceJobAsset(job);
+    const card = make('section', 'asset-workbench-task asset-face-task');
+    if (job.running) card.classList.add('is-running');
+    else if (job.done && !job.ok) card.classList.add('is-error');
+    card.appendChild(make('h3', 'asset-task-section-heading', '骨骼表情标注'));
+    card.appendChild(make('b', 'asset-face-task-name', asset ? asset.name : ('Identifier ' + (job.ident || '未知'))));
+    card.appendChild(make('span', 'asset-face-task-phase', job.phase || (job.running ? '处理中' : '已结束')));
+    const current = Number(job.current || 0), total = Number(job.total || 0);
+    if (total > 0) card.appendChild(make('strong', 'asset-face-task-progress', current + ' / ' + total));
+    const stats = make('div', 'asset-face-task-stats');
+    [
+      ['已渲染', result.rendered_count],
+      ['AI 标注', result.labeled_count],
+      ['数据库', result.saved_count],
+      ['失败', result.failed_count]
+    ].forEach(function (entry) {
+      if (entry[1] === undefined || entry[1] === null) return;
+      stats.appendChild(make('span', '', entry[0] + ' ' + Number(entry[1] || 0)));
+    });
+    if (stats.children.length) card.appendChild(stats);
+    if (result.completed_at) {
+      card.appendChild(make('span', 'asset-face-task-completed', '完成时间 ' + result.completed_at));
+    }
+    const message = job.error || job.message;
+    if (message) card.appendChild(make('p', 'asset-face-task-message', message));
+    const lines = Array.isArray(job.log) ? job.log.slice(-5) : [];
+    if (lines.length) {
+      const recent = make('div', 'asset-face-task-log');
+      lines.forEach(function (line) { recent.appendChild(make('span', '', line)); });
+      card.appendChild(recent);
+    }
+    if (job.done && job.ok && asset) {
+      const view = make('button', 'ghost', '查看标注');
+      view.type = 'button';
+      view.dataset.workbenchAction = 'view-face-job';
+      view.dataset.assetKey = asset._assetKey;
+      card.appendChild(view);
+    }
+    this.tasks.appendChild(card);
+  };
+
+  AssetWorkbench.prototype.scheduleTaskRefresh = function (delay, generation) {
+    if (this.taskTimer) clearTimeout(this.taskTimer);
+    this.taskTimer = setTimeout(function () {
+      this.taskTimer = null;
+      if (!this.isOpen() || generation !== this.generation) return;
+      this.refreshTasks();
+    }.bind(this), delay);
+  };
+
+  AssetWorkbench.prototype.refreshTasks = function () {
+    if (!this.isOpen()) return;
+    const generation = this.generation;
+    if (this.taskRequest && this.taskRequest.generation === generation) {
+      return this.taskRequest.promise;
+    }
+    const sequence = ++this.taskPollSequence;
+    if (this.taskTimer) clearTimeout(this.taskTimer);
+    this.taskTimer = null;
+    const request = {generation: generation, promise: null};
+    request.promise = (async function () {
+      try {
+        const job = await exports.Api.request('/api/assets/faces/job');
+        if (!this.isOpen() || generation !== this.generation || sequence !== this.taskPollSequence) return;
+        this.faceJob = job || {};
+        this.faceJobError = '';
+        this.renderTasks();
+        if (this.faceJob.running) this.scheduleTaskRefresh(1000, generation);
+      } catch (error) {
+        if (!this.isOpen() || generation !== this.generation || sequence !== this.taskPollSequence) return;
+        this.faceJobError = '任务状态暂时无法读取，正在自动重试。';
+        this.renderTasks();
+        this.scheduleTaskRefresh(3000, generation);
+      }
+    }.bind(this))().finally(function () {
+      if (this.taskRequest === request) this.taskRequest = null;
+    }.bind(this));
+    this.taskRequest = request;
+    return request.promise;
+  };
+
+  AssetWorkbench.prototype.viewFaceJob = function (trigger) {
+    const asset = this.assets.find(function (item) {
+      return item._assetKey === String(trigger && trigger.dataset.assetKey || '');
+    });
+    if (!asset || !exports.FaceWorkspace) return;
+    this.selectedKey = asset._assetKey;
+    this.select(asset._assetKey);
+    exports.FaceWorkspace.open(asset, trigger);
   };
 
   AssetWorkbench.prototype.toggleTasks = function () {
@@ -446,6 +574,8 @@
     const expanded = this.tasks.classList.contains('is-open');
     this.tasks.classList.toggle('is-open', !expanded);
     this.taskToggle.setAttribute('aria-expanded', String(!expanded));
+    if (expanded) return;
+    this.refreshTasks();
   };
 
   exports.StoryUI = exports.StoryUI || {};

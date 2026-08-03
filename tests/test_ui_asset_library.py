@@ -111,6 +111,80 @@ sources.forEach(source=>vm.runInNewContext(source,context));
     }
 
 
+def test_current_tasks_drawer_includes_face_job_and_polls_while_it_runs():
+    script = r'''
+const fs=require('fs'),vm=require('vm');
+const sources=process.argv.slice(1).map(path=>fs.readFileSync(path,'utf8'));
+const nodes={},listeners={},timers=[];let document;
+function node(id){
+  let own='',attrs={},events={},classes=new Set();
+  return {id:id||'',children:[],parentNode:null,dataset:{},className:'',hidden:false,value:'',disabled:false,
+    classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x),toggle:(x,v)=>v?classes.add(x):classes.delete(x)},
+    appendChild(child){child.parentNode=this;this.children.push(child);return child},
+    addEventListener(kind,fn){events[kind]=fn},setAttribute(key,value){attrs[key]=String(value)},getAttribute(key){return attrs[key]},removeAttribute(key){delete attrs[key]},
+    focus(){document.activeElement=this},querySelector(){return null},closest(){return null},
+    set textContent(value){own=String(value||'');this.children=[]},get textContent(){return own+this.children.map(child=>child.textContent||'').join('')}
+  };
+}
+['appShell','assetWorkbench','assetWorkbenchBack','assetWorkbenchContext','assetWorkbenchTaskToggle','assetWorkbenchBody','assetWorkbenchFilters','assetWorkbenchList','assetWorkbenchDetail','assetWorkbenchTasks','assetWorkbenchStatus'].forEach(id=>nodes[id]=node(id));
+nodes.assetWorkbench.hidden=true;nodes.appShell.hidden=false;
+document={activeElement:node('trigger'),getElementById:id=>nodes[id]||null,createElement:tag=>node(tag),addEventListener:(kind,fn)=>listeners[kind]=fn};
+const requests=[];
+const assets={characters:[{kind:'character',aa_key:'626652156',sha256:'digest',name:'凯伊（约会服）',copies:[],details:{file_count:4,face_count:44}}],backgrounds:[],sounds:[],bgms:[]};
+const jobs=[
+  {running:true,done:false,ok:false,ident:'626652156',phase:'AI 识别',message:'正在识别第 3 批',current:27,total:44,log:['九宫格 2/5 完成'],result:{rendered_count:44,labeled_count:18,saved_count:18,failed_count:0}},
+  {running:false,done:true,ok:true,ident:'626652156',phase:'完成',message:'标注完成',current:44,total:44,log:['数据库写入完成'],result:{rendered_count:44,labeled_count:44,saved_count:44,failed_count:0,completed_at:'2026-08-03 14:26:30'}}
+];
+const window={StoryUI:{},StoryStore:{get:()=>({story_token:'story-1'})},Api:{request:async path=>{requests.push(path);return path.startsWith('/api/assets/faces/job')?jobs.shift():assets},json:(method,payload)=>({method,payload})}};
+const context={window,document,Promise,Error,console,encodeURIComponent,CustomEvent:function(){},ResizeObserver:undefined,setTimeout:(fn,delay)=>{timers.push({fn,delay});return timers.length},clearTimeout(){},setImmediate};
+sources.forEach(source=>vm.runInNewContext(source,context));
+(async()=>{
+  await window.AssetWorkbench.open({story_token:'story-1',tasks:[{task_id:'bg-1',kind:'background',requested_name:'雨夜天台',reason:'剧情引用但未登记'}]});
+  const running={text:nodes.assetWorkbenchTasks.textContent,timers:timers.map(item=>item.delay)};
+  timers.shift().fn();
+  await new Promise(resolve=>setImmediate(resolve));
+  console.log(JSON.stringify({requests,running,completed:{text:nodes.assetWorkbenchTasks.textContent,timers:timers.map(item=>item.delay)}}));
+})();
+'''
+    result = run_library(script)
+
+    assert "/api/assets/faces/job" in result["requests"]
+    assert "雨夜天台" in result["running"]["text"]
+    assert "凯伊（约会服）" in result["running"]["text"]
+    assert "27 / 44" in result["running"]["text"]
+    assert "已渲染 44" in result["running"]["text"]
+    assert "AI 标注 18" in result["running"]["text"]
+    assert "数据库 18" in result["running"]["text"]
+    assert result["running"]["timers"] == [1000]
+    assert "完成时间 2026-08-03 14:26:30" in result["completed"]["text"]
+    assert "查看标注" in result["completed"]["text"]
+    assert result["completed"]["timers"] == []
+
+
+def test_current_tasks_drawer_retries_an_initial_job_poll_failure():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+const nodes={},timers=[];let document;
+function node(id){let own='',attrs={},classes=new Set();return {id:id||'',children:[],dataset:{},hidden:false,classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x),toggle:(x,v)=>v?classes.add(x):classes.delete(x)},appendChild(child){this.children.push(child);return child},addEventListener(){},setAttribute(k,v){attrs[k]=String(v)},focus(){},querySelector(){return null},set textContent(v){own=String(v||'');this.children=[]},get textContent(){return own+this.children.map(child=>child.textContent||'').join('')}}}
+['appShell','assetWorkbench','assetWorkbenchContext','assetWorkbenchTaskToggle','assetWorkbenchBody','assetWorkbenchFilters','assetWorkbenchList','assetWorkbenchDetail','assetWorkbenchTasks','assetWorkbenchStatus'].forEach(id=>nodes[id]=node(id));
+document={activeElement:null,getElementById:id=>nodes[id]||null,createElement:tag=>node(tag),addEventListener(){}};
+let rejectRequest,requests=0;
+const window={StoryUI:{AssetPreview:function(){this.stop=function(){}},TransferController:function(){},CopyManager:function(){}},Api:{request:()=>{requests++;return new Promise((resolve,reject)=>{rejectRequest=reject})}}};
+vm.runInNewContext(source,{window,document,Promise,Error,console,ResizeObserver:undefined,setTimeout:(fn,delay)=>{timers.push({fn,delay});return timers.length},clearTimeout(){},encodeURIComponent});
+(async()=>{nodes.assetWorkbench.hidden=false;const first=window.AssetWorkbench.refreshTasks(),second=window.AssetWorkbench.refreshTasks();rejectRequest(new Error('disconnect'));await Promise.all([first,second]);console.log(JSON.stringify({requests,timers:timers.map(item=>item.delay),text:nodes.assetWorkbenchTasks.textContent}));})();
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library.js")],
+        text=True,
+        encoding="utf-8",
+    )
+    result = json.loads(output)
+
+    assert result["requests"] == 1
+    assert result["timers"] == [3000]
+    assert "自动重试" in result["text"]
+
+
 def test_asset_workbench_modules_do_not_build_untrusted_html_or_use_eval():
     for name in MODULES:
         source = (HERE / "js" / name).read_text(encoding="utf-8")

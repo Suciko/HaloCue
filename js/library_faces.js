@@ -110,6 +110,7 @@
       workbench.selectedKey = state.selectedKey;
       workbench.restoreSelection();
       if (workbench.list) workbench.list.scrollTop = state.scrollTop;
+      if (workbench.refreshTasks) workbench.refreshTasks();
     }
     if (this.trigger && this.trigger.focus) this.trigger.focus();
   };
