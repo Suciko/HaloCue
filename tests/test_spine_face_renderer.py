@@ -221,9 +221,313 @@ def test_unpacked_region_images_are_restored_to_skeleton_attachment_size(tmp_pat
     assert restore(skeleton, images) == []
 
 
+def test_atlas_metadata_parser_keeps_region_transform_fields(tmp_path):
+    atlas = tmp_path / "actor.atlas"
+    atlas.write_text(
+        "actor.png\n"
+        "size: 512,512\n"
+        "format: RGBA8888\n"
+        "filter: Linear,Linear\n"
+        "repeat: none\n"
+        "eyes\n"
+        "  rotate: true\n"
+        "  xy: 10, 20\n"
+        "  size: 60, 20\n"
+        "  orig: 80, 40\n"
+        "  offset: 10, 5\n"
+        "  index: -1\n",
+        encoding="utf-8",
+    )
+
+    parse = getattr(
+        spine_face_renderer,
+        "parse_atlas_metadata",
+        lambda path: {},
+    )
+
+    assert parse(atlas) == {
+        "eyes.png": {
+            "rotate": True,
+            "size": [60, 20],
+            "orig": [80, 40],
+            "offset": [10, 5],
+        }
+    }
+
+
+def test_attachment_restore_rebuilds_trimmed_region_and_preserves_mesh_geometry(
+    tmp_path,
+):
+    images = tmp_path / "images"
+    images.mkdir()
+    Image.new("RGBA", (60, 20), (255, 0, 0, 255)).save(images / "eyes.png")
+    Image.new("RGBA", (32, 32), (0, 0, 255, 255)).save(images / "face-mesh.png")
+    skeleton = {
+        "skins": [{
+            "name": "default",
+            "attachments": {
+                "Eyes": {
+                    "angry": {
+                        "path": "eyes",
+                        "width": 100,
+                        "height": 50,
+                    }
+                },
+                "Face": {
+                    "mesh": {
+                        "type": "mesh",
+                        "path": "face-mesh",
+                        "uvs": [0, 0, 1, 0, 1, 1, 0, 1],
+                        "vertices": [0, 0, 32, 0, 32, 32, 0, 32],
+                        "triangles": [0, 1, 2, 2, 3, 0],
+                    }
+                },
+            },
+        }]
+    }
+    atlas = {
+        "eyes.png": {
+            "rotate": False,
+            "size": [60, 20],
+            "orig": [80, 40],
+            "offset": [10, 5],
+        },
+        "face-mesh.png": {
+            "rotate": False,
+            "size": [32, 32],
+            "orig": [32, 32],
+            "offset": [0, 0],
+        },
+    }
+
+    restore = getattr(
+        spine_face_renderer,
+        "restore_attachment_images",
+        lambda skeleton, images, atlas_metadata=None: [],
+    )
+    diagnostics = restore(skeleton, images, atlas)
+
+    region = next(item for item in diagnostics if item["attachment"] == "angry")
+    mesh = next(item for item in diagnostics if item["attachment"] == "mesh")
+    assert region == {
+        "attachment": "angry",
+        "slot": "Eyes",
+        "path": "eyes.png",
+        "type": "region",
+        "status": "restored",
+        "reason": "restored_trimmed_region_to_attachment_geometry",
+        "from": [60, 20],
+        "to": [100, 50],
+    }
+    restored = Image.open(images / "eyes.png").convert("RGBA")
+    assert restored.size == (100, 50)
+    assert restored.getpixel((0, 0))[3] == 0
+    assert restored.getpixel((50, 25)) == (255, 0, 0, 255)
+    assert mesh["type"] == "mesh"
+    assert mesh["status"] == "preserved_geometry"
+    assert Image.open(images / "face-mesh.png").size == (32, 32)
+
+
+def test_attachment_restore_marks_unsafe_mesh_and_incomplete_region_for_calibration(
+    tmp_path,
+):
+    images = tmp_path / "images"
+    images.mkdir()
+    Image.new("RGBA", (24, 12), "blue").save(images / "mesh.png")
+    Image.new("RGBA", (12, 8), "red").save(images / "region.png")
+    skeleton = {
+        "skins": [{
+            "name": "default",
+            "attachments": {
+                "Face": {
+                    "unsafe-mesh": {
+                        "type": "mesh",
+                        "path": "mesh",
+                        "uvs": [0, 0, 1, 1],
+                    }
+                },
+                "Eyes": {
+                    "incomplete-region": {
+                        "path": "region",
+                        "width": 100,
+                    }
+                },
+            },
+        }]
+    }
+
+    restore = getattr(
+        spine_face_renderer,
+        "restore_attachment_images",
+        lambda skeleton, images, atlas_metadata=None: [],
+    )
+    diagnostics = restore(skeleton, images)
+
+    assert diagnostics == [
+        {
+            "attachment": "unsafe-mesh",
+            "slot": "Face",
+            "path": "mesh.png",
+            "type": "mesh",
+            "status": "needs_manual_calibration",
+            "reason": "missing_mesh_geometry:triangles,vertices",
+        },
+        {
+            "attachment": "incomplete-region",
+            "slot": "Eyes",
+            "path": "region.png",
+            "type": "region",
+            "status": "needs_manual_calibration",
+            "reason": "missing_region_geometry:height",
+        },
+    ]
+    assert Image.open(images / "mesh.png").size == (24, 12)
+    assert Image.open(images / "region.png").size == (12, 8)
+
+
+def test_attachment_restore_marks_invalid_atlas_transform_for_calibration(tmp_path):
+    images = tmp_path / "images"
+    images.mkdir()
+    Image.new("RGBA", (60, 20), "red").save(images / "eyes.png")
+    skeleton = {
+        "skins": [{
+            "attachments": {
+                "Eyes": {
+                    "angry": {
+                        "path": "eyes",
+                        "width": 100,
+                        "height": 50,
+                    }
+                }
+            }
+        }]
+    }
+    malformed_atlas = {
+        "eyes.png": {
+            "rotate": False,
+            "size": [60, 20],
+            "orig": [80, 40],
+            # Missing offset means the trim cannot be reconstructed safely.
+        }
+    }
+
+    diagnostics = spine_face_renderer.restore_attachment_images(
+        skeleton,
+        images,
+        malformed_atlas,
+    )
+
+    assert diagnostics[0]["status"] == "needs_manual_calibration"
+    assert diagnostics[0]["reason"] == "restored_region_without_valid_atlas_metadata"
+    assert Image.open(images / "eyes.png").size == (100, 50)
+
+
+def test_attachment_restore_marks_missing_mesh_texture_for_calibration(tmp_path):
+    skeleton = {
+        "skins": [{
+            "attachments": {
+                "Face": {
+                    "mesh": {
+                        "type": "mesh",
+                        "path": "missing-mesh",
+                        "uvs": [0, 0, 1, 0, 1, 1],
+                        "vertices": [0, 0, 1, 0, 1, 1],
+                        "triangles": [0, 1, 2],
+                    }
+                }
+            }
+        }]
+    }
+
+    diagnostics = spine_face_renderer.restore_attachment_images(
+        skeleton,
+        tmp_path,
+    )
+
+    assert diagnostics[0]["status"] == "needs_manual_calibration"
+    assert diagnostics[0]["reason"] == "missing_attachment_image"
+
+
+def test_attachment_calibration_maps_37_through_40_like_other_animations():
+    skeleton = {
+        "animations": {
+            face_id: {
+                "slots": {
+                    "Eyes": {
+                        "attachment": [{"name": "angry"}],
+                    }
+                }
+            }
+            for face_id in ("37", "38", "39", "40", "41")
+        }
+    }
+    attachment_diagnostics = [{
+        "attachment": "angry",
+        "slot": "Eyes",
+        "path": "eyes.png",
+        "type": "region",
+        "status": "needs_manual_calibration",
+        "reason": "missing_region_geometry:height",
+    }]
+
+    map_calibration = getattr(
+        spine_face_renderer,
+        "map_attachment_calibration_to_faces",
+        lambda skeleton, face_ids, diagnostics: [],
+    )
+    calibration = map_calibration(
+        skeleton,
+        ["37", "38", "39", "40", "41"],
+        attachment_diagnostics,
+    )
+
+    assert [item["face_id"] for item in calibration] == [
+        "37",
+        "38",
+        "39",
+        "40",
+        "41",
+    ]
+    assert all(item["attachment"] == "angry" for item in calibration)
+    assert len({item["reason"] for item in calibration}) == 1
+
+
+def test_render_validation_and_report_calibration_are_backward_compatible(tmp_path):
+    portrait = tmp_path / "portrait.png"
+    head = tmp_path / "head.png"
+    Image.new("RGBA", (100, 200), (220, 60, 100, 255)).save(portrait)
+    Image.new("RGBA", (80, 80), (220, 60, 100, 255)).save(head)
+    face = spine_face_renderer.RenderedFace("37", portrait, head)
+
+    validate = getattr(
+        spine_face_renderer,
+        "validate_rendered_face",
+        lambda face: {},
+    )
+    diagnostic = validate(face)
+    report = spine_face_renderer.RenderReport(
+        signature="signature",
+        cache_dir=tmp_path,
+        faces=(face,),
+        cached=False,
+    )
+
+    assert diagnostic["face_id"] == "37"
+    assert diagnostic["status"] == "validated"
+    assert diagnostic["alpha_bounds"] == [0, 0, 100, 200]
+    assert diagnostic["visible_coverage"] == 1.0
+    assert diagnostic["head_bounds"] == [0, 0, 80, 80]
+    assert diagnostic["stability"] == {
+        "portrait_aspect_ratio": 0.5,
+        "head_aspect_ratio": 1.0,
+        "head_to_portrait_width": 0.8,
+    }
+    assert report.calibration == ()
+
+
 def test_cached_warmed_project_restores_images_overwritten_by_repeat_unpack(tmp_path):
-    warmed = tmp_path / "render-warmup-v4.spine"
-    patched = tmp_path / "render-warmup-v4.json"
+    warmed = tmp_path / "render-warmup-v5.spine"
+    patched = tmp_path / "render-warmup-v5.json"
     image = tmp_path / "eyes.png"
     warmed.write_bytes(b"project")
     Image.new("RGBA", (65, 32), "red").save(image)

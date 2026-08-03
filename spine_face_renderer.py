@@ -24,7 +24,8 @@ from spine_semantic_faces import extract_semantic_face_combinations
 
 _SOURCE_SUFFIXES = {".skel", ".atlas", ".png"}
 _FRAME_SUFFIX = re.compile(r"_(\d+)\.png$", re.IGNORECASE)
-_RENDER_PROFILE = "restore-region-attachment-size-v4"
+_CACHE_VERSION = "v5"
+_RENDER_PROFILE = "attachment-geometry-v5"
 _HEAD_PREVIEW_SIZE = 768
 _FINAL_RENDER_FRAME = 8
 
@@ -42,6 +43,7 @@ class RenderReport:
     cache_dir: Path
     faces: tuple[RenderedFace, ...]
     cached: bool
+    calibration: tuple[dict, ...] = ()
 
 
 def discover_renderable_face_ids(combinations: Mapping[str, Mapping]) -> list[str]:
@@ -231,92 +233,351 @@ def crop_head_preview(
     return destination
 
 
-def restore_region_attachment_images(
-    skeleton_json: dict,
-    images_dir: str | Path,
-) -> list[dict]:
-    """Restore unpacked atlas regions to their Spine attachment dimensions.
+def parse_atlas_metadata(atlas_path: str | Path) -> dict[str, dict]:
+    """Read the transform fields needed to rebuild loose atlas regions."""
+    result: dict[str, dict] = {}
+    current: str | None = None
+    fields: dict[str, object] = {}
 
-    Spine's atlas unpacker writes packed pixels (for example 269x127), while
-    region attachments retain their authoring dimensions (for example
-    414x195).  Reimporting those packed pixels as loose images makes the face
-    parts about 35% too small.  Mesh attachments are deliberately untouched:
-    their UVs and vertices, rather than region width/height, define geometry.
-    """
-    root = Path(images_dir)
-    expected_by_path: dict[str, tuple[int, int]] = {}
+    def finish() -> None:
+        nonlocal current, fields
+        required = {"rotate", "size", "orig", "offset"}
+        if current and required.issubset(fields):
+            name = Path(current.replace("\\", "/"))
+            if name.suffix.lower() != ".png":
+                name = name.with_suffix(".png")
+            result[name.as_posix()] = dict(fields)
+        current = None
+        fields = {}
 
+    for raw_line in Path(atlas_path).read_text(encoding="utf-8-sig").splitlines():
+        if not raw_line.strip():
+            finish()
+            continue
+        if raw_line[:1].isspace():
+            if current is None or ":" not in raw_line:
+                continue
+            key, raw_value = raw_line.strip().split(":", 1)
+            value = raw_value.strip()
+            if key == "rotate":
+                fields[key] = value.lower() in {"true", "90"}
+            elif key in {"size", "orig", "offset"}:
+                try:
+                    fields[key] = [int(part.strip()) for part in value.split(",")]
+                except ValueError:
+                    continue
+            continue
+
+        # Page headers have unindented properties; regions are followed by
+        # indented transform properties and are therefore finalized safely.
+        if ":" not in raw_line:
+            finish()
+            current = raw_line.strip()
+    finish()
+    return result
+
+
+def _attachment_path(attachment_name: str, attachment: Mapping) -> str:
+    raw_path = str(
+        attachment.get("path")
+        or attachment.get("name")
+        or attachment_name
+    ).replace("\\", "/")
+    relative = Path(raw_path)
+    if relative.suffix.lower() != ".png":
+        relative = relative.with_suffix(".png")
+    return relative.as_posix()
+
+
+def _iter_attachments(skeleton_json: Mapping):
     skins = skeleton_json.get("skins") or []
     if isinstance(skins, dict):
         skin_records = skins.values()
     else:
         skin_records = skins
-
     for skin in skin_records:
         if not isinstance(skin, dict):
             continue
         attachments = skin.get("attachments")
         if not isinstance(attachments, dict):
-            # Spine 3.7 and earlier JSON may store the slot map directly
-            # under the skin name.
             attachments = {
-                key: value
-                for key, value in skin.items()
-                if key != "name"
+                key: value for key, value in skin.items() if key != "name"
             }
-        for slot in attachments.values():
+        for slot_name, slot in attachments.items():
             if not isinstance(slot, dict):
                 continue
             for attachment_name, attachment in slot.items():
-                if not isinstance(attachment, dict):
-                    continue
-                if attachment.get("type", "region") != "region":
-                    continue
-                width = round(float(attachment.get("width") or 0))
-                height = round(float(attachment.get("height") or 0))
-                if width <= 0 or height <= 0:
-                    continue
-                raw_path = str(
-                    attachment.get("path")
-                    or attachment.get("name")
-                    or attachment_name
-                ).replace("\\", "/")
-                relative = Path(raw_path)
-                if relative.suffix.lower() != ".png":
-                    relative = relative.with_suffix(".png")
-                normalized = relative.as_posix()
-                expected = (width, height)
-                previous = expected_by_path.get(normalized)
-                if previous is not None and previous != expected:
-                    raise ValueError(
-                        "Spine region is used with conflicting attachment sizes: "
-                        f"{normalized} is both {previous} and {expected}"
-                    )
-                expected_by_path[normalized] = expected
+                if isinstance(attachment, dict):
+                    yield str(slot_name), str(attachment_name), attachment
 
-    restored: list[dict] = []
-    for normalized, expected in expected_by_path.items():
+
+def _rebuild_trimmed_region(
+    source: Image.Image,
+    metadata: Mapping,
+) -> Image.Image | None:
+    try:
+        packed_size = tuple(int(value) for value in metadata["size"])
+        original_size = tuple(int(value) for value in metadata["orig"])
+        offset = tuple(int(value) for value in metadata["offset"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if (
+        len(packed_size) != 2
+        or len(original_size) != 2
+        or len(offset) != 2
+        or min(*packed_size, *original_size) <= 0
+    ):
+        return None
+
+    crop = source.convert("RGBA")
+    if crop.size == original_size:
+        return crop
+    if bool(metadata.get("rotate")) and crop.size == tuple(reversed(packed_size)):
+        crop = crop.transpose(Image.Transpose.ROTATE_90)
+    if crop.size != packed_size:
+        return None
+    canvas = Image.new("RGBA", original_size, (0, 0, 0, 0))
+    left = offset[0]
+    top = original_size[1] - offset[1] - crop.height
+    if left < 0 or top < 0 or left + crop.width > canvas.width or top + crop.height > canvas.height:
+        return None
+    canvas.alpha_composite(crop, (left, top))
+    return canvas
+
+
+def restore_attachment_images(
+    skeleton_json: dict,
+    images_root: str | Path,
+    atlas_metadata: Mapping[str, Mapping] | None = None,
+) -> list[dict]:
+    """Restore regions while preserving or diagnosing non-region geometry."""
+    root = Path(images_root)
+    atlas = {
+        Path(str(path).replace("\\", "/")).as_posix(): metadata
+        for path, metadata in (atlas_metadata or {}).items()
+        if isinstance(metadata, Mapping)
+    }
+    diagnostics: list[dict] = []
+
+    for slot_name, attachment_name, attachment in _iter_attachments(skeleton_json):
+        attachment_type = str(attachment.get("type") or "region")
+        normalized = _attachment_path(attachment_name, attachment)
         image_path = root / Path(normalized)
-        if not image_path.is_file():
-            continue
-        with Image.open(image_path) as source:
-            source.load()
-            actual = source.size
-            if actual == expected:
+        base = {
+            "attachment": attachment_name,
+            "slot": slot_name,
+            "path": normalized,
+            "type": attachment_type,
+        }
+
+        if attachment_type == "mesh":
+            if not image_path.is_file():
+                diagnostics.append({
+                    **base,
+                    "status": "needs_manual_calibration",
+                    "reason": "missing_attachment_image",
+                })
                 continue
-            resized = source.convert("RGBA").resize(
-                expected,
-                Image.Resampling.LANCZOS,
-            )
-        resized.save(image_path, format="PNG", optimize=True)
-        restored.append(
-            {
-                "path": normalized,
-                "from": list(actual),
-                "to": list(expected),
-            }
+            missing = [
+                field
+                for field in ("triangles", "uvs", "vertices")
+                if not attachment.get(field)
+            ]
+            if missing:
+                diagnostics.append({
+                    **base,
+                    "status": "needs_manual_calibration",
+                    "reason": f"missing_mesh_geometry:{','.join(missing)}",
+                })
+            else:
+                diagnostics.append({
+                    **base,
+                    "status": "preserved_geometry",
+                    "reason": "mesh_uv_vertices_preserved",
+                })
+            continue
+
+        if attachment_type != "region":
+            diagnostics.append({
+                **base,
+                "status": "needs_manual_calibration",
+                "reason": f"unsupported_attachment_type:{attachment_type}",
+            })
+            continue
+
+        missing = [
+            field
+            for field in ("height", "width")
+            if float(attachment.get(field) or 0) <= 0
+        ]
+        if missing:
+            diagnostics.append({
+                **base,
+                "status": "needs_manual_calibration",
+                "reason": f"missing_region_geometry:{','.join(missing)}",
+            })
+            continue
+        expected = (
+            round(float(attachment["width"])),
+            round(float(attachment["height"])),
         )
-    return restored
+        if not image_path.is_file():
+            diagnostics.append({
+                **base,
+                "status": "needs_manual_calibration",
+                "reason": "missing_attachment_image",
+            })
+            continue
+
+        with Image.open(image_path) as loaded:
+            loaded.load()
+            actual = loaded.size
+            if actual == expected:
+                diagnostics.append({
+                    **base,
+                    "status": "preserved_geometry",
+                    "reason": "region_matches_attachment_geometry",
+                })
+                continue
+            rebuilt = None
+            metadata = atlas.get(normalized)
+            if metadata is not None:
+                rebuilt = _rebuild_trimmed_region(loaded, metadata)
+            metadata_valid = rebuilt is not None
+            if rebuilt is None:
+                rebuilt = loaded.convert("RGBA")
+            restored = rebuilt.resize(expected, Image.Resampling.LANCZOS)
+        restored.save(image_path, format="PNG", optimize=True)
+        diagnostics.append({
+            **base,
+            "status": (
+                "restored" if metadata_valid else "needs_manual_calibration"
+            ),
+            "reason": (
+                "restored_trimmed_region_to_attachment_geometry"
+                if metadata_valid
+                else (
+                    "restored_region_without_atlas_metadata"
+                    if metadata is None
+                    else "restored_region_without_valid_atlas_metadata"
+                )
+            ),
+            "from": list(actual),
+            "to": list(expected),
+        })
+    return diagnostics
+
+
+def restore_region_attachment_images(
+    skeleton_json: dict,
+    images_dir: str | Path,
+) -> list[dict]:
+    """Compatibility wrapper returning the legacy resize-only report."""
+    return [
+        {"path": item["path"], "from": item["from"], "to": item["to"]}
+        for item in restore_attachment_images(skeleton_json, images_dir)
+        if "from" in item and item.get("type") == "region"
+    ]
+
+
+def map_attachment_calibration_to_faces(
+    skeleton_json: Mapping,
+    face_ids: Sequence[str],
+    attachment_diagnostics: Sequence[Mapping],
+) -> list[dict]:
+    """Associate unsafe attachments with animations through slot timelines."""
+    animations = skeleton_json.get("animations") or {}
+    unsafe = [
+        item
+        for item in attachment_diagnostics
+        if item.get("status") == "needs_manual_calibration"
+    ]
+    calibration: list[dict] = []
+    for face_id in face_ids:
+        animation_name = "Idle_01" if face_id == "00" else face_id
+        animation = animations.get(animation_name) or {}
+        slots = animation.get("slots") or {}
+        for item in unsafe:
+            slot_name = str(item.get("slot") or "")
+            slot_timeline = slots.get(slot_name) or {}
+            frames = slot_timeline.get("attachment") or []
+            referenced = {
+                str(frame.get("name"))
+                for frame in frames
+                if isinstance(frame, Mapping) and frame.get("name") is not None
+            }
+            if str(item.get("attachment")) not in referenced:
+                continue
+            calibration.append({
+                "face_id": face_id,
+                "status": "needs_manual_calibration",
+                "attachment": str(item.get("attachment") or ""),
+                "slot": slot_name,
+                "reason": str(item.get("reason") or "attachment_geometry_unsafe"),
+            })
+    return calibration
+
+
+def validate_rendered_face(face: RenderedFace) -> dict:
+    """Return portable geometry evidence for a rendered portrait and head."""
+    base = {
+        "face_id": face.face_id,
+        "attachment": "",
+        "slot": "",
+    }
+    try:
+        portrait = Image.open(face.portrait_path).convert("RGBA")
+        portrait.load()
+        head = Image.open(face.head_path).convert("RGBA")
+        head.load()
+    except (OSError, ValueError) as exc:
+        return {
+            **base,
+            "status": "needs_manual_calibration",
+            "reason": f"unreadable_render:{type(exc).__name__}",
+        }
+
+    portrait_alpha = portrait.getchannel("A")
+    head_alpha = head.getchannel("A")
+    alpha_bounds = portrait_alpha.getbbox()
+    head_bounds = head_alpha.getbbox()
+    visible_pixels = sum(
+        count
+        for alpha, count in enumerate(portrait_alpha.histogram())
+        if alpha > 0
+    )
+    coverage = visible_pixels / max(1, portrait.width * portrait.height)
+    metrics = {
+        "alpha_bounds": list(alpha_bounds) if alpha_bounds else None,
+        "visible_coverage": round(coverage, 6),
+        "head_bounds": list(head_bounds) if head_bounds else None,
+        "portrait_size": [portrait.width, portrait.height],
+        "head_size": [head.width, head.height],
+        "stability": {
+            "portrait_aspect_ratio": round(
+                portrait.width / max(1, portrait.height), 6
+            ),
+            "head_aspect_ratio": round(
+                head.width / max(1, head.height), 6
+            ),
+            "head_to_portrait_width": round(
+                head.width / max(1, portrait.width), 6
+            ),
+        },
+    }
+    if not alpha_bounds or not head_bounds or coverage < 0.01:
+        return {
+            **base,
+            "status": "needs_manual_calibration",
+            "reason": "render_geometry_is_empty_or_too_sparse",
+            **metrics,
+        }
+    return {
+        **base,
+        "status": "validated",
+        "reason": "render_geometry_validated",
+        **metrics,
+    }
 
 
 def _run_spine(
@@ -413,16 +674,20 @@ def _prepare_warmed_project(
     project: Path,
     work: Path,
     face_ids: Sequence[str],
+    atlas_metadata: Mapping[str, Mapping] | None = None,
+    diagnostics: list[dict] | None = None,
 ) -> Path:
-    # v4 restores atlas-unpacked region images both when creating and reusing
-    # the warmed project.  A repeat unpack must never shrink the loose images.
-    # Keep the version in the filename so a malformed warmed project cannot
-    # silently survive the renderer correction.
-    warmed = work / "render-warmup-v4.spine"
-    patched = work / "render-warmup-v4.json"
+    # A repeat unpack overwrites restored loose images even when the warmed
+    # project is reusable, so restoration is required on both branches.
+    warmed = work / f"render-warmup-{_CACHE_VERSION}.spine"
+    patched = work / f"render-warmup-{_CACHE_VERSION}.json"
     if warmed.exists() and patched.exists():
         cached_data = json.loads(patched.read_text(encoding="utf-8"))
-        restore_region_attachment_images(cached_data, work)
+        restored = restore_attachment_images(
+            cached_data, work, atlas_metadata=atlas_metadata
+        )
+        if diagnostics is not None:
+            diagnostics.extend(restored)
         return warmed
     export_dir = work / f"json-export-{len(list(work.glob('json-export-*'))):03d}"
     export_dir.mkdir(parents=True, exist_ok=False)
@@ -451,7 +716,11 @@ def _prepare_warmed_project(
         )
     data = json.loads(exported[0].read_text(encoding="utf-8"))
     data.setdefault("skeleton", {})["images"] = work.as_posix()
-    restore_region_attachment_images(data, work)
+    restored = restore_attachment_images(
+        data, work, atlas_metadata=atlas_metadata
+    )
+    if diagnostics is not None:
+        diagnostics.extend(restored)
     all_numbered = [
         name
         for name in (data.get("animations") or {})
@@ -499,8 +768,10 @@ def _load_cached_report(
     faces = tuple(
         RenderedFace(
             face_id=face_id,
-            portrait_path=cache_dir / "portraits-v4" / f"{face_id}.png",
-            head_path=cache_dir / "heads-v4" / f"{face_id}.png",
+            portrait_path=(
+                cache_dir / f"portraits-{_CACHE_VERSION}" / f"{face_id}.png"
+            ),
+            head_path=cache_dir / f"heads-{_CACHE_VERSION}" / f"{face_id}.png",
         )
         for face_id in face_ids
     )
@@ -516,6 +787,9 @@ def _load_cached_report(
         cache_dir=cache_dir,
         faces=faces,
         cached=True,
+        calibration=tuple(
+            item for item in (data.get("calibration") or []) if isinstance(item, dict)
+        ),
     )
 
 
@@ -580,6 +854,7 @@ def render_face_variations(
             str(atlases[0]),
         ]
     )
+    atlas_metadata = parse_atlas_metadata(atlases[0])
 
     skeleton_copy = work / skeletons[0].name
     shutil.copy2(skeletons[0], skeleton_copy)
@@ -604,16 +879,19 @@ def render_face_variations(
                 skeletons[0].stem,
             ]
         )
+    attachment_diagnostics: list[dict] = []
     project = _prepare_warmed_project(
         execute=execute,
         cli=cli,
         project=project,
         work=work,
         face_ids=selected_ids,
+        atlas_metadata=atlas_metadata,
+        diagnostics=attachment_diagnostics,
     )
 
-    portraits = cache_dir / "portraits-v4"
-    heads = cache_dir / "heads-v4"
+    portraits = cache_dir / f"portraits-{_CACHE_VERSION}"
+    heads = cache_dir / f"heads-{_CACHE_VERSION}"
     settings_dir = work / "settings"
     portraits.mkdir(parents=True, exist_ok=True)
     heads.mkdir(parents=True, exist_ok=True)
@@ -713,6 +991,15 @@ def render_face_variations(
                     progress(face_id, len(completed), total)
             rendered = sorted(completed, key=lambda face: selected_ids.index(face.face_id))
 
+    patched_json = work / f"render-warmup-{_CACHE_VERSION}.json"
+    skeleton_data = json.loads(patched_json.read_text(encoding="utf-8"))
+    calibration = map_attachment_calibration_to_faces(
+        skeleton_data,
+        selected_ids,
+        attachment_diagnostics,
+    )
+    calibration.extend(validate_rendered_face(face) for face in rendered)
+
     (cache_dir / "manifest.json").write_text(
         json.dumps(
             {
@@ -721,6 +1008,7 @@ def render_face_variations(
                 "spine_version": "3.8.75",
                 "render_profile": _RENDER_PROFILE,
                 "head_preview_size": _HEAD_PREVIEW_SIZE,
+                "calibration": calibration,
             },
             ensure_ascii=False,
             indent=2,
@@ -732,4 +1020,5 @@ def render_face_variations(
         cache_dir=cache_dir,
         faces=tuple(rendered),
         cached=False,
+        calibration=tuple(calibration),
     )
