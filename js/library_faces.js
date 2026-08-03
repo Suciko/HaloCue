@@ -201,7 +201,16 @@
 
   FaceWorkspace.prototype.toggleEditor = function (faceId) {
     const card = this.card(faceId), editor = card && card.querySelector('.face-card-editor');
-    if (editor) editor.hidden = !editor.hidden;
+    if (!editor) return;
+    const opening = editor.hidden;
+    editor.hidden = !editor.hidden;
+    if (opening) {
+      const image = card.querySelector('img');
+      if (image) {
+        image.loading = 'eager';
+        if (image.complete && !image.naturalWidth) image.src = image.src;
+      }
+    }
   };
 
   FaceWorkspace.prototype.saveFace = function (faceId, restore) {

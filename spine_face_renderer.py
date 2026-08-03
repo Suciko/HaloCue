@@ -12,6 +12,7 @@ import json
 import re
 import shutil
 import subprocess
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,10 +26,11 @@ from spine_semantic_faces import extract_semantic_face_combinations
 _SOURCE_SUFFIXES = {".skel", ".atlas", ".png"}
 _IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 _FRAME_SUFFIX = re.compile(r"_(\d+)\.png$", re.IGNORECASE)
-_CACHE_VERSION = "v6"
-_RENDER_PROFILE = "shared-expression-focus-v7"
+_CACHE_VERSION = "v7"
+_RENDER_PROFILE = "first-frame-snapshot-v8"
 _HEAD_PREVIEW_SIZE = 768
 _FINAL_RENDER_FRAME = 8
+_EMPTY_TIMELINE = object()
 
 
 def bounded_render_workers(value: int) -> int:
@@ -99,6 +101,61 @@ def extend_face_animation_duration(
             translate.append({"time": duration})
 
 
+def _first_frame_value(value):
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            kept = _first_frame_value(item)
+            if kept is not _EMPTY_TIMELINE:
+                result[key] = kept
+        return result or _EMPTY_TIMELINE
+    if isinstance(value, list):
+        result = []
+        for item in value:
+            if isinstance(item, dict) and float(item.get("time") or 0) > 0:
+                continue
+            kept = _first_frame_value(item)
+            if kept is _EMPTY_TIMELINE:
+                continue
+            if isinstance(kept, dict):
+                kept.pop("time", None)
+                for key in ("curve", "c2", "c3", "c4"):
+                    kept.pop(key, None)
+            result.append(kept)
+        return result or _EMPTY_TIMELINE
+    return value
+
+
+def prepare_first_frame_animations(
+    skeleton_json: dict,
+    face_ids: Sequence[str],
+) -> dict[str, str]:
+    """Replace animations with preload/final aliases frozen at t=0."""
+    animations = skeleton_json.get("animations") or {}
+    frozen: dict[str, dict] = {}
+    aliases: dict[str, str] = {}
+    for face_id in dict.fromkeys(str(item) for item in face_ids):
+        source_name = "Idle_01" if face_id == "00" else face_id
+        source = animations.get(source_name)
+        if not isinstance(source, dict):
+            raise ValueError(f"Spine animation not found for face {face_id}: {source_name}")
+        snapshot = _first_frame_value(source)
+        frozen[face_id] = {} if snapshot is _EMPTY_TIMELINE else snapshot
+        aliases[face_id] = f"zz_aa_face_{face_id}"
+
+    skeleton_json["animations"] = {
+        **{
+            f"aa_warmup_{face_id}": deepcopy(animation)
+            for face_id, animation in frozen.items()
+        },
+        **{
+            aliases[face_id]: deepcopy(animation)
+            for face_id, animation in frozen.items()
+        },
+    }
+    return aliases
+
+
 def bundle_signature(source_dir: str | Path) -> str:
     """Hash every Spine source file without changing or copying the bundle."""
     root = Path(source_dir)
@@ -164,6 +221,25 @@ def select_final_frame(directory: str | Path) -> Path:
     if not candidates:
         raise FileNotFoundError(f"No numbered Spine PNG frames in {directory}")
     return max(candidates, key=lambda item: item[0])[1]
+
+
+def select_snapshot_frame(directory: str | Path, alias: str) -> Path:
+    """Select exactly the zero frame for one temporary snapshot animation."""
+    candidates = sorted(Path(directory).glob(f"*{alias}_0.png"))
+    if not candidates:
+        raise FileNotFoundError(
+            f"No zero frame for snapshot animation {alias} in {directory}"
+        )
+    return candidates[0]
+
+
+def select_export_zero_frame(output: str | Path) -> Path:
+    """Select only the zero frame for a single-animation export target."""
+    output = Path(output)
+    candidate = output.with_name(f"{output.name}_0.png")
+    if not candidate.is_file():
+        raise FileNotFoundError(f"No zero frame for export target {output}")
+    return candidate
 
 
 def is_textured_render(source: str | Path) -> bool:
@@ -323,14 +399,11 @@ def derive_shared_face_crop(
     )
     change_width = right - left
     change_height = bottom - top
-    alpha_bbox = images[0].getchannel("A").point(
-        lambda value: 255 if value >= 8 else 0
-    ).getbbox()
-    visible_width = (alpha_bbox[2] - alpha_bbox[0]) if alpha_bbox else width
+    fallback_side = fallback[2] - fallback[0]
     side = max(
-        change_width * 2.2,
-        change_height * 2.8,
-        visible_width * 0.55,
+        change_width * 1.8,
+        change_height * 1.5,
+        fallback_side * 0.75,
     )
     center_x = (left + right) / 2
     center_y = (top + bottom) / 2 + side * 0.03
@@ -367,9 +440,15 @@ def crop_face_previews(
     ordered = tuple(faces)
     if not ordered:
         return ()
-    box = derive_shared_face_crop([face.portrait_path for face in ordered])
-    for face in ordered:
-        image = Image.open(face.portrait_path).convert("RGBA")
+    images = [Image.open(face.portrait_path).convert("RGBA") for face in ordered]
+    if all(image.size == images[0].size for image in images[1:]):
+        shared_box = derive_shared_face_crop(
+            [face.portrait_path for face in ordered]
+        )
+        boxes = [shared_box] * len(images)
+    else:
+        boxes = [_upper_alpha_crop(image) for image in images]
+    for face, image, box in zip(ordered, images, boxes):
         preview = _crop_with_transparent_padding(image, box).resize(
             (size, size), Image.Resampling.LANCZOS
         )
@@ -638,21 +717,36 @@ def map_attachment_calibration_to_faces(
         for item in attachment_diagnostics
         if item.get("status") == "needs_manual_calibration"
     ]
+    setup_attachments = {
+        str(slot.get("name")): slot.get("attachment")
+        for slot in (skeleton_json.get("slots") or [])
+        if isinstance(slot, Mapping) and slot.get("name") is not None
+    }
     calibration: list[dict] = []
     for face_id in face_ids:
         animation_name = "Idle_01" if face_id == "00" else face_id
-        animation = animations.get(animation_name) or {}
+        snapshot_name = f"zz_aa_face_{face_id}"
+        animation = (
+            animations[snapshot_name]
+            if snapshot_name in animations
+            else animations.get(animation_name) or {}
+        )
         slots = animation.get("slots") or {}
         for item in unsafe:
             slot_name = str(item.get("slot") or "")
             slot_timeline = slots.get(slot_name) or {}
             frames = slot_timeline.get("attachment") or []
-            referenced = {
-                str(frame.get("name"))
-                for frame in frames
-                if isinstance(frame, Mapping) and frame.get("name") is not None
-            }
-            if str(item.get("attachment")) not in referenced:
+            effective_attachment = setup_attachments.get(slot_name)
+            for frame in frames:
+                if not isinstance(frame, Mapping) or "name" not in frame:
+                    continue
+                try:
+                    frame_time = float(frame.get("time") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if frame_time <= 0:
+                    effective_attachment = frame.get("name")
+            if str(item.get("attachment")) != str(effective_attachment):
                 continue
             calibration.append({
                 "face_id": face_id,
@@ -790,8 +884,43 @@ def _export_settings(
         "enlarge": False,
         "fps": 1,
         "lastFrame": False,
-        "rangeStart": _FINAL_RENDER_FRAME,
-        "rangeEnd": _FINAL_RENDER_FRAME,
+        "rangeStart": 0,
+        "rangeEnd": 0,
+        "pad": True,
+        "msaa": 4,
+        "compression": compression,
+        "open": False,
+    }
+
+
+def _bulk_export_settings(
+    *,
+    project: Path,
+    output: Path,
+    compression: int,
+) -> dict:
+    return {
+        "class": "com.esotericsoftware.spine.editor.export.ExportSettings$ExportPng",
+        "name": "PNG",
+        "project": project.as_posix(),
+        "output": output.as_posix(),
+        "exportType": "animation",
+        "skeletonType": "current",
+        "animationType": "all",
+        "animation": "",
+        "skinType": "current",
+        "skinNone": False,
+        "maxBounds": True,
+        "renderImages": True,
+        "renderBones": False,
+        "renderOthers": False,
+        "linearFiltering": True,
+        "scale": 100,
+        "fitWidth": 0,
+        "fitHeight": 0,
+        "enlarge": False,
+        "fps": 1,
+        "lastFrame": True,
         "pad": True,
         "msaa": 4,
         "compression": compression,
@@ -828,13 +957,23 @@ def _prepare_warmed_project(
     warmed = work / f"render-warmup-{_CACHE_VERSION}.spine"
     patched = work / f"render-warmup-{_CACHE_VERSION}.json"
     if warmed.exists() and patched.exists():
-        cached_data = json.loads(patched.read_text(encoding="utf-8"))
-        restored = restore_attachment_images(
-            cached_data, work, atlas_metadata=atlas_metadata
+        try:
+            cached_data = json.loads(patched.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            cached_data = {}
+        animations = cached_data.get("animations") or {}
+        aliases_ready = all(
+            f"aa_warmup_{face_id}" in animations
+            and f"zz_aa_face_{face_id}" in animations
+            for face_id in dict.fromkeys(str(item) for item in face_ids)
         )
-        if diagnostics is not None:
-            diagnostics.extend(restored)
-        return warmed
+        if aliases_ready:
+            restored = restore_attachment_images(
+                cached_data, work, atlas_metadata=atlas_metadata
+            )
+            if diagnostics is not None:
+                diagnostics.extend(restored)
+            return warmed
     export_dir = work / f"json-export-{len(list(work.glob('json-export-*'))):03d}"
     export_dir.mkdir(parents=True, exist_ok=False)
     settings = work / "json-export-settings.json"
@@ -867,31 +1006,37 @@ def _prepare_warmed_project(
     )
     if diagnostics is not None:
         diagnostics.extend(restored)
-    all_numbered = [
-        name
-        for name in (data.get("animations") or {})
-        if re.fullmatch(r"\d{2}", name)
-    ]
-    extend_face_animation_duration(
-        data, all_numbered, duration=_FINAL_RENDER_FRAME
-    )
-    patched.write_text(
+    prepare_first_frame_animations(data, face_ids)
+    pending_patched = patched.with_suffix(".pending.json")
+    pending_warmed = warmed.with_suffix(".pending.spine")
+    pending_patched.write_text(
         json.dumps(data, ensure_ascii=False, separators=(",", ":")),
         encoding="utf-8",
     )
-    execute(
-        [
-            str(cli),
-            "--update",
-            "3.8.75",
-            "--input",
-            str(patched),
-            "--output",
-            str(warmed),
-            "--import",
-            project.stem,
-        ]
-    )
+    pending_warmed.unlink(missing_ok=True)
+    try:
+        execute(
+            [
+                str(cli),
+                "--update",
+                "3.8.75",
+                "--input",
+                str(pending_patched),
+                "--output",
+                str(pending_warmed),
+                "--import",
+                project.stem,
+            ]
+        )
+    except Exception:
+        pending_patched.unlink(missing_ok=True)
+        pending_warmed.unlink(missing_ok=True)
+        raise
+    if not pending_warmed.is_file():
+        pending_patched.unlink(missing_ok=True)
+        raise RuntimeError("Spine import did not create the warmed project")
+    pending_warmed.replace(warmed)
+    pending_patched.replace(patched)
     return warmed
 
 
@@ -1053,6 +1198,72 @@ def render_face_variations(
     portraits.mkdir(parents=True, exist_ok=True)
     heads.mkdir(parents=True, exist_ok=True)
     settings_dir.mkdir(parents=True, exist_ok=True)
+    aliases = {face_id: f"zz_aa_face_{face_id}" for face_id in selected_ids}
+
+    def render_bulk() -> list[RenderedFace] | None:
+        for attempt, compression in enumerate((9, 1), start=1):
+            raw_dir = work / "raw" / "bulk" / f"attempt-{attempt}"
+            raw_dir.mkdir(parents=True, exist_ok=True)
+            for stale_frame in raw_dir.rglob("*.png"):
+                stale_frame.unlink()
+            output = raw_dir / "face"
+            settings = settings_dir / f"bulk-attempt-{attempt}.json"
+            settings.write_text(
+                json.dumps(
+                    _bulk_export_settings(
+                        project=project,
+                        output=output,
+                        compression=compression,
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            try:
+                execute(
+                    [
+                        str(cli),
+                        "--update",
+                        "3.8.75",
+                        "--input",
+                        str(project),
+                        "--output",
+                        str(output),
+                        "--export",
+                        str(settings),
+                    ]
+                )
+            except RuntimeError:
+                # Spine may time out after completing its PNG writes. Validate
+                # the exact zero-frame set before deciding the attempt failed.
+                pass
+
+            accepted: list[tuple[str, Path]] = []
+            try:
+                for face_id in selected_ids:
+                    frame = select_snapshot_frame(output, aliases[face_id])
+                    if not is_textured_render(frame):
+                        raise ValueError(f"Untextured snapshot frame: {frame}")
+                    accepted.append((face_id, frame))
+            except (FileNotFoundError, ValueError):
+                continue
+
+            rendered = []
+            for face_id, frame in accepted:
+                portrait = portraits / f"{face_id}.png"
+                head = heads / f"{face_id}.png"
+                shutil.copy2(frame, portrait)
+                rendered.append(
+                    RenderedFace(
+                        face_id=face_id,
+                        portrait_path=portrait,
+                        head_path=head,
+                    )
+                )
+            return rendered
+        return None
+
     def render_one(face_id: str) -> RenderedFace:
         portrait = portraits / f"{face_id}.png"
         head = heads / f"{face_id}.png"
@@ -1060,12 +1271,14 @@ def render_face_variations(
             return RenderedFace(
                 face_id=face_id, portrait_path=portrait, head_path=head
             )
-        animation = "Idle_01" if face_id == "00" else face_id
+        animation = aliases[face_id]
         accepted: Path | None = None
         last_error: Exception | None = None
         for attempt, compression in enumerate((9, 1), start=1):
             raw_dir = work / "raw" / face_id / f"attempt-{attempt}"
             raw_dir.mkdir(parents=True, exist_ok=True)
+            for stale_frame in raw_dir.rglob("*.png"):
+                stale_frame.unlink()
             output = raw_dir / "face"
             settings = settings_dir / f"{face_id}-attempt-{attempt}.json"
             settings.write_text(
@@ -1095,15 +1308,14 @@ def render_face_variations(
                         str(settings),
                     ]
                 )
-                final_frame = select_final_frame(raw_dir)
+                final_frame = select_export_zero_frame(output)
             except (RuntimeError, FileNotFoundError) as exc:
                 last_error = exc
-                # Spine 3.8 occasionally finishes writing the complete PNG
-                # sequence but leaves its command-line process alive.  A
-                # timeout is still required, yet a valid final frame should
-                # be retained instead of paying for another full export.
+                # Spine 3.8 occasionally writes the requested zero frame but
+                # leaves its command-line process alive. Keep that exact frame
+                # instead of paying for another full export.
                 try:
-                    final_frame = select_final_frame(raw_dir)
+                    final_frame = select_export_zero_frame(output)
                 except FileNotFoundError:
                     continue
                 if is_textured_render(final_frame):
@@ -1127,7 +1339,15 @@ def render_face_variations(
     total = len(selected_ids)
     retried_faces: tuple[str, ...] = ()
     fallback_workers: int | None = None
-    if workers == 1:
+    bulk_rendered = render_bulk()
+    if bulk_rendered is not None:
+        rendered = bulk_rendered
+        actual_workers = 1
+        if progress:
+            for index, face_id in enumerate(selected_ids, start=1):
+                progress(face_id, index, total)
+    elif workers == 1:
+        actual_workers = 1
         rendered = []
         for index, face_id in enumerate(selected_ids):
             if progress:
@@ -1136,6 +1356,7 @@ def render_face_variations(
             if progress:
                 progress(face_id, index + 1, total)
     else:
+        actual_workers = workers
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
                 pool.submit(render_one, face_id): face_id
@@ -1185,7 +1406,7 @@ def render_face_variations(
                 "render_profile": _RENDER_PROFILE,
                 "head_preview_size": _HEAD_PREVIEW_SIZE,
                 "calibration": calibration,
-                "actual_workers": workers,
+                "actual_workers": actual_workers,
                 "retried_faces": list(retried_faces),
                 "fallback_workers": fallback_workers,
             },
@@ -1200,7 +1421,7 @@ def render_face_variations(
         faces=tuple(rendered),
         cached=False,
         calibration=tuple(calibration),
-        actual_workers=workers,
+        actual_workers=actual_workers,
         retried_faces=retried_faces,
         fallback_workers=fallback_workers,
     )

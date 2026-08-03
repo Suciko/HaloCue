@@ -485,6 +485,34 @@ vm.runInNewContext(source,{window,document,Promise,Error,console,encodeURICompon
     assert json.loads(output) == {"usage_hint_cn": "new usage"}
 
 
+def test_face_workspace_edit_eagerly_retries_an_unloaded_preview():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+let sourceAssignments=0,currentSource='/api/assets/faces/preview?face_id=40';
+const image={loading:'lazy',complete:true,naturalWidth:0,get src(){return currentSource},set src(value){currentSource=value;sourceAssignments+=1}};
+const editor={hidden:true};
+const card={querySelector(selector){if(selector==='.face-card-editor')return editor;if(selector==='img')return image;return null}};
+const root={classList:{contains:()=>true}};
+const document={activeElement:null,getElementById:()=>null,createElement:()=>({}),addEventListener(){}};
+const window={StoryUI:{},Api:{}};
+vm.runInNewContext(source,{window,document,Promise,Error,console,setTimeout,clearTimeout});
+const workspace=new window.StoryUI.FaceWorkspace(root);workspace.card=()=>card;
+workspace.toggleEditor('40');
+console.log(JSON.stringify({hidden:editor.hidden,loading:image.loading,sourceAssignments,src:image.src}));
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library_faces.js")],
+        text=True,
+        encoding="utf-8",
+    )
+    assert json.loads(output) == {
+        "hidden": False,
+        "loading": "eager",
+        "sourceAssignments": 1,
+        "src": "/api/assets/faces/preview?face_id=40",
+    }
+
+
 def test_face_workspace_queued_restore_clears_manual_fields_saved_ahead_of_it():
     script = r'''
 const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8'),pending=[],requests=[];

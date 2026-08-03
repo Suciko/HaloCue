@@ -29,7 +29,7 @@ def test_render_worker_count_is_capped_at_four():
     assert spine_face_renderer.bounded_render_workers(12) == 4
 
 
-def test_png_export_settings_render_only_the_warmed_final_frame(tmp_path):
+def test_png_export_settings_render_first_frame_only(tmp_path):
     settings = spine_face_renderer._export_settings(
         project=tmp_path / "project.spine",
         output=tmp_path / "face",
@@ -38,9 +38,59 @@ def test_png_export_settings_render_only_the_warmed_final_frame(tmp_path):
     )
 
     assert settings["fps"] == 1
-    assert settings["rangeStart"] == 8
-    assert settings["rangeEnd"] == 8
+    assert settings["rangeStart"] == 0
+    assert settings["rangeEnd"] == 0
     assert settings["lastFrame"] is False
+
+
+def test_first_frame_snapshot_animations_preload_without_later_timeline_frames():
+    skeleton = {
+        "animations": {
+            "Idle_01": {
+                "slots": {
+                    "glow": {
+                        "color": [
+                            {"color": "ffffff00", "curve": 0.42, "c3": 0.58},
+                            {"time": 2, "color": "ffffffff"},
+                        ]
+                    }
+                }
+            },
+            "02": {
+                "slots": {
+                    "Eyes": {
+                        "attachment": [
+                            {"name": "first"},
+                            {"time": 1, "name": "later"},
+                        ]
+                    }
+                }
+            },
+            "unused": {"slots": {"Eyes": {"attachment": [{"name": "unused"}]}}},
+        }
+    }
+
+    aliases = spine_face_renderer.prepare_first_frame_animations(
+        skeleton, ["00", "02"]
+    )
+
+    assert aliases == {"00": "zz_aa_face_00", "02": "zz_aa_face_02"}
+    assert list(skeleton["animations"]) == [
+        "aa_warmup_00",
+        "aa_warmup_02",
+        "zz_aa_face_00",
+        "zz_aa_face_02",
+    ]
+    assert skeleton["animations"]["zz_aa_face_00"] == {
+        "slots": {"glow": {"color": [{"color": "ffffff00"}]}}
+    }
+    assert skeleton["animations"]["zz_aa_face_02"] == {
+        "slots": {"Eyes": {"attachment": [{"name": "first"}]}}
+    }
+    assert (
+        skeleton["animations"]["aa_warmup_02"]
+        == skeleton["animations"]["zz_aa_face_02"]
+    )
 
 
 def test_discover_renderable_faces_keeps_every_numbered_expression_including_99():
@@ -216,6 +266,28 @@ def test_shared_face_crop_focuses_aligned_expression_differences(tmp_path):
         assert box[1] <= y < box[3]
 
 
+def test_shared_face_crop_does_not_shrink_the_face_to_fit_the_full_body(tmp_path):
+    paths = []
+    expression_marks = ((148, 112), (252, 118), (200, 248))
+    for index, mark in enumerate(expression_marks):
+        path = tmp_path / f"wide-body-{index}.png"
+        image = Image.new("RGBA", (400, 700), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        draw.ellipse((110, 30, 290, 270), fill=(230, 210, 200, 255))
+        draw.rectangle((20, 250, 380, 690), fill=(70, 100, 160, 255))
+        x, y = mark
+        draw.ellipse((x - 7, y - 5, x + 7, y + 5), fill=(210, 35, 70, 255))
+        image.save(path)
+        paths.append(path)
+
+    box = derive_shared_face_crop(paths)
+
+    assert box[2] - box[0] <= 320
+    for x, y in expression_marks:
+        assert box[0] <= x < box[2]
+        assert box[1] <= y < box[3]
+
+
 def test_shared_face_crop_falls_back_for_identical_or_mismatched_portraits(tmp_path):
     identical = [
         _aligned_portrait(tmp_path / "same-a.png"),
@@ -246,6 +318,34 @@ def test_face_preview_batch_uses_one_shared_crop_for_every_expression(tmp_path):
     heads = [Image.open(face.head_path).convert("RGBA") for face in result]
     assert all(head.size == (256, 256) for head in heads)
     assert all(head.getbbox() == heads[0].getbbox() for head in heads)
+
+
+def test_face_preview_batch_keeps_mismatched_canvas_origins_visible(tmp_path):
+    portraits = []
+    for face_id, size, head_box in (
+        ("a", (240, 400), (40, 20, 180, 170)),
+        ("b", (400, 520), (220, 50, 370, 220)),
+    ):
+        portrait = tmp_path / f"{face_id}-portrait.png"
+        image = Image.new("RGBA", size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        draw.ellipse(head_box, fill=(230, 210, 200, 255))
+        draw.rectangle(
+            (head_box[0] - 15, head_box[3] - 10, head_box[2] + 15, size[1] - 5),
+            fill=(70, 100, 160, 255),
+        )
+        image.save(portrait)
+        portraits.append(spine_face_renderer.RenderedFace(
+            face_id,
+            portrait,
+            tmp_path / f"{face_id}-head.png",
+        ))
+
+    crop_face_previews(portraits, size=256)
+
+    heads = [Image.open(face.head_path).convert("RGBA") for face in portraits]
+    assert all(head.getbbox() is not None for head in heads)
+    assert all(head.getchannel("A").getbbox()[2] > 128 for head in heads)
 
 
 def test_unpacked_region_images_are_restored_to_skeleton_attachment_size(tmp_path):
@@ -628,6 +728,62 @@ def test_attachment_calibration_maps_37_through_40_like_other_animations():
     assert len({item["reason"] for item in calibration}) == 1
 
 
+def test_attachment_calibration_maps_first_frame_snapshot_aliases():
+    skeleton = {
+        "animations": {
+            "01": {
+                "slots": {
+                    "Eyes": {"attachment": [{"name": "unsafe-eyes"}]}
+                }
+            }
+        }
+    }
+    spine_face_renderer.prepare_first_frame_animations(skeleton, ["01"])
+
+    calibration = spine_face_renderer.map_attachment_calibration_to_faces(
+        skeleton,
+        ["01"],
+        [{
+            "attachment": "unsafe-eyes",
+            "slot": "Eyes",
+            "status": "needs_manual_calibration",
+            "reason": "missing_region_geometry:height",
+        }],
+    )
+
+    assert calibration == [{
+        "face_id": "01",
+        "status": "needs_manual_calibration",
+        "attachment": "unsafe-eyes",
+        "slot": "Eyes",
+        "reason": "missing_region_geometry:height",
+    }]
+
+
+def test_attachment_calibration_inherits_setup_pose_and_honors_null_override():
+    diagnostics = [{
+        "attachment": "unsafe-eyes",
+        "slot": "Eyes",
+        "status": "needs_manual_calibration",
+        "reason": "missing_region_geometry:height",
+    }]
+    skeleton = {
+        "slots": [{"name": "Eyes", "attachment": "unsafe-eyes"}],
+        "animations": {"01": {}, "02": {
+            "slots": {"Eyes": {"attachment": [{"name": None}]}}
+        }},
+    }
+    spine_face_renderer.prepare_first_frame_animations(skeleton, ["01", "02"])
+
+    calibration = spine_face_renderer.map_attachment_calibration_to_faces(
+        skeleton,
+        ["01", "02"],
+        diagnostics,
+    )
+
+    assert [item["face_id"] for item in calibration] == ["01"]
+
+
 def test_render_validation_and_report_calibration_are_backward_compatible(tmp_path):
     portrait = tmp_path / "portrait.png"
     head = tmp_path / "head.png"
@@ -662,14 +818,19 @@ def test_render_validation_and_report_calibration_are_backward_compatible(tmp_pa
 
 
 def test_cached_warmed_project_restores_images_overwritten_by_repeat_unpack(tmp_path):
-    warmed = tmp_path / "render-warmup-v6.spine"
-    patched = tmp_path / "render-warmup-v6.json"
+    cache_version = spine_face_renderer._CACHE_VERSION
+    warmed = tmp_path / f"render-warmup-{cache_version}.spine"
+    patched = tmp_path / f"render-warmup-{cache_version}.json"
     image = tmp_path / "eyes.png"
     warmed.write_bytes(b"project")
     Image.new("RGBA", (65, 32), "red").save(image)
     patched.write_text(
         json.dumps(
             {
+                "animations": {
+                    "aa_warmup_01": {},
+                    "zz_aa_face_01": {},
+                },
                 "skins": [{
                     "name": "default",
                     "attachments": {
@@ -700,6 +861,254 @@ def test_cached_warmed_project_restores_images_overwritten_by_repeat_unpack(tmp_
 
     assert result == warmed
     assert Image.open(image).size == (100, 50)
+
+
+def test_cached_warmed_project_rebuilds_when_requested_face_alias_is_missing(tmp_path):
+    cache_version = spine_face_renderer._CACHE_VERSION
+    warmed = tmp_path / f"render-warmup-{cache_version}.spine"
+    patched = tmp_path / f"render-warmup-{cache_version}.json"
+    warmed.write_bytes(b"old-project")
+    patched.write_text(
+        json.dumps({
+            "skeleton": {},
+            "animations": {
+                "aa_warmup_01": {},
+                "zz_aa_face_01": {},
+            },
+        }),
+        encoding="utf-8",
+    )
+    commands = []
+
+    def runner(command):
+        commands.append(command)
+        if "--export" in command:
+            output = Path(command[command.index("--output") + 1])
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "actor.json").write_text(
+                json.dumps({
+                    "skeleton": {},
+                    "animations": {"01": {}, "02": {}},
+                }),
+                encoding="utf-8",
+            )
+        elif "--import" in command:
+            Path(command[command.index("--output") + 1]).write_bytes(b"new-project")
+        return "Complete."
+
+    result = _prepare_warmed_project(
+        execute=runner,
+        cli=tmp_path / "Spine.com",
+        project=tmp_path / "source.spine",
+        work=tmp_path,
+        face_ids=["01", "02"],
+    )
+
+    rebuilt = json.loads(patched.read_text(encoding="utf-8"))
+    assert result == warmed
+    assert warmed.read_bytes() == b"new-project"
+    assert set(rebuilt["animations"]) == {
+        "aa_warmup_01",
+        "aa_warmup_02",
+        "zz_aa_face_01",
+        "zz_aa_face_02",
+    }
+    assert len(commands) == 2
+
+
+def test_failed_warmed_project_rebuild_does_not_poison_the_old_cache(tmp_path):
+    cache_version = spine_face_renderer._CACHE_VERSION
+    warmed = tmp_path / f"render-warmup-{cache_version}.spine"
+    patched = tmp_path / f"render-warmup-{cache_version}.json"
+    warmed.write_bytes(b"old-project")
+    old_data = {
+        "skeleton": {},
+        "animations": {
+            "aa_warmup_01": {},
+            "zz_aa_face_01": {},
+        },
+    }
+    patched.write_text(json.dumps(old_data), encoding="utf-8")
+    export_calls = 0
+
+    def failing_runner(command):
+        nonlocal export_calls
+        if "--export" in command:
+            export_calls += 1
+            output = Path(command[command.index("--output") + 1])
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "actor.json").write_text(
+                json.dumps({
+                    "skeleton": {},
+                    "animations": {"01": {}, "02": {}},
+                }),
+                encoding="utf-8",
+            )
+        elif "--import" in command:
+            raise RuntimeError("import failed")
+        return "Complete."
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="import failed"):
+            _prepare_warmed_project(
+                execute=failing_runner,
+                cli=tmp_path / "Spine.com",
+                project=tmp_path / "source.spine",
+                work=tmp_path,
+                face_ids=["01", "02"],
+            )
+
+    assert export_calls == 2
+    assert warmed.read_bytes() == b"old-project"
+    assert json.loads(patched.read_text(encoding="utf-8")) == old_data
+
+
+def test_renderer_discards_stale_frames_before_export(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "actor.skel").write_bytes(b"fake skeleton")
+    (source / "actor.atlas").write_text("actor.png\n", encoding="utf-8")
+    Image.new("RGBA", (32, 32), (200, 40, 80, 255)).save(source / "actor.png")
+
+    cache_root = tmp_path / "cache"
+    raw_dir = (
+        cache_root
+        / bundle_signature(source)
+        / "work"
+        / "raw"
+        / "00"
+        / "attempt-1"
+    )
+    raw_dir.mkdir(parents=True)
+    stale = raw_dir / "face_99.png"
+    Image.new("RGBA", (300, 600), (20, 180, 40, 255)).save(stale)
+
+    def runner(command):
+        if "--unpack" in command:
+            output = Path(command[command.index("--output") + 1])
+            output.mkdir(parents=True, exist_ok=True)
+            Image.new("RGBA", (16, 16), (200, 40, 80, 255)).save(output / "base.png")
+        elif "--import" in command:
+            Path(command[command.index("--output") + 1]).write_bytes(b"project")
+        elif "--export" in command:
+            settings = json.loads(
+                Path(command[command.index("--export") + 1]).read_text(encoding="utf-8")
+            )
+            if settings["class"].endswith("$ExportJson"):
+                output = Path(command[command.index("--output") + 1])
+                output.mkdir(parents=True, exist_ok=True)
+                (output / "actor.json").write_text(
+                    json.dumps({
+                        "skeleton": {},
+                        "bones": [{"name": "root"}],
+                        "animations": {"Idle_01": {}},
+                    }),
+                    encoding="utf-8",
+                )
+            else:
+                output = Path(settings["output"])
+                if settings["animationType"] != "all":
+                    first = Image.new("RGBA", (300, 600), (0, 0, 0, 0))
+                    draw = ImageDraw.Draw(first)
+                    draw.ellipse((75, 30, 225, 210), fill=(220, 60, 100, 255))
+                    draw.rectangle((50, 190, 250, 580), fill=(40, 80, 160, 255))
+                    first.save(output.with_name(output.name + "_0.png"))
+                    later = Image.new("RGBA", (300, 600), (0, 0, 0, 0))
+                    draw = ImageDraw.Draw(later)
+                    draw.ellipse((75, 30, 225, 210), fill=(20, 180, 40, 255))
+                    draw.rectangle((50, 190, 250, 580), fill=(40, 80, 160, 255))
+                    later.save(output.with_name(output.name + "_8.png"))
+        return "Complete."
+
+    report = render_face_variations(
+        source,
+        spine_cli=tmp_path / "Spine.com",
+        cache_root=cache_root,
+        face_ids=["00"],
+        runner=runner,
+        workers=1,
+    )
+
+    portrait = Image.open(report.faces[0].portrait_path).convert("RGBA")
+    assert portrait.getpixel((150, 100))[:3] == (220, 60, 100)
+    assert not stale.exists()
+
+
+def test_renderer_bulk_exports_and_selects_only_snapshot_zero_frames(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "actor.skel").write_bytes(b"fake skeleton")
+    (source / "actor.atlas").write_text("actor.png\n", encoding="utf-8")
+    Image.new("RGBA", (32, 32), (200, 40, 80, 255)).save(source / "actor.png")
+    png_settings = []
+
+    def rendered(color):
+        image = Image.new("RGBA", (300, 600), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        draw.ellipse((75, 30, 225, 210), fill=color)
+        draw.rectangle((50, 190, 250, 580), fill=(40, 80, 160, 255))
+        return image
+
+    def runner(command):
+        if "--unpack" in command:
+            output = Path(command[command.index("--output") + 1])
+            output.mkdir(parents=True, exist_ok=True)
+            Image.new("RGBA", (16, 16), (200, 40, 80, 255)).save(output / "base.png")
+        elif "--import" in command:
+            Path(command[command.index("--output") + 1]).write_bytes(b"project")
+        elif "--export" in command:
+            settings = json.loads(
+                Path(command[command.index("--export") + 1]).read_text(encoding="utf-8")
+            )
+            if settings["class"].endswith("$ExportJson"):
+                output = Path(command[command.index("--output") + 1])
+                output.mkdir(parents=True, exist_ok=True)
+                (output / "actor.json").write_text(
+                    json.dumps({
+                        "skeleton": {},
+                        "bones": [{"name": "root"}],
+                        "animations": {"Idle_01": {}, "01": {}},
+                    }),
+                    encoding="utf-8",
+                )
+            else:
+                png_settings.append(settings)
+                output = Path(settings["output"])
+                if settings["animationType"] == "all":
+                    output.mkdir(parents=True, exist_ok=True)
+                    stem = Path(settings["project"]).stem
+                    for face_id in ("00", "01"):
+                        rendered((220, 60, 100, 255)).save(
+                            output / f"{stem}-zz_aa_face_{face_id}_0.png"
+                        )
+                        rendered((20, 180, 40, 255)).save(
+                            output / f"{stem}-zz_aa_face_{face_id}_1.png"
+                        )
+                else:
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    rendered((220, 60, 100, 255)).save(
+                        output.with_name(output.name + "_0.png")
+                    )
+        return "Complete."
+
+    report = render_face_variations(
+        source,
+        spine_cli=tmp_path / "Spine.com",
+        cache_root=tmp_path / "cache",
+        face_ids=["00", "01"],
+        runner=runner,
+        workers=4,
+    )
+
+    assert len(png_settings) == 1
+    assert png_settings[0]["animationType"] == "all"
+    assert report.actual_workers == 1
+    assert [face.face_id for face in report.faces] == ["00", "01"]
+    assert all(
+        Image.open(face.portrait_path).convert("RGBA").getpixel((150, 100))[:3]
+        == (220, 60, 100)
+        for face in report.faces
+    )
 
 
 def test_renderer_uses_content_cache_and_never_changes_source_bundle(tmp_path):
@@ -750,7 +1159,7 @@ def test_renderer_uses_content_cache_and_never_changes_source_bundle(tmp_path):
                 draw = ImageDraw.Draw(image)
                 draw.ellipse((75, 30, 225, 210), fill=(220, 60, 100, 255))
                 draw.rectangle((50, 190, 250, 580), fill=(40, 80, 160, 255))
-                image.save(output.with_name(output.name + "_8.png"))
+                image.save(output.with_name(output.name + "_0.png"))
         return "Complete."
 
     first = render_face_variations(
@@ -838,7 +1247,7 @@ def test_parallel_render_retries_only_failed_faces_and_preserves_evidence(tmp_pa
             else:
                 animation = settings["animation"]
                 export_attempts[animation] = export_attempts.get(animation, 0) + 1
-                if animation == "01" and export_attempts[animation] <= 2:
+                if animation == "zz_aa_face_01" and export_attempts[animation] <= 2:
                     raise RuntimeError("Spine resource exhausted")
                 output = Path(settings["output"])
                 output.parent.mkdir(parents=True, exist_ok=True)
@@ -846,7 +1255,7 @@ def test_parallel_render_retries_only_failed_faces_and_preserves_evidence(tmp_pa
                 draw = ImageDraw.Draw(image)
                 draw.ellipse((75, 30, 225, 210), fill=(220, 60, 100, 255))
                 draw.rectangle((50, 190, 250, 580), fill=(40, 80, 160, 255))
-                image.save(output.with_name(output.name + "_8.png"))
+                image.save(output.with_name(output.name + "_0.png"))
         return "Complete."
 
     first = render_face_variations(
@@ -868,7 +1277,7 @@ def test_parallel_render_retries_only_failed_faces_and_preserves_evidence(tmp_pa
     assert first.actual_workers == 4
     assert first.retried_faces == ("01",)
     assert first.fallback_workers == 1
-    assert export_attempts["01"] == 3
+    assert export_attempts["zz_aa_face_01"] == 3
     assert second.cached is True
     assert second.actual_workers == 4
     assert second.retried_faces == ("01",)
