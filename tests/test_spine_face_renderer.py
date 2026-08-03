@@ -21,6 +21,20 @@ from spine_face_renderer import (
 )
 
 
+def test_png_export_settings_render_only_the_warmed_final_frame(tmp_path):
+    settings = spine_face_renderer._export_settings(
+        project=tmp_path / "project.spine",
+        output=tmp_path / "face",
+        animation="11",
+        compression=9,
+    )
+
+    assert settings["fps"] == 1
+    assert settings["rangeStart"] == 8
+    assert settings["rangeEnd"] == 8
+    assert settings["lastFrame"] is False
+
+
 def test_discover_renderable_faces_keeps_every_numbered_expression_including_99():
     combinations = {
         "00": {"special": False},

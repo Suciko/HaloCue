@@ -605,7 +605,7 @@ def run_face_job(payload: dict):
             provider=provider,
             force_vision=bool(payload.get("force_vision")),
             progress=_face_progress,
-            workers=1,
+            workers=2,
         )
         if provider_issue:
             result["provider_issue"] = provider_issue

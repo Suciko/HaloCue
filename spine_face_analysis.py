@@ -123,7 +123,7 @@ def analyze_character_faces(
     provider=None,
     force_vision: bool = False,
     progress: ProgressCallback | None = None,
-    workers: int = 1,
+    workers: int = 2,
 ) -> dict:
     """Render all real numbered faces and optionally add visual semantic labels."""
     source = Path(source_dir).resolve()

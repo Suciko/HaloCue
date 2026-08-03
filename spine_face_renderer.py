@@ -26,6 +26,7 @@ _SOURCE_SUFFIXES = {".skel", ".atlas", ".png"}
 _FRAME_SUFFIX = re.compile(r"_(\d+)\.png$", re.IGNORECASE)
 _RENDER_PROFILE = "restore-region-attachment-size-v4"
 _HEAD_PREVIEW_SIZE = 768
+_FINAL_RENDER_FRAME = 8
 
 
 @dataclass(frozen=True)
@@ -381,9 +382,9 @@ def _export_settings(
         "fitHeight": 0,
         "enlarge": False,
         "fps": 1,
-        "lastFrame": True,
-        "rangeStart": -1,
-        "rangeEnd": -1,
+        "lastFrame": False,
+        "rangeStart": _FINAL_RENDER_FRAME,
+        "rangeEnd": _FINAL_RENDER_FRAME,
         "pad": True,
         "msaa": 4,
         "compression": compression,
@@ -456,7 +457,9 @@ def _prepare_warmed_project(
         for name in (data.get("animations") or {})
         if re.fullmatch(r"\d{2}", name)
     ]
-    extend_face_animation_duration(data, all_numbered, duration=8)
+    extend_face_animation_duration(
+        data, all_numbered, duration=_FINAL_RENDER_FRAME
+    )
     patched.write_text(
         json.dumps(data, ensure_ascii=False, separators=(",", ":")),
         encoding="utf-8",
@@ -625,7 +628,7 @@ def render_face_variations(
         animation = "Idle_01" if face_id == "00" else face_id
         accepted: Path | None = None
         last_error: Exception | None = None
-        for attempt, compression in enumerate((1, 9), start=1):
+        for attempt, compression in enumerate((9, 1), start=1):
             raw_dir = work / "raw" / face_id / f"attempt-{attempt}"
             raw_dir.mkdir(parents=True, exist_ok=True)
             output = raw_dir / "face"

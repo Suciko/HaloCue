@@ -134,6 +134,33 @@ def test_analysis_maps_per_face_render_progress_to_job_updates(tmp_path, monkeyp
     ]
 
 
+def test_analysis_uses_two_render_workers_by_default(tmp_path, monkeypatch):
+    report = _report(tmp_path)
+    observed = {}
+
+    def render(*args, **kwargs):
+        observed["workers"] = kwargs["workers"]
+        return report
+
+    monkeypatch.setattr(spine_face_analysis, "render_face_variations", render)
+    source = tmp_path / "spine"
+    source.mkdir()
+    con = assetdb.connect(tmp_path / "assets.db")
+
+    spine_face_analysis.analyze_character_faces(
+        con,
+        source_dir=source,
+        ident="custom-1",
+        spine_signature="skel-signature",
+        outfit_key="date",
+        spine_cli=tmp_path / "Spine.com",
+        cache_root=tmp_path / "cache",
+        provider=None,
+    )
+
+    assert observed["workers"] == 2
+
+
 def test_analysis_returns_condensed_semantics_for_web_review(tmp_path, monkeypatch):
     report = _report(tmp_path)
     monkeypatch.setattr(
