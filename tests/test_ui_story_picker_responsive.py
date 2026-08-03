@@ -132,3 +132,19 @@ def test_device_upload_opens_story_through_the_real_browser(browser, app_url):
     finally:
         page.close()
     assert errors == []
+
+
+@pytest.mark.parametrize("width", [1200, 390])
+def test_settings_locks_root_scrollbar_but_keeps_drawer_scroll(browser, app_url, width):
+    page = browser.new_page(viewport={"width": width, "height": 900})
+    try:
+        page.goto(app_url, wait_until="domcontentloaded")
+        page.locator('[data-action="open-settings"]').click()
+        page.locator("#settingsDrawer.open").wait_for()
+        page.wait_for_timeout(100)
+        assert page.locator("#settingsDrawer").evaluate("el => getComputedStyle(el).overflowY") == "auto"
+        assert page.evaluate("getComputedStyle(document.documentElement).overflowY") == "hidden"
+        assert page.evaluate("getComputedStyle(document.documentElement).scrollbarWidth") == "none"
+        assert page.evaluate("getComputedStyle(document.body).scrollbarWidth") == "none"
+    finally:
+        page.close()

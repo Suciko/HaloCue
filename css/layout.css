@@ -133,7 +133,8 @@ td,th{padding:9px 7px}.av{width:40px;height:40px;border-radius:10px}.grid{paddin
 .context-rail{align-self:start;position:sticky;top:110px}
 .settings-backdrop{position:fixed;inset:0;background:#0b122066;opacity:0;pointer-events:none;
   transition:opacity .2s ease;z-index:10}
-.drawer-open,.drawer-open body{overflow:hidden}
+html.drawer-open,html.drawer-open body,body.drawer-open{overflow:hidden;scrollbar-width:none;-ms-overflow-style:none}
+html.drawer-open::-webkit-scrollbar,html.drawer-open body::-webkit-scrollbar,body.drawer-open::-webkit-scrollbar{display:none;width:0;height:0}
 .settings-backdrop.open{opacity:1;pointer-events:auto}
 .settings-drawer{position:fixed;top:0;right:0;width:min(760px,calc(100vw - 82px));height:100vh;
   padding:28px;background:var(--bg);overflow:auto;z-index:11;box-shadow:-24px 0 70px #14203324;
