@@ -69,6 +69,7 @@ class StoryFilePicker:
         roots: Iterable[str | os.PathLike[str]],
         upload_dir: str | os.PathLike[str],
         token_ttl: int = 600,
+        allowed_suffixes: Iterable[str] | None = STORY_SUFFIXES,
     ):
         canonical = []
         for value in roots:
@@ -80,6 +81,11 @@ class StoryFilePicker:
         self.roots = tuple(canonical)
         self.upload_dir = Path(upload_dir).resolve()
         self.token_ttl = int(token_ttl)
+        self.allowed_suffixes = (
+            None
+            if allowed_suffixes is None
+            else frozenset(str(value).casefold() for value in allowed_suffixes)
+        )
         self._entries: dict[str, _HostEntry] = {}
         self._lock = threading.RLock()
 
@@ -108,7 +114,11 @@ class StoryFilePicker:
             kind, size, modified_ns = self._stat_entry(canonical)
         except OSError as exc:
             raise StoryFilePickerError("host_entry_missing", "该文件已不存在", 410) from exc
-        if kind == "file" and canonical.suffix.casefold() not in STORY_SUFFIXES:
+        if (
+            kind == "file"
+            and self.allowed_suffixes is not None
+            and canonical.suffix.casefold() not in self.allowed_suffixes
+        ):
             raise StoryFilePickerError("unsupported_story_type", "只支持 .txt 和 .md 剧情文本")
         token = f"entry-{uuid.uuid4().hex}"
         with self._lock:
@@ -238,7 +248,13 @@ class StoryFilePicker:
                 if canonical.is_dir():
                     if needle and needle not in path.name.casefold():
                         continue
-                elif canonical.is_file() and canonical.suffix.casefold() in STORY_SUFFIXES:
+                elif (
+                    canonical.is_file()
+                    and (
+                        self.allowed_suffixes is None
+                        or canonical.suffix.casefold() in self.allowed_suffixes
+                    )
+                ):
                     if needle and needle not in path.name.casefold():
                         continue
                 else:
@@ -272,3 +288,9 @@ class StoryFilePicker:
             "name": entry.path.name,
             "size": entry.size,
         }
+
+    def resolve_entry_path(
+        self, entry_token: str, *, expected_kind: str | None = None
+    ) -> Path:
+        """Resolve a short-lived host token for server-side settings only."""
+        return self._resolve_entry(entry_token, expected_kind=expected_kind).path

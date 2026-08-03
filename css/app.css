@@ -185,10 +185,13 @@ button:disabled {
   min-height: 34px;
   font-size: 12px;
 }
-#storageSettings .row input {
+#storageSettings .row input,
+#spineSettings .row input {
   flex: 1;
   min-width: 0;
 }
+.settings-path-row { align-items: stretch; }
+.settings-path-row button { flex: 0 0 auto; }
 .cast-edit { min-height: 34px; padding: 4px 10px; font-size: 12px; }
 .cast-results { display: grid; gap: 6px; max-height: 320px; overflow: auto; }
 .cast-result { display: block; width: 100%; text-align: left; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); min-height: 44px; }

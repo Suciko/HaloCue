@@ -226,6 +226,17 @@ def _atlas_pages(lines: list[str]) -> list[str]:
     return pages
 
 
+def _read_atlas_lines(path: Path) -> list[str]:
+    """Decode Spine atlas text from encodings commonly used on Windows."""
+    raw = path.read_bytes()
+    for encoding in ("utf-8-sig", "gb18030"):
+        try:
+            return raw.decode(encoding).splitlines()
+        except UnicodeDecodeError:
+            continue
+    raise ValueError("unsupported atlas text encoding")
+
+
 _PART_KIND_KEYWORDS = (
     ("eyes", ("眼",)),
     ("brows", ("眉",)),
@@ -332,7 +343,7 @@ def validate_spine(
     lines: list[str] = []
     if atlas.is_file():
         try:
-            lines = atlas.read_text(encoding="utf-8-sig").splitlines()
+            lines = _read_atlas_lines(atlas)
         except Exception as exc:
             issues.append(ValidationIssue("atlas_unreadable", f"无法读取 atlas：{exc}"))
     pages = _atlas_pages(lines)

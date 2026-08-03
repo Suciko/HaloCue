@@ -140,6 +140,26 @@ def test_host_entry_token_cannot_escape_roots_or_change_targets(tmp_path):
     assert escaped.value.code == "host_entry_outside_roots"
 
 
+def test_settings_picker_can_select_directories_and_non_story_files(tmp_path):
+    from story_file_picker import StoryFilePicker
+
+    aa_data = tmp_path / "aa-data"
+    aa_data.mkdir()
+    (aa_data / "projects").mkdir()
+    spine = tmp_path / "Spine.com"
+    spine.write_bytes(b"binary cli")
+    picker = StoryFilePicker(
+        roots=[tmp_path], upload_dir=tmp_path / "uploads", allowed_suffixes=None
+    )
+
+    listing = picker.list_directory()
+    aa_row = next(row for row in listing["entries"] if row["name"] == "aa-data")
+    spine_row = next(row for row in listing["entries"] if row["name"] == "Spine.com")
+    assert picker.resolve_entry_path(aa_row["entry_token"], expected_kind="directory") == aa_data.resolve()
+    assert picker.resolve_entry_path(spine_row["entry_token"], expected_kind="file") == spine.resolve()
+    assert "path" not in aa_row and "path" not in spine_row
+
+
 def test_host_http_routes_use_entry_tokens_instead_of_paths(tmp_path, monkeypatch):
     (tmp_path / "story.txt").write_text("story", encoding="utf-8")
     picker = StoryFilePicker(roots=[tmp_path], upload_dir=tmp_path / "uploads")
@@ -158,6 +178,34 @@ def test_host_http_routes_use_entry_tokens_instead_of_paths(tmp_path, monkeypatc
     assert status == selected_status == 200
     assert entry["name"] == selected["name"] == "story.txt"
     assert "path" not in entry and "path" not in selected
+
+
+def test_settings_host_route_validates_an_entry_without_exposing_path(tmp_path, monkeypatch):
+    (tmp_path / "Spine.com").write_bytes(b"binary cli")
+    picker = StoryFilePicker(
+        roots=[tmp_path], upload_dir=tmp_path / "uploads", allowed_suffixes=None
+    )
+    monkeypatch.setattr(webui, "SETTINGS_FILE_PICKER", picker)
+
+    with _server(picker, monkeypatch) as base:
+        status, listed = _request(base, "/api/settings/host")
+        entry = next(row for row in listed["entries"] if row["name"] == "Spine.com")
+        selected_status, selected = _request(
+            base,
+            "/api/settings/entry",
+            method="POST",
+            data=json.dumps({"entry_token": entry["entry_token"]}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert status == selected_status == 200
+    assert selected == {
+        "ok": True,
+        "entry_token": entry["entry_token"],
+        "name": "Spine.com",
+        "kind": "file",
+    }
+    assert str(tmp_path) not in json.dumps(selected)
 
 
 def test_windows_host_roots_include_useful_existing_locations_without_duplicates(tmp_path):

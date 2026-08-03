@@ -66,3 +66,26 @@ def test_picker_close_restores_focus_and_keeps_paths_out_of_browser_storage():
 const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');function n(){return {hidden:false,dataset:{},children:[],classList:{add(){},remove(){},toggle(){}},appendChild(x){this.children.push(x)},addEventListener(){},setAttribute(){},focus(){this.focused=true},set textContent(v){this.children=[]}}}const nodes={};['storyPicker','storyPickerDeviceInput','storyPickerSource','storyPickerHost','storyPickerStatus','storyPickerEntries','storyPickerBreadcrumbs','storyPickerRoots','storyPickerSearch','storyPickerSelected','storyPickerOpen','storyPickerBack','storyPickerForward','storyPickerUp'].forEach(id=>nodes[id]=n());const trigger=n();const window={Api:{request:async()=>({})},StoryUI:{},localStorage:{setItem(){throw new Error('must not persist')},getItem(){throw new Error('must not read')}}};const document={getElementById:id=>nodes[id],createElement:n,createDocumentFragment:n,activeElement:trigger,addEventListener(){}};vm.runInNewContext(source,{window,document,encodeURIComponent,URLSearchParams,Promise,Error,console});const p=new window.StoryUI.StoryFilePicker(nodes.storyPicker,{onChoose(){}});p.open(trigger);p.close();console.log(JSON.stringify({closed:nodes.storyPicker.hidden,restored:trigger.focused===true}));
 '''
     assert _run_picker(script) == {"closed": True, "restored": True}
+
+
+def test_settings_picker_can_choose_a_host_directory_or_any_file():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+function node(){const listeners={};return {value:'',hidden:false,disabled:false,dataset:{},children:[],classList:{add(){},remove(){},toggle(){}},appendChild(x){this.children.push(x);return x},removeChild(){return this.children.shift()},get firstChild(){return this.children[0]},addEventListener(k,f){listeners[k]=f},fire(k,e){return listeners[k]&&listeners[k](e||{target:this})},setAttribute(){},focus(){},click(){return this.fire('click')},set textContent(v){this._text=String(v||'');this.children=[]},get textContent(){return this._text||''}}}
+const nodes={};['storyPicker','storyPickerDeviceInput','storyPickerSource','storyPickerHost','storyPickerStatus','storyPickerEntries','storyPickerBreadcrumbs','storyPickerRoots','storyPickerSearch','storyPickerSelected','storyPickerOpen','storyPickerBack','storyPickerForward','storyPickerUp'].forEach(id=>nodes[id]=node());
+const calls=[];const listing={entries:[{entry_token:'dir-1',name:'aa-data',kind:'directory',size:0,modified:'2026-08-03T00:00:00Z',type:'文件夹'},{entry_token:'spine-1',name:'Spine.com',kind:'file',size:5,modified:'2026-08-03T00:00:00Z',type:'文件'}],breadcrumbs:[],roots:[],parent_token:'',location_token:'root'};
+let selects=0;const window={Api:{request:async(p)=>{calls.push(p);if(p==='/api/settings/host?sort=name&direction=asc')return listing;selects+=1;return selects===1?{ok:true,entry_token:'dir-1',name:'aa-data',kind:'directory'}:{ok:true,entry_token:'spine-1',name:'Spine.com',kind:'file'};}},StoryUI:{}};const document={getElementById:id=>nodes[id],createElement:node,createDocumentFragment:node,activeElement:node(),addEventListener(){}};
+vm.runInNewContext(source,{window,document,encodeURIComponent,URLSearchParams,Promise,Error,console});
+(async()=>{const chosen=[];const picker=new window.StoryUI.StoryFilePicker(nodes.storyPicker,{hostEndpoint:'/api/settings/host',selectEndpoint:'/api/settings/entry',onChoose:x=>chosen.push(x)});await picker.openDirectory();picker.selectEntry(listing.entries[0],nodes.storyPickerEntries);await picker.confirm();await picker.openPath();picker.selectEntry(listing.entries[1],nodes.storyPickerEntries);await picker.confirm();console.log(JSON.stringify({chosen,calls}));})();
+'''
+    result = _run_picker(script)
+    assert result["chosen"] == [
+        {"ok": True, "entry_token": "dir-1", "name": "aa-data", "kind": "directory"},
+        {"ok": True, "entry_token": "spine-1", "name": "Spine.com", "kind": "file"},
+    ]
+    assert result["calls"] == [
+        "/api/settings/host?sort=name&direction=asc",
+        "/api/settings/entry",
+        "/api/settings/host?sort=name&direction=asc",
+        "/api/settings/entry",
+    ]

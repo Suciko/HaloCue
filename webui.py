@@ -62,6 +62,11 @@ STORY_FILE_PICKER = StoryFilePicker(
     roots=windows_host_roots(STORY_ROOT),
     upload_dir=os.path.join(HERE, "out", "story-uploads"),
 )
+SETTINGS_FILE_PICKER = StoryFilePicker(
+    roots=windows_host_roots(STORY_ROOT),
+    upload_dir=os.path.join(HERE, "out", "story-uploads"),
+    allowed_suffixes=None,
+)
 
 CFG = {"overrides": None, "aa_data": None, "spine_cli": None}
 STORY_WORKSPACE = None
@@ -682,6 +687,18 @@ def setup_status():
             name=str(active_profile.get("name") or ""),
             model=str(active_profile.get("model") or ""),
         )
+    config_path = Path(HERE) / "aa_config.json"
+    configured_spine = str(CFG.get("spine_cli") or "").strip()
+    if not configured_spine and config_path.is_file():
+        try:
+            configured_spine = str(
+                json.loads(config_path.read_text(encoding="utf-8")).get("spine_cli") or ""
+            ).strip()
+        except (OSError, ValueError, TypeError):
+            configured_spine = ""
+    resolved_spine = spine_face_analysis.resolve_spine_cli(
+        configured_spine or None, config_path=config_path
+    )
     return {
         "aa": {
             "connected": bool(
@@ -697,8 +714,29 @@ def setup_status():
             "stats": stats,
         },
         "model": model,
+        "spine": {
+            "configured": bool(resolved_spine),
+            "path": configured_spine or str(resolved_spine or ""),
+            "resolved_path": str(resolved_spine or ""),
+        },
         "entry_file": "启动AA自动写剧本.cmd",
     }
+
+
+def _write_settings_config(**updates: str) -> None:
+    config_path = Path(HERE) / "aa_config.json"
+    values: dict[str, object] = {}
+    if config_path.is_file():
+        try:
+            loaded = json.loads(config_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                values.update(loaded)
+        except (OSError, ValueError, TypeError):
+            pass
+    values.update({key: value for key, value in updates.items() if value})
+    config_path.write_text(
+        json.dumps(values, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def list_characters(q="", limit=400):
@@ -1921,6 +1959,16 @@ class H(BaseHTTPRequestHandler):
                     ))
                 except StoryFilePickerError as exc:
                     return self._send(exc.status, {"ok": False, "code": exc.code, "e": str(exc)})
+            if p == "/api/settings/host":
+                try:
+                    return self._send(200, SETTINGS_FILE_PICKER.list_directory(
+                        q.get("entry_token", ""),
+                        query=q.get("query", ""),
+                        sort=q.get("sort", "name"),
+                        direction=q.get("direction", "asc"),
+                    ))
+                except StoryFilePickerError as exc:
+                    return self._send(exc.status, {"ok": False, "code": exc.code, "e": str(exc)})
             if p == "/api/analyze":
                 path = q.get("path", "")
                 if not path:
@@ -2218,6 +2266,19 @@ class H(BaseHTTPRequestHandler):
                 except StoryFilePickerError as exc:
                     return self._send(exc.status, {"ok": False, "code": exc.code, "e": str(exc)})
 
+            if p == "/api/settings/entry":
+                try:
+                    token = str(data.get("entry_token") or "")
+                    entry = SETTINGS_FILE_PICKER._resolve_entry(token)
+                    return self._send(200, {
+                        "ok": True,
+                        "entry_token": token,
+                        "name": entry.path.name,
+                        "kind": entry.kind,
+                    })
+                except StoryFilePickerError as exc:
+                    return self._send(exc.status, {"ok": False, "code": exc.code, "e": str(exc)})
+
             if p == "/api/stories/open":
                 try:
                     context = open_story(data.get("file_token", ""), data.get("project"))
@@ -2388,15 +2449,43 @@ class H(BaseHTTPRequestHandler):
                         return self._send(409, {"ok": False, "code": "revision_conflict", "e": str(exc)})
 
             if p == "/api/settings/aa-data":
-                path = str(data.get("aa_data") or "").strip()
+                try:
+                    if data.get("entry_token"):
+                        path = str(SETTINGS_FILE_PICKER.resolve_entry_path(
+                            str(data.get("entry_token")), expected_kind="directory"
+                        ))
+                    else:
+                        path = str(data.get("aa_data") or "").strip()
+                except StoryFilePickerError as exc:
+                    return self._send(exc.status, {"ok": False, "code": exc.code, "e": str(exc)})
                 if not path or not os.path.isdir(os.path.join(path, "projects")):
                     return self._send(400, {"ok": False, "code": "invalid_aa_data", "e": "该目录下没有 projects 文件夹，请检查路径"})
                 try:
-                    with open(os.path.join(HERE, "aa_config.json"), "w", encoding="utf-8") as f:
-                        json.dump({"aa_data": path}, f, ensure_ascii=False, indent=2)
+                    _write_settings_config(aa_data=path)
                 except OSError as exc:
                     return self._send(500, {"ok": False, "code": "write_failed", "e": str(exc)})
-                return self._send(200, {"ok": True, "e": "已保存，请重启程序后生效"})
+                return self._send(200, {"ok": True, "path": path, "e": "已保存，请重启程序后生效"})
+
+            if p == "/api/settings/spine-cli":
+                try:
+                    if data.get("entry_token"):
+                        path = SETTINGS_FILE_PICKER.resolve_entry_path(
+                            str(data.get("entry_token")), expected_kind="file"
+                        )
+                    else:
+                        path = Path(str(data.get("spine_cli") or "").strip()).expanduser()
+                    path = path.resolve()
+                except (OSError, StoryFilePickerError) as exc:
+                    code = exc.code if isinstance(exc, StoryFilePickerError) else "invalid_spine_cli"
+                    return self._send(400, {"ok": False, "code": code, "e": str(exc)})
+                if not path.is_file():
+                    return self._send(400, {"ok": False, "code": "invalid_spine_cli", "e": "Spine 命令行程序文件不存在，请选择 Spine.com"})
+                try:
+                    _write_settings_config(spine_cli=str(path))
+                    CFG["spine_cli"] = str(path)
+                except OSError as exc:
+                    return self._send(500, {"ok": False, "code": "write_failed", "e": str(exc)})
+                return self._send(200, {"ok": True, "path": str(path), "e": "Spine 命令行路径已保存"})
 
             if p == "/api/drafts/import":
                 ft_token = data.get("file_token")

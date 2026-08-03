@@ -28,6 +28,10 @@
     this.upButton = byId('storyPickerUp');
     this.selected = null; this.locationToken = ''; this.parentToken = '';
     this.historyBack = []; this.historyForward = []; this.sort = 'name'; this.direction = 'asc';
+    this.hostEndpoint = this.options.hostEndpoint || '/api/story-files/host';
+    this.selectEndpoint = this.options.selectEndpoint || '/api/story-files/select';
+    this.directoryOnly = Boolean(this.options.directoryOnly);
+    this.hostOnly = Boolean(this.options.hostOnly);
     this.trigger = null; this._bound = false; this.bind();
   }
 
@@ -45,6 +49,9 @@
   StoryFilePicker.prototype.open = function (trigger) {
     this.trigger = trigger || document.activeElement; this.selected = null;
     if (this.root) { this.root.hidden = false; this.root.classList.add('on'); this.root.setAttribute('aria-hidden', 'false'); }
+    const title = byId('browseTitle');
+    if (title && this.options.title) title.textContent = this.options.title;
+    if (this.hostOnly) return this.openHost();
     if (this.source) this.source.hidden = false; if (this.host) this.host.hidden = true;
     if (this.status) this.status.textContent = ''; if (this.selectedLabel) this.selectedLabel.textContent = '尚未选择文件';
     if (this.openButton) this.openButton.disabled = true;
@@ -59,6 +66,22 @@
 
   StoryFilePicker.prototype.chooseDevice = function () { if (this.input && this.input.click) this.input.click(); };
 
+  StoryFilePicker.prototype.openHostMode = function (trigger, directoryOnly) {
+    this.trigger = trigger || document.activeElement;
+    this.directoryOnly = Boolean(directoryOnly);
+    this.hostOnly = true;
+    if (this.root) { this.root.hidden = false; this.root.classList.add('on'); this.root.setAttribute('aria-hidden', 'false'); }
+    return this.openHost();
+  };
+
+  StoryFilePicker.prototype.openDirectory = function (trigger) {
+    return this.openHostMode(trigger, true);
+  };
+
+  StoryFilePicker.prototype.openPath = function (trigger) {
+    return this.openHostMode(trigger, false);
+  };
+
   StoryFilePicker.prototype.upload = async function (file) {
     if (!file) return null;
     if (this.status) this.status.textContent = '正在读取此设备上的文件…';
@@ -69,12 +92,21 @@
         body: file,
       });
       this.close();
-      if (this.options.onChoose) await this.options.onChoose({file_token: result.file_token, name: result.name, size: result.size});
+      if (this.options.onChoose) {
+        const selection = this.selectEndpoint === '/api/story-files/select'
+          ? {file_token: result.file_token, name: result.name, size: result.size}
+          : result;
+        await this.options.onChoose(selection);
+      }
       return result;
     } catch (error) { if (this.status) this.status.textContent = error.message || '文件上传失败'; return null; }
   };
 
   StoryFilePicker.prototype.openHost = async function () {
+    this.selected = null;
+    if (this.openButton) this.openButton.disabled = true;
+    const title = byId('browseTitle');
+    if (title && this.options.title) title.textContent = this.options.title;
     if (this.source) this.source.hidden = true; if (this.host) this.host.hidden = false;
     this.historyBack = []; this.historyForward = []; this.locationToken = '';
     return this.load('', false);
@@ -85,7 +117,7 @@
     if (token) query.set('entry_token', token);
     if (this.search && this.search.value) query.set('query', this.search.value);
     query.set('sort', this.sort); query.set('direction', this.direction);
-    return '/api/story-files/host?' + query.toString();
+    return this.hostEndpoint + '?' + query.toString();
   };
 
   StoryFilePicker.prototype.load = async function (token, pushHistory) {
@@ -129,7 +161,10 @@
       const size = document.createElement('span'); size.className = 'story-picker-entry-size'; size.textContent = item.kind === 'directory' ? '' : formatSize(item.size);
       row.append(icon, name, type, modified, size);
       row.addEventListener('click', function () { self.selectEntry(item, row); });
-      row.addEventListener('dblclick', function () { if (item.kind === 'directory') self.navigate(item.entry_token); else { self.selectEntry(item, row); self.confirm(); } });
+      row.addEventListener('dblclick', function () {
+        if (item.kind === 'directory' && !self.directoryOnly) self.navigate(item.entry_token);
+        else { self.selectEntry(item, row); self.confirm(); }
+      });
       self.entries.appendChild(row);
     });
     if (this.backButton) this.backButton.disabled = !this.historyBack.length;
@@ -138,7 +173,8 @@
   };
 
   StoryFilePicker.prototype.selectEntry = function (item, row) {
-    if (!item) return; if (item.kind === 'directory') { this.navigate(item.entry_token); return; }
+    if (!item) return;
+    if (item.kind === 'directory' && !this.directoryOnly) { this.navigate(item.entry_token); return; }
     this.selected = item;
     if (this.entries && this.entries.children) Array.prototype.forEach.call(this.entries.children, function (node) { node.classList && node.classList.toggle('is-selected', node === row); });
     if (this.selectedLabel) this.selectedLabel.textContent = item.name + ' · ' + formatSize(item.size);
@@ -148,9 +184,14 @@
   StoryFilePicker.prototype.confirm = async function () {
     if (!this.selected) return null; if (this.status) this.status.textContent = '正在打开剧情文本…';
     try {
-      const result = await exports.Api.request('/api/story-files/select', exports.Api.json ? exports.Api.json('POST', {entry_token: this.selected.entry_token}) : {method: 'POST', body: JSON.stringify({entry_token: this.selected.entry_token})});
+      const result = await exports.Api.request(this.selectEndpoint, exports.Api.json ? exports.Api.json('POST', {entry_token: this.selected.entry_token}) : {method: 'POST', body: JSON.stringify({entry_token: this.selected.entry_token})});
       this.close();
-      if (this.options.onChoose) await this.options.onChoose({file_token: result.file_token, name: result.name, size: result.size});
+      if (this.options.onChoose) {
+        const selection = this.selectEndpoint === '/api/story-files/select'
+          ? {file_token: result.file_token, name: result.name, size: result.size}
+          : result;
+        await this.options.onChoose(selection);
+      }
       return result;
     } catch (error) { if (this.status) this.status.textContent = error.message || '无法打开剧情文本'; return null; }
   };

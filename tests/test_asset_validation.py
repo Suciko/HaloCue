@@ -120,6 +120,28 @@ def test_spine_preserves_identifier_and_finds_atlas_faces(tmp_path):
     assert result.candidate.metadata["expression_status"] == "known"
 
 
+def test_spine_accepts_windows_gb18030_atlas_text(tmp_path):
+    root = make_spine_bundle(tmp_path / "kai")
+    atlas = root / "CH0335_noweapon_spr.atlas"
+    atlas.write_bytes(
+        (
+            "CH0335_noweapon_spr.png\n"
+            "size:2048,2048\n"
+            "format:RGBA8888\n"
+            "凯伊(普通睁眼)\n"
+            "bounds:0,0,1,1\n"
+            "03_smile\n"
+            "bounds:1,1,1,1\n"
+        ).encode("gb18030")
+    )
+
+    result = validate_spine(root, identifier="1516544")
+
+    assert result.ok
+    assert not any(issue.code == "atlas_unreadable" for issue in result.issues)
+    assert result.candidate.metadata["faces"] == ["03"]
+
+
 def test_spine_metadata_uses_skeleton_signature_and_keeps_atlas_as_candidate(tmp_path):
     """Changing skeleton bytes must change the variant key; atlas omission is not a rejection."""
     root = make_spine_bundle(tmp_path / "kai")

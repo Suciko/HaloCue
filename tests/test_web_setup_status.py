@@ -82,3 +82,16 @@ def test_setup_status_is_available_over_local_http(
         thread.join()
         server.server_close()
 
+
+def test_settings_config_updates_preserve_the_other_runtime_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "HERE", str(tmp_path))
+    config = tmp_path / "aa_config.json"
+    config.write_text(json.dumps({"aa_data": "old-data", "spine_cli": "old-spine"}), encoding="utf-8")
+
+    webui._write_settings_config(aa_data="new-data")
+
+    assert json.loads(config.read_text(encoding="utf-8")) == {
+        "aa_data": "new-data",
+        "spine_cli": "old-spine",
+    }
+
