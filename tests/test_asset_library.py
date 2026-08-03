@@ -567,7 +567,7 @@ def test_face_job_snapshot_never_exposes_server_paths(monkeypatch, tmp_path):
 
     snapshot = webui.face_job_snapshot()
 
-    assert snapshot["contact_sheet_available"] is True
+    assert "contact_sheet_available" not in snapshot
     assert snapshot["result"]["saved_count"] == 3
     assert snapshot["result"]["completed_at"] == "2026-08-03T15:00:00+00:00"
     assert snapshot["result"]["status"] == "partial"

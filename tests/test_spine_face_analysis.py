@@ -68,7 +68,7 @@ def test_resolve_spine_cli_prefers_explicit_then_environment_then_config(
     assert spine_face_analysis.resolve_spine_cli(config_path=config) == configured
 
 
-def test_analysis_renders_contact_sheet_without_requiring_model_key(
+def test_analysis_keeps_contact_sheet_out_of_normal_results_without_model_key(
     tmp_path, monkeypatch
 ):
     report = _report(tmp_path)
@@ -95,7 +95,8 @@ def test_analysis_renders_contact_sheet_without_requiring_model_key(
     assert result["ok"] is True
     assert result["rendered_count"] == 2
     assert result["vision_status"] == "skipped_missing_key"
-    assert Path(result["contact_sheet"]).is_file()
+    assert "contact_sheet" not in result
+    assert not (report.cache_dir / "contact-sheet.jpg").exists()
 
 
 def test_analysis_maps_per_face_render_progress_to_job_updates(tmp_path, monkeypatch):

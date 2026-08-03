@@ -10,7 +10,6 @@ from typing import Callable
 
 from spine_face_labeler import (
     label_face_images,
-    make_contact_sheet,
     persist_visual_face_labels,
 )
 from spine_face_renderer import render_face_variations
@@ -172,9 +171,6 @@ def analyze_character_faces(
         len(report.faces),
     )
 
-    contact_sheet = make_contact_sheet(
-        report.faces, report.cache_dir / "contact-sheet.jpg"
-    )
     result = {
         "ok": True,
         "status": (
@@ -193,7 +189,6 @@ def analyze_character_faces(
         "retried_faces": list(report.retried_faces),
         "fallback_workers": report.fallback_workers,
         "calibration": list(report.calibration),
-        "contact_sheet": str(contact_sheet),
         "vision_status": "skipped_missing_key",
         "labeled_count": 0,
         "semantic_faces": semantic_faces,

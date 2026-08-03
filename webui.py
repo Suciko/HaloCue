@@ -100,7 +100,6 @@ FACE_JOB = {
     "current": None,
     "total": None,
     "log": [],
-    "contact_sheet": None,
 }
 FACE_JOB_LOCK = threading.Lock()
 
@@ -489,16 +488,9 @@ def face_job_snapshot() -> dict:
         "ident": public_text(raw.get("ident"), 120),
         "outfit_key": public_text(raw.get("outfit_key"), 120),
         "log": [public_text(line) for line in (raw.get("log") or [])[-30:]],
-        "contact_sheet_available": bool(raw.get("contact_sheet")),
         "result": public_result,
         "error": public_text(raw.get("error")) if raw.get("error") else None,
     }
-
-
-def face_job_contact_sheet() -> str | None:
-    with FACE_JOB_LOCK:
-        value = FACE_JOB.get("contact_sheet")
-    return str(value) if value else None
 
 
 def _public_visual_face(record: dict, *, aa_key: str, sha256: str) -> dict:
@@ -709,7 +701,6 @@ def reserve_face_job(payload: dict) -> bool:
             current=0,
             total=None,
             log=["已加入表情解析队列"],
-            contact_sheet=None,
             ident=str(payload.get("ident") or ""),
             outfit_key=str(payload.get("outfit_key") or ""),
             result=None,
@@ -752,7 +743,6 @@ def run_face_job(payload: dict):
                     else "complete"
                 ),
                 result=result,
-                contact_sheet=result.get("contact_sheet"),
             )
     except Exception as exc:
         traceback.print_exc()
@@ -2347,15 +2337,6 @@ class H(BaseHTTPRequestHandler):
                     con.close()
             if p == "/api/llm/profiles":
                 return self._send(200, MODEL_PROFILES.public_state())
-            if p == "/api/assets/faces/contact-sheet":
-                sheet = face_job_contact_sheet()
-                if not sheet or not os.path.isfile(sheet):
-                    return self._send(404, {"e": "no contact sheet"})
-                return self._send(
-                    200,
-                    open(sheet, "rb").read(),
-                    "image/jpeg",
-                )
             if p.startswith("/thumb/bg/"):
                 name = p[len("/thumb/bg/"):]
                 f = bg_files().get(name)

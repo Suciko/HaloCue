@@ -212,13 +212,13 @@ def test_asset_workbench_modules_do_not_build_untrusted_html_or_use_eval():
         assert "eval(" not in source
 
 
-def test_face_workspace_is_split_and_keeps_contact_sheet_and_semantic_results():
+def test_face_workspace_is_split_and_keeps_contact_sheet_internal():
     source = (HERE / "js" / "library_faces.js").read_text(encoding="utf-8")
     library = (HERE / "js" / "library.js").read_text(encoding="utf-8")
 
     assert "renderLabels" in source
     assert "semantic_faces" in source
-    assert "/api/assets/faces/contact-sheet" in source
+    assert "/api/assets/faces/contact-sheet" not in source
     assert "rendered_count" in source
     assert "function FaceWorkspace" not in library
     assert "new window.StoryUI.FaceWorkspace" not in library
@@ -319,7 +319,7 @@ const document={activeElement:null,getElementById:id=>nodes[id]||null,createElem
 const requests=[];
 const window={StoryUI:{},AssetWorkbench:{root:workbenchRoot,selectedKey:'character:626652156',list:{scrollTop:0},refresh:async()=>{},restoreSelection(){}},Api:{request:async path=>{
   requests.push(path);
-  if(path.startsWith('/api/assets/faces/labels')) return {saved_count:1,faces:[{face_id:'00',version:1,effective:{primary_emotion:'平静',confidence:.9,eyes:'睁眼'}}]};
+  if(path.startsWith('/api/assets/faces/labels')) return {saved_count:1,faces:[{face_id:'00',version:1,effective:{primary_emotion:'平静',usage_hint_cn:'普通交谈或安静倾听',confidence:.9,eyes:'不应显示的部件细节'}}]};
   return {running:false,done:false,ident:''};
 }}};
 vm.runInNewContext(source,{window,document,Promise,Error,console,setTimeout(){return 1},clearTimeout(){},encodeURIComponent,setImmediate});
@@ -339,6 +339,8 @@ vm.runInNewContext(source,{window,document,Promise,Error,console,setTimeout(){re
 
     assert sum(path.startswith("/api/assets/faces/labels") for path in result["requests"]) == 1
     assert "平静" in result["text"]
+    assert "普通交谈或安静倾听" in result["text"]
+    assert "不应显示的部件细节" not in result["text"]
     assert "已保存到数据库：1 个表情" in result["status"]
 
 
@@ -464,7 +466,7 @@ vm.runInNewContext(source,{window,document,Promise,Error,console,encodeURICompon
 def test_face_workspace_queued_restore_clears_manual_fields_saved_ahead_of_it():
     script = r'''
 const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8'),pending=[],requests=[];
-function node(){let classes=new Set();const inputs=[{dataset:{faceField:'primary_emotion'},type:'text',value:'kept'},{dataset:{faceField:'eyes'},type:'text',value:'new eyes'}];return {children:[],dataset:{},hidden:false,disabled:false,classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},appendChild(child){this.children.push(child);return child},addEventListener(){},setAttribute(){},removeAttribute(){},focus(){},querySelector(selector){if(selector==='.face-save-state')return {textContent:''};return null},querySelectorAll(){return inputs}}}
+function node(){let classes=new Set();const inputs=[{dataset:{faceField:'primary_emotion'},type:'text',value:'kept'},{dataset:{faceField:'usage_hint_cn'},type:'text',value:'new usage'}];return {children:[],dataset:{},hidden:false,disabled:false,classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},appendChild(child){this.children.push(child);return child},addEventListener(){},setAttribute(){},removeAttribute(){},focus(){},querySelector(selector){if(selector==='.face-save-state')return {textContent:''};return null},querySelectorAll(){return inputs}}}
 const document={activeElement:null,getElementById:()=>null,createElement:node,addEventListener(){}};
 const window={StoryUI:{},Api:{json:(method,payload)=>({method,payload}),request:(path,options)=>{requests.push({path,options});return new Promise(resolve=>pending.push(resolve))}}};
 vm.runInNewContext(source,{window,document,Promise,Error,console,encodeURIComponent,setTimeout,clearTimeout});
@@ -472,7 +474,7 @@ vm.runInNewContext(source,{window,document,Promise,Error,console,encodeURICompon
   const root=node();root.classList.add('open');const workspace=new window.StoryUI.FaceWorkspace(root),card=node();
   workspace.selected={kind:'character',aa_key:'hero',sha256:'digest'};workspace.faces=[{face_id:'00',version:1,manual:{primary_emotion:'old'},effective:{primary_emotion:'old'}}];workspace.card=()=>card;workspace.renderLabels=()=>{};
   const save=workspace.saveFace('00');const restore=workspace.restoreAi('00');
-  pending[0]({face:{face_id:'00',version:2,manual:{primary_emotion:'kept',eyes:'new eyes'},effective:{primary_emotion:'kept',eyes:'new eyes'}},saved_at:'one'});await save;await new Promise(resolve=>setTimeout(resolve,0));
+  pending[0]({face:{face_id:'00',version:2,manual:{primary_emotion:'kept',usage_hint_cn:'new usage'},effective:{primary_emotion:'kept',usage_hint_cn:'new usage'}},saved_at:'one'});await save;await new Promise(resolve=>setTimeout(resolve,0));
   const restorePayload=requests[1].options.payload;pending[1]({face:{face_id:'00',version:3,manual:{},effective:{primary_emotion:'ai'}},saved_at:'two'});await restore;
   console.log(JSON.stringify({requests:requests.length,restorePayload}));
 })();
@@ -488,7 +490,7 @@ vm.runInNewContext(source,{window,document,Promise,Error,console,encodeURICompon
             "aa_key": "hero",
             "sha256": "digest",
             "version": 2,
-            "patch": {"primary_emotion": None, "eyes": None},
+            "patch": {"primary_emotion": None, "usage_hint_cn": None},
         },
     }
 
