@@ -30,6 +30,14 @@ _HEAD_PREVIEW_SIZE = 768
 _FINAL_RENDER_FRAME = 8
 
 
+def bounded_render_workers(value: int) -> int:
+    """Keep Spine CLI concurrency useful without exhausting the desktop."""
+    workers = int(value)
+    if workers < 1:
+        raise ValueError("workers must be at least 1")
+    return min(workers, 4)
+
+
 @dataclass(frozen=True)
 class RenderedFace:
     face_id: str
@@ -829,8 +837,7 @@ def render_face_variations(
         selected_ids = sorted(dict.fromkeys(str(item) for item in face_ids))
     if not selected_ids:
         raise ValueError("No renderable numbered face animations were found")
-    if workers < 1:
-        raise ValueError("workers must be at least 1")
+    workers = bounded_render_workers(workers)
 
     cache_dir = Path(cache_root).resolve() / signature
     cached = _load_cached_report(cache_dir, signature, selected_ids)

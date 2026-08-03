@@ -21,6 +21,12 @@ from spine_face_renderer import (
 )
 
 
+def test_render_worker_count_is_capped_at_four():
+    assert spine_face_renderer.bounded_render_workers(1) == 1
+    assert spine_face_renderer.bounded_render_workers(4) == 4
+    assert spine_face_renderer.bounded_render_workers(12) == 4
+
+
 def test_png_export_settings_render_only_the_warmed_final_frame(tmp_path):
     settings = spine_face_renderer._export_settings(
         project=tmp_path / "project.spine",
