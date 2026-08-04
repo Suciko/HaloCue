@@ -112,6 +112,10 @@ def build_environment_report(
                 if discovery.resource_cache is not None
                 else "not_installed"
             ),
+            "resource_cache": (
+                str(discovery.resource_cache)
+                if discovery.resource_cache else ""
+            ),
             "preview_status": "not_built",
             "projects": (
                 str(discovery.projects)
@@ -320,6 +324,10 @@ def main(argv: list[str] | None = None) -> int:
                     executable=(
                         Path(report["aa"]["executable"])
                         if report["aa"]["executable"] else None
+                    ),
+                    cache_dir=(
+                        Path(report["aa"]["resource_cache"])
+                        if report["aa"]["resource_cache"] else None
                     ),
                 )
         if not report["aa"]["connected"]:
