@@ -18,6 +18,18 @@
 
 黑色窗口是本地服务，使用期间请保留；关闭窗口即可停止程序。
 
+### 首次连接 AA 安装与官方资源
+
+打开网页右上角的“设置”，在“AA 安装与资源”中选择 `AzureArchive.exe` 或 AA 安装目录。程序会自动显示当前 `projects`、`saves` 和官方资源包状态。资源包已安装但“图片预览”显示尚未建立时，点击“建立图片预览”。
+
+程序只读取每位用户自己安装的 AA 程序、设置和资源包。生成的缩略图只保存在本机 `out/official-previews`，不会修改或上传 AA 的 EXE、配置、AssetBundle、工作区文件或时间戳，也不会随发布包分发。
+
+常见状态的处理方式：
+
+- **所选程序无法识别**：重新选择 `AzureArchive.exe` 或它所在的安装目录。
+- **工作区有效，但资源包尚未安装**：可以继续使用 projects；需要官方图片预览时，先在 AA 中安装资源包，再回到设置页检查状态。
+- **图片预览需要更新或部分可用**：资源包更新后重新建立索引；“部分可用”表示可用图片已经建立，个别损坏资源已跳过，可直接使用或稍后重试。
+
 ## 开发者：命令行启动
 
 ```bash
@@ -84,7 +96,9 @@ python script2aap.py --syntax                           # 查全部语法
 | `assetdb.py` / `label_assets.py` | 素材数据库与看图打标 |
 | `asset_validation.py` / `asset_import.py` | 自定义素材发现、格式验证和统一导入 |
 | `aa_registry.py` / `asset_catalog.py` | 项目级注册、幂等清单和模型白名单 |
+| `aa_install_discovery.py` | 从 AzureArchive.exe 只读定位工作区和官方资源包 |
 | `aa_resource_cache.py` | 官方 Addressables 资源缓存只读发现 |
+| `official_preview_index.py` | 从用户本机资源包建立背景和头像预览索引 |
 | `build_index.py` | 扫 AA 生成资源索引 |
 | `verify.py` | 结构校验 + 与参照工程比对 |
 | `webui.py` / `ui.html` | 本地网页界面 |
@@ -98,13 +112,7 @@ python script2aap.py --syntax                           # 查全部语法
 
 ## 跨机器适配
 
-不写死任何绝对路径。探测顺序：
-
-1. 命令行 `--aa-data`
-2. 同目录下的 `aa_config.json`
-3. 环境变量 `AA_DATA`
-4. AA 默认位置的 `settings/user_settings.json` 里的 `workspacePath`
-5. AA 默认位置 `%USERPROFILE%\AppData\LocalLow\foxxlight\AzureArchive\data`
+不写死任何绝对路径。优先从用户选择的 `AzureArchive.exe` 或安装目录确认 AA 程序身份，再读取 AA 自己的 `user_settings.json` 中的 `workspacePath` 和 `cachePath`。旧版的命令行 `--aa-data`、`aa_config.json` 和 `AA_DATA` 入口继续兼容。
 
 跑 `python aapaths.py` 看本机探到了什么。找不到会给出三种解决办法。
 

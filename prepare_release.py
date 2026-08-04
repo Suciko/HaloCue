@@ -19,7 +19,8 @@ CODE = ["script2aap.py", "stage.py", "camera.py", "annotate.py", "prompt.py",
         "model_profiles.py", "background_requests.py", "background_workflow.py",
         "asset_catalog.py", "asset_import.py", "asset_models.py",
         "asset_validation.py", "aa_registry.py", "aa_project_assets.py",
-        "aa_resource_cache.py", "official_catalog.py", "performance_rules.py",
+        "aa_install_discovery.py", "aa_resource_cache.py", "official_catalog.py",
+        "official_preview_index.py", "performance_rules.py",
         "dialogue_pacing.py", "spine_face_analysis.py",
         "spine_face_renderer.py", "spine_face_labeler.py",
         "spine_semantic_faces.py", "launcher.py", "prepare_release.py"]
@@ -39,6 +40,7 @@ REQUIREMENTS = """# 最低要求：Python 3.9+
 # 核心功能（转换、校验、路径探测）零依赖，只用标准库。
 
 pillow>=10.0        # 网页界面的缩略图 / 打标时的图片缩放
+UnityPy>=1.25.2     # 从用户自己的 AA 资源包生成本地官方图片预览
 openai>=1.40        # 可选：OpenAI 兼容接口（GPT / DeepSeek / GLM / Kimi / Qwen）
 anthropic>=0.40     # 可选：Claude API（带 prompt caching）
 pywin32>=306        # Windows：把 API Key 安全保存到系统凭据管理器
