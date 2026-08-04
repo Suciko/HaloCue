@@ -213,6 +213,42 @@ def test_conflicting_legacy_candidates_require_explicit_selection(tmp_path):
     assert any(issue.code == "workspace_selection_required" for issue in result.issues)
 
 
+def test_ambiguous_workspaces_preserve_existing_recent_project_files(tmp_path):
+    home = tmp_path / "home"
+    exe = make_install(tmp_path / "AzureArchive")
+    configured = make_data(tmp_path / "configured")
+    environment = make_data(tmp_path / "environment")
+    first = tmp_path / "recent" / "first.aap"
+    second = tmp_path / "recent" / "second.aas"
+    first.parent.mkdir()
+    first.write_text("{}", encoding="utf-8")
+    second.write_text("{}", encoding="utf-8")
+    config = tmp_path / "aa_config.json"
+    config.write_text(json.dumps({"aa_data": str(configured)}), encoding="utf-8")
+    write_local_settings(
+        home,
+        {
+            "visitedFiles": [
+                str(first),
+                str(tmp_path / "missing.aap"),
+                str(tmp_path / "note.txt"),
+                str(second),
+            ],
+        },
+    )
+
+    result = discover_aa(
+        exe,
+        config_path=config,
+        home=home,
+        environ={"AA_DATA": str(environment)},
+    )
+
+    assert result.data is None
+    assert result.requires_selection is True
+    assert result.recent_project_files == (first.resolve(), second.resolve())
+
+
 def test_authoritative_workspace_does_not_conflict_with_lower_priority_legacy_paths(tmp_path):
     home = tmp_path / "home"
     exe = make_install(tmp_path / "AzureArchive")

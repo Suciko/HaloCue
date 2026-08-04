@@ -257,6 +257,7 @@ def _empty_result(
     candidates: tuple[PathCandidate, ...],
     requires_selection: bool,
     issues: list[DiscoveryIssue],
+    configuration: Mapping | None = None,
 ) -> AADiscoveryResult:
     return AADiscoveryResult(
         executable=executable,
@@ -270,7 +271,7 @@ def _empty_result(
         settings=None,
         resource_cache=None,
         catalog=_catalog_path(executable),
-        recent_project_files=(),
+        recent_project_files=_read_recent_project_files(configuration or {}),
         data_candidates=candidates,
         requires_selection=requires_selection,
         source=None,
@@ -365,6 +366,7 @@ def discover_aa(
             candidates=valid_legacy,
             requires_selection=True,
             issues=issues,
+            configuration=settings,
         )
 
     if executable is None:
@@ -377,4 +379,5 @@ def discover_aa(
         candidates=(),
         requires_selection=False,
         issues=issues,
+        configuration=settings,
     )
