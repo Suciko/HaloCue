@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS character (
     name   TEXT,
     club   TEXT,
     spine  TEXT,
+    avatar TEXT NOT NULL DEFAULT '',
     source TEXT                    -- overrides / observed / custom
 );
 CREATE TABLE IF NOT EXISTS face (
@@ -205,20 +206,33 @@ def connect(path):
     con = sqlite3.connect(path, timeout=5.0)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA busy_timeout=5000")
-    if not _schema_is_current(con):
-        with _MIGRATE_LOCK:
-            if not _schema_is_current(con):
-                con.executescript(SCHEMA)
-                migrate_visual_face_labels(con)
-                con.execute(
-                    """
-                    INSERT INTO meta(key,value) VALUES('assetdb_schema_version',?)
-                    ON CONFLICT(key) DO UPDATE SET value=excluded.value
-                    """,
-                    (_SCHEMA_VERSION,),
-                )
-                con.commit()
+    with _MIGRATE_LOCK:
+        needs_schema = not _schema_is_current(con)
+        if needs_schema:
+            con.executescript(SCHEMA)
+            migrate_visual_face_labels(con)
+        migrate_character_avatar(con)
+        if needs_schema:
+            con.execute(
+                """
+                INSERT INTO meta(key,value) VALUES('assetdb_schema_version',?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                """,
+                (_SCHEMA_VERSION,),
+            )
+        con.commit()
     return con
+
+
+def migrate_character_avatar(con):
+    """Add official portrait metadata without rebuilding existing databases."""
+    columns = {
+        row["name"] for row in con.execute("PRAGMA table_info(character)")
+    }
+    if "avatar" not in columns:
+        con.execute(
+            "ALTER TABLE character ADD COLUMN avatar TEXT NOT NULL DEFAULT ''"
+        )
 
 
 def migrate_visual_face_labels(con):
@@ -450,9 +464,12 @@ def import_index(con, idx):
         n["sound"] += 1
 
     for c in idx.get("characters", []):
-        con.execute("INSERT INTO character(ident,name,club,spine,source) VALUES(?,?,?,?,'overrides') "
+        con.execute("INSERT INTO character(ident,name,club,spine,avatar,source) VALUES(?,?,?,?,?,'overrides') "
                     "ON CONFLICT(ident) DO UPDATE SET name=excluded.name, club=excluded.club, "
-                    "spine=excluded.spine", (c["identifier"], c.get("name"), c.get("club"), c.get("spine")))
+                    "spine=excluded.spine, avatar=excluded.avatar", (
+                        c["identifier"], c.get("name"), c.get("club"),
+                        c.get("spine"), c.get("avatar") or "",
+                    ))
         n["character"] += 1
         for f in c.get("faces", []):
             con.execute("INSERT INTO face(ident,face_id,raw,label,label_cn,source) VALUES(?,?,?,?,?,'atlas') "
@@ -619,7 +636,8 @@ def export_json(con, path):
     chars = {}
     for r in con.execute("SELECT * FROM character"):
         chars[r["ident"]] = {"identifier": r["ident"], "name": r["name"],
-                             "club": r["club"], "spine": r["spine"], "faces": []}
+                             "club": r["club"], "spine": r["spine"],
+                             "avatar": r["avatar"] or "", "faces": []}
     for r in con.execute("SELECT * FROM face ORDER BY ident, face_id"):
         if r["ident"] in chars:
             chars[r["ident"]]["faces"].append(

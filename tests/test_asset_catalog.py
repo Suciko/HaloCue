@@ -89,6 +89,56 @@ def test_character_identifier_is_stored_verbatim(tmp_path):
     assert out["characters"][0]["faces"] == ["00", "03"]
 
 
+def test_import_index_preserves_official_avatar_key(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    assetdb.import_index(con, {"characters": [{
+        "identifier": "hifumi",
+        "name": "日步美",
+        "club": "补课部",
+        "spine": "UIs/03_Scenario/02_Character/CharacterSpine_hihumi",
+        "avatar": "UIs/01_Common/01_Character/Student_Portrait_Hifumi",
+        "faces": [],
+    }]})
+
+    row = con.execute(
+        "SELECT avatar FROM character WHERE ident='hifumi'"
+    ).fetchone()
+
+    assert row["avatar"].endswith("Student_Portrait_Hifumi")
+    exported = assetdb.export_json(con, tmp_path / "export.json")
+    assert exported["characters"][0]["avatar"].endswith(
+        "Student_Portrait_Hifumi"
+    )
+
+
+def test_connect_migrates_old_character_table_with_existing_rows(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    raw = sqlite3.connect(path)
+    raw.execute(
+        "CREATE TABLE character (ident TEXT PRIMARY KEY, name TEXT, "
+        "club TEXT, spine TEXT, source TEXT)"
+    )
+    raw.execute(
+        "INSERT INTO character VALUES (?,?,?,?,?)",
+        ("legacy", "旧角色", "社团", "old-spine", "legacy"),
+    )
+    raw.commit()
+    raw.close()
+
+    con = assetdb.connect(path)
+
+    columns = {
+        row["name"] for row in con.execute("PRAGMA table_info(character)")
+    }
+    row = con.execute(
+        "SELECT ident,name,avatar FROM character WHERE ident='legacy'"
+    ).fetchone()
+    assert "avatar" in columns
+    assert tuple(row) == ("legacy", "旧角色", "")
+
+
 def test_import_bg_files_computes_custom_background_hash(tmp_path):
     con = assetdb.connect(tmp_path / "assets.db")
     bgs = tmp_path / "bgs"

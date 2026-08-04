@@ -91,13 +91,21 @@ class OfficialPreviewIndex:
     def __init__(self, root: str | Path):
         self.root = Path(root)
         self.manifest_path = self.root / "manifest.json"
+        self._manifest_cache_stamp: tuple[int, int] | None = None
+        self._manifest_cache: dict | None = None
 
     def _read_manifest(self) -> dict | None:
         try:
+            stat = self.manifest_path.stat()
+            stamp = (stat.st_mtime_ns, stat.st_size)
+            if self._manifest_cache_stamp == stamp:
+                return self._manifest_cache
             manifest = json.loads(
                 self.manifest_path.read_text(encoding="utf-8")
             )
         except (OSError, ValueError):
+            self._manifest_cache_stamp = None
+            self._manifest_cache = None
             return None
         if not isinstance(manifest, dict):
             return None
@@ -105,6 +113,8 @@ class OfficialPreviewIndex:
             return None
         if not isinstance(manifest.get("records"), list):
             return None
+        self._manifest_cache_stamp = stamp
+        self._manifest_cache = manifest
         return manifest
 
     @staticmethod
@@ -150,6 +160,8 @@ class OfficialPreviewIndex:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, self.manifest_path)
+        self._manifest_cache_stamp = None
+        self._manifest_cache = None
 
     def _manifest_payload(
         self,

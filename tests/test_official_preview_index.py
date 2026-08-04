@@ -161,6 +161,47 @@ def test_resolve_rejects_unknown_kind_and_traversal_keys(
     assert store.resolve("sound", "BG_Classroom") is None
 
 
+def test_resolve_reuses_manifest_parse_until_manifest_changes(
+    tmp_path,
+    monkeypatch,
+):
+    root = tmp_path / "previews"
+    root.mkdir()
+    output = root / "one.webp"
+    Image.new("RGB", (20, 20)).save(output)
+    manifest = {
+        "schema_version": 1,
+        "status": "ready",
+        "fingerprint": "one",
+        "counts": {"backgrounds": 1, "avatars": 0, "failed": 0},
+        "records": [{
+            "kind": "background",
+            "key": "BG_One",
+            "normalized_key": "bg_one",
+            "path": "one.webp",
+            "source_fingerprint": "one",
+        }],
+        "failures": [],
+    }
+    manifest_path = root / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    store = OfficialPreviewIndex(root)
+    reads = 0
+    original = Path.read_text
+
+    def counted_read(path, *args, **kwargs):
+        nonlocal reads
+        if path == manifest_path:
+            reads += 1
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counted_read)
+
+    assert store.resolve("background", "BG_One") == output
+    assert store.resolve("background", "BG_One") == output
+    assert reads == 1
+
+
 def test_failed_bundle_produces_partial_and_preserves_successes(
     tmp_path,
     monkeypatch,

@@ -11,7 +11,7 @@ import argparse, io, json, mimetypes, os, re, socket, sys, threading, traceback,
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Dict, List, Any, Optional
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs, unquote, urlencode
+from urllib.parse import urlparse, parse_qs, quote, unquote, urlencode
 
 sys.stdout.reconfigure(encoding="utf-8")
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +25,7 @@ from history_assets import HistoryAssetBrowser, HistoryAssetError  # noqa: E402
 import background_workflow                                      # noqa: E402
 import llm                                                      # noqa: E402
 import model_profiles                                           # noqa: E402
+from official_preview_index import OfficialPreviewIndex         # noqa: E402
 import script2aap as S2A                                        # noqa: E402
 import spine_face_analysis                                      # noqa: E402
 import spine_face_labeler                                       # noqa: E402
@@ -59,6 +60,9 @@ MODEL_PROFILES = model_profiles.ModelProfileStore(
     os.path.join(HERE, "llm_profiles.json")
 )
 THUMBS = os.path.join(HERE, ".thumbs")
+OFFICIAL_PREVIEW_INDEX = OfficialPreviewIndex(
+    Path(HERE) / "out" / "official-previews"
+)
 STORY_FILE_PICKER = StoryFilePicker(
     roots=windows_host_roots(STORY_ROOT),
     upload_dir=os.path.join(HERE, "out", "story-uploads"),
@@ -878,7 +882,7 @@ def _write_settings_config(**updates: str) -> None:
 
 def list_characters(q="", limit=400):
     con = db()
-    sql = ("SELECT c.ident, c.name, c.club, c.spine, c.source, "
+    sql = ("SELECT c.ident, c.name, c.club, c.spine, c.avatar, c.source, "
            "  (SELECT COUNT(*) FROM face f WHERE f.ident=c.ident) AS nface "
            "FROM character c ")
     args = []
@@ -889,10 +893,17 @@ def list_characters(q="", limit=400):
     args.append(limit)
     out = []
     for r in con.execute(sql, args):
+        avatar_key = Path(
+            str(r["avatar"] or "").replace("\\", "/")
+        ).name or str(r["spine"] or "")
+        avatar = character_avatar_path(r["avatar"], r["spine"])
         out.append({"ident": r["ident"], "name": r["name"] or r["ident"],
                     "club": r["club"] or "", "spine": r["spine"] or "",
                     "faces": r["nface"], "source": r["source"],
-                    "avatar": bool(r["spine"])})
+                    "avatar": (
+                        "/thumb/av/" + quote(avatar_key, safe="")
+                        if avatar and avatar_key else ""
+                    )})
     return out
 
 
@@ -911,13 +922,13 @@ def list_backgrounds(q="", only_ready=False, limit=300):
     # 避免把无标签的哈希名（00000-*）顶到前面。
     sql += "ORDER BY (hash IS NULL), name LIMIT ?"
     args.append(max(limit * 4, 1000))
-    files = bg_files()
     out = []
     for r in con.execute(sql, args):
         out.append({"name": r["name"], "ready": r["hash"] is not None,
                     "label": r["label"] or "", "place": r["place"] or "",
                     "time": r["time"] or "", "mood": r["mood"] or "",
-                    "tags": r["tags"] or "", "img": r["name"] in files})
+                    "tags": r["tags"] or "",
+                    "img": _background_preview_available(r["name"])})
     out.sort(key=lambda item: (not item["img"], not bool(item["label"]), item["name"].casefold()))
     return out[:limit]
 
@@ -928,7 +939,10 @@ _BGF = {}
 def bg_files():
     if _BGF:
         return _BGF
-    root = os.path.join(CFG["overrides"], "bgs")
+    overrides = CFG.get("overrides")
+    if not overrides:
+        return _BGF
+    root = os.path.join(overrides, "bgs")
     for dp, _, fns in os.walk(root):
         for fn in fns:
             stem, ext = os.path.splitext(fn)
@@ -937,11 +951,31 @@ def bg_files():
     return _BGF
 
 
+def background_preview_path(name: str) -> Path | None:
+    custom = bg_files().get(str(name))
+    if custom and Path(custom).is_file():
+        return Path(custom)
+    return OFFICIAL_PREVIEW_INDEX.resolve("background", str(name))
+
+
+def _background_preview_available(name: str) -> bool:
+    return background_preview_path(name) is not None
+
+
 def avatar_path(spine):
-    if not spine:
+    overrides = CFG.get("overrides")
+    if not spine or not overrides:
         return None
-    p = os.path.join(CFG["overrides"], spine.replace("\\", os.sep) + "-avatar.png")
+    p = os.path.join(overrides, spine.replace("\\", os.sep) + "-avatar.png")
     return p if os.path.exists(p) else None
+
+
+def character_avatar_path(avatar: str, spine: str) -> Path | None:
+    custom = avatar_path(spine)
+    if custom:
+        return Path(custom)
+    key = Path(str(avatar or "").replace("\\", "/")).name
+    return OFFICIAL_PREVIEW_INDEX.resolve("avatar", key) if key else None
 
 
 def thumb(src, px, key):
@@ -2347,13 +2381,29 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, MODEL_PROFILES.public_state())
             if p.startswith("/thumb/bg/"):
                 name = p[len("/thumb/bg/"):]
-                f = bg_files().get(name)
+                f = background_preview_path(name)
                 if not f:
                     return self._send(404, {"e": "no image"})
                 return self._send(200, thumb(f, int(q.get("px", 240)), "bg_" + name),
                                   "image/jpeg")
             if p.startswith("/thumb/av/"):
-                f = avatar_path(unquote(p[len("/thumb/av/"):]))
+                key = unquote(p[len("/thumb/av/"):])
+                f = None
+                con = db()
+                try:
+                    for row in con.execute("SELECT avatar,spine FROM character"):
+                        avatar_key = Path(
+                            str(row["avatar"] or "").replace("\\", "/")
+                        ).name
+                        if key in {avatar_key, str(row["spine"] or "")}:
+                            f = character_avatar_path(
+                                row["avatar"], row["spine"]
+                            )
+                            break
+                finally:
+                    con.close()
+                if not f:
+                    f = character_avatar_path(key, key)
                 if not f:
                     return self._send(404, {"e": "no avatar"})
                 return self._send(200, thumb(f, int(q.get("px", 96)), "av_" + p[-40:]),
