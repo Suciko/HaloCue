@@ -3,13 +3,23 @@
 import base64
 import json
 import struct
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 
 # Extracted from AA's local ScenarioCharacterNameExcel table.  The first four
 # bytes are the table's uint-XOR key; the full key decrypts its UTF-16 strings.
 CHARACTER_NAME_KEY = bytes.fromhex("268bd50b5cce8633")
 CHARACTER_NAME_UINT_KEY = int.from_bytes(CHARACTER_NAME_KEY[:4], "little")
+
+
+@dataclass(frozen=True)
+class CatalogBundleLocation:
+    internal_id: str
+    bundle_name: str
+    content_hash: str
+    data_path: Path | None
 
 
 def decrypt_ba_text(token: str, key: bytes = CHARACTER_NAME_KEY) -> str:
@@ -98,17 +108,82 @@ def read_character_table_bundle(data_path: str | Path) -> list[dict]:
 
 def _catalog_entries(encoded: str) -> dict[int, tuple[int, ...]]:
     """Read Addressables' compact 7-int ResourceLocation records."""
-    raw = base64.b64decode(encoded)
+    return _catalog_entries_raw(base64.b64decode(encoded))
+
+
+def _catalog_entries_raw(raw: bytes) -> dict[int, tuple[int, ...]]:
     count = (len(raw) - 4) // 28
     rows = (struct.unpack_from("<7i", raw, 4 + index * 28) for index in range(count))
     return {row[0]: row for row in rows}
 
 
 def _bundle_options(encoded: str, offset: int) -> dict:
-    raw = base64.b64decode(encoded)
+    return _bundle_options_raw(base64.b64decode(encoded), offset)
+
+
+def _bundle_options_raw(raw: bytes, offset: int) -> dict:
     json_start = raw.index(b"{\x00", offset)
     size = _u32(raw, json_start - 4)
     return json.loads(raw[json_start:json_start + size].decode("utf-16-le"))
+
+
+def _cached_bundle_path(
+    cache_root: Path,
+    bundle_name: str,
+    content_hash: str,
+) -> Path | None:
+    bundle_root = cache_root / bundle_name
+    exact = bundle_root / content_hash / "__data"
+    if exact.is_file():
+        return exact
+    cached = sorted(bundle_root.glob("*/__data")) if bundle_root.is_dir() else []
+    return cached[0] if len(cached) == 1 else None
+
+
+def catalog_bundle_locations(
+    catalog_path: str | Path,
+    cache_root: str | Path,
+    *,
+    internal_predicate: Callable[[str], bool],
+) -> tuple[CatalogBundleLocation, ...]:
+    """Map selected Addressables internal IDs to local cache bundles."""
+    catalog = json.loads(Path(catalog_path).read_text(encoding="utf-8-sig"))
+    internal_ids = catalog["m_InternalIds"]
+    entries = _catalog_entries_raw(
+        base64.b64decode(catalog["m_EntryDataString"])
+    )
+    extra_data = base64.b64decode(catalog["m_ExtraDataString"])
+    selected: list[CatalogBundleLocation] = []
+    seen: set[tuple[str, str]] = set()
+    for internal_index, internal_id in enumerate(internal_ids):
+        if not internal_predicate(internal_id):
+            continue
+        entry = entries[internal_index]
+        bundle_index = entry[2]
+        if bundle_index >= 0:
+            bundle_entry = entries[bundle_index]
+        elif internal_id.casefold().endswith(".bundle"):
+            bundle_entry = entry
+        else:
+            continue
+        options = _bundle_options_raw(extra_data, bundle_entry[4])
+        bundle_name = str(options["m_BundleName"])
+        content_hash = str(options["m_Hash"])
+        bundle_key = (bundle_name, content_hash)
+        if bundle_key in seen:
+            continue
+        seen.add(bundle_key)
+        selected.append(
+            CatalogBundleLocation(
+                internal_id=internal_id,
+                bundle_name=bundle_name,
+                content_hash=content_hash,
+                data_path=_cached_bundle_path(
+                    Path(cache_root), bundle_name, content_hash
+                ),
+            )
+        )
+    return tuple(selected)
 
 
 def locate_character_table_bundle(catalog_path: str | Path, cache_root: str | Path) -> Path:
@@ -118,28 +193,19 @@ def locate_character_table_bundle(catalog_path: str | Path, cache_root: str | Pa
     this intentionally reads the local Addressables catalog instead of using a
     fixed cache path.
     """
-    catalog = json.loads(Path(catalog_path).read_text(encoding="utf-8"))
-    internal = catalog["m_InternalIds"]
-    target = next(
-        index for index, value in enumerate(internal)
-        if value.lower().endswith("scenariocharacternameexceltable.bytes")
+    locations = catalog_bundle_locations(
+        catalog_path,
+        cache_root,
+        internal_predicate=lambda value: value.casefold().endswith(
+            "scenariocharacternameexceltable.bytes"
+        ),
     )
-    entries = _catalog_entries(catalog["m_EntryDataString"])
-    table_entry = entries[target]
-    bundle_internal_index = table_entry[2]
-    bundle_entry = entries[bundle_internal_index]
-    options = _bundle_options(catalog["m_ExtraDataString"], bundle_entry[4])
-    bundle_root = Path(cache_root) / options["m_BundleName"]
-    path = bundle_root / options["m_Hash"] / "__data"
-    if path.is_file():
-        return path
-
-    # AA's Unity cache can retain a valid current entry under its own cache
-    # version hash rather than the catalog content hash.  Use it only when the
-    # bundle-name directory has one unambiguous cached version.
-    cached = sorted(bundle_root.glob("*/__data")) if bundle_root.is_dir() else []
-    if len(cached) == 1:
-        return cached[0]
+    if locations and locations[0].data_path is not None:
+        return locations[0].data_path
+    bundle_root = (
+        Path(cache_root) / locations[0].bundle_name
+        if locations else Path(cache_root)
+    )
     raise FileNotFoundError(
         f"AA 缓存缺少或无法唯一确定官方角色表 bundle: {bundle_root}"
     )

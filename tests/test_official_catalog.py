@@ -1,7 +1,60 @@
 import base64
+import json
+import struct
 from pathlib import Path
 
 import pytest
+
+
+def _entry_data(*rows):
+    raw = bytearray(4)
+    for row in rows:
+        raw.extend(struct.pack("<7i", *row))
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _extra_data(*options):
+    raw = bytearray()
+    offsets = []
+    for option in options:
+        offsets.append(len(raw))
+        encoded = json.dumps(option).encode("utf-16-le")
+        raw.extend(struct.pack("<I", len(encoded)))
+        raw.extend(encoded)
+    return base64.b64encode(raw).decode("ascii"), offsets
+
+
+def _write_catalog_fixture(path):
+    background_id = (
+        "Assets/AddressableResources/UIs/"
+        "03_Scenario/01_Background/BG_Classroom.jpg"
+    )
+    avatar_bundle_id = (
+        "Assets/AddressableResources/UIs/"
+        "01_Common/01_Character/avatars_assets_all.bundle"
+    )
+    extra, offsets = _extra_data(
+        {"m_BundleName": "outer-avatar", "m_Hash": "content-avatar"},
+        {"m_BundleName": "outer-audio", "m_Hash": "content-audio"},
+        {"m_BundleName": "outer-bg", "m_Hash": "content-bg"},
+    )
+    catalog = {
+        "m_InternalIds": [
+            background_id,
+            avatar_bundle_id,
+            "Assets/Audio/voice_assets_all.bundle",
+            "Assets/Background/background_assets_all.bundle",
+        ],
+        "m_EntryDataString": _entry_data(
+            (0, 0, 3, 0, 0, 0, 0),
+            (1, 0, -1, 0, offsets[0], 0, 0),
+            (2, 0, -1, 0, offsets[1], 0, 0),
+            (3, 0, -1, 0, offsets[2], 0, 0),
+        ),
+        "m_ExtraDataString": extra,
+    }
+    path.write_text(json.dumps(catalog), encoding="utf-8")
+    return background_id, avatar_bundle_id
 
 
 def _encrypt_for_fixture(text, key):
@@ -15,6 +68,105 @@ def test_decrypts_official_table_text_with_the_character_table_key():
     token = _encrypt_for_fixture("日步美", CHARACTER_NAME_KEY)
 
     assert decrypt_ba_text(token) == "日步美"
+
+
+def test_catalog_resolves_asset_and_bundle_internal_ids(tmp_path):
+    from official_catalog import catalog_bundle_locations
+
+    catalog_path = tmp_path / "catalog.json"
+    background_id, avatar_bundle_id = _write_catalog_fixture(catalog_path)
+    cache_root = tmp_path / "cache"
+    background_data = cache_root / "outer-bg" / "content-bg" / "__data"
+    background_data.parent.mkdir(parents=True)
+    background_data.write_bytes(b"UnityFS")
+    avatar_data = (
+        cache_root / "outer-avatar" / "content-avatar" / "__data"
+    )
+    avatar_data.parent.mkdir(parents=True)
+    avatar_data.write_bytes(b"UnityFS")
+
+    backgrounds = catalog_bundle_locations(
+        catalog_path,
+        cache_root,
+        internal_predicate=lambda value: (
+            "/01_background/" in value.casefold()
+        ),
+    )
+    avatars = catalog_bundle_locations(
+        catalog_path,
+        cache_root,
+        internal_predicate=lambda value: value.casefold().endswith(
+            "/avatars_assets_all.bundle"
+        ),
+    )
+
+    assert [
+        (row.internal_id, row.bundle_name, row.content_hash)
+        for row in backgrounds
+    ] == [(background_id, "outer-bg", "content-bg")]
+    assert backgrounds[0].data_path == background_data
+    assert avatars[0].internal_id == avatar_bundle_id
+    assert avatars[0].data_path == avatar_data
+
+
+def test_catalog_uses_only_one_unambiguous_cached_version(tmp_path):
+    from official_catalog import catalog_bundle_locations
+
+    catalog_path = tmp_path / "catalog.json"
+    _write_catalog_fixture(catalog_path)
+    cache_root = tmp_path / "cache"
+    fallback = cache_root / "outer-bg" / "downloaded-version" / "__data"
+    fallback.parent.mkdir(parents=True)
+    fallback.write_bytes(b"UnityFS")
+
+    rows = catalog_bundle_locations(
+        catalog_path,
+        cache_root,
+        internal_predicate=lambda value: (
+            "/01_background/" in value.casefold()
+        ),
+    )
+    assert rows[0].data_path == fallback
+
+    second = cache_root / "outer-bg" / "older-version" / "__data"
+    second.parent.mkdir(parents=True)
+    second.write_bytes(b"UnityFS")
+    ambiguous = catalog_bundle_locations(
+        catalog_path,
+        cache_root,
+        internal_predicate=lambda value: (
+            "/01_background/" in value.casefold()
+        ),
+    )
+    assert ambiguous[0].data_path is None
+
+
+def test_catalog_decodes_large_binary_sections_once(tmp_path, monkeypatch):
+    import official_catalog
+
+    catalog_path = tmp_path / "catalog.json"
+    _write_catalog_fixture(catalog_path)
+    calls = 0
+    original = official_catalog.base64.b64decode
+
+    def counted_decode(value):
+        nonlocal calls
+        calls += 1
+        return original(value)
+
+    monkeypatch.setattr(
+        official_catalog.base64,
+        "b64decode",
+        counted_decode,
+    )
+
+    official_catalog.catalog_bundle_locations(
+        catalog_path,
+        tmp_path / "cache",
+        internal_predicate=lambda value: True,
+    )
+
+    assert calls == 2
 
 
 @pytest.mark.skipif(
