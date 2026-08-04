@@ -29,6 +29,17 @@ def test_asset_polish_preserves_mobile_touch_targets_and_overflow_guards():
     assert css.count(".story-context-bar{position:static;top:auto;align-items:flex-start;flex-direction:column}") >= 2
 
 
+def test_aa_settings_rows_and_progress_have_stable_responsive_geometry():
+    css = (HERE / "css" / "layout.css").read_text(encoding="utf-8")
+    assert ".aa-status-row{display:grid;grid-template-columns:88px minmax(0,1fr)" in css
+    assert ".aa-status-value{overflow-wrap:anywhere" in css
+    assert ".aa-index-progress{height:" in css
+    assert "#buildAAIndex{min-height:44px" in css
+    assert ".aa-install-actions button{min-height:44px" in css
+    assert "@media(max-width:640px)" in css
+    assert ".aa-status-row{grid-template-columns:1fr" in css
+
+
 def test_workflow_progressively_reveals_only_actionable_stages():
     html = (HERE / "ui.html").read_text(encoding="utf-8")
     css = (HERE / "css" / "layout.css").read_text(encoding="utf-8")

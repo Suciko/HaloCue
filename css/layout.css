@@ -166,6 +166,16 @@ html.drawer-open::-webkit-scrollbar,html.drawer-open body::-webkit-scrollbar,bod
 .help-backdrop{position:fixed;inset:0;background:#0b122066;opacity:0;pointer-events:none;
   transition:opacity .2s ease;z-index:10}
 .help-backdrop.open{opacity:1;pointer-events:auto}
+.aa-install-controls{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:stretch}
+.aa-install-actions{display:flex;gap:8px}.aa-install-actions button{min-height:44px;white-space:nowrap}
+.aa-status-list{margin-top:14px}.aa-status-row{display:grid;grid-template-columns:88px minmax(0,1fr);gap:12px;align-items:start;padding:9px 0}
+.aa-status-value{overflow-wrap:anywhere;letter-spacing:0;line-height:1.5}
+.aa-index-tools{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;min-height:44px;margin-top:12px}
+.aa-index-progress{height:8px;width:100%;visibility:hidden}.aa-index-progress.is-active{visibility:visible}
+#buildAAIndex{min-height:44px;white-space:nowrap}
+.aa-workspace-conflict{margin-top:14px;padding-top:14px}.aa-workspace-conflict[hidden]{display:none}
+.aa-workspace-candidates{display:grid;margin:8px 0 12px}.aa-workspace-candidate{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 8px;align-items:start;padding:9px 0;overflow-wrap:anywhere}
+.aa-workspace-candidate input{grid-row:1/3;margin-top:3px}.aa-workspace-candidate b,.aa-workspace-candidate span{grid-column:2;min-width:0}
 .help-drawer{position:fixed;top:0;right:0;width:min(720px,calc(100vw - 82px));height:100vh;
   padding:28px;background:var(--bg);overflow:auto;z-index:11;box-shadow:-24px 0 70px #14203324;
   transform:translateX(102%);visibility:hidden;transition:transform .22s cubic-bezier(.2,.75,.2,1),visibility .22s}
@@ -271,6 +281,10 @@ html.drawer-open::-webkit-scrollbar,html.drawer-open body::-webkit-scrollbar,bod
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 
 /* 审查工作区补充样式（新版新增元素） */
+@media(max-width:640px){
+  .aa-install-controls,.aa-index-tools{grid-template-columns:1fr}.aa-install-actions{display:grid;grid-template-columns:1fr 1fr}
+  .aa-status-row{grid-template-columns:1fr;gap:3px}.aa-install-actions button,#buildAAIndex{width:100%;min-height:44px}
+}
 .workspace-stack{min-width:0}
 .card-list{display:grid;gap:6px}
 .review-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,320px);gap:16px;align-items:start}.review-layout #reviewWorkspace{margin:18px 0}.review-preview{position:sticky;top:176px;min-height:180px;margin:18px 0;padding:16px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);box-shadow:var(--shadow-1)}

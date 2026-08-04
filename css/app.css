@@ -192,6 +192,16 @@ button:disabled {
 }
 .settings-path-row { align-items: stretch; }
 .settings-path-row button { flex: 0 0 auto; }
+.aa-status-list { border-top: 1px solid var(--line); }
+.aa-status-row { border-bottom: 1px solid var(--line); }
+.aa-status-row > span { color: var(--dim); font-size: 12px; font-weight: 700; }
+.aa-status-value { color: var(--fg); font-size: 12px; font-weight: 650; }
+.aa-status-value[data-state="ready"] { color: var(--ok); }
+.aa-status-value[data-state="attention"] { color: var(--warn); }
+.aa-status-value[data-state="failed"] { color: var(--err); }
+.aa-workspace-conflict { border-top: 1px solid var(--line); }
+.aa-workspace-candidate { border-bottom: 1px solid var(--line); }
+.aa-workspace-candidate span { color: var(--dim); font-size: 11px; }
 .cast-edit { min-height: 34px; padding: 4px 10px; font-size: 12px; }
 .cast-results { display: grid; gap: 6px; max-height: 320px; overflow: auto; }
 .cast-result { display: block; width: 100%; text-align: left; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); min-height: 44px; }
