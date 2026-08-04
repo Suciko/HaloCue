@@ -8,6 +8,7 @@ AA 剧本编译器 · 本地网页界面
 只用标准库 + PIL（缩略图），不需要装框架。
 """
 import argparse, io, json, mimetypes, os, re, socket, sys, threading, traceback, uuid, webbrowser
+from dataclasses import replace
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Dict, List, Any, Optional
 from pathlib import Path
@@ -21,11 +22,16 @@ import aapaths                                                  # noqa: E402
 import asset_catalog                                            # noqa: E402
 import asset_import                                             # noqa: E402
 import assetdb                                                  # noqa: E402
+from aa_install_discovery import AADiscoveryResult, discover_aa  # noqa: E402
+from aa_resource_cache import probe_resource_cache               # noqa: E402
 from history_assets import HistoryAssetBrowser, HistoryAssetError  # noqa: E402
 import background_workflow                                      # noqa: E402
 import llm                                                      # noqa: E402
 import model_profiles                                           # noqa: E402
-from official_preview_index import OfficialPreviewIndex         # noqa: E402
+from official_preview_index import (                             # noqa: E402
+    OfficialPreviewIndex,
+    PreviewIndexState,
+)
 import script2aap as S2A                                        # noqa: E402
 import spine_face_analysis                                      # noqa: E402
 import spine_face_labeler                                       # noqa: E402
@@ -106,6 +112,19 @@ FACE_JOB = {
     "log": [],
 }
 FACE_JOB_LOCK = threading.Lock()
+RESOURCE_INDEX_LOCK = threading.RLock()
+
+
+def _empty_resource_index_job() -> dict:
+    return {
+        "status": "not_built",
+        "backgrounds": 0,
+        "avatars": 0,
+        "failed": 0,
+    }
+
+
+RESOURCE_INDEX_JOB = _empty_resource_index_job()
 
 
 class StoryProjectMismatchError(ValueError):
@@ -803,9 +822,136 @@ def db():
     return assetdb.connect(DB)
 
 
+def _settings_values() -> dict[str, object]:
+    config_path = Path(HERE) / "aa_config.json"
+    if not config_path.is_file():
+        return {}
+    try:
+        loaded = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _current_aa_discovery() -> AADiscoveryResult:
+    """Refresh AA's own paths without modifying the installed application."""
+    config_path = Path(HERE) / "aa_config.json"
+    values = _settings_values()
+    configured_executable = str(values.get("aa_executable") or "").strip()
+    configured_data = str(CFG.get("aa_data") or "").strip()
+    if configured_executable:
+        program = discover_aa(
+            selection=configured_executable,
+            config_path=config_path,
+        )
+        if not configured_data:
+            return program
+        try:
+            same_data = (
+                program.data is not None
+                and os.path.normcase(str(program.data.resolve()))
+                == os.path.normcase(str(Path(configured_data).resolve()))
+            )
+        except (OSError, ValueError):
+            same_data = False
+        if same_data:
+            return program
+        explicit = discover_aa(
+            selection=configured_data,
+            config_path=config_path,
+        )
+        return replace(
+            explicit,
+            executable=program.executable,
+            install_root=program.install_root,
+            identity=program.identity,
+            local_low_root=program.local_low_root,
+            resource_cache=explicit.resource_cache or program.resource_cache,
+            catalog=program.catalog,
+            recent_project_files=program.recent_project_files,
+        )
+    if configured_data:
+        return discover_aa(selection=configured_data, config_path=config_path)
+    return discover_aa(config_path=config_path)
+
+
+def _preview_public_state(state: PreviewIndexState | dict | None) -> dict:
+    if isinstance(state, PreviewIndexState):
+        payload = {
+            "status": state.status,
+            "backgrounds": int(state.backgrounds),
+            "avatars": int(state.avatars),
+            "failed": int(state.failed),
+        }
+        if state.status == "building":
+            payload.update(current=int(state.current), total=int(state.total))
+        return payload
+    if isinstance(state, dict):
+        payload = {
+            key: state[key]
+            for key in ("status", "backgrounds", "avatars", "failed")
+            if key in state
+        }
+        if state.get("status") == "building":
+            payload.update(current=int(state.get("current", 0)), total=int(state.get("total", 0)))
+        if state.get("status") == "failed":
+            payload["action"] = "请检查 AA 资源包后重试索引"
+        return payload
+    return _empty_resource_index_job()
+
+
+def _preview_state_for_discovery(discovery: AADiscoveryResult) -> PreviewIndexState:
+    if discovery.catalog is None or discovery.resource_cache is None:
+        return PreviewIndexState("not_built", 0, 0, 0, "")
+    try:
+        return OFFICIAL_PREVIEW_INDEX.state(discovery.catalog, discovery.resource_cache)
+    except (OSError, ValueError, TypeError):
+        return PreviewIndexState("stale", 0, 0, 0, "")
+
+
+def _public_aa_status(
+    discovery: AADiscoveryResult,
+    preview_state: PreviewIndexState | dict | None = None,
+) -> dict:
+    executable = discovery.executable
+    if executable is None:
+        program = {"status": "missing", "path": ""}
+    elif discovery.identity is None:
+        program = {"status": "invalid", "path": str(executable)}
+    else:
+        program = {"status": "recognized", "path": str(executable)}
+    projects = {
+        "status": "ready" if discovery.projects is not None else "missing",
+        "path": str(discovery.projects or ""),
+    }
+    saves = {
+        "status": "ready" if discovery.saves is not None else "missing",
+        "path": str(discovery.saves or ""),
+    }
+    if discovery.resource_cache is None:
+        resource = {"status": "not_installed", "path": ""}
+    else:
+        probe = probe_resource_cache(discovery.resource_cache)
+        resource = {"status": probe.status, "path": str(discovery.resource_cache)}
+    index = _preview_public_state(preview_state or _preview_state_for_discovery(discovery))
+    data = discovery.data or (Path(str(CFG.get("aa_data"))) if CFG.get("aa_data") else None)
+    return {
+        "connected": bool(discovery.projects),
+        "path": str(data or ""),
+        "program": program,
+        "projects": projects,
+        "saves": saves,
+        "resource": resource,
+        "preview_index": index,
+    }
+
+
 def setup_status():
     """Return non-sensitive readiness for the first-use UI and launcher."""
-    aa_data = str(CFG.get("aa_data") or "")
+    discovery = _current_aa_discovery()
+    with RESOURCE_INDEX_LOCK:
+        job = dict(RESOURCE_INDEX_JOB)
+    preview_state = job if job.get("status") in {"building", "failed"} else None
     database_ready = os.path.isfile(DB)
     stats = {}
     if database_ready:
@@ -841,15 +987,7 @@ def setup_status():
         configured_spine or None, config_path=config_path
     )
     return {
-        "aa": {
-            "connected": bool(
-                aa_data
-                and os.path.isdir(
-                    os.path.join(aa_data, "projects")
-                )
-            ),
-            "path": aa_data,
-        },
+        "aa": _public_aa_status(discovery, preview_state),
         "database": {
             "ready": database_ready,
             "stats": stats,
@@ -866,18 +1004,84 @@ def setup_status():
 
 def _write_settings_config(**updates: str) -> None:
     config_path = Path(HERE) / "aa_config.json"
-    values: dict[str, object] = {}
-    if config_path.is_file():
-        try:
-            loaded = json.loads(config_path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                values.update(loaded)
-        except (OSError, ValueError, TypeError):
-            pass
-    values.update({key: value for key, value in updates.items() if value})
+    values = _settings_values()
+    for key, value in updates.items():
+        if value:
+            values[key] = value
+        else:
+            values.pop(key, None)
     config_path.write_text(
         json.dumps(values, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+
+
+def _resource_index_snapshot(discovery: AADiscoveryResult | None = None) -> dict:
+    with RESOURCE_INDEX_LOCK:
+        current = dict(RESOURCE_INDEX_JOB)
+    if current.get("status") == "not_built":
+        current = _preview_public_state(
+            _preview_state_for_discovery(discovery or _current_aa_discovery())
+        )
+    return {"ok": True, "preview_index": _preview_public_state(current)}
+
+
+def _update_resource_index_job(state: PreviewIndexState | dict) -> None:
+    public = _preview_public_state(state)
+    with RESOURCE_INDEX_LOCK:
+        RESOURCE_INDEX_JOB.clear()
+        RESOURCE_INDEX_JOB.update(public)
+
+
+def _resource_index_worker(discovery: AADiscoveryResult) -> None:
+    try:
+        result = OFFICIAL_PREVIEW_INDEX.build(
+            discovery.catalog,
+            discovery.resource_cache,
+            progress=_update_resource_index_job,
+        )
+        _update_resource_index_job(result)
+    except Exception:
+        with RESOURCE_INDEX_LOCK:
+            counts = {
+                key: int(RESOURCE_INDEX_JOB.get(key, 0))
+                for key in ("backgrounds", "avatars", "failed")
+            }
+            RESOURCE_INDEX_JOB.clear()
+            RESOURCE_INDEX_JOB.update(status="failed", **counts)
+
+
+def _start_resource_index() -> tuple[int, dict]:
+    discovery = _current_aa_discovery()
+    if discovery.catalog is None or discovery.resource_cache is None:
+        return 409, {
+            "ok": False,
+            "code": "aa_resources_not_ready",
+            "e": "请先识别 AA 程序并确认官方资源包已安装",
+        }
+    with RESOURCE_INDEX_LOCK:
+        if RESOURCE_INDEX_JOB.get("status") == "building":
+            return 409, {
+                "ok": False,
+                "code": "index_already_running",
+                "e": "官方资源预览索引正在建立",
+                "preview_index": _preview_public_state(RESOURCE_INDEX_JOB),
+            }
+        RESOURCE_INDEX_JOB.clear()
+        RESOURCE_INDEX_JOB.update(
+            status="building",
+            backgrounds=0,
+            avatars=0,
+            failed=0,
+            current=0,
+            total=0,
+        )
+        snapshot = _preview_public_state(RESOURCE_INDEX_JOB)
+    threading.Thread(
+        target=_resource_index_worker,
+        args=(discovery,),
+        daemon=True,
+    ).start()
+    return 202, {"ok": True, "preview_index": snapshot}
 
 
 def list_characters(q="", limit=400):
@@ -2112,6 +2316,25 @@ class H(BaseHTTPRequestHandler):
                     "aa_ok": os.path.isdir(CFG["aa_data"])})
             if p == "/api/setup/status":
                 return self._send(200, setup_status())
+            if p == "/api/resources/index":
+                return self._send(200, _resource_index_snapshot())
+            if p == "/api/resources/preview":
+                kind = q.get("kind", "")
+                key = q.get("key", "")
+                preview = OFFICIAL_PREVIEW_INDEX.resolve(kind, key)
+                if preview is None:
+                    return self._send(404, {
+                        "ok": False,
+                        "code": "official_preview_not_found",
+                        "e": "官方资源预览不存在",
+                    })
+                content_type = {
+                    ".webp": "image/webp",
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                }.get(preview.suffix.casefold(), "application/octet-stream")
+                return self._send_preview_file(preview, content_type)
             if p == "/api/browse":
                 return self._send(
                     200,
@@ -2513,6 +2736,88 @@ class H(BaseHTTPRequestHandler):
                     })
                 except StoryFilePickerError as exc:
                     return self._send(exc.status, {"ok": False, "code": exc.code, "e": str(exc)})
+
+            if p == "/api/settings/aa-install":
+                try:
+                    entry_token = str(data.get("entry_token") or "").strip()
+                    typed_install = str(data.get("aa_install") or "").strip()
+                    if entry_token:
+                        selection = SETTINGS_FILE_PICKER.resolve_entry_path(entry_token)
+                    elif typed_install:
+                        selection = Path(typed_install).expanduser()
+                    else:
+                        return self._send(400, {
+                            "ok": False,
+                            "code": "aa_install_required",
+                            "e": "请选择 AzureArchive.exe 或 AA 安装目录",
+                        })
+                    config_path = Path(HERE) / "aa_config.json"
+                    discovery = discover_aa(
+                        selection=selection,
+                        config_path=config_path,
+                    )
+                    selected_data = str(data.get("aa_data") or "").strip()
+                    if discovery.requires_selection:
+                        candidates = [
+                            {"path": str(row.path), "source": row.source}
+                            for row in discovery.data_candidates
+                            if row.valid
+                        ]
+                        if not selected_data:
+                            return self._send(409, {
+                                "ok": False,
+                                "code": "aa_workspace_selection_required",
+                                "e": "发现多个 AA 工作区，请明确选择一个",
+                                "candidates": candidates,
+                            })
+                        selected_path = Path(selected_data).expanduser().resolve()
+                        allowed = {
+                            os.path.normcase(str(row.path.resolve()))
+                            for row in discovery.data_candidates
+                            if row.valid
+                        }
+                        if os.path.normcase(str(selected_path)) not in allowed:
+                            return self._send(400, {
+                                "ok": False,
+                                "code": "invalid_aa_workspace_selection",
+                                "e": "选择的 AA 工作区不在本次发现结果中",
+                            })
+                        discovery = discover_aa(
+                            selection=selected_path,
+                            config_path=config_path,
+                        )
+                    if discovery.projects is None or not discovery.projects.is_dir():
+                        return self._send(400, {
+                            "ok": False,
+                            "code": "aa_workspace_not_found",
+                            "e": "没有找到有效的 AA projects 工作区",
+                        })
+                    _write_settings_config(
+                        aa_executable=str(discovery.executable or ""),
+                        aa_data=str(discovery.data or ""),
+                        aa_cache=str(discovery.resource_cache or ""),
+                    )
+                    return self._send(200, {
+                        "ok": True,
+                        "restart_required": True,
+                        "aa": _public_aa_status(discovery),
+                    })
+                except StoryFilePickerError as exc:
+                    return self._send(exc.status, {
+                        "ok": False,
+                        "code": exc.code,
+                        "e": str(exc),
+                    })
+                except (OSError, TypeError, ValueError) as exc:
+                    return self._send(400, {
+                        "ok": False,
+                        "code": "invalid_aa_install",
+                        "e": str(exc),
+                    })
+
+            if p == "/api/resources/index":
+                status, payload = _start_resource_index()
+                return self._send(status, payload)
 
             if p == "/api/stories/open":
                 try:

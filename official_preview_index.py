@@ -30,6 +30,8 @@ class PreviewIndexState:
     avatars: int
     failed: int
     fingerprint: str
+    current: int = 0
+    total: int = 0
 
 
 @dataclass(frozen=True)
@@ -376,6 +378,8 @@ class OfficialPreviewIndex:
                         sum(row["kind"] == "avatar" for row in records),
                         len(failures),
                         fingerprint,
+                        current=index,
+                        total=len(work),
                     )
                 )
 
@@ -384,7 +388,14 @@ class OfficialPreviewIndex:
             status, fingerprint, records, failures
         )
         self._write_manifest(manifest)
-        return self._manifest_state(manifest, status)
+        result = self._manifest_state(manifest, status)
+        return PreviewIndexState(
+            **{
+                **result.__dict__,
+                "current": len(work),
+                "total": len(work),
+            }
+        )
 
     def resolve(
         self,

@@ -1,11 +1,13 @@
 import json
 import threading
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from urllib.request import urlopen
 
 import assetdb
 import spine_face_analysis
 import webui
+from aa_install_discovery import AADiscoveryResult, UnityIdentity
 
 
 class ActiveProfileStore:
@@ -36,9 +38,23 @@ def test_setup_status_reports_readiness_without_secret_fields(
 
     status = webui.setup_status()
 
-    assert status["aa"] == {
-        "connected": True,
-        "path": str(data),
+    assert status["aa"]["connected"] is True
+    assert status["aa"]["path"] == str(data)
+    assert status["aa"]["program"] == {"status": "missing", "path": ""}
+    assert status["aa"]["projects"] == {
+        "status": "ready",
+        "path": str(data / "projects"),
+    }
+    assert status["aa"]["saves"] == {"status": "missing", "path": ""}
+    assert status["aa"]["resource"] == {
+        "status": "not_installed",
+        "path": "",
+    }
+    assert status["aa"]["preview_index"] == {
+        "status": "not_built",
+        "backgrounds": 0,
+        "avatars": 0,
+        "failed": 0,
     }
     assert status["database"]["ready"] is True
     assert status["model"] == {
@@ -82,6 +98,57 @@ def test_setup_status_is_available_over_local_http(
         server.shutdown()
         thread.join()
         server.server_close()
+
+
+def test_setup_status_refreshes_from_saved_executable_after_restart(
+    tmp_path,
+    monkeypatch,
+):
+    program = tmp_path / "program"
+    program.mkdir()
+    executable = tmp_path / "AzureArchive" / "App" / "AzureArchive.exe"
+    data = tmp_path / "storage" / "data"
+    projects = data / "projects"
+    projects.mkdir(parents=True)
+    (program / "aa_config.json").write_text(
+        json.dumps({
+            "aa_executable": str(executable),
+            "aa_data": str(data),
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(webui, "HERE", str(program))
+    monkeypatch.setitem(webui.CFG, "aa_data", str(data))
+
+    def discover(selection=None, **_kwargs):
+        recognized = Path(selection) == executable
+        return AADiscoveryResult(
+            executable=executable if recognized else None,
+            install_root=executable.parents[1] if recognized else None,
+            identity=UnityIdentity("foxxlight", "AzureArchive") if recognized else None,
+            local_low_root=None,
+            data=data,
+            projects=projects,
+            saves=None,
+            overrides=None,
+            settings=None,
+            resource_cache=None,
+            catalog=None,
+            recent_project_files=(),
+            data_candidates=(),
+            requires_selection=False,
+            source="test",
+            issues=(),
+        )
+
+    monkeypatch.setattr(webui, "discover_aa", discover)
+
+    status = webui.setup_status()
+
+    assert status["aa"]["program"] == {
+        "status": "recognized",
+        "path": str(executable),
+    }
 
 
 def test_settings_config_updates_preserve_the_other_runtime_path(tmp_path, monkeypatch):

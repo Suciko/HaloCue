@@ -2,6 +2,7 @@ import contextlib
 import json
 import threading
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -9,6 +10,11 @@ from urllib.request import Request, urlopen
 import pytest
 
 import webui
+from aa_install_discovery import (
+    AADiscoveryResult,
+    PathCandidate,
+    UnityIdentity,
+)
 from picker_token import resolve_file_token
 from story_file_picker import StoryFilePicker, StoryFilePickerError, windows_host_roots
 
@@ -206,6 +212,177 @@ def test_settings_host_route_validates_an_entry_without_exposing_path(tmp_path, 
         "kind": "file",
     }
     assert str(tmp_path) not in json.dumps(selected)
+
+
+def _aa_discovery(tmp_path):
+    install = tmp_path / "AzureArchive"
+    exe = install / "App" / "AzureArchive.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"exe")
+    data = tmp_path / "storage" / "data"
+    for name in ("projects", "saves", "overrides", "settings"):
+        (data / name).mkdir(parents=True)
+    cache = tmp_path / "resources"
+    bundle = cache / "outer" / "content" / "__data"
+    bundle.parent.mkdir(parents=True)
+    bundle.write_bytes(b"UnityFS")
+    catalog = exe.parent / "AzureArchive_Data" / "StreamingAssets" / "aa" / "catalog.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text("{}", encoding="utf-8")
+    return AADiscoveryResult(
+        executable=exe.resolve(),
+        install_root=install.resolve(),
+        identity=UnityIdentity("foxxlight", "AzureArchive"),
+        local_low_root=None,
+        data=data.resolve(),
+        projects=(data / "projects").resolve(),
+        saves=(data / "saves").resolve(),
+        overrides=(data / "overrides").resolve(),
+        settings=(data / "settings").resolve(),
+        resource_cache=cache.resolve(),
+        catalog=catalog.resolve(),
+        recent_project_files=(),
+        data_candidates=(),
+        requires_selection=False,
+        source="test",
+        issues=(),
+    )
+
+
+def test_aa_install_settings_accept_file_and_directory_tokens(
+    tmp_path,
+    monkeypatch,
+):
+    discovery = _aa_discovery(tmp_path)
+    picker = StoryFilePicker(
+        roots=[tmp_path],
+        upload_dir=tmp_path / "uploads",
+        allowed_suffixes=None,
+    )
+    monkeypatch.setattr(webui, "SETTINGS_FILE_PICKER", picker)
+    monkeypatch.setattr(webui, "HERE", str(tmp_path / "program"))
+    Path(webui.HERE).mkdir()
+    (Path(webui.HERE) / "aa_config.json").write_text(
+        json.dumps({"spine_cli": "keep-spine"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        webui,
+        "discover_aa",
+        lambda selection=None, **kwargs: discovery,
+    )
+    monkeypatch.setattr(
+        webui,
+        "OFFICIAL_PREVIEW_INDEX",
+        __import__("official_preview_index").OfficialPreviewIndex(
+            tmp_path / "previews"
+        ),
+    )
+    root = picker.list_directory()
+    install_entry = next(
+        row for row in root["entries"] if row["name"] == "AzureArchive"
+    )
+    app = picker.list_directory(install_entry["entry_token"])
+    app_entry = next(row for row in app["entries"] if row["name"] == "App")
+    app_listing = picker.list_directory(app_entry["entry_token"])
+    exe_entry = next(
+        row for row in app_listing["entries"] if row["name"] == "AzureArchive.exe"
+    )
+
+    with _server(picker, monkeypatch) as base:
+        for token in (exe_entry["entry_token"], install_entry["entry_token"]):
+            status, payload = _request(
+                base,
+                "/api/settings/aa-install",
+                method="POST",
+                data=json.dumps({"entry_token": token}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            assert status == 200
+            assert payload["restart_required"] is True
+            assert payload["aa"]["program"]["status"] == "recognized"
+            assert payload["aa"]["projects"]["path"] == str(discovery.projects)
+            assert payload["aa"]["resource"]["status"] == "installed"
+
+    saved = json.loads(
+        (Path(webui.HERE) / "aa_config.json").read_text(encoding="utf-8")
+    )
+    assert saved == {
+        "spine_cli": "keep-spine",
+        "aa_executable": str(discovery.executable),
+        "aa_data": str(discovery.data),
+        "aa_cache": str(discovery.resource_cache),
+    }
+
+
+def test_aa_install_settings_requires_explicit_workspace_selection(
+    tmp_path,
+    monkeypatch,
+):
+    base_result = _aa_discovery(tmp_path)
+    other = tmp_path / "other" / "data"
+    (other / "projects").mkdir(parents=True)
+    candidates = (
+        PathCandidate(base_result.data, "AA current", True),
+        PathCandidate(other.resolve(), "legacy config", True),
+    )
+    ambiguous = AADiscoveryResult(
+        **{
+            **base_result.__dict__,
+            "data": None,
+            "projects": None,
+            "saves": None,
+            "overrides": None,
+            "settings": None,
+            "data_candidates": candidates,
+            "requires_selection": True,
+        }
+    )
+    picker = StoryFilePicker(
+        roots=[tmp_path], upload_dir=tmp_path / "uploads", allowed_suffixes=None
+    )
+    monkeypatch.setattr(webui, "SETTINGS_FILE_PICKER", picker)
+    monkeypatch.setattr(webui, "HERE", str(tmp_path / "program"))
+    Path(webui.HERE).mkdir()
+
+    def discover(selection=None, **kwargs):
+        if selection and Path(selection).resolve() == base_result.data:
+            return base_result
+        return ambiguous
+
+    monkeypatch.setattr(webui, "discover_aa", discover)
+    install_entry = next(
+        row for row in picker.list_directory()["entries"]
+        if row["name"] == "AzureArchive"
+    )
+
+    with _server(picker, monkeypatch) as server:
+        status, conflict = _request(
+            server,
+            "/api/settings/aa-install",
+            method="POST",
+            data=json.dumps({"entry_token": install_entry["entry_token"]}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        assert status == 409
+        assert conflict["code"] == "aa_workspace_selection_required"
+        assert conflict["candidates"] == [
+            {"path": str(row.path), "source": row.source}
+            for row in candidates
+        ]
+
+        selected_status, selected = _request(
+            server,
+            "/api/settings/aa-install",
+            method="POST",
+            data=json.dumps({
+                "entry_token": install_entry["entry_token"],
+                "aa_data": str(base_result.data),
+            }).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert selected_status == 200
+    assert selected["aa"]["projects"]["status"] == "ready"
 
 
 def test_windows_host_roots_include_useful_existing_locations_without_duplicates(tmp_path):
