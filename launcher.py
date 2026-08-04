@@ -14,6 +14,8 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+from aa_install_discovery import discover_aa, normalize_aa_data_path
+
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -27,38 +29,22 @@ MIN_PYTHON = (3, 9)
 CORE_FILES = ("webui.py", "ui.html")
 
 
-def normalize_aa_data_path(path: str | os.PathLike | None) -> Path | None:
-    """Accept either AA's ``data`` directory or its workspace parent."""
-    if not path:
-        return None
-    candidate = Path(path).expanduser()
-    try:
-        candidate = candidate.resolve()
-    except OSError:
-        return None
-    for value in (candidate, candidate / "data"):
-        if value.is_dir() and (value / "projects").is_dir():
-            return value
-    return None
-
-
-def _detected_aa_data(explicit_aa_data: str | None) -> Path | None:
-    explicit = normalize_aa_data_path(explicit_aa_data)
-    if explicit is not None:
-        return explicit
-    sys.path.insert(0, str(PROGRAM_DIR))
-    try:
-        import aapaths
-
-        detected = aapaths.detect()
-    except Exception:
-        return None
-    return normalize_aa_data_path(detected.get("data"))
+def _discover_aa(
+    explicit_aa_data: str | None,
+    explicit_aa_install: str | None,
+):
+    selection = explicit_aa_data or explicit_aa_install
+    return discover_aa(
+        selection,
+        config_path=PROGRAM_DIR / "aa_config.json",
+    )
 
 
 def build_environment_report(
     program_dir: str | os.PathLike,
     explicit_aa_data: str | None = None,
+    *,
+    explicit_aa_install: str | None = None,
 ) -> dict:
     """Return a redacted, serializable startup-readiness report."""
     root = Path(program_dir).resolve()
@@ -68,7 +54,8 @@ def build_environment_report(
     database_ready = (root / "aa_assets.db").is_file()
     pillow_ready = importlib.util.find_spec("PIL") is not None
     python_ready = sys.version_info >= MIN_PYTHON
-    aa_data = _detected_aa_data(explicit_aa_data)
+    discovery = _discover_aa(explicit_aa_data, explicit_aa_install)
+    aa_data = discovery.data
     issues: list[str] = []
     if not python_ready:
         issues.append(
@@ -112,6 +99,25 @@ def build_environment_report(
         "aa": {
             "connected": aa_data is not None,
             "path": str(aa_data) if aa_data else "",
+            "executable": (
+                str(discovery.executable)
+                if discovery.executable else ""
+            ),
+            "install_root": (
+                str(discovery.install_root)
+                if discovery.install_root else ""
+            ),
+            "resource_status": (
+                "installed"
+                if discovery.resource_cache is not None
+                else "not_installed"
+            ),
+            "preview_status": "not_built",
+            "projects": (
+                str(discovery.projects)
+                if discovery.projects else ""
+            ),
+            "saves": str(discovery.saves) if discovery.saves else "",
         },
         "entry_file": ENTRY_FILE,
         "blocking_issues": issues,
@@ -169,11 +175,42 @@ def _choose_aa_data() -> Path | None:
         root.destroy()
 
 
-def _save_aa_path(data_dir: Path) -> None:
+def _choose_aa_install() -> Path | None:
+    """Ask for the AA executable before falling back to a workspace."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception:
+        return None
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        selected = filedialog.askopenfilename(
+            filetypes=[
+                ("AzureArchive", "AzureArchive.exe"),
+                ("程序", "*.exe"),
+            ],
+        )
+        return Path(selected).resolve() if selected else None
+    finally:
+        root.destroy()
+
+
+def _save_aa_path(
+    data_dir: Path,
+    *,
+    executable: Path | None = None,
+    cache_dir: Path | None = None,
+) -> None:
     sys.path.insert(0, str(PROGRAM_DIR))
     import aapaths
 
-    aapaths.save_config(str(data_dir))
+    aapaths.save_config(
+        str(data_dir),
+        executable=str(executable) if executable else None,
+        cache_dir=str(cache_dir) if cache_dir else None,
+    )
 
 
 def _human_report(report: dict) -> str:
@@ -253,11 +290,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--aa-data")
+    parser.add_argument("--aa-install")
     args = parser.parse_args(argv)
 
     report = build_environment_report(
         PROGRAM_DIR,
         explicit_aa_data=args.aa_data,
+        explicit_aa_install=args.aa_install,
     )
     if args.check:
         if args.json:
@@ -267,13 +306,30 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if report["ok"] else 1
 
     if not report["aa"]["connected"]:
-        chosen = _choose_aa_data()
-        if chosen is not None:
-            _save_aa_path(chosen)
+        chosen_install = (
+            _choose_aa_install() if os.name == "nt" else None
+        )
+        if chosen_install is not None:
             report = build_environment_report(
                 PROGRAM_DIR,
-                explicit_aa_data=str(chosen),
+                explicit_aa_install=str(chosen_install),
             )
+            if report["aa"]["connected"]:
+                _save_aa_path(
+                    Path(report["aa"]["path"]),
+                    executable=(
+                        Path(report["aa"]["executable"])
+                        if report["aa"]["executable"] else None
+                    ),
+                )
+        if not report["aa"]["connected"]:
+            chosen_data = _choose_aa_data()
+            if chosen_data is not None:
+                _save_aa_path(chosen_data)
+                report = build_environment_report(
+                    PROGRAM_DIR,
+                    explicit_aa_data=str(chosen_data),
+                )
 
     if not report["ok"]:
         _write_failure_log(report)

@@ -12,6 +12,8 @@ AA 的存储目录默认在 %USERPROFILE%\\AppData\\LocalLow\\foxxlight\\AzureAr
 """
 import json, os, sys
 
+from aa_install_discovery import discover_aa, normalize_aa_data_path
+
 APPDATA_LOW = os.path.join(os.path.expanduser("~"), "AppData", "LocalLow")
 VENDOR = os.path.join(APPDATA_LOW, "foxxlight", "AzureArchive")
 CONF_NAME = "aa_config.json"
@@ -38,53 +40,35 @@ def _resource_cache_for_data(data_dir, settings):
     return sibling if os.path.isdir(sibling) else None
 
 
-def detect(explicit=None):
-    """返回 {'data':…, 'overrides':…, 'projects':…, 'saves':…, 'cache':…, 'source':…}
-    找不到时 data 为 None，调用方自己报错。"""
-    cands = []
-    if explicit:
-        cands.append((os.path.abspath(explicit), "命令行指定"))
+def _path_string(value):
+    return str(value) if value is not None else None
 
-    # 项目里的配置文件
-    conf = os.path.join(HERE, CONF_NAME)
-    if os.path.exists(conf):
-        try:
-            c = json.load(open(conf, encoding="utf-8"))
-            if c.get("aa_data"):
-                cands.append((os.path.abspath(c["aa_data"]), CONF_NAME))
-        except Exception:
-            pass
 
-    # 环境变量
-    if os.environ.get("AA_DATA"):
-        cands.append((os.path.abspath(os.environ["AA_DATA"]), "环境变量 AA_DATA"))
-
-    # 默认位置的设置文件里写的 workspacePath
-    default_data = os.path.join(VENDOR, "data")
-    st = _read_settings(default_data)
-    ws = (st.get("workspacePath") or "").strip()
-    if ws:
-        cands.append((os.path.join(ws, "data"), "user_settings.workspacePath"))
-    cands.append((default_data, "AA 默认位置"))
-
-    cache = (st.get("cachePath") or "").strip() or None
-
-    for path, src in cands:
-        if path and os.path.isdir(os.path.join(path, "projects")):
-            st2 = _read_settings(path)
-            detected_cache = _resource_cache_for_data(path, st2)
-            return {
-                "data": path,
-                "projects": os.path.join(path, "projects"),
-                "saves": os.path.join(path, "saves"),
-                "overrides": os.path.join(path, "overrides"),
-                "settings": os.path.join(path, "settings"),
-                "cache": (detected_cache or cache or None),
-                "source": src,
-            }
-    return {"data": None, "projects": None, "saves": None, "overrides": None,
-            "settings": None, "cache": cache, "source": None,
-            "tried": [p for p, _ in cands]}
+def detect(explicit=None, *, aa_install=None):
+    """Return legacy string paths backed by structured discovery."""
+    selection = normalize_aa_data_path(explicit) if explicit else aa_install
+    selection = selection or explicit or aa_install
+    result = discover_aa(
+        selection,
+        config_path=os.path.join(HERE, CONF_NAME),
+    )
+    return {
+        "data": _path_string(result.data),
+        "projects": _path_string(result.projects),
+        "saves": _path_string(result.saves),
+        "overrides": _path_string(result.overrides),
+        "settings": _path_string(result.settings),
+        "cache": _path_string(result.resource_cache),
+        "source": result.source,
+        "tried": [str(candidate.path) for candidate in result.data_candidates],
+        "executable": _path_string(result.executable),
+        "install_root": _path_string(result.install_root),
+        "catalog": _path_string(result.catalog),
+        "recent_project_files": [
+            str(path) for path in result.recent_project_files
+        ],
+        "requires_selection": result.requires_selection,
+    }
 
 
 def require(explicit=None, what="AA 存储目录"):
@@ -107,15 +91,22 @@ def require(explicit=None, what="AA 存储目录"):
     return p
 
 
-def save_config(data_dir):
+def save_config(data_dir=None, *, executable=None, cache_dir=None):
     conf = os.path.join(HERE, CONF_NAME)
     old = {}
     if os.path.exists(conf):
         try:
             old = json.load(open(conf, encoding="utf-8"))
         except Exception:
-            pass
-    old["aa_data"] = data_dir
+            old = {}
+    if not isinstance(old, dict):
+        old = {}
+    updates = {
+        "aa_data": str(data_dir) if data_dir else None,
+        "aa_executable": str(executable) if executable else None,
+        "aa_cache": str(cache_dir) if cache_dir else None,
+    }
+    old.update({key: value for key, value in updates.items() if value})
     with open(conf, "w", encoding="utf-8") as fh:
         json.dump(old, fh, ensure_ascii=False, indent=1)
     return conf
