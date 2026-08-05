@@ -22,6 +22,7 @@ import aapaths                                                  # noqa: E402
 import asset_catalog                                            # noqa: E402
 import asset_import                                             # noqa: E402
 import assetdb                                                  # noqa: E402
+import background_labeler                                      # noqa: E402
 from aa_install_discovery import AADiscoveryResult, discover_aa  # noqa: E402
 from aa_resource_cache import probe_resource_cache               # noqa: E402
 from history_assets import HistoryAssetBrowser, HistoryAssetError  # noqa: E402
@@ -280,6 +281,14 @@ def _public_face_analysis(result: Any) -> Dict[str, Any] | None:
     return public or None
 
 
+def _public_background_analysis(result: Any) -> Dict[str, Any] | None:
+    raw = result if isinstance(result, dict) else {}
+    public = {
+        name: raw[name] for name in ("status", "queued", "job_id") if name in raw
+    }
+    return public or None
+
+
 def _public_story_asset_import(result: Dict[str, Any], context: StoryContext) -> Dict[str, Any]:
     """Explicit allowlist for picker-token import responses (never paths/details)."""
     kind = str(result.get("kind") or "")
@@ -300,6 +309,9 @@ def _public_story_asset_import(result: Dict[str, Any], context: StoryContext) ->
     analysis = _public_face_analysis(result.get("face_analysis"))
     if analysis is not None:
         public["face_analysis"] = analysis
+    background_analysis = _public_background_analysis(result.get("background_analysis"))
+    if background_analysis is not None:
+        public["background_analysis"] = background_analysis
     return public
 
 
@@ -665,6 +677,80 @@ def _optional_vision_provider():
         return llm.make_provider(LLMCFG), None
     except Exception as exc:
         return None, str(exc)
+
+
+def _background_label_public_error(exc: Exception) -> str:
+    message = str(exc or "背景识别失败").strip() or "背景识别失败"
+    message = re.sub(
+        r"(?i)(api[_ -]?key|authorization|bearer|token|secret)\s*[=:]\s*[^\s,;]+",
+        r"\1=已隐藏",
+        message,
+    )[:240]
+    if re.search(r"(?:[A-Za-z]:[\\/]|\\\\[^\\\s]+[\\/])", message):
+        return "背景识别失败，请重试或手动补充"
+    return message
+
+
+def background_label_worker(payload: dict) -> dict:
+    """Label one registered background resolved only from immutable catalog identity."""
+    identity = {
+        "aa_key": str(payload.get("aa_key") or "").strip(),
+        "sha256": str(payload.get("sha256") or "").strip(),
+    }
+    con = db()
+    try:
+        target = asset_catalog.library_background_analysis_target(con, **identity)
+    finally:
+        con.close()
+
+    try:
+        provider, provider_issue = _optional_vision_provider()
+        if provider_issue or provider is None:
+            raise RuntimeError(provider_issue or "当前没有可用的视觉模型")
+        labels = background_labeler.label_background(provider, Path(target["source"]))
+    except Exception as exc:
+        public_error = _background_label_public_error(exc)
+        con = db()
+        try:
+            asset_catalog.update_background_labels(
+                con, **identity, labels=target.get("labels") or {},
+                status="failed", error=public_error,
+            )
+        finally:
+            con.close()
+        raise
+
+    con = db()
+    try:
+        saved = asset_catalog.update_background_labels(
+            con, **identity, labels=labels, status="ready", error=""
+        )
+    finally:
+        con.close()
+    return {"ok": True, **saved}
+
+
+def queue_background_label_analysis(payload: dict) -> dict:
+    """Queue vision only after proving a registered server-side copy exists."""
+    identity = {
+        "aa_key": str(payload.get("aa_key") or "").strip(),
+        "sha256": str(payload.get("sha256") or "").strip(),
+    }
+    con = db()
+    try:
+        target = asset_catalog.library_background_analysis_target(con, **identity)
+        asset_catalog.update_background_labels(
+            con, **identity, labels=target.get("labels") or {},
+            status="labeling", error="",
+        )
+    finally:
+        con.close()
+    job_id = global_job_manager.submit(
+        lambda job: background_label_worker(identity),
+        label=f"background-label:{identity['aa_key']}",
+        prefix="background-label-",
+    )
+    return {"status": "labeling", "queued": True, "job_id": job_id}
 
 
 _CONNECTION_SCHEMA = {
@@ -2831,6 +2917,58 @@ class H(BaseHTTPRequestHandler):
                     code = str(exc)
                     return self._send(400, {"ok": False, "code": code, "e": code})
 
+            if p == "/api/assets/library/background-label":
+                expected_fields = {"aa_key", "sha256"}
+                if not isinstance(data, dict) or set(data) != expected_fields:
+                    return self._send(400, {
+                        "ok": False, "code": "invalid_background_label_request",
+                        "e": "背景标注请求无效",
+                    })
+                try:
+                    queued = queue_background_label_analysis(data)
+                    return self._send(202, {"ok": True, **queued})
+                except KeyError:
+                    return self._send(404, {
+                        "ok": False, "code": "library_background_not_found",
+                        "e": "没有可用于场景识别的已登记背景副本",
+                    })
+                except ValueError as exc:
+                    return self._send(400, {
+                        "ok": False, "code": "invalid_background_label_request",
+                        "e": str(exc),
+                    })
+
+            if p == "/api/assets/library/background-labels":
+                expected_fields = {"aa_key", "sha256", "labels"}
+                if not isinstance(data, dict) or set(data) != expected_fields:
+                    return self._send(400, {
+                        "ok": False, "code": "invalid_background_label_request",
+                        "e": "背景标注请求无效",
+                    })
+                con = db()
+                try:
+                    result = asset_catalog.update_background_labels(
+                        con,
+                        aa_key=data.get("aa_key", ""),
+                        sha256=data.get("sha256", ""),
+                        labels=data.get("labels"),
+                        status="ready",
+                        error="",
+                    )
+                    return self._send(200, {"ok": True, **result})
+                except KeyError:
+                    return self._send(404, {
+                        "ok": False, "code": "library_background_not_found",
+                        "e": "素材履历中不存在该已登记背景",
+                    })
+                except ValueError as exc:
+                    return self._send(400, {
+                        "ok": False, "code": "invalid_background_label_request",
+                        "e": str(exc),
+                    })
+                finally:
+                    con.close()
+
             if p == "/api/assets/library/profile":
                 try:
                     result = asset_catalog.update_library_profile(
@@ -3478,6 +3616,12 @@ class H(BaseHTTPRequestHandler):
                     data["project_dir"] = str(story_context.project_dir)
                 project_name = str(data.pop("project", "") or "").strip()
                 requested_spine_cli = str(data.pop("spine_cli", "") or "").strip()
+                supplied_background_labels = {}
+                if str(data.get("kind") or "") == "background" and "labels" in data:
+                    supplied_background_labels = background_labeler.normalize_background_labels(
+                        data.get("labels")
+                    )
+                    data["labels"] = supplied_background_labels
                 if project_name:
                     if (
                         os.path.basename(project_name) != project_name
@@ -3489,11 +3633,32 @@ class H(BaseHTTPRequestHandler):
                     data["project_dir"] = os.path.join(
                         CFG["aa_data"], "projects", project_name
                     )
-                result = asset_import.register_asset_request(
-                    data,
-                    con=db(),
-                    saves_root=os.path.join(CFG["aa_data"], "saves"),
-                )
+                registration_con = db()
+                try:
+                    result = asset_import.register_asset_request(
+                        data,
+                        con=registration_con,
+                        saves_root=os.path.join(CFG["aa_data"], "saves"),
+                    )
+                    if (
+                        result.get("ok")
+                        and result.get("status") == "registered"
+                        and result.get("kind") == "background"
+                        and any(supplied_background_labels.values())
+                    ):
+                        asset_catalog.update_background_labels(
+                            registration_con,
+                            aa_key=result.get("aa_key", ""),
+                            sha256=result.get("sha256", ""),
+                            labels=supplied_background_labels,
+                            status="ready",
+                            error="",
+                        )
+                        result["background_analysis"] = {
+                            "status": "ready", "queued": False,
+                        }
+                finally:
+                    registration_con.close()
                 if (
                     result.get("ok")
                     and result.get("status") == "registered"
@@ -3509,6 +3674,16 @@ class H(BaseHTTPRequestHandler):
                             "spine_cli": requested_spine_cli,
                         }
                     )
+                if (
+                    result.get("ok")
+                    and result.get("status") == "registered"
+                    and result.get("kind") == "background"
+                    and not any(supplied_background_labels.values())
+                ):
+                    result["background_analysis"] = queue_background_label_analysis({
+                        "aa_key": result.get("aa_key", ""),
+                        "sha256": result.get("sha256", ""),
+                    })
                 if story_context:
                     # The story token is the browser's only asset scope.  Do not
                     # disclose canonical project/save/install paths to this UI.

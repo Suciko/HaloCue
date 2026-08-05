@@ -4,14 +4,14 @@
 
   const TASK_STATES = new Set([
     'validating', 'validated', 'waiting_for_aa', 'registering',
-    'available', 'failed', 'interrupted'
+    'labeling', 'available', 'failed', 'interrupted'
   ]);
   const FILTERS = [
     ['all', '全部'], ['character', '角色'], ['background', '背景'],
     ['sound', '音效'], ['bgm', 'BGM']
   ];
   const COLLECTIONS = {character: 'characters', background: 'backgrounds', sound: 'sounds', bgm: 'bgms'};
-  const ACTIVE_STATES = new Set(['validating', 'validated', 'waiting_for_aa', 'registering']);
+  const ACTIVE_STATES = new Set(['validating', 'validated', 'waiting_for_aa', 'registering', 'labeling']);
   const STORAGE_KEY = 'aa-story-asset-tasks-v1';
 
   function make(tag, className, value) {
@@ -32,6 +32,7 @@
     if (task.state === 'validated') return '检查通过，准备登记';
     if (task.state === 'waiting_for_aa') return '请关闭 AA 后重试';
     if (task.state === 'registering') return '正在复制并登记';
+    if (task.state === 'labeling') return '正在识别背景场景';
     if (task.state === 'available') return task.message || '已可用';
     if (task.state === 'interrupted') return '导入已中断，可重试';
     if (task.code === 'aa_running') return '请关闭 AA 后重试';
@@ -42,7 +43,7 @@
   function taskStateLabel(task) {
     const labels = {
       validating: '正在检查', validated: '检查完成', waiting_for_aa: '等待 AA 退出',
-      registering: '正在登记', available: '已可用', failed: '导入失败', interrupted: '已中断'
+      registering: '正在登记', labeling: 'AI 标注中', available: '已可用', failed: '导入失败', interrupted: '已中断'
     };
     return labels[task.state] || '导入状态';
   }
@@ -174,7 +175,7 @@
     const store = storage();
     if (!store) return;
     const kept = this.tasks.slice(-30).map(function (task) {
-      return {id: task.id, kind: task.kind, name: task.name, storyToken: task.storyToken, state: task.state, code: task.code || '', message: task.message || '', jobId: task.jobId || '', fileToken: task.fileToken || '', displayName: task.displayName || '', identifier: task.identifier || ''};
+      return {id: task.id, kind: task.kind, name: task.name, storyToken: task.storyToken, state: task.state, code: task.code || '', message: task.message || '', jobId: task.jobId || '', fileToken: task.fileToken || '', displayName: task.displayName || '', identifier: task.identifier || '', labels: task.labels || {}};
     });
     try { store.setItem(STORAGE_KEY, JSON.stringify(kept)); } catch (_) {}
   };
@@ -186,7 +187,7 @@
       id: 'asset-task-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
       kind: input.kind, name: input.name || input.displayName || '未命名素材',
       storyToken: input.storyToken || (story && story.story_token) || '',
-      source: input.source || '', displayName: input.displayName || '', identifier: input.identifier || '',
+      source: input.source || '', displayName: input.displayName || '', identifier: input.identifier || '', labels: input.labels || {},
       state: 'validating', code: '', message: '', jobId: input.jobId || ''
     };
     this.tasks.push(task); this.pruneTasks(); this.persistTasks(); this.render();
@@ -234,7 +235,9 @@
         return ['succeeded', 'failed', 'cancelled'].includes(job.state);
       }, {isCurrent: function () { return generation === self.recoverGeneration && currentStory() && currentStory().story_token === storyToken; }}).then(function (job) {
         if (!job || generation !== self.recoverGeneration || task.storyToken !== storyToken) return;
+        const wasBackgroundLabel = task.kind === 'background' && task.state === 'labeling';
         if (job.state === 'succeeded') { self.updateTask(task.id, {state: 'available'}); self.load(storyToken).catch(function () { self.updateTask(task.id, {state: 'available', code: 'refresh_failed', message: '已登记，列表刷新失败。'}); }); }
+        else if (wasBackgroundLabel && job.state === 'failed') self.updateTask(task.id, {state: 'available', code: 'background_label_failed', message: '背景已登记，AI 标注失败，可在素材工作台补充'});
         else self.updateTask(task.id, {state: job.state === 'cancelled' ? 'interrupted' : 'failed', message: job.error || ''});
       }).catch(function () { self.updateTask(task.id, {state: 'interrupted'}); });
     });
@@ -315,7 +318,7 @@
   StoryAssetStrip.prototype.retryTask = function (id) {
     const task = this.tasks.find(function (item) { return item.id === id; });
     if (!task || task.kind === 'bgm') return;
-    if (task.source || task.fileToken) this.runImport(task, {source: task.source, fileToken: task.fileToken, displayName: task.displayName, identifier: task.identifier});
+    if (task.source || task.fileToken) this.runImport(task, {source: task.source, fileToken: task.fileToken, displayName: task.displayName, identifier: task.identifier, labels: task.labels});
     else this.importLocal(task.kind, {});
   };
   StoryAssetStrip.prototype.scanInbox = async function () {
@@ -355,9 +358,10 @@
     if (!path) return null;
     const displayName = triggerContext.displayName || '';
     const identifier = triggerContext.identifier || '';
-    const task = this.beginTask({kind: kind, name: triggerContext.name || path.split(/[\\/]/).pop(), storyToken: story.story_token, source: path, displayName: displayName, identifier: identifier});
+    const labels = triggerContext.labels || {};
+    const task = this.beginTask({kind: kind, name: triggerContext.name || path.split(/[\\/]/).pop(), storyToken: story.story_token, source: path, displayName: displayName, identifier: identifier, labels: labels});
     if (this.options.onToast) this.options.onToast('已开始导入素材');
-    return this.runImport(task, {source: path, displayName: displayName, identifier: identifier});
+    return this.runImport(task, {source: path, displayName: displayName, identifier: identifier, labels: labels});
   };
   StoryAssetStrip.prototype.runImport = async function (task, details) {
     const story = currentStory();
@@ -369,6 +373,10 @@
       this.updateTask(task.id, {fileToken: picker.file_token, source: ''});
       const payload = {kind: task.kind, file_token: picker.file_token, story_token: task.storyToken};
       if (task.kind === 'character') { payload.identifier = details.identifier; payload.display_name = details.displayName; }
+      if (task.kind === 'background') {
+        if (details.displayName) payload.display_name = details.displayName;
+        if (details.labels && Object.keys(details.labels).length) payload.labels = details.labels;
+      }
       const validation = await exports.Api.request('/api/assets/validate', exports.Api.json('POST', payload));
       if (!currentStory() || currentStory().story_token !== task.storyToken) return null;
       if (!validation.ok) { this.updateTask(task.id, {state: 'failed', code: 'validation_failed', message: ((validation.issues || [])[0] || {}).message || '文件未通过检查'}); return null; }
@@ -378,6 +386,11 @@
       if (!currentStory() || currentStory().story_token !== task.storyToken) return null;
       if (!result.ok || result.status === 'rejected') { this.updateTask(task.id, {state: 'failed', code: 'validation_failed', message: (((result.issues || [])[0] || {}).message || '文件未通过检查')}); return null; }
       if (result.job_id) { this.updateTask(task.id, {state: 'registering', jobId: result.job_id}); this.recoverTasks(task.storyToken); return result; }
+      if (result.background_analysis && result.background_analysis.queued && result.background_analysis.job_id) {
+        this.updateTask(task.id, {state: 'labeling', jobId: result.background_analysis.job_id});
+        this.recoverTasks(task.storyToken);
+        return result;
+      }
       this.updateTask(task.id, {state: 'available'});
       try { await this.load(task.storyToken); }
       catch (_) { this.updateTask(task.id, {state: 'available', code: 'refresh_failed', message: '已登记，列表刷新失败。'}); }

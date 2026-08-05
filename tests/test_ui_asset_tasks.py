@@ -114,6 +114,23 @@ vm.runInNewContext(source,{window,document,encodeURIComponent,Promise,Error,cons
     assert requests[2]["opts"]["payload"] == requests[1]["opts"]["payload"]
 
 
+def test_visual_background_import_labels_then_stays_available_when_ai_fails():
+    """Background registration succeeds independently from the optional vision job."""
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');const requests=[];const story={story_token:'story-a',project:'A'};let finishPoll;
+function node(){let own='';return {children:[],dataset:{},classList:{add(){},remove(){},toggle(){}},appendChild(x){this.children.push(x);return x},append(){Array.from(arguments).forEach(x=>this.appendChild(x))},removeChild(){return this.children.shift()},get firstChild(){return this.children[0]},addEventListener(){},set textContent(v){own=String(v||'');this.children=[]},get textContent(){return own+this.children.map(x=>x.textContent||'').join('')}}}
+const root=node(),window={Api:{request:(path,opts)=>{requests.push({path,opts});if(path==='/api/picker')return Promise.resolve({file_token:'ft-image'});if(path==='/api/assets/validate')return Promise.resolve({ok:true});if(path==='/api/assets/register')return Promise.resolve({ok:true,status:'registered',kind:'background',aa_key:'rain-night',background_analysis:{status:'labeling',queued:true,job_id:'bg-label-1'}});if(path.indexOf('/api/story/assets?')===0)return Promise.resolve({characters:[],backgrounds:[],sounds:[],bgms:[],counts:{}});return Promise.reject(new Error(path));},poll:()=>new Promise(resolve=>{finishPoll=resolve}),json:(m,p)=>({method:m,payload:p})},StoryStore:{get:()=>story,subscribe:()=>()=>{}},sessionStorage:{getItem(){return null},setItem(){},removeItem(){}}},document={createElement:node,createDocumentFragment:node};
+vm.runInNewContext(source,{window,document,encodeURIComponent,Promise,Error,console});(async()=>{const assets=new window.StoryUI.StoryAssetStrip(root);await assets.importLocal('background',{path:'C:/private/rain.png',name:'rain.png',displayName:'雨夜候车厅'});const labeling={state:assets.tasks[0].state,text:root.textContent};finishPoll({state:'failed',error:'vision unavailable'});await Promise.resolve();await Promise.resolve();await Promise.resolve();console.log(JSON.stringify({labeling,final:{state:assets.tasks[0].state,code:assets.tasks[0].code,text:root.textContent},payload:requests.find(x=>x.path==='/api/assets/register').opts.payload}));})();
+'''
+    result = run_assets(script)
+    assert result["labeling"]["state"] == "labeling"
+    assert "正在识别背景场景" in result["labeling"]["text"]
+    assert result["final"]["state"] == "available"
+    assert result["final"]["code"] == "background_label_failed"
+    assert "背景已登记，AI 标注失败，可在素材工作台补充" in result["final"]["text"]
+    assert result["payload"]["display_name"] == "雨夜候车厅"
+
+
 def test_character_import_modal_is_csp_safe_and_collects_required_fields():
     html = (HERE / "ui.html").read_text(encoding="utf-8")
     assert 'id="mAssetCharacter"' in html

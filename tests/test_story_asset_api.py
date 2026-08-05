@@ -776,3 +776,178 @@ def test_history_copy_error_payloads_do_not_disclose_internal_paths(tmp_path, mo
     assert str(aa_data) not in payload
     assert str(history) not in payload
     assert str(destination) not in payload
+
+
+def test_background_label_registration_queues_server_side_analysis(tmp_path, monkeypatch):
+    """A context-free background import must become usable before vision labeling runs."""
+    queued = []
+
+    def queue(payload):
+        queued.append(dict(payload))
+        return {"status": "labeling", "queued": True, "job_id": "background-label-test"}
+
+    monkeypatch.setattr(webui, "queue_background_label_analysis", queue, raising=False)
+    source = tmp_path / "incoming" / "night-platform.png"
+    _background(source)
+    file_token = webui.register_file_token(str(source))
+    with _server(tmp_path, monkeypatch) as base:
+        story = _open_story(base, tmp_path)
+        status, body = _request(base, "/api/assets/register", {
+            "kind": "background",
+            "file_token": file_token,
+            "story_token": story["story_token"],
+            "display_name": "夜间站台",
+        }, "POST")
+
+    assert status == 200
+    assert body["status"] == "registered"
+    assert body["background_analysis"] == {
+        "status": "labeling", "queued": True, "job_id": "background-label-test",
+    }
+    assert queued == [{"aa_key": body["aa_key"], "sha256": body["sha256"]}]
+    assert str(source) not in repr(body)
+    assert str(source) not in repr(queued)
+
+
+def test_background_label_registration_uses_supplied_scene_labels_without_vision(
+    tmp_path, monkeypatch
+):
+    """Scene semantics are already known, so registration must persist them without a second AI call."""
+    monkeypatch.setattr(
+        webui,
+        "queue_background_label_analysis",
+        lambda payload: pytest.fail("scene labels must skip vision"),
+        raising=False,
+    )
+    source = tmp_path / "incoming" / "rain-room.png"
+    _background(source)
+    file_token = webui.register_file_token(str(source))
+    labels = {
+        "label": "雨夜候车厅", "description": "玻璃窗外有雨",
+        "place": "候车厅", "indoor_outdoor": "室内", "time": "夜晚",
+        "weather": "雨", "season": "", "mood": "安静", "tags": ["雨夜", "车站"],
+    }
+    with _server(tmp_path, monkeypatch) as base:
+        story = _open_story(base, tmp_path)
+        status, body = _request(base, "/api/assets/register", {
+            "kind": "background", "file_token": file_token,
+            "story_token": story["story_token"], "display_name": "雨夜候车厅",
+            "labels": labels,
+        }, "POST")
+        _, library = _request(base, "/api/assets/library?story_token=" + story["story_token"])
+
+    assert status == 200
+    assert body["background_analysis"] == {"status": "ready", "queued": False}
+    details = library["backgrounds"][0]["details"]
+    assert details["label_status"] == "ready"
+    assert details["labels"]["label"] == "雨夜候车厅"
+    assert details["labels"]["tags"] == "雨夜, 车站"
+
+
+def test_background_label_manual_save_updates_library_and_retry_rejects_browser_path(
+    tmp_path, monkeypatch
+):
+    """Workbench edits use immutable catalog identity; retry never trusts a browser path."""
+    aa_data, _ = _registered_library_background(tmp_path)
+    monkeypatch.setattr(webui, "HISTORY_ASSET_BROWSER", HistoryAssetBrowser(aa_data=aa_data))
+    queued = []
+    monkeypatch.setattr(
+        webui,
+        "queue_background_label_analysis",
+        lambda payload: queued.append(dict(payload)) or {
+            "status": "labeling", "queued": True, "job_id": "background-label-retry"
+        },
+        raising=False,
+    )
+    con = assetdb.connect(tmp_path / "assets.db")
+    row = con.execute(
+        "SELECT aa_key,sha256 FROM asset_install WHERE kind='background' LIMIT 1"
+    ).fetchone()
+    con.close()
+    identity = {"aa_key": row["aa_key"], "sha256": row["sha256"]}
+
+    with _server(tmp_path, monkeypatch) as base:
+        save_status, saved = _request(base, "/api/assets/library/background-labels", {
+            **identity,
+            "labels": {
+                "label": "雨夜天台", "description": "湿润的屋顶", "place": "屋顶",
+                "indoor_outdoor": "室外", "time": "夜晚", "weather": "雨",
+                "season": "", "mood": "冷清", "tags": ["屋顶", "雨夜"],
+            },
+        }, "POST")
+        _, library = _request(base, "/api/assets/library")
+        bad_status, bad = _request(base, "/api/assets/library/background-label", {
+            **identity, "source": str(tmp_path / "private.png")
+        }, "POST")
+        retry_status, retry = _request(
+            base, "/api/assets/library/background-label", identity, "POST"
+        )
+
+    assert save_status == 200 and saved["label_status"] == "ready"
+    details = library["backgrounds"][0]["details"]
+    assert details["labels"]["label"] == "雨夜天台"
+    assert details["labels"]["tags"] == "屋顶, 雨夜"
+    assert bad_status == 400 and bad["code"] == "invalid_background_label_request"
+    assert retry_status == 202
+    assert retry["job_id"] == "background-label-retry"
+    assert queued == [identity]
+
+
+def test_background_label_worker_persists_failed_status_when_vision_fails(tmp_path, monkeypatch):
+    """A model failure must not roll back the already registered background."""
+    aa_data, _ = _registered_library_background(tmp_path)
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+
+    class FailingProvider:
+        def complete_json_vision(self, *args, **kwargs):
+            raise RuntimeError("vision unavailable")
+
+    monkeypatch.setattr(
+        webui, "_optional_vision_provider", lambda: (FailingProvider(), None)
+    )
+    con = assetdb.connect(tmp_path / "assets.db")
+    row = con.execute(
+        "SELECT aa_key,sha256 FROM asset_install WHERE kind='background' LIMIT 1"
+    ).fetchone()
+    con.close()
+
+    with pytest.raises(RuntimeError, match="vision unavailable"):
+        webui.background_label_worker({"aa_key": row["aa_key"], "sha256": row["sha256"]})
+
+    con = assetdb.connect(tmp_path / "assets.db")
+    library = __import__("asset_catalog").list_library_assets(con)
+    con.close()
+    details = library["backgrounds"][0]["details"]
+    assert details["label_status"] == "failed"
+    assert details["label_error"] == "vision unavailable"
+    assert library["backgrounds"][0]["copy_count"] == 1
+
+
+def test_background_label_failure_never_exposes_the_registered_copy_path(tmp_path, monkeypatch):
+    """Provider and decoder exceptions may contain paths that the workbench must never receive."""
+    _registered_library_background(tmp_path)
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    private_path = tmp_path / "aa-data" / "projects" / "Chapter One" / "bgs" / "rain_roof.png"
+
+    class FailingProvider:
+        def complete_json_vision(self, *args, **kwargs):
+            raise RuntimeError(f"cannot decode {private_path}")
+
+    monkeypatch.setattr(
+        webui, "_optional_vision_provider", lambda: (FailingProvider(), None)
+    )
+    con = assetdb.connect(tmp_path / "assets.db")
+    row = con.execute(
+        "SELECT aa_key,sha256 FROM asset_install WHERE kind='background' LIMIT 1"
+    ).fetchone()
+    con.close()
+
+    with pytest.raises(RuntimeError):
+        webui.background_label_worker({"aa_key": row["aa_key"], "sha256": row["sha256"]})
+
+    con = assetdb.connect(tmp_path / "assets.db")
+    library = __import__("asset_catalog").list_library_assets(con)
+    con.close()
+    label_error = library["backgrounds"][0]["details"]["label_error"]
+    assert label_error == "背景识别失败，请重试或手动补充"
+    assert str(private_path) not in repr(library)

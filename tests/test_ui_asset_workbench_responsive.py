@@ -230,3 +230,25 @@ def test_real_browser_workbench_preview_copy_face_flow_has_no_console_errors(bro
 
     assert all(phase in phases for phase in ("正在校验", "正在复制", "正在登记", "本章已登记"))
     assert errors == []
+@pytest.mark.parametrize("width", [1200, 390])
+def test_visual_background_label_editor_is_reachable_without_overflow(
+    browser, app_url, tmp_path, width
+):
+    """Background semantics must remain editable on desktop and the narrow workbench."""
+    page = browser.new_page()
+    try:
+        _open_workbench(page, app_url, width, tmp_path)
+        page.get_by_role("button", name="背景", exact=True).click()
+        page.locator(".asset-workbench-row").click()
+        editor = page.locator(".background-label-editor")
+        editor.wait_for()
+        fields = editor.locator("[data-background-label-field]")
+        assert fields.count() == 9
+        assert editor.locator("[data-background-label-field='place']").input_value() == "屋顶"
+        assert editor.get_by_role("button", name="AI 识别场景", exact=True).is_visible()
+        assert editor.get_by_role("button", name="保存标注", exact=True).is_visible()
+        assert editor.evaluate("el => el.scrollWidth <= el.clientWidth")
+        assert page.evaluate("document.documentElement.scrollWidth") <= width
+        page.screenshot(path=str(tmp_path / f"background-label-editor-{width}.png"), full_page=True)
+    finally:
+        page.close()

@@ -383,6 +383,103 @@
     }
     this.detail.appendChild(actions);
     this.renderProfileEditor(item);
+    if (item.kind === 'background') this.renderBackgroundLabelEditor(item);
+  };
+
+  AssetWorkbench.prototype.renderBackgroundLabelEditor = function (item) {
+    const details = item.details || (item.details = {});
+    const labels = details.labels || {};
+    const statusLabels = {
+      labeling: 'AI 标注中', ready: '已标注', failed: '标注失败', not_labeled: '待标注'
+    };
+    const form = make('section', 'background-label-editor');
+    const heading = make('div', 'background-label-heading');
+    heading.appendChild(make('h4', '', '场景语义'));
+    heading.appendChild(make(
+      'span', 'background-label-status status-' + String(details.label_status || 'not_labeled'),
+      statusLabels[details.label_status] || '待标注'
+    ));
+    form.appendChild(heading);
+    if (details.label_error) form.appendChild(make('p', 'background-label-error', details.label_error));
+    const fields = [
+      ['label', '场景名称'], ['description', '画面描述'], ['place', '地点'],
+      ['indoor_outdoor', '室内外'], ['time', '时间'], ['weather', '天气'],
+      ['season', '季节'], ['mood', '氛围'], ['tags', '匹配标签']
+    ];
+    const controls = {};
+    const grid = make('div', 'background-label-fields');
+    fields.forEach(function (entry) {
+      const wrapper = make('label', entry[0] === 'description' ? 'is-wide' : '');
+      wrapper.appendChild(make('span', '', entry[1]));
+      const control = document.createElement(entry[0] === 'description' ? 'textarea' : 'input');
+      if (entry[0] !== 'description') control.type = 'text';
+      control.value = String(labels[entry[0]] || '');
+      control.maxLength = entry[0] === 'description' ? 500 : entry[0] === 'tags' ? 960 : 160;
+      control.dataset.backgroundLabelField = entry[0];
+      controls[entry[0]] = control;
+      wrapper.appendChild(control);
+      grid.appendChild(wrapper);
+    });
+    form.appendChild(grid);
+    const actions = make('div', 'background-label-actions');
+    const recognize = make('button', 'ghost', 'AI 识别场景');
+    recognize.type = 'button';
+    recognize.disabled = details.label_status === 'labeling';
+    recognize.addEventListener('click', function () {
+      this.retryBackgroundLabels(item, recognize);
+    }.bind(this));
+    const save = make('button', '', '保存标注');
+    save.type = 'button';
+    save.addEventListener('click', async function () {
+      save.disabled = true;
+      const nextLabels = {};
+      Object.keys(controls).forEach(function (key) {
+        nextLabels[key] = controls[key].value.trim();
+      });
+      try {
+        const result = await exports.Api.request('/api/assets/library/background-labels', exports.Api.json('POST', {
+          aa_key: item.aa_key, sha256: item.sha256, labels: nextLabels
+        }));
+        details.labels = result.labels || {};
+        details.label_status = result.label_status || 'ready';
+        details.label_error = result.label_error || '';
+        this.setCopyState('背景标注已保存。');
+        this.select(item._assetKey);
+      } catch (error) {
+        this.setCopyState(String(error.e || error.message || '背景标注保存失败，请重试。'));
+      } finally {
+        save.disabled = false;
+      }
+    }.bind(this));
+    actions.appendChild(recognize);
+    actions.appendChild(save);
+    form.appendChild(actions);
+    this.detail.appendChild(form);
+  };
+
+  AssetWorkbench.prototype.retryBackgroundLabels = async function (item, trigger) {
+    if (trigger) trigger.disabled = true;
+    this.setCopyState('正在启动背景场景识别…');
+    try {
+      const queued = await exports.Api.request('/api/assets/library/background-label', exports.Api.json('POST', {
+        aa_key: item.aa_key, sha256: item.sha256
+      }));
+      item.details = item.details || {};
+      item.details.label_status = queued.status || 'labeling';
+      item.details.label_error = '';
+      this.select(item._assetKey);
+      if (!queued.job_id) return;
+      const job = await exports.Api.poll('/api/jobs/' + encodeURIComponent(queued.job_id), function (value) {
+        return ['succeeded', 'failed', 'cancelled'].includes(value.state);
+      }, {isCurrent: function () { return this.isOpen(); }.bind(this)});
+      await this.refresh();
+      this.setCopyState(job && job.state === 'succeeded'
+        ? '背景场景识别完成。'
+        : '背景已登记，AI 标注失败，可手动补充。');
+    } catch (error) {
+      this.setCopyState(String(error.e || error.message || '背景场景识别启动失败，请重试。'));
+      await this.refresh();
+    }
   };
 
   AssetWorkbench.prototype.renderProfileEditor = function (item) {

@@ -678,3 +678,66 @@ button:disabled {
   background: var(--card);
   justify-content: center;
 }
+
+.background-label-editor {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.background-label-heading,
+.background-label-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.background-label-heading h4 {
+  margin: 0;
+  font-size: 13px;
+}
+.background-label-status {
+  color: var(--dim);
+  font-size: 11px;
+  font-weight: 700;
+}
+.background-label-status.status-ready { color: var(--ok); }
+.background-label-status.status-failed,
+.background-label-error { color: var(--err); }
+.background-label-error {
+  margin: 0;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.background-label-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.background-label-fields label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: var(--dim);
+  font-size: 11px;
+}
+.background-label-fields label.is-wide { grid-column: 1 / -1; }
+.background-label-fields input,
+.background-label-fields textarea {
+  width: 100%;
+  min-width: 0;
+}
+.background-label-fields textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+.background-label-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+@media (max-width: 680px) {
+  .background-label-fields { grid-template-columns: 1fr; }
+  .background-label-fields label.is-wide { grid-column: auto; }
+  .background-label-actions button { flex: 1 1 130px; }
+}
