@@ -90,10 +90,21 @@ def _merge_install_manifests(*manifests: Dict[str, Any]) -> Dict[str, Any]:
             if not identifier:
                 continue
             current = characters.get(identifier)
-            if current is None or (
-                not current.get("SpinePortraitPath") and row.get("SpinePortraitPath")
-            ):
+            if current is None:
                 characters[identifier] = dict(row)
+                continue
+            if not current.get("SpinePortraitPath") and row.get("SpinePortraitPath"):
+                for key in (
+                    "CharacterReference",
+                    "OriginalIdentifier",
+                    "SpinePortraitPath",
+                    "SmallPortraitPath",
+                ):
+                    current[key] = row.get(key)
+            if row.get("Name"):
+                current["Name"] = row["Name"]
+            if row.get("Nickname"):
+                current["Nickname"] = row["Nickname"]
         for key in path_keys:
             for value in manifest.get(key, []):
                 normalized = _manifest_path_key(value)

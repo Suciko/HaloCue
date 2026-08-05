@@ -911,7 +911,11 @@ def finalize_project_manifest(
             c.get("narrator")
             or identifier not in used
             or not c.get("name")
-            or (c.get("portrait") and not c.get("custom"))
+            or (
+                c.get("portrait")
+                and not c.get("custom")
+                and not c.get("spine_signature")
+            )
         ):
             continue
         row = {
@@ -924,9 +928,14 @@ def finalize_project_manifest(
             "SmallPortraitPath": None,
         }
         for manifest, known in zip(manifests, by_identifier):
-            if identifier not in known:
+            existing = known.get(identifier)
+            if existing is None:
                 manifest["CharacterOverrides"].append(row.copy())
                 known[identifier] = row
+                continue
+            existing["Name"] = row["Name"]
+            if row["Nickname"]:
+                existing["Nickname"] = row["Nickname"]
 
     merged_voices = merge_voice_overrides(manifests, voice_overrides)
     for manifest in manifests:

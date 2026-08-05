@@ -15,6 +15,7 @@ from install_manager import (
     AACorruptBundleError,
     AAInstallTargetExistsError,
     AARunningError,
+    _merge_install_manifests,
     compose_install_project_name,
 )
 
@@ -225,6 +226,41 @@ def test_same_name_install_preserves_registered_story_assets(
         assert installed["CharacterOverrides"] == [character]
         assert (target / "bgs" / "river.png").read_bytes() == b"background"
         assert (target / "characters" / "custom-kei" / "date.skel").is_file()
+
+
+def test_install_manifest_uses_bundle_display_name_with_registered_spine_paths():
+    registered = {
+        "CharacterOverrides": [{
+            "Identifier": "626652156",
+            "Name": "凯伊（约会服）",
+            "Nickname": "约会短篇",
+            "CharacterReference": None,
+            "OriginalIdentifier": None,
+            "SpinePortraitPath": r"characters\626652156\Kei_Date_Outfit",
+            "SmallPortraitPath": r"characters\626652156\Kei_Date_Outfit-avatar.png",
+        }],
+    }
+    bundle = {
+        "CharacterOverrides": [{
+            "Identifier": "626652156",
+            "Name": "凯伊",
+            "Nickname": "",
+            "CharacterReference": None,
+            "OriginalIdentifier": None,
+            "SpinePortraitPath": None,
+            "SmallPortraitPath": None,
+        }],
+    }
+
+    merged = _merge_install_manifests(registered, bundle)
+
+    character = merged["CharacterOverrides"][0]
+    assert character["Name"] == "凯伊"
+    assert character["Nickname"] == "约会短篇"
+    assert character["SpinePortraitPath"] == r"characters\626652156\Kei_Date_Outfit"
+    assert character["SmallPortraitPath"] == (
+        r"characters\626652156\Kei_Date_Outfit-avatar.png"
+    )
 
 
 def test_install_repairs_referenced_orphan_background_and_external_character(

@@ -7,6 +7,7 @@ from aa_registry import (
     load_manifest,
     register_background,
     register_sound,
+    write_manifest_atomic,
 )
 from asset_validation import validate_background, validate_sound
 from script2aap import finalize_project_manifest, merge_project_registered_assets
@@ -111,3 +112,55 @@ def test_generator_does_not_write_empty_override_for_official_portrait(tmp_path)
 
     overrides = load_manifest(project)["CharacterOverrides"]
     assert [entry["Identifier"] for entry in overrides] == ["teacher-id"]
+
+
+def test_generator_refreshes_screenplay_names_in_existing_overrides(tmp_path):
+    project = tmp_path / "projects" / "display-names"
+    write_manifest_atomic(project, {
+        "CharacterOverrides": [
+            {
+                "Identifier": "45145456",
+                "Name": "45145456",
+                "Nickname": "",
+                "CharacterReference": None,
+                "OriginalIdentifier": None,
+                "SpinePortraitPath": None,
+                "SmallPortraitPath": None,
+            },
+            {
+                "Identifier": "shop-clerk",
+                "Name": "shop-clerk",
+                "Nickname": "",
+                "CharacterReference": None,
+                "OriginalIdentifier": None,
+                "SpinePortraitPath": None,
+                "SmallPortraitPath": None,
+            },
+        ],
+    })
+    cast = {
+        "凯伊": {
+            "id": "626652156",
+            "name": "凯伊",
+            "portrait": True,
+            "spine_signature": "registered-date-outfit",
+        },
+        "老师": {"id": "45145456", "name": "老师", "portrait": False},
+        "店员": {"id": "shop-clerk", "name": "店员", "portrait": False},
+    }
+
+    finalize_project_manifest(
+        cast,
+        {"626652156", "45145456", "shop-clerk"},
+        story_root=tmp_path,
+        project_dir=project,
+        voice_overrides=[],
+    )
+
+    overrides = {
+        entry["Identifier"]: entry
+        for entry in load_manifest(project)["CharacterOverrides"]
+    }
+    assert overrides["626652156"]["Name"] == "凯伊"
+    assert overrides["45145456"]["Name"] == "老师"
+    assert overrides["shop-clerk"]["Name"] == "店员"
