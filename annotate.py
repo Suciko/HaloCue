@@ -20,6 +20,13 @@ from script2aap import HEAD_RE, split_head, load_cast          # noqa: E402
 from build_index import faces_of                               # noqa: E402
 from asset_validation import extract_expression_capabilities   # noqa: E402
 from dialogue_pacing import split_strong_dialogue_items         # noqa: E402
+from direction_rules import (                                  # noqa: E402
+    apply_model_directions,
+    mark_explicit_directions,
+    normalize_direction_density,
+    normalize_emoticon_density as _normalize_emoticon_density,
+    supplement_directions,
+)
 import prompt as PROMPT                                        # noqa: E402
 import tables                                                  # noqa: E402
 
@@ -271,25 +278,7 @@ def normalize_bgfx_lifetime(items):
 
 def normalize_emoticon_density(items):
     """Keep emoticons sparse: never consecutive, and do not repeat them rapidly."""
-    dialogue_no = -1
-    previous_had_emoticon = False
-    last_used = {}
-    for item in items:
-        if item.get("kind") != "line":
-            continue
-        dialogue_no += 1
-        emoticon = item.get("emo")
-        if not emoticon:
-            previous_had_emoticon = False
-            continue
-        cooldown = 8 if emoticon == "脸红" else 4
-        too_soon = dialogue_no - last_used.get(emoticon, -10_000) <= cooldown
-        if previous_had_emoticon or too_soon:
-            item.pop("emo", None)
-            previous_had_emoticon = False
-            continue
-        last_used[emoticon] = dialogue_no
-        previous_had_emoticon = True
+    _normalize_emoticon_density(items)
 
 
 def normalize_contextual_sounds(items, idx):
@@ -544,9 +533,11 @@ def parse_lines(path, cast):
         if who not in cast:
             out.append({"raw": raw, "kind": "other"})
             continue
-        out.append({"raw": raw, "kind": "line", "who": who,
-                    "text": m.group("text").strip(),
-                    "face": face, "emo": emo, "act": act, "fx": fx})
+        item = {"raw": raw, "kind": "line", "who": who,
+                "text": m.group("text").strip(),
+                "face": face, "emo": emo, "act": act, "fx": fx}
+        mark_explicit_directions(item)
+        out.append(item)
     return out
 
 
@@ -619,6 +610,18 @@ def build_postprocessor_proposals(items: List[Dict[str, Any]], rule: str = "emot
     return proposals
 
 
+def apply_direction_supplements(items, cast):
+    """Run optional deterministic direction without blocking draft generation."""
+    try:
+        return supplement_directions(items, cast), []
+    except Exception as exc:
+        return [], [{
+            "code": "direction_supplement_failed",
+            "level": "warning",
+            "message": f"自动演出补全已跳过：{exc}",
+        }]
+
+
 def annotate_script(options: dict, provider_instance=None) -> dict:
     """演出标注纯函数接口（剥离 sys.argv 与全局状态）"""
     script_path = options["script"]
@@ -673,6 +676,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     n = llmcfg.get("chunk_lines", 40)
     ctx = llmcfg.get("context_lines", 10)
     dropped, applied = [], 0
+    diagnostics = []
     proposals = []
 
     for start in range(0, len(todo), n):
@@ -704,9 +708,10 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             portrait = c.get("portrait") and not c.get("narrator")
             clean, rejected, rejected_details = filter_annotation_row(row, it, c, constraints, include_details=True)
             card_id = it.get("card_id") or str(uuid.uuid4())
+            applied_clean = apply_model_directions(it, clean)
 
             # 1. 收集合法提议 -> applied_pending
-            for f_name, f_val in clean.items():
+            for f_name, f_val in applied_clean.items():
                 proposals.append(
                     build_proposal(
                         card_id=card_id,
@@ -733,7 +738,6 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
                     )
                 )
 
-            it.update(clean)
             dropped.extend(rejected)
             if row.get("place"):
                 it["place"] = row["place"][:40]
@@ -759,7 +763,22 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         print(f"  已标注 {done}/{len(todo)} 行")
 
     normalize_contextual_sounds(items, idx)
-    normalize_emoticon_density(items)
+    supplements, supplement_diagnostics = apply_direction_supplements(items, cast)
+    diagnostics.extend(supplement_diagnostics)
+    for change in supplements:
+        item = items[change["item_index"]]
+        proposals.append(
+            build_proposal(
+                card_id=item.get("card_id") or str(uuid.uuid4()),
+                p_type="applied_pending",
+                origin="deterministic_supplement",
+                rule=change["rule"],
+                field_name=change["field"],
+                before=change["before"],
+                after=change["after"],
+            )
+        )
+    normalize_direction_density(items)
     normalize_bgfx_lifetime(items)
 
     out_lines = []
@@ -808,7 +827,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     return {
         "text": final_text,
         "proposals": proposals,
-        "diagnostics": [],
+        "diagnostics": diagnostics,
         "out": out_path,
     }
 
