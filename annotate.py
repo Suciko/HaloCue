@@ -356,6 +356,8 @@ def build_batch_context(items, indices):
             usage[item["who"]][item["face"]] += 1
         if item.get("emo"):
             detail.append(f"emo={item['emo']}")
+        if item.get("act"):
+            detail.append(f"act={item['act']}")
         suffix = f"（{', '.join(detail)}）" if detail else ""
         lines.append(f"  {item['who']}: {item['text']}{suffix}")
     for who, counts in usage.items():
@@ -450,10 +452,10 @@ SCHEMA = {
                 "properties": {
                     "i": {"type": "integer", "description": "段落内的行号"},
                     "face": {"type": "string", "description": "faceId，两位数字；无立绘或不改则空串"},
-                    "emo": {"type": "string", "description": "气泡符号或中文名；不加则空串"},
-                    "act": {"type": "string", "description": "动作 verb；不加则空串"},
+                    "emo": {"type": "string", "description": "头顶的瞬时心理反应气泡，填符号或中文名；不加则空串"},
+                    "act": {"type": "string", "description": "原地身体反应的动作 verb；不加则空串"},
                     "fx": {"type": "string",
-                           "description": "立绘效果：特写 / 剪影 / 变暗；不加则空串"},
+                           "description": "立绘效果：通讯 / 黑屏剪影 / 特写，可用 + 组合；不加则空串"},
                     "se": {"type": "string", "description": "音效名；不加则空串"},
                     "bg": {"type": "string", "description": "从本行起换背景；不换则空串"},
                     "bg_request": {"type": "string",
@@ -464,7 +466,7 @@ SCHEMA = {
                     "bgfx": {"type": "string", "description": "背景效果中文名；不加则空串"},
                     "trans": {"type": "string", "description": "过渡，只在换背景那行填；不加则空串"},
                     "move": {"type": "integer",
-                             "description": "让说话者走到位置 1-5；不走则填 0"},
+                             "description": "文本明确发生真实位置变化时，让说话者走到位置 1-5；不走则填 0"},
                     "shot": {"type": "string",
                              "description": "仅当画面中该角色实际遭受攻击时，填受击角色的精确名字；否则空串"},
                 },
