@@ -46,7 +46,12 @@ from draft_store import (                                       # noqa: E402
     InvalidDraftTokenError,
     RevisionConflictError,
 )
-from install_manager import InstallManager, AARunningError, AACorruptBundleError  # noqa: E402
+from install_manager import (  # noqa: E402
+    InstallManager,
+    AACorruptBundleError,
+    AAInstallTargetExistsError,
+    AARunningError,
+)
 from jobs import global_job_manager                             # noqa: E402
 from picker_token import register_file_token, resolve_file_token  # noqa: E402
 from story_file_picker import StoryFilePicker, StoryFilePickerError, windows_host_roots  # noqa: E402
@@ -2214,6 +2219,18 @@ def get_draft_detail_data(token, store=None):
             "proposal_ids": [],
         })
 
+    compiled_build_id = (
+        session.get("last_compiled_build_id")
+        if session.get("last_compiled_content_revision") == session.get("content_revision")
+        else None
+    )
+    installed_build_id = (
+        session.get("last_installed_build_id")
+        if compiled_build_id
+        and session.get("last_installed_build_id") == compiled_build_id
+        else None
+    )
+
     pending_count = sum(1 for c in cards if c["review_state"] == "pending")
     unresolved_issues = sum(1 for d in diagnostics if d.get("severity") in ("error", "warning"))
     blocking_errors = sum(1 for d in diagnostics if d.get("severity") == "error")
@@ -2228,6 +2245,11 @@ def get_draft_detail_data(token, store=None):
         },
         "draft_version": session["draft_version"],
         "content_revision": session["content_revision"],
+        "last_compiled_build_id": compiled_build_id,
+        "last_installed_build_id": installed_build_id,
+        "last_installed_project": (
+            session.get("last_installed_project") if installed_build_id else None
+        ),
         "identity_rebuilt": draft.get("identity_rebuilt", False),
         "project": session.get("project"),
         "story_token": session.get("story_token"),
@@ -2465,6 +2487,16 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/backgrounds":
                 return self._send(200, list_backgrounds(
                     q.get("q", ""), q.get("ready") == "1"))
+            if p == "/api/install/options":
+                try:
+                    return self._send(200, InstallManager().install_options(
+                        token=q.get("token", ""),
+                        build_id=q.get("build_id", ""),
+                    ))
+                except AACorruptBundleError as exc:
+                    return self._send(400, {
+                        "ok": False, "code": "corrupted_bundle", "e": str(exc),
+                    })
             if p == "/api/projects":
                 root = os.path.join(CFG["aa_data"], "projects")
                 names = []
@@ -3239,12 +3271,25 @@ class H(BaseHTTPRequestHandler):
                 build_id = data.get("build_id")
                 install_mgr = InstallManager()
                 try:
-                    res = install_mgr.install_build(token=token, build_id=build_id)
+                    res = install_mgr.install_build(
+                        token=token,
+                        build_id=build_id,
+                        category=data.get("category", ""),
+                        story_name=data.get("story_name"),
+                    )
                     return self._send(200, res)
                 except AARunningError as exc:
                     return self._send(423, {"ok": False, "code": "aa_running", "e": str(exc)})
+                except AAInstallTargetExistsError as exc:
+                    return self._send(409, {
+                        "ok": False, "code": "install_target_exists", "e": str(exc),
+                    })
                 except AACorruptBundleError as exc:
                     return self._send(400, {"ok": False, "code": "corrupted_bundle", "e": str(exc)})
+                except ValueError as exc:
+                    return self._send(400, {
+                        "ok": False, "code": "invalid_project_name", "e": str(exc),
+                    })
                 except Exception as exc:
                     return self._send(500, {"ok": False, "e": str(exc)})
 

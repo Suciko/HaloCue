@@ -195,3 +195,74 @@ const {createHarness}=require(process.argv[1]);let a,b,calls=0,opens=0;const h=c
 (async()=>{const first=recent.refresh();await h.drain();const second=recent.refresh();await h.drain();b([{story_token:'B',project:'B',source_name:'B'}]);await second;a([{story_token:'A',project:'A',source_name:'A'}]);await first;const entry=h.get('#recentStories').children[1].children[0];entry.click();console.log(JSON.stringify({label:entry.textContent,entries:h.get('#recentStories').children[1].children.length,opens}));})();
 '''
     assert run_runtime(script) == {"label": "BAA 工程：B最近打开：未知继续", "entries": 1, "opens": 1}
+
+
+def test_install_button_opens_optional_category_confirmation_without_installing():
+    script = r'''
+const {createHarness}=require(process.argv[1]);let installPosts=0;
+const h=createHarness({request:async(p,o)=>{if(p==='/api/draft?token=d')return {story_token:'S',project:'第一幕-第一章',draft_version:1,counts:{pending:0,blocking_errors:0},cards:[]};if(p==='/api/compile')return {ok:true,build_id:'b',job_id:'j'};if(p.startsWith('/api/install/options?'))return {ok:true,source_project:'第一幕-第一章',default_category:'',default_story_name:'第一幕-第一章',categories:['大故事']};if(p==='/api/install'){installPosts++;return {ok:true}}return {profiles:[]};},poll:async()=>({state:'succeeded'})});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'第一幕-第一章'});h.get('#rvDraftSelect').value='d';await h.window.AppRuntime.loadReview();await h.window.AppRuntime.compile();await h.window.AppRuntime.openInstallDialog(h.get('#rvInstall'));console.log(JSON.stringify({open:h.get('#mInstall').classList.contains('on'),category:h.get('#installCategory').value,story:h.get('#installStoryName').value,preview:h.get('#installProjectPreview').textContent,options:h.get('#installCategoryOptions').children.map(x=>x.value),installPosts}));})();
+'''
+    assert run_runtime(script) == {
+        "open": True,
+        "category": "",
+        "story": "第一幕-第一章",
+        "preview": "第一幕-第一章",
+        "options": ["大故事"],
+        "installPosts": 0,
+    }
+
+
+def test_confirm_install_shows_exact_aa_locations_and_manual_open_instruction():
+    script = r'''
+const {createHarness}=require(process.argv[1]);let payload;
+const h=createHarness({request:async(p,o)=>{if(p==='/api/draft?token=d')return {story_token:'S',project:'第一幕-第一章',draft_version:1,counts:{pending:0,blocking_errors:0},cards:[]};if(p==='/api/compile')return {ok:true,build_id:'b',job_id:'j'};if(p.startsWith('/api/install/options?'))return {ok:true,source_project:'第一幕-第一章',default_category:'',default_story_name:'第一幕-第一章',categories:[]};if(p==='/api/install'){payload=o.payload;return {ok:true,project:'大故事-第一幕-第一章',aap_path:'E:\\AA\\data\\projects\\大故事-第一幕-第一章.aap',project_dir:'E:\\AA\\data\\projects\\大故事-第一幕-第一章',save_dir:'E:\\AA\\data\\saves\\大故事-第一幕-第一章'}}return {profiles:[]};},poll:async()=>({state:'succeeded'})});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'第一幕-第一章'});h.get('#rvDraftSelect').value='d';await h.window.AppRuntime.loadReview();await h.window.AppRuntime.compile();await h.window.AppRuntime.openInstallDialog();h.get('#installCategory').value='大故事';h.get('#installStoryName').value='第一幕-第一章';h.get('#installCategory').dispatch('input');await h.window.AppRuntime.confirmInstall();console.log(JSON.stringify({payload,preview:h.get('#installProjectPreview').textContent,resultHidden:h.get('#installResult').hidden,aap:h.get('#installAapPath').textContent,project:h.get('#installProjectDir').textContent,save:h.get('#installSaveDir').textContent,instruction:h.get('#installOpenHint').textContent,status:h.get('#rvStatus').textContent}));})();
+'''
+    result = run_runtime(script)
+    assert result["payload"] == {
+        "token": "d",
+        "expected_draft_version": 1,
+        "build_id": "b",
+        "category": "大故事",
+        "story_name": "第一幕-第一章",
+    }
+    assert result["preview"] == "大故事-第一幕-第一章"
+    assert result["resultHidden"] is False
+    assert result["aap"].endswith("大故事-第一幕-第一章.aap")
+    assert result["project"].endswith("大故事-第一幕-第一章")
+    assert result["save"].endswith("大故事-第一幕-第一章")
+    assert "AA" in result["instruction"] and ".aap" in result["instruction"]
+    assert result["status"] == "安装完成：大故事-第一幕-第一章"
+
+
+def test_install_result_copies_the_exact_aap_path_with_visible_feedback():
+    script = r'''
+const {createHarness}=require(process.argv[1]);let copied='';
+const h=createHarness({request:async(p)=>{if(p==='/api/draft?token=d')return {story_token:'S',project:'第一幕-第一章',draft_version:1,last_compiled_build_id:'b',last_installed_build_id:'b',counts:{pending:0,blocking_errors:0},cards:[]};if(p.startsWith('/api/install/options?'))return {ok:true,source_project:'第一幕-第一章',default_category:'',default_story_name:'第一幕-第一章',categories:[],existing_install:{project:'第一幕-第一章',aap_path:'E:\\AA\\data\\projects\\第一幕-第一章.aap',project_dir:'E:\\AA\\data\\projects\\第一幕-第一章',save_dir:'E:\\AA\\data\\saves\\第一幕-第一章'}};return {profiles:[]};}});
+h.window.navigator={clipboard:{writeText:async(value)=>{copied=value;}}};
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'第一幕-第一章'});h.get('#rvDraftSelect').value='d';await h.window.AppRuntime.loadReview();await h.window.AppRuntime.openInstallDialog();await h.clickAction('copy-install-aap');await h.drain();console.log(JSON.stringify({copied,status:h.get('#installDialogStatus').textContent}));})();
+'''
+    assert run_runtime(script) == {
+        "copied": r"E:\AA\data\projects\第一幕-第一章.aap",
+        "status": "已复制 AA 工程文件路径。",
+    }
+
+
+def test_reopened_draft_restores_install_button_and_shows_existing_aap_location():
+    script = r'''
+const {createHarness}=require(process.argv[1]);
+const h=createHarness({request:async(p)=>{if(p==='/api/draft?token=d')return {story_token:'S',project:'第一章',draft_version:2,last_compiled_build_id:'b',last_installed_build_id:'b',last_installed_project:'大故事-第一章',counts:{pending:0,blocking_errors:0},cards:[]};if(p.startsWith('/api/install/options?'))return {ok:true,source_project:'第一章',default_category:'',default_story_name:'第一章',categories:['大故事'],existing_install:{project:'大故事-第一章',aap_path:'E:\\AA\\data\\projects\\大故事-第一章.aap',project_dir:'E:\\AA\\data\\projects\\大故事-第一章',save_dir:'E:\\AA\\data\\saves\\大故事-第一章'}};return {profiles:[]};}});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'第一章'});h.get('#rvDraftSelect').value='d';await h.window.AppRuntime.loadReview();const before={disabled:h.get('#rvInstall').disabled,compile:h.get('#storyCompileStatus').textContent,install:h.get('#storyInstallStatus').textContent};await h.window.AppRuntime.openInstallDialog();console.log(JSON.stringify({before,resultHidden:h.get('#installResult').hidden,resultState:h.get('#installResultState').textContent,resultProject:h.get('#installResultProject').textContent,aap:h.get('#installAapPath').textContent,status:h.get('#installDialogStatus').textContent}));})();
+'''
+    result = run_runtime(script)
+    assert result["before"] == {
+        "disabled": False,
+        "compile": "编译：已完成",
+        "install": "安装：已安装 · 大故事-第一章",
+    }
+    assert result["resultHidden"] is False
+    assert result["resultState"] == "已有安装"
+    assert result["resultProject"] == "大故事-第一章"
+    assert result["aap"].endswith("大故事-第一章.aap")
+    assert "已有安装" in result["status"]

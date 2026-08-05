@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 import webui
 from webui import H
 from draft_store import DraftStore
+from install_manager import AAInstallTargetExistsError
 
 
 @contextlib.contextmanager
@@ -313,3 +314,104 @@ def test_annotate_worker_can_create_review_draft_without_calling_model(tmp_path,
     assert captured["source_text"] == captured["text"]
     assert captured["story_token"] == "story-format-only"
     assert result["proposals"] == 0
+
+
+def test_install_options_and_confirmed_name_are_forwarded_through_http(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    class FakeInstallManager:
+        def install_options(self, token, build_id):
+            calls.append(("options", token, build_id))
+            return {
+                "ok": True,
+                "source_project": "第一幕-第一章",
+                "default_category": "",
+                "default_story_name": "第一幕-第一章",
+                "categories": ["大故事"],
+            }
+
+        def install_build(self, token, build_id, *, category, story_name):
+            calls.append(("install", token, build_id, category, story_name))
+            return {
+                "ok": True,
+                "project": "大故事-第一幕-第一章",
+                "aap_path": r"E:\AA\data\projects\大故事-第一幕-第一章.aap",
+                "project_dir": r"E:\AA\data\projects\大故事-第一幕-第一章",
+                "save_dir": r"E:\AA\data\saves\大故事-第一幕-第一章",
+            }
+
+    monkeypatch.setattr(webui, "InstallManager", FakeInstallManager)
+    with draft_server(tmp_path, monkeypatch) as (base, _):
+        status, options = req(
+            base,
+            "/api/install/options?token=draft-one&build_id=build-one",
+            method="GET",
+        )
+        assert status == 200
+        assert options["default_category"] == ""
+        assert options["categories"] == ["大故事"]
+
+        status, result = req(base, "/api/install", {
+            "token": "draft-one",
+            "build_id": "build-one",
+            "category": "大故事",
+            "story_name": "第一幕-第一章",
+        })
+
+    assert status == 200
+    assert result["project"] == "大故事-第一幕-第一章"
+    assert result["aap_path"].endswith("大故事-第一幕-第一章.aap")
+    assert calls == [
+        ("options", "draft-one", "build-one"),
+        ("install", "draft-one", "build-one", "大故事", "第一幕-第一章"),
+    ]
+
+
+def test_install_target_conflict_is_reported_as_409(tmp_path, monkeypatch):
+    class ConflictingInstallManager:
+        def install_build(self, token, build_id, *, category, story_name):
+            raise AAInstallTargetExistsError("AA 中已存在同名工程")
+
+    monkeypatch.setattr(webui, "InstallManager", ConflictingInstallManager)
+    with draft_server(tmp_path, monkeypatch) as (base, _):
+        status, result = req(base, "/api/install", {
+            "token": "draft-one",
+            "build_id": "build-one",
+            "category": "大故事",
+            "story_name": "第一章",
+        })
+
+    assert status == 409
+    assert result == {
+        "ok": False,
+        "code": "install_target_exists",
+        "e": "AA 中已存在同名工程",
+    }
+
+
+def test_draft_detail_restores_current_compile_and_install_state(
+    tmp_path, monkeypatch
+):
+    with draft_server(tmp_path, monkeypatch) as (base, drafts_dir):
+        token = make_draft(drafts_dir, "旁白: 已完成\n", token="restored-build")
+        store = DraftStore(base_dir=drafts_dir)
+        session_file = store.get_draft_path(token) / "session.json"
+        session = json.loads(session_file.read_text(encoding="utf-8"))
+        session.update({
+            "last_compiled_build_id": "build-current",
+            "last_compiled_content_revision": session["content_revision"],
+            "last_installed_build_id": "build-current",
+            "last_installed_project": "大故事-第一章",
+        })
+        session_file.write_text(
+            json.dumps(session, ensure_ascii=False), encoding="utf-8"
+        )
+
+        status, result = req(base, "/api/draft?token=" + token, method="GET")
+
+    assert status == 200
+    assert result["last_compiled_build_id"] == "build-current"
+    assert result["last_installed_build_id"] == "build-current"
+    assert result["last_installed_project"] == "大故事-第一章"
