@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from draft_store import DraftStore, calc_sha256
+from document import parse_document_lossless
 from script2aap import compile_script
 
 HERE = Path(__file__).resolve().parent
@@ -57,10 +58,58 @@ class BuildBundleManager:
             input_dir.mkdir(parents=True, exist_ok=True)
 
             # 复制不可变输入快照
-            for fname in ["edited.txt", "session.json", "identity.json", "diagnostics.json", "source_map.json"]:
+            for fname in [
+                "edited.txt",
+                "session.json",
+                "identity.json",
+                "diagnostics.json",
+                "source_map.json",
+                "cast.json",
+            ]:
                 fpath = draft_dir / fname
                 if fpath.is_file():
                     shutil.copy2(fpath, input_dir / fname)
+
+            cast_path = input_dir / "cast.json"
+            try:
+                cast_data = json.loads(cast_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                cast_data = {}
+            if not isinstance(cast_data.get("cast"), dict) or not cast_data["cast"]:
+                # Imported legacy drafts may not have actor bindings.  An empty
+                # portrait cast is safe; the application-level sample cast is not.
+                edited_text = (input_dir / "edited.txt").read_text(encoding="utf-8")
+                speakers = sorted({
+                    str(node.fields.get("who") or "").strip()
+                    for node in parse_document_lossless(edited_text)
+                    if node.kind == "line" and str(node.fields.get("who") or "").strip()
+                })
+                cast_path.write_text(
+                    json.dumps(
+                        {
+                            "default_bg": "BG_Black",
+                            "default_bgm": 999,
+                            "scene_bg": {},
+                            "cast": {
+                                speaker: {"narrator": True} for speaker in speakers
+                            },
+                            "alias": {},
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+
+            resource_index = draft_dir / "resources.json"
+            if not resource_index.is_file():
+                # Review drafts historically stored this token-scoped file in out/.
+                resource_index = HERE / "out" / f"{token}.resources.json"
+            if not resource_index.is_file():
+                resource_index = HERE / "aa_resources.json"
+            if not resource_index.is_file():
+                raise FileNotFoundError(f"Draft resource index missing: {token}")
+            shutil.copy2(resource_index, input_dir / "resources.json")
 
             return build_id
 
@@ -90,6 +139,8 @@ class BuildBundleManager:
             {
                 "script": str(script_tmp),
                 "out": project_name,
+                "cast": str(input_dir / "cast.json"),
+                "index": str(input_dir / "resources.json"),
                 "install": False,
             }
         )
