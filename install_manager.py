@@ -9,13 +9,24 @@ import json
 import os
 import shutil
 import tempfile
-from pathlib import Path
-from typing import Any, Dict, Optional
+from pathlib import Path, PureWindowsPath
+from typing import Any, Callable, Dict, Optional
 
 import aapaths
-from aa_project_assets import assert_aa_closed, validate_windows_path_component
+from aa_project_assets import (
+    assert_aa_closed,
+    resolve_project_target,
+    validate_windows_path_component,
+)
+from aa_registry import (
+    MANIFEST_LISTS,
+    AssetRegistrationError,
+    load_manifest,
+    write_manifest_atomic,
+)
 from build_bundle import calc_file_sha256
 from draft_store import DraftStore
+from script2aap import install_transaction
 
 HERE = Path(__file__).resolve().parent
 
@@ -51,15 +62,386 @@ def compose_install_project_name(category: str, story_name: str) -> str:
     )
 
 
+def _manifest_path_key(value: Any) -> str:
+    return str(PureWindowsPath(str(value).replace("/", "\\"))).casefold()
+
+
+def _safe_manifest_relative(value: Any, folder: str) -> Optional[PureWindowsPath]:
+    relative = PureWindowsPath(str(value).replace("/", "\\"))
+    if (
+        relative.is_absolute()
+        or relative.drive
+        or relative.root
+        or ".." in relative.parts
+        or len(relative.parts) < 2
+        or relative.parts[0].casefold() != folder.casefold()
+    ):
+        return None
+    return relative
+
+
+def _merge_install_manifests(*manifests: Dict[str, Any]) -> Dict[str, Any]:
+    merged = {key: [] for key in MANIFEST_LISTS}
+    characters: Dict[str, Dict[str, Any]] = {}
+    path_keys = {key: set() for key in MANIFEST_LISTS if key != "CharacterOverrides"}
+    for manifest in manifests:
+        for row in manifest.get("CharacterOverrides", []):
+            identifier = str(row.get("Identifier") or "")
+            if not identifier:
+                continue
+            current = characters.get(identifier)
+            if current is None or (
+                not current.get("SpinePortraitPath") and row.get("SpinePortraitPath")
+            ):
+                characters[identifier] = dict(row)
+        for key in path_keys:
+            for value in manifest.get(key, []):
+                normalized = _manifest_path_key(value)
+                if normalized not in path_keys[key]:
+                    merged[key].append(str(value))
+                    path_keys[key].add(normalized)
+    merged["CharacterOverrides"] = list(characters.values())
+    return merged
+
+
+def _append_manifest_path(manifest: Dict[str, Any], key: str, value: str) -> None:
+    normalized = _manifest_path_key(value)
+    if all(_manifest_path_key(current) != normalized for current in manifest[key]):
+        manifest[key].append(value)
+
+
+def _copy_asset_file(source: Path, destination: Path) -> None:
+    if destination.is_file():
+        if calc_file_sha256(source) != calc_file_sha256(destination):
+            raise AACorruptBundleError(
+                f"AA asset conflict: {source} and {destination} differ"
+            )
+        return
+    if destination.exists():
+        raise AACorruptBundleError(f"AA asset target is not a file: {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+
+
+def _copy_asset_tree(source: Path, *destinations: Path) -> None:
+    for path in sorted(source.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(source)
+        for destination in destinations:
+            _copy_asset_file(path, destination / relative)
+
+
+def _tree_signature(root: Path) -> tuple:
+    return tuple(
+        (path.relative_to(root).as_posix().casefold(), calc_file_sha256(path))
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    )
+
+
+def _aap_asset_references(path: Path) -> tuple[set[str], set[str]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AACorruptBundleError(f"Bundle AAP is invalid: {path}") from exc
+    backgrounds: set[str] = set()
+    characters: set[str] = set()
+    for node in payload.get("nodes", {}).get("$values", []):
+        for script in node.get("Scripts", {}).get("$values", []):
+            friendly = str(script.get("bgFriendlyName") or "").strip()
+            if friendly:
+                backgrounds.add(friendly)
+            for character in script.get("characters", {}).get("$values", []):
+                identifier = str(character.get("name") or "").strip()
+                if identifier:
+                    characters.add(identifier)
+    return backgrounds, characters
+
+
+def _bundle_resource_index(project_dir: Path) -> Dict[str, Any]:
+    index_path = project_dir / "aa_resources.json"
+    try:
+        return json.loads(index_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _bundle_character_ids(project_dir: Path) -> set[str]:
+    index = _bundle_resource_index(project_dir)
+    return {
+        str(row.get("identifier") or "")
+        for row in index.get("characters", [])
+        if row.get("identifier") and str(row.get("spine") or "").strip()
+    }
+
+
+def _bundle_custom_backgrounds(project_dir: Path) -> set[str]:
+    labels = _bundle_resource_index(project_dir).get("bg_label", {})
+    return set(labels) if isinstance(labels, dict) else set()
+
+
+def _find_character_source(
+    projects_dir: Path,
+    identifier: str,
+    *,
+    expected_signature: Optional[tuple] = None,
+) -> Optional[tuple[Dict[str, Any], Path]]:
+    candidates = []
+    for manifest_path in sorted(projects_dir.glob("*/manifest.json")):
+        project_dir = manifest_path.parent
+        try:
+            manifest = load_manifest(project_dir)
+        except AssetRegistrationError:
+            continue
+        for row in manifest["CharacterOverrides"]:
+            if str(row.get("Identifier") or "") != identifier:
+                continue
+            spine = str(row.get("SpinePortraitPath") or "")
+            if not spine:
+                continue
+            relative = _safe_manifest_relative(spine, "characters")
+            if (
+                relative is None
+                or len(relative.parts) < 3
+                or relative.parts[1] != identifier
+            ):
+                continue
+            asset_dir = project_dir.joinpath(relative.parts[0], relative.parts[1])
+            base = project_dir.joinpath(*relative.parts)
+            required = [Path(str(base) + suffix) for suffix in (".skel", ".atlas", ".png")]
+            avatar = str(row.get("SmallPortraitPath") or "")
+            if avatar:
+                avatar_relative = _safe_manifest_relative(avatar, "characters")
+                if avatar_relative is None or avatar_relative.parts[1] != identifier:
+                    continue
+                required.append(project_dir.joinpath(*avatar_relative.parts))
+            if asset_dir.is_dir() and all(path.is_file() for path in required):
+                candidates.append((dict(row), asset_dir, _tree_signature(asset_dir)))
+    if not candidates:
+        return None
+    if expected_signature is not None:
+        candidates = [
+            candidate for candidate in candidates if candidate[2] == expected_signature
+        ]
+        if not candidates:
+            return None
+    signatures = {candidate[2] for candidate in candidates}
+    if len(signatures) != 1:
+        raise AACorruptBundleError(
+            f"AA contains conflicting asset copies for character {identifier}"
+        )
+    row, asset_dir, _ = candidates[0]
+    return row, asset_dir
+
+
+def _find_simple_asset_source(
+    projects_dir: Path, *, folder: str, manifest_key: str, stem: str
+) -> Optional[Path]:
+    candidates = []
+    for manifest_path in sorted(projects_dir.glob("*/manifest.json")):
+        project_dir = manifest_path.parent
+        try:
+            manifest = load_manifest(project_dir)
+        except AssetRegistrationError:
+            continue
+        for value in manifest[manifest_key]:
+            relative = _safe_manifest_relative(value, folder)
+            if (
+                relative is None
+                or len(relative.parts) != 2
+                or relative.stem.casefold() != stem.casefold()
+            ):
+                continue
+            source = project_dir.joinpath(*relative.parts)
+            if source.is_file():
+                candidates.append(source)
+    if not candidates:
+        return None
+    hashes = {calc_file_sha256(path) for path in candidates}
+    if len(hashes) != 1:
+        raise AACorruptBundleError(
+            f"AA contains conflicting asset copies for background {stem}"
+        )
+    return candidates[0]
+
+
+def _reconcile_simple_assets(
+    manifest: Dict[str, Any], project_dir: Path, save_dir: Path
+) -> None:
+    specs = (
+        ("bgs", "BgOverrides", {".png", ".jpg", ".jpeg", ".webp"}),
+        ("sounds", "SoundOverrides", {".ogg", ".wav", ".mp3"}),
+        ("bgms", "BgmOverrides", {".ogg", ".wav", ".mp3"}),
+    )
+    for folder, key, suffixes in specs:
+        sources: Dict[str, Path] = {}
+        for root in (project_dir, save_dir):
+            directory = root / folder
+            if not directory.is_dir():
+                continue
+            for path in sorted(directory.iterdir()):
+                if path.is_file() and path.suffix.casefold() in suffixes:
+                    known = sources.get(path.name.casefold())
+                    if known and calc_file_sha256(known) != calc_file_sha256(path):
+                        raise AACorruptBundleError(
+                            f"AA project/save asset conflict: {known} and {path} differ"
+                        )
+                    sources[path.name.casefold()] = path
+        kept = []
+        for value in manifest[key]:
+            relative = _safe_manifest_relative(value, folder)
+            if (
+                relative is not None
+                and len(relative.parts) == 2
+                and relative.name.casefold() in sources
+            ):
+                kept.append(str(value))
+        manifest[key] = kept
+        for source in sources.values():
+            for root in (project_dir, save_dir):
+                _copy_asset_file(source, root / folder / source.name)
+            _append_manifest_path(
+                manifest, key, str(PureWindowsPath(folder, source.name))
+            )
+
+
+def _reconcile_voice_assets(
+    manifest: Dict[str, Any], project_dir: Path, save_dir: Path
+) -> None:
+    kept = []
+    for value in manifest["VoiceOverrides"]:
+        relative = _safe_manifest_relative(value, "voices")
+        if relative is None:
+            continue
+        paths = [root.joinpath(*relative.parts) for root in (project_dir, save_dir)]
+        sources = [path for path in paths if path.is_file()]
+        if not sources:
+            continue
+        if len(sources) == 2 and calc_file_sha256(sources[0]) != calc_file_sha256(
+            sources[1]
+        ):
+            raise AACorruptBundleError(
+                f"AA project/save voice conflict: {sources[0]} and {sources[1]} differ"
+            )
+        for path in paths:
+            _copy_asset_file(sources[0], path)
+        kept.append(str(value))
+    manifest["VoiceOverrides"] = kept
+
+
+def _repair_install_assets(
+    *,
+    projects_dir: Path,
+    project_dir: Path,
+    save_dir: Path,
+    bundle_project_dir: Path,
+    aap_path: Path,
+    manifest: Dict[str, Any],
+) -> Dict[str, Any]:
+    referenced_backgrounds, referenced_characters = _aap_asset_references(aap_path)
+    _reconcile_simple_assets(manifest, project_dir, save_dir)
+    _reconcile_voice_assets(manifest, project_dir, save_dir)
+
+    registered_backgrounds = {
+        PureWindowsPath(value).stem for value in manifest["BgOverrides"]
+    }
+    for stem in sorted(referenced_backgrounds - registered_backgrounds):
+        source = _find_simple_asset_source(
+            projects_dir, folder="bgs", manifest_key="BgOverrides", stem=stem
+        )
+        if source is None:
+            continue
+        for root in (project_dir, save_dir):
+            _copy_asset_file(source, root / "bgs" / source.name)
+        _append_manifest_path(
+            manifest, "BgOverrides", str(PureWindowsPath("bgs", source.name))
+        )
+    registered_backgrounds = {
+        PureWindowsPath(value).stem.casefold() for value in manifest["BgOverrides"]
+    }
+    unresolved_backgrounds = sorted(
+        stem
+        for stem in referenced_backgrounds & _bundle_custom_backgrounds(
+            bundle_project_dir
+        )
+        if stem.casefold() not in registered_backgrounds
+    )
+    if unresolved_backgrounds:
+        raise AACorruptBundleError(
+            "AAP references custom backgrounds that are not installed in this project: "
+            + ", ".join(unresolved_backgrounds)
+        )
+
+    by_identifier = {
+        str(row.get("Identifier") or ""): row
+        for row in manifest["CharacterOverrides"]
+        if row.get("Identifier")
+    }
+    physical_identifiers = set()
+    for root in (project_dir, save_dir):
+        directory = root / "characters"
+        if directory.is_dir():
+            physical_identifiers.update(
+                path.name for path in directory.iterdir() if path.is_dir()
+            )
+    official_identifiers = _bundle_character_ids(bundle_project_dir)
+    for identifier in sorted(physical_identifiers | referenced_characters):
+        if identifier in by_identifier or identifier in official_identifiers:
+            continue
+        existing_directories = [
+            root / "characters" / identifier
+            for root in (project_dir, save_dir)
+            if (root / "characters" / identifier).is_dir()
+        ]
+        existing_signatures = {
+            _tree_signature(directory) for directory in existing_directories
+        }
+        if len(existing_signatures) > 1:
+            raise AACorruptBundleError(
+                f"AA project/save character conflict: {identifier} differs"
+            )
+        expected_signature = next(iter(existing_signatures), None)
+        source = _find_character_source(
+            projects_dir,
+            identifier,
+            expected_signature=expected_signature,
+        )
+        if source is None:
+            continue
+        row, asset_dir = source
+        _copy_asset_tree(
+            asset_dir,
+            project_dir / "characters" / identifier,
+            save_dir / "characters" / identifier,
+        )
+        manifest["CharacterOverrides"].append(row)
+        by_identifier[identifier] = row
+
+    unresolved = sorted(
+        identifier
+        for identifier in referenced_characters
+        if identifier not in by_identifier and identifier not in official_identifiers
+    )
+    if unresolved:
+        raise AACorruptBundleError(
+            "AAP references characters that are not installed in this project: "
+            + ", ".join(unresolved)
+        )
+    return manifest
+
+
 class InstallManager:
     def __init__(
         self,
         store: Optional[DraftStore] = None,
         aa_data_dir: Optional[str] = None,
         record_path: Optional[str] = None,
+        running_probe: Optional[Callable[[], bool]] = None,
     ):
         self.store = store or DraftStore()
         self.aa_data_dir = aa_data_dir
+        self.running_probe = running_probe
         if record_path:
             self.record_path = Path(record_path)
         else:
@@ -227,7 +609,10 @@ class InstallManager:
 
         # 3. 验证 AA 客户端已关闭
         try:
-            assert_aa_closed()
+            if self.running_probe is None:
+                assert_aa_closed()
+            else:
+                assert_aa_closed(running_probe=self.running_probe)
         except RuntimeError as exc:
             raise AARunningError(str(exc)) from exc
         except Exception as exc:
@@ -267,23 +652,44 @@ class InstallManager:
 
         # 5. 复制安装 AAP 与工程文件
         aap_source = bundle_dir / f"{source_project}.aap"
-        if aap_source.is_file():
-            if project_name == source_project:
-                shutil.copy2(aap_source, aap_dest)
-            else:
-                self._write_renamed_aap(aap_source, aap_dest, project_name)
-
         proj_res_source = bundle_dir / "project"
-        if project_name != source_project:
-            self._copy_story_assets(projects_dir / source_project, proj_res_dest)
-            self._copy_story_assets(saves_dir / source_project, save_res_dest)
-        if proj_res_source.is_dir():
-            shutil.copytree(proj_res_source, proj_res_dest, dirs_exist_ok=True)
-            # 同时也复制到 saves 镜像
-            shutil.copytree(proj_res_source, save_res_dest, dirs_exist_ok=True)
-        if project_name != source_project:
-            self._rename_install_metadata(proj_res_dest, project_name)
-            self._rename_install_metadata(save_res_dest, project_name)
+        source_manifests = [
+            load_manifest(projects_dir / source_project),
+            load_manifest(saves_dir / source_project),
+            load_manifest(proj_res_source),
+        ]
+        install_target = resolve_project_target(
+            proj_res_dest, saves_root=saves_dir
+        )
+        with install_transaction(
+            install_target, aap_path=aap_dest, running_probe=self.running_probe
+        ):
+            if aap_source.is_file():
+                if project_name == source_project:
+                    shutil.copy2(aap_source, aap_dest)
+                else:
+                    self._write_renamed_aap(aap_source, aap_dest, project_name)
+
+            if project_name != source_project:
+                self._copy_story_assets(projects_dir / source_project, proj_res_dest)
+                self._copy_story_assets(saves_dir / source_project, save_res_dest)
+            if proj_res_source.is_dir():
+                shutil.copytree(proj_res_source, proj_res_dest, dirs_exist_ok=True)
+                # 同时也复制到 saves 镜像
+                shutil.copytree(proj_res_source, save_res_dest, dirs_exist_ok=True)
+            merged_manifest = _repair_install_assets(
+                projects_dir=projects_dir,
+                project_dir=proj_res_dest,
+                save_dir=save_res_dest,
+                bundle_project_dir=proj_res_source,
+                aap_path=aap_dest,
+                manifest=_merge_install_manifests(*source_manifests),
+            )
+            write_manifest_atomic(proj_res_dest, merged_manifest)
+            write_manifest_atomic(save_res_dest, merged_manifest)
+            if project_name != source_project:
+                self._rename_install_metadata(proj_res_dest, project_name)
+                self._rename_install_metadata(save_res_dest, project_name)
 
         # 6. 记录项目级安装状态 project_install_record.json
         self.record_path.parent.mkdir(parents=True, exist_ok=True)
