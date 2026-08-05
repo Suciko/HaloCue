@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+from datetime import datetime, timezone
 import json
 import math
 import re
@@ -55,7 +56,7 @@ _CUSTOM_CATALOG_SOURCES = {
 _LIBRARY_ROLES = {"series_shared", "chapter_only"}
 _SAFE_LABEL_FIELDS = {
     "label", "tags", "place", "time", "weather", "mood", "usage",
-    "indoor_outdoor",
+    "indoor_outdoor", "description", "season",
 }
 _SOURCE_PRIORITY = {
     "aa_verified": 0,
@@ -475,6 +476,13 @@ def _library_item_details(kind: str, metadata: dict) -> dict:
         details = {
             "resolution": "待检测",
             "labels": _safe_catalog_labels(metadata.get("labels")),
+            "label_status": _safe_catalog_text(
+                metadata.get("label_status"), fallback="not_labeled"
+            ),
+            "label_error": _safe_catalog_text(metadata.get("label_error")),
+            "labels_updated_at": _safe_catalog_text(
+                metadata.get("labels_updated_at")
+            ),
         }
         width, height = metadata.get("width"), metadata.get("height")
         if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
@@ -595,6 +603,121 @@ def list_library_assets(con) -> dict:
         values.sort(key=lambda item: (str(item["series_name"]).casefold(), str(item["name"]).casefold()))
     out["counts"] = {key: len(out[key]) for key in out}
     return out
+
+
+def library_background_analysis_target(
+    con, *, aa_key: str | int, sha256: str
+) -> dict:
+    """Resolve one installed custom background without exposing it to the browser."""
+    migrate(con)
+    key = str(aa_key or "").strip()
+    digest = str(sha256 or "").strip()
+    if not key or not digest:
+        raise ValueError("缺少背景素材标识")
+    rows = con.execute(
+        """
+        SELECT aa_key,display_name,status,install_path,metadata_json
+        FROM asset_install
+        WHERE kind='background' AND aa_key=? AND sha256=? AND status=?
+        ORDER BY scope
+        """,
+        (key, digest, STORY_ASSET_STATUS),
+    ).fetchall()
+    for row in rows:
+        metadata = _safe_metadata(row["metadata_json"])
+        if not _is_story_custom_row(row, metadata):
+            continue
+        installed = Path(str(row["install_path"] or ""))
+        if installed.is_file():
+            return {
+                "source": str(installed),
+                "aa_key": str(row["aa_key"]),
+                "sha256": digest,
+                "name": _safe_catalog_text(row["display_name"], fallback=key),
+                "labels": _safe_catalog_labels(metadata.get("labels")),
+                "label_status": _safe_catalog_text(
+                    metadata.get("label_status"), fallback="not_labeled"
+                ),
+            }
+    raise KeyError("没有可用于场景识别的已登记背景副本")
+
+
+def update_background_labels(
+    con,
+    *,
+    aa_key: str | int,
+    sha256: str,
+    labels: object,
+    status: str,
+    error: str = "",
+) -> dict:
+    """Persist one semantic result across identical registered custom copies."""
+    from background_labeler import normalize_background_labels
+
+    migrate(con)
+    key = str(aa_key or "").strip()
+    digest = str(sha256 or "").strip()
+    normalized = normalize_background_labels(labels)
+    state = str(status or "").strip()
+    if not key or not digest:
+        raise ValueError("缺少背景素材标识")
+    if state not in {"not_labeled", "labeling", "ready", "failed"}:
+        raise ValueError("背景标注状态无效")
+    safe_error = _safe_catalog_text(error)
+    rows = con.execute(
+        """
+        SELECT rowid,display_name,install_path,status,metadata_json
+        FROM asset_install
+        WHERE kind='background' AND aa_key=? AND sha256=? AND status=?
+        """,
+        (key, digest, STORY_ASSET_STATUS),
+    ).fetchall()
+    updated = 0
+    legacy_names = set()
+    timestamp = datetime.now(timezone.utc).isoformat()
+    with con:
+        for row in rows:
+            metadata = _safe_metadata(row["metadata_json"])
+            if not _is_story_custom_row(row, metadata):
+                continue
+            metadata["labels"] = normalized
+            metadata["label_status"] = state
+            metadata["label_error"] = safe_error
+            metadata["labels_updated_at"] = timestamp
+            con.execute(
+                "UPDATE asset_install SET metadata_json=? WHERE rowid=?",
+                (json.dumps(metadata, ensure_ascii=False), row["rowid"]),
+            )
+            installed = Path(str(row["install_path"] or ""))
+            if installed.name:
+                legacy_names.add(installed.stem)
+            updated += 1
+        for name in legacy_names:
+            con.execute(
+                """
+                UPDATE bg SET label=?,place=?,time=?,mood=?,tags=?,labeled_by='vision'
+                WHERE name=?
+                """,
+                (
+                    normalized.get("label") or None,
+                    normalized.get("place") or None,
+                    normalized.get("time") or None,
+                    normalized.get("mood") or None,
+                    normalized.get("tags") or None,
+                    name,
+                ),
+            )
+    if not updated:
+        raise KeyError("素材履历中不存在该已登记背景")
+    return {
+        "aa_key": _numeric_key(key),
+        "sha256": digest,
+        "labels": normalized,
+        "label_status": state,
+        "label_error": safe_error,
+        "labels_updated_at": timestamp,
+        "updated": updated,
+    }
 
 
 def update_library_profile(
