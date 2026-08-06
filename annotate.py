@@ -9,7 +9,7 @@ script2aap.py。任何超出资源表的标注都会被丢弃并告警——模�
   python annotate.py 剧本.txt -o 剧本.annotated.txt [--cast cast.json] [--provider openai]
   python annotate.py 剧本.txt --range 1-80          只标注前 80 行（先试水）
 """
-import argparse, json, os, re, sys, uuid
+import argparse, hashlib, json, os, re, sys, uuid
 from typing import Any, Dict, List
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -20,6 +20,12 @@ from script2aap import HEAD_RE, split_head, load_cast          # noqa: E402
 from build_index import faces_of                               # noqa: E402
 from asset_validation import extract_expression_capabilities   # noqa: E402
 from dialogue_pacing import split_strong_dialogue_items         # noqa: E402
+from annotation_chunks import assign_annotation_ids             # noqa: E402
+from annotation_memory import (                                 # noqa: E402
+    AnnotationCheckpointStore,
+    build_run_fingerprint,
+)
+from annotation_agent import run_annotation_agent               # noqa: E402
 from direction_rules import (                                  # noqa: E402
     apply_model_directions,
     mark_explicit_directions,
@@ -63,11 +69,27 @@ def _selected_variants(capabilities, identifier, spine_signature="", outfit_key=
 
 
 def face_allowlist(capabilities, identifier, *, spine_signature="", outfit_key=""):
-    """Return only AAP-observed or AA-verified faces for the chosen safe scope."""
+    """Return only observed or verified faces for the chosen safe scope."""
     allow = set()
     for variant in _selected_variants(capabilities, identifier, spine_signature, outfit_key):
         for face in variant.get("faces", []):
             if {"aap_observed", "aa_verified"} & set(face.get("sources", [])):
+                allow.add(face["id"])
+    return allow
+
+
+def official_basic_face_allowlist(
+    capabilities, identifier, *, spine_signature="", outfit_key=""
+):
+    """Return official atlas candidates plus observed/verified faces."""
+    allow = face_allowlist(
+        capabilities, identifier,
+        spine_signature=spine_signature,
+        outfit_key=outfit_key,
+    )
+    for variant in _selected_variants(capabilities, identifier, spine_signature, outfit_key):
+        for face in variant.get("faces", []):
+            if "atlas_candidate" in set(face.get("sources", [])):
                 allow.add(face["id"])
     return allow
 
@@ -83,12 +105,16 @@ def semantic_face_allowlist(capabilities, identifier, *, spine_signature="", out
 
 
 def _allowed_face_records(
-    capabilities, identifier, *, spine_signature="", outfit_key="", semantic=False
+    capabilities, identifier, *, spine_signature="", outfit_key="", semantic=False,
+    official_basic=False
 ):
     selector = {"spine_signature": spine_signature, "outfit_key": outfit_key}
     allowed = (
         semantic_face_allowlist(capabilities, identifier, **selector)
-        if semantic else face_allowlist(capabilities, identifier, **selector)
+        if semantic else (
+            official_basic_face_allowlist(capabilities, identifier, **selector)
+            if official_basic else face_allowlist(capabilities, identifier, **selector)
+        )
     )
     records = {}
     for variant in _selected_variants(capabilities, identifier, spine_signature, outfit_key):
@@ -130,9 +156,15 @@ def annotation_constraints(idx, cast):
                     "spine_signature": character.get("spine_signature", ""),
                     "outfit_key": character.get("outfit_key", ""),
                 }
+                official = ident in {
+                    record.get("identifier")
+                    for record in idx.get("characters", [])
+                } and not character.get("custom")
                 faces_by_id[ident] = (
                     semantic_face_allowlist(capabilities, ident, **selector)
                     if ident in semantic_modular
+                    else official_basic_face_allowlist(capabilities, ident, **selector)
+                    if official
                     else face_allowlist(capabilities, ident, **selector)
                 )
     else:
@@ -506,6 +538,7 @@ def build_static(idx, cast, cast_names):
                     spine_signature=character.get("spine_signature", ""),
                     outfit_key=character.get("outfit_key", ""),
                     semantic=expression_mode == "semantic_modular",
+                    official_basic=ident in character_records and not character.get("custom"),
                 ),
                 "expression_mode": expression_mode,
                 "expression_parts": character.get(
@@ -522,7 +555,7 @@ def build_static(idx, cast, cast_names):
 def parse_lines(path, cast):
     """保留原文行，同时标出哪些是台词行。"""
     out = []
-    for raw in open(path, encoding="utf-8").read().splitlines():
+    for line_no, raw in enumerate(open(path, encoding="utf-8").read().splitlines(), 1):
         s = raw.strip()
         if not s or s.startswith("#") or s.startswith("@"):
             out.append({"raw": raw, "kind": "other"})
@@ -535,7 +568,7 @@ def parse_lines(path, cast):
         if who not in cast:
             out.append({"raw": raw, "kind": "other"})
             continue
-        item = {"raw": raw, "kind": "line", "who": who,
+        item = {"raw": raw, "kind": "line", "line_no": line_no, "split_index": 0, "who": who,
                 "text": m.group("text").strip(),
                 "face": face, "emo": emo, "act": act, "fx": fx}
         mark_explicit_directions(item)
@@ -567,6 +600,41 @@ def render(item):
     return f"{item['who']}{anno}: {item['text']}"
 
 
+def render_annotated_items(items):
+    """Render annotated items while avoiding redundant background switches."""
+    out_lines = []
+    last_bg = None
+    has_background = False
+    for item in items:
+        if item["kind"] != "line":
+            out_lines.append(item["raw"])
+            continue
+
+        background = item.get("bg")
+        background_changed = bool(background and background != last_bg)
+        if background_changed:
+            out_lines.append(f"@bg {background}")
+            last_bg = background
+        if item.get("trans") and (not background or (background_changed and has_background)):
+            out_lines.append(f"@trans {item['trans']}")
+        if background_changed:
+            has_background = True
+        if item.get("bgfx"):
+            out_lines.append(f"@bgfx {item['bgfx']}")
+        if item.get("place"):
+            out_lines.append(f"@place {item['place']}")
+        if item.get("move"):
+            out_lines.append(f"@move {item['who']} {item['move']}")
+        if item.get("shake"):
+            out_lines.append("@bgshake")
+        if item.get("se"):
+            out_lines.append(f"@se {item['se']}")
+        out_lines.extend(annotation_directives(item))
+        out_lines.append(render(item))
+
+    return "\n".join(out_lines) + "\n"
+
+
 def build_proposal(
     card_id: str,
     p_type: str,
@@ -591,6 +659,49 @@ def build_proposal(
         "expected_card_version": expected_card_version,
         "state": "pending",
     }
+
+
+def apply_annotation_response_row(item, row, cast, constraints, proposals, dropped):
+    """Apply one validated model row through the existing resource guards."""
+    character = cast[item["who"]]
+    portrait = character.get("portrait") and not character.get("narrator")
+    clean, rejected, rejected_details = filter_annotation_row(
+        row, item, character, constraints, include_details=True
+    )
+    card_id = item.get("card_id") or str(uuid.uuid4())
+    applied_clean = apply_model_directions(item, clean)
+    for field_name, field_value in applied_clean.items():
+        proposals.append(build_proposal(
+            card_id=card_id, p_type="applied_pending", origin="model",
+            rule="llm_annotation", field_name=field_name,
+            before=item.get(field_name), after=field_value,
+        ))
+    for rejected_item in rejected_details:
+        proposals.append(build_proposal(
+            card_id=card_id, p_type="suggested_fix", origin="model",
+            rule="llm_rejected_annotation", field_name=rejected_item["field"],
+            before=None, after=rejected_item["value"],
+        ))
+    dropped.extend(rejected)
+    if row.get("place"):
+        item["place"] = str(row["place"])[:40]
+    if row.get("shake"):
+        item["shake"] = True
+    if row.get("bgfx"):
+        _value, error = tables.resolve_bgeffect(row["bgfx"])
+        if error is None:
+            item["bgfx"] = row["bgfx"]
+        else:
+            dropped.append(error or f"未知背景效果 {row['bgfx']}")
+    if row.get("trans"):
+        value, error = tables.resolve_transition(row["trans"])
+        if value:
+            item["trans"] = row["trans"]
+        else:
+            dropped.append(error or f"未知过渡 {row['trans']}")
+    if portrait and isinstance(row.get("move"), int) and 1 <= row["move"] <= 5:
+        item["move"] = row["move"]
+    return True
 
 
 def build_postprocessor_proposals(items: List[Dict[str, Any]], rule: str = "emoticon_density") -> List[Dict[str, Any]]:
@@ -634,12 +745,23 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     provider_name = options.get("provider")
     range_str = options.get("range")
     dry_run = options.get("dry_run", False)
+    raw_usage_chain = options.get("usage_chain")
+    usage_chain = raw_usage_chain[:80] if isinstance(raw_usage_chain, list) else []
+    usage_chain_context = ""
+    if usage_chain:
+        usage_chain_context = (
+            "已确认的场景演出规划（优先遵守其中已确认的背景和音效，不要重新换成其他素材；"
+            "BGM 仅作上下文，本阶段不写入）：\n"
+            + json.dumps(usage_chain, ensure_ascii=False, separators=(",", ":"))[:16000]
+        )
 
     cfg, cast, _ = load_cast(cast_path)
     idx = json.load(open(index_path, encoding="utf-8"))
     llmcfg = json.load(open(llm_path, encoding="utf-8"))
     load_custom_faces(cast, os.path.dirname(os.path.dirname(HERE)), idx)
-    items = split_strong_dialogue_items(parse_lines(script_path, cast), cast)
+    items = assign_annotation_ids(
+        split_strong_dialogue_items(parse_lines(script_path, cast), cast)
+    )
 
     dialog = [i for i, it in enumerate(items) if it["kind"] == "line"]
     lo, hi = 0, len(dialog)
@@ -680,89 +802,79 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     dropped, applied = [], 0
     diagnostics = []
     proposals = []
-
-    for start in range(0, len(todo), n):
-        batch = todo[start:start + n]
-        head = todo[max(0, start - ctx):start]
-        vol = ""
-        if head:
-            vol = (
-                "前文（只作上下文，不要标注；括号是已采用演出，请避免机械重复）：\n"
-                + build_batch_context(items, head)
-            )
-            cumulative = build_face_usage_summary(items, todo[:start])
-            if cumulative:
-                vol += "\n本章截至此处的 face 分布（语义正确优先，并避免少数编号霸占）：\n" + cumulative
-        body = "需要标注的段落：\n" + "\n".join(
-            f"[{k}] {items[i]['who']}: {items[i]['text']}" for k, i in enumerate(batch))
-
-        try:
-            res = prov.complete_json(static, vol, body, SCHEMA)
-        except LLMError as e:
-            raise RuntimeError(f"调用失败: {e}")
-
-        for row in annotation_rows(res):
-            k = row.get("i")
-            if not isinstance(k, int) or not 0 <= k < len(batch):
-                continue
-            it = items[batch[k]]
-            c = cast[it["who"]]
-            portrait = c.get("portrait") and not c.get("narrator")
-            clean, rejected, rejected_details = filter_annotation_row(row, it, c, constraints, include_details=True)
-            card_id = it.get("card_id") or str(uuid.uuid4())
-            applied_clean = apply_model_directions(it, clean)
-
-            # 1. 收集合法提议 -> applied_pending
-            for f_name, f_val in applied_clean.items():
-                proposals.append(
-                    build_proposal(
-                        card_id=card_id,
-                        p_type="applied_pending",
-                        origin="model",
-                        rule="llm_annotation",
-                        field_name=f_name,
-                        before=it.get(f_name),
-                        after=f_val,
-                    )
+    agent_enabled = bool(options.get("agent_enabled", llmcfg.get("agent_enabled", False))) and not range_str
+    agent_meta = {}
+    if agent_enabled:
+        script_text = open(script_path, encoding="utf-8").read()
+        model_config = {
+            "provider": getattr(prov, "name", provider_name or llmcfg.get("provider") or ""),
+            "model": getattr(prov, "model", ""),
+            "max_tokens": int(getattr(prov, "cfg", {}).get("max_tokens", 16000)),
+        }
+        fingerprint = build_run_fingerprint(
+            script_text, cast, idx,
+            hashlib.sha256(static.encode("utf-8")).hexdigest()[:16], 1, "scene-v1",
+            model_config,
+        )
+        checkpoint_dir = options.get("checkpoint_dir") or os.path.join(HERE, "out", "annotation-checkpoints")
+        agent_result = run_annotation_agent(
+            items, provider=prov, static_system=static, cast=cast,
+            constraints=constraints, usage_chain=usage_chain,
+            checkpoint_store=AnnotationCheckpointStore(checkpoint_dir),
+            run_fingerprint=fingerprint, progress=options.get("progress"),
+            cancelled=options.get("cancelled"),
+            target=int(llmcfg.get("agent_target_lines", 20)),
+            soft_limit=int(llmcfg.get("agent_soft_limit", 24)),
+            hard_limit=int(llmcfg.get("agent_hard_limit", 30)),
+            before=int(llmcfg.get("agent_context_before", 15)),
+            after=int(llmcfg.get("agent_context_after", 10)),
+        )
+        diagnostics.extend(agent_result.get("diagnostics") or [])
+        agent_meta = {
+            "enabled": True,
+            "completed_chunks": agent_result.get("completed_chunks", 0),
+            "resumed_chunks": agent_result.get("resumed_chunks", 0),
+            "cancelled": bool(agent_result.get("cancelled")),
+        }
+        if agent_meta["cancelled"]:
+            return {"text": "", "proposals": [], "diagnostics": diagnostics,
+                    "out": out_path, "agent": agent_meta, "cancelled": True}
+        rows_by_id = agent_result["rows_by_id"]
+        for item_index in todo:
+            item = items[item_index]
+            row = rows_by_id.get(item.get("annotation_id"))
+            if row and apply_annotation_response_row(item, row, cast, constraints, proposals, dropped):
+                applied += 1
+        print(f"  已标注 {applied}/{len(todo)} 行（Agent）")
+    else:
+        for start in range(0, len(todo), n):
+            batch = todo[start:start + n]
+            head = todo[max(0, start - ctx):start]
+            vol = ""
+            if head:
+                vol = (
+                    "前文（只作上下文，不要标注；括号是已采用演出，请避免机械重复）：\n"
+                    + build_batch_context(items, head)
                 )
-
-            # 2. 收集越界/非法提议 -> suggested_fix
-            for rej in rejected_details:
-                proposals.append(
-                    build_proposal(
-                        card_id=card_id,
-                        p_type="suggested_fix",
-                        origin="model",
-                        rule="llm_rejected_annotation",
-                        field_name=rej["field"],
-                        before=None,
-                        after=rej["value"],
-                    )
-                )
-
-            dropped.extend(rejected)
-            if row.get("place"):
-                it["place"] = row["place"][:40]
-            if row.get("shake"):
-                it["shake"] = True
-            if row.get("bgfx"):
-                v, err = tables.resolve_bgeffect(row["bgfx"])
-                if err is None:
-                    it["bgfx"] = row["bgfx"]
-                else:
-                    dropped.append(err or f"未知背景效果 {row['bgfx']}")
-            if row.get("trans"):
-                v, err = tables.resolve_transition(row["trans"])
-                if v:
-                    it["trans"] = row["trans"]
-                else:
-                    dropped.append(err or f"未知过渡 {row['trans']}")
-            if portrait and isinstance(row.get("move"), int) and 1 <= row["move"] <= 5:
-                it["move"] = row["move"]
-            applied += 1
-
-        done = min(start + n, len(todo))
-        print(f"  已标注 {done}/{len(todo)} 行")
+                cumulative = build_face_usage_summary(items, todo[:start])
+                if cumulative:
+                    vol += "\n本章截至此处的 face 分布（语义正确优先，并避免少数编号霸占）：\n" + cumulative
+            if usage_chain_context:
+                vol += ("\n\n" if vol else "") + usage_chain_context
+            body = "需要标注的段落：\n" + "\n".join(
+                f"[{k}] {items[i]['who']}: {items[i]['text']}" for k, i in enumerate(batch))
+            try:
+                response = prov.complete_json(static, vol, body, SCHEMA)
+            except LLMError as error:
+                raise RuntimeError(f"调用失败: {error}")
+            for row in annotation_rows(response):
+                row_index = row.get("i")
+                if not isinstance(row_index, int) or not 0 <= row_index < len(batch):
+                    continue
+                if apply_annotation_response_row(items[batch[row_index]], row, cast, constraints, proposals, dropped):
+                    applied += 1
+            done = min(start + n, len(todo))
+            print(f"  已标注 {done}/{len(todo)} 行")
 
     normalize_contextual_sounds(items, idx)
     supplements, supplement_diagnostics = apply_direction_supplements(items, cast)
@@ -783,30 +895,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     normalize_direction_density(items)
     normalize_bgfx_lifetime(items)
 
-    out_lines = []
-    for it in items:
-        if it["kind"] != "line":
-            out_lines.append(it["raw"])
-            continue
-        if it.get("bg"):
-            out_lines.append(f"@bg {it['bg']}")
-        if it.get("trans"):
-            out_lines.append(f"@trans {it['trans']}")
-        if it.get("bgfx"):
-            out_lines.append(f"@bgfx {it['bgfx']}")
-        if it.get("place"):
-            out_lines.append(f"@place {it['place']}")
-        if it.get("move"):
-            out_lines.append(f"@move {it['who']} {it['move']}")
-        if it.get("shake"):
-            out_lines.append("@bgshake")
-        if it.get("se"):
-            out_lines.append(f"@se {it['se']}")
-        for directive in annotation_directives(it):
-            out_lines.append(directive)
-        out_lines.append(render(it))
-
-    final_text = "\n".join(out_lines) + "\n"
+    final_text = render_annotated_items(items)
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(final_text)
@@ -831,6 +920,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         "proposals": proposals,
         "diagnostics": diagnostics,
         "out": out_path,
+        "agent": agent_meta,
     }
 
 

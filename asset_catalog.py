@@ -102,17 +102,34 @@ def _face_capabilities(con) -> dict[str, list[dict]]:
         face = variant["faces"].setdefault(row["face_id"], {
             "id": row["face_id"], "raw": row["raw"], "label": row["label"],
             "cn": row["label_cn"], "semantic_cn": "", "sources": [],
-            "observed_count": 0, "verified": False,
+            "observed_count": 0, "verified": False, "semantic_level": "unknown",
         })
         face["sources"].append(row["source"])
         face["observed_count"] += row["observed_count"] or 0
         face["verified"] = face["verified"] or row["source"] == "aa_verified"
+        if row["source"].startswith("vision:"):
+            try:
+                rich = json.loads(row["raw"] or "{}")
+            except (TypeError, ValueError):
+                rich = {}
+            if isinstance(rich, dict):
+                fields = (
+                    "emotion_family", "intensity", "expression_class", "beat_fit",
+                    "hold_policy", "special_tags", "avoid_when_cn",
+                )
+                for field in fields:
+                    if field in rich:
+                        face[field] = rich[field]
+                if any(field in rich for field in fields):
+                    face["semantic_level"] = "rich"
         if (
             (row["source"] == "spine_semantic" or row["source"].startswith("vision:"))
             and row["label_cn"]
             and not face["semantic_cn"]
         ):
             face["semantic_cn"] = row["label_cn"]
+        if face["semantic_level"] == "unknown" and (row["label_cn"] or row["label"]):
+            face["semantic_level"] = "basic"
     by_ident: dict[str, list[dict]] = {}
     for (ident, signature, outfit), variant in sorted(variants.items()):
         faces = variant.pop("faces")

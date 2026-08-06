@@ -38,6 +38,29 @@ def test_filter_rejects_unknown_assets_and_portrait_effects_for_narrator():
     ]
 
 
+def test_official_named_faces_are_basic_candidates_but_unknown_faces_are_not_suggested():
+    idx = {
+        "bg": {}, "sounds": [], "enums": {"emoticon": {}, "action": {}},
+        "characters": [{"identifier": "official", "faces": []}],
+        "face_capabilities": {"official": [{
+            "spine_signature": "official-sha", "outfit_key": "default",
+            "faces": [
+                {"id": "00", "raw": "default", "label": "default", "cn": "默认", "sources": ["atlas_candidate"]},
+                {"id": "03", "raw": "smile", "label": "smile", "cn": "微笑", "sources": ["atlas_candidate"]},
+                {"id": "17", "raw": "17", "label": "", "cn": "", "sources": ["atlas_candidate"]},
+            ],
+        }]},
+    }
+    cast = {"官方": {"id": "official", "portrait": True, "spine_signature": "official-sha", "outfit_key": "default"}}
+
+    constraints = annotation_constraints(idx, cast)
+    assert constraints["faces_by_id"]["official"] == {"00", "03", "17"}
+    prompt = build_static(idx, cast, ["官方"])
+    assert "00=默认" in prompt
+    assert "03=微笑" in prompt
+    assert "17=" not in prompt
+
+
 def test_filter_accepts_only_variant_verified_face_id():
     constraints = annotation_constraints(
         {

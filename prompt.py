@@ -233,14 +233,21 @@ FEWSHOT = """# 示范
 
 OUTPUT = """# 输出
 
-输出 lines 数组，**每一个待标注行都要有一项**，i 用给出的行号。
+输出 lines 数组，**每一个待标注行都要有一项**；具体字段和行身份以本轮请求中的 JSON Schema 与 TARGET 标识为准。
 不加的字段填空串（数字字段填 0，布尔填 false）。
 宁可少标也不要瞎标 —— 漏标只是平淡，乱标是直接出戏。
 """
 
+MEMORY_POLICY = """# Agent 记忆规则
+
+如果本轮输出 Schema 包含 memory_events，只记录会影响后续场景理解的称呼、承诺、误会、物品、伏笔或关系变化。
+每条记忆必须引用本轮可见的 source_id，并原样摘录能够证明它的台词作为 evidence；不能把猜测升级为事实。
+普通表情变化、一次性气泡、动作和音效不进入长期记忆。没有高价值事件时输出空数组。
+"""
+
 
 def build_rules():
-    return "\n\n".join([ROLE, SHOT, WAIT_POLICY, BACKGROUND_REQUEST, PACING, CAMERA, DIMENSIONS, FEWSHOT, OUTPUT])
+    return "\n\n".join([ROLE, SHOT, WAIT_POLICY, BACKGROUND_REQUEST, PACING, CAMERA, DIMENSIONS, FEWSHOT, OUTPUT, MEMORY_POLICY])
 
 
 def _labeled_asset(name, labels):
@@ -279,7 +286,14 @@ def build_resources(idx, cast, cast_names, faces_by_id):
             expression_parts = []
         if faces:
             tbl = "  ".join(
-                f"{f['id']}={f.get('semantic_cn') or f.get('cn') or f.get('label')}"
+                (
+                    f"{f['id']}={f.get('semantic_cn') or f.get('cn') or f.get('label')}"
+                    + (
+                        f"[{f.get('emotion_family')},I{f['intensity']},{f.get('expression_class')}]"
+                        if f.get("semantic_level") == "rich" and f.get("intensity") is not None
+                        else ""
+                    )
+                )
                 if (f.get("semantic_cn") or f.get("cn") or f.get("label")) else f["id"]
                 for f in faces
             )
