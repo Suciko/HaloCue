@@ -29,7 +29,25 @@ _EDITABLE_FACE_FIELDS = frozenset({
     "tears",
     "description_cn",
     "usage_hint_cn",
+    "emotion_family",
+    "intensity",
+    "expression_class",
+    "beat_fit",
+    "hold_policy",
+    "special_tags",
+    "avoid_when_cn",
 })
+
+_SEMANTIC_FIELDS = frozenset({
+    "emotion_family", "intensity", "expression_class", "beat_fit",
+    "hold_policy", "special_tags", "avoid_when_cn",
+})
+_EMOTION_FAMILIES = frozenset({
+    "neutral", "joy", "surprise_fear", "embarrassment",
+    "irritation_anger", "sadness_hurt", "confusion_resignation",
+})
+_EXPRESSION_CLASSES = frozenset({"base", "accent", "peak", "special"})
+_HOLD_POLICIES = frozenset({"hold", "short", "flash"})
 
 
 VISION_SCHEMA = {
@@ -44,6 +62,13 @@ VISION_SCHEMA = {
                     "primary_emotion": {"type": "string"},
                     "usage_hint_cn": {"type": "string"},
                     "confidence": {"type": "number"},
+                    "emotion_family": {"type": "string", "enum": sorted(_EMOTION_FAMILIES)},
+                    "intensity": {"type": "integer", "minimum": 0, "maximum": 3},
+                    "expression_class": {"type": "string", "enum": sorted(_EXPRESSION_CLASSES)},
+                    "beat_fit": {"type": "array", "items": {"type": "string"}},
+                    "hold_policy": {"type": "string", "enum": sorted(_HOLD_POLICIES)},
+                    "special_tags": {"type": "array", "items": {"type": "string"}},
+                    "avoid_when_cn": {"type": "string"},
                 },
                 "required": [
                     "face_id",
@@ -107,7 +132,32 @@ def _valid_vision_item(item: dict, required: set[str]) -> bool:
     confidence = item.get("confidence")
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
         return False
-    return math.isfinite(float(confidence)) and 0.0 <= float(confidence) <= 1.0
+    if not math.isfinite(float(confidence)) or not 0.0 <= float(confidence) <= 1.0:
+        return False
+    family = item.get("emotion_family")
+    if family is not None and family not in _EMOTION_FAMILIES:
+        return False
+    intensity = item.get("intensity")
+    if intensity is not None and (
+        isinstance(intensity, bool) or not isinstance(intensity, int)
+        or not 0 <= intensity <= 3
+    ):
+        return False
+    expression_class = item.get("expression_class")
+    if expression_class is not None and expression_class not in _EXPRESSION_CLASSES:
+        return False
+    hold_policy = item.get("hold_policy")
+    if hold_policy is not None and hold_policy not in _HOLD_POLICIES:
+        return False
+    for field in ("beat_fit", "special_tags"):
+        value = item.get(field)
+        if value is not None and (
+            not isinstance(value, list) or any(not isinstance(entry, str) for entry in value)
+        ):
+            return False
+    if "avoid_when_cn" in item and not isinstance(item["avoid_when_cn"], str):
+        return False
+    return True
 
 
 _SYSTEM = """你在为视觉小说角色立绘建立供剧情选择的表情语义表。
@@ -379,8 +429,8 @@ def persist_visual_face_labels(
             INSERT INTO face_visual_label
               (ident,spine_signature,outfit_key,face_id,model,primary_emotion,
                secondary_json,valence,arousal,eyes,brows,mouth,blush,tears,
-               confidence,description_cn,head_path,reviewed,manual_json,version,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               confidence,description_cn,semantic_json,head_path,reviewed,manual_json,version,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(ident,spine_signature,outfit_key,face_id,model) DO UPDATE SET
               primary_emotion=excluded.primary_emotion,
               secondary_json=excluded.secondary_json,
@@ -393,6 +443,7 @@ def persist_visual_face_labels(
               tears=excluded.tears,
               confidence=excluded.confidence,
               description_cn=excluded.description_cn,
+              semantic_json=excluded.semantic_json,
               head_path=excluded.head_path,
               version=face_visual_label.version+1,
               updated_at=excluded.updated_at
@@ -414,6 +465,11 @@ def persist_visual_face_labels(
                 int(bool(item.get("tears"))),
                 float(item.get("confidence") or 0.0),
                 usage_hint_cn(item),
+                json.dumps(
+                    {key: item[key] for key in _SEMANTIC_FIELDS if key in item},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
                 str(item.get("head_path") or ""),
                 int(bool(manual)),
                 json.dumps(manual, ensure_ascii=False, separators=(",", ":")),
@@ -525,6 +581,10 @@ def _visual_label_record(row) -> dict:
     if not isinstance(secondary, list):
         secondary = []
     hint = str(row["description_cn"] or "")
+    try:
+        semantic = _safe_json_object(row["semantic_json"])
+    except (KeyError, TypeError):
+        semantic = {}
     ai = {
         "primary_emotion": str(row["primary_emotion"] or ""),
         "secondary_emotions": [str(value) for value in secondary],
@@ -539,6 +599,10 @@ def _visual_label_record(row) -> dict:
         "description_cn": str(row["description_cn"] or ""),
         "usage_hint_cn": hint,
     }
+    ai.update(semantic)
+    ai["semantic_level"] = "rich" if semantic else (
+        "basic" if ai["primary_emotion"] or ai["usage_hint_cn"] else "unknown"
+    )
     manual = {
         key: value
         for key, value in _safe_json_object(row["manual_json"]).items()

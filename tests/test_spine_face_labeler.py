@@ -117,6 +117,53 @@ def test_visual_schema_accepts_selection_semantics_without_face_components(tmp_p
     assert "不得用是否脸红、是否流泪等视觉现象决定是否使用" in provider.calls[0][0]
 
 
+def test_rich_semantics_round_trip_and_legacy_level(tmp_path):
+    item_schema = VISION_SCHEMA["properties"]["items"]["items"]
+    assert item_schema["properties"]["intensity"]["minimum"] == 0
+    assert item_schema["properties"]["intensity"]["maximum"] == 3
+    assert "emotion_family" in item_schema["properties"]
+    assert "avoid_when_cn" in item_schema["properties"]
+
+    con = assetdb.connect(tmp_path / "assets.db")
+    persist_visual_face_labels(
+        con,
+        ident="hero",
+        spine_signature="sig",
+        outfit_key="outfit",
+        model="vision-rich",
+        labels=[{
+            **_compact_label("17", emotion="慌乱尴尬"),
+            "emotion_family": "embarrassment",
+            "intensity": 2,
+            "expression_class": "accent",
+            "beat_fit": ["reaction", "denial"],
+            "hold_policy": "short",
+            "special_tags": [],
+            "avoid_when_cn": "不适合真正发火",
+        }],
+    )
+    rich = list_visual_face_labels(
+        con, ident="hero", spine_signature="sig", outfit_key="outfit"
+    )[0]
+    assert rich["effective"]["semantic_level"] == "rich"
+    assert rich["effective"]["intensity"] == 2
+    assert rich["effective"]["beat_fit"] == ["reaction", "denial"]
+    assert rich["effective"]["avoid_when_cn"] == "不适合真正发火"
+
+    persist_visual_face_labels(
+        con,
+        ident="legacy",
+        spine_signature="sig",
+        outfit_key="outfit",
+        model="vision-legacy",
+        labels=[_compact_label("00")],
+    )
+    legacy = list_visual_face_labels(
+        con, ident="legacy", spine_signature="sig", outfit_key="outfit"
+    )[0]
+    assert legacy["effective"]["semantic_level"] == "basic"
+
+
 def test_legacy_provider_fields_remain_available_for_evidence_diagnostics(tmp_path):
     provider = FakeVisionProvider()
     labels = label_face_images(

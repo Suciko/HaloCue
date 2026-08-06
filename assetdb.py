@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS face_evidence (
     observed_count  INTEGER,
     PRIMARY KEY (ident, spine_signature, outfit_key, face_id, source)
 );
-CREATE TABLE IF NOT EXISTS face_visual_label (
+    CREATE TABLE IF NOT EXISTS face_visual_label (
     ident              TEXT NOT NULL,
     spine_signature    TEXT NOT NULL,
     outfit_key         TEXT NOT NULL,
@@ -90,8 +90,9 @@ CREATE TABLE IF NOT EXISTS face_visual_label (
     blush              INTEGER NOT NULL DEFAULT 0,
     tears              INTEGER NOT NULL DEFAULT 0,
     confidence         REAL NOT NULL DEFAULT 0,
-    description_cn     TEXT,
-    head_path          TEXT,
+        description_cn     TEXT,
+        semantic_json      TEXT NOT NULL DEFAULT '{}',
+        head_path          TEXT,
     reviewed           INTEGER NOT NULL DEFAULT 0,
     manual_json        TEXT NOT NULL DEFAULT '{}',
     version            INTEGER NOT NULL DEFAULT 1,
@@ -210,7 +211,7 @@ def connect(path):
         needs_schema = not _schema_is_current(con)
         if needs_schema:
             con.executescript(SCHEMA)
-            migrate_visual_face_labels(con)
+        migrate_visual_face_labels(con)
         migrate_character_avatar(con)
         if needs_schema:
             con.execute(
@@ -241,6 +242,7 @@ def migrate_visual_face_labels(con):
         row["name"] for row in con.execute("PRAGMA table_info(face_visual_label)")
     }
     additions = {
+        "semantic_json": "TEXT NOT NULL DEFAULT '{}'",
         "manual_json": "TEXT NOT NULL DEFAULT '{}'",
         "version": "INTEGER NOT NULL DEFAULT 1",
         "updated_at": "TEXT NOT NULL DEFAULT ''",
