@@ -7,7 +7,7 @@ AA 剧本编译器 - 无损文档模型 (document.py)
 """
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Tuple
 
 from diagnostics import validate_script_diagnostics
@@ -22,6 +22,7 @@ ANNO_RE = re.compile(
 )
 BG_REQ_RE = re.compile(r"^\s*#\s*待生成自定义背景\s*[:：]\s*(?P<desc>.+?)\s*$")
 DIR_RE = re.compile(r"^@(?P<cmd>\w+)\s*(?P<arg>.*)$")
+THEMATIC_BREAK_RE = re.compile(r"^(?P<mark>[-*_])(?:\s*(?P=mark)){2,}$")
 
 
 def split_head(head: str, cast: Dict[str, Any]) -> Tuple[str, Optional[str], Optional[str], Optional[str], Optional[str]]:
@@ -43,7 +44,7 @@ def split_head(head: str, cast: Dict[str, Any]) -> Tuple[str, Optional[str], Opt
 
 @dataclass
 class DocNode:
-    kind: str  # background_request | scene | title | dir | line | meta | blank | unknown
+    kind: str  # background_request | scene | title | dir | line | meta | blank | separator | unknown
     raw: str  # 整行原文（含 BOM, 缩进, 冒号格式, eol）
     line_no: int
     fields: Dict[str, Any] = field(default_factory=dict)
@@ -205,6 +206,23 @@ def parse_document_lossless(text: str) -> List[DocNode]:
         )
 
     return nodes
+
+
+def normalize_draft_nodes(nodes: List[DocNode]) -> List[DocNode]:
+    """Return the review/compile view of a document without layout-only blanks."""
+    normalized: List[DocNode] = []
+    for node in nodes:
+        if node.kind == "blank":
+            continue
+        if node.kind == "unknown":
+            marker = node.raw.strip()
+            if THEMATIC_BREAK_RE.fullmatch(marker):
+                normalized.append(
+                    replace(node, kind="separator", fields={"marker": marker})
+                )
+                continue
+        normalized.append(node)
+    return normalized
 
 
 def serialize_document(nodes: List[DocNode]) -> str:

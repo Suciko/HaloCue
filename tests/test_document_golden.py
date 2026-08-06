@@ -59,6 +59,17 @@ def test_raw_directive_is_dir_node():
     assert nodes[0].fields["arg"] == "#任意指令 参数"
 
 
+def test_normalize_draft_nodes_drops_blank_lines_and_classifies_thematic_breaks():
+    from document import normalize_draft_nodes
+
+    nodes = parse_document_lossless("旁白: 第一幕。\n\n---\n\n旁白: 第二幕。\n")
+    normalized = normalize_draft_nodes(nodes)
+
+    assert [node.kind for node in normalized] == ["line", "separator", "line"]
+    assert normalized[1].fields["marker"] == "---"
+    assert [node.line_no for node in normalized] == [1, 3, 5]
+
+
 def test_unbound_actor_line_preserved_with_error_diagnostic():
     sample = (
         "## 场景1\n"
