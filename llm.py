@@ -19,6 +19,98 @@ class LLMError(RuntimeError):
     pass
 
 
+class StructuredOutputError(LLMError):
+    """The provider response is not the JSON shape requested by the caller."""
+
+
+class UnsupportedResponseFormatError(LLMError):
+    """The OpenAI-compatible endpoint rejected the response_format field."""
+
+
+def _schema_error(path: str, detail: str) -> StructuredOutputError:
+    return StructuredOutputError(f"结构化返回不符合 schema：{path} {detail}")
+
+
+def _matches_schema_type(value, expected: str) -> bool:
+    if expected == "null":
+        return value is None
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return False
+
+
+def _validate_schema_value(value, schema, path: str) -> None:
+    if not isinstance(schema, dict):
+        raise _schema_error(path, "schema 无效")
+    expected = schema.get("type")
+    if isinstance(expected, list):
+        if not expected or not any(_matches_schema_type(value, item) for item in expected):
+            raise _schema_error(path, "type is outside the allowed range")
+        if value is None:
+            return
+        expected = next(item for item in expected if _matches_schema_type(value, item))
+    if expected == "object":
+        if not isinstance(value, dict):
+            raise _schema_error(path, "应为 object")
+        properties = schema.get("properties") or {}
+        for name in schema.get("required") or []:
+            if name not in value:
+                raise _schema_error(f"{path}.{name}", "缺少必需字段")
+        if schema.get("additionalProperties") is False:
+            unknown = sorted(set(value) - set(properties))
+            if unknown:
+                raise _schema_error(f"{path}.{unknown[0]}", "不允许的字段")
+        for name, child_schema in properties.items():
+            if name in value:
+                _validate_schema_value(value[name], child_schema, f"{path}.{name}")
+        return
+    if expected == "array":
+        if not isinstance(value, list):
+            raise _schema_error(path, "应为 array")
+        item_schema = schema.get("items")
+        if item_schema is not None:
+            for index, item in enumerate(value):
+                _validate_schema_value(item, item_schema, f"{path}[{index}]")
+        return
+    if expected == "string" and not isinstance(value, str):
+        raise _schema_error(path, "应为 string")
+    if expected == "boolean" and not isinstance(value, bool):
+        raise _schema_error(path, "应为 boolean")
+    if expected == "number" and (isinstance(value, bool) or not isinstance(value, (int, float))):
+        raise _schema_error(path, "应为 number")
+    if expected == "integer" and (isinstance(value, bool) or not isinstance(value, int)):
+        raise _schema_error(path, "应为 integer")
+    if expected == "null" and value is not None:
+        raise _schema_error(path, "应为 null")
+    enum = schema.get("enum")
+    if enum is not None and value not in enum:
+        raise _schema_error(path, "值不在允许范围内")
+
+
+def validate_json_schema(value, schema):
+    """Validate a parsed provider response without requiring jsonschema."""
+    _validate_schema_value(value, schema, "$response")
+    return value
+
+
+def parse_and_validate_json_response(text, schema, prefix="调用"):
+    try:
+        value = parse_json_response(text)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise StructuredOutputError(f"{prefix}没有返回合法 JSON") from exc
+    return validate_json_schema(value, schema)
+
+
 def parse_json_response(text):
     """Parse a structured-model response, accepting one complete JSON fence.
 
@@ -124,7 +216,7 @@ class AnthropicProvider(Provider):
         text = "".join(b.text for b in msg.content if b.type == "text")
         if not text.strip():
             raise LLMError("Anthropic 返回了空文本")
-        return parse_json_response(text)
+        return parse_and_validate_json_response(text, schema, "Anthropic 调用")
 
     def complete_json_vision(self, system, images, user, schema):
         import base64
@@ -153,7 +245,9 @@ class AnthropicProvider(Provider):
         self.stats["out"] += u.output_tokens
         self.stats["cache_read"] += getattr(u, "cache_read_input_tokens", 0) or 0
         self.stats["cache_write"] += getattr(u, "cache_creation_input_tokens", 0) or 0
-        return parse_json_response("".join(b.text for b in msg.content if b.type == "text"))
+        return parse_and_validate_json_response(
+            "".join(b.text for b in msg.content if b.type == "text"), schema, "Anthropic 视觉调用"
+        )
 
     def list_models(self):
         try:
@@ -212,7 +306,10 @@ class OpenAIProvider(Provider):
             except (json.JSONDecodeError, OSError):
                 error_payload = None
             message = self._error_message(error_payload, str(exc.reason or exc))
-            raise LLMError(f"{self.model} 接口返回 HTTP {exc.code}: {message}") from exc
+            formatted = f"{self.model} 接口返回 HTTP {exc.code}: {message}"
+            if exc.code == 400 and "response_format" in message.lower():
+                raise UnsupportedResponseFormatError(formatted) from exc
+            raise LLMError(formatted) from exc
         except (URLError, TimeoutError, OSError) as exc:
             reason = getattr(exc, "reason", None) or str(exc)
             raise LLMError(f"{self.model} 无法连接模型接口: {reason}") from exc
@@ -232,20 +329,19 @@ class OpenAIProvider(Provider):
         self.stats["out"] += int(usage.get("completion_tokens") or 0)
         self.stats["cache_read"] += int(details.get("cached_tokens") or 0)
 
-    def _complete(self, messages, schema, schema_name, *, vision=False):
+    def _completion_text(self, messages, response_format, *, vision=False):
         payload = {
             "model": self.model,
             "messages": messages,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {"name": schema_name, "schema": schema, "strict": True},
-            },
             "max_tokens": self.cfg.get("max_tokens", 16000),
         }
+        if response_format is not None:
+            payload["response_format"] = response_format
         response = self._request_json("/chat/completions", payload)
         self._record_usage(response)
         choices = response.get("choices") or []
         choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+        self._last_finish_reason = choice.get("finish_reason") or "unknown"
         message = choice.get("message") or {}
         text = message.get("content") if isinstance(message, dict) else ""
         if isinstance(text, list):
@@ -258,12 +354,78 @@ class OpenAIProvider(Provider):
         if not text.strip():
             finish_reason = choice.get("finish_reason") or "unknown"
             prefix = "视觉调用" if vision else "调用"
-            raise LLMError(f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）")
+            error_type = StructuredOutputError if finish_reason == "length" else LLMError
+            raise error_type(f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）")
+        return text
+
+    @staticmethod
+    def _json_object_messages(messages, schema):
+        instruction = (
+            "\n\n兼容模式：严格只返回一个符合下列 JSON Schema 的 JSON 对象。"
+            "不要输出 Markdown、标题、解释文字或代码围栏。\nJSON Schema：\n"
+            + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+        )
+        fallback = []
+        inserted = False
+        for original in messages:
+            item = dict(original)
+            if not inserted and item.get("role") == "system" and isinstance(item.get("content"), str):
+                item["content"] += instruction
+                inserted = True
+            fallback.append(item)
+        if not inserted:
+            fallback.insert(0, {"role": "system", "content": instruction.lstrip()})
+        return fallback
+
+    def _complete_compatible(self, messages, schema, prefix, *, vision=False):
+        response_format = None if getattr(self, "_response_format_unavailable", False) else {"type": "json_object"}
+        compatible_messages = self._json_object_messages(messages, schema)
         try:
-            return parse_json_response(text)
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            prefix = "视觉调用" if vision else "调用"
-            raise LLMError(f"{self.model} {prefix}没有返回合法 JSON") from exc
+            fallback_text = self._completion_text(
+                compatible_messages,
+                response_format,
+                vision=vision,
+            )
+        except UnsupportedResponseFormatError:
+            self._response_format_unavailable = True
+            fallback_text = self._completion_text(
+                compatible_messages,
+                None,
+                vision=vision,
+            )
+        try:
+            return parse_and_validate_json_response(
+                fallback_text, schema, f"{self.model} {prefix}兼容模式"
+            )
+        except StructuredOutputError as exc:
+            if getattr(self, "_last_finish_reason", "") == "length":
+                raise StructuredOutputError(
+                    f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens={self.cfg.get('max_tokens', 16000)}）；"
+                    "请提高最大输出或缩小 Agent 分块"
+                ) from exc
+            raise
+
+    def _complete(self, messages, schema, schema_name, *, vision=False):
+        prefix = "视觉调用" if vision else "调用"
+        if (
+            getattr(self, "_strict_response_format_unavailable", False)
+            or getattr(self, "_response_format_unavailable", False)
+        ):
+            return self._complete_compatible(messages, schema, prefix, vision=vision)
+        strict_format = {
+            "type": "json_schema",
+            "json_schema": {"name": schema_name, "schema": schema, "strict": True},
+        }
+        try:
+            text = self._completion_text(messages, strict_format, vision=vision)
+        except UnsupportedResponseFormatError:
+            self._strict_response_format_unavailable = True
+            return self._complete_compatible(messages, schema, prefix, vision=vision)
+        try:
+            return parse_and_validate_json_response(text, schema, f"{self.model} {prefix}")
+        except StructuredOutputError:
+            self._strict_response_format_unavailable = True
+            return self._complete_compatible(messages, schema, prefix, vision=vision)
 
     def complete_json(self, static_system, volatile_system, user, schema):
         system = static_system + (("\n\n" + volatile_system) if volatile_system else "")
@@ -322,6 +484,22 @@ class MockProvider(Provider):
             self.stats["out"] += 50
             return self.preset_response
         import re as _re
+        target_matches = list(_re.finditer(
+            r"\[TARGET ([^\]]+)\].*?fingerprint=([0-9a-f]+)", user
+        ))
+        if target_matches and "source_id" in json.dumps(schema, ensure_ascii=False):
+            rows = []
+            for index, match in enumerate(target_matches):
+                rows.append({
+                    "source_id": match.group(1), "text_fingerprint": match.group(2),
+                    "face": "", "emo": "", "act": "", "fx": "", "se": "",
+                    "bg": "", "bg_request": "", "place": "", "shake": False,
+                    "bgfx": "", "trans": "", "move": 0, "shot": "",
+                })
+            self.stats["calls"] += 1
+            self.stats["in"] += len(static_system) // 3
+            self.stats["out"] += len(rows) * 20
+            return {"lines": rows, "state_delta": {}, "memory_events": []}
         faces = _re.findall(r"^\s{0,2}(\d\d)=", static_system, _re.M) or ["00", "01", "03"]
         rows = []
         for m in _re.finditer(r"^\[(\d+)\]\s*([^:：]+)[:：]", user, _re.M):
