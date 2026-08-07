@@ -13,6 +13,7 @@ def run_node(script, *args):
 
 def test_settings_ui_has_two_role_cards_and_help_entry():
     html = (Path(__file__).parents[1] / "ui.html").read_text(encoding="utf-8")
+    layout_css = (Path(__file__).parents[1] / "css" / "layout.css").read_text(encoding="utf-8")
     settings = html.split('id="modelSettings"', 1)[1].split("</section>", 1)[0]
     assert 'class="model-role-card"' in settings
     assert "基础模型" in settings
@@ -31,6 +32,7 @@ def test_settings_ui_has_two_role_cards_and_help_entry():
     assert 'id="modelMaxTokensHint"' in settings
     assert 'id="modelReasoningMode"' in settings
     assert 'data-action="restore-model-max-tokens"' in settings
+    assert ".model-grid>.field{align-content:start}" in layout_css
     app = (Path(__file__).parents[1] / "js" / "app.js").read_text(encoding="utf-8")
     assert "delete-workbench-model" in app
     assert "delete_empty_connection" in app

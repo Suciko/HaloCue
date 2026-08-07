@@ -79,6 +79,7 @@ th{font-weight:600;font-size:12px;color:var(--dim)}
 .modal .box{background:var(--card);border-radius:12px;padding:18px;max-width:760px;width:100%;
   max-height:82vh;overflow:auto}
 .model-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.model-grid>.field{align-content:start}
 .model-grid .wide{grid-column:1/-1}
 @media(max-width:680px){.model-grid{grid-template-columns:1fr}.model-grid .wide{grid-column:auto}}
 
