@@ -23,7 +23,7 @@ from annotation_protocol import (
     ChunkProtocolError, build_chunk_schema, validate_chunk_response,
     validate_review_patches,
 )
-from llm import OutputCapacityError, RequestDeadlineError, StructuredOutputError
+from llm import EmptyModelResponseError, OutputCapacityError, RequestDeadlineError, StructuredOutputError
 
 
 _CAPACITY_PROTOCOL_CODES = {"missing_target"}
@@ -34,7 +34,7 @@ def _classify_chunk_error(exc: Exception) -> str:
         return "capacity"
     if isinstance(exc, ChunkProtocolError) and exc.code in _CAPACITY_PROTOCOL_CODES:
         return "capacity"
-    if isinstance(exc, (ChunkProtocolError, StructuredOutputError)):
+    if isinstance(exc, (ChunkProtocolError, StructuredOutputError, EmptyModelResponseError)):
         return "protocol"
     return "fatal"
 

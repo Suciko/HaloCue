@@ -21,6 +21,12 @@ class LLMError(RuntimeError):
     pass
 
 
+class EmptyModelResponseError(LLMError):
+    """The provider stopped normally without returning visible content."""
+
+    code = "empty_response"
+
+
 class StructuredOutputError(LLMError):
     """The provider response is not the JSON shape requested by the caller."""
 
@@ -536,7 +542,9 @@ class OpenAIProvider(Provider):
                     f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens="
                     f"{self.cfg.get('max_tokens', 16000)}）；请提高最大输出或缩小 Agent 分块"
                 )
-            raise LLMError(f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）")
+            raise EmptyModelResponseError(
+                f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）"
+            )
         return text
 
     def _stream_completion_text(self, messages, response_format, *, activity, started_ms):
@@ -673,7 +681,9 @@ class OpenAIProvider(Provider):
                     f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens="
                     f"{self.cfg.get('max_tokens', 16000)}）；请提高最大输出或缩小 Agent 分块"
                 )
-            raise LLMError(f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）")
+            raise EmptyModelResponseError(
+                f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）"
+            )
         return text
 
     @staticmethod

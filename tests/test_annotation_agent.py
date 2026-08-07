@@ -155,7 +155,7 @@ def test_resume_after_subdivision_requests_only_unfinished_targets(tmp_path):
     assert len(completed_ids) == len(set(completed_ids)) == 25
 
 
-def test_empty_stop_response_fails_without_retry(tmp_path):
+def test_empty_stop_response_retries_once_without_partial_commit(tmp_path):
     class EmptyOnceProvider(RecordingProvider):
         def __init__(self):
             super().__init__()
@@ -165,14 +165,16 @@ def test_empty_stop_response_fails_without_retry(tmp_path):
             if self.empty:
                 self.empty = False
                 self.calls += 1
-                raise llm.LLMError("deepseek-v4-flash 调用返回了空文本（finish_reason=stop）")
+                raise llm.EmptyModelResponseError("empty stop response")
             return super().complete_json(static, volatile, user, schema)
 
     provider = EmptyOnceProvider()
-    with pytest.raises(AnnotationAgentError, match="model_call"):
-        fixture(tmp_path, provider, count=10)
+    result = fixture(tmp_path, provider, count=10)
 
-    assert provider.calls == 1
+    assert provider.calls == 2
+    assert result["completed_chunks"] == 1
+    assert len(result["rows_by_id"]) == 10
+    assert result["metrics"]["retries"] == 1
 
 
 def test_chunk_recovery_progress_explains_retry_and_subdivision(tmp_path):
