@@ -9,12 +9,13 @@
   ];
   const CONTEXT_FIELDS = [
     'origin', 'story_token', 'draft_token', 'card_id',
-    'asset_kind', 'request_id', 'tasks'
+    'asset_kind', 'request_id', 'tasks', 'background_target'
   ];
   const TASK_FIELDS = [
     'task_id', 'kind', 'requested_name', 'source_location',
     'reason', 'candidate_keys'
   ];
+  const SORT_MODES = new Set(['recent', 'oldest', 'name-asc', 'name-desc']);
 
   function make(tag, className, value) {
     const node = document.createElement(tag);
@@ -24,6 +25,54 @@
   }
 
   function clear(node) { if (node) node.textContent = ''; }
+
+  function storedSortMode() {
+    try {
+      const value = exports.localStorage && exports.localStorage.getItem
+        ? exports.localStorage.getItem('aa-asset-workbench-sort-v1')
+        : '';
+      return SORT_MODES.has(value) ? value : 'recent';
+    } catch (_) { return 'recent'; }
+  }
+
+  function saveSortMode(value) {
+    try {
+      if (exports.localStorage && exports.localStorage.setItem) {
+        exports.localStorage.setItem('aa-asset-workbench-sort-v1', value);
+      }
+    } catch (_) {}
+  }
+
+  function parsedTime(value) {
+    const time = Date.parse(String(value || ''));
+    return Number.isFinite(time) ? time : null;
+  }
+
+  function formatLibraryTime(value) {
+    const time = parsedTime(value);
+    return time === null ? '' : new Date(time).toLocaleString('zh-CN', {hour12: false});
+  }
+
+  function nameCompare(left, right) {
+    return String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN', {
+      numeric: true, sensitivity: 'base'
+    }) || String(left._assetKey || '').localeCompare(String(right._assetKey || ''));
+  }
+
+  function assetCompare(mode) {
+    return function (left, right) {
+      if (mode === 'name-asc') return nameCompare(left, right);
+      if (mode === 'name-desc') return -nameCompare(left, right);
+      const leftTime = parsedTime(left.imported_at);
+      const rightTime = parsedTime(right.imported_at);
+      if (leftTime === null && rightTime !== null) return 1;
+      if (rightTime === null && leftTime !== null) return -1;
+      if (leftTime !== null && rightTime !== null && leftTime !== rightTime) {
+        return mode === 'oldest' ? leftTime - rightTime : rightTime - leftTime;
+      }
+      return nameCompare(left, right);
+    };
+  }
 
   function currentStory() {
     return exports.StoryStore && exports.StoryStore.get
@@ -53,6 +102,19 @@
     return task;
   }
 
+  function safeBackgroundTarget(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const rawSelector = value.selector;
+    if (!rawSelector || typeof rawSelector !== 'object' || Array.isArray(rawSelector)) return undefined;
+    const selector = {};
+    ['segment', 'location', 'requested_name'].forEach(function (key) {
+      const text = String(rawSelector[key] || '').trim();
+      if (text && text.length <= 160) selector[key] = text;
+    });
+    if (!selector.segment || !selector.location || !selector.requested_name) return undefined;
+    return {selector: selector, place: String(value.place || '').trim().slice(0, 160)};
+  }
+
   function sanitizeWorkbenchContext(value) {
     const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     const context = {};
@@ -61,6 +123,7 @@
       if (key === 'tasks') context.tasks = Array.isArray(source.tasks)
         ? source.tasks.map(safeTask).filter(Boolean)
         : [];
+      else if (key === 'background_target') context.background_target = safeBackgroundTarget(source[key]);
       else context[key] = source[key];
     });
     context.origin = String(context.origin || 'topbar');
@@ -125,6 +188,7 @@
     this.tasks = document.getElementById('assetWorkbenchTasks');
     this.status = document.getElementById('assetWorkbenchStatus');
     this.taskToggle = document.getElementById('assetWorkbenchTaskToggle');
+    this.importButton = document.getElementById('assetWorkbenchImport');
     this.context = sanitizeWorkbenchContext({});
     this.assets = [];
     this.selectedKey = null;
@@ -137,6 +201,7 @@
     this.taskRequest = null;
     this.searchQuery = '';
     this.kindFilter = 'all';
+    this.sortMode = storedSortMode();
     this.roleFilter = 'all';
     this.visibleColumns = 3;
     this.preview = new exports.StoryUI.AssetPreview(this.detail);
@@ -159,6 +224,7 @@
         const story = currentStory() || {};
         self.open({origin: 'topbar', story_token: story.story_token || ''});
       } else if (action === 'close') self.close();
+      else if (action === 'import' && exports.AssetImportDialog) exports.AssetImportDialog.open(target);
       else if (action === 'back-catalog') self.showCatalog();
       else if (action === 'toggle-tasks') self.toggleTasks();
       else if (action === 'view-face-job') self.viewFaceJob(target);
@@ -177,8 +243,22 @@
         self.restoreSelection();
       }
     });
+    if (this.filters) this.filters.addEventListener('change', function (event) {
+      if (event.target && event.target.dataset.workbenchFilter === 'sort') {
+        const value = String(event.target.value || '');
+        self.sortMode = SORT_MODES.has(value) ? value : 'recent';
+        saveSortMode(self.sortMode);
+        self.renderCatalog();
+        self.restoreSelection();
+      }
+    });
     document.addEventListener('keydown', function (event) {
       if (event.key === 'Escape' && self.isOpen()) self.close();
+    });
+    if (exports.addEventListener) exports.addEventListener('storyassets:imported', function (event) {
+      const detail = event && event.detail || {};
+      if (!self.isOpen() || detail.story_token !== self.context.story_token) return;
+      self.refresh().then(function () { self.locateAsset(detail.identity || {}); });
     });
   };
 
@@ -224,6 +304,10 @@
     if (this.appShell) this.appShell.hidden = true;
     this.root.hidden = false;
     this.root.setAttribute('aria-hidden', 'false');
+    if (this.importButton) {
+      this.importButton.disabled = !this.context.story_token;
+      this.importButton.title = this.context.story_token ? '导入到当前剧情' : '请先打开剧情文件';
+    }
     if (this.contextLabel) {
       const story = currentStory();
       this.contextLabel.textContent = story && story.project
@@ -247,7 +331,7 @@
     this.root.hidden = true;
     this.root.setAttribute('aria-hidden', 'true');
     if (this.appShell) this.appShell.hidden = false;
-    if (typeof exports.refreshAfterAssetWorkbench === 'function') {
+    if (!this.context.background_target && typeof exports.refreshAfterAssetWorkbench === 'function') {
       await exports.refreshAfterAssetWorkbench(this.context);
     }
     if (this.returnFocus && this.returnFocus.focus) this.returnFocus.focus();
@@ -285,6 +369,20 @@
     search.setAttribute('aria-label', '搜索素材');
     search.dataset.workbenchFilter = 'search';
     this.filters.appendChild(search);
+    const sort = document.createElement('select');
+    sort.className = 'asset-sort-select';
+    sort.dataset.workbenchFilter = 'sort';
+    sort.setAttribute('aria-label', '素材排序');
+    [
+      ['recent', '最近导入'], ['oldest', '最早导入'],
+      ['name-asc', '名称 A-Z'], ['name-desc', '名称 Z-A']
+    ].forEach(function (entry) {
+      const option = document.createElement('option');
+      option.value = entry[0]; option.textContent = entry[1];
+      sort.appendChild(option);
+    });
+    sort.value = SORT_MODES.has(this.sortMode) ? this.sortMode : 'recent';
+    this.filters.appendChild(sort);
     const segments = make('div', 'asset-kind-segments');
     [['all', '全部'], ['character', '骨骼'], ['background', '背景'], ['sound', '音效']].forEach(function (entry) {
       const button = make('button', this.kindFilter === entry[0] ? 'is-active' : '', entry[1]);
@@ -305,7 +403,7 @@
         .concat((item.copies || []).map(function (copy) { return copy.chapter; }))
         .concat(item.chapters || []).join(' ').toLocaleLowerCase();
       return (kind === 'all' || item.kind === kind) && (!query || searchable.includes(query));
-    });
+    }).sort(assetCompare(this.sortMode));
   };
 
   AssetWorkbench.prototype.renderCatalog = function () {
@@ -326,6 +424,13 @@
       button.appendChild(make('span', 'asset-kind', kindLabel(item.kind)));
       button.appendChild(make('span', 'asset-state', item.registered_in_current ? '本章已登记' : '未登记'));
       button.appendChild(make('span', 'asset-auxiliary', auxiliary(item)));
+      const imported = formatLibraryTime(item.imported_at);
+      const chapter = String(item.last_used_chapter || '').trim();
+      button.appendChild(make(
+        'span', 'asset-workbench-recency',
+        (imported || '导入时间未知') + ' · ' +
+          (chapter ? '最近使用：' + chapter : '最近使用章节未知')
+      ));
       this.list.appendChild(button);
     }, this);
   };
@@ -360,12 +465,40 @@
     else if (this.detail.insertBefore) this.detail.insertBefore(back, this.detail.firstChild);
     else this.detail.appendChild(back);
     const actions = make('section', 'asset-detail-actions');
+    const applyMode = Boolean(
+      this.context.background_target && item.kind === 'background'
+    );
     const primary = make(
-      'button', '', item.registered_in_current ? '本章已登记' : '复制到当前剧情'
+      'button', '', applyMode
+        ? (item.registered_in_current ? '应用到当前场景' : '复制并应用到当前场景')
+        : (item.registered_in_current ? '本章已登记' : '复制到当前剧情')
     );
     primary.type = 'button';
-    primary.disabled = Boolean(item.registered_in_current);
-    primary.addEventListener('click', function () { this.transfer.copy(item); }.bind(this));
+    primary.disabled = Boolean(item.registered_in_current && !applyMode);
+    const actionStatus = make('p', 'asset-action-status');
+    actionStatus.setAttribute('aria-live', 'polite');
+    primary.addEventListener('click', async function () {
+      if (!applyMode) return this.transfer.copy(item);
+      const idleLabel = item.registered_in_current
+        ? '应用到当前场景'
+        : '复制并应用到当前场景';
+      primary.disabled = true;
+      primary.textContent = '正在应用…';
+      actionStatus.textContent = '正在把这个背景应用到当前场景。';
+      actionStatus.classList.remove('is-error');
+      try {
+        await this.applyBackground(item);
+      } catch (error) {
+        const raw = String(error && (error.e || error.message) || '背景未能应用到当前场景，请重试。');
+        const message = error && error.status === 404 || raw === 'not found'
+          ? '本地服务版本较旧，请重启程序后再试。'
+          : raw;
+        primary.disabled = false;
+        primary.textContent = '重新' + idleLabel;
+        actionStatus.textContent = '应用失败：' + message;
+        actionStatus.classList.add('is-error');
+      }
+    }.bind(this));
     actions.appendChild(primary);
     const manage = make('button', 'ghost', '管理副本');
     manage.type = 'button';
@@ -382,8 +515,68 @@
       actions.appendChild(faces);
     }
     this.detail.appendChild(actions);
+    if (applyMode) this.detail.appendChild(actionStatus);
     this.renderProfileEditor(item);
     if (item.kind === 'background') this.renderBackgroundLabelEditor(item);
+  };
+
+  AssetWorkbench.prototype.locateAsset = function (identity) {
+    identity = identity || {};
+    const kind = String(identity.kind || '');
+    const aaKey = String(identity.aa_key === undefined ? '' : identity.aa_key);
+    const sha256 = String(identity.sha256 || '');
+    const item = this.assets.find(function (candidate) {
+      return candidate.kind === kind && String(candidate.aa_key) === aaKey &&
+        (!sha256 || String(candidate.sha256 || '') === sha256);
+    });
+    if (!item) return null;
+    this.selectedKey = item._assetKey;
+    this.renderCatalog();
+    this.select(item._assetKey);
+    const row = this.list && this.list.querySelector
+      ? this.list.querySelector('[data-asset-key="' + String(item._assetKey).replace(/"/g, '\\"') + '"]')
+      : null;
+    if (row && row.scrollIntoView) row.scrollIntoView({block: 'nearest'});
+    if (row && row.focus) row.focus();
+    return item;
+  };
+
+  AssetWorkbench.prototype.applyBackground = async function (item) {
+    const target = this.context.background_target;
+    if (!target || !item || item.kind !== 'background') return null;
+    this.setCopyState(item.registered_in_current
+      ? '正在应用背景到当前场景…'
+      : '正在复制背景并应用到当前场景…');
+    try {
+      if (!item.registered_in_current) await this.transfer.copy(item);
+      const labels = item.details && item.details.labels || {};
+      const selectedLabel = String(labels.label || item.name || item.aa_key || '');
+      const result = await exports.Api.request(
+        '/api/preflight/background-binding',
+        exports.Api.json('POST', {
+          story_token: this.context.story_token,
+          selector: target.selector,
+          binding: {aa_key: String(item.aa_key), selected_label: selectedLabel}
+        })
+      );
+      const detail = {
+        story_token: this.context.story_token,
+        kind: 'background',
+        aa_key: String(item.aa_key),
+        preflight_snapshot: result.preflight_snapshot,
+        context: Object.assign({}, this.context)
+      };
+      await this.close();
+      if (exports.dispatchEvent && typeof CustomEvent === 'function') {
+        exports.dispatchEvent(new CustomEvent('assetworkbench:background-applied', {
+          detail: detail
+        }));
+      }
+      return result;
+    } catch (error) {
+      this.setCopyState(String(error.e || error.message || '背景未能应用到当前场景，请重试。'));
+      throw error;
+    }
   };
 
   AssetWorkbench.prototype.renderBackgroundLabelEditor = function (item) {
@@ -582,7 +775,7 @@
     if (job.running) card.classList.add('is-running');
     else if (job.done && !job.ok) card.classList.add('is-error');
     card.appendChild(make('h3', 'asset-task-section-heading', '骨骼表情标注'));
-    card.appendChild(make('b', 'asset-face-task-name', asset ? asset.name : ('Identifier ' + (job.ident || '未知'))));
+    card.appendChild(make('b', 'asset-face-task-name', asset ? asset.name : ('角色标识 ' + (job.ident || '未知'))));
     card.appendChild(make('span', 'asset-face-task-phase', job.phase || (job.running ? '处理中' : '已结束')));
     const current = Number(job.current || 0), total = Number(job.total || 0);
     if (total > 0) card.appendChild(make('strong', 'asset-face-task-progress', current + ' / ' + total));

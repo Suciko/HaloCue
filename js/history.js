@@ -23,8 +23,10 @@
     return '复制素材失败，请重试。';
   }
 
-  function HistoryDrawer(root) {
+  function HistoryDrawer(root, options) {
     this.root = root;
+    this.options = options || {};
+    this.embedded = Boolean(this.options.embedded);
     this.generation = 0;
     this.context = null;
     this.projects = [];
@@ -33,6 +35,7 @@
     this.message = '';
     this.busy = false;
     this.trigger = null;
+    this.searchQuery = '';
     this.bind();
   }
 
@@ -50,7 +53,7 @@
         else if (action === 'replace-local') self.replaceLocal();
       });
     }
-    if (!document._historyDrawerEscapeBound && document.addEventListener) {
+    if (!this.embedded && !document._historyDrawerEscapeBound && document.addEventListener) {
       document._historyDrawerEscapeBound = true;
       document.addEventListener('keydown', function (event) {
         if (event.key === 'Escape' && self.isOpen()) self.close();
@@ -89,7 +92,9 @@
       draftVersion: context.draftVersion,
       requestId: context.requestId || '',
       replaceCardId: context.replaceCardId || '',
-      onApplied: (typeof context.onApplied === 'function') ? context.onApplied : null
+      onApplied: (typeof context.onApplied === 'function') ? context.onApplied : null,
+      onCopied: (typeof context.onCopied === 'function') ? context.onCopied : null,
+      onReplaceLocal: (typeof context.onReplaceLocal === 'function') ? context.onReplaceLocal : null
     };
     this.trigger = context.trigger || document.activeElement || null;
     this.projects = [];
@@ -176,12 +181,23 @@
         return null;
       }
       assetStrip.updateTask(task.id, {state: 'available'});
+      if (exports.dispatchEvent && typeof CustomEvent === 'function') {
+        exports.dispatchEvent(new CustomEvent('storyassets:imported', {detail: {
+          identity: {
+            kind: String(result.kind || asset.kind),
+            aa_key: result.aa_key === undefined ? asset.aa_key : result.aa_key,
+            sha256: String(result.sha256 || asset.sha256 || '')
+          },
+          story_token: context.storyToken
+        }}));
+      }
       try { await assetStrip.load(context.storyToken); }
       catch (_) { assetStrip.updateTask(task.id, {state: 'available', code: 'refresh_failed', message: '已复制，素材列表刷新失败。'}); }
       if (!this.isCurrent(generation) || this.context !== context) return null;
       const applied = await this.applyDraftContext(context, result);
       if (!this.isCurrent(generation) || this.context !== context) return null;
       if (context.onApplied) { try { await context.onApplied(result); } catch (_) {} }
+      if (context.onCopied) { try { await context.onCopied(result); } catch (_) {} }
       if (!this.isCurrent(generation) || this.context !== context) return null;
       this.busy = false;
       this.message = applied === false
@@ -223,9 +239,34 @@
   };
   HistoryDrawer.prototype.replaceLocal = function () {
     const context = this.context;
-    if (!context || !this.isCurrent(this.generation) || !exports.StoryAssets || !exports.StoryAssets.importLocal) return null;
+    if (!context || !this.isCurrent(this.generation)) return null;
     this.close({restore: false});
+    if (context.onReplaceLocal) return context.onReplaceLocal(context.kind);
+    if (!exports.StoryAssets || !exports.StoryAssets.importLocal) return null;
     return exports.StoryAssets.importLocal(context.kind, {triggerCardId: context.triggerCardId});
+  };
+  HistoryDrawer.prototype.setSearchQuery = function (value) {
+    this.searchQuery = String(value || '').trim().toLocaleLowerCase();
+    this.render();
+  };
+  HistoryDrawer.prototype.filteredAssets = function () {
+    const query = this.searchQuery;
+    return this.assets.filter(function (asset) {
+      const searchable = [asset.name, asset.aa_key, asset.project]
+        .map(function (value) { return String(value || ''); })
+        .join(' ').toLocaleLowerCase();
+      return !query || searchable.includes(query);
+    }).sort(function (left, right) {
+      const leftTime = Date.parse(String(left.imported_at || ''));
+      const rightTime = Date.parse(String(right.imported_at || ''));
+      const leftKnown = Number.isFinite(leftTime), rightKnown = Number.isFinite(rightTime);
+      if (leftKnown && !rightKnown) return -1;
+      if (!leftKnown && rightKnown) return 1;
+      if (leftKnown && rightKnown && leftTime !== rightTime) return rightTime - leftTime;
+      return String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN', {
+        numeric: true, sensitivity: 'base'
+      }) || String(left.aa_key || '').localeCompare(String(right.aa_key || ''));
+    });
   };
   HistoryDrawer.prototype.close = function (options) {
     options = options || {};
@@ -239,11 +280,14 @@
   HistoryDrawer.prototype.render = function () {
     if (!this.root) return;
     clear(this.root);
-    const panel = make('div', 'history-drawer-panel');
+    const panel = make('div', 'history-drawer-panel' + (this.embedded ? ' is-embedded' : ''));
     const header = make('div', 'history-drawer-heading');
     header.appendChild(make('h2', '', '从历史项目导入'));
-    const close = make('button', 'ghost history-drawer-close', '关闭');
-    close.type = 'button'; close.dataset.historyAction = 'close'; header.appendChild(close); panel.appendChild(header);
+    if (!this.embedded) {
+      const close = make('button', 'ghost history-drawer-close', '关闭');
+      close.type = 'button'; close.dataset.historyAction = 'close'; header.appendChild(close);
+    }
+    panel.appendChild(header);
     panel.appendChild(make('p', 'dim history-drawer-intro', '素材会复制并登记到当前剧情，不会链接到原项目。'));
     const kind = this.context && this.context.kind;
     panel.appendChild(make('p', 'history-drawer-kind', kind === 'character' ? '角色' : kind === 'sound' ? '音效' : '背景'));
@@ -255,7 +299,7 @@
     }, this);
     panel.appendChild(projectList);
     const assetList = make('div', 'history-asset-list');
-    this.assets.forEach(function (asset) {
+    this.filteredAssets().forEach(function (asset) {
       const card = make('article', 'history-asset-card' + (asset.status === 'source_missing' ? ' is-missing' : ''));
       card.appendChild(make('b', 'history-asset-name', asset.name || asset.aa_key || '未命名素材'));
       card.appendChild(make('span', 'history-asset-type', asset.kind === 'character' ? '角色' : asset.kind === 'sound' ? '音效' : '背景'));

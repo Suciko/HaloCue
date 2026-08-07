@@ -14,6 +14,8 @@ import json, os, sys, time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from model_capabilities import normalize_remote_model_record
+
 
 class LLMError(RuntimeError):
     pass
@@ -198,8 +200,16 @@ class Provider:
         """images = [(标识, jpeg_bytes), ...]"""
         raise NotImplementedError
 
-    def list_models(self):
+    def list_model_records(self):
         raise LLMError(f"{self.name} 接口不支持读取模型列表")
+
+    def list_models(self):
+        """Compatibility view for callers that only need model IDs."""
+        return sorted({
+            str(record.get("id") or "")
+            for record in self.list_model_records()
+            if str(record.get("id") or "")
+        })
 
     def report(self):
         s = self.stats
@@ -376,17 +386,18 @@ class AnthropicProvider(Provider):
         )
         return result
 
-    def list_models(self):
+    def list_model_records(self):
         try:
             response = self.client.models.list()
         except Exception as exc:
             raise LLMError(f"{self.model} 读取模型列表失败: {exc}") from exc
         data = getattr(response, "data", response)
-        return sorted({
-            str(getattr(item, "id", "") or "")
-            for item in data
-            if str(getattr(item, "id", "") or "")
-        })
+        records = []
+        for item in data:
+            model_id = str(getattr(item, "id", "") or "").strip()
+            if model_id:
+                records.append({"id": model_id})
+        return sorted(records, key=lambda record: record["id"])
 
 
 # ---------------------------------------------------------------- OpenAI 兼容
@@ -793,14 +804,15 @@ class OpenAIProvider(Provider):
             vision=True,
         )
 
-    def list_models(self):
+    def list_model_records(self):
         response = self._request_json("/models")
         data = response.get("data") or []
-        return sorted({
-            str(item.get("id") or "")
-            for item in data
-            if isinstance(item, dict) and str(item.get("id") or "")
-        })
+        records = []
+        for item in data:
+            record = normalize_remote_model_record(item)
+            if record["id"]:
+                records.append(record)
+        return sorted(records, key=lambda record: record["id"])
 
 
 # ---------------------------------------------------------------- 假货（不花钱跑通链路）

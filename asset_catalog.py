@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS asset_install (
     status        TEXT NOT NULL,
     error         TEXT,
     metadata_json TEXT NOT NULL DEFAULT '{}',
+    registered_at TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (kind, aa_key, scope)
 );
 CREATE INDEX IF NOT EXISTS ix_asset_install_status
@@ -43,7 +44,7 @@ CREATE TABLE IF NOT EXISTS asset_library_profile (
 
 ALLOWED_MODEL_STATUSES = ("registered", "verified")
 STORY_ASSET_STATUS = "registered"
-_ASSET_SCHEMA_VERSION = "1"
+_ASSET_SCHEMA_VERSION = "2"
 _MIGRATE_LOCK = threading.RLock()
 _OFFICIAL_CATALOG_SOURCES = {
     "observed", "verified", "aa_verified", "aap_observed", "official",
@@ -189,6 +190,12 @@ def _asset_schema_is_current(con) -> bool:
     return bool(row and str(row[0]) == _ASSET_SCHEMA_VERSION)
 
 
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace(
+        "+00:00", "Z"
+    )
+
+
 def migrate(con) -> None:
     if _asset_schema_is_current(con):
         return
@@ -196,6 +203,14 @@ def migrate(con) -> None:
         if _asset_schema_is_current(con):
             return
         con.executescript(ASSET_SCHEMA)
+        columns = {
+            str(row["name"]) for row in con.execute("PRAGMA table_info(asset_install)")
+        }
+        if "registered_at" not in columns:
+            con.execute(
+                "ALTER TABLE asset_install "
+                "ADD COLUMN registered_at TEXT NOT NULL DEFAULT ''"
+            )
         assetdb.migrate_face_evidence(con)
         con.execute(
             """
@@ -225,13 +240,19 @@ def upsert_candidate(
         """
         INSERT INTO asset_install
           (kind,aa_key,display_name,source_path,sha256,scope,
-           install_path,status,error,metadata_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
+           install_path,status,error,metadata_json,registered_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(kind,aa_key,scope) DO UPDATE SET
           display_name=excluded.display_name,
           source_path=excluded.source_path,
           sha256=excluded.sha256,
           install_path=excluded.install_path,
+          registered_at=CASE
+            WHEN asset_install.registered_at<>'' THEN asset_install.registered_at
+            WHEN asset_install.status='registered' THEN ''
+            WHEN excluded.status='registered' THEN excluded.registered_at
+            ELSE ''
+          END,
           status=excluded.status,
           error=excluded.error,
           metadata_json=excluded.metadata_json
@@ -247,6 +268,7 @@ def upsert_candidate(
             status,
             error,
             json.dumps(metadata, ensure_ascii=False),
+            _utc_now_iso() if status == "registered" else "",
         ),
     )
     if candidate.kind == "character":
@@ -281,10 +303,19 @@ def set_asset_status(
     changed = con.execute(
         """
         UPDATE asset_install
-        SET status=?, install_path=COALESCE(?,install_path), error=?
+        SET status=?, install_path=COALESCE(?,install_path), error=?,
+            registered_at=CASE
+              WHEN registered_at<>'' THEN registered_at
+              WHEN status='registered' THEN ''
+              WHEN ?='registered' THEN ?
+              ELSE ''
+            END
         WHERE kind=? AND aa_key=? AND scope=?
         """,
-        (status, install_path, error, kind, str(aa_key), scope),
+        (
+            status, install_path, error, status, _utc_now_iso(),
+            kind, str(aa_key), scope,
+        ),
     ).rowcount
     if not changed:
         raise KeyError(f"素材目录中不存在 {kind}:{aa_key}@{scope}")
@@ -311,6 +342,21 @@ def _safe_catalog_text(value, *, fallback: str = "") -> str:
     if text.startswith(("/", "\\\\")) or re.match(r"^[A-Za-z]:[\\/]", text):
         return fallback
     return text
+
+
+def _safe_iso_timestamp(value) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if parsed.tzinfo is None:
+        return ""
+    return parsed.astimezone(timezone.utc).isoformat(timespec="seconds").replace(
+        "+00:00", "Z"
+    )
 
 
 def _safe_catalog_labels(value) -> dict:
@@ -523,7 +569,8 @@ def library_custom_rows(con):
     migrate(con)
     rows = con.execute(
         """
-        SELECT kind,aa_key,display_name,sha256,scope,status,metadata_json,install_path
+        SELECT kind,aa_key,display_name,sha256,scope,status,metadata_json,install_path,
+               registered_at
         FROM asset_install
         WHERE status=? AND kind IN ('character','background','sound')
         ORDER BY kind,display_name,aa_key,scope
@@ -602,6 +649,7 @@ def list_library_assets(con) -> dict:
             "asset_role": str(profile["asset_role"]) if profile else "chapter_only",
             "series_name": str(profile["series_name"]) if profile else "",
             "chapters": [], "details": _library_item_details(key[0], metadata),
+            "_copy_times": [],
         })
         _merge_visual_label_summary(
             item["details"], kind=key[0], aa_key=key[1], metadata=metadata,
@@ -610,11 +658,21 @@ def list_library_assets(con) -> dict:
         chapter = Path(str(row["scope"] or "")).name or "未命名章节"
         if chapter not in item["chapters"]:
             item["chapters"].append(chapter)
+        timestamp = _safe_iso_timestamp(row["registered_at"])
+        if timestamp:
+            item["_copy_times"].append((timestamp, chapter))
     out = {"characters": [], "backgrounds": [], "sounds": [], "bgms": []}
     bucket = {"character": "characters", "background": "backgrounds", "sound": "sounds"}
     for item in groups.values():
         item["chapters"].sort(key=str.casefold)
         item["copy_count"] = len(item["chapters"])
+        copy_times = item.pop("_copy_times")
+        item["imported_at"] = min(
+            (timestamp for timestamp, _ in copy_times), default=""
+        )
+        latest = max(copy_times, default=None)
+        item["last_used_at"] = latest[0] if latest else ""
+        item["last_used_chapter"] = latest[1] if latest else ""
         out[bucket[item["kind"]]].append(item)
     for values in out.values():
         values.sort(key=lambda item: (str(item["series_name"]).casefold(), str(item["name"]).casefold()))

@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+import urllib.error
 from pathlib import Path
 
 import aapaths
@@ -9,6 +10,45 @@ from aa_install_discovery import AADiscoveryResult, UnityIdentity
 
 
 HERE = Path(__file__).resolve().parents[1]
+
+
+class _JsonResponse:
+    def __init__(self, payload, status=200):
+        self.payload = payload
+        self.status = status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload).encode("utf-8")
+
+
+def test_existing_server_must_support_model_workbench(monkeypatch):
+    def legacy_server(request_url, timeout):
+        if request_url.endswith("/api/setup/status"):
+            return _JsonResponse({"entry_file": launcher.ENTRY_FILE})
+        raise urllib.error.HTTPError(request_url, 404, "not found", {}, None)
+
+    monkeypatch.setattr(launcher.urllib.request, "urlopen", legacy_server)
+
+    assert launcher.is_existing_server("http://127.0.0.1:8770") is False
+
+
+def test_existing_server_accepts_current_model_workbench(monkeypatch):
+    def current_server(request_url, timeout):
+        if request_url.endswith("/api/setup/status"):
+            return _JsonResponse({"entry_file": launcher.ENTRY_FILE})
+        if request_url.endswith("/api/llm/workbench"):
+            return _JsonResponse({"schema_version": 2})
+        raise AssertionError(request_url)
+
+    monkeypatch.setattr(launcher.urllib.request, "urlopen", current_server)
+
+    assert launcher.is_existing_server("http://127.0.0.1:8770") is True
 
 
 def _make_aa_data(root: Path) -> Path:

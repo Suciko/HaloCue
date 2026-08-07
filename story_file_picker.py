@@ -263,6 +263,12 @@ class StoryFilePicker:
     def _entry_payload(self, path: Path) -> dict:
         kind, size, modified_ns = self._stat_entry(path)
         suffix = path.suffix.casefold()
+        file_types = {
+            ".md": "Markdown",
+            ".png": "PNG 图片",
+            ".jpg": "JPEG 图片",
+            ".jpeg": "JPEG 图片",
+        }
         return {
             "entry_token": self._issue_entry(path),
             "name": path.name,
@@ -271,7 +277,7 @@ class StoryFilePicker:
             "modified": dt.datetime.fromtimestamp(
                 modified_ns / 1_000_000_000, tz=dt.timezone.utc
             ).isoformat(),
-            "type": "文件夹" if kind == "directory" else ("Markdown" if suffix == ".md" else "文本文件"),
+            "type": "文件夹" if kind == "directory" else file_types.get(suffix, "文本文件"),
         }
 
     def _breadcrumb(self, directory: Path) -> list[dict]:

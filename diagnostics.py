@@ -8,6 +8,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 DIAGNOSTIC_CODES = {
+    "draft.blank_node": {"severity": "error", "message_tmpl": "草稿包含无意义的空白卡片"},
     "actor.unbound": {"severity": "error", "message_tmpl": "演员表里没有「{who}」，此行跳过"},
     "line.unparsable": {"severity": "error", "message_tmpl": "无法解析的行: {text}"},
     "dir.unknown": {"severity": "error", "message_tmpl": "未知指令: {cmd}"},
@@ -49,6 +50,8 @@ KNOWN_COMMANDS = {
     "zoom",
     "raw",
 }
+
+THEMATIC_BREAK_RE = re.compile(r"^(?P<mark>[-*_])(?:\s*(?P=mark)){2,}$")
 
 
 def create_diagnostic(
@@ -103,8 +106,16 @@ def validate_script_diagnostics(
                     description=fields.get("description", ""),
                 )
             )
+        elif kind == "blank":
+            diagnostics.append(
+                create_diagnostic("draft.blank_node", line_no=line_no)
+            )
+        elif kind == "separator":
+            continue
         elif kind == "unknown":
             raw_text = getattr(node, "raw", "").strip()
+            if THEMATIC_BREAK_RE.fullmatch(raw_text):
+                continue
             diagnostics.append(
                 create_diagnostic(
                     "line.unparsable",

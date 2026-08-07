@@ -29,7 +29,7 @@ def test_migration_preserves_legacy_rows(tmp_path):
     assert tuple(row) == ("BG_Black", 1047754314, "黑屏")
     assert con.execute(
         "SELECT value FROM meta WHERE key='asset_schema_version'"
-    ).fetchone()[0] == "1"
+    ).fetchone()[0] == "2"
 
 
 def test_only_registered_custom_assets_are_exported(tmp_path):

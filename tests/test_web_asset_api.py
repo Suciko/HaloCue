@@ -558,3 +558,7 @@ def test_web_build_attaches_registered_skeleton_scope_to_cast(tmp_path):
     entry = cast["cast"]["Kei"]
     assert entry["spine_signature"]
     assert entry["outfit_key"] == "character"
+    assert entry["custom"] == {
+        "src": str(project / "characters" / "date-kei"),
+        "asset": "character",
+    }

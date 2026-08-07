@@ -75,3 +75,34 @@ def test_jobmanager_cleanup():
     time.sleep(1.1)
     jm.clean_stale_jobs()
     assert jm.get(job_id) is None
+
+
+def test_job_activity_is_snapshot_and_does_not_pollute_progress_detail():
+    jm = JobManager()
+
+    def sample_task(job):
+        job.update_progress(25, "正在标注第 1/4 个场景块")
+        job.update_activity({
+            "state": "receiving",
+            "model": "deepseek-v4-flash",
+            "received_chars": 2048,
+            "elapsed_ms": 7300,
+            "untrusted_field": "drop me",
+        })
+        return {"ok": True}
+
+    job_id = jm.submit(sample_task, label="活动测试")
+    for _ in range(20):
+        info = jm.get(job_id)
+        if info["state"] in ("succeeded", "failed"):
+            break
+        time.sleep(0.05)
+
+    info = jm.get(job_id)
+    assert info["detail"] == "正在标注第 1/4 个场景块"
+    assert info["activity"] == {
+        "state": "receiving",
+        "model": "deepseek-v4-flash",
+        "received_chars": 2048,
+        "elapsed_ms": 7300,
+    }

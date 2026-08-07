@@ -12,6 +12,7 @@ MODULES = (
     "library_transfer.js",
     "library_copies.js",
     "library_faces.js",
+    "library_import.js",
     "library.js",
 )
 
@@ -42,6 +43,53 @@ def test_material_workbench_is_full_screen_and_loads_split_csp_safe_modules():
     assert positions == sorted(positions)
     assert "onclick=" not in html
     assert "onchange=" not in html
+
+
+def test_material_workbench_declares_one_unified_import_dialog():
+    html = (HERE / "ui.html").read_text(encoding="utf-8")
+
+    assert 'id="assetWorkbenchImport"' in html
+    assert 'data-workbench-action="import"' in html
+    assert 'id="assetImportDialog"' in html
+    assert 'role="dialog"' in html
+    assert 'aria-labelledby="assetImportTitle"' in html
+    assert 'data-asset-import-mode="local"' in html
+    assert 'data-asset-import-mode="history"' in html
+    assert html.index('/js/history.js') < html.index('/js/library_import.js')
+    assert html.index('/js/library_import.js') < html.index('/js/library.js')
+
+
+def test_unified_import_dialog_delegates_local_import_and_restores_focus():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');const nodes={},calls=[];
+function node(id){let own='',classes=new Set();return {id:id||'',children:[],dataset:{},hidden:false,disabled:false,value:'',classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x),toggle:(x,v)=>v?classes.add(x):classes.delete(x)},appendChild(x){this.children.push(x);return x},addEventListener(){},setAttribute(){},focus(){this.focused=true},set textContent(v){own=String(v||'');this.children=[]},get textContent(){return own}}}
+['assetImportDialog','assetImportLocal','assetImportHistory','assetImportCharacterFields','assetImportIdentifier','assetImportDisplayName','assetImportSelectedFile','assetImportStatus','assetImportSubmit','assetImportHistoryRoot','assetImportHistorySearch'].forEach(id=>nodes[id]=node(id));nodes.assetImportDialog.hidden=true;
+const trigger=node('trigger'),story={story_token:'story-1'};
+function Picker(){this.allowedSuffixes=null;}Picker.prototype.open=function(){calls.push({picker:true})};
+function History(){this.open=context=>{calls.push({history:context.kind});return Promise.resolve()};this.close=function(){};this.setSearchQuery=function(){}};
+const window={StoryUI:{StoryFilePicker:Picker,HistoryDrawer:History},StoryStore:{get:()=>story},StoryAssets:{importLocal:async(kind,context)=>{calls.push({kind,context});return {ok:true,status:'registered',kind,aa_key:'door',sha256:'digest'}}}};
+const document={activeElement:trigger,getElementById:id=>nodes[id]||null,addEventListener(){}};
+vm.runInNewContext(source,{window,document,console,Promise,Error,Set});
+(async()=>{const dialog=new window.StoryUI.LibraryImportDialog(nodes.assetImportDialog);dialog.open(trigger);dialog.setKind('sound');dialog.selection={file_token:'ft-sound',name:'door.wav',size:10};nodes.assetImportDisplayName.value='开门声';const result=await dialog.submitLocal();dialog.close();console.log(JSON.stringify({calls,result,closed:nodes.assetImportDialog.hidden,restored:trigger.focused,status:nodes.assetImportStatus.textContent}));})();
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library_import.js")],
+        text=True,
+        encoding="utf-8",
+    )
+    result = json.loads(output)
+
+    assert result["calls"][-1] == {
+        "kind": "sound",
+        "context": {
+            "fileToken": "ft-sound",
+            "name": "door.wav",
+            "displayName": "开门声",
+        },
+    }
+    assert result["result"]["ok"] is True
+    assert result["closed"] is True
+    assert result["restored"] is True
 
 
 def test_face_workspace_uses_database_backed_editable_cards():
@@ -713,6 +761,65 @@ const detail=node(),states=[],workbench={detail,setCopyState:text=>states.push(t
     assert result["focused"]["card_id"] == "bg-1"
 
 
+def test_scene_workbench_applies_registered_background_and_returns_snapshot():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),sources=process.argv.slice(1).map(path=>fs.readFileSync(path,'utf8'));const nodes={},requests=[],events=[];let document;
+function node(tag){let own='',classes=new Set(),handlers={};return {tagName:tag,id:'',children:[],parentNode:null,dataset:{},className:'',hidden:false,value:'',type:'',disabled:false,src:'',alt:'',controls:false,classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x),toggle:(x,v)=>v?classes.add(x):classes.delete(x)},appendChild(child){child.parentNode=this;this.children.push(child);return child},addEventListener(type,handler){handlers[type]=handler},click(){return handlers.click&&handlers.click({target:this})},setAttribute(){},removeAttribute(){},focus(){document.activeElement=this},pause(){},load(){},closest(){return null},set textContent(value){own=String(value||'');this.children=[]},get textContent(){return own+this.children.map(child=>child.textContent||'').join('')}}}
+function find(root,predicate){if(predicate(root))return root;for(const child of root.children||[]){const found=find(child,predicate);if(found)return found;}return null;}
+['appShell','assetWorkbench','assetWorkbenchContext','assetWorkbenchTaskToggle','assetWorkbenchFilters','assetWorkbenchList','assetWorkbenchDetail','assetWorkbenchTasks','assetWorkbenchStatus'].forEach(id=>{nodes[id]=node('div');nodes[id].id=id});nodes.assetWorkbench.hidden=true;
+document={activeElement:node('button'),getElementById:id=>nodes[id]||null,createElement:node,addEventListener(){}};
+const payload={characters:[],backgrounds:[{kind:'background',aa_key:'9001',sha256:'digest',name:'雨夜车站',registered_in_current:true,preview_available:true,copy_count:1,copies:[],details:{labels:{label:'雨夜车站'}}}],sounds:[],bgms:[]};
+const snapshot={state:'fresh',approved:false,result:{usage_chain:[]}};
+const window={StoryUI:{},StoryStore:{get:()=>({story_token:'story-1',project:'第一章'})},Api:{request:async(path,options)=>{requests.push({path,payload:options&&options.payload});if(path==='/api/preflight/background-binding')return {ok:true,preflight_snapshot:snapshot};return payload;},json:(method,payload)=>({method,payload})},dispatchEvent:event=>{events.push({type:event.type,detail:event.detail});return true;}};
+sources.forEach(source=>vm.runInNewContext(source,{window,document,Promise,Error,console,setTimeout,clearTimeout,encodeURIComponent,CustomEvent:function(type,options){this.type=type;this.detail=options&&options.detail}}));
+(async()=>{await window.AssetWorkbench.open({origin:'preflight',story_token:'story-1',asset_kind:'background',background_target:{selector:{segment:'开场',location:'第1行',requested_name:'雨夜车站'},place:'车站'},tasks:[]});const apply=find(nodes.assetWorkbenchDetail,node=>node.tagName==='button'&&node.textContent.includes('应用到当前场景'));await apply.click();await Promise.resolve();console.log(JSON.stringify({context:window.AssetWorkbench.context,requests,events,closed:nodes.assetWorkbench.hidden}));})();
+'''
+    result = run_library(script)
+    assert result["context"]["background_target"] == {
+        "selector": {"segment": "开场", "location": "第1行", "requested_name": "雨夜车站"},
+        "place": "车站",
+    }
+    binding_request = next(
+        item for item in result["requests"]
+        if item["path"] == "/api/preflight/background-binding"
+    )
+    assert binding_request == {
+        "path": "/api/preflight/background-binding",
+        "payload": {
+            "story_token": "story-1",
+            "selector": {"segment": "开场", "location": "第1行", "requested_name": "雨夜车站"},
+            "binding": {"aa_key": "9001", "selected_label": "雨夜车站"},
+        },
+    }
+    assert result["events"][-1]["type"] == "assetworkbench:background-applied"
+    assert result["events"][-1]["detail"]["preflight_snapshot"] == {
+        "state": "fresh", "approved": False, "result": {"usage_chain": []},
+    }
+    assert result["closed"] is True
+
+
+def test_scene_workbench_shows_binding_failure_next_to_action_and_allows_retry():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),sources=process.argv.slice(1).map(path=>fs.readFileSync(path,'utf8'));const nodes={};let document;
+function node(tag){let own='',classes=new Set(),handlers={};return {tagName:tag,id:'',children:[],parentNode:null,dataset:{},className:'',hidden:false,value:'',type:'',disabled:false,src:'',alt:'',controls:false,classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x),toggle:(x,v)=>v?classes.add(x):classes.delete(x)},appendChild(child){child.parentNode=this;this.children.push(child);return child},addEventListener(type,handler){handlers[type]=handler},click(){return handlers.click&&handlers.click({target:this})},setAttribute(){},removeAttribute(){},focus(){document.activeElement=this},pause(){},load(){},closest(){return null},set textContent(value){own=String(value||'');this.children=[]},get textContent(){return own+this.children.map(child=>child.textContent||'').join('')}}}
+function find(root,predicate){if(predicate(root))return root;for(const child of root.children||[]){const found=find(child,predicate);if(found)return found;}return null;}
+['appShell','assetWorkbench','assetWorkbenchContext','assetWorkbenchTaskToggle','assetWorkbenchFilters','assetWorkbenchList','assetWorkbenchDetail','assetWorkbenchTasks','assetWorkbenchStatus'].forEach(id=>{nodes[id]=node('div');nodes[id].id=id});nodes.assetWorkbench.hidden=true;
+document={activeElement:node('button'),getElementById:id=>nodes[id]||null,createElement:node,addEventListener(){}};
+const payload={characters:[],backgrounds:[{kind:'background',aa_key:'9001',sha256:'digest',name:'雨夜车站',registered_in_current:true,preview_available:true,copy_count:1,copies:[],details:{labels:{label:'雨夜车站'}}}],sounds:[],bgms:[]};
+const window={StoryUI:{},StoryStore:{get:()=>({story_token:'story-1',project:'第一章'})},Api:{request:async path=>{if(path==='/api/preflight/background-binding')throw new Error('not found');return payload;},json:(method,payload)=>({method,payload})}};
+sources.forEach(source=>vm.runInNewContext(source,{window,document,Promise,Error,console,setTimeout,clearTimeout,encodeURIComponent,CustomEvent:function(){}}));
+(async()=>{await window.AssetWorkbench.open({origin:'preflight',story_token:'story-1',asset_kind:'background',background_target:{selector:{segment:'开场',location:'第1行',requested_name:'雨夜车站'},place:'车站'},tasks:[]});const apply=find(nodes.assetWorkbenchDetail,node=>node.tagName==='button'&&node.textContent.includes('应用到当前场景'));const clickResult=apply.click();const pending={text:apply.textContent,disabled:apply.disabled};await clickResult;console.log(JSON.stringify({pending,after:{text:apply.textContent,disabled:apply.disabled,detail:nodes.assetWorkbenchDetail.textContent,status:nodes.assetWorkbenchStatus.textContent,closed:nodes.assetWorkbench.hidden}}));})();
+'''
+    result = run_library(script)
+
+    assert result["pending"] == {"text": "正在应用…", "disabled": True}
+    assert result["after"]["text"] == "重新应用到当前场景"
+    assert result["after"]["disabled"] is False
+    assert "应用失败" in result["after"]["detail"]
+    assert "本地服务版本较旧，请重启程序后再试" in result["after"]["detail"]
+    assert result["after"]["closed"] is False
+
+
 def test_catalog_combines_filter_hierarchy_auxiliary_detail_and_explicit_actions():
     script = r'''
 const fs=require('fs'),vm=require('vm'),sources=process.argv.slice(1).map(path=>fs.readFileSync(path,'utf8'));const nodes={};let document;
@@ -731,3 +838,42 @@ sources.forEach(source=>vm.runInNewContext(source,{window,document,Promise,Error
     assert "1920×1080" in result["detail"] and "屋顶" in result["detail"]
     assert "复制到当前剧情" in result["detail"]
     assert "管理副本" in result["detail"]
+
+
+def test_workbench_sorts_by_import_time_renders_recency_and_locates_identity():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+function node(tag){let own='';return {tagName:tag,children:[],dataset:{},className:'',type:'',value:'',appendChild(child){this.children.push(child);return child},setAttribute(){},addEventListener(){},focus(){this.focused=true},scrollIntoView(){this.scrolled=true},querySelector(){return null},set textContent(value){own=String(value||'');this.children=[]},get textContent(){return own+this.children.map(child=>child.textContent||'').join('')}}}
+const document={getElementById:()=>null,createElement:node,addEventListener(){}};
+const window={StoryUI:{}};
+vm.runInNewContext(source,{window,document,console,ResizeObserver:undefined,encodeURIComponent,setTimeout,clearTimeout});
+const prototype=window.StoryUI.AssetWorkbench.prototype,workbench=Object.create(prototype);
+workbench.kindFilter='all';workbench.searchQuery='';workbench.list=node('div');workbench.detail=node('section');
+workbench.assets=[
+  {kind:'background',aa_key:'unknown',sha256:'u',name:'未知',imported_at:'',last_used_chapter:'',_assetKey:'background:unknown:u',details:{}},
+  {kind:'background',aa_key:'old',sha256:'o',name:'较早',imported_at:'2026-08-01T02:00:00Z',last_used_chapter:'第一章',_assetKey:'background:old:o',details:{}},
+  {kind:'background',aa_key:'new',sha256:'n',name:'最新',imported_at:'2026-08-07T05:30:00Z',last_used_chapter:'第三章',_assetKey:'background:new:n',details:{}}
+];
+workbench.sortMode='recent';const recent=workbench.filteredAssets().map(item=>item.name);
+workbench.sortMode='oldest';const oldest=workbench.filteredAssets().map(item=>item.name);
+workbench.sortMode='name-asc';const names=workbench.filteredAssets().map(item=>item.name);
+workbench.sortMode='recent';workbench.renderCatalog();
+const rows=workbench.list.children.map(child=>child.textContent);
+const hasLocate=typeof workbench.locateAsset==='function';
+if(hasLocate){workbench.preview={render(){}};workbench.renderDetailActions=function(){};workbench.locateAsset({kind:'background',aa_key:'old',sha256:'o'});}
+console.log(JSON.stringify({recent,oldest,names,rows,hasLocate,selected:workbench.selectedKey||''}));
+'''
+    output = subprocess.check_output(
+        ["node", "-e", script, str(HERE / "js" / "library.js")],
+        text=True,
+        encoding="utf-8",
+    )
+    result = json.loads(output)
+
+    assert result["recent"] == ["最新", "较早", "未知"]
+    assert result["oldest"] == ["较早", "最新", "未知"]
+    assert result["names"] == ["较早", "未知", "最新"]
+    assert any("最近使用：第三章" in row for row in result["rows"])
+    assert any("导入时间未知" in row for row in result["rows"])
+    assert result["hasLocate"] is True
+    assert result["selected"] == "background:old:o"

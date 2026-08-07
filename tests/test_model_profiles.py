@@ -6,6 +6,7 @@ from model_profiles import (
     ModelProfileError,
     ModelProfileStore,
     WindowsCredentialStore,
+    MODEL_PRESETS,
 )
 
 
@@ -91,6 +92,41 @@ def test_saved_profile_keeps_secret_only_in_credential_store(tmp_path):
     reloaded = ModelProfileStore(profiles_path, credentials=credentials)
     assert reloaded.active_profile()["id"] == profile["id"]
     assert reloaded.resolve_api_key(profile["id"]) == "temporary-value"
+
+
+def test_profile_persists_output_limit_provenance_and_legacy_is_not_manual(tmp_path):
+    credentials = FakeCredentials()
+    path = tmp_path / "profiles.json"
+    store = ModelProfileStore(path, credentials=credentials)
+    profile = store.save_profile({
+        "name": "Verified model", "provider": "openai", "model": "deepseek-v4-flash",
+        "max_tokens": 384000, "max_tokens_source": "api",
+        "recommended_max_tokens": 384000, "recommended_source": "api",
+        "recommended_label": "接口返回 · 384,000",
+    })
+
+    assert profile["max_tokens_source"] == "api"
+    assert profile["recommended_max_tokens"] == 384000
+    assert profile["recommended_source"] == "api"
+    assert profile["recommended_label"] == "接口返回 · 384,000"
+
+    default_label = store.save_profile({
+        "name": "Unknown model", "provider": "openai", "model": "unknown-model",
+    })
+    assert default_label["recommended_label"] == "上限未识别"
+
+    path.write_text(json.dumps({
+        "version": 1, "active_profile_id": "legacy", "profiles": [{
+            "id": "legacy", "name": "Old", "provider": "openai", "model": "old-model",
+            "max_tokens": 16000,
+        }],
+    }), encoding="utf-8")
+    legacy_store = ModelProfileStore(path, credentials=credentials)
+    legacy = legacy_store.public_state()["profiles"][0]
+    assert legacy["max_tokens_source"] == "legacy"
+    assert legacy["recommended_max_tokens"] is None
+    assert legacy["recommended_source"] == "unknown"
+    assert legacy["recommended_label"] == "上限未识别"
 
 
 def test_nonempty_secret_is_persisted_even_for_legacy_save_key_false(tmp_path):
@@ -226,3 +262,209 @@ def test_legacy_llm_config_is_imported_once_without_secret_fields(tmp_path):
     raw = profiles.read_text(encoding="utf-8")
     assert "api_key_env" not in raw
     assert "LEGACY_KEY" not in raw
+
+
+def test_profile_presets_cover_major_openai_compatible_services():
+    assert {"deepseek", "glm", "qwen"} <= set(MODEL_PRESETS)
+    assert MODEL_PRESETS["deepseek"]["provider"] == "openai"
+    assert MODEL_PRESETS["deepseek"]["model"] == "deepseek-v4-flash"
+    assert "/v1" in MODEL_PRESETS["qwen"]["base_url"]
+
+
+def test_profile_can_be_saved_without_api_key_for_later_setup(tmp_path):
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=FakeCredentials())
+
+    profile = store.save_profile({
+        "name": "Later",
+        "provider": "openai",
+        "service_preset": "deepseek",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-chat",
+        "api_key": "",
+    })
+
+    assert profile["secret_status"] == "missing"
+    assert store.profile_record(profile["id"])["service_preset"] == "deepseek"
+    with pytest.raises(ModelProfileError, match="API Key"):
+        store.provider_settings(profile["id"])
+
+
+def test_legacy_profiles_migrate_once_and_keep_saved_secret(tmp_path):
+    credentials = FakeCredentials()
+    path = tmp_path / "profiles.json"
+    path.write_text(
+        json.dumps({
+            "version": 1,
+            "active_profile_id": "profile-1",
+            "profiles": [{
+                "id": "profile-1",
+                "name": "DeepSeek",
+                "provider": "openai",
+                "service_preset": "deepseek",
+                "base_url": "https://api.deepseek.com/v1",
+                "model": "deepseek-chat",
+                "max_tokens": 16000,
+                "vision": False,
+            }],
+        }),
+        encoding="utf-8",
+    )
+    credentials.write("AA-AutoWriter/profile-1", "saved-secret")
+    store = ModelProfileStore(path, credentials=credentials)
+
+    first = store.migrate_legacy_profiles()
+    second = store.migrate_legacy_profiles()
+
+    assert first == second
+    assert first["schema_version"] == 2
+    assert len(first["connections"]) == len(first["models"]) == 1
+    assert first["assignments"]["base_model_id"] == first["models"][0]["id"]
+    connection_id = first["connections"][0]["id"]
+    assert store.resolve_connection_key(connection_id) == "saved-secret"
+    assert "saved-secret" not in path.read_text(encoding="utf-8")
+
+
+def test_v2_store_saves_multiple_models_for_one_connection(tmp_path):
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=FakeCredentials())
+    connection = store.save_connection({
+        "name": "千问",
+        "service_preset": "qwen",
+        "protocol": "openai",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "api_key": "secret",
+    })
+    text_model = store.save_model({
+        "connection_id": connection["id"],
+        "model": "qwen-max",
+        "max_tokens": 16000,
+        "text_status": "passed",
+        "vision_status": "unsupported",
+    })
+    vision_model = store.save_model({
+        "connection_id": connection["id"],
+        "model": "qwen-vl-plus",
+        "max_tokens": 8000,
+        "text_status": "untested",
+        "vision_status": "passed",
+    })
+
+    state = store.public_state()
+
+    assert {row["id"] for row in state["models"]} == {
+        text_model["id"], vision_model["id"],
+    }
+    assert text_model["recommended_label"] == "上限未识别"
+    assert all(row["connection_id"] == connection["id"] for row in state["models"])
+    serialized = json.dumps(state)
+    assert '"api_key": "secret"' not in serialized
+    assert all("api_key" not in row for row in state["connections"])
+
+
+def test_v2_assignments_require_compatible_tested_models(tmp_path):
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=FakeCredentials())
+    connection = store.save_connection({
+        "name": "Models", "service_preset": "custom", "protocol": "openai",
+        "base_url": "https://example.invalid/v1",
+    })
+    base = store.save_model({
+        "connection_id": connection["id"], "model": "text-only",
+        "text_status": "passed", "vision_status": "untested",
+    })
+
+    with pytest.raises(ModelProfileError, match="图片测试"):
+        store.set_assignments({
+            "base_model_id": base["id"], "vision_mode": "base",
+        })
+
+    saved = store.set_assignments({
+        "base_model_id": base["id"], "vision_mode": "disabled",
+    })
+    assert saved == {
+        "base_model_id": base["id"],
+        "vision_mode": "disabled",
+        "vision_model_id": "",
+    }
+
+
+def test_v2_referenced_models_and_connections_cannot_be_deleted(tmp_path):
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=FakeCredentials())
+    connection = store.save_connection({
+        "name": "DeepSeek", "service_preset": "deepseek", "protocol": "openai",
+        "base_url": "https://api.deepseek.com/v1",
+    })
+    model = store.save_model({
+        "connection_id": connection["id"], "model": "deepseek-chat",
+        "text_status": "passed", "vision_status": "unsupported",
+    })
+    store.set_assignments({
+        "base_model_id": model["id"], "vision_mode": "disabled",
+    })
+
+    with pytest.raises(ModelProfileError, match="仍被使用"):
+        store.delete_model(model["id"])
+    with pytest.raises(ModelProfileError, match="仍有模型"):
+        store.delete_connection(connection["id"])
+
+
+def test_delete_unassigned_model_keeps_nonempty_connection_and_key(tmp_path):
+    credentials = FakeCredentials()
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=credentials)
+    connection = store.save_connection({
+        "name": "Shared", "service_preset": "deepseek", "protocol": "openai",
+        "base_url": "https://api.deepseek.com/v1", "api_key": "secret",
+    })
+    base = store.save_model({
+        "connection_id": connection["id"], "model": "deepseek-v4-flash",
+        "text_status": "passed", "vision_status": "unsupported",
+    })
+    spare = store.save_model({
+        "connection_id": connection["id"], "model": "deepseek-v4-pro",
+        "text_status": "untested", "vision_status": "unsupported",
+    })
+    store.set_assignments({
+        "base_model_id": base["id"], "vision_mode": "disabled",
+    })
+
+    result = store.delete_model(spare["id"], delete_empty_connection=True)
+    state = store.public_state(include_links=True)
+
+    assert result["deleted_connection"] is False
+    assert [row["id"] for row in state["models"]] == [base["id"]]
+    assert state["connections"][0]["id"] == connection["id"]
+    assert store.resolve_connection_key(connection["id"]) == "secret"
+
+
+def test_delete_last_unassigned_model_can_remove_connection_and_key(tmp_path):
+    credentials = FakeCredentials()
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=credentials)
+    base_connection = store.save_connection({
+        "name": "Base", "service_preset": "deepseek", "protocol": "openai",
+        "base_url": "https://api.deepseek.com/v1", "api_key": "base-secret",
+    })
+    base = store.save_model({
+        "connection_id": base_connection["id"], "model": "deepseek-v4-flash",
+        "text_status": "passed", "vision_status": "unsupported",
+    })
+    spare_connection = store.save_connection({
+        "name": "Spare", "service_preset": "qwen", "protocol": "openai",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "api_key": "spare-secret",
+    })
+    spare = store.save_model({
+        "connection_id": spare_connection["id"], "model": "qwen-vl-max",
+    })
+    store.set_assignments({
+        "base_model_id": base["id"], "vision_mode": "disabled",
+    })
+
+    result = store.delete_model(spare["id"], delete_empty_connection=True)
+    state = store.public_state(include_links=True)
+
+    assert result == {
+        "ok": True,
+        "model_id": spare["id"],
+        "deleted_connection": True,
+        "connection_id": spare_connection["id"],
+    }
+    assert {row["id"] for row in state["connections"]} == {base_connection["id"]}
+    assert store.resolve_connection_key(spare_connection["id"]) is None

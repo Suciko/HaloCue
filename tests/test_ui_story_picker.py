@@ -35,6 +35,24 @@ vm.runInNewContext(source,{window,document,encodeURIComponent,URLSearchParams,Pr
     ]
 
 
+def test_picker_filters_shared_asset_listing_by_allowed_suffixes():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+function node(tag){let own='';return {tagName:tag||'div',value:'',hidden:false,disabled:false,dataset:{},children:[],classList:{add(){},remove(){},toggle(){}},appendChild(x){this.children.push(x);return x},append(){for(const x of arguments)this.appendChild(x)},removeChild(){return this.children.shift()},get firstChild(){return this.children[0]},addEventListener(){},setAttribute(){},focus(){},set textContent(v){own=String(v||'');this.children=[]},get textContent(){return own}}}
+const nodes={};['storyPicker','storyPickerHost','storyPickerStatus','storyPickerEntries','storyPickerBreadcrumbs','storyPickerRoots','storyPickerSearch','storyPickerSelected','storyPickerOpen','storyPickerBack','storyPickerForward','storyPickerUp'].forEach(id=>nodes[id]=node());
+const listing={entries:[
+  {entry_token:'image',name:'rain.png',kind:'file',size:1,modified:'2026-08-03T00:00:00Z',type:'PNG'},
+  {entry_token:'sound',name:'door.wav',kind:'file',size:1,modified:'2026-08-03T00:00:00Z',type:'WAV'},
+  {entry_token:'spine',name:'hero.skel',kind:'file',size:1,modified:'2026-08-03T00:00:00Z',type:'SKEL'},
+  {entry_token:'folder',name:'assets',kind:'directory',size:0,modified:'2026-08-03T00:00:00Z',type:'文件夹'}
+],breadcrumbs:[],roots:[],parent_token:'',location_token:'root'};
+const window={Api:{request:async()=>listing},StoryUI:{}};const document={getElementById:id=>nodes[id],createElement:node,createDocumentFragment:()=>node('fragment'),activeElement:node(),addEventListener(){}};
+vm.runInNewContext(source,{window,document,encodeURIComponent,URLSearchParams,Promise,Error,console});
+(async()=>{const picker=new window.StoryUI.StoryFilePicker(nodes.storyPicker,{allowedSuffixes:['.png','.jpg','.jpeg']});await picker.open();console.log(JSON.stringify({names:nodes.storyPickerEntries.children.map(row=>row.children[1].textContent)}));})();
+'''
+    assert _run_picker(script)["names"] == ["rain.png", "assets"]
+
+
 def test_host_navigation_search_sort_keyboard_and_stale_error_are_deterministic():
     """A stale token or navigation branch must not silently open a different host file."""
     script = r'''

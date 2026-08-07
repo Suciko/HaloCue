@@ -10,6 +10,7 @@ if str(HERE) not in sys.path:
 import pytest
 from document import (
     parse_document_lossless,
+    normalize_draft_nodes,
     serialize_document,
     compile_document,
     DocNode,
@@ -60,14 +61,44 @@ def test_raw_directive_is_dir_node():
 
 
 def test_normalize_draft_nodes_drops_blank_lines_and_classifies_thematic_breaks():
-    from document import normalize_draft_nodes
-
     nodes = parse_document_lossless("旁白: 第一幕。\n\n---\n\n旁白: 第二幕。\n")
     normalized = normalize_draft_nodes(nodes)
 
     assert [node.kind for node in normalized] == ["line", "separator", "line"]
     assert normalized[1].fields["marker"] == "---"
     assert [node.line_no for node in normalized] == [1, 3, 5]
+
+
+def test_normalize_draft_nodes_drops_first_scene_transition_and_redundant_transition():
+    nodes = parse_document_lossless(
+        "@bg BG_ShoppingDistrict\n"
+        "@trans 淡入淡出\n"
+        "@place 商店街\n"
+        "旁白: 第一幕。\n"
+        "---\n"
+        "@bg BG_ShoppingDistrict\n"
+        "@trans 淡入淡出\n"
+        "@place 可丽饼摊前\n"
+        "旁白: 第二幕。\n"
+        "@bg BG_GameCenter\n"
+        "@trans 淡入淡出\n"
+        "旁白: 第三幕。\n"
+    )
+
+    normalized = normalize_draft_nodes(nodes)
+    directives = [
+        (node.fields["cmd"], node.fields["arg"])
+        for node in normalized
+        if node.kind == "dir"
+    ]
+
+    assert directives == [
+        ("bg", "BG_ShoppingDistrict"),
+        ("place", "商店街"),
+        ("place", "可丽饼摊前"),
+        ("bg", "BG_GameCenter"),
+        ("trans", "淡入淡出"),
+    ]
 
 
 def test_unbound_actor_line_preserved_with_error_diagnostic():

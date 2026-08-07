@@ -7,7 +7,7 @@ AA 剧本编译器 · 本地网页界面
 跑起来后浏览器打开 http://127.0.0.1:8770 。只监听本机，不对外。
 只用标准库 + PIL（缩略图），不需要装框架。
 """
-import argparse, io, json, mimetypes, os, re, socket, sys, threading, traceback, uuid, webbrowser
+import argparse, hashlib, io, json, mimetypes, os, re, socket, sys, threading, traceback, uuid, webbrowser
 from dataclasses import replace
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Dict, List, Any, Optional
@@ -28,7 +28,9 @@ from aa_resource_cache import probe_resource_cache               # noqa: E402
 from history_assets import HistoryAssetBrowser, HistoryAssetError  # noqa: E402
 import background_workflow                                      # noqa: E402
 import llm                                                      # noqa: E402
+import model_capabilities                                       # noqa: E402
 import model_profiles                                           # noqa: E402
+import model_router                                             # noqa: E402
 from official_preview_index import (                             # noqa: E402
     OfficialPreviewIndex,
     PreviewIndexState,
@@ -40,7 +42,7 @@ from aa_project_assets import assert_aa_closed, validate_windows_path_component 
 from aa_registry import AssetRegistrationError, RegistrationConflictError  # noqa: E402
 from build_index import faces_of                                # noqa: E402
 from build_bundle import BuildBundleManager, CompileInputStaleError  # noqa: E402
-from document import parse_document_lossless                    # noqa: E402
+from document import normalize_draft_nodes, parse_document_lossless  # noqa: E402
 from draft_store import (                                       # noqa: E402
     DraftStore,
     InvalidDraftTokenError,
@@ -72,6 +74,7 @@ MODEL_PROFILES = model_profiles.ModelProfileStore(
     os.path.join(HERE, "llm_profiles.json")
 )
 THUMBS = os.path.join(HERE, ".thumbs")
+CHARACTER_CATALOG_METADATA = {"stamp": None, "items": {}}
 OFFICIAL_PREVIEW_INDEX = OfficialPreviewIndex(
     Path(HERE) / "out" / "official-previews"
 )
@@ -83,6 +86,13 @@ SETTINGS_FILE_PICKER = StoryFilePicker(
     roots=windows_host_roots(STORY_ROOT),
     upload_dir=os.path.join(HERE, "out", "story-uploads"),
     allowed_suffixes=None,
+)
+ASSET_FILE_PICKER = StoryFilePicker(
+    roots=windows_host_roots(STORY_ROOT),
+    upload_dir=os.path.join(HERE, "out", "story-uploads"),
+    allowed_suffixes={
+        ".png", ".jpg", ".jpeg", ".wav", ".ogg", ".mp3", ".skel", ".atlas",
+    },
 )
 
 CFG = {"overrides": None, "aa_data": None, "spine_cli": None}
@@ -141,15 +151,38 @@ class InvalidProjectNameError(ValueError):
     """A client value is not a single valid Windows project component."""
 
 
+def _story_workspace_index_path(aa_data: Path) -> Path:
+    identity = os.path.normcase(str(aa_data.resolve())).encode("utf-8")
+    digest = hashlib.sha256(identity).hexdigest()[:16]
+    return Path(HERE) / "out" / "story-workspaces" / f"{digest}.json"
+
+
+def _migrate_legacy_story_index(aa_data: Path, index_path: Path) -> None:
+    legacy_path = aa_data / ".story-index.json"
+    if index_path.is_file() or not legacy_path.is_file():
+        return
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = index_path.with_name(f".{index_path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp_path.write_bytes(legacy_path.read_bytes())
+        os.replace(temp_path, index_path)
+    finally:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def story_workspace() -> StoryWorkspaceRegistry:
-    """Return the server-local registry for the configured AA data root."""
+    """Return app-owned story state scoped to the configured AA data root."""
     global STORY_WORKSPACE
     aa_data = Path(CFG.get("aa_data") or (Path(HERE) / "out" / "aa-data")).resolve()
     with STORY_WORKSPACE_LOCK:
         if STORY_WORKSPACE is None or STORY_WORKSPACE.aa_data != aa_data:
+            index_path = _story_workspace_index_path(aa_data)
+            _migrate_legacy_story_index(aa_data, index_path)
             STORY_WORKSPACE = StoryWorkspaceRegistry(
-                # 索引随数据目录走：不同 aa_data 各自独立，测试不会污染真实最近记录。
-                aa_data / ".story-index.json", aa_data=aa_data
+                index_path, aa_data=aa_data
             )
         return STORY_WORKSPACE
 
@@ -650,6 +683,11 @@ def profile_provider(profile_id=None):
 
 def annotation_provider(profile_id=None):
     state = MODEL_PROFILES.public_state()
+    if state.get("schema_version") == 2 and state.get("models"):
+        try:
+            return model_router.ModelRouter(MODEL_PROFILES).text_provider()
+        except model_profiles.ModelProfileError:
+            return None
     selected = str(
         profile_id or state.get("active_profile_id") or ""
     )
@@ -660,6 +698,13 @@ def annotation_provider(profile_id=None):
 
 def _optional_vision_provider():
     """Return the configured provider only when its key is available."""
+    state = MODEL_PROFILES.public_state()
+    if state.get("schema_version") == 2 and state.get("models"):
+        try:
+            provider = model_router.ModelRouter(MODEL_PROFILES).vision_provider()
+            return provider, None
+        except model_profiles.ModelProfileError as exc:
+            return None, str(exc)
     active = MODEL_PROFILES.active_profile()
     if active is not None:
         if not active.get("vision", True):
@@ -694,6 +739,14 @@ def _background_label_public_error(exc: Exception) -> str:
     if re.search(r"(?:[A-Za-z]:[\\/]|\\\\[^\\\s]+[\\/])", message):
         return "背景识别失败，请重试或手动补充"
     return message
+
+
+def _model_public_error(exc: Exception) -> str:
+    message = str(exc or "模型连接失败").strip() or "模型连接失败"
+    message = re.sub(r"(?i)(api[_ -]?key|authorization|bearer|token|secret)\s*[:=]?\s*[^\s,;]+", r"\1=已隐藏", message)
+    if re.search(r"(?:[A-Za-z]:[\\/]|\\\\[^\\\s]+[\\/])", message):
+        return "模型连接测试失败，请检查接口设置"
+    return message[:240]
 
 
 def background_label_worker(payload: dict) -> dict:
@@ -1037,6 +1090,201 @@ def _public_aa_status(
     }
 
 
+def _temporary_profile_provider(payload):
+    """Build a provider from unsaved form values without persisting them."""
+    profile = dict(payload or {})
+    profile.setdefault("name", "临时测试")
+    profile.setdefault("service_preset", "custom")
+    profile.setdefault("max_tokens", 16000)
+    profile.setdefault("vision", True)
+    record = MODEL_PROFILES._validated(profile, profile_id="temporary")
+    secret = str(profile.get("api_key") or "").strip()
+    if not secret:
+        raise model_profiles.ModelProfileError("临时测试配置尚未设置 API Key")
+    provider_name = str(record["provider"])
+    return llm.make_provider_from_settings(provider_name, {
+        "model": record["model"], "base_url": record["base_url"],
+        "max_tokens": record["max_tokens"], "vision": record["vision"],
+        "api_key": secret,
+    })
+
+
+def _temporary_connection_provider(connection_payload, model_payload):
+    """Build one provider from redacted workbench records plus a submitted key."""
+    connection = dict(connection_payload or {})
+    connection.setdefault("name", "临时连接")
+    connection.setdefault("service_preset", "custom")
+    record = MODEL_PROFILES._validated_connection(
+        connection, connection_id=str(connection.get("id") or "temporary")
+    )
+    secret = str(connection.get("api_key") or "").strip()
+    if not secret and connection.get("id"):
+        secret = str(MODEL_PROFILES.resolve_connection_key(connection["id"]) or "")
+    if not secret:
+        raise model_profiles.ModelProfileError("模型连接尚未设置 API Key")
+    model = dict(model_payload or {})
+    model_name = str(model.get("model") or "").strip()
+    if not model_name:
+        raise model_profiles.ModelProfileError("模型名称不能为空")
+    return llm.make_provider_from_settings(record["protocol"], {
+        "model": model_name,
+        "base_url": record["base_url"],
+        "max_tokens": int(model.get("max_tokens") or 16000),
+        "vision": model.get("vision_status") != "unsupported",
+        "api_key": secret,
+    })
+
+
+def _saved_workbench_provider(model_id):
+    model = MODEL_PROFILES.model_record(str(model_id or ""))
+    connection = MODEL_PROFILES.connection_record(model["connection_id"])
+    connection["api_key"] = MODEL_PROFILES.resolve_connection_key(connection["id"])
+    return _temporary_connection_provider(connection, model), model
+
+
+def test_workbench_model(model_id, mode):
+    provider, model = _saved_workbench_provider(model_id)
+    mode = str(mode or "text").strip().lower()
+    try:
+        if mode == "text":
+            provider.complete_json(
+                "你是接口连通测试器，只返回符合 schema 的 JSON。", "",
+                "请返回 ok=true。", _CONNECTION_SCHEMA,
+            )
+        elif mode == "vision":
+            if model.get("vision_status") == "unsupported":
+                raise model_profiles.ModelProfileError("当前模型不支持图片能力")
+            from PIL import Image
+            image = Image.new("RGB", (48, 48), (70, 120, 220))
+            buffer = io.BytesIO(); image.save(buffer, format="JPEG", quality=90)
+            provider.complete_json_vision(
+                "你是图片接口连通测试器，只返回符合 schema 的 JSON。",
+                [("connection-test", buffer.getvalue())],
+                "图中存在一个纯色方块，请返回 ok=true。", _CONNECTION_SCHEMA,
+            )
+        else:
+            raise model_profiles.ModelProfileError("mode 必须是 text 或 vision")
+    except Exception:
+        if mode in {"text", "vision"}:
+            MODEL_PROFILES.set_model_capability(model["id"], mode, "failed")
+        raise
+    MODEL_PROFILES.set_model_capability(model["id"], mode, "passed")
+    return {"ok": True, "mode": mode, "model": str(getattr(provider, "model", "") or "")}
+
+
+def _v1_fallback_connection(connection):
+    connection = dict(connection or {})
+    protocol = str(connection.get("protocol") or connection.get("provider") or "").lower()
+    base_url = str(connection.get("base_url") or "").strip().rstrip("/")
+    parsed = urlparse(base_url)
+    if protocol != "openai" or not parsed.netloc or parsed.path not in {"", "/"}:
+        return None
+    connection["base_url"] = base_url + "/v1"
+    return connection
+
+
+def list_workbench_models(connection, model_payload):
+    def discovered(provider, preset):
+        list_records = getattr(provider, "list_model_records", None)
+        if not callable(list_records):
+            return provider.list_models()
+        resolved = {}
+        for record in list_records():
+            if not isinstance(record, dict):
+                continue
+            model_id = str(record.get("id") or "").strip()
+            if not model_id:
+                continue
+            resolved[model_id] = model_capabilities.resolve_output_capability(
+                model_id,
+                service_preset=str(preset or "custom"),
+                remote_record=record,
+            )
+        return sorted(resolved.values(), key=lambda item: item["model_id"].casefold())
+
+    provider = _temporary_connection_provider(connection, model_payload)
+    try:
+        return {
+            "models": discovered(provider, connection.get("service_preset")),
+        }
+    except Exception:
+        fallback = _v1_fallback_connection(connection)
+        if fallback is None:
+            raise
+    provider = _temporary_connection_provider(fallback, model_payload)
+    return {
+        "models": discovered(provider, fallback.get("service_preset")),
+        "base_url": fallback["base_url"],
+        "base_url_adjusted": True,
+    }
+
+
+def current_model_status():
+    public_state = getattr(MODEL_PROFILES, "public_state", None)
+    if callable(public_state):
+        try:
+            state = public_state()
+        except Exception:
+            state = {}
+        models = {str(row.get("id")): row for row in state.get("models", [])}
+        connections = {
+            str(row.get("id")): row for row in state.get("connections", [])
+        }
+        assignments = state.get("assignments") or {}
+        base = models.get(str(assignments.get("base_model_id") or ""))
+        if base:
+            connection = connections.get(str(base.get("connection_id") or ""), {})
+            result = {
+                "configured": True,
+                "name": str(connection.get("name") or ""),
+                "model": str(base.get("model") or ""),
+            }
+            vision_mode = str(assignments.get("vision_mode") or "disabled")
+            vision_id = assignments.get("base_model_id") if vision_mode == "base" else assignments.get("vision_model_id")
+            vision = models.get(str(vision_id or "")) if vision_mode != "disabled" else None
+            if vision:
+                vision_connection = connections.get(
+                    str(vision.get("connection_id") or ""), {}
+                )
+                result.update(
+                    vision_name=str(vision_connection.get("name") or ""),
+                    vision_model=str(vision.get("model") or ""),
+                )
+            return result
+    active_profile = MODEL_PROFILES.active_profile()
+    if active_profile:
+        return {
+            "configured": True,
+            "name": str(active_profile.get("name") or ""),
+            "model": str(active_profile.get("model") or ""),
+        }
+    return {"configured": False, "name": "", "model": ""}
+
+
+def test_profile_payload(payload, mode="text"):
+    provider = _temporary_profile_provider(payload)
+    mode = str(mode or "text").strip().lower()
+    if mode == "text":
+        provider.complete_json(
+            "你是接口连通测试器，只返回符合 schema 的 JSON。", "",
+            "请返回 ok=true。", _CONNECTION_SCHEMA,
+        )
+    elif mode == "vision":
+        if not bool(payload.get("vision", True)):
+            raise model_profiles.ModelProfileError("当前模型配置未启用图片能力")
+        from PIL import Image
+        image = Image.new("RGB", (48, 48), (70, 120, 220))
+        buffer = io.BytesIO(); image.save(buffer, format="JPEG", quality=90)
+        provider.complete_json_vision(
+            "你是图片接口连通测试器，只返回符合 schema 的 JSON。",
+            [("connection-test", buffer.getvalue())],
+            "图中存在一个纯色方块，请返回 ok=true。", _CONNECTION_SCHEMA,
+        )
+    else:
+        raise model_profiles.ModelProfileError("mode 必须是 text 或 vision")
+    return {"ok": True, "mode": mode, "model": str(getattr(provider, "model", "") or "")}
+
+
 def setup_status():
     """Return non-sensitive readiness for the first-use UI and launcher."""
     discovery = _current_aa_discovery()
@@ -1054,17 +1302,7 @@ def setup_status():
             }
         finally:
             con.close()
-    active_profile = MODEL_PROFILES.active_profile()
-    model = {
-        "configured": active_profile is not None,
-        "name": "",
-        "model": "",
-    }
-    if active_profile:
-        model.update(
-            name=str(active_profile.get("name") or ""),
-            model=str(active_profile.get("model") or ""),
-        )
+    model = current_model_status()
     config_path = Path(HERE) / "aa_config.json"
     configured_spine = str(CFG.get("spine_cli") or "").strip()
     if not configured_spine and config_path.is_file():
@@ -1175,6 +1413,52 @@ def _start_resource_index() -> tuple[int, dict]:
     return 202, {"ok": True, "preview_index": snapshot}
 
 
+def registered_character_avatar_path(con, ident: str) -> Path | None:
+    """Resolve one imported character avatar without exposing its source path."""
+    if not ident:
+        return None
+    asset_catalog.migrate(con)
+    rows = con.execute(
+        """SELECT install_path, metadata_json FROM asset_install
+           WHERE kind='character' AND aa_key=? AND status='registered'
+           ORDER BY scope""",
+        (str(ident),),
+    ).fetchall()
+    for row in rows:
+        metadata = asset_catalog._safe_metadata(row["metadata_json"])
+        preview = asset_catalog._preview_path("character", row["install_path"], metadata)
+        if preview:
+            return preview
+    return None
+
+
+def character_catalog_metadata(ident: str) -> dict:
+    """Return stable avatar metadata from the exported AA resource catalog."""
+    if not ident:
+        return {}
+    try:
+        stat = os.stat(INDEX)
+        stamp = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        return {}
+    if CHARACTER_CATALOG_METADATA["stamp"] != stamp:
+        items = {}
+        try:
+            payload = json.load(open(INDEX, encoding="utf-8"))
+            for row in payload.get("characters", []):
+                key = str(row.get("identifier") or "")
+                if key and key not in items:
+                    items[key] = {
+                        "avatar": str(row.get("avatar") or ""),
+                        "spine": str(row.get("spine") or ""),
+                    }
+        except (OSError, ValueError, TypeError):
+            items = {}
+        CHARACTER_CATALOG_METADATA["stamp"] = stamp
+        CHARACTER_CATALOG_METADATA["items"] = items
+    return CHARACTER_CATALOG_METADATA["items"].get(str(ident), {})
+
+
 def list_characters(q="", limit=400):
     con = db()
     sql = ("SELECT c.ident, c.name, c.club, c.spine, c.avatar, c.source, "
@@ -1182,27 +1466,61 @@ def list_characters(q="", limit=400):
            "FROM character c ")
     args = []
     if q:
-        sql += "WHERE c.ident LIKE ? OR c.name LIKE ? OR c.club LIKE ? "
-        args = [f"%{q}%"] * 3
+        conditions = [
+            "c.ident LIKE ?", "c.name LIKE ?", "c.club LIKE ?",
+            "EXISTS (SELECT 1 FROM name_alias a WHERE a.ident=c.ident AND a.script_name LIKE ?)",
+            "EXISTS (SELECT 1 FROM name_alias a JOIN character target ON target.ident=a.ident "
+            "WHERE a.script_name LIKE ? AND target.name=c.name)",
+        ]
+        args = [f"%{q}%"] * len(conditions)
+        builtin_ids = [
+            ident for script_name, ident, kind in assetdb.SEED_ALIAS
+            if ident and kind == "portrait" and str(q).casefold() in script_name.casefold()
+        ]
+        if builtin_ids:
+            placeholders = ",".join("?" for _ in builtin_ids)
+            conditions.append("c.ident IN (" + placeholders + ")")
+            conditions.append(
+                "c.name IN (SELECT name FROM character WHERE ident IN (" + placeholders + "))"
+            )
+            args.extend(builtin_ids)
+            args.extend(builtin_ids)
+        sql += "WHERE (" + " OR ".join(conditions) + ") "
     sql += "ORDER BY (c.name IS NULL), nface DESC, c.ident LIMIT ?"
     args.append(limit)
     out = []
     for r in con.execute(sql, args):
+        catalog = character_catalog_metadata(r["ident"])
+        avatar_value = str(r["avatar"] or catalog.get("avatar") or "")
+        spine_value = str(r["spine"] or catalog.get("spine") or "")
         avatar_key = Path(
-            str(r["avatar"] or "").replace("\\", "/")
-        ).name or str(r["spine"] or "")
-        avatar = character_avatar_path(r["avatar"], r["spine"])
+            avatar_value.replace("\\", "/")
+        ).name or spine_value
+        avatar = character_avatar_path(avatar_value, spine_value)
+        if not avatar:
+            avatar = registered_character_avatar_path(con, r["ident"])
+        if avatar and not avatar_key:
+            avatar_key = str(r["ident"])
         out.append({"ident": r["ident"], "name": r["name"] or r["ident"],
-                    "club": r["club"] or "", "spine": r["spine"] or "",
+                    "club": r["club"] or "", "spine": spine_value,
                     "faces": r["nface"], "source": r["source"],
                     "avatar": (
                         "/thumb/av/" + quote(avatar_key, safe="")
                         if avatar and avatar_key else ""
                     )})
+    def variant_rank(item):
+        stem = str(item.get("spine") or "").replace("\\", "/").rsplit("/", 1)[-1].casefold()
+        suffix = stem[len("characterspine_"):] if stem.startswith("characterspine_") else ""
+        return (0 if suffix and "_" not in suffix else 2 if suffix.endswith(("_noweapon", "_n", "_nf")) else 1,
+                str(item.get("ident") or "").casefold())
+    out.sort(key=lambda item: (
+        0 if str(item.get("source") or "").casefold() not in {"overrides", "custom", "current_story_custom"} else 1,
+        variant_rank(item), str(item.get("name") or "").casefold(),
+    ))
     return out
 
 
-def list_backgrounds(q="", only_ready=False, limit=300):
+def list_backgrounds(q="", only_ready=False, limit=80):
     con = db()
     sql = "SELECT name,hash,label,place,time,mood,tags FROM bg "
     where, args = [], []
@@ -1225,7 +1543,17 @@ def list_backgrounds(q="", only_ready=False, limit=300):
                     "tags": r["tags"] or "",
                     "img": _background_preview_available(r["name"])})
     out.sort(key=lambda item: (not item["img"], not bool(item["label"]), item["name"].casefold()))
-    return out[:limit]
+    unique = []
+    seen_labels = set()
+    for item in out:
+        visible_name = " ".join(str(item["label"] or item["name"]).split()).casefold()
+        if visible_name in seen_labels:
+            continue
+        seen_labels.add(visible_name)
+        unique.append(item)
+        if len(unique) >= limit:
+            break
+    return unique
 
 
 _BGF = {}
@@ -1265,12 +1593,50 @@ def avatar_path(spine):
     return p if os.path.exists(p) else None
 
 
+def official_avatar_key_from_spine(spine: str) -> str:
+    """Derive the indexed portrait key for a standard AA character spine."""
+    stem = Path(str(spine or "").replace("\\", "/")).name
+    match = re.fullmatch(r"CharacterSpine_(.+)", stem, flags=re.IGNORECASE)
+    return "Student_Portrait_" + match.group(1) if match else ""
+
+
 def character_avatar_path(avatar: str, spine: str) -> Path | None:
     custom = avatar_path(spine)
     if custom:
         return Path(custom)
     key = Path(str(avatar or "").replace("\\", "/")).name
-    return OFFICIAL_PREVIEW_INDEX.resolve("avatar", key) if key else None
+    preview = OFFICIAL_PREVIEW_INDEX.resolve("avatar", key) if key else None
+    if preview:
+        return preview
+    derived_key = official_avatar_key_from_spine(spine)
+    return OFFICIAL_PREVIEW_INDEX.resolve("avatar", derived_key) if derived_key else None
+
+
+def avatar_thumb(src, px, key):
+    """Render character thumbnails without replacing transparent pixels with black."""
+    from PIL import Image
+
+    with Image.open(src) as source:
+        has_alpha = "A" in source.getbands() or (
+            source.mode == "P" and "transparency" in source.info
+        )
+        if not has_alpha:
+            return thumb(src, px, key), "image/jpeg"
+        image = source.convert("RGBA")
+    os.makedirs(THUMBS, exist_ok=True)
+    safe = re.sub(r"[^\w.-]", "_", key)[:120]
+    dst = os.path.join(THUMBS, f"{safe}_{px}.png")
+    if os.path.exists(dst) and os.path.getmtime(dst) >= os.path.getmtime(src):
+        return open(dst, "rb").read(), "image/png"
+    image.thumbnail((px, px), Image.LANCZOS)
+    canvas = Image.new("RGBA", (px, px), (0, 0, 0, 0))
+    canvas.alpha_composite(image, ((px - image.width) // 2, (px - image.height) // 2))
+    image = canvas
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG", optimize=True)
+    data = buffer.getvalue()
+    open(dst, "wb").write(data)
+    return data, "image/png"
 
 
 def thumb(src, px, key):
@@ -1365,6 +1731,29 @@ def analyze(path):
             "format": _script_format_summary(lines, nline, directive_lines, len(scenes))}
 
 
+def is_non_character_speaker(value: str) -> bool:
+    return str(value or "").strip().casefold() in {
+        "旁白", "独白", "narration", "system", "系统", "系统消息", "老师", "teacher"
+    }
+
+
+def _preferred_variant(con, row):
+    if row is None or row["source"] == "overrides":
+        return row
+    siblings = con.execute(
+        "SELECT ident,name,spine,source FROM character WHERE name=? AND source<>?",
+        (row["name"], "overrides"),
+    ).fetchall()
+    if not siblings:
+        return row
+    def key(item):
+        stem = str(item["spine"] or "").replace("\\", "/").rsplit("/", 1)[-1].casefold()
+        suffix = stem[len("characterspine_"):] if stem.startswith("characterspine_") else ""
+        return (0 if suffix and "_" not in suffix else 2 if suffix.endswith(("_noweapon", "_n", "_nf")) else 1,
+                str(item["ident"] or "").casefold())
+    return sorted(siblings, key=key)[0]
+
+
 def guess_mapping(speakers):
     """给每个说话者猜一个 AA 角色。
 
@@ -1372,33 +1761,40 @@ def guess_mapping(speakers):
     用户自己导入的「桃井」而不是别名里的占位 ???）；退回学过的别名时同样跳过
     占位垃圾角色。用户始终可在“确认演员”一步手动修改对应关系。"""
     con = db()
-    assetdb.seed_alias(con)
     out = {}
     for sp in speakers:
         w = sp["who"]
-        if w in ("旁白", "独白", "narration"):
+        if is_non_character_speaker(w):
             out[w] = {"kind": "narrator"}
             continue
-        # 1. 名字/标识完全一致（用户自定义素材优先；如「凯伊」→基础版而非“约会服”）
+        # 1. 名字/标识完全一致。全局 overrides 里的服装变体仍需让已学习的
+        # 官方本体映射优先；当前剧情自定义素材会在预检拿到 scope 后单独提升。
         row = con.execute(
-            "SELECT ident,name,spine FROM character WHERE name=? OR ident=? "
+            "SELECT ident,name,spine,source FROM character WHERE name=? OR ident=? "
             "ORDER BY (ident<>?), (spine IS NULL), LENGTH(ident) LIMIT 1",
             (w, w, w)).fetchone()
-        if row is not None and not assetdb._looks_placeholder(row["name"]):
+        exact_valid = row is not None and not assetdb._looks_placeholder(row["name"])
+        if exact_valid and row["source"] != "overrides":
+            row = _preferred_variant(con, row)
             out[w] = {"kind": "portrait", "id": row["ident"],
                       "name": row["name"] or w, "spine": row["spine"] or ""}
             continue
         # 2. 学过的别名（portrait 别名已过滤占位垃圾）
         a = assetdb.best_alias(con, w)
+        if exact_valid and a is not None and a["kind"] != "portrait":
+            a = None
         if a:
             if a["kind"] == "narrator":
                 out[w] = {"kind": "narrator"}
                 continue
-            crow = con.execute("SELECT ident,name,spine FROM character WHERE ident=?",
-                               (a["ident"],)).fetchone()
+            crow = con.execute(
+                "SELECT ident,name,spine,source FROM character WHERE ident=?",
+                (a["ident"],),
+            ).fetchone()
             if crow is not None and not assetdb._looks_placeholder(crow["name"]):
-                out[w] = {"kind": a["kind"], "id": a["ident"],
-                          "name": crow["name"] or w, "spine": crow["spine"] or "",
+                crow = _preferred_variant(con, crow)
+                out[w] = {"kind": a["kind"], "id": crow["ident"],
+                          "name": w, "spine": crow["spine"] or "",
                           "learned": True}
                 continue
             # voice 角色可能没有名字（无头像的语音位），仍按语音映射
@@ -1406,8 +1802,42 @@ def guess_mapping(speakers):
                 out[w] = {"kind": "voice", "id": a["ident"],
                           "name": w, "spine": "", "learned": True}
                 continue
+        if exact_valid:
+            out[w] = {"kind": "portrait", "id": row["ident"],
+                      "name": row["name"] or w, "spine": row["spine"] or ""}
+            continue
         out[w] = {"kind": "unset"}
     return out
+
+
+def _story_custom_character_mapping(who: str, custom_assets: dict) -> dict | None:
+    """Resolve one unambiguous current-story character variant by display name."""
+    folded_who = str(who or "").strip().casefold()
+    if not folded_who:
+        return None
+    exact = []
+    variants = []
+    for item in custom_assets.get("characters", []):
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        folded_name = name.casefold()
+        base_name = re.sub(r"\s*[（(][^）)]*[）)]\s*$", "", name).strip().casefold()
+        if folded_name == folded_who:
+            exact.append(item)
+        elif base_name == folded_who:
+            variants.append(item)
+    matches = exact or variants
+    if len(matches) != 1:
+        return None
+    item = matches[0]
+    return {
+        "kind": "portrait",
+        "id": str(item.get("aa_key") or ""),
+        "name": str(who),
+        "spine": "",
+        "source": "current_story_custom",
+    }
 
 
 _PREFLIGHT_SCHEMA = {
@@ -1431,6 +1861,28 @@ _PREFLIGHT_SCHEMA = {
                 "reason": {"type": "string"},
             }, "required": ["kind", "name", "status", "location", "reason"]},
         },
+        "usage_chain": {
+            "type": "array",
+            "items": {"type": "object", "additionalProperties": False, "properties": {
+                "segment": {"type": "string"}, "location": {"type": "string"},
+                "start": {"type": "string"}, "end": {"type": "string"},
+                "evidence": {"type": "string"},
+                "needs": {"type": "array", "items": {"type": "object", "additionalProperties": False, "properties": {
+                    "kind": {"type": "string"}, "name": {"type": "string"},
+                    "location": {"type": "string"}, "reason": {"type": "string"},
+                    "confidence": {"type": "number"},
+                    "candidates": {"type": "array", "items": {
+                        "type": "object", "additionalProperties": False,
+                        "properties": {
+                            "aa_key": {"type": "string"},
+                            "confidence": {"type": "number"},
+                            "reason": {"type": "string"},
+                        },
+                        "required": ["aa_key", "confidence", "reason"],
+                    }},
+                }, "required": ["kind", "name", "location", "reason", "confidence"]}},
+            }, "required": ["segment", "location", "start", "end", "evidence", "needs"]},
+        },
         "issues": {
             "type": "array",
             "items": {"type": "object", "additionalProperties": False, "properties": {
@@ -1440,7 +1892,7 @@ _PREFLIGHT_SCHEMA = {
             }, "required": ["severity", "code", "message", "action"]},
         },
     },
-    "required": ["characters", "assets", "issues"],
+    "required": ["characters", "assets", "usage_chain", "issues"],
 }
 
 
@@ -1496,13 +1948,97 @@ def _preflight_character_library(con, speakers: list[dict], custom_assets: dict,
     return {"total": total, "candidates": list(candidates.values())}
 
 
+def _preflight_background_library(con, limit: int = 800) -> list[dict]:
+    """Expose usable AA backgrounds to the model without filesystem details."""
+    asset_catalog.migrate(con)
+    rows = con.execute(
+        """
+        SELECT official.name,official.label,official.place,official.time,
+               official.mood,official.tags
+        FROM bg AS official
+        WHERE official.hash IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM asset_install AS custom
+              WHERE custom.kind='background' AND custom.status='registered'
+                AND CAST(custom.aa_key AS TEXT)=CAST(official.hash AS TEXT)
+          )
+        ORDER BY official.name
+        """,
+    ).fetchall()
+    preview_keys = {
+        str(row["name"])
+        for row in rows
+        if _background_preview_available(str(row["name"]))
+    }
+    grouped: dict[tuple[str, str], dict] = {}
+    for row in rows:
+        aa_key = str(row["name"] or "")
+        if not aa_key:
+            continue
+        label = str(row["label"] or aa_key)
+        time = str(row["time"] or "")
+        group_key = (label.casefold(), time.casefold())
+        item = {
+            "aa_key": aa_key, "label": label,
+            "place": str(row["place"] or ""), "time": time,
+            "mood": str(row["mood"] or ""), "tags": str(row["tags"] or ""),
+        }
+        existing = grouped.get(group_key)
+        if existing is None or (
+            aa_key in preview_keys and existing["aa_key"] not in preview_keys
+        ):
+            grouped[group_key] = item
+    library = sorted(
+        grouped.values(),
+        key=lambda item: (item["label"].casefold(), item["time"].casefold(), item["aa_key"].casefold()),
+    )
+    return library[:limit]
+
+
+def _preflight_custom_background_library(custom_assets: dict) -> list[dict]:
+    """Expose only labeled, story-scoped custom backgrounds without paths."""
+    library: list[dict] = []
+    for item in custom_assets.get("backgrounds", []):
+        if not isinstance(item, dict):
+            continue
+        aa_key = str(item.get("aa_key") or "").strip()
+        if not aa_key:
+            continue
+        labels = background_labeler.normalize_background_labels(item.get("labels"))
+        if not any(labels.values()):
+            continue
+        name = str(item.get("name") or aa_key).strip()[:240] or aa_key
+        library.append({
+            "aa_key": aa_key,
+            "label": labels["label"] or name,
+            "name": name,
+            **{field: labels[field] for field in (
+                "description", "place", "indoor_outdoor", "time",
+                "weather", "season", "mood", "tags",
+            )},
+            "source": "custom",
+            "preview_available": bool(item.get("preview_available")),
+        })
+    return library
+
+
 def _is_builtin_asset_ref(con, kind: str, name: str) -> bool:
     """内置素材不进入“本剧情自定义素材”清单，也不产生缺失错误。"""
     if kind == "bgm":
         return name.lstrip("-").isdigit()
     if kind == "background":
+        asset_catalog.migrate(con)
         row = con.execute(
-            "SELECT 1 FROM bg WHERE name=? OR label=? LIMIT 1", (name, name)
+            """SELECT 1 FROM bg AS official
+               WHERE official.hash IS NOT NULL
+                 AND (official.name=? OR official.label=?)
+                 AND NOT EXISTS (
+                     SELECT 1 FROM asset_install AS custom
+                     WHERE custom.kind='background' AND custom.status='registered'
+                       AND CAST(custom.aa_key AS TEXT)=CAST(official.hash AS TEXT)
+                 )
+               LIMIT 1""",
+            (name, name),
         ).fetchone()
         return row is not None
     if kind == "sound":
@@ -1539,8 +2075,285 @@ def _preflight_asset_refs(text: str, custom_assets: dict, con) -> list[dict]:
             "status": "registered" if found else "missing",
             "location": "第%d行" % line_no,
             "reason": "已登记到当前剧情" if found else "未在当前剧情自定义素材中登记",
+            "detected_by": "directive",
         })
     return refs
+
+
+_PREFLIGHT_KIND_ALIASES = {
+    "bg": "background", "background": "background",
+    "se": "sound", "sound": "sound", "sfx": "sound",
+    "bgm": "bgm", "music": "bgm",
+}
+
+
+def _compact_timeline_marker(value: object, max_chars: int = 32) -> str:
+    """Keep AI-provided scene boundaries useful without turning them into dialogue blocks."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars - 1].rstrip("，,。.!！？?；;：:、 ") + "…"
+
+
+def _safe_ai_error(exc: Exception) -> str:
+    """Keep model diagnostics useful without echoing secrets or huge payloads."""
+    message = str(exc or "AI 调用失败").strip() or "AI 调用失败"
+    message = re.sub(
+        r"(?i)(api[_ -]?key|authorization|bearer|token|secret)\s*[=:]\s*[^\s,;]+",
+        r"\1=已隐藏",
+        message,
+    )
+    return message[:500]
+
+
+def _background_generation_prompt(name: str, reason: str, evidence: str, location: str) -> str:
+    """Create an editable provider-neutral prompt for one missing background."""
+    detail = reason or "根据剧情场景补足背景。"
+    source = evidence or location or "当前场景"
+    return (
+        "请生成一张用于剧情演出的二次元游戏背景图。\n"
+        f"场景：{name}\n"
+        f"场景证据：{source}\n"
+        f"补充要求：{detail}\n"
+        "构图要求：横向 16:9，保持清晰的环境空间关系，保留角色站位和对白区域。\n"
+        "画面质量：清晰干净的游戏背景原画，自然材质细节，低噪点、无颗粒、无胶片噪声、"
+        "无色带、无 JPEG 压缩伪影、无过度锐化、无脏污纹理、无模糊重影。\n"
+        "排除内容：人物、文字、水印、UI、对白框、Logo 和边框。"
+    )
+
+
+_BACKGROUND_CATALOG_FALLBACK_HINTS = (
+    (("夜晚", "晚上", "夜间", "深夜", "当晚"), (("night", 3.0),)),
+    (("室内", "屋内", "房间", "房内"), (("office", 1.5), ("room", 1.5), ("indoor", 1.5))),
+    (("夏莱", "沙勒", "schale"), (("schale", 4.0),)),
+    (("夏莱办公室", "夏莱办事处", "老师办公室"), (("main", 4.0), ("office", 2.0))),
+    (("老师", "教师", "先生", "teacher"), (("main", 4.0), ("office", 2.0))),
+)
+
+
+def _catalog_background_candidates(con, *context: str, limit: int = 3) -> list[dict]:
+    """Suggest only reviewable official background approximations from scene context."""
+    query = " ".join(str(value or "") for value in context).casefold()
+    term_weights: dict[str, float] = {}
+    for aliases, terms in _BACKGROUND_CATALOG_FALLBACK_HINTS:
+        if any(alias.casefold() in query for alias in aliases):
+            for term, weight in terms:
+                term_weights[term] = term_weights.get(term, 0.0) + weight
+    if not term_weights:
+        return []
+
+    rows = con.execute(
+        """SELECT official.name,official.label,official.place,official.time,
+                  official.mood,official.tags
+           FROM bg AS official
+           WHERE official.hash IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM asset_install AS custom
+                 WHERE custom.kind='background' AND custom.status='registered'
+                   AND CAST(custom.aa_key AS TEXT)=CAST(official.hash AS TEXT)
+             )""",
+    ).fetchall()
+    ranked: list[tuple[float, str, dict]] = []
+    for row in rows:
+        name = str(row["name"] or "")
+        if not name:
+            continue
+        searchable = " ".join(str(row[field] or "").casefold() for field in (
+            "name", "label", "place", "time", "mood", "tags",
+        ))
+        score = sum(weight for term, weight in term_weights.items() if term in searchable)
+        if score < 4.0:
+            continue
+        ranked.append((score, name.casefold(), {
+            "aa_key": name,
+            "label": str(row["label"] or name),
+            "source": "official",
+            "preview_source": "official",
+            # A local fallback is deliberately never strong enough to auto-apply.
+            "confidence": min(0.74, 0.50 + score * 0.025),
+            "reason": "根据场景时间、空间和角色上下文检索到的官方近似项。",
+            "preview_available": _background_preview_available(name),
+        }))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    return [item[2] for item in ranked[:limit]]
+
+
+def _normalize_usage_chain(raw_chain: object, custom_assets: dict, con) -> tuple[list[dict], list[dict]]:
+    """Normalize model scene segments and derive safe asset refs for each need."""
+    if not isinstance(raw_chain, list):
+        return [], []
+    asset_catalog.migrate(con)
+    buckets = {
+        "background": custom_assets.get("backgrounds", []),
+        "sound": custom_assets.get("sounds", []),
+        "bgm": custom_assets.get("bgms", []),
+    }
+    custom_backgrounds = {
+        item["aa_key"].casefold(): item
+        for item in _preflight_custom_background_library(custom_assets)
+    }
+    chain: list[dict] = []
+    refs: list[dict] = []
+    ref_keys: set[tuple[str, str]] = set()
+    for raw_segment in raw_chain[:160]:
+        if not isinstance(raw_segment, dict):
+            continue
+        segment = str(raw_segment.get("segment") or "场景").strip()[:120]
+        location = str(raw_segment.get("location") or "位置未标注").strip()[:160]
+        start = _compact_timeline_marker(raw_segment.get("start"))
+        end = _compact_timeline_marker(raw_segment.get("end"))
+        evidence = str(raw_segment.get("evidence") or "").strip()[:500]
+        needs: list[dict] = []
+        for raw_need in (raw_segment.get("needs") or [])[:80]:
+            if not isinstance(raw_need, dict):
+                continue
+            kind = _PREFLIGHT_KIND_ALIASES.get(str(raw_need.get("kind") or "").casefold())
+            name = str(raw_need.get("name") or "").strip().strip("\"'")[:160]
+            if not kind or not name:
+                continue
+            need_location = str(raw_need.get("location") or start or location or "位置未标注").strip()[:160]
+            reason = str(raw_need.get("reason") or "AI 根据全文识别出的演出需求。").strip()[:500]
+            try:
+                confidence = max(0.0, min(1.0, float(raw_need.get("confidence", 0.0))))
+            except (TypeError, ValueError):
+                confidence = 0.0
+            candidates: list[dict] = []
+            candidate_keys: set[str] = set()
+            if kind == "background":
+                for raw_candidate in (raw_need.get("candidates") or [])[:8]:
+                    if not isinstance(raw_candidate, dict):
+                        continue
+                    aa_key = str(raw_candidate.get("aa_key") or "").strip()
+                    folded_key = aa_key.casefold()
+                    if not aa_key or folded_key in candidate_keys:
+                        continue
+                    try:
+                        candidate_confidence = max(
+                            0.0, min(1.0, float(raw_candidate.get("confidence", 0.0)))
+                        )
+                    except (TypeError, ValueError):
+                        candidate_confidence = 0.0
+                    if candidate_confidence < 0.60:
+                        continue
+                    custom = custom_backgrounds.get(folded_key)
+                    if custom is not None:
+                        candidates.append({
+                            "aa_key": custom["aa_key"],
+                            "label": custom["label"],
+                            "source": "custom",
+                            "preview_source": "story",
+                            "preview_available": custom["preview_available"],
+                            "confidence": candidate_confidence,
+                            "reason": str(raw_candidate.get("reason") or "")[:500],
+                        })
+                        candidate_keys.add(folded_key)
+                        continue
+                    row = con.execute(
+                        """SELECT official.name,official.label FROM bg AS official
+                           WHERE official.name=? COLLATE NOCASE
+                             AND official.hash IS NOT NULL
+                             AND NOT EXISTS (
+                                 SELECT 1 FROM asset_install AS custom
+                                 WHERE custom.kind='background'
+                                   AND custom.status='registered'
+                                   AND CAST(custom.aa_key AS TEXT)=CAST(official.hash AS TEXT)
+                             )
+                           LIMIT 1""",
+                        (aa_key,),
+                    ).fetchone()
+                    if row is None:
+                        continue
+                    candidates.append({
+                        "aa_key": str(row["name"]),
+                        "label": str(row["label"] or row["name"]),
+                        "source": "official",
+                        "preview_source": "official",
+                        "confidence": candidate_confidence,
+                        "reason": str(raw_candidate.get("reason") or "与场景语义接近。")[:500],
+                        "preview_available": _background_preview_available(aa_key),
+                    })
+                    candidate_keys.add(folded_key)
+                candidates.sort(key=lambda item: (-item["confidence"], item["aa_key"].casefold()))
+                candidates = candidates[:3]
+                if not candidates:
+                    candidates = _catalog_background_candidates(
+                        con, name, reason, evidence, need_location, location
+                    )
+            found = next((item for item in buckets[kind] if (
+                str(item.get("name") or "").casefold() == name.casefold()
+                or str(item.get("aa_key") or "").casefold() == name.casefold()
+            )), None)
+            builtin_key = ""
+            if not found:
+                if kind == "background":
+                    row = con.execute(
+                        """SELECT official.name FROM bg AS official
+                           WHERE official.hash IS NOT NULL
+                             AND (official.name=? OR official.label=?)
+                             AND NOT EXISTS (
+                                 SELECT 1 FROM asset_install AS custom
+                                 WHERE custom.kind='background'
+                                   AND custom.status='registered'
+                                   AND CAST(custom.aa_key AS TEXT)=CAST(official.hash AS TEXT)
+                             )
+                           LIMIT 1""",
+                        (name, name),
+                    ).fetchone()
+                    builtin_key = str(row["name"] or "") if row else ""
+                elif kind == "sound":
+                    row = con.execute("SELECT name FROM sound WHERE name=? OR label=? LIMIT 1", (name, name)).fetchone()
+                    builtin_key = str(row["name"] or "") if row else ""
+                elif kind == "bgm" and name.lstrip("-").isdigit():
+                    builtin_key = name
+            builtin = bool(found is None and builtin_key)
+            if found:
+                status = "registered"
+            elif builtin:
+                status = "builtin"
+            elif candidates and candidates[0]["confidence"] >= 0.75:
+                status = "recommended"
+            elif candidates:
+                status = "approximate"
+            elif kind == "bgm":
+                status = "unsupported"
+            else:
+                status = "missing"
+            need = {
+                "kind": kind, "name": name, "location": need_location,
+                "reason": reason, "confidence": confidence, "status": status,
+                "evidence": evidence, "candidates": candidates if not (found or builtin) else [],
+            }
+            if found:
+                need["aa_key"] = str(found.get("aa_key") or name)
+            elif builtin_key:
+                need["aa_key"] = builtin_key
+            elif candidates:
+                need["suggested_aa_key"] = candidates[0]["aa_key"]
+            offer_custom_background = (
+                kind == "background"
+                and status in {"missing", "recommended", "approximate"}
+                and (not candidates or candidates[0]["confidence"] < 0.90)
+            )
+            if offer_custom_background:
+                need["generation_prompt"] = _background_generation_prompt(
+                    name, reason, evidence, need_location
+                )
+            needs.append(need)
+            key = (kind, name.casefold())
+            if key not in ref_keys and status not in {"builtin"}:
+                refs.append({
+                    "kind": kind, "name": name, "status": status,
+                    "location": need_location, "reason": reason,
+                    "detected_by": "ai", "evidence": evidence,
+                    "confidence": confidence,
+                })
+                ref_keys.add(key)
+        if needs:
+            chain.append({
+                "segment": segment, "location": location, "start": start,
+                "end": end, "evidence": evidence, "needs": needs,
+            })
+    return chain, refs
 
 
 _PREFLIGHT_COMMANDS = {
@@ -1586,6 +2399,21 @@ def _preflight_directive_issues(text: str) -> list[dict]:
     return issues
 
 
+def _complete_preflight(provider, static: str, volatile: str, user: str) -> dict:
+    """Request a schema-valid preflight result, retrying one format failure."""
+    try:
+        result = provider.complete_json(static, volatile, user, _PREFLIGHT_SCHEMA)
+        return llm.validate_json_schema(result, _PREFLIGHT_SCHEMA)
+    except llm.StructuredOutputError:
+        retry_static = static + (
+            "\n\n上一次返回不符合要求。请重新输出，严格只允许一个 JSON 对象，"
+            "必须包含 characters、assets、usage_chain、issues 四个字段；"
+            "不要输出 Markdown、解释文字、标题或代码围栏。"
+        )
+        result = provider.complete_json(retry_static, volatile, user, _PREFLIGHT_SCHEMA)
+        return llm.validate_json_schema(result, _PREFLIGHT_SCHEMA)
+
+
 def _preflight_result(script: str, *, scope: str, model_profile_id: str | None = None) -> dict:
     """执行规则基线与可选 AI 初审，返回浏览器可编辑的安全结果。"""
     text = Path(script).read_text(encoding="utf-8", errors="replace")
@@ -1594,14 +2422,29 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
     con = db()
     try:
         custom_assets = asset_catalog.list_story_assets(con, scope=scope)
+        for speaker in analysis.get("speakers") or []:
+            who = str(speaker.get("who") or "")
+            story_mapping = _story_custom_character_mapping(who, custom_assets)
+            if story_mapping is not None:
+                baseline[who] = story_mapping
+        custom_backgrounds = _preflight_custom_background_library(custom_assets)
         character_library = _preflight_character_library(
             con, analysis.get("speakers") or [], custom_assets, baseline
         )
+        official_backgrounds = _preflight_background_library(con)
         refs = _preflight_asset_refs(text, custom_assets, con)
         builtin_asset_names = {
             "background": {
                 str(value).casefold()
-                for row in con.execute("SELECT name,label FROM bg")
+                for row in con.execute(
+                    """SELECT official.name,official.label FROM bg AS official
+                       WHERE official.hash IS NOT NULL
+                         AND NOT EXISTS (
+                             SELECT 1 FROM asset_install AS custom
+                             WHERE custom.kind='background' AND custom.status='registered'
+                               AND CAST(custom.aa_key AS TEXT)=CAST(official.hash AS TEXT)
+                         )"""
+                )
                 for value in (row["name"], row["label"])
                 if value
             },
@@ -1622,35 +2465,80 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
     for speaker in analysis.get("speakers", []):
         who = str(speaker.get("who") or "")
         mapping = dict(baseline.get(who) or {"kind": "unset"})
+        current_story_custom = mapping.get("source") == "current_story_custom"
         characters.append({
             "speaker": who, "kind": str(mapping.get("kind") or "unset"),
             "id": str(mapping.get("id") or ""), "name": str(mapping.get("name") or ""),
             "custom": str(mapping.get("id") or "").casefold() in custom_ids,
-            "confidence": 0.65 if mapping.get("kind") not in (None, "unset") else 0.0,
-            "reason": "规则匹配结果，可在确认演员中修改。",
+            "confidence": (
+                0.95 if current_story_custom
+                else 0.65 if mapping.get("kind") not in (None, "unset") else 0.0
+            ),
+            "reason": (
+                "当前剧情中唯一同名的自定义角色素材。"
+                if current_story_custom else "规则匹配结果，可在确认演员中修改。"
+            ),
         })
     ai_status = "not_configured"
+    usage_chain_status = "not_run"
+    usage_chain: list[dict] = []
+    ai_diagnostics: dict | None = None
     ai_issues = []
     provider = annotation_provider(model_profile_id)
     if provider is not None:
         static = (
             "你是 AA 剧本编译器的剧本初审助手。只返回 JSON，不要编造文件路径。"
-            "请通读全文，即使写法不是“角色：台词”，也要列出明确出场或说话的角色，以及明确提及的背景、音效和 BGM。"
+            "请通读全文，即使写法不是“角色：台词”，也要列出明确出场或说话的角色。"
+            "请按地点、时间或空间变化把全文分成完整场景段落，并在 usage_chain 中描述每段需要的背景、BGM 和音效。"
+            "不要要求用户书写 @bg、@bgm 或 @sound；这些只是后续生成层的内部指令。"
+            "每个演出需求都要提供原文证据、位置、理由和 0 到 1 的置信度。"
             "只能把角色映射到提供的候选或明确标记为 unset；自定义角色/骨骼必须标记 custom=true。"
             "素材状态只能依据当前剧情自定义素材清单判断，不能把缺失素材改成已登记。"
+            "背景需求必须先检查当前剧情 custom_backgrounds，再检查 official_backgrounds；"
+            "语义合适时优先使用当前剧情已标注的自定义背景，只能从这两个清单返回最多三个 candidates，"
+            "每项包含精确 aa_key、匹配置信度和差异说明；不得返回未列出的自定义背景或编造 aa_key。"
+            "商店街背景即使没有钟塔等次要细节，也可以作为 0.60 到 0.74 的近似候选。"
+            "商店街或商业街应优先考虑 BG_ShoppingDistrict；只有它不符合室内外、时间或剧情关键细节时，"
+            "才改选更泛化的 CityTown、Downtown 等候选。"
+            "音效和 BGM 是可选演出增强，不要因为缺少它们而报告 error。"
         )
         volatile = json.dumps({
             "speakers": analysis.get("speakers", []),
+            "scenes": analysis.get("scenes", []),
             "rule_mapping": characters,
             "character_library": character_library,
+            "official_backgrounds": official_backgrounds,
+            "custom_backgrounds": custom_backgrounds,
             "custom_assets": custom_assets,
             "script_asset_refs": refs,
         }, ensure_ascii=False)
-        user = "请先理解以下剧本全文，再给出可编辑的角色、素材和问题清单。\n\n剧本全文：\n" + text
+        user = "请先理解以下剧本全文，再给出可编辑的角色、场景演出时间线、素材需求和问题清单。\n\n剧本全文：\n" + text
         try:
-            ai = provider.complete_json(static, volatile, user, _PREFLIGHT_SCHEMA)
+            ai = _complete_preflight(provider, static, volatile, user)
             if isinstance(ai, dict):
                 ai_status = "completed"
+                usage_chain_status = "completed"
+                chain_con = db()
+                try:
+                    usage_chain, chain_refs = _normalize_usage_chain(
+                        ai.get("usage_chain"), custom_assets, chain_con
+                    )
+                finally:
+                    chain_con.close()
+                present_chain_refs = {
+                    (item["kind"], item["name"].casefold()) for item in refs
+                }
+                chain_kinds = {
+                    str(need.get("kind") or "")
+                    for segment in usage_chain
+                    for need in (segment.get("needs") or [])
+                    if isinstance(need, dict)
+                }
+                for chain_ref in chain_refs:
+                    key = (chain_ref["kind"], chain_ref["name"].casefold())
+                    if key not in present_chain_refs:
+                        refs.append(chain_ref)
+                        present_chain_refs.add(key)
                 candidates_by_id = {
                     str(row.get("id") or "").casefold(): row
                     for row in character_library["candidates"]
@@ -1683,11 +2571,22 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
                         kind = str(suggestion.get("kind") or "unset").casefold()
                         ident = str(suggestion.get("id") or "").strip()
                         candidate = candidates_by_id.get(ident.casefold())
+                        current_kind = str(item.get("kind") or "unset")
+                        current_id = str(item.get("id") or "")
+                        resolved = current_kind != "unset"
+                        same_mapping = (
+                            kind == current_kind
+                            and (kind == "narrator" or ident.casefold() == current_id.casefold())
+                        )
+                        accepted = not resolved or same_mapping
+                        if not accepted:
+                            continue
                         if kind == "narrator":
                             item.update(kind="narrator", id="", name="旁白", custom=False)
                         elif kind in {"portrait", "voice"} and candidate:
                             item.update(
-                                kind=kind, id=candidate["id"], name=candidate["name"],
+                                kind=kind, id=candidate["id"],
+                                name=(item["speaker"] if kind == "voice" else item.get("name") or candidate["name"]),
                                 custom=bool(candidate["custom"]),
                             )
                         elif kind == "unset":
@@ -1703,16 +2602,14 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
                     for row in (ai.get("assets") or [])
                     if isinstance(row, dict) and str(row.get("name") or "").strip()
                 }
-                kind_aliases = {
-                    "bg": "background", "background": "background",
-                    "se": "sound", "sound": "sound",
-                    "bgm": "bgm", "music": "bgm",
-                }
+                kind_aliases = _PREFLIGHT_KIND_ALIASES
                 present_refs = {(item["kind"], item["name"].casefold()) for item in refs}
                 for (raw_kind, folded_name), suggestion in refs_by_key.items():
                     kind = kind_aliases.get(raw_kind)
                     name = str(suggestion.get("name") or "").strip()
                     if not kind or not name or len(name) > 160 or (kind, folded_name) in present_refs:
+                        continue
+                    if kind in chain_kinds:
                         continue
                     bucket_name = {"background": "backgrounds", "sound": "sounds", "bgm": "bgms"}[kind]
                     bucket = custom_assets.get(bucket_name, [])
@@ -1745,6 +2642,10 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
                     code = str(row.get("code") or "ai_issue")
                     if code in {"missing_custom_asset", "speaker_unmapped"}:
                         continue
+                    if any(token in code.casefold() for token in (
+                        "asset", "background", "sound", "bgm", "music"
+                    )):
+                        continue
                     issue = {
                         "severity": severity if severity in {"error", "warning"} else "warning",
                         "code": code,
@@ -1756,11 +2657,32 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
                     ai_issues.append(issue)
         except Exception as exc:
             ai_status = "failed"
+            usage_chain_status = "unavailable"
+            usage_chain = []
+            provider_name = str(getattr(provider, "name", provider.__class__.__name__))
+            model_name = str(getattr(provider, "model", "") or "")
+            structured = isinstance(exc, llm.StructuredOutputError)
+            ai_diagnostics = {
+                "stage": "structured_output" if structured else "model_call",
+                "provider": provider_name[:80],
+                "model": model_name[:120],
+                "message": _safe_ai_error(exc),
+            }
             ai_issues.append({
                 "severity": "warning", "code": "ai_preflight_failed",
-                "message": "AI 初审调用失败，已保留规则分析结果。",
-                "action": "检查模型配置后重试，或直接编辑下方角色映射并继续。",
+                "message": (
+                    "AI 已响应，但初审结果格式尚未整理完成，已保留规则分析结果。"
+                    if structured else "AI 初审尚未完成，已保留规则分析结果。"
+                ),
+                "action": (
+                    "系统已自动重试一次；请检查模型配置是否支持结构化 JSON。"
+                    if structured else
+                    "检查模型配置、接口地址和网络后重试；场景演出规划暂未完成。"
+                ),
             })
+    else:
+        usage_chain_status = "unavailable"
+        ai_diagnostics = {"stage": "configuration", "message": "未配置可用模型"}
     issues = _preflight_directive_issues(text)
     if analysis.get("format", {}).get("confidence") == "low":
         issues.append({
@@ -1777,16 +2699,49 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
     for ref in refs:
         if ref["status"] == "missing":
             kind_name = "背景" if ref["kind"] == "background" else "音效" if ref["kind"] == "sound" else "BGM"
+            ai_suggestion = ref.get("detected_by") == "ai"
             action = "请从本剧情素材导入，或从历史项目复制后再确认初审。"
             if ref["kind"] == "bgm":
                 action = "当前版本尚未开放自定义 BGM 登记；请改用已知数字 BGM ID。"
+            elif ai_suggestion and ref["kind"] == "background":
+                action = "没有找到可靠的 AA 近似背景；可以生成或导入新背景，也可以继续使用默认背景。"
+            elif ai_suggestion:
+                action = "这是可选演出增强，可以补充，也可以直接跳过。"
             issues.append({
-                "severity": "error", "code": "missing_custom_asset",
-                "message": f"{ref['location']} 引用了未登记的{kind_name}“{ref['name']}”。",
+                "severity": "warning" if ai_suggestion else "error",
+                "code": (
+                    "optional_asset_suggestion" if ai_suggestion and ref["kind"] in {"sound", "bgm"}
+                    else "background_asset_suggestion" if ai_suggestion
+                    else "bgm_not_supported" if ref["kind"] == "bgm"
+                    else "missing_custom_asset"
+                ),
+                "message": (
+                    f"{ref['location']} 可选使用{kind_name}“{ref['name']}”。"
+                    if ai_suggestion and ref["kind"] in {"sound", "bgm"} else
+                    f"{ref['location']} 建议使用背景“{ref['name']}”，但没有可靠的现有匹配。"
+                    if ai_suggestion else
+                    f"{ref['location']} 需要{kind_name}“{ref['name']}”，但当前剧情尚未登记。"
+                ),
                 "action": action,
             })
+        elif ref["status"] == "unsupported":
+            ai_suggestion = ref.get("detected_by") == "ai"
+            issues.append({
+                "severity": "warning",
+                "code": "optional_asset_suggestion" if ai_suggestion else "bgm_not_supported",
+                "message": (
+                    f"{ref['location']} 可选使用 BGM“{ref['name']}”。"
+                    if ai_suggestion else
+                    f"{ref['location']} 需要 BGM“{ref['name']}”，当前版本暂不支持自定义 BGM 登记。"
+                ),
+                "action": (
+                    "这是可选演出增强，可以直接跳过。"
+                    if ai_suggestion else
+                    "先保留为待验证演出需求；AA 原生 BGM 契约确认后再登记。"
+                ),
+            })
     for item in characters:
-        if item["kind"] == "unset":
+        if item["kind"] == "unset" and not is_non_character_speaker(item["speaker"]):
             issues.append({
                 "severity": "error", "code": "speaker_unmapped", "speaker": item["speaker"],
                 "message": f"说话者“{item['speaker']}”尚未对应 AA 角色。",
@@ -1801,6 +2756,9 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
     return {
         "ok": True, "ai_status": ai_status, "characters": characters,
         "assets": refs, "available_assets": custom_assets,
+        "usage_chain": usage_chain,
+        "usage_chain_status": usage_chain_status,
+        "ai_diagnostics": ai_diagnostics,
         "character_library": character_library, "issues": issues,
         "analysis": {"lines": analysis.get("lines", 0), "scenes": analysis.get("scenes", []),
                       "speakers": analysis.get("speakers", []),
@@ -1814,7 +2772,19 @@ def preflight_story_worker(payload: dict) -> dict:
     scope = str(payload.get("scope") or "")
     if not script or not os.path.isfile(script) or not scope:
         raise ValueError("缺少有效的剧本或剧情作用域")
-    return _preflight_result(script, scope=scope, model_profile_id=payload.get("model_profile_id"))
+    result = _preflight_result(
+        script, scope=scope, model_profile_id=payload.get("model_profile_id")
+    )
+    saved = False
+    story_token = str(payload.get("story_token") or "")
+    if story_token:
+        try:
+            story_workspace().set_preflight_snapshot(story_token, result)
+            saved = True
+        except (KeyError, OSError, TypeError, ValueError):
+            pass
+    result["snapshot_saved"] = saved
+    return result
 
 
 # ---------------------------------------------------------------- 生成
@@ -1856,6 +2826,12 @@ def attach_registered_variants(cast, con, project_dir):
         if signature and outfit_key:
             entry["spine_signature"] = signature
             entry["outfit_key"] = outfit_key
+            install_path = Path(str(record.get("install_path") or ""))
+            if install_path.is_dir():
+                entry["custom"] = {
+                    "src": str(install_path),
+                    "asset": outfit_key,
+                }
 
 
 def build_project_name(payload):
@@ -2108,7 +3084,7 @@ def run_build(payload, job=None):
             JOB.update(running=False, done=True)
 
 
-def annotate_draft_worker(payload):
+def annotate_draft_worker(payload, job=None):
     """AI 演出标注 -> 建草稿 -> 存 cast/proposals。供 /api/annotate 的 Job 调用。"""
     import annotate as ANN
     project = build_project_name(payload)
@@ -2153,11 +3129,34 @@ def annotate_draft_worker(payload):
 
     result = {}
     if payload.get("annotate", True):
+        def annotation_model_activity(activity):
+            if not job or not hasattr(job, "update_activity"):
+                return
+            job.update_activity(activity)
+
+        def annotation_progress(phase, current, total, detail):
+            if not job:
+                return
+            if phase == "recovery":
+                detail = str(detail)
+            phase_start = {"planning": 0.0, "annotating": 0.10, "resumed": 0.10,
+                           "recovery": 0.10, "review": 0.90, "cancelled": 0.0}.get(phase, 0.10)
+            phase_end = {"planning": 0.10, "annotating": 0.90, "resumed": 0.90,
+                         "recovery": 0.90, "review": 0.98, "cancelled": 1.0}.get(phase, 0.90)
+            ratio = min(1.0, max(0.0, (current / total) if total else 0.0))
+            job.update_progress((phase_start + (phase_end - phase_start) * ratio) * 100, detail)
+
         opts = {
             "script": payload["script"],
             "out": out_path,
             "cast": cpath,
             "index": index_path,
+            "usage_chain": payload.get("usage_chain") or [],
+            "agent_enabled": payload.get("agent_enabled", True),
+            "checkpoint_dir": os.path.join(HERE, "out", "annotation-checkpoints"),
+            "progress": annotation_progress,
+            "model_activity": annotation_model_activity,
+            "cancelled": job.is_cancel_requested if job else None,
         }
         if payload.get("provider"):
             opts["provider"] = payload["provider"]
@@ -2168,6 +3167,10 @@ def annotate_draft_worker(payload):
             annotated = open(out_path, encoding="utf-8").read()
         if not annotated:
             annotated = result.get("text") or ""
+        if result.get("cancelled"):
+            return {"project": project, "lines": 0, "proposals": 0,
+                    "diagnostics": result.get("diagnostics") or [], "cancelled": True,
+                    "agent": result.get("agent") or {}}
     else:
         annotated = source_text
 
@@ -2180,8 +3183,11 @@ def annotate_draft_worker(payload):
     proposals = result.get("proposals") or []
     if proposals:
         store.add_proposals(token, proposals)
+    agent = result.get("agent") or {}
     return {"draft_token": token, "project": project,
-            "lines": len(annotated.splitlines()), "proposals": len(proposals)}
+            "lines": len(annotated.splitlines()), "proposals": len(proposals),
+             "resumed_chunks": int(agent.get("resumed_chunks") or 0),
+             "agent_metrics": dict(agent.get("metrics") or {})}
 
 
 def get_draft_detail_data(token, store=None):
@@ -2199,11 +3205,17 @@ def get_draft_detail_data(token, store=None):
         "speakers": sorted(cast_members) if isinstance(cast_members, dict) else [],
     }
 
-    nodes = parse_document_lossless(edited_text)
+    nodes = normalize_draft_nodes(parse_document_lossless(edited_text))
     cards = []
     for node, card_id_info in zip(nodes, identities_data):
+        card_id = card_id_info["card_id"]
+        card_issues = [
+            item for item in diagnostics
+            if item.get("card_id") == card_id
+            or (not item.get("card_id") and item.get("line_no") == node.line_no)
+        ]
         cards.append({
-            "card_id": card_id_info["card_id"],
+            "card_id": card_id,
             "source_id": card_id_info.get("source_id"),
             "origin": card_id_info.get("origin", "source"),
             "parent_id": card_id_info.get("parent_id"),
@@ -2215,10 +3227,13 @@ def get_draft_detail_data(token, store=None):
             "review_state": card_id_info.get("review_state", "pending"),
             "edit_state": "unchanged",
             "validation_state": "valid",
-            "issues": [],
+            "issues": card_issues,
             "proposal_ids": [],
         })
 
+    pending_count = sum(1 for c in cards if c["review_state"] == "pending")
+    unresolved_issues = sum(1 for d in diagnostics if d.get("severity") in ("error", "warning"))
+    blocking_errors = sum(1 for d in diagnostics if d.get("severity") == "error")
     compiled_build_id = (
         session.get("last_compiled_build_id")
         if session.get("last_compiled_content_revision") == session.get("content_revision")
@@ -2231,10 +3246,6 @@ def get_draft_detail_data(token, store=None):
         else None
     )
 
-    pending_count = sum(1 for c in cards if c["review_state"] == "pending")
-    unresolved_issues = sum(1 for d in diagnostics if d.get("severity") in ("error", "warning"))
-    blocking_errors = sum(1 for d in diagnostics if d.get("severity") == "error")
-
     return {
         "cards": cards,
         "diagnostics": diagnostics,
@@ -2244,6 +3255,7 @@ def get_draft_detail_data(token, store=None):
             "blocking_errors": blocking_errors,
         },
         "draft_version": session["draft_version"],
+        "generation_version": store.generation_version(token),
         "content_revision": session["content_revision"],
         "last_compiled_build_id": compiled_build_id,
         "last_installed_build_id": installed_build_id,
@@ -2401,12 +3413,9 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/state":
                 con = db()
                 st = assetdb.stats(con)
-                active_profile = MODEL_PROFILES.active_profile()
-                if active_profile:
-                    prov = (
-                        f"{active_profile['name']} / "
-                        f"{active_profile['model']}"
-                    )
+                model_status = current_model_status()
+                if model_status["configured"]:
+                    prov = f"{model_status['name']} / {model_status['model']}"
                 else:
                     prov = json.load(
                         open(LLMCFG, encoding="utf-8")
@@ -2464,6 +3473,16 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/settings/host":
                 try:
                     return self._send(200, SETTINGS_FILE_PICKER.list_directory(
+                        q.get("entry_token", ""),
+                        query=q.get("query", ""),
+                        sort=q.get("sort", "name"),
+                        direction=q.get("direction", "asc"),
+                    ))
+                except StoryFilePickerError as exc:
+                    return self._send(exc.status, {"ok": False, "code": exc.code, "e": str(exc)})
+            if p == "/api/assets/host":
+                try:
+                    return self._send(200, ASSET_FILE_PICKER.list_directory(
                         q.get("entry_token", ""),
                         query=q.get("query", ""),
                         sort=q.get("sort", "name"),
@@ -2648,18 +3667,7 @@ class H(BaseHTTPRequestHandler):
                     return self._send(404, {"e": str(exc)})
             if p == "/api/drafts":
                 store = DraftStore()
-                drafts_list = []
-                if store.base_dir.is_dir():
-                    for d_dir in store.base_dir.iterdir():
-                        if d_dir.is_dir():
-                            session_file = d_dir / "session.json"
-                            if session_file.is_file():
-                                try:
-                                    sess = json.loads(session_file.read_text(encoding="utf-8"))
-                                    drafts_list.append(sess)
-                                except Exception:
-                                    pass
-                return self._send(200, drafts_list)
+                return self._send(200, store.list_sessions())
             if p.startswith("/api/jobs/"):
                 job_id = p[len("/api/jobs/"):]
                 job_info = global_job_manager.get(job_id)
@@ -2720,8 +3728,11 @@ class H(BaseHTTPRequestHandler):
                     con.close()
             if p == "/api/llm/profiles":
                 return self._send(200, MODEL_PROFILES.public_state())
+            if p == "/api/llm/workbench":
+                MODEL_PROFILES.migrate_legacy_profiles()
+                return self._send(200, MODEL_PROFILES.public_state(include_links=True))
             if p.startswith("/thumb/bg/"):
-                name = p[len("/thumb/bg/"):]
+                name = unquote(p[len("/thumb/bg/"):])
                 f = background_preview_path(name)
                 if not f:
                     return self._send(404, {"e": "no image"})
@@ -2732,14 +3743,16 @@ class H(BaseHTTPRequestHandler):
                 f = None
                 con = db()
                 try:
-                    for row in con.execute("SELECT avatar,spine FROM character"):
+                    for row in con.execute("SELECT ident,avatar,spine FROM character"):
                         avatar_key = Path(
                             str(row["avatar"] or "").replace("\\", "/")
                         ).name
-                        if key in {avatar_key, str(row["spine"] or "")}:
+                        if key in {avatar_key, str(row["spine"] or ""), str(row["ident"] or "")}:
                             f = character_avatar_path(
                                 row["avatar"], row["spine"]
                             )
+                            if not f:
+                                f = registered_character_avatar_path(con, row["ident"])
                             break
                 finally:
                     con.close()
@@ -2747,8 +3760,10 @@ class H(BaseHTTPRequestHandler):
                     f = character_avatar_path(key, key)
                 if not f:
                     return self._send(404, {"e": "no avatar"})
-                return self._send(200, thumb(f, int(q.get("px", 96)), "av_" + p[-40:]),
-                                  "image/jpeg")
+                data, content_type = avatar_thumb(
+                    f, int(q.get("px", 96)), "av_" + p[-40:]
+                )
+                return self._send(200, data, content_type)
             if p.startswith("/js/"):
                 rel_path = unquote(p[4:])
                 if not rel_path.endswith(".js"):
@@ -2838,6 +3853,15 @@ class H(BaseHTTPRequestHandler):
                     return self._send(200, {
                         "ok": True,
                         **STORY_FILE_PICKER.select(str(data.get("entry_token") or "")),
+                    })
+                except StoryFilePickerError as exc:
+                    return self._send(exc.status, {"ok": False, "code": exc.code, "e": str(exc)})
+
+            if p == "/api/assets/select":
+                try:
+                    return self._send(200, {
+                        "ok": True,
+                        **ASSET_FILE_PICKER.select(str(data.get("entry_token") or "")),
                     })
                 except StoryFilePickerError as exc:
                     return self._send(exc.status, {"ok": False, "code": exc.code, "e": str(exc)})
@@ -3146,17 +4170,27 @@ class H(BaseHTTPRequestHandler):
             if p.startswith("/api/drafts/") and "/backgrounds/" in p and p.endswith("/resolve"):
                 parts = [pt for pt in p.split("/") if pt]
                 # /api/drafts/<token>/backgrounds/<request_id>/resolve
-                if len(parts) == 5:
+                if len(parts) == 6 and parts[1] == "drafts" and parts[3] == "backgrounds":
                     token = parts[2]
                     request_card_id = parts[4]
-                    bg_name = data.get("bg_name")
+                    bg_name = str(data.get("bg_name") or "").strip()
                     expected_ver = data.get("expected_draft_version", 1)
+                    if not bg_name:
+                        return self._send(400, {"ok": False, "code": "bad_request", "e": "缺少 bg_name"})
                     try:
                         store = DraftStore()
                         res = store.resolve_background_request(token=token, card_id=request_card_id, bg_name=bg_name, expected_draft_version=expected_ver)
-                        return self._send(200, {"ok": True, "draft_version": res["session"]["draft_version"], "content_revision": res["session"]["content_revision"]})
-                    except Exception as exc:
+                        payload = {"ok": True, "draft_version": res["session"]["draft_version"], "content_revision": res["session"]["content_revision"]}
+                        merged_backgrounds = int(res.get("merged_backgrounds") or 0)
+                        if merged_backgrounds:
+                            payload["merged_backgrounds"] = merged_backgrounds
+                        return self._send(200, payload)
+                    except RevisionConflictError as exc:
                         return self._send(409, {"ok": False, "code": "revision_conflict", "e": str(exc)})
+                    except KeyError as exc:
+                        return self._send(404, {"ok": False, "code": "card_not_found", "e": str(exc)})
+                    except Exception as exc:
+                        return self._send(400, {"ok": False, "code": "bad_request", "e": str(exc)})
 
             if p == "/api/settings/aa-data":
                 try:
@@ -3376,6 +4410,107 @@ class H(BaseHTTPRequestHandler):
                 except Exception as exc:
                     return self._send(400, {"ok": False, "code": "bad_request", "e": str(exc)})
 
+            if p == "/api/preflight/background-binding":
+                try:
+                    context = resolve_story_context(str(data.get("story_token") or ""))
+                except ValueError:
+                    return self._send(404, {
+                        "ok": False, "code": "invalid_story_token", "e": "story not found",
+                    })
+                selector = data.get("selector")
+                requested_binding = data.get("binding")
+                if not isinstance(selector, dict) or not isinstance(requested_binding, dict):
+                    return self._send(400, {
+                        "ok": False, "code": "invalid_background_binding",
+                        "e": "selector and binding are required",
+                    })
+                aa_key = str(requested_binding.get("aa_key") or "").strip()
+                con = db()
+                try:
+                    backgrounds = asset_catalog.list_story_assets(
+                        con, scope=str(context.project_dir)
+                    ).get("backgrounds", [])
+                    official = con.execute(
+                        """SELECT name,label FROM bg
+                           WHERE name=? COLLATE NOCASE AND hash IS NOT NULL
+                           LIMIT 1""",
+                        (aa_key,),
+                    ).fetchone()
+                finally:
+                    con.close()
+                background = next((
+                    item for item in backgrounds
+                    if str(item.get("aa_key") or "").casefold() == aa_key.casefold()
+                    and item.get("preview_available")
+                ), None)
+                if background is None and official is None:
+                    return self._send(404, {
+                        "ok": False, "code": "background_not_registered",
+                        "e": "background is not available in this story or the official catalog",
+                    })
+                if background is not None:
+                    labels = background_labeler.normalize_background_labels(
+                        background.get("labels")
+                    )
+                    selected_label = labels.get("label") or str(
+                        background.get("name") or aa_key
+                    )
+                    binding_source = "custom"
+                    preview_source = "story"
+                    preview_available = True
+                else:
+                    aa_key = str(official["name"])
+                    selected_label = str(official["label"] or official["name"])
+                    binding_source = "official"
+                    preview_source = "official"
+                    preview_available = _background_preview_available(aa_key)
+                try:
+                    updated = story_workspace().bind_preflight_background(
+                        context.story_token,
+                        selector,
+                        {
+                            "aa_key": aa_key,
+                            "selected_label": selected_label,
+                            "source": binding_source,
+                            "preview_source": preview_source,
+                            "preview_available": preview_available,
+                        },
+                    )
+                except ValueError as exc:
+                    return self._send(409, {
+                        "ok": False, "code": "background_binding_rejected", "e": str(exc),
+                    })
+                return self._send(200, {
+                    "ok": True,
+                    "preflight_snapshot": public_story_context(updated).get(
+                        "preflight_snapshot"
+                    ),
+                })
+
+            if p == "/api/preflight/approve":
+                try:
+                    context = resolve_story_context(str(data.get("story_token") or ""))
+                    if not isinstance(data.get("approved"), bool):
+                        return self._send(400, {
+                            "ok": False, "code": "invalid_preflight_approval",
+                            "e": "approved must be a boolean",
+                        })
+                    registry = story_workspace()
+                    if isinstance(data.get("characters"), list):
+                        registry.update_preflight_mapping(context.story_token, data["characters"])
+                    updated = registry.set_preflight_approved(context.story_token, data["approved"])
+                    return self._send(200, {
+                        "ok": True,
+                        "preflight_snapshot": public_story_context(updated).get(
+                            "preflight_snapshot"
+                        ),
+                    })
+                except (KeyError, ValueError) as exc:
+                    return self._send(404, {
+                        "ok": False, "code": "preflight_snapshot_not_found",
+                        "e": str(exc),
+                    })
+
             if p == "/api/preflight":
                 try:
                     context = inherit_story_context(data)
@@ -3385,9 +4520,9 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "code": "invalid_story_token", "e": "invalid story token"})
                 if not context:
                     return self._send(400, {"ok": False, "code": "bad_request", "e": "初审必须绑定当前剧情"})
-                script = resolve_file_token(str(data.get("file_token") or ""))
+                script = str(context.source_path or "")
                 if not script or not os.path.isfile(script):
-                    return self._send(400, {"ok": False, "code": "invalid_file_token", "e": "缺少有效的 file_token"})
+                    return self._send(400, {"ok": False, "code": "invalid_story_source", "e": "当前剧情原文不存在，请重新打开剧情"})
                 task_payload = {
                     "script": script,
                     "scope": str(context.project_dir),
@@ -3409,9 +4544,10 @@ class H(BaseHTTPRequestHandler):
                 except ValueError as exc:
                     return self._send(400, {"ok": False, "code": str(exc), "e": "invalid story token"})
                 if context:
-                    script = resolve_file_token(str(data.get("file_token") or ""))
+                    script = str(context.source_path or "")
                     if not script or not os.path.isfile(script):
-                        return self._send(400, {"ok": False, "code": "invalid_file_token", "e": "缺少有效的 file_token"})
+                        return self._send(400, {"ok": False, "code": "invalid_story_source", "e": "当前剧情原文不存在，请重新打开剧情"})
+                    data.pop("file_token", None)
                     data["script"] = script
                 else:
                     script = data.get("script")
@@ -3419,7 +4555,14 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "code": "bad_request", "e": "缺少有效的 script 与 mapping"})
 
                 def annotate_task(job):
-                    result = annotate_draft_worker(data)
+                    try:
+                        result = annotate_draft_worker(data, job=job)
+                    except TypeError as exc:
+                        if "unexpected keyword argument 'job'" not in str(exc):
+                            raise
+                        result = annotate_draft_worker(data)
+                    if result.get("cancelled"):
+                        job.mark_cancelled()
                     if context and result.get("draft_token"):
                         story_workspace().set_latest_draft_token(
                             context.story_token, result["draft_token"]
@@ -3501,6 +4644,51 @@ class H(BaseHTTPRequestHandler):
 
             if p == "/api/llm/profiles/save":
                 return self._send(200, MODEL_PROFILES.save_profile(data))
+            if p == "/api/llm/connections/save":
+                return self._send(200, MODEL_PROFILES.save_connection(data))
+            if p == "/api/llm/models/save":
+                return self._send(200, MODEL_PROFILES.save_model(data))
+            if p == "/api/llm/models/delete":
+                return self._send(200, MODEL_PROFILES.delete_model(
+                    str(data.get("id") or ""),
+                    delete_empty_connection=bool(
+                        data.get("delete_empty_connection", False)
+                    ),
+                ))
+            if p == "/api/llm/assignments/save":
+                return self._send(200, MODEL_PROFILES.set_assignments(data))
+            if p == "/api/llm/models/test":
+                return self._send(
+                    200,
+                    test_workbench_model(data.get("id"), data.get("mode") or "text"),
+                )
+            if p == "/api/llm/models/list":
+                if data.get("connection"):
+                    connection = dict(data["connection"])
+                else:
+                    connection = MODEL_PROFILES.connection_record(
+                        str(data.get("connection_id") or "")
+                    )
+                    connection["api_key"] = MODEL_PROFILES.resolve_connection_key(
+                        connection["id"]
+                    )
+                return self._send(200, list_workbench_models(
+                    connection, data.get("model") or {"model": "model-list"}
+                ))
+            if p == "/api/llm/models/recommend":
+                model_name = str(data.get("model") or "").strip()
+                if not model_name:
+                    raise model_profiles.ModelProfileError("妯″瀷鍚嶇О涓嶈兘涓虹┖")
+                return self._send(
+                    200,
+                    model_capabilities.resolve_output_capability(
+                        model_name,
+                        service_preset=str(data.get("service_preset") or "custom"),
+                    ),
+                )
+            if p == "/api/llm/vision/fallback-test":
+                provider = model_router.ModelRouter(MODEL_PROFILES).one_shot_base_fallback()
+                return self._send(200, {"ok": True, "model": provider.model})
             if p == "/api/llm/profiles/activate":
                 return self._send(
                     200,
@@ -3515,12 +4703,19 @@ class H(BaseHTTPRequestHandler):
                 )
                 return self._send(200, {"ok": True})
             if p == "/api/llm/models":
-                provider = profile_provider(str(data.get("id") or ""))
+                if data.get("profile"):
+                    provider = _temporary_profile_provider(data["profile"])
+                else:
+                    provider = profile_provider(str(data.get("id") or ""))
                 return self._send(
                     200,
                     {"models": provider.list_models()},
                 )
             if p == "/api/llm/test":
+                if data.get("profile"):
+                    return self._send(
+                        200, test_profile_payload(data["profile"], data.get("mode") or "text")
+                    )
                 return self._send(
                     200,
                     test_profile_connection(
@@ -3533,7 +4728,7 @@ class H(BaseHTTPRequestHandler):
             model_profiles.CredentialStoreError,
             llm.LLMError,
         ) as exc:
-            return self._send(400, {"ok": False, "e": str(exc)})
+            return self._send(400, {"ok": False, "e": _model_public_error(exc)})
         if p == "/api/build/background/resolve":
             try:
                 return self._send(

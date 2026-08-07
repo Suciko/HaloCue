@@ -8,10 +8,16 @@ import datetime
 import queue
 import threading
 import uuid
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 
 
 class Job:
+    _ACTIVITY_FIELDS = frozenset({
+        "state", "model", "request_started_at_ms", "elapsed_ms", "first_delta_ms",
+        "received_chars", "finish_reason", "scene_id", "chunk_id", "chunk_current",
+        "chunk_total", "request_index", "retry_count", "subdivision_count",
+    })
+
     def __init__(self, job_id: str, label: str = "job"):
         self.job_id = job_id
         self.label = label
@@ -20,6 +26,7 @@ class Job:
         self.detail = ""
         self.result = None
         self.error = None
+        self.activity: Dict[str, Any] = {}
         self.cancel_requested = False
         self.created_at = datetime.datetime.now(datetime.timezone.utc)
         self.updated_at = datetime.datetime.now(datetime.timezone.utc)
@@ -31,6 +38,15 @@ class Job:
             self.progress = float(progress)
             if detail:
                 self.detail = detail
+            self.updated_at = datetime.datetime.now(datetime.timezone.utc)
+
+    def update_activity(self, activity: Optional[Mapping[str, Any]]) -> None:
+        """Store a sanitized activity snapshot without changing progress/detail."""
+        if not isinstance(activity, Mapping):
+            return
+        snapshot = {key: value for key, value in activity.items() if key in self._ACTIVITY_FIELDS}
+        with self._lock:
+            self.activity = snapshot
             self.updated_at = datetime.datetime.now(datetime.timezone.utc)
 
     def is_cancel_requested(self) -> bool:
@@ -59,6 +75,7 @@ class Job:
                 "state": self.state,
                 "progress": self.progress,
                 "detail": self.detail,
+                "activity": dict(self.activity),
                 "result": self.result,
                 "error": self.error,
                 "cancel_requested": self.cancel_requested,

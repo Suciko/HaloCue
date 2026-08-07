@@ -186,6 +186,42 @@ def test_host_http_routes_use_entry_tokens_instead_of_paths(tmp_path, monkeypatc
     assert "path" not in entry and "path" not in selected
 
 
+def test_asset_image_picker_routes_filter_files_and_return_an_opaque_file_token(tmp_path, monkeypatch):
+    image = tmp_path / "generated-rain.png"
+    image.write_bytes(b"png")
+    (tmp_path / "notes.txt").write_text("not an image", encoding="utf-8")
+    picker = StoryFilePicker(
+        roots=[tmp_path],
+        upload_dir=tmp_path / "uploads",
+        allowed_suffixes={".png", ".jpg", ".jpeg"},
+    )
+    monkeypatch.setattr(webui, "ASSET_FILE_PICKER", picker, raising=False)
+
+    with _server(webui.STORY_FILE_PICKER, monkeypatch) as base:
+        status, listed = _request(base, "/api/assets/host")
+        entry = listed["entries"][0]
+        selected_status, selected = _request(
+            base,
+            "/api/assets/select",
+            method="POST",
+            data=json.dumps({"entry_token": entry["entry_token"]}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert status == selected_status == 200
+    assert [row["name"] for row in listed["entries"]] == ["generated-rain.png"]
+    assert entry["type"] == "PNG 图片"
+    assert selected["name"] == "generated-rain.png"
+    assert selected["file_token"].startswith("ft-")
+    assert str(tmp_path) not in json.dumps({"listed": listed, "selected": selected})
+
+
+def test_shared_asset_picker_accepts_all_supported_material_file_types():
+    assert webui.ASSET_FILE_PICKER.allowed_suffixes == {
+        ".png", ".jpg", ".jpeg", ".wav", ".ogg", ".mp3", ".skel", ".atlas",
+    }
+
+
 def test_settings_host_route_validates_an_entry_without_exposing_path(tmp_path, monkeypatch):
     (tmp_path / "Spine.com").write_bytes(b"binary cli")
     picker = StoryFilePicker(

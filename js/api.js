@@ -21,6 +21,7 @@
     function check(attempt) {
       if (!isCurrent()) return Promise.resolve(null);
       return request(path).then(function (value) {
+        if (options.onProgress) options.onProgress(value);
         if (!isCurrent() || done(value)) return value;
         return wait(baseDelay).then(function () { return check(0); });
       }).catch(function (error) {

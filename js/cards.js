@@ -32,6 +32,11 @@
       sceneBadge.className = 'card-kind-badge scene-badge';
       sceneBadge.textContent = '## 场景: ' + (card.current.title || '');
       cardEl.appendChild(sceneBadge);
+    } else if (card.kind === 'separator') {
+      const separatorBadge = document.createElement('span');
+      separatorBadge.className = 'card-kind-badge separator-badge';
+      separatorBadge.textContent = '场景分隔';
+      cardEl.appendChild(separatorBadge);
     }
 
     // 3. 台词 / 指令主体
@@ -53,7 +58,11 @@
       dirEl.className = 'card-dir';
       dirEl.textContent = '@' + (card.current.cmd || '') + ' ' + (card.current.arg || '');
       contentEl.appendChild(dirEl);
-    } else if (card.kind !== 'background_request' && card.kind !== 'scene') {
+    } else if (
+      card.kind !== 'background_request' &&
+      card.kind !== 'scene' &&
+      card.kind !== 'separator'
+    ) {
       const rawEl = document.createElement('span');
       rawEl.className = 'card-raw';
       rawEl.textContent = card.raw || '';
@@ -76,19 +85,25 @@
       cardEl.appendChild(chipsEl);
     }
 
-    // 4b. 背景请求卡动作：从历史项目复制并回填该卡
-    if (card.kind === 'background_request' && options.onFillBackground) {
+    // 4b. 背景请求卡动作
+    if (card.kind === 'background_request' && (options.onUseDefaultBackground || options.onChooseBackground || options.onFillBackground)) {
       const actionsEl = document.createElement('div');
       actionsEl.className = 'card-actions';
-      const fillBtn = document.createElement('button');
-      fillBtn.type = 'button';
-      fillBtn.className = 'ghost card-fill-bg';
-      fillBtn.textContent = '补背景：从历史项目复制';
-      fillBtn.addEventListener('click', function (event) {
-        event.stopPropagation();
-        options.onFillBackground(card);
-      });
-      actionsEl.appendChild(fillBtn);
+      function appendAction(label, callback) {
+        if (!callback) return;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ghost card-fill-bg';
+        button.textContent = label;
+        button.addEventListener('click', function (event) {
+          event.stopPropagation();
+          callback(card, button);
+        });
+        actionsEl.appendChild(button);
+      }
+      appendAction('使用默认黑屏', options.onUseDefaultBackground);
+      appendAction('选择官方背景', options.onChooseBackground);
+      appendAction('从历史项目复制', options.onFillBackground);
       cardEl.appendChild(actionsEl);
     }
 

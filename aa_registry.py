@@ -355,6 +355,9 @@ def _register_character_unlocked(result: ValidationResult, directories: tuple[Pa
     entry = {"Identifier": identifier, "Name": display_name, "Nickname": nickname, "CharacterReference": None, "OriginalIdentifier": None, "SpinePortraitPath": spine_rel, "SmallPortraitPath": _manifest_rel("characters", identifier, candidate.stem + "-avatar.png")}
     for manifest in manifests:
         existing = next((row for row in manifest["CharacterOverrides"] if str(row.get("Identifier")) == identifier), None)
+        if existing and not existing.get("SpinePortraitPath"):
+            existing.update(entry)
+            continue
         if existing and any(existing.get(key) != entry[key] for key in ("Identifier", "Name", "Nickname", "SpinePortraitPath", "SmallPortraitPath")):
             raise RegistrationConflictError(f"Identifier {identifier!r} 已用于不同身份或内容")
     sources = _character_files(candidate)

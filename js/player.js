@@ -9,6 +9,7 @@
     this.container = container;
     this.options = options || {};
     this.cards = [];
+    this.sceneStates = [];
     this.currentIndex = 0;
     this.isPlaying = false;
     this.timer = null;
@@ -89,6 +90,13 @@
 
   Player.prototype.loadCards = function (cards) {
     this.cards = cards || [];
+    let background = '';
+    this.sceneStates = this.cards.map(function (card) {
+      const current = card && card.current || {};
+      const command = card && card.kind === 'dir' ? String(current.cmd || '').toLowerCase() : '';
+      if (command === 'bg' || command === 'scene') background = String(current.arg || '');
+      return {background: background};
+    });
     this.currentIndex = 0;
     this.renderCurrent();
   };
@@ -104,7 +112,6 @@
   };
 
   Player.prototype.renderCurrent = function () {
-    // 先清空上一句的背景预览，再按当前卡渲染。
     this.bgLayerEl.style.backgroundImage = '';
     this.bgLayerEl.classList.remove('has-bg');
     if (this.progressEl) this.progressEl.textContent = this.cards && this.cards.length ? ((this.currentIndex + 1) + ' / ' + this.cards.length) : '';
@@ -117,18 +124,25 @@
 
     const card = this.cards[this.currentIndex];
     if (!card) return;
+    const sceneState = this.sceneStates[this.currentIndex] || {};
+    if (sceneState.background) {
+      this.bgLayerEl.style.backgroundImage = 'url("/thumb/bg/' + encodeURIComponent(sceneState.background) + '")';
+      this.bgLayerEl.classList.add('has-bg');
+    }
 
     if (card.kind === 'line') {
       this.speakerNameEl.textContent = card.current.who || '（旁白）';
       this.dialogTextEl.textContent = card.current.text || '';
     } else if (card.kind === 'dir' && (card.current.cmd === 'bg' || card.current.cmd === 'scene')) {
       const name = card.current.arg || '';
-      if (name) {
-        this.bgLayerEl.style.backgroundImage = 'url("/thumb/bg/' + encodeURIComponent(name) + '")';
-        this.bgLayerEl.classList.add('has-bg');
-      }
       this.speakerNameEl.textContent = card.current.cmd === 'scene' ? '【场景】' : '【背景】';
       this.dialogTextEl.textContent = name || card.raw || '';
+    } else if (card.kind === 'dir' && card.current.cmd === 'trans') {
+      this.speakerNameEl.textContent = '【转场】';
+      this.dialogTextEl.textContent = card.current.arg || card.raw || '';
+    } else if (card.kind === 'dir' && card.current.cmd === 'place') {
+      this.speakerNameEl.textContent = '【地点】';
+      this.dialogTextEl.textContent = card.current.arg || card.raw || '';
     } else if (card.kind === 'scene') {
       this.speakerNameEl.textContent = '【场景切换】';
       this.dialogTextEl.textContent = card.current.title || '';

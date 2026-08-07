@@ -18,19 +18,21 @@ from story_workspace import StoryContext
 
 def _insert_asset(
     con, *, kind, key, name, digest, scope, source="history_import", metadata=None,
-    install_path=None,
+    install_path=None, registered_at="",
 ):
     payload = {**({"catalog_source": source} if source is not None else {}), **(metadata or {})}
     con.execute(
         """
         INSERT INTO asset_install
-          (kind,aa_key,display_name,source_path,sha256,scope,install_path,status,metadata_json)
-        VALUES (?,?,?,?,?,?,?,?,?)
+          (kind,aa_key,display_name,source_path,sha256,scope,install_path,status,
+           metadata_json,registered_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
         """,
         (
             kind, str(key), name, rf"C:\private\source\{name}", digest,
             scope, str(install_path or rf"C:\private\installed\{name}"), "registered",
             json.dumps(payload, ensure_ascii=False),
+            registered_at,
         ),
     )
     con.commit()
@@ -87,6 +89,67 @@ def test_library_groups_custom_copies_and_marks_current_story(tmp_path):
     assert str(tmp_path) not in repr(payload)
 
 
+def test_library_aggregates_first_import_and_latest_used_chapter(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    asset_catalog.migrate(con)
+    first = tmp_path / "projects" / "Chapter A"
+    second = tmp_path / "projects" / "Chapter B"
+    first_preview = first / "bgs" / "rain.png"
+    second_preview = second / "bgs" / "rain.png"
+    first_preview.parent.mkdir(parents=True)
+    second_preview.parent.mkdir(parents=True)
+    first_preview.write_bytes(b"rain")
+    second_preview.write_bytes(b"rain")
+    _insert_asset(
+        con, kind="background", key="rain", name="Rain", digest="same-digest",
+        scope=str(first), install_path=first_preview,
+        registered_at="2026-08-01T02:00:00Z",
+    )
+    _insert_asset(
+        con, kind="background", key="rain", name="Rain", digest="same-digest",
+        scope=str(second), install_path=second_preview,
+        registered_at="2026-08-07T05:30:00Z",
+    )
+    current = StoryContext(
+        story_token="story-b", project="Chapter B", project_dir=second,
+        save_dir=tmp_path / "saves" / "Chapter B", source_path=None,
+        latest_draft_token=None, bgm_default={},
+    )
+
+    item = HistoryAssetBrowser(aa_data=tmp_path).list_library(
+        con, current_context=current
+    )["backgrounds"][0]
+
+    assert item["imported_at"] == "2026-08-01T02:00:00Z"
+    assert item["last_used_at"] == "2026-08-07T05:30:00Z"
+    assert item["last_used_chapter"] == "Chapter B"
+    assert {
+        copy["chapter"]: copy["registered_at"] for copy in item["copies"]
+    } == {
+        "Chapter A": "2026-08-01T02:00:00Z",
+        "Chapter B": "2026-08-07T05:30:00Z",
+    }
+
+
+def test_library_legacy_copy_times_are_publicly_unknown(tmp_path):
+    con, current, browser = library_fixture(tmp_path)
+
+    item = browser.list_library(con, current_context=current)["backgrounds"][0]
+
+    assert item["imported_at"] == ""
+    assert item["last_used_at"] == ""
+    assert item["last_used_chapter"] == ""
+    assert all(copy["registered_at"] == "" for copy in item["copies"])
+
+
+def test_library_rejects_invalid_or_timezone_free_registration_times(tmp_path):
+    assert asset_catalog._safe_iso_timestamp("not-a-date") == ""
+    assert asset_catalog._safe_iso_timestamp("2026-08-07T05:30:00") == ""
+    assert asset_catalog._safe_iso_timestamp("2026-08-07T13:30:00+08:00") == (
+        "2026-08-07T05:30:00Z"
+    )
+
+
 def test_library_excludes_observed_verified_and_bgm_rows(tmp_path):
     """Treating observed/verified catalog records as reusable custom assets leaks built-ins into the library."""
     con, current, browser = mixed_source_library_fixture(tmp_path)
@@ -136,6 +199,91 @@ def test_upserted_custom_candidate_is_explicitly_marked_for_library(tmp_path):
     row = con.execute("SELECT metadata_json FROM asset_install WHERE aa_key='new'").fetchone()
 
     assert json.loads(row["metadata_json"])["catalog_source"] == "custom"
+
+
+def test_registered_asset_gets_server_time_and_upsert_preserves_it(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    source = tmp_path / "source.png"
+    source.write_bytes(b"source")
+    candidate = asset_catalog.AssetCandidate(
+        "background", source, "new", "new", "new-digest"
+    )
+
+    asset_catalog.upsert_candidate(
+        con, candidate, scope=str(tmp_path / "project"), status="registered",
+        install_path=str(source),
+    )
+    initial = con.execute(
+        "SELECT registered_at FROM asset_install WHERE aa_key='new'"
+    ).fetchone()["registered_at"]
+
+    assert initial.endswith("Z")
+    asset_catalog.upsert_candidate(
+        con, candidate, scope=str(tmp_path / "project"), status="registered",
+        install_path=str(source),
+    )
+    assert con.execute(
+        "SELECT registered_at FROM asset_install WHERE aa_key='new'"
+    ).fetchone()["registered_at"] == initial
+
+
+def test_legacy_registered_asset_keeps_unknown_time_after_migration(tmp_path):
+    con = assetdb.connect(tmp_path / "legacy.db")
+    con.executescript(
+        """
+        CREATE TABLE asset_install (
+            kind TEXT NOT NULL,
+            aa_key TEXT NOT NULL,
+            display_name TEXT,
+            source_path TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            install_path TEXT,
+            status TEXT NOT NULL,
+            error TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (kind, aa_key, scope)
+        );
+        INSERT INTO meta(key,value) VALUES('asset_schema_version','1')
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value;
+        """
+    )
+    con.execute(
+        """
+        INSERT INTO asset_install
+          (kind,aa_key,display_name,source_path,sha256,scope,install_path,status,metadata_json)
+        VALUES ('background','legacy','Legacy','source.png','digest','Old Chapter',
+                'installed.png','registered','{"catalog_source":"custom"}')
+        """
+    )
+    con.commit()
+
+    asset_catalog.migrate(con)
+
+    assert con.execute(
+        "SELECT registered_at FROM asset_install WHERE aa_key='legacy'"
+    ).fetchone()["registered_at"] == ""
+
+
+def test_status_transition_to_registered_sets_server_time(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    source = tmp_path / "source.wav"
+    source.write_bytes(b"sound")
+    candidate = asset_catalog.AssetCandidate(
+        "sound", source, "door", "door", "door-digest"
+    )
+    scope = str(tmp_path / "project")
+    asset_catalog.upsert_candidate(
+        con, candidate, scope=scope, status="validated", install_path=str(source)
+    )
+
+    asset_catalog.set_asset_status(
+        con, kind="sound", aa_key="door", scope=scope, status="registered"
+    )
+
+    assert con.execute(
+        "SELECT registered_at FROM asset_install WHERE aa_key='door'"
+    ).fetchone()["registered_at"].endswith("Z")
 
 
 @contextlib.contextmanager
@@ -211,6 +359,7 @@ def test_library_groups_custom_copies_by_content_without_exposing_paths(tmp_path
     assert result["backgrounds"][0]["copy_count"] == 2
     assert result["backgrounds"][0]["details"] == {
         "resolution": "1920×1080", "labels": {"place": "天台"},
+        "label_status": "not_labeled", "label_error": "", "labels_updated_at": "",
     }
     encoded = json.dumps(result, ensure_ascii=False)
     assert str(tmp_path) not in encoded

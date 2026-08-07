@@ -38,3 +38,110 @@ def test_main_with_mock_provider_writes_a_portrait_annotation(tmp_path, monkeypa
     annotate.main(provider_instance=llm.MockProvider({}))
 
     assert output.read_text(encoding="utf-8") == "Kai(00): hello\n"
+
+
+def test_agent_mode_accepts_mock_provider_source_identity_response(tmp_path):
+    script = tmp_path / "scene.txt"
+    script.write_text("Kai: hello\nKai: goodbye\n", encoding="utf-8")
+    cast = tmp_path / "cast.json"
+    cast.write_text(json.dumps({
+        "default_bg": "BG_Black", "default_bgm": 0, "scene_bg": {},
+        "cast": {"Kai": {"id": "kai", "portrait": True}}, "alias": {},
+    }), encoding="utf-8")
+    index = tmp_path / "index.json"
+    index.write_text(json.dumps({
+        "bg": {"BG_Black": 1}, "sounds": [],
+        "characters": [{"identifier": "kai", "faces": [{"id": "00", "raw": "00", "label": "", "cn": ""}]}],
+        "enums": {"emoticon": {}, "action": {}},
+    }), encoding="utf-8")
+    output = tmp_path / "annotated.txt"
+    result = annotate.annotate_script({
+        "script": str(script), "out": str(output), "cast": str(cast),
+        "index": str(index), "agent_enabled": True,
+    }, provider_instance=llm.MockProvider({}))
+    assert result["agent"]["enabled"] is True
+    assert output.read_text(encoding="utf-8") == "Kai: hello\nKai: goodbye\n"
+
+
+def test_confirmed_usage_chain_is_sent_as_annotation_context(tmp_path):
+    script = tmp_path / "scene.txt"
+    script.write_text("Kai: hello\n", encoding="utf-8")
+    cast = tmp_path / "cast.json"
+    cast.write_text(json.dumps({
+        "default_bg": "BG_Black", "default_bgm": 0, "scene_bg": {},
+        "cast": {"Kai": {"id": "kai", "portrait": True}}, "alias": {},
+    }), encoding="utf-8")
+    index = tmp_path / "index.json"
+    index.write_text(json.dumps({
+        "bg": {"BG_Black": 1, "BG_RoofNight": 2}, "sounds": [],
+        "characters": [{"identifier": "kai", "faces": [{"id": "00", "raw": "00", "label": "", "cn": ""}]}],
+        "enums": {"emoticon": {}, "action": {}},
+    }), encoding="utf-8")
+    captured = {}
+
+    class Provider:
+        name = "capture"
+        model = "capture"
+
+        def complete_json(self, _static, volatile, _user, _schema):
+            captured["volatile"] = volatile
+            return {"lines": []}
+
+        def report(self):
+            return "capture"
+
+    plan = [{
+        "segment": "转场", "location": "夜间天台", "start": "第1行", "end": "第1行",
+        "evidence": "夜色中的天台。", "needs": [{
+            "kind": "background", "name": "BG_RoofNight", "status": "builtin",
+            "location": "第1行", "reason": "已确认", "confidence": 0.98,
+        }],
+    }]
+
+    annotate.annotate_script({
+        "script": str(script), "out": str(tmp_path / "annotated.txt"),
+        "cast": str(cast), "index": str(index), "usage_chain": plan,
+    }, provider_instance=Provider())
+
+    assert "已确认的场景演出规划" in captured["volatile"]
+    assert "BG_RoofNight" in captured["volatile"]
+
+
+def test_annotation_writer_does_not_repeat_same_background():
+    items = [
+        {
+            "kind": "line",
+            "raw": "旁白: 一",
+            "who": "旁白",
+            "text": "一",
+            "bg": "BG_ShoppingDistrict",
+            "trans": "淡入淡出",
+            "place": "商店街",
+        },
+        {
+            "kind": "line",
+            "raw": "旁白: 二",
+            "who": "旁白",
+            "text": "二",
+            "bg": "BG_ShoppingDistrict",
+            "trans": "淡入淡出",
+            "place": "可丽饼摊前",
+        },
+        {
+            "kind": "line",
+            "raw": "旁白: 三",
+            "who": "旁白",
+            "text": "三",
+            "bg": "BG_GameCenter",
+            "trans": "淡入淡出",
+            "place": "游戏中心",
+        },
+    ]
+
+    result = annotate.render_annotated_items(items)
+
+    assert result.count("@bg BG_ShoppingDistrict") == 1
+    assert result.count("@trans 淡入淡出") == 1
+    assert "@bg BG_ShoppingDistrict\n@trans 淡入淡出" not in result
+    assert "@place 可丽饼摊前\n旁白: 二" in result
+    assert "@bg BG_GameCenter\n@trans 淡入淡出" in result

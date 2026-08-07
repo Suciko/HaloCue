@@ -10,7 +10,11 @@ from aa_registry import (
     write_manifest_atomic,
 )
 from asset_validation import validate_background, validate_sound
-from script2aap import finalize_project_manifest, merge_project_registered_assets
+from script2aap import (
+    finalize_project_manifest,
+    merge_project_registered_assets,
+    restore_registered_cast_assets,
+)
 
 
 def make_wav(path: Path):
@@ -94,6 +98,44 @@ def test_generator_preserves_registered_assets_and_delegates_character(tmp_path)
     assert merged["sounds"] == ["齿轮声"]
 
 
+def test_generator_upgrades_empty_character_placeholder_to_registered_spine(tmp_path):
+    project = tmp_path / "projects" / "legacy-output"
+    write_manifest_atomic(project, {
+        "CharacterOverrides": [{
+            "Identifier": "custom-character",
+            "Name": "测试角色",
+            "Nickname": "",
+            "CharacterReference": None,
+            "OriginalIdentifier": None,
+            "SpinePortraitPath": None,
+            "SmallPortraitPath": None,
+        }],
+    })
+    spine = tmp_path / "spine"
+    make_spine(spine, "Date_Outfit")
+    cast = {"测试角色": {
+        "id": "custom-character",
+        "name": "测试角色",
+        "club": "",
+        "portrait": True,
+        "custom": {"src": str(spine), "asset": "Date_Outfit"},
+    }}
+
+    finalize_project_manifest(
+        cast,
+        {"custom-character"},
+        story_root=tmp_path,
+        project_dir=project,
+        voice_overrides=[],
+    )
+
+    row = load_manifest(project)["CharacterOverrides"][0]
+    assert row["SpinePortraitPath"] == r"characters\custom-character\Date_Outfit"
+    assert row["SmallPortraitPath"] == (
+        r"characters\custom-character\Date_Outfit-avatar.png"
+    )
+
+
 def test_generator_does_not_write_empty_override_for_official_portrait(tmp_path):
     project = tmp_path / "projects" / "official"
     cast = {
@@ -116,6 +158,11 @@ def test_generator_does_not_write_empty_override_for_official_portrait(tmp_path)
 
 def test_generator_refreshes_screenplay_names_in_existing_overrides(tmp_path):
     project = tmp_path / "projects" / "display-names"
+    spine_dir = project / "characters" / "626652156"
+    spine_dir.mkdir(parents=True)
+    for suffix in (".skel", ".atlas", ".png"):
+        (spine_dir / f"Kei_Date_Outfit{suffix}").write_bytes(suffix.encode("ascii"))
+    (spine_dir / "Kei_Date_Outfit-avatar.png").write_bytes(b"avatar")
     write_manifest_atomic(project, {
         "CharacterOverrides": [
             {
@@ -144,6 +191,7 @@ def test_generator_refreshes_screenplay_names_in_existing_overrides(tmp_path):
             "name": "凯伊",
             "portrait": True,
             "spine_signature": "registered-date-outfit",
+            "outfit_key": "Kei_Date_Outfit",
         },
         "老师": {"id": "45145456", "name": "老师", "portrait": False},
         "店员": {"id": "shop-clerk", "name": "店员", "portrait": False},
@@ -162,5 +210,50 @@ def test_generator_refreshes_screenplay_names_in_existing_overrides(tmp_path):
         for entry in load_manifest(project)["CharacterOverrides"]
     }
     assert overrides["626652156"]["Name"] == "凯伊"
+    assert overrides["626652156"]["SpinePortraitPath"] == (
+        r"characters\626652156\Kei_Date_Outfit"
+    )
+    assert overrides["626652156"]["SmallPortraitPath"] == (
+        r"characters\626652156\Kei_Date_Outfit-avatar.png"
+    )
     assert overrides["45145456"]["Name"] == "老师"
     assert overrides["shop-clerk"]["Name"] == "店员"
+
+
+def test_generator_restores_legacy_draft_custom_source_from_registered_spine(tmp_path):
+    aa_data = tmp_path / "data"
+    registered = aa_data / "projects" / "registered-story"
+    character_dir = registered / "characters" / "custom-character"
+    character_dir.mkdir(parents=True)
+    stem = "Date_Outfit"
+    skel = character_dir / f"{stem}.skel"
+    skel.write_bytes(b"registered-spine")
+    for suffix in (".atlas", ".png"):
+        (character_dir / f"{stem}{suffix}").write_bytes(suffix.encode("ascii"))
+    (character_dir / f"{stem}-avatar.png").write_bytes(b"avatar")
+    write_manifest_atomic(registered, {
+        "CharacterOverrides": [{
+            "Identifier": "custom-character",
+            "Name": "测试角色",
+            "Nickname": "",
+            "CharacterReference": None,
+            "OriginalIdentifier": None,
+            "SpinePortraitPath": rf"characters\custom-character\{stem}",
+            "SmallPortraitPath": rf"characters\custom-character\{stem}-avatar.png",
+        }],
+    })
+    import hashlib
+    cast = {"测试角色": {
+        "id": "custom-character",
+        "name": "测试角色",
+        "portrait": True,
+        "spine_signature": hashlib.sha256(skel.read_bytes()).hexdigest(),
+        "outfit_key": stem,
+    }}
+
+    restore_registered_cast_assets(cast, aa_data)
+
+    assert cast["测试角色"]["custom"] == {
+        "src": str(character_dir),
+        "asset": stem,
+    }

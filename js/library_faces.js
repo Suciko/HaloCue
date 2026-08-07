@@ -84,7 +84,7 @@
     this.root.classList.add('open');
     if (this.backdrop) this.backdrop.classList.add('open');
     this.root.setAttribute('aria-hidden', 'false');
-    this.character.textContent = item.name + ' · Identifier ' + item.aa_key;
+    this.character.textContent = item.name + ' · 角色标识 ' + item.aa_key;
     this.phase.textContent = '正在读取骨骼';
     this.progress.textContent = '—';
     this.result.textContent = '尚未生成';

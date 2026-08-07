@@ -76,6 +76,31 @@ class ScriptConversionError(ValueError):
     """A script token cannot be represented by a confirmed AA enum value."""
 
 
+class AppearanceState:
+    """Track first appearance and long off-screen re-entry without timing pauses."""
+
+    def __init__(self, reappear_after=8):
+        self.reappear_after = int(reappear_after)
+        self.seen = set()
+        self.offscreen = {}
+
+    def reset_scene(self):
+        self.seen.clear()
+        self.offscreen.clear()
+
+    def observe(self, visible):
+        visible = set(visible or ())
+        fades = set()
+        for ident in visible:
+            if ident not in self.seen or self.offscreen.get(ident, 0) >= self.reappear_after:
+                fades.add(ident)
+            self.seen.add(ident)
+            self.offscreen[ident] = 0
+        for ident in self.seen - visible:
+            self.offscreen[ident] = self.offscreen.get(ident, 0) + 1
+        return fades
+
+
 def _resolve_numeric_enum(token, allowed, kind, line):
     value = int(token)
     if value not in allowed:
@@ -243,6 +268,50 @@ def merge_project_registered_assets(index, project_dir):
     return merged
 
 
+def restore_registered_cast_assets(cast, aa_data):
+    """Restore server-owned custom sources for legacy draft cast bindings."""
+    projects = Path(aa_data) / "projects"
+    if not projects.is_dir():
+        return cast
+    for entry in cast.values():
+        if entry.get("custom") or not entry.get("spine_signature"):
+            continue
+        identifier = str(entry.get("id") or "")
+        outfit_key = str(entry.get("outfit_key") or "")
+        if not identifier or not outfit_key:
+            continue
+        matches = []
+        for manifest_path in sorted(projects.glob("*/manifest.json")):
+            try:
+                manifest = load_manifest(manifest_path.parent)
+            except AssetRegistrationError:
+                continue
+            for row in manifest["CharacterOverrides"]:
+                if str(row.get("Identifier") or "") != identifier:
+                    continue
+                spine = PureWindowsPath(str(row.get("SpinePortraitPath") or ""))
+                if (
+                    spine.is_absolute()
+                    or ".." in spine.parts
+                    or len(spine.parts) != 3
+                    or spine.parts[0].casefold() != "characters"
+                    or spine.parts[1] != identifier
+                    or spine.name != outfit_key
+                ):
+                    continue
+                character_dir = manifest_path.parent.joinpath(*spine.parts[:-1])
+                base = character_dir / outfit_key
+                required = [Path(str(base) + suffix) for suffix in (".skel", ".atlas", ".png")]
+                if not all(path.is_file() for path in required):
+                    continue
+                if _file_sha256(required[0]) != str(entry["spine_signature"]):
+                    continue
+                matches.append(character_dir)
+        if matches:
+            entry["custom"] = {"src": str(matches[0]), "asset": outfit_key}
+    return cast
+
+
 def resolve_emo(tok, emo_sym, emo_cn, no):
     if not tok:
         return -1
@@ -388,8 +457,10 @@ def build(events, cfg, cast, idx, project):
     cam_opts = cfg.get("camera") or {}
     cam_on = cam_opts.get("enabled", True)
 
+    appearance = AppearanceState()
     for sc in scenes:
         scripts = []
+        appearance.reset_scene()
         if sc["title"] in scene_bg:
             bg = scene_bg[sc["title"]]
         # 先给整场算一份镜头计划：每一行画面上该显示谁。
@@ -429,6 +500,8 @@ def build(events, cfg, cast, idx, project):
             # ---------------------------------------------------- 指令
             if e["k"] == "dir":
                 cmd, arg, no = e["cmd"], e["arg"], e["no"]
+                if cmd in ("bg", "place"):
+                    appearance.reset_scene()
                 if cmd == "bg":
                     selected_bg = parse_bg_argument(arg)
                     if selected_bg:
@@ -438,6 +511,8 @@ def build(events, cfg, cast, idx, project):
                                  f"名字写错的话 AA 里会显示不出来")
                 elif cmd == "trans":
                     trans, err = tables.resolve_transition(arg)
+                    if not out and not scripts:
+                        trans = 0
                     if err:
                         warn(no, err)
                 elif cmd == "bgfx":
@@ -597,11 +672,9 @@ def build(events, cfg, cast, idx, project):
             else:
                 speaker_ident = c["id"]
                 if speaker_ident not in st.pos and speaker_ident not in entering:
-                    # 本场第一个有立绘的说话者直接就位（前面即使有旁白也不淡入）；
-                    # 之后的首次入镜才用登场动画，重入镜仍是剪辑。
-                    entering[speaker_ident] = (
-                        0 if not ever else (3 if speaker_ident not in ever else 0)
-                    )
+                    # 首次出现、换场重现和长时间离镜重现都在首句同节点渐变，
+                    # 不额外生成空节点或显式等待。
+                    entering[speaker_ident] = 0
                     if speaker_ident not in seen_order:
                         seen_order.append(speaker_ident)
                 ever.add(speaker_ident)
@@ -626,6 +699,7 @@ def build(events, cfg, cast, idx, project):
                         ever.add(i)
                 order = [i for i in seen_order
                          if (i in want or i in leaving) and (i in st.pos or i in entering)]
+            fades = appearance.observe(order)
             if len(order) > 5:
                 drop = order[5:]
                 warn(no, f"台上要放 {len(order)} 个立绘，超过 5 个位置，"
@@ -651,8 +725,10 @@ def build(events, cfg, cast, idx, project):
                 ch["name"] = i
                 ch["startingPos"], ch["endingPos"] = src, dst
                 ch["faceId"] = face_state.get(i, "00")
-                if i in entering:
+                if i in entering and entering[i]:
                     ch["appear"] = entering[i]
+                elif i in fades:
+                    ch["appear"] = 3
                 elif i in leaving:
                     ch["appear"] = leaving[i]
                 if i in pend.fx:
@@ -927,6 +1003,25 @@ def finalize_project_manifest(
             "SpinePortraitPath": None,
             "SmallPortraitPath": None,
         }
+        # A draft may carry only the persisted Spine signature/outfit binding.
+        # Recover the server-owned registration path from the project files so
+        # the generated AA manifest remains executable after a rebuild.
+        outfit_key = str(c.get("outfit_key") or "").strip()
+        for directory in directories:
+            candidate_stems = [outfit_key] if outfit_key else []
+            character_dir = Path(directory) / "characters" / identifier
+            if character_dir.is_dir() and not candidate_stems:
+                candidate_stems = sorted(path.stem for path in character_dir.glob("*.skel"))
+            for stem in candidate_stems:
+                base = character_dir / stem
+                if all(Path(str(base) + suffix).is_file() for suffix in (".skel", ".atlas", ".png")):
+                    row["SpinePortraitPath"] = str(PureWindowsPath("characters", identifier, stem))
+                    avatar = character_dir / f"{stem}-avatar.png"
+                    if avatar.is_file():
+                        row["SmallPortraitPath"] = str(PureWindowsPath("characters", identifier, f"{stem}-avatar.png"))
+                    break
+            if row["SpinePortraitPath"]:
+                break
         for manifest, known in zip(manifests, by_identifier):
             existing = known.get(identifier)
             if existing is None:
@@ -936,6 +1031,9 @@ def finalize_project_manifest(
             existing["Name"] = row["Name"]
             if row["Nickname"]:
                 existing["Nickname"] = row["Nickname"]
+            if not existing.get("SpinePortraitPath") and row["SpinePortraitPath"]:
+                existing["SpinePortraitPath"] = row["SpinePortraitPath"]
+                existing["SmallPortraitPath"] = row["SmallPortraitPath"]
 
     merged_voices = merge_voice_overrides(manifests, voice_overrides)
     for manifest in manifests:
@@ -1100,6 +1198,7 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
     aa_data = aa_data or P["data"]
 
     cfg, cast, id2name = load_cast(cast_path)
+    restore_registered_cast_assets(cast, aa_data)
     build_index = json.load(open(index_path, encoding="utf-8"))
     project = validate_windows_path_component(
         out_name or os.path.splitext(os.path.basename(script_path))[0],

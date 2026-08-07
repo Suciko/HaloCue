@@ -133,6 +133,35 @@ def test_openai_model_discovery_uses_builtin_http(monkeypatch):
     assert requests[0][0].headers["Authorization"] == "Bearer secret"
 
 
+def test_openai_model_discovery_preserves_safe_output_metadata(monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "urlopen",
+        lambda request, timeout: FakeHttpResponse({"data": [
+            {
+                "id": "deepseek-v4-flash",
+                "context_length": 1_000_000,
+                "max_completion_tokens": 384_000,
+                "pricing": {"prompt": "private-shape-not-forwarded"},
+            },
+            {"id": "unknown", "context_length": 128_000},
+        ]}),
+        raising=False,
+    )
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "chosen"})
+
+    assert provider.list_model_records() == [
+        {
+            "id": "deepseek-v4-flash",
+            "context_length": 1_000_000,
+            "max_output_tokens": 384_000,
+            "max_output_field": "max_completion_tokens",
+        },
+        {"id": "unknown", "context_length": 128_000, "max_output_tokens": None},
+    ]
+    assert provider.list_models() == ["deepseek-v4-flash", "unknown"]
+
+
 def test_make_provider_from_settings_uses_selected_provider(monkeypatch):
     captured = {}
 

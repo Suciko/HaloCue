@@ -17,6 +17,27 @@ def test_prompt_coordinates_direction_dimensions_and_explains_boundaries():
         assert phrase in rules
 
 
+def test_prompt_allows_semantic_comedy_reaction_chains_without_blanket_caps():
+    rules = build_rules()
+
+    assert "一段 10 行最多 2-3 个" not in rules
+    assert "任意两句相邻对白绝不连续使用气泡" not in rules
+    assert "喜剧连击" in rules
+    assert "连续使用气泡" in rules
+    assert "持续而外显的兴奋或愤怒爆发" in rules
+    assert "结巴、掩饰、反讽" in rules
+    assert "！？" in rules
+
+
+def test_prompt_reserves_wait_for_schema_backed_dialogue_free_beats():
+    rules = build_rules()
+
+    assert "Schema 包含 beats" in rules
+    assert "独立无台词反应" in rules
+    assert "普通对白" in rules
+    assert "wait_ms" in rules
+
+
 def test_batch_context_includes_recent_emoticon_and_action_choices():
     items = [
         {
@@ -43,3 +64,11 @@ def test_annotation_schema_uses_the_real_direction_contract():
     assert "原地身体反应" in fields["act"]["description"]
     assert "真实位置变化" in fields["move"]["description"]
     assert "通讯 / 黑屏剪影 / 特写" in fields["fx"]["description"]
+
+
+def test_prompt_limits_long_term_memory_to_evidence_backed_events():
+    rules = build_rules()
+    assert "memory_events" in rules
+    assert "原样摘录" in rules
+    assert "不能把猜测升级为事实" in rules
+    assert "普通表情变化" in rules

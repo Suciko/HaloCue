@@ -10,10 +10,12 @@ HTML = (HERE / "ui.html").read_text(encoding="utf-8")
 def test_workbench_keeps_review_and_settings_contracts_after_runtime_extraction():
     for element_id in (
         "view-create", "modelSettings", "settingsDrawer",
-        "helpDrawer", "welcomePanel", "s1", "s2", "s3", "s4", "go",
+        "helpDrawer", "welcomePanel", "s1", "s4", "go",
         "rvDraftSelect", "rvCards", "backgroundRequestsPanel",
     ):
         assert f'id="{element_id}"' in HTML
+    assert 'id="s2"' not in HTML
+    assert 'id="s3"' not in HTML
 
 
 def test_asset_entry_is_story_scoped_and_not_a_standalone_workspace():

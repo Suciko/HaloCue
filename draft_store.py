@@ -10,12 +10,13 @@ import hashlib
 import json
 import os
 import threading
+from collections import defaultdict, deque
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from aa_project_assets import validate_windows_path_component
-from document import compile_document, parse_document_lossless
+from document import compile_document, normalize_draft_nodes, parse_document_lossless
 from draft_identity import (
     CardIdentity,
     assign_identity,
@@ -27,6 +28,10 @@ from story_workspace import normalize_bgm_policy
 HERE = Path(__file__).resolve().parent
 _DRAFT_LOCKS_GUARD = threading.Lock()
 _DRAFT_LOCKS: Dict[str, threading.RLock] = {}
+
+
+def _parse_draft_nodes(text: str) -> List[Any]:
+    return normalize_draft_nodes(parse_document_lossless(text))
 
 
 class RevisionConflictError(ValueError):
@@ -74,6 +79,47 @@ class DraftStore:
             raise InvalidDraftTokenError("draft token escapes drafts root") from exc
         return draft_dir
 
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        """List drafts with a read-only generation number for each source lineage."""
+        rows = []
+        if self.base_dir.is_dir():
+            for draft_dir in self.base_dir.iterdir():
+                if not draft_dir.is_dir():
+                    continue
+                session_file = draft_dir / "session.json"
+                source_file = draft_dir / "source.txt"
+                if not session_file.is_file() or not source_file.is_file():
+                    continue
+                try:
+                    session = json.loads(session_file.read_text(encoding="utf-8"))
+                    source_hash = calc_sha256(source_file.read_text(encoding="utf-8"))
+                except (OSError, ValueError, TypeError):
+                    continue
+                if isinstance(session, dict):
+                    rows.append((session, source_hash))
+
+        rows.sort(key=lambda row: (
+            str(row[0].get("created_at") or ""),
+            str(row[0].get("draft_token") or ""),
+        ))
+        lineage_versions: Dict[tuple[str, str], int] = {}
+        sessions = []
+        for session, source_hash in rows:
+            project = str(session.get("project") or "").strip().casefold()
+            lineage = (project, source_hash)
+            generation_version = lineage_versions.get(lineage, 0) + 1
+            lineage_versions[lineage] = generation_version
+            item = dict(session)
+            item["generation_version"] = generation_version
+            sessions.append(item)
+        return sessions
+
+    def generation_version(self, token: str) -> int:
+        for session in self.list_sessions():
+            if session.get("draft_token") == token:
+                return int(session["generation_version"])
+        return 1
+
     @contextmanager
     def draft_lock(self, token: str):
         draft_dir = self.get_draft_path(token)
@@ -95,7 +141,7 @@ class DraftStore:
         bgm_policy: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """新建草稿目录并保存各真相源文件"""
-        cast = cast or {}
+        cast = cast if isinstance(cast, dict) else {}
         frozen_bgm_policy = normalize_bgm_policy(bgm_policy)
         draft_dir = self.get_draft_path(token)
         draft_dir.mkdir(parents=True, exist_ok=True)
@@ -114,13 +160,15 @@ class DraftStore:
             with open(draft_dir / "source_map.json", "w", encoding="utf-8") as f:
                 json.dump(source_map, f, ensure_ascii=False, indent=2)
 
-            nodes = parse_document_lossless(text)
+            nodes = _parse_draft_nodes(text)
             identities = assign_identity(nodes, source_map=source_map, origin_override="source")
             identities_data = [card.to_dict() for card in identities]
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)
             (draft_dir / "identity.json").write_text(identity_json_str, encoding="utf-8")
 
-            _, diagnostics = compile_document(nodes, cast, {})
+            _, diagnostics = compile_document(
+                nodes, self._diagnostic_cast(token, cast), {}
+            )
             with open(draft_dir / "diagnostics.json", "w", encoding="utf-8") as f:
                 json.dump(diagnostics, f, ensure_ascii=False, indent=2)
 
@@ -172,6 +220,23 @@ class DraftStore:
                 return json.loads(f.read_text(encoding="utf-8"))
             return {}
 
+    def _diagnostic_cast(
+        self, token: str, cast: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Return the flat speaker map expected by the document compiler."""
+        value = cast
+        if value is None:
+            cast_file = self.get_draft_path(token) / "cast.json"
+            value = (
+                json.loads(cast_file.read_text(encoding="utf-8"))
+                if cast_file.is_file()
+                else {}
+            )
+        if not isinstance(value, dict):
+            return {}
+        wrapped = value.get("cast")
+        return wrapped if isinstance(wrapped, dict) else value
+
     def update_cast(
         self,
         token: str,
@@ -202,10 +267,12 @@ class DraftStore:
 
             edited_text = (draft_dir / "edited.txt").read_text(encoding="utf-8")
             identities_data = json.loads((draft_dir / "identity.json").read_text(encoding="utf-8"))
-            nodes = parse_document_lossless(edited_text)
+            nodes = _parse_draft_nodes(edited_text)
 
             # 重算诊断（cast 变化会影响未绑定演员等诊断）
-            _, diagnostics = compile_document(nodes, cast, {})
+            _, diagnostics = compile_document(
+                nodes, self._diagnostic_cast(token, cast), {}
+            )
             with open(draft_dir / "diagnostics.json", "w", encoding="utf-8") as f:
                 json.dump(diagnostics, f, ensure_ascii=False, indent=2)
 
@@ -256,7 +323,7 @@ class DraftStore:
             if not session_file.is_file():
                 raise FileNotFoundError(f"草稿会话文件不存在: {session_file}")
 
-            nodes = parse_document_lossless(
+            nodes = _parse_draft_nodes(
                 (draft_dir / "edited.txt").read_text(encoding="utf-8")
             )
             cards = json.loads((draft_dir / "identity.json").read_text(encoding="utf-8"))
@@ -336,7 +403,6 @@ class DraftStore:
 
     def _load_draft_locked(self, token: str, cast: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """加载草稿并校验 edited_sha256, identity_sha256 与卡片指纹。校验失败自动重建身份。"""
-        cast = cast or {}
         draft_dir = self.get_draft_path(token)
         session_file = draft_dir / "session.json"
         if not session_file.is_file():
@@ -355,7 +421,7 @@ class DraftStore:
         if curr_identity_sha != session.get("identity_sha256"):
             is_valid = False
 
-        nodes = parse_document_lossless(edited_text)
+        nodes = _parse_draft_nodes(edited_text)
         identities_data = json.loads(identity_str)
 
         if is_valid:
@@ -371,10 +437,9 @@ class DraftStore:
         if not is_valid:
             return self.rebuild_identity(token, cast=cast)
 
-        diagnostics = []
-        diag_file = draft_dir / "diagnostics.json"
-        if diag_file.is_file():
-            diagnostics = json.loads(diag_file.read_text(encoding="utf-8"))
+        _, diagnostics = compile_document(
+            nodes, self._diagnostic_cast(token, cast), {}
+        )
 
         return {
             "session": session,
@@ -385,26 +450,53 @@ class DraftStore:
         }
 
     def rebuild_identity(self, token: str, cast: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """身份重建流程：重新建卡分配全新的 card_id, 清除 review_state，更新 session sha256。"""
-        cast = cast or {}
+        """重建卡片身份；仅为哈希可信且文本未变的卡片保留审查状态。"""
         draft_dir = self.get_draft_path(token)
         with self.draft_lock(token):
             edited_text = (draft_dir / "edited.txt").read_text(encoding="utf-8")
             session = json.loads((draft_dir / "session.json").read_text(encoding="utf-8"))
+            identity_file = draft_dir / "identity.json"
+            old_identity_text = (
+                identity_file.read_text(encoding="utf-8")
+                if identity_file.is_file()
+                else ""
+            )
+            trusted_old_identities = (
+                calc_sha256(edited_text) == session.get("edited_sha256")
+                and calc_sha256(old_identity_text) == session.get("identity_sha256")
+            )
 
             source_map = {}
             map_file = draft_dir / "source_map.json"
             if map_file.is_file():
                 source_map = json.loads(map_file.read_text(encoding="utf-8"))
 
-            nodes = parse_document_lossless(edited_text)
+            nodes = _parse_draft_nodes(edited_text)
             new_identities = assign_identity(nodes, source_map=source_map, origin_override="manual")
+            if trusted_old_identities:
+                old_by_fingerprint = defaultdict(deque)
+                for old in json.loads(old_identity_text):
+                    fingerprint = old.get("text_fingerprint")
+                    if fingerprint:
+                        old_by_fingerprint[fingerprint].append(old)
+                for node, identity in zip(nodes, new_identities):
+                    matches = old_by_fingerprint.get(compute_text_fingerprint(node.raw))
+                    if not matches:
+                        continue
+                    old = CardIdentity.from_dict(matches.popleft())
+                    identity.card_id = old.card_id
+                    identity.source_id = old.source_id
+                    identity.origin = old.origin
+                    identity.parent_id = old.parent_id
+                    identity.review_state = old.review_state
             new_identities_data = [card.to_dict() for card in new_identities]
 
             identity_json_str = json.dumps(new_identities_data, ensure_ascii=False, indent=2)
             (draft_dir / "identity.json").write_text(identity_json_str, encoding="utf-8")
 
-            _, diagnostics = compile_document(nodes, cast, {})
+            _, diagnostics = compile_document(
+                nodes, self._diagnostic_cast(token, cast), {}
+            )
             with open(draft_dir / "diagnostics.json", "w", encoding="utf-8") as f:
                 json.dump(diagnostics, f, ensure_ascii=False, indent=2)
 
@@ -433,7 +525,6 @@ class DraftStore:
         cast: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """带 CAS 控制的草稿内容更新。"""
-        cast = cast or {}
         draft_dir = self.get_draft_path(token)
         with self.draft_lock(token):
             session_file = draft_dir / "session.json"
@@ -454,13 +545,15 @@ class DraftStore:
             if map_file.is_file():
                 source_map = json.loads(map_file.read_text(encoding="utf-8"))
 
-            nodes = parse_document_lossless(new_text)
+            nodes = _parse_draft_nodes(new_text)
             identities = assign_identity(nodes, source_map=source_map, origin_override="manual")
             identities_data = [card.to_dict() for card in identities]
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)
             (draft_dir / "identity.json").write_text(identity_json_str, encoding="utf-8")
 
-            _, diagnostics = compile_document(nodes, cast, {})
+            _, diagnostics = compile_document(
+                nodes, self._diagnostic_cast(token, cast), {}
+            )
             with open(draft_dir / "diagnostics.json", "w", encoding="utf-8") as f:
                 json.dump(diagnostics, f, ensure_ascii=False, indent=2)
 
@@ -547,7 +640,6 @@ class DraftStore:
         cast: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """单卡内容修改，双版本 +1。若涉及指令更新则触发后续已审卡片重置为 pending。"""
-        cast = cast or {}
         draft_dir = self.get_draft_path(token)
         with self.draft_lock(token):
             session_file = draft_dir / "session.json"
@@ -562,7 +654,7 @@ class DraftStore:
             identity_file = draft_dir / "identity.json"
             identities_data = json.loads(identity_file.read_text(encoding="utf-8"))
 
-            nodes = parse_document_lossless(edited_text)
+            nodes = _parse_draft_nodes(edited_text)
             if len(nodes) != len(identities_data):
                 raise ValueError("Nodes and identities mismatched")
 
@@ -598,7 +690,9 @@ class DraftStore:
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)
             identity_file.write_text(identity_json_str, encoding="utf-8")
 
-            _, diagnostics = compile_document(nodes, cast, {})
+            _, diagnostics = compile_document(
+                nodes, self._diagnostic_cast(token, cast), {}
+            )
             with open(draft_dir / "diagnostics.json", "w", encoding="utf-8") as f:
                 json.dump(diagnostics, f, ensure_ascii=False, indent=2)
 
@@ -629,7 +723,6 @@ class DraftStore:
         cast: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """插入新卡片，双版本 +1。"""
-        cast = cast or {}
         draft_dir = self.get_draft_path(token)
         with self.draft_lock(token):
             session_file = draft_dir / "session.json"
@@ -642,7 +735,7 @@ class DraftStore:
 
             edited_text = (draft_dir / "edited.txt").read_text(encoding="utf-8")
             identities_data = json.loads((draft_dir / "identity.json").read_text(encoding="utf-8"))
-            nodes = parse_document_lossless(edited_text)
+            nodes = _parse_draft_nodes(edited_text)
 
             insert_idx = len(nodes)
             if after_card_id:
@@ -696,7 +789,9 @@ class DraftStore:
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)
             (draft_dir / "identity.json").write_text(identity_json_str, encoding="utf-8")
 
-            _, diagnostics = compile_document(nodes, cast, {})
+            _, diagnostics = compile_document(
+                nodes, self._diagnostic_cast(token, cast), {}
+            )
             with open(draft_dir / "diagnostics.json", "w", encoding="utf-8") as f:
                 json.dump(diagnostics, f, ensure_ascii=False, indent=2)
 
@@ -724,7 +819,6 @@ class DraftStore:
         cast: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """删除卡片，双版本 +1。"""
-        cast = cast or {}
         draft_dir = self.get_draft_path(token)
         with self.draft_lock(token):
             session_file = draft_dir / "session.json"
@@ -737,7 +831,7 @@ class DraftStore:
 
             edited_text = (draft_dir / "edited.txt").read_text(encoding="utf-8")
             identities_data = json.loads((draft_dir / "identity.json").read_text(encoding="utf-8"))
-            nodes = parse_document_lossless(edited_text)
+            nodes = _parse_draft_nodes(edited_text)
 
             target_idx = -1
             for idx, item in enumerate(identities_data):
@@ -761,7 +855,9 @@ class DraftStore:
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)
             (draft_dir / "identity.json").write_text(identity_json_str, encoding="utf-8")
 
-            _, diagnostics = compile_document(nodes, cast, {})
+            _, diagnostics = compile_document(
+                nodes, self._diagnostic_cast(token, cast), {}
+            )
             with open(draft_dir / "diagnostics.json", "w", encoding="utf-8") as f:
                 json.dump(diagnostics, f, ensure_ascii=False, indent=2)
 
@@ -794,7 +890,6 @@ class DraftStore:
         移动改变文本行顺序，因此同时重排 edited.txt 节点与 identity 数组，
         并按新顺序重排 order_key，双版本 +1。
         """
-        cast = cast or {}
         draft_dir = self.get_draft_path(token)
         with self.draft_lock(token):
             session_file = draft_dir / "session.json"
@@ -807,7 +902,7 @@ class DraftStore:
 
             edited_text = (draft_dir / "edited.txt").read_text(encoding="utf-8")
             identities_data = json.loads((draft_dir / "identity.json").read_text(encoding="utf-8"))
-            nodes = parse_document_lossless(edited_text)
+            nodes = _parse_draft_nodes(edited_text)
 
             if len(nodes) != len(identities_data):
                 raise ValueError("Nodes and identities mismatched")
@@ -846,7 +941,9 @@ class DraftStore:
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)
             (draft_dir / "identity.json").write_text(identity_json_str, encoding="utf-8")
 
-            _, diagnostics = compile_document(nodes, cast, {})
+            _, diagnostics = compile_document(
+                nodes, self._diagnostic_cast(token, cast), {}
+            )
             with open(draft_dir / "diagnostics.json", "w", encoding="utf-8") as f:
                 json.dump(diagnostics, f, ensure_ascii=False, indent=2)
 
@@ -889,7 +986,6 @@ class DraftStore:
         cast: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """处理 proposal: approve | reject | accept。带有双版本控制与两类 Proposal 语义。"""
-        cast = cast or {}
         draft_dir = self.get_draft_path(token)
         with self.draft_lock(token):
             session_file = draft_dir / "session.json"
@@ -1044,7 +1140,6 @@ class DraftStore:
         cast: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """将草稿中的 background_request 节点原地同卡转换为 dir bg，保持 card_id 不变，双版本 +1。"""
-        cast = cast or {}
         draft_dir = self.get_draft_path(token)
         with self.draft_lock(token):
             session_file = draft_dir / "session.json"
@@ -1057,7 +1152,7 @@ class DraftStore:
 
             edited_text = (draft_dir / "edited.txt").read_text(encoding="utf-8")
             identities_data = json.loads((draft_dir / "identity.json").read_text(encoding="utf-8"))
-            nodes = parse_document_lossless(edited_text)
+            nodes = _parse_draft_nodes(edited_text)
 
             target_idx = -1
             for idx, item in enumerate(identities_data):
@@ -1077,6 +1172,15 @@ class DraftStore:
             identities_data[target_idx]["review_state"] = "pending"
             identities_data[target_idx]["text_fingerprint"] = compute_text_fingerprint(target_node.raw)
 
+            identity_by_node = {
+                id(node): identity
+                for node, identity in zip(nodes, identities_data)
+            }
+            node_count_before_normalize = len(nodes)
+            nodes = normalize_draft_nodes(nodes)
+            merged_backgrounds = node_count_before_normalize - len(nodes)
+            identities_data = [identity_by_node[id(node)] for node in nodes]
+
             from document import serialize_document
             new_text = serialize_document(nodes)
             (draft_dir / "edited.txt").write_text(new_text, encoding="utf-8")
@@ -1087,7 +1191,9 @@ class DraftStore:
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)
             (draft_dir / "identity.json").write_text(identity_json_str, encoding="utf-8")
 
-            _, diagnostics = compile_document(nodes, cast, {})
+            _, diagnostics = compile_document(
+                nodes, self._diagnostic_cast(token, cast), {}
+            )
             with open(draft_dir / "diagnostics.json", "w", encoding="utf-8") as f:
                 json.dump(diagnostics, f, ensure_ascii=False, indent=2)
 
@@ -1105,4 +1211,5 @@ class DraftStore:
                 "identities": identities_data,
                 "diagnostics": diagnostics,
                 "identity_rebuilt": False,
+                "merged_backgrounds": merged_backgrounds,
             }

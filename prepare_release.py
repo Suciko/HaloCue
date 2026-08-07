@@ -21,7 +21,8 @@ CODE = ["script2aap.py", "stage.py", "camera.py", "annotate.py", "prompt.py",
         "asset_validation.py", "aa_registry.py", "aa_project_assets.py",
         "aa_install_discovery.py", "aa_resource_cache.py", "official_catalog.py",
         "official_preview_index.py", "performance_rules.py",
-        "dialogue_pacing.py", "spine_face_analysis.py",
+        "dialogue_pacing.py", "annotation_chunks.py", "annotation_protocol.py",
+        "annotation_memory.py", "annotation_agent.py", "spine_face_analysis.py",
         "spine_face_renderer.py", "spine_face_labeler.py",
         "spine_semantic_faces.py", "launcher.py", "prepare_release.py"]
 PROGRAM_FILES = ["启动程序.cmd", "检查运行环境.cmd"]

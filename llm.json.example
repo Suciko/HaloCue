@@ -26,5 +26,12 @@
   },
 
   "chunk_lines": 40,
-  "context_lines": 10
+  "context_lines": 10,
+  "agent_enabled": true,
+  "agent_target_lines": 50,
+  "agent_soft_limit": 50,
+  "agent_hard_limit": 60,
+  "agent_context_before": 15,
+  "agent_context_after": 10,
+  "agent_output_note": "max_tokens 是单次模型输出上限；遇到 finish_reason=length 时优先缩小 Agent 分块"
 }

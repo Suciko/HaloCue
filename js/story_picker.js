@@ -2,6 +2,14 @@
   'use strict';
 
   function byId(id) { return document.getElementById(id); }
+  function scoped(root, role, fallbackId) {
+    const found = root && root.querySelector
+      ? root.querySelector('[data-picker-role="' + role + '"]')
+      : null;
+    return found && found.dataset && found.dataset.pickerRole === role
+      ? found
+      : byId(fallbackId);
+  }
   function clear(node) { while (node && node.firstChild) node.removeChild(node.firstChild); }
   function button(label, className) {
     const node = document.createElement('button'); node.type = 'button';
@@ -19,16 +27,23 @@
 
   function StoryFilePicker(root, options) {
     this.root = root; this.options = options || {};
-    this.host = byId('storyPickerHost'); this.status = byId('storyPickerStatus');
-    this.entries = byId('storyPickerEntries'); this.breadcrumbs = byId('storyPickerBreadcrumbs');
-    this.roots = byId('storyPickerRoots'); this.search = byId('storyPickerSearch');
-    this.selectedLabel = byId('storyPickerSelected'); this.openButton = byId('storyPickerOpen');
-    this.backButton = byId('storyPickerBack'); this.forwardButton = byId('storyPickerForward');
-    this.upButton = byId('storyPickerUp');
+    this.host = scoped(root, 'host', 'storyPickerHost'); this.status = scoped(root, 'status', 'storyPickerStatus');
+    this.entries = scoped(root, 'entries', 'storyPickerEntries'); this.breadcrumbs = scoped(root, 'breadcrumbs', 'storyPickerBreadcrumbs');
+    this.roots = scoped(root, 'roots', 'storyPickerRoots'); this.search = scoped(root, 'search', 'storyPickerSearch');
+    this.selectedLabel = scoped(root, 'selected', 'storyPickerSelected'); this.openButton = scoped(root, 'open', 'storyPickerOpen');
+    this.backButton = scoped(root, 'back', 'storyPickerBack'); this.forwardButton = scoped(root, 'forward', 'storyPickerForward');
+    this.upButton = scoped(root, 'up', 'storyPickerUp'); this.title = scoped(root, 'title', 'browseTitle');
     this.selected = null; this.locationToken = ''; this.parentToken = '';
     this.historyBack = []; this.historyForward = []; this.sort = 'name'; this.direction = 'asc';
     this.hostEndpoint = this.options.hostEndpoint || '/api/story-files/host';
     this.selectEndpoint = this.options.selectEndpoint || '/api/story-files/select';
+    this.searchPlaceholder = this.options.searchPlaceholder || '搜索剧情文本';
+    this.allowedSuffixes = Array.isArray(this.options.allowedSuffixes)
+      ? new Set(this.options.allowedSuffixes.map(function (value) {
+        const suffix = String(value || '').trim().toLocaleLowerCase();
+        return suffix && suffix.charAt(0) === '.' ? suffix : '.' + suffix;
+      }).filter(Boolean))
+      : null;
     this.directoryOnly = Boolean(this.options.directoryOnly);
     this.hostOnly = Boolean(this.options.hostOnly);
     this.trigger = null; this._bound = false; this.bind();
@@ -47,8 +62,9 @@
   StoryFilePicker.prototype.open = function (trigger) {
     this.trigger = trigger || document.activeElement; this.selected = null;
     if (this.root) { this.root.hidden = false; this.root.classList.add('on'); this.root.setAttribute('aria-hidden', 'false'); }
-    const title = byId('browseTitle');
+    const title = this.title;
     if (title && this.options.title) title.textContent = this.options.title;
+    if (this.search) this.search.placeholder = this.searchPlaceholder;
     if (this.status) this.status.textContent = ''; if (this.selectedLabel) this.selectedLabel.textContent = '尚未选择文件';
     if (this.openButton) this.openButton.disabled = true;
     return this.openHost();
@@ -79,8 +95,9 @@
   StoryFilePicker.prototype.openHost = async function () {
     this.selected = null;
     if (this.openButton) this.openButton.disabled = true;
-    const title = byId('browseTitle');
+    const title = this.title;
     if (title && this.options.title) title.textContent = this.options.title;
+    if (this.search) this.search.placeholder = this.searchPlaceholder;
     if (this.host) this.host.hidden = false;
     this.historyBack = []; this.historyForward = []; this.locationToken = '';
     return this.load('', false);
@@ -102,7 +119,7 @@
       this.locationToken = result.location_token || token || ''; this.parentToken = result.parent_token || '';
       if (pushHistory) this.historyForward = [];
       this.selected = null; this.render(result);
-      if (this.status) this.status.textContent = (result.entries || []).length ? '' : '这个文件夹中没有可选择的 .txt 或 .md 剧情文本';
+      if (this.status) this.status.textContent = (result.entries || []).length ? '' : (this.options.emptyStatus || '这个文件夹中没有可选择的 .txt 或 .md 剧情文本');
       return result;
     } catch (error) { if (this.status) this.status.textContent = error.message || '无法读取文件夹'; return null; }
   };
@@ -126,7 +143,12 @@
     const self = this; clear(this.entries); clear(this.breadcrumbs); clear(this.roots);
     (result.roots || []).forEach(function (item) { const node = button(item.name, 'story-picker-root'); node.addEventListener('click', function () { self.navigate(item.entry_token); }); self.roots.appendChild(node); });
     (result.breadcrumbs || []).forEach(function (item, index) { const node = button(item.name, 'story-picker-crumb'); node.addEventListener('click', function () { self.navigate(item.entry_token); }); self.breadcrumbs.appendChild(node); if (index < result.breadcrumbs.length - 1) { const sep = document.createElement('span'); sep.textContent = '›'; self.breadcrumbs.appendChild(sep); } });
-    (result.entries || []).forEach(function (item) {
+    (result.entries || []).filter(function (item) {
+      if (!item || item.kind === 'directory' || !self.allowedSuffixes) return Boolean(item);
+      const name = String(item.name || '').toLocaleLowerCase();
+      const index = name.lastIndexOf('.');
+      return index >= 0 && self.allowedSuffixes.has(name.slice(index));
+    }).forEach(function (item) {
       const row = document.createElement('button'); row.type = 'button'; row.className = 'story-picker-entry'; row.dataset.kind = item.kind;
       const icon = document.createElement('span'); icon.className = 'story-picker-entry-icon'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = item.kind === 'directory' ? '▰' : '▤';
       const name = document.createElement('span'); name.className = 'story-picker-entry-name'; name.textContent = item.name;
@@ -156,7 +178,7 @@
   };
 
   StoryFilePicker.prototype.confirm = async function () {
-    if (!this.selected) return null; if (this.status) this.status.textContent = '正在打开剧情文本…';
+    if (!this.selected) return null; if (this.status) this.status.textContent = this.options.openingStatus || '正在打开剧情文本…';
     try {
       const result = await exports.Api.request(this.selectEndpoint, exports.Api.json ? exports.Api.json('POST', {entry_token: this.selected.entry_token}) : {method: 'POST', body: JSON.stringify({entry_token: this.selected.entry_token})});
       this.close();

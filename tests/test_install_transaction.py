@@ -16,6 +16,7 @@ from install_manager import (
     AAInstallTargetExistsError,
     AARunningError,
     _merge_install_manifests,
+    _repair_install_assets,
     compose_install_project_name,
 )
 
@@ -261,6 +262,147 @@ def test_install_manifest_uses_bundle_display_name_with_registered_spine_paths()
     assert character["SmallPortraitPath"] == (
         r"characters\626652156\Kei_Date_Outfit-avatar.png"
     )
+
+
+def test_bundle_spine_index_does_not_hide_missing_manifest_registration(tmp_path):
+    projects_dir = tmp_path / "projects"
+    source = projects_dir / "registered-source"
+    project_dir = tmp_path / "target-project"
+    save_dir = tmp_path / "target-save"
+    bundle_project_dir = tmp_path / "bundle-project"
+    for directory in (source, project_dir, save_dir, bundle_project_dir):
+        directory.mkdir(parents=True)
+
+    identifier = "custom-character"
+    stem = "Date_Outfit"
+    source_character = source / "characters" / identifier
+    source_character.mkdir(parents=True)
+    for suffix in (".skel", ".atlas", ".png"):
+        (source_character / f"{stem}{suffix}").write_bytes(suffix.encode("ascii"))
+    (source_character / f"{stem}-avatar.png").write_bytes(b"avatar")
+    row = {
+        "Identifier": identifier,
+        "Name": "测试角色",
+        "Nickname": "",
+        "CharacterReference": None,
+        "OriginalIdentifier": None,
+        "SpinePortraitPath": rf"characters\{identifier}\{stem}",
+        "SmallPortraitPath": rf"characters\{identifier}\{stem}-avatar.png",
+    }
+    manifest = {
+        "CharacterOverrides": [row],
+        "VoiceOverrides": [], "PopupOverrides": [], "SoundOverrides": [],
+        "BgOverrides": [], "BgmOverrides": [],
+    }
+    (source / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    placeholder = {
+        "Identifier": identifier,
+        "Name": "测试角色",
+        "Nickname": "",
+        "CharacterReference": None,
+        "OriginalIdentifier": None,
+        "SpinePortraitPath": None,
+        "SmallPortraitPath": None,
+    }
+    empty_manifest = {
+        "CharacterOverrides": [placeholder],
+        "VoiceOverrides": [], "PopupOverrides": [], "SoundOverrides": [],
+        "BgOverrides": [], "BgmOverrides": [],
+    }
+    for directory in (project_dir, save_dir):
+        (directory / "manifest.json").write_text(json.dumps(empty_manifest), encoding="utf-8")
+
+    (bundle_project_dir / "aa_resources.json").write_text(
+        json.dumps({"characters": [{"identifier": identifier, "spine":
+            rf"characters\{identifier}\{stem}"}]}), encoding="utf-8"
+    )
+    (tmp_path / "story.aap").write_text(json.dumps({
+        "nodes": {"$values": [{"Scripts": {"$values": [{
+            "characters": {"$values": [{"name": identifier}]}
+        }]}}]}
+    }), encoding="utf-8")
+
+    repaired = _repair_install_assets(
+        projects_dir=projects_dir,
+        project_dir=project_dir,
+        save_dir=save_dir,
+        bundle_project_dir=bundle_project_dir,
+        aap_path=tmp_path / "story.aap",
+        manifest=empty_manifest,
+    )
+
+    assert repaired["CharacterOverrides"] == [row]
+    assert (project_dir / "characters" / identifier / f"{stem}.skel").is_file()
+    assert (save_dir / "characters" / identifier / f"{stem}.atlas").is_file()
+
+
+def test_install_repairs_empty_character_paths_from_matching_physical_variant(tmp_path):
+    projects_dir = tmp_path / "projects"
+    project_dir = projects_dir / "story"
+    save_dir = tmp_path / "saves" / "story"
+    bundle_project_dir = tmp_path / "bundle-project"
+    for directory in (project_dir, save_dir, bundle_project_dir):
+        directory.mkdir(parents=True)
+
+    identifier = "custom-character"
+    stem = "Date_Outfit"
+    for root in (project_dir, save_dir):
+        character_dir = root / "characters" / identifier
+        character_dir.mkdir(parents=True)
+        for suffix in (".skel", ".atlas", ".png"):
+            (character_dir / f"{stem}{suffix}").write_bytes(suffix.encode("ascii"))
+        (character_dir / f"{stem}-avatar.png").write_bytes(b"avatar")
+
+    placeholder = {
+        "Identifier": identifier,
+        "Name": "测试角色",
+        "Nickname": "",
+        "CharacterReference": None,
+        "OriginalIdentifier": None,
+        "SpinePortraitPath": None,
+        "SmallPortraitPath": None,
+    }
+    manifest = {
+        "CharacterOverrides": [placeholder],
+        "VoiceOverrides": [], "PopupOverrides": [], "SoundOverrides": [],
+        "BgOverrides": [], "BgmOverrides": [],
+    }
+    (bundle_project_dir / "aa_resources.json").write_text(
+        json.dumps({
+            "characters": [{
+                "identifier": identifier,
+                "name": "测试角色",
+                "spine": "",
+                "face_capabilities": [{
+                    "spine": rf"characters\{identifier}\{stem}",
+                    "spine_signature": "variant-signature",
+                    "outfit_key": stem,
+                    "faces": [],
+                }],
+            }],
+        }),
+        encoding="utf-8",
+    )
+    (tmp_path / "story.aap").write_text(json.dumps({
+        "nodes": {"$values": [{"Scripts": {"$values": [{
+            "characters": {"$values": [{"name": identifier}]}
+        }]}}]}
+    }), encoding="utf-8")
+
+    repaired = _repair_install_assets(
+        projects_dir=projects_dir,
+        project_dir=project_dir,
+        save_dir=save_dir,
+        bundle_project_dir=bundle_project_dir,
+        aap_path=tmp_path / "story.aap",
+        manifest=manifest,
+    )
+
+    assert repaired["CharacterOverrides"] == [{
+        **placeholder,
+        "SpinePortraitPath": rf"characters\{identifier}\{stem}",
+        "SmallPortraitPath": rf"characters\{identifier}\{stem}-avatar.png",
+    }]
 
 
 def test_install_repairs_referenced_orphan_background_and_external_character(

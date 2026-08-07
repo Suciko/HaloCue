@@ -10,6 +10,8 @@ import threading
 from http.server import ThreadingHTTPServer
 from urllib.request import Request, urlopen
 
+import pytest
+
 import webui
 from webui import H
 from draft_store import DraftStore
@@ -93,6 +95,16 @@ def test_cards_update_success_and_revision_conflict(tmp_path, monkeypatch):
         })
         assert status == 409
         assert res["code"] == "revision_conflict"
+
+
+def test_draft_detail_attaches_diagnostics_to_the_affected_card(tmp_path, monkeypatch):
+    """The UI needs card-scoped diagnostics to implement a truthful pending-work filter."""
+    with draft_server(tmp_path, monkeypatch) as (base, drafts_dir):
+        token = make_draft(drafts_dir, "## 场景1\n未绑定角色: 你好\n")
+        status, draft = req(base, "/api/draft?token=" + token, method="GET")
+        assert status == 200
+        card = next(item for item in draft["cards"] if item["line_no"] == 2)
+        assert any(issue["severity"] == "error" for issue in card["issues"])
 
 
 def test_cards_insert_move_delete(tmp_path, monkeypatch):
@@ -179,6 +191,46 @@ def test_validate_endpoint(tmp_path, monkeypatch):
         assert status == 200
         assert isinstance(res["blocking_errors"], int)
         assert isinstance(res["diagnostics"], list)
+
+
+def test_background_request_resolve_route_replaces_the_card(tmp_path, monkeypatch):
+    text = "## 场景1\n# 待生成自定义背景：雨夜车站\n旁白: 到站了。\n"
+    with draft_server(tmp_path, monkeypatch) as (base, drafts_dir):
+        token = make_draft(drafts_dir, text, token="background-http-1")
+        _, draft = req(base, "/api/draft?token=" + token, method="GET")
+        card = next(item for item in draft["cards"] if item["kind"] == "background_request")
+
+        status, result = req(
+            base,
+            f"/api/drafts/{token}/backgrounds/{card['card_id']}/resolve",
+            {"bg_name": "BG_Black", "expected_draft_version": draft["draft_version"]},
+        )
+
+        assert status == 200
+        assert result == {
+            "ok": True,
+            "draft_version": draft["draft_version"] + 1,
+            "content_revision": draft["content_revision"] + 1,
+        }
+        _, resolved = req(base, "/api/draft?token=" + token, method="GET")
+        assert resolved["cards"][1]["card_id"] == card["card_id"]
+        assert resolved["cards"][1]["current"] == {"cmd": "bg", "arg": "BG_Black"}
+
+
+def test_draft_endpoint_uses_normalized_card_nodes(tmp_path, monkeypatch):
+    text = "旁白: 第一行。\n\n---\n\n旁白: 第二行。\n"
+    with draft_server(tmp_path, monkeypatch) as (base, drafts_dir):
+        token = make_draft(drafts_dir, text)
+
+        status, draft = req(base, "/api/draft?token=" + token, method="GET")
+
+        assert status == 200
+        assert [card["kind"] for card in draft["cards"]] == [
+            "line",
+            "separator",
+            "line",
+        ]
+        assert [card["line_no"] for card in draft["cards"]] == [1, 3, 5]
 
 
 def test_jobs_cancel(tmp_path, monkeypatch):
@@ -313,7 +365,117 @@ def test_annotate_worker_can_create_review_draft_without_calling_model(tmp_path,
     assert captured["text"] == source.read_text(encoding="utf-8")
     assert captured["source_text"] == captured["text"]
     assert captured["story_token"] == "story-format-only"
+
+
+def test_annotate_worker_exposes_agent_checkpoint_reuse(tmp_path, monkeypatch):
+    source = tmp_path / "原稿.txt"
+    source.write_text("旁白: 保留原文\n", encoding="utf-8")
+
+    class FakeStore:
+        def create_draft(self, **_kwargs):
+            pass
+
+        def save_cast(self, _token, _cast):
+            pass
+
+        def add_proposals(self, _token, _proposals):
+            pass
+
+    monkeypatch.setattr(webui, "HERE", str(tmp_path))
+    monkeypatch.setitem(webui.CFG, "aa_data", str(tmp_path / "aa-data"))
+    monkeypatch.setattr(webui, "db", lambda: object())
+    monkeypatch.setattr(webui, "prepare_project_index", lambda *args, **kwargs: None)
+    monkeypatch.setattr(webui, "attach_registered_variants", lambda *args, **kwargs: None)
+    monkeypatch.setattr(webui, "DraftStore", FakeStore)
+    monkeypatch.setattr(webui, "annotation_provider", lambda *_: object())
+    monkeypatch.setattr("annotate.annotate_script", lambda *_args, **_kwargs: {
+        "text": "旁白: 保留原文\n", "agent": {"resumed_chunks": 3}, "proposals": [],
+    })
+
+    result = webui.annotate_draft_worker({
+        "script": str(source), "project": "复用测试", "mapping": {}, "annotate": True,
+    })
+
+    assert result["resumed_chunks"] == 3
     assert result["proposals"] == 0
+
+
+def test_annotate_worker_forwards_model_activity_and_returns_agent_metrics(tmp_path, monkeypatch):
+    source = tmp_path / "原稿.txt"
+    source.write_text("旁白: 保留原文\n", encoding="utf-8")
+    captured = {}
+
+    class FakeStore:
+        def create_draft(self, **kwargs):
+            captured["draft"] = kwargs
+
+        def save_cast(self, _token, _cast):
+            pass
+
+        def add_proposals(self, _token, _proposals):
+            pass
+
+    class FakeJob:
+        def __init__(self):
+            self.activities = []
+
+        def update_activity(self, activity):
+            self.activities.append(dict(activity))
+
+        def is_cancel_requested(self):
+            return False
+
+    job = FakeJob()
+    monkeypatch.setattr(webui, "HERE", str(tmp_path))
+    monkeypatch.setitem(webui.CFG, "aa_data", str(tmp_path / "aa-data"))
+    monkeypatch.setattr(webui, "db", lambda: object())
+    monkeypatch.setattr(webui, "prepare_project_index", lambda *args, **kwargs: None)
+    monkeypatch.setattr(webui, "attach_registered_variants", lambda *args, **kwargs: None)
+    monkeypatch.setattr(webui, "DraftStore", FakeStore)
+    monkeypatch.setattr(webui, "annotation_provider", lambda *_: object())
+
+    def fake_annotate(options, provider_instance=None):
+        captured["options"] = options
+        options["model_activity"]({
+            "state": "receiving",
+            "model": "deepseek-v4-flash",
+            "received_chars": 128,
+        })
+        return {
+            "text": "旁白: 保留原文\n",
+            "agent": {
+                "resumed_chunks": 3,
+                "metrics": {
+                    "actual_model": "deepseek-v4-flash",
+                    "requests": 7,
+                    "cache_reported": True,
+                    "cache_read_tokens": 130432,
+                    "uncached_input_tokens": 58682,
+                    "cache_hit_rate": 0.69,
+                },
+            },
+            "proposals": [],
+        }
+
+    monkeypatch.setattr("annotate.annotate_script", fake_annotate)
+    result = webui.annotate_draft_worker({
+        "script": str(source), "project": "活动测试", "mapping": {}, "annotate": True,
+    }, job=job)
+
+    assert captured["options"]["model_activity"] is not None
+    assert job.activities[-1] == {
+        "state": "receiving",
+        "model": "deepseek-v4-flash",
+        "received_chars": 128,
+    }
+    assert result["agent_metrics"] == {
+        "actual_model": "deepseek-v4-flash",
+        "requests": 7,
+        "cache_reported": True,
+        "cache_read_tokens": 130432,
+        "uncached_input_tokens": 58682,
+        "cache_hit_rate": pytest.approx(0.69, abs=0.01),
+    }
 
 
 def test_install_options_and_confirmed_name_are_forwarded_through_http(

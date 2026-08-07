@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import datetime as _datetime
+import hashlib
 import json
 import os
 import threading
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,7 @@ class StoryContext:
     source_path: Path | None
     latest_draft_token: str | None
     bgm_default: dict
+    preflight_snapshot: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,106 @@ class StorySummary:
     source_name: str
     last_opened_at: str
     latest_draft_token: str | None
+    source_display: str = ""
+    source_type: str = ""
+    source_size: int | None = None
+    source_modified: str = ""
+
+
+def _source_metadata(source_path: Path | None) -> dict[str, Any]:
+    """Return bounded source metadata suitable for the browser workbench."""
+    if source_path is None:
+        return {
+            "source_name": "",
+            "source_display": "",
+            "source_type": "",
+            "source_size": None,
+            "source_modified": "",
+        }
+    parts = [part for part in source_path.parts if part not in {source_path.anchor, ""}]
+    tail = parts[-4:] if len(parts) > 4 else parts
+    display = " / ".join(tail)
+    if len(parts) > len(tail):
+        display = "… / " + display
+    source_type = "Markdown" if source_path.suffix.casefold() == ".md" else "文本文件"
+    size = None
+    modified = ""
+    try:
+        stat = source_path.stat()
+        size = int(stat.st_size)
+        modified = _datetime.datetime.fromtimestamp(
+            stat.st_mtime, tz=_datetime.timezone.utc
+        ).isoformat()
+    except OSError:
+        pass
+    return {
+        "source_name": source_path.name,
+        "source_display": display,
+        "source_type": source_type,
+        "source_size": size,
+        "source_modified": modified,
+    }
+
+
+def _source_fingerprint(source_path: Path | None) -> dict[str, Any] | None:
+    if source_path is None:
+        return None
+    try:
+        stat = source_path.stat()
+        digest = hashlib.sha256()
+        with source_path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return {
+        "size": int(stat.st_size),
+        "modified_ns": int(stat.st_mtime_ns),
+        "sha256": digest.hexdigest(),
+    }
+
+
+def _safe_preflight_snapshot(value: object) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    result = value.get("result")
+    fingerprint = value.get("fingerprint")
+    if not isinstance(result, dict) or not isinstance(fingerprint, dict):
+        return None
+    if not isinstance(fingerprint.get("size"), int):
+        return None
+    if not isinstance(fingerprint.get("modified_ns"), int):
+        return None
+    if not isinstance(fingerprint.get("sha256"), str):
+        return None
+    try:
+        clean_result = json.loads(json.dumps(result, ensure_ascii=False))
+    except (TypeError, ValueError):
+        return None
+    clean_result.pop("ai_diagnostics", None)
+    return {
+        "result": clean_result,
+        "fingerprint": {
+            "size": fingerprint["size"],
+            "modified_ns": fingerprint["modified_ns"],
+            "sha256": fingerprint["sha256"],
+        },
+        "saved_at": str(value.get("saved_at") or ""),
+        "approved": bool(value.get("approved", False)),
+    }
+
+
+def _public_preflight_snapshot(context: StoryContext) -> dict[str, Any] | None:
+    snapshot = _safe_preflight_snapshot(context.preflight_snapshot)
+    if snapshot is None:
+        return None
+    current = _source_fingerprint(context.source_path)
+    return {
+        "state": "fresh" if current is not None and current == snapshot["fingerprint"] else "stale",
+        "result": snapshot["result"],
+        "saved_at": snapshot["saved_at"],
+        "approved": snapshot["approved"],
+    }
 
 
 def public_story_context(context: StoryContext) -> dict[str, Any]:
@@ -58,9 +160,10 @@ def public_story_context(context: StoryContext) -> dict[str, Any]:
     return {
         "story_token": context.story_token,
         "project": context.project,
-        "source_name": context.source_path.name if context.source_path else "",
+        **_source_metadata(context.source_path),
         "latest_draft_token": context.latest_draft_token,
         "bgm_default": dict(context.bgm_default),
+        "preflight_snapshot": _public_preflight_snapshot(context),
     }
 
 
@@ -69,6 +172,10 @@ def public_story_summary(summary: StorySummary) -> dict[str, Any]:
         "story_token": summary.story_token,
         "project": summary.project,
         "source_name": summary.source_name,
+        "source_display": summary.source_display or summary.source_name,
+        "source_type": summary.source_type,
+        "source_size": summary.source_size,
+        "source_modified": summary.source_modified,
         "last_opened_at": summary.last_opened_at,
         "latest_draft_token": summary.latest_draft_token,
     }
@@ -100,10 +207,19 @@ class StoryWorkspaceRegistry:
             return None
         return Path(value).resolve()
 
+    @staticmethod
+    def _safe_story_token(value: object) -> str | None:
+        if not isinstance(value, str) or not value.startswith("story-"):
+            return None
+        suffix = value[6:]
+        if len(suffix) != 32 or any(char not in "0123456789abcdef" for char in suffix):
+            return None
+        return value
+
     def _context_from_record(self, record: dict[str, Any], token: str | None = None) -> StoryContext:
         project = validate_windows_path_component(record["project"], label="project name")
         source_path = self._safe_source_path(record.get("source_path"))
-        story_token = token or f"story-{uuid.uuid4().hex}"
+        story_token = token or self._safe_story_token(record.get("story_token")) or f"story-{uuid.uuid4().hex}"
         return StoryContext(
             story_token=story_token,
             project=project,
@@ -112,6 +228,7 @@ class StoryWorkspaceRegistry:
             source_path=source_path,
             latest_draft_token=record.get("latest_draft_token") or None,
             bgm_default=normalize_bgm_policy(None),
+            preflight_snapshot=_safe_preflight_snapshot(record.get("preflight_snapshot")),
         )
 
     def _load(self) -> None:
@@ -126,6 +243,7 @@ class StoryWorkspaceRegistry:
             return
 
         seen: set[str] = set()
+        migrated = False
         for record in records:
             if not isinstance(record, dict):
                 continue
@@ -137,14 +255,20 @@ class StoryWorkspaceRegistry:
             if key in seen:
                 continue
             seen.add(key)
+            if self._safe_story_token(record.get("story_token")) != context.story_token:
+                migrated = True
             self._records.append({
+                "story_token": context.story_token,
                 "project": context.project,
                 "source_path": str(context.source_path) if context.source_path else "",
                 "last_opened_at": str(record.get("last_opened_at") or self._now()),
                 "latest_draft_token": context.latest_draft_token,
+                "preflight_snapshot": context.preflight_snapshot,
             })
             self._contexts[context.story_token] = context
             self._tokens_by_project[key] = context.story_token
+        if migrated and self._records:
+            self._persist()
 
     def _persist(self) -> None:
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
@@ -170,10 +294,12 @@ class StoryWorkspaceRegistry:
             if self._project_key(str(record.get("project") or "")) != key
         ]
         self._records.insert(0, {
+            "story_token": context.story_token,
             "project": context.project,
             "source_path": str(context.source_path) if context.source_path else "",
             "last_opened_at": last_opened_at,
             "latest_draft_token": context.latest_draft_token,
+            "preflight_snapshot": context.preflight_snapshot,
         })
 
     def open_path(self, path: str | Path, project: str | None = None) -> StoryContext:
@@ -196,6 +322,9 @@ class StoryWorkspaceRegistry:
                     old_context.latest_draft_token if old_context is not None else None
                 ),
                 bgm_default=normalize_bgm_policy(None),
+                preflight_snapshot=(
+                    old_context.preflight_snapshot if old_context is not None else None
+                ),
             )
             self._contexts[context.story_token] = context
             self._tokens_by_project[key] = context.story_token
@@ -210,12 +339,17 @@ class StoryWorkspaceRegistry:
                 key = self._project_key(record["project"])
                 token = self._tokens_by_project[key]
                 source_path = self._safe_source_path(record.get("source_path"))
+                metadata = _source_metadata(source_path)
                 summaries.append(StorySummary(
                     story_token=token,
                     project=record["project"],
-                    source_name=source_path.name if source_path else "",
+                    source_name=metadata["source_name"],
                     last_opened_at=record["last_opened_at"],
                     latest_draft_token=record.get("latest_draft_token") or None,
+                    source_display=metadata["source_display"],
+                    source_type=metadata["source_type"],
+                    source_size=metadata["source_size"],
+                    source_modified=metadata["source_modified"],
                 ))
             return summaries
 
@@ -237,7 +371,145 @@ class StoryWorkspaceRegistry:
                 source_path=prior.source_path,
                 latest_draft_token=draft_token or None,
                 bgm_default=normalize_bgm_policy(None),
+                preflight_snapshot=prior.preflight_snapshot,
             )
+            self._contexts[story_token] = updated
+            self._replace_record(updated, last_opened_at=self._now())
+            self._persist()
+            return updated
+
+    def set_preflight_snapshot(self, story_token: str, result: dict[str, Any]) -> StoryContext:
+        with self._lock:
+            prior = self.resolve_story_token(story_token)
+            fingerprint = _source_fingerprint(prior.source_path)
+            if fingerprint is None:
+                raise ValueError("story source is unavailable")
+            snapshot = _safe_preflight_snapshot({
+                "result": result,
+                "fingerprint": fingerprint,
+                "saved_at": self._now(),
+                "approved": False,
+            })
+            if snapshot is None:
+                raise ValueError("invalid preflight snapshot")
+            updated = StoryContext(
+                story_token=prior.story_token,
+                project=prior.project,
+                project_dir=prior.project_dir,
+                save_dir=prior.save_dir,
+                source_path=prior.source_path,
+                latest_draft_token=prior.latest_draft_token,
+                bgm_default=normalize_bgm_policy(prior.bgm_default),
+                preflight_snapshot=snapshot,
+            )
+            self._contexts[story_token] = updated
+            self._replace_record(updated, last_opened_at=self._now())
+            self._persist()
+            return updated
+
+    def set_preflight_approved(self, story_token: str, approved: bool) -> StoryContext:
+        with self._lock:
+            prior = self.resolve_story_token(story_token)
+            snapshot = _safe_preflight_snapshot(prior.preflight_snapshot)
+            if snapshot is None:
+                raise ValueError("preflight snapshot is unavailable")
+            snapshot["approved"] = bool(approved)
+            updated = StoryContext(
+                story_token=prior.story_token,
+                project=prior.project,
+                project_dir=prior.project_dir,
+                save_dir=prior.save_dir,
+                source_path=prior.source_path,
+                latest_draft_token=prior.latest_draft_token,
+                bgm_default=normalize_bgm_policy(prior.bgm_default),
+                preflight_snapshot=snapshot,
+            )
+            self._contexts[story_token] = updated
+            self._replace_record(updated, last_opened_at=self._now())
+            self._persist()
+            return updated
+
+    def update_preflight_mapping(self, story_token: str, characters: list[dict[str, Any]]) -> StoryContext:
+        """Persist selected character identities inside the existing snapshot."""
+        with self._lock:
+            prior = self.resolve_story_token(story_token)
+            snapshot = _safe_preflight_snapshot(prior.preflight_snapshot)
+            if snapshot is None or not isinstance(characters, list):
+                raise ValueError("invalid preflight mapping")
+            snapshot["result"]["characters"] = json.loads(json.dumps(characters, ensure_ascii=False))
+            updated = replace(prior, preflight_snapshot=snapshot)
+            self._contexts[story_token] = updated
+            self._replace_record(updated, last_opened_at=self._now())
+            self._persist()
+            return updated
+
+    def bind_preflight_background(
+        self, story_token: str, selector: dict[str, Any], binding: dict[str, Any]
+    ) -> StoryContext:
+        """Bind one verified background to one exact need in the saved snapshot."""
+        with self._lock:
+            prior = self.resolve_story_token(story_token)
+            snapshot = _safe_preflight_snapshot(prior.preflight_snapshot)
+            if snapshot is None:
+                raise ValueError("preflight snapshot is unavailable")
+            current_fingerprint = _source_fingerprint(prior.source_path)
+            if current_fingerprint is None or current_fingerprint != snapshot["fingerprint"]:
+                raise ValueError("preflight snapshot is stale")
+            if not isinstance(selector, dict) or not isinstance(binding, dict):
+                raise ValueError("invalid background binding")
+
+            def bounded(value: object, limit: int = 160) -> str:
+                text = " ".join(str(value or "").split())
+                if not text or len(text) > limit:
+                    raise ValueError("invalid background binding")
+                return text
+
+            segment_name = bounded(selector.get("segment"))
+            location = bounded(selector.get("location"))
+            requested_name = bounded(selector.get("requested_name"))
+            aa_key = bounded(binding.get("aa_key"))
+            selected_label = bounded(binding.get("selected_label") or aa_key)
+            source = bounded(binding.get("source"))
+            preview_source = bounded(binding.get("preview_source"))
+            if source not in {"custom", "official"}:
+                raise ValueError("invalid background binding source")
+            if preview_source not in {"story", "official"}:
+                raise ValueError("invalid background preview source")
+
+            result = snapshot["result"]
+            matches = []
+            for segment in result.get("usage_chain", []):
+                if not isinstance(segment, dict) or str(segment.get("segment") or "") != segment_name:
+                    continue
+                for need in segment.get("needs", []):
+                    if not isinstance(need, dict) or str(need.get("kind") or "") != "background":
+                        continue
+                    if (
+                        str(need.get("location") or "") == location
+                        and str(need.get("name") or "") == requested_name
+                    ):
+                        matches.append(need)
+            if len(matches) != 1:
+                raise ValueError("background scene selector is missing or ambiguous")
+
+            need = matches[0]
+            candidates = need.get("candidates")
+            if not isinstance(candidates, list):
+                candidates = []
+            need.update({
+                "status": "registered",
+                "aa_key": aa_key,
+                "selected_label": selected_label,
+                "source": source,
+                "preview_source": preview_source,
+                "preview_available": bool(binding.get("preview_available")),
+                "candidates": candidates,
+            })
+            need.pop("suggested_aa_key", None)
+            need.pop("generation_prompt", None)
+            snapshot["saved_at"] = self._now()
+            snapshot["approved"] = False
+            updated = replace(prior, preflight_snapshot=snapshot)
             self._contexts[story_token] = updated
             self._replace_record(updated, last_opened_at=self._now())
             self._persist()

@@ -211,9 +211,28 @@ def parse_document_lossless(text: str) -> List[DocNode]:
 def normalize_draft_nodes(nodes: List[DocNode]) -> List[DocNode]:
     """Return the review/compile view of a document without layout-only blanks."""
     normalized: List[DocNode] = []
+    last_background: Optional[str] = None
+    has_background = False
+    suppress_transition = False
     for node in nodes:
         if node.kind == "blank":
             continue
+        if node.kind == "dir":
+            command = str(node.fields.get("cmd") or "").lower()
+            argument = str(node.fields.get("arg") or "").strip()
+            if command == "bg" and argument:
+                first_background = not has_background
+                if argument == last_background:
+                    suppress_transition = True
+                    continue
+                last_background = argument
+                has_background = True
+                suppress_transition = first_background
+            elif command == "trans" and suppress_transition:
+                suppress_transition = False
+                continue
+            else:
+                suppress_transition = False
         if node.kind == "unknown":
             marker = node.raw.strip()
             if THEMATIC_BREAK_RE.fullmatch(marker):

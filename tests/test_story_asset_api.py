@@ -446,13 +446,80 @@ def test_preflight_endpoint_runs_as_a_scoped_job_without_exposing_source_path(tm
             if job["state"] in {"succeeded", "failed", "cancelled"}:
                 break
             time.sleep(0.01)
+        _, current = _request(
+            base, "/api/story/current?story_token=" + opened["story_token"]
+        )
+        approve_status, _ = _request(base, "/api/preflight/approve", {
+            "story_token": opened["story_token"], "approved": True,
+        }, "POST")
+        _, confirmed = _request(
+            base, "/api/story/current?story_token=" + opened["story_token"]
+        )
 
     assert open_status == 200 and status == 202
     assert job["state"] == "succeeded"
+    assert job["result"]["snapshot_saved"] is True
     assert job["result"]["characters"][0]["kind"] == "narrator"
+    assert current["preflight_snapshot"]["state"] == "fresh"
+    assert current["preflight_snapshot"]["approved"] is False
+    assert approve_status == 200
+    assert confirmed["preflight_snapshot"]["approved"] is True
     public = json.dumps(job["result"], ensure_ascii=False)
     assert str(script) not in public
     assert "source_path" not in public
+
+
+def test_preflight_uses_story_source_after_the_picker_token_expires(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "annotation_provider", lambda _profile=None: None)
+    script = tmp_path / "Long Review.txt"
+    script.write_text("旁白: 十分钟后继续。\n", encoding="utf-8")
+    opening_token = webui.register_file_token(str(script))
+    with _server(tmp_path, monkeypatch) as base:
+        _, opened = _request(
+            base, "/api/stories/open", {"file_token": opening_token}, "POST"
+        )
+        status, accepted = _request(base, "/api/preflight", {
+            "story_token": opened["story_token"],
+            "file_token": "ft-expired",
+        }, "POST")
+        job = None
+        if status == 202:
+            for _ in range(100):
+                _, job = _request(base, "/api/jobs/" + accepted["job_id"])
+                if job["state"] in {"succeeded", "failed", "cancelled"}:
+                    break
+                time.sleep(0.01)
+
+    assert status == 202
+    assert job["state"] == "succeeded"
+    assert job["result"]["analysis"]["lines"] == 1
+
+
+def test_preflight_job_returns_result_when_snapshot_persistence_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "annotation_provider", lambda _profile=None: None)
+    monkeypatch.setattr(
+        webui.StoryWorkspaceRegistry,
+        "set_preflight_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk unavailable")),
+    )
+    script = tmp_path / "Unsaved Chapter.txt"
+    script.write_text("旁白：开始。\n", encoding="utf-8")
+    file_token = webui.register_file_token(str(script))
+    with _server(tmp_path, monkeypatch) as base:
+        _, opened = _request(base, "/api/stories/open", {"file_token": file_token}, "POST")
+        status, accepted = _request(base, "/api/preflight", {
+            "story_token": opened["story_token"], "file_token": file_token,
+        }, "POST")
+        for _ in range(100):
+            _, job = _request(base, "/api/jobs/" + accepted["job_id"])
+            if job["state"] in {"succeeded", "failed", "cancelled"}:
+                break
+            time.sleep(0.01)
+
+    assert status == 202
+    assert job["state"] == "succeeded"
+    assert job["result"]["snapshot_saved"] is False
+    assert job["result"]["characters"][0]["kind"] == "narrator"
 
 
 def test_story_asset_list_excludes_other_project_assets_and_never_exposes_paths(tmp_path, monkeypatch):
@@ -951,3 +1018,161 @@ def test_background_label_failure_never_exposes_the_registered_copy_path(tmp_pat
     label_error = library["backgrounds"][0]["details"]["label_error"]
     assert label_error == "背景识别失败，请重试或手动补充"
     assert str(private_path) not in repr(library)
+
+
+def test_custom_background_candidate_preflight_job_keeps_story_preview_scope(tmp_path, monkeypatch):
+    """A preflight job may return only a current-story custom candidate and scoped preview marker."""
+    source = tmp_path / "incoming" / "rain-station.png"
+    _background(source)
+    captured = {}
+
+    class Provider:
+        def complete_json(self, _static, volatile, _user, _schema):
+            custom = json.loads(volatile)["custom_backgrounds"]
+            captured["custom"] = custom
+            key = str(custom[0]["aa_key"])
+            return {
+                "characters": [], "assets": [], "issues": [],
+                "usage_chain": [{
+                    "segment": "开场", "location": "车站", "start": "第1行", "end": "第1行",
+                    "evidence": "雨夜的车站。", "needs": [{
+                        "kind": "background", "name": "雨夜车站", "location": "第1行",
+                        "reason": "场景匹配", "confidence": 0.95,
+                        "candidates": [
+                            {"aa_key": key, "confidence": 0.92, "reason": "本章已生成"},
+                            {"aa_key": "forged", "confidence": 0.99, "reason": "跨章伪造"},
+                        ],
+                    }],
+                }],
+            }
+
+    monkeypatch.setattr(webui, "annotation_provider", lambda _profile=None: Provider())
+    with _server(tmp_path, monkeypatch) as base:
+        story = _open_story(base, tmp_path)
+        file_token = webui.register_file_token(str(source))
+        _, imported = _request(base, "/api/assets/register", {
+            "kind": "background", "file_token": file_token,
+            "story_token": story["story_token"],
+            "labels": {"label": "雨夜车站", "place": "车站", "time": "夜晚"},
+        }, "POST")
+        script = tmp_path / "Chapter One.txt"
+        script_token = webui.register_file_token(str(script))
+        status, accepted = _request(base, "/api/preflight", {
+            "story_token": story["story_token"], "file_token": script_token,
+        }, "POST")
+        for _ in range(100):
+            _, job = _request(base, "/api/jobs/" + accepted["job_id"])
+            if job["state"] in {"succeeded", "failed", "cancelled"}:
+                break
+            time.sleep(0.01)
+        preview = _request_bytes(
+            base,
+            "/api/story/assets/preview?story_token=" + story["story_token"]
+            + "&kind=background&key=" + str(imported["aa_key"]),
+        )
+
+    assert status == 202 and job["state"] == "succeeded"
+    candidate = job["result"]["usage_chain"][0]["needs"][0]["candidates"][0]
+    assert candidate["aa_key"] == str(imported["aa_key"])
+    assert candidate["source"] == "custom"
+    assert candidate["preview_source"] == "story"
+    assert [item["aa_key"] for item in captured["custom"]] == [str(imported["aa_key"])]
+    assert preview[0] == 200 and preview[2].startswith(b"\x89PNG")
+    assert "forged" not in json.dumps(job["result"])
+    assert str(tmp_path) not in json.dumps(job["result"], ensure_ascii=False)
+
+
+def test_background_binding_api_accepts_only_current_story_registered_background(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "incoming" / "rain-station.png"
+    _background(source)
+    with _server(tmp_path, monkeypatch) as base:
+        current = _open_named_story(base, tmp_path, "Current")
+        other = _open_named_story(base, tmp_path, "Other")
+        file_token = webui.register_file_token(str(source))
+        _, imported = _request(base, "/api/assets/register", {
+            "kind": "background", "file_token": file_token,
+            "story_token": current["story_token"],
+            "labels": {"label": "雨夜车站", "place": "车站"},
+        }, "POST")
+        for story, segment in ((current, "当前章"), (other, "其他章")):
+            webui.story_workspace().set_preflight_snapshot(story["story_token"], {
+                "ai_status": "completed", "usage_chain_status": "completed",
+                "characters": [], "assets": [], "issues": [],
+                "usage_chain": [{"segment": segment, "location": "车站", "needs": [{
+                    "kind": "background", "name": "雨夜车站", "location": "第1行",
+                    "status": "missing", "candidates": [],
+                }]}],
+            })
+        rejected_status, rejected = _request(base, "/api/preflight/background-binding", {
+            "story_token": other["story_token"],
+            "selector": {"segment": "其他章", "location": "第1行",
+                         "requested_name": "雨夜车站"},
+            "binding": {"aa_key": str(imported["aa_key"]),
+                        "selected_label": "雨夜车站"},
+        }, "POST")
+        accepted_status, accepted = _request(base, "/api/preflight/background-binding", {
+            "story_token": current["story_token"],
+            "selector": {"segment": "当前章", "location": "第1行",
+                         "requested_name": "雨夜车站"},
+            "binding": {"aa_key": str(imported["aa_key"]),
+                        "selected_label": "雨夜车站"},
+        }, "POST")
+
+    assert rejected_status == 404
+    assert rejected["code"] == "background_not_registered"
+    assert accepted_status == 200
+    need = accepted["preflight_snapshot"]["result"]["usage_chain"][0]["needs"][0]
+    assert need["status"] == "registered"
+    assert need["aa_key"] == str(imported["aa_key"])
+    assert need["source"] == "custom"
+    assert need["preview_source"] == "story"
+    assert str(tmp_path) not in json.dumps(accepted, ensure_ascii=False)
+
+
+def test_background_binding_api_accepts_verified_official_key_and_persists_it(
+    tmp_path, monkeypatch
+):
+    with _server(tmp_path, monkeypatch) as base:
+        story = _open_named_story(base, tmp_path, "OfficialBinding")
+        con = webui.db()
+        try:
+            con.execute(
+                "INSERT INTO bg(name,hash,label) VALUES(?,?,?)",
+                ("BG_ShoppingDistrict", 101, "Shopping District"),
+            )
+            con.commit()
+        finally:
+            con.close()
+        webui.story_workspace().set_preflight_snapshot(story["story_token"], {
+            "ai_status": "completed", "usage_chain_status": "completed",
+            "characters": [], "assets": [], "issues": [],
+            "usage_chain": [{"segment": "场景一", "location": "商店街", "needs": [{
+                "kind": "background", "name": "商店街入口钟塔", "location": "第1行",
+                "status": "approximate", "candidates": [{
+                    "aa_key": "BG_ShoppingDistrict", "source": "official",
+                }],
+            }]}],
+        })
+
+        status, accepted = _request(base, "/api/preflight/background-binding", {
+            "story_token": story["story_token"],
+            "selector": {"segment": "场景一", "location": "第1行",
+                         "requested_name": "商店街入口钟塔"},
+            "binding": {"aa_key": "BG_ShoppingDistrict",
+                        "selected_label": "untrusted client label"},
+        }, "POST")
+        _, restored = _request(
+            base, "/api/story/current?story_token=" + story["story_token"],
+            method="GET",
+        )
+
+    assert status == 200
+    need = accepted["preflight_snapshot"]["result"]["usage_chain"][0]["needs"][0]
+    assert need["status"] == "registered"
+    assert need["aa_key"] == "BG_ShoppingDistrict"
+    assert need["selected_label"] == "Shopping District"
+    assert need["source"] == "official"
+    assert need["preview_source"] == "official"
+    assert restored["preflight_snapshot"]["result"]["usage_chain"][0]["needs"][0] == need

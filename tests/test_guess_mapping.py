@@ -38,12 +38,11 @@ def test_guess_skips_placeholder_alias_and_prefers_exact_name(tmp_path, monkeypa
     assert out["桃井"]["kind"] == "portrait"
 
 
-def test_guess_keeps_voice_alias_for_null_named_character(tmp_path, monkeypatch):
-    """「老师」这类 voice 角色没有名字，仍应映射为语音而不是变成未指定。"""
+def test_guess_treats_teacher_as_non_character_even_with_voice_alias(tmp_path, monkeypatch):
+    """A teacher narration label must not be rebound through historical voice data."""
     monkeypatch.setattr(webui, "db", lambda: _make_con(tmp_path))
     out = webui.guess_mapping([{"who": "老师"}])
-    assert out["老师"]["kind"] == "voice"
-    assert out["老师"]["id"] == "45145456"
+    assert out["老师"] == {"kind": "narrator"}
 
 
 def test_guess_marks_unknown_speaker_unset(tmp_path, monkeypatch):
@@ -74,3 +73,79 @@ def test_guess_prefers_base_variant_over_learned_different_identity(tmp_path, mo
     out = webui.guess_mapping([{"who": "凯伊"}])
     assert out["凯伊"]["id"] == "1516544"
     assert out["凯伊"]["name"] == "凯伊"
+
+
+def test_guess_prefers_learned_official_character_over_exact_override_outfit(
+    tmp_path, monkeypatch
+):
+    """Plain character names must not be captured by an imported outfit variant."""
+    con = _make_con(tmp_path)
+    con.execute(
+        "INSERT INTO character(ident,name,spine,source) VALUES(?,?,?,?)",
+        ("爱丽丝（防寒服-冬装）", "爱丽丝", "winter", "overrides"),
+    )
+    con.execute(
+        "INSERT INTO character(ident,name,spine,source) VALUES(?,?,?,?)",
+        ("아리스N", "愛麗絲", "official", "observed"),
+    )
+    con.execute(
+        "INSERT INTO name_alias(script_name,ident,kind,uses) VALUES('爱丽丝','???N','portrait',8)"
+    )
+    con.execute(
+        "INSERT INTO name_alias(script_name,ident,kind,uses) VALUES('爱丽丝','아리스N','portrait',4)"
+    )
+    con.commit()
+    monkeypatch.setattr(webui, "db", lambda: con)
+
+    out = webui.guess_mapping([{"who": "爱丽丝"}])
+
+    assert out["爱丽丝"]["id"] == "아리스N"
+    assert out["爱丽丝"]["name"] == "爱丽丝"
+
+
+def test_guess_prefers_official_default_spine_when_alias_points_to_variant(
+    tmp_path, monkeypatch
+):
+    """A translated plain name must resolve to the default official spine."""
+    con = _make_con(tmp_path)
+    con.execute(
+        "INSERT INTO character(ident,name,spine,source) VALUES(?,?,?,?)",
+        ("아리스", "愛麗絲", "CharacterSpine_aris", "observed"),
+    )
+    con.execute(
+        "INSERT INTO character(ident,name,spine,source) VALUES(?,?,?,?)",
+        ("아리스N", "愛麗絲", "CharacterSpine_aris_noweapon", "observed"),
+    )
+    con.execute(
+        "INSERT INTO name_alias(script_name,ident,kind,uses) VALUES('爱丽丝','아리스N','portrait',8)"
+    )
+    con.commit()
+    monkeypatch.setattr(webui, "db", lambda: con)
+
+    out = webui.guess_mapping([{"who": "爱丽丝"}])
+
+    assert out["爱丽丝"]["id"] == "아리스"
+    assert out["爱丽丝"]["spine"] == "CharacterSpine_aris"
+
+
+def test_non_character_speaker_is_not_a_blocking_unmapped_character(
+    tmp_path, monkeypatch
+):
+    con = _make_con(tmp_path)
+    monkeypatch.setattr(webui, "db", lambda: con)
+
+    out = webui.guess_mapping([{"who": "系统消息"}])
+
+    assert out["系统消息"] == {"kind": "narrator"}
+    assert webui.is_non_character_speaker("系统消息") is True
+
+
+def test_guess_lookup_does_not_seed_or_mutate_alias_table(tmp_path, monkeypatch):
+    con = _make_con(tmp_path)
+    before = con.execute("SELECT COUNT(*) FROM name_alias").fetchone()[0]
+    monkeypatch.setattr(webui, "db", lambda: con)
+
+    webui.guess_mapping([{"who": "桃井"}])
+
+    after = con.execute("SELECT COUNT(*) FROM name_alias").fetchone()[0]
+    assert after == before

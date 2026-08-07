@@ -22,12 +22,18 @@ def _free_port():
 
 
 @pytest.fixture(scope="module")
-def app_url():
+def app_url(tmp_path_factory):
     port = _free_port()
     sample = HERE.parent.parent / "story-picker-browser-sample.txt"
     sample.write_text("凯伊：浏览器测试", encoding="utf-8")
+    aa_data = tmp_path_factory.mktemp("story-picker-aa") / "data"
+    for name in ("projects", "saves", "overrides", "settings"):
+        (aa_data / name).mkdir(parents=True)
     process = subprocess.Popen(
-        [sys.executable, "webui.py", "--no-browser", "--port", str(port)],
+        [
+            sys.executable, "webui.py", "--no-browser", "--port", str(port),
+            "--aa-data", str(aa_data),
+        ],
         cwd=HERE,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -125,7 +131,9 @@ def test_host_selection_opens_story_through_the_real_browser(browser, app_url):
         row.dblclick()
         page.locator("#storyContextName", has_text="story-picker-browser-sample.txt").wait_for()
         assert page.locator("#path").input_value() == "story-picker-browser-sample.txt"
-        assert page.locator("#storyContextName").inner_text() == "story-picker-browser-sample.txt"
+        source_label = page.locator("#storyContextName").inner_text()
+        assert source_label.split(" / ")[-1] == "story-picker-browser-sample.txt"
+        assert "\\" not in source_label and ":" not in source_label
         assert page.locator("#mBrowse").is_hidden()
     finally:
         page.close()

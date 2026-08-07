@@ -13,7 +13,7 @@ HERE = Path(__file__).resolve().parent.parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from story_workspace import StoryWorkspaceRegistry
+from story_workspace import StoryWorkspaceRegistry, public_story_context
 
 
 def test_open_story_uses_source_stem_and_returns_opaque_token(tmp_path):
@@ -58,6 +58,7 @@ def test_recent_index_persists_metadata_but_not_server_paths_in_summary(tmp_path
     second_registry = StoryWorkspaceRegistry(index_path, aa_data=tmp_path / "data")
     summary = second_registry.list_recent()[0]
 
+    assert summary.story_token == context.story_token
     assert summary.project == "第一章"
     assert summary.source_name == "第一章.txt"
     assert summary.latest_draft_token == "draft-123"
@@ -65,6 +66,164 @@ def test_recent_index_persists_metadata_but_not_server_paths_in_summary(tmp_path
     assert second_registry.resolve_story_token(summary.story_token).source_path == (
         tmp_path / "第一章.txt"
     ).resolve()
+
+
+def test_preflight_snapshot_persists_safely_and_reports_source_freshness(tmp_path):
+    index_path = tmp_path / "out" / "story-index.json"
+    aa_data = tmp_path / "data"
+    source = tmp_path / "story.txt"
+    source.write_text("凯伊：出发。\n", encoding="utf-8")
+    registry = StoryWorkspaceRegistry(index_path, aa_data=aa_data)
+    context = registry.open_path(source, project="SnapshotStory")
+
+    registry.set_preflight_snapshot(context.story_token, {
+        "ai_status": "completed",
+        "analysis": {"lines": 1, "speakers": [{"who": "凯伊"}]},
+        "characters": [{"speaker": "凯伊", "kind": "portrait", "id": "hero"}],
+        "usage_chain": [],
+        "issues": [],
+        "ai_diagnostics": {"message": "private provider detail"},
+    })
+    registry.set_preflight_approved(context.story_token, True)
+
+    reloaded = StoryWorkspaceRegistry(index_path, aa_data=aa_data)
+    summary = reloaded.list_recent()[0]
+    payload = public_story_context(reloaded.resolve_story_token(summary.story_token))
+    snapshot = payload["preflight_snapshot"]
+
+    assert snapshot["state"] == "fresh"
+    assert snapshot["approved"] is True
+    assert snapshot["saved_at"]
+    assert snapshot["result"]["analysis"]["lines"] == 1
+    assert "ai_diagnostics" not in snapshot["result"]
+    assert "fingerprint" not in snapshot
+    assert str(tmp_path) not in json.dumps(snapshot, ensure_ascii=False)
+
+
+def test_preflight_mapping_update_persists_exact_spine_identity(tmp_path):
+    source = tmp_path / "story.txt"
+    source.write_text("爱丽丝：出发。\n", encoding="utf-8")
+    index_path = tmp_path / "out" / "story-index.json"
+    registry = StoryWorkspaceRegistry(index_path, aa_data=tmp_path / "data")
+    context = registry.open_path(source, project="MappingStory")
+    registry.set_preflight_snapshot(context.story_token, {
+        "ai_status": "completed", "characters": [{
+            "speaker": "爱丽丝", "kind": "portrait", "id": "아리스N",
+            "name": "爱丽丝", "spine": "CharacterSpine_aris_noweapon",
+        }], "assets": [], "usage_chain": [], "issues": [],
+    })
+
+    registry.update_preflight_mapping(context.story_token, [{
+        "speaker": "爱丽丝", "kind": "portrait", "id": "아리스",
+        "name": "爱丽丝", "spine": "CharacterSpine_aris",
+    }])
+
+    restored = StoryWorkspaceRegistry(index_path, aa_data=tmp_path / "data")
+    token = restored.list_recent()[0].story_token
+    snapshot = public_story_context(restored.resolve_story_token(token))["preflight_snapshot"]
+    assert snapshot["result"]["characters"][0]["id"] == "아리스"
+    assert snapshot["result"]["characters"][0]["spine"] == "CharacterSpine_aris"
+
+def test_preflight_background_binding_updates_exact_scene_and_persists(tmp_path):
+    index_path = tmp_path / "out" / "story-index.json"
+    source = tmp_path / "story.txt"
+    source.write_text("旁白：雨夜的车站。\n", encoding="utf-8")
+    registry = StoryWorkspaceRegistry(index_path, aa_data=tmp_path / "data")
+    context = registry.open_path(source, project="BindingStory")
+    registry.set_preflight_snapshot(context.story_token, {
+        "ai_status": "completed", "usage_chain_status": "completed",
+        "analysis": {"lines": 1, "speakers": [], "scenes": []},
+        "characters": [], "assets": [], "issues": [],
+        "usage_chain": [{
+            "segment": "开场", "location": "车站", "needs": [{
+                "kind": "background", "name": "雨夜车站", "location": "第1行",
+                "status": "missing", "generation_prompt": "生成雨夜车站",
+                "candidates": [
+                    {"aa_key": "BG_Official", "confidence": 0.9, "reason": "宽泛匹配"},
+                    {"aa_key": "BG_SubwayHall", "confidence": 0.6, "reason": "售票口匹配"},
+                ],
+            }],
+        }],
+    })
+
+    registry.bind_preflight_background(
+        context.story_token,
+        {"segment": "开场", "location": "第1行", "requested_name": "雨夜车站"},
+        {"aa_key": "9001", "selected_label": "雨夜车站", "source": "custom",
+         "preview_source": "story", "preview_available": True},
+    )
+
+    restored = StoryWorkspaceRegistry(index_path, aa_data=tmp_path / "data")
+    restored_token = restored.list_recent()[0].story_token
+    snapshot = public_story_context(
+        restored.resolve_story_token(restored_token)
+    )["preflight_snapshot"]
+    need = snapshot["result"]["usage_chain"][0]["needs"][0]
+    assert need == {
+        "kind": "background", "name": "雨夜车站", "location": "第1行",
+        "status": "registered", "aa_key": "9001", "selected_label": "雨夜车站",
+        "source": "custom", "preview_source": "story", "preview_available": True,
+        "candidates": [
+            {"aa_key": "BG_Official", "confidence": 0.9, "reason": "宽泛匹配"},
+            {"aa_key": "BG_SubwayHall", "confidence": 0.6, "reason": "售票口匹配"},
+        ],
+    }
+    assert snapshot["approved"] is False
+
+
+def test_preflight_background_binding_rejects_stale_or_cross_story_selector(tmp_path):
+    index_path = tmp_path / "story-index.json"
+    registry = StoryWorkspaceRegistry(index_path, aa_data=tmp_path / "data")
+    first_source = tmp_path / "first.txt"
+    second_source = tmp_path / "second.txt"
+    first_source.write_text("第一章", encoding="utf-8")
+    second_source.write_text("第二章", encoding="utf-8")
+    first = registry.open_path(first_source, project="First")
+    second = registry.open_path(second_source, project="Second")
+    registry.set_preflight_snapshot(first.story_token, {
+        "usage_chain": [{"segment": "第一章", "needs": [{
+            "kind": "background", "name": "教室", "location": "第1行",
+        }]}],
+    })
+    registry.set_preflight_snapshot(second.story_token, {
+        "usage_chain": [{"segment": "第二章", "needs": [{
+            "kind": "background", "name": "天台", "location": "第2行",
+        }]}],
+    })
+
+    with pytest.raises(ValueError, match="scene"):
+        registry.bind_preflight_background(
+            first.story_token,
+            {"segment": "第二章", "location": "第2行", "requested_name": "天台"},
+            {"aa_key": "other", "selected_label": "天台", "source": "custom",
+             "preview_source": "story", "preview_available": True},
+        )
+    first_source.write_text("第一章已修改", encoding="utf-8")
+    with pytest.raises(ValueError, match="stale"):
+        registry.bind_preflight_background(
+            first.story_token,
+            {"segment": "第一章", "location": "第1行", "requested_name": "教室"},
+            {"aa_key": "9001", "selected_label": "教室", "source": "custom",
+             "preview_source": "story", "preview_available": True},
+        )
+
+
+def test_public_story_context_exposes_safe_source_metadata_without_path(tmp_path):
+    source = tmp_path / "章节" / "第一章.md"
+    source.parent.mkdir()
+    source.write_text("正文", encoding="utf-8")
+    registry = StoryWorkspaceRegistry(
+        tmp_path / "story-index.json", aa_data=tmp_path / "data"
+    )
+
+    payload = public_story_context(registry.open_path(source))
+
+    assert payload["source_name"] == "第一章.md"
+    assert payload["source_type"] == "Markdown"
+    assert payload["source_size"] == len("正文".encode("utf-8"))
+    assert payload["source_modified"]
+    assert payload["source_display"].endswith("章节 / 第一章.md")
+    assert str(tmp_path) not in json.dumps(payload, ensure_ascii=False)
 
 
 def test_open_story_rejects_unsafe_project_name(tmp_path):
@@ -221,6 +380,49 @@ def test_annotate_story_context_uses_file_token_and_updates_recent(tmp_path, mon
         assert recent[0]["latest_draft_token"] == "draft-annotated"
 
 
+def test_annotate_story_context_uses_trusted_source_after_file_token_expires(
+    tmp_path, monkeypatch
+):
+    import time
+    import webui
+
+    source = tmp_path / "长时间审查.txt"
+    source.write_text("旁白: 继续。\n", encoding="utf-8")
+    opening_token = webui.register_file_token(str(source))
+    seen = []
+
+    def fake_worker(payload):
+        seen.append(dict(payload))
+        return {
+            "draft_token": "draft-after-expiry",
+            "project": payload["project"],
+            "lines": 1,
+            "proposals": 0,
+        }
+
+    monkeypatch.setattr(webui, "annotate_draft_worker", fake_worker)
+    with _story_server(tmp_path, monkeypatch) as base:
+        _, opened = _request(base, "/api/stories/open", {
+            "file_token": opening_token,
+        })
+        status, queued = _request(base, "/api/annotate", {
+            "story_token": opened["story_token"],
+            "file_token": "ft-expired",
+            "mapping": {},
+        })
+        job = None
+        if status == 202:
+            for _ in range(40):
+                _, job = _request(base, "/api/jobs/" + queued["job_id"], method="GET")
+                if job["state"] in {"succeeded", "failed", "cancelled"}:
+                    break
+                time.sleep(0.05)
+
+    assert status == 202
+    assert job["state"] == "succeeded"
+    assert seen[0]["script"] == str(source.resolve())
+
+
 def test_build_inherits_story_project_and_rejects_mismatched_project(tmp_path, monkeypatch):
     """A build request must not escape the project carried by its story token."""
     import webui
@@ -348,6 +550,36 @@ def test_story_workspace_initialization_is_singleton_per_aa_root(tmp_path, monke
 
     assert len(factory_calls) == 1
     assert len({id(workspace) for workspace in returned}) == 1
+
+
+def test_web_registry_migrates_legacy_index_without_writing_to_aa_data(
+    tmp_path, monkeypatch
+):
+    import webui
+
+    aa_data = tmp_path / "aa-data"
+    source = tmp_path / "story.txt"
+    source.write_text("旁白: 开始。\n", encoding="utf-8")
+    legacy_path = aa_data / ".story-index.json"
+    legacy = StoryWorkspaceRegistry(legacy_path, aa_data=aa_data)
+    context = legacy.open_path(source, project="只读迁移")
+    legacy.set_latest_draft_token(context.story_token, "draft-legacy")
+    before_bytes = legacy_path.read_bytes()
+    before_mtime = legacy_path.stat().st_mtime_ns
+
+    tool_root = tmp_path / "tool"
+    monkeypatch.setattr(webui, "HERE", str(tool_root))
+    monkeypatch.setattr(webui, "STORY_WORKSPACE", None)
+    monkeypatch.setitem(webui.CFG, "aa_data", str(aa_data))
+
+    migrated = webui.story_workspace()
+
+    assert migrated.index_path.parent == (
+        tool_root / "out" / "story-workspaces"
+    ).resolve()
+    assert migrated.list_recent()[0].latest_draft_token == "draft-legacy"
+    assert legacy_path.read_bytes() == before_bytes
+    assert legacy_path.stat().st_mtime_ns == before_mtime
 
 
 def test_story_open_uses_stable_project_error_code_and_keeps_token_code(tmp_path, monkeypatch):

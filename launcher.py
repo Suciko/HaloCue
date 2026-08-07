@@ -129,7 +129,7 @@ def build_environment_report(
 
 
 def is_existing_server(url: str) -> bool:
-    """Return true only when the URL identifies this local application."""
+    """Return true only for a current, model-workbench-capable server."""
     try:
         with urllib.request.urlopen(
             url.rstrip("/") + "/api/setup/status",
@@ -138,13 +138,22 @@ def is_existing_server(url: str) -> bool:
             if response.status != 200:
                 return False
             payload = json.loads(response.read().decode("utf-8"))
+        if payload.get("entry_file") != ENTRY_FILE:
+            return False
+        with urllib.request.urlopen(
+            url.rstrip("/") + "/api/llm/workbench",
+            timeout=0.8,
+        ) as response:
+            if response.status != 200:
+                return False
+            workbench = json.loads(response.read().decode("utf-8"))
     except (
         OSError,
         ValueError,
         urllib.error.URLError,
     ):
         return False
-    return payload.get("entry_file") == ENTRY_FILE
+    return workbench.get("schema_version") == 2
 
 
 def _choose_aa_data() -> Path | None:

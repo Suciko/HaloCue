@@ -70,11 +70,16 @@
   }
   function assetMeta(kind, item) {
     const labels = item.labels || {};
-    if (kind === 'character') return [
-      '表情 ' + (item.expression_status || '待检测'),
-      '文件 ' + (item.file_completeness || '待检测'),
-      '面部 ' + ((item.faces || []).length || '待检测')
-    ].join(' · ');
+    if (kind === 'character') {
+      const expressionStatus = item.expression_status === 'known'
+        ? '已识别表情编号'
+        : item.expression_status === 'unresolved' ? '表情状态待确认' : (item.expression_status || '待检测');
+      return [
+        '表情 ' + expressionStatus,
+        '文件 ' + (item.file_completeness || '待检测'),
+        '面部 ' + ((item.faces || []).length || '待检测')
+      ].join(' · ');
+    }
     if (kind === 'background') return [item.resolution || '待检测', item.aspect_ratio || '待检测', labels.place || labels.tags || '待检测'].join(' · ');
     if (kind === 'sound') return [
       item.duration ? Number(item.duration).toFixed(1) + ' 秒' : '待检测',
@@ -82,6 +87,14 @@
       item.channels ? item.channels + ' 声道' : '待检测'
     ].join(' · ');
     return '待检测';
+  }
+  function assetStatusLabel(status) {
+    return status === 'registered' ? '已登记'
+      : status === 'verified' ? '已验证'
+      : status === 'observed' ? '已识别'
+      : status === 'missing' ? '待补充'
+      : status === 'failed' ? '检查失败'
+      : status || '待确认';
   }
   function previewUrl(storyToken, kind, item) {
     return '/api/story/assets/preview?story_token=' + encodeURIComponent(storyToken) + '&kind=' + encodeURIComponent(kind) + '&key=' + encodeURIComponent(item.aa_key);
@@ -121,7 +134,7 @@
       const values = {identifier: (identifier && identifier.value || '').trim(), displayName: (displayName && displayName.value || '').trim(), path: (path && path.value || '').trim()};
       if (!values.identifier || !values.displayName || !values.path) {
         [identifier, displayName, path].forEach(function (field) { if (field) field.setAttribute('aria-invalid', String(!field.value.trim())); });
-        if (error) error.textContent = '请填写 Identifier、显示名称和角色文件路径。';
+        if (error) error.textContent = '请填写角色标识、显示名称和角色文件路径。';
         return;
       }
       if (error) error.textContent = '';
@@ -249,24 +262,38 @@
     if (!story) { this.root.classList.add('is-empty'); this.root.appendChild(make('p', 'dim', '打开剧情后显示当前剧情的自定义素材。')); return; }
     this.root.classList.remove('is-empty');
     const header = make('div', 'asset-strip-heading');
-    header.appendChild(make('h2', '', '本剧情素材'));
+    header.appendChild(make('h2', '', '本剧情自定义素材'));
     const counts = this.items.counts || {};
     header.appendChild(make('p', 'dim', loading ? '正在读取自定义素材…' : '角色 ' + (counts.characters || this.items.characters.length || 0) + ' · 背景 ' + (counts.backgrounds || this.items.backgrounds.length || 0) + ' · 音效 ' + (counts.sounds || this.items.sounds.length || 0) + ' · BGM ' + (counts.bgms || this.items.bgms.length || 0)));
     this.root.appendChild(header);
     const controls = make('div', 'asset-strip-controls'); const self = this;
-    FILTERS.forEach(function (pair) { const button = make('button', 'ghost asset-filter' + (self.filter === pair[0] ? ' active' : ''), pair[1]); button.type = 'button'; button.addEventListener('click', function () { self.filter = pair[0]; self.renderContent(); }); controls.appendChild(button); });
-    const importKind = this.filter === 'all' ? 'background' : this.filter;
-    const importKindLabel = importKind === 'character' ? '角色' : importKind === 'sound' ? '音效' : '背景';
-    if (importKind !== 'bgm') {
+    FILTERS.forEach(function (pair) { const button = make('button', 'ghost asset-filter' + (self.filter === pair[0] ? ' active' : ''), pair[1]); button.type = 'button'; button.addEventListener('click', function () { self.filter = pair[0]; self.render(); }); controls.appendChild(button); });
+    const kindLabels = {character: '角色', background: '背景', sound: '音效'};
+    const addImportActions = function (resolveKind) {
+      const initialKind = resolveKind();
+      if (!initialKind) return;
+      const importKindLabel = kindLabels[initialKind] || '素材';
       const historyButton = make('button', 'ghost asset-import-history', '从历史导入' + importKindLabel); historyButton.type = 'button';
       historyButton.addEventListener('click', function () {
-        if (exports.HistoryDrawer && exports.HistoryDrawer.open) exports.HistoryDrawer.open({kind: importKind, trigger: historyButton});
+        const importKind = resolveKind();
+        if (importKind && exports.HistoryDrawer && exports.HistoryDrawer.open) exports.HistoryDrawer.open({kind: importKind, trigger: historyButton});
       });
       controls.appendChild(historyButton);
+      const importButton = make('button', 'asset-import-local', '从本地导入' + importKindLabel); importButton.type = 'button';
+      importButton.addEventListener('click', function () {
+        const importKind = resolveKind();
+        if (importKind === 'character') self.openCharacterForm(); else if (importKind) self.importLocal(importKind, {});
+      });
+      controls.appendChild(importButton);
+    };
+    if (this.filter !== 'all' && this.filter !== 'bgm') {
+      const importKind = this.filter;
+      addImportActions(function () { return importKind; });
+    }
+    if (this.filter !== 'bgm') {
       const inboxButton = make('button', 'ghost asset-import-inbox', '扫描素材目录'); inboxButton.type = 'button'; inboxButton.title = '扫描当前剧情素材目录中的背景、音效和角色';
       inboxButton.addEventListener('click', function () { self.scanInbox(); });
       controls.appendChild(inboxButton);
-      const importButton = make('button', 'asset-import-local', '从本地导入' + importKindLabel); importButton.type = 'button'; importButton.addEventListener('click', function () { if (importKind === 'character') self.openCharacterForm(); else self.importLocal(importKind, {}); }); controls.appendChild(importButton);
     }
     this.root.appendChild(controls);
     if (this.filter === 'bgm') this.root.appendChild(make('p', 'asset-bgm-gate dim', '当前默认不使用 BGM／原生验证完成后开放。'));
@@ -311,7 +338,7 @@
     card.appendChild(make('b', 'asset-card-name', item.name || item.display_name || '未命名素材'));
     card.appendChild(make('span', 'asset-card-type', kind === 'character' ? '角色' : kind === 'background' ? '背景' : kind === 'sound' ? '音效' : 'BGM'));
     card.appendChild(make('p', 'asset-card-meta', assetMeta(kind, item)));
-    card.appendChild(make('span', 'asset-card-status status-' + (item.status || 'registered'), item.status || '已登记'));
+    card.appendChild(make('span', 'asset-card-status status-' + (item.status || 'registered'), assetStatusLabel(item.status || 'registered')));
     card.appendChild(make('small', 'asset-source-project', item.source_project ? '来源 · 历史剧情：' + item.source_project : '来源 · 本地导入'));
     return card;
   };
@@ -353,15 +380,16 @@
     if (!['character', 'background', 'sound'].includes(kind)) return null;
     const story = currentStory(); if (!story) return null;
     triggerContext = triggerContext || {};
+    const fileToken = triggerContext.fileToken || '';
     let path = triggerContext.path || triggerContext.source || '';
-    if (!path && typeof exports.prompt === 'function') path = exports.prompt('输入要导入的素材完整路径', '');
-    if (!path) return null;
+    if (!fileToken && !path && typeof exports.prompt === 'function') path = exports.prompt('输入要导入的素材完整路径', '');
+    if (!fileToken && !path) return null;
     const displayName = triggerContext.displayName || '';
     const identifier = triggerContext.identifier || '';
     const labels = triggerContext.labels || {};
-    const task = this.beginTask({kind: kind, name: triggerContext.name || path.split(/[\\/]/).pop(), storyToken: story.story_token, source: path, displayName: displayName, identifier: identifier, labels: labels});
+    const task = this.beginTask({kind: kind, name: triggerContext.name || path.split(/[\\/]/).pop() || '所选素材', storyToken: story.story_token, source: path, fileToken: fileToken, displayName: displayName, identifier: identifier, labels: labels});
     if (this.options.onToast) this.options.onToast('已开始导入素材');
-    return this.runImport(task, {source: path, displayName: displayName, identifier: identifier, labels: labels});
+    return this.runImport(task, {source: path, fileToken: fileToken, displayName: displayName, identifier: identifier, labels: labels});
   };
   StoryAssetStrip.prototype.runImport = async function (task, details) {
     const story = currentStory();
@@ -385,6 +413,16 @@
       const result = await exports.Api.request('/api/assets/register', exports.Api.json('POST', Object.assign(payload, {story_token: task.storyToken})));
       if (!currentStory() || currentStory().story_token !== task.storyToken) return null;
       if (!result.ok || result.status === 'rejected') { this.updateTask(task.id, {state: 'failed', code: 'validation_failed', message: (((result.issues || [])[0] || {}).message || '文件未通过检查')}); return null; }
+      if (exports.dispatchEvent && typeof CustomEvent === 'function') {
+        exports.dispatchEvent(new CustomEvent('storyassets:imported', {detail: {
+          identity: {
+            kind: String(result.kind || validation.kind || task.kind),
+            aa_key: result.aa_key === undefined ? validation.aa_key : result.aa_key,
+            sha256: String(result.sha256 || validation.sha256 || '')
+          },
+          story_token: task.storyToken
+        }}));
+      }
       if (result.job_id) { this.updateTask(task.id, {state: 'registering', jobId: result.job_id}); this.recoverTasks(task.storyToken); return result; }
       if (result.background_analysis && result.background_analysis.queued && result.background_analysis.job_id) {
         this.updateTask(task.id, {state: 'labeling', jobId: result.background_analysis.job_id});

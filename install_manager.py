@@ -187,6 +187,37 @@ def _bundle_character_ids(project_dir: Path) -> set[str]:
     }
 
 
+def _bundle_character_spine_paths(project_dir: Path) -> Dict[str, list[str]]:
+    paths: Dict[str, list[str]] = {}
+    for row in _bundle_resource_index(project_dir).get("characters", []):
+        identifier = str(row.get("identifier") or "")
+        if not identifier:
+            continue
+        values = [row.get("spine")]
+        values.extend(
+            variant.get("spine")
+            for variant in row.get("face_capabilities", [])
+            if isinstance(variant, dict)
+        )
+        paths[identifier] = [str(value) for value in values if str(value or "").strip()]
+    return paths
+
+
+def _manifest_character_has_assets(root: Path, row: Dict[str, Any]) -> bool:
+    spine = _safe_manifest_relative(row.get("SpinePortraitPath"), "characters")
+    if spine is None or len(spine.parts) < 3:
+        return False
+    base = root.joinpath(*spine.parts)
+    if not all(Path(str(base) + suffix).is_file() for suffix in (".skel", ".atlas", ".png")):
+        return False
+    avatar = row.get("SmallPortraitPath")
+    if avatar:
+        avatar_rel = _safe_manifest_relative(avatar, "characters")
+        if avatar_rel is None or not root.joinpath(*avatar_rel.parts).is_file():
+            return False
+    return True
+
+
 def _bundle_custom_backgrounds(project_dir: Path) -> set[str]:
     labels = _bundle_resource_index(project_dir).get("bg_label", {})
     return set(labels) if isinstance(labels, dict) else set()
@@ -389,6 +420,7 @@ def _repair_install_assets(
         for row in manifest["CharacterOverrides"]
         if row.get("Identifier")
     }
+    bundle_spine_paths = _bundle_character_spine_paths(bundle_project_dir)
     physical_identifiers = set()
     for root in (project_dir, save_dir):
         directory = root / "characters"
@@ -398,8 +430,38 @@ def _repair_install_assets(
             )
     official_identifiers = _bundle_character_ids(bundle_project_dir)
     for identifier in sorted(physical_identifiers | referenced_characters):
-        if identifier in by_identifier or identifier in official_identifiers:
+        existing = by_identifier.get(identifier)
+        if existing is not None and (
+            _manifest_character_has_assets(project_dir, existing)
+            or _manifest_character_has_assets(save_dir, existing)
+        ):
             continue
+        if identifier in official_identifiers and existing is None:
+            continue
+        if existing is not None and not existing.get("SpinePortraitPath"):
+            for value in bundle_spine_paths.get(identifier, []):
+                spine = _safe_manifest_relative(value, "characters")
+                if (
+                    spine is None
+                    or len(spine.parts) < 3
+                    or spine.parts[1] != identifier
+                ):
+                    continue
+                recovered = dict(existing)
+                recovered["SpinePortraitPath"] = str(spine)
+                avatar = PureWindowsPath(*spine.parts[:-1], spine.name + "-avatar.png")
+                recovered["SmallPortraitPath"] = str(avatar) if all(
+                    root.joinpath(*avatar.parts).is_file()
+                    for root in (project_dir, save_dir)
+                ) else None
+                if all(
+                    _manifest_character_has_assets(root, recovered)
+                    for root in (project_dir, save_dir)
+                ):
+                    existing.update(recovered)
+                    break
+            if existing.get("SpinePortraitPath"):
+                continue
         existing_directories = [
             root / "characters" / identifier
             for root in (project_dir, save_dir)
@@ -426,7 +488,10 @@ def _repair_install_assets(
             project_dir / "characters" / identifier,
             save_dir / "characters" / identifier,
         )
-        manifest["CharacterOverrides"].append(row)
+        if existing is None:
+            manifest["CharacterOverrides"].append(row)
+        else:
+            existing.update(row)
         by_identifier[identifier] = row
 
     unresolved = sorted(

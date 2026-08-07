@@ -17,12 +17,23 @@ from playwright.sync_api import sync_playwright
 
 
 HERE = Path(__file__).resolve().parents[1]
+CHROMIUM_UNSAFE_PORTS = {
+    1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53,
+    69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115,
+    117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512,
+    513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587,
+    601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045,
+    5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080,
+}
 
 
 def _free_port():
-    with closing(socket.socket()) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+    while True:
+        with closing(socket.socket()) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        if port not in CHROMIUM_UNSAFE_PORTS:
+            return port
 
 
 @pytest.fixture(scope="module")
@@ -143,6 +154,215 @@ def test_narrow_workbench_detail_return_and_tasks_remain_reachable(browser, app_
         page.close()
 
 
+@pytest.mark.parametrize("width,mode", [(1200, "local"), (390, "history")])
+def test_unified_workbench_import_refreshes_and_keeps_layout_stable(browser, app_url, tmp_path, width, mode):
+    page = browser.new_page(viewport={"width": width, "height": 820})
+    errors, imported = [], {"done": False}
+
+    def catalog():
+        values = [ASSETS["backgrounds"][0]]
+        if imported["done"]:
+            values.append({
+                "kind": "background", "aa_key": "new_rain", "sha256": "new-digest",
+                "name": "新雨夜背景", "registered_in_current": True, "preview_available": False,
+                "copies": [{"copy_token": "copy-new", "registered_at": "2026-08-07T08:00:00Z"}],
+                "imported_at": "2026-08-07T08:00:00Z", "details": {"resolution": "1920x1080"},
+            })
+        return {"characters": [], "backgrounds": values, "sounds": [], "bgms": []}
+
+    def route_api(route):
+        path = route.request.url.split("/api/", 1)[-1].split("?", 1)[0]
+        if path == "assets/library":
+            body = catalog()
+        elif path == "assets/host":
+            body = {
+                "location_token": "asset-root", "parent_token": "", "roots": [], "breadcrumbs": [],
+                "entries": [{"entry_token": "entry-bg", "kind": "file", "name": "rain.png", "type": "PNG", "size": 42}],
+            }
+        elif path == "assets/select":
+            body = {"file_token": "picked-bg", "name": "rain.png", "size": 42}
+        elif path == "assets/validate":
+            body = {"ok": True, "kind": "background", "aa_key": "new_rain", "sha256": "new-digest"}
+        elif path == "assets/register":
+            imported["done"] = True
+            body = {"ok": True, "status": "registered", "kind": "background", "aa_key": "new_rain", "sha256": "new-digest"}
+        elif path == "history/projects":
+            body = [{"history_token": "history-1", "project": "旧剧情"}]
+        elif path == "history/assets":
+            body = [{"history_asset_token": "history-bg", "kind": "background", "name": "新雨夜背景", "aa_key": "new_rain", "sha256": "new-digest", "project": "旧剧情", "imported_at": "2026-08-07T08:00:00Z"}]
+        elif path == "story/assets/copy":
+            imported["done"] = True
+            body = {"ok": True, "kind": "background", "aa_key": "new_rain", "sha256": "new-digest"}
+        elif path == "story/assets":
+            body = {"characters": [], "backgrounds": [], "sounds": [], "bgms": [], "counts": {}}
+        elif path in {"stories/recent", "drafts", "backgrounds"}:
+            body = []
+        elif path == "llm/profiles":
+            body = {"profiles": []}
+        elif path == "setup/status":
+            body = {"aa": {"connected": True}, "database": {"ready": True}, "model": {"configured": False}}
+        elif path == "state":
+            body = {"stats": {}}
+        else:
+            body = {}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body, ensure_ascii=False))
+
+    try:
+        page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.route("**/api/**", route_api)
+        page.goto(app_url, wait_until="networkidle")
+        page.evaluate("""window.StoryStore.set({story_token:'story-1',project:'当前剧情'});
+          window.openAssetWorkbench({origin:'topbar',story_token:'story-1'});""")
+        page.locator(".asset-workbench-row").first.wait_for()
+        page.locator("[data-workbench-filter='sort']").select_option("name-asc")
+        page.locator("#assetWorkbenchImport").click()
+        dialog = page.locator("#assetImportDialog")
+        dialog.wait_for(state="visible")
+        dialog.get_by_role("button", name="背景", exact=True).click()
+        if mode == "local":
+            dialog.get_by_role("button", name="选择文件", exact=True).click()
+            picker = dialog.locator("#assetImportFilePicker")
+            picker.locator(".story-picker-entry", has_text="rain.png").click()
+            picker.locator("[data-picker-role='open']").click()
+            dialog.locator("#assetImportSubmit").click()
+        else:
+            dialog.get_by_role("button", name="从历史导入", exact=True).click()
+            dialog.get_by_role("button", name="复制到当前剧情", exact=True).click()
+        page.locator(".asset-workbench-row", has_text="新雨夜背景").wait_for()
+        assert page.locator("[data-workbench-filter='sort']").input_value() == "name-asc"
+        assert page.evaluate("window.AssetWorkbench.selected().aa_key") == "new_rain"
+        assert page.evaluate("document.documentElement.scrollWidth") <= width
+        page.screenshot(path=str(tmp_path / f"asset-import-{mode}-{width}.png"), full_page=True)
+    finally:
+        page.close()
+
+    assert errors == []
+
+
+@pytest.mark.parametrize("width", [1200, 390])
+def test_preflight_scene_chain_and_generation_prompt_fit_viewport(browser, app_url, tmp_path, width):
+    page = browser.new_page(viewport={"width": width, "height": 760})
+    errors = []
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.on("pageerror", lambda error: errors.append(str(error)))
+
+    def route_api(route):
+        path = route.request.url.split("/api/", 1)[-1].split("?", 1)[0]
+        if path in {"stories/recent", "drafts", "backgrounds"}:
+            body = []
+        elif path == "llm/profiles":
+            body = {"profiles": []}
+        elif path == "setup/status":
+            body = {"aa": {"connected": True}, "database": {"ready": True}, "model": {"configured": False}}
+        elif path == "state":
+            body = {"stats": {}}
+        else:
+            body = {}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body, ensure_ascii=False))
+
+    try:
+        page.route("**/api/**", route_api)
+        page.goto(app_url, wait_until="networkidle")
+        assert page.locator("#s2, #s3").count() == 0
+        assert page.locator("#s4 .num").inner_text() == "3"
+        page.evaluate("""window.AppRuntime.renderPreflight({
+          ai_status:'completed', usage_chain_status:'completed', characters:[], assets:[], issues:[],
+          usage_chain:[{segment:'深夜抵达与初次会面',location:'基沃托斯郊外的雨夜车站候车厅',start:'第 1 行',end:'第 18 行',evidence:'雨水拍打玻璃，凯伊推开候车厅的门。',needs:[
+            {kind:'background',name:'雨夜车站候车厅',status:'approximate',location:'第 1 行',reason:'官方背景库只有普通车站，缺少雨夜候车厅细节',confidence:.93,generation_prompt:'请生成一张用于剧情演出的日系二次元游戏背景图。\\n场景：基沃托斯郊外的雨夜车站候车厅。\\n横向 16:9，无人物、无文字、无水印。',candidates:[{aa_key:'BG_Station',label:'Station',confidence:.70,reason:'普通车站，缺少雨夜候车厅细节',preview_available:false}]},
+            {kind:'bgm',name:'克制而略带不安的夜间氛围',status:'unsupported',location:'第 1 行',reason:'当前版本待验证',confidence:.68},
+            {kind:'sound',name:'雨声与推门声',status:'missing',location:'第 2 行',reason:'正文包含明确的环境声和动作',confidence:.88}
+          ]}]
+        })""")
+        workflow = page.locator(".usage-custom-background")
+        assert workflow.evaluate("el => !el.open")
+        workflow.locator("summary").click()
+        assert workflow.evaluate("el => el.open")
+        assert workflow.locator("[data-usage-action]").count() == 4
+        page.screenshot(path=str(tmp_path / f"preflight-chain-workflow-{width}.png"), full_page=True)
+        trigger = page.locator("[data-usage-action='generate-prompt']")
+        trigger.click()
+        dialog = page.locator("#mGenerationPrompt .box")
+        dialog.wait_for(state="visible")
+        page.screenshot(path=str(tmp_path / f"preflight-chain-prompt-{width}.png"), full_page=True)
+
+        assert page.evaluate("document.documentElement.scrollWidth") <= width
+        assert page.locator("#preflightScenePlan").evaluate("el => el.scrollWidth <= el.clientWidth")
+        assert page.locator("#generationPromptText").evaluate("el => el.scrollWidth <= el.clientWidth")
+        box = dialog.bounding_box()
+        assert box["x"] >= 0 and box["x"] + box["width"] <= width
+        assert "雨夜车站候车厅" in page.locator("#generationPromptText").input_value()
+        assert errors == []
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("width", [1200, 390])
+def test_story_asset_import_controls_fit_without_a_duplicate_type_selector(browser, app_url, tmp_path, width):
+    page = browser.new_page(viewport={"width": width, "height": 760})
+
+    def route_api(route):
+        path = route.request.url.split("/api/", 1)[-1].split("?", 1)[0]
+        if path in {"stories/recent", "drafts", "backgrounds"}:
+            body = []
+        elif path == "llm/profiles":
+            body = {"profiles": []}
+        elif path == "setup/status":
+            body = {"aa": {"connected": True}, "database": {"ready": True}, "model": {"configured": False}}
+        elif path == "state":
+            body = {"stats": {}}
+        else:
+            body = {}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body, ensure_ascii=False))
+
+    try:
+        page.route("**/api/**", route_api)
+        page.goto(app_url, wait_until="networkidle")
+        page.evaluate("""window.StoryStore.set({story_token:'story-1',project:'测试'});
+          window.StoryAssets.items={characters:[],backgrounds:[],sounds:[],bgms:[],counts:{}};
+          window.StoryAssets.filter='all';window.StoryAssets.render();""")
+        controls = page.locator("#storyAssetStrip .asset-strip-controls")
+        selector = controls.locator(".asset-import-kind")
+        page.screenshot(path=str(tmp_path / f"story-asset-import-controls-{width}.png"), full_page=True)
+
+        assert selector.count() == 0
+        assert controls.locator(".asset-import-history").count() == 0
+        assert controls.locator(".asset-import-local").count() == 0
+        controls.get_by_role("button", name="背景", exact=True).click()
+        assert controls.get_by_role("button", name="从历史导入背景", exact=True).is_visible()
+        assert controls.get_by_role("button", name="从本地导入背景", exact=True).is_visible()
+        assert page.evaluate("document.documentElement.scrollWidth") <= width
+        assert controls.evaluate("el => el.scrollWidth <= el.clientWidth")
+        topbar_library = page.locator(".topbar-actions [data-library-action='open']")
+        assert topbar_library.evaluate("""el => {const range=document.createRange();range.selectNodeContents(el);return range.getClientRects().length;}""") == 1
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("width", [1200, 390])
+def test_visual_background_label_editor_is_reachable_without_overflow(
+    browser, app_url, tmp_path, width
+):
+    """Background semantics must remain editable on desktop and the narrow workbench."""
+    page = browser.new_page()
+    try:
+        _open_workbench(page, app_url, width, tmp_path)
+        page.get_by_role("button", name="背景", exact=True).click()
+        page.locator(".asset-workbench-row").click()
+        editor = page.locator(".background-label-editor")
+        editor.wait_for()
+        fields = editor.locator("[data-background-label-field]")
+        assert fields.count() == 9
+        assert editor.locator("[data-background-label-field='place']").input_value() == "屋顶"
+        assert editor.get_by_role("button", name="AI 识别场景", exact=True).is_visible()
+        assert editor.get_by_role("button", name="保存标注", exact=True).is_visible()
+        assert editor.evaluate("el => el.scrollWidth <= el.clientWidth")
+        assert page.evaluate("document.documentElement.scrollWidth") <= width
+        page.screenshot(path=str(tmp_path / f"background-label-editor-{width}.png"), full_page=True)
+    finally:
+        page.close()
+
+
 def test_real_browser_workbench_preview_copy_face_flow_has_no_console_errors(browser, app_url, tmp_path):
     page = browser.new_page(viewport={"width": 1200, "height": 900})
     errors = []
@@ -230,25 +450,3 @@ def test_real_browser_workbench_preview_copy_face_flow_has_no_console_errors(bro
 
     assert all(phase in phases for phase in ("正在校验", "正在复制", "正在登记", "本章已登记"))
     assert errors == []
-@pytest.mark.parametrize("width", [1200, 390])
-def test_visual_background_label_editor_is_reachable_without_overflow(
-    browser, app_url, tmp_path, width
-):
-    """Background semantics must remain editable on desktop and the narrow workbench."""
-    page = browser.new_page()
-    try:
-        _open_workbench(page, app_url, width, tmp_path)
-        page.get_by_role("button", name="背景", exact=True).click()
-        page.locator(".asset-workbench-row").click()
-        editor = page.locator(".background-label-editor")
-        editor.wait_for()
-        fields = editor.locator("[data-background-label-field]")
-        assert fields.count() == 9
-        assert editor.locator("[data-background-label-field='place']").input_value() == "屋顶"
-        assert editor.get_by_role("button", name="AI 识别场景", exact=True).is_visible()
-        assert editor.get_by_role("button", name="保存标注", exact=True).is_visible()
-        assert editor.evaluate("el => el.scrollWidth <= el.clientWidth")
-        assert page.evaluate("document.documentElement.scrollWidth") <= width
-        page.screenshot(path=str(tmp_path / f"background-label-editor-{width}.png"), full_page=True)
-    finally:
-        page.close()

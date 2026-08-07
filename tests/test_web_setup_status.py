@@ -24,6 +24,7 @@ def test_setup_status_reports_readiness_without_secret_fields(
     tmp_path,
     monkeypatch,
 ):
+    monkeypatch.setattr(webui, "HERE", str(tmp_path))
     data = tmp_path / "data"
     (data / "projects").mkdir(parents=True)
     database = tmp_path / "assets.db"

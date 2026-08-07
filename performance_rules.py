@@ -5,7 +5,7 @@ import tables
 
 
 def enforce_focusline_shots(scripts):
-    """FocusLine is legal only for one visible portrait and always implies closeup."""
+    """Keep FocusLine only on an existing solo closeup in the center slot."""
     focusline = tables.BGEFFECT["BG_FocusLine"]
     for script in scripts:
         if script.get("bgEffect") != focusline:
@@ -15,27 +15,13 @@ def enforce_focusline_shots(scripts):
             character for character in characters[1:]
             if character.get("name")
         ]
-        speaker_slot = int(script.get("speakerSlotNum") or 0)
-        speaker = (
-            characters[speaker_slot]
-            if 0 < speaker_slot < len(characters)
-            and characters[speaker_slot].get("name")
-            else None
-        )
-        focal = speaker or (visible[0] if len(visible) == 1 else None)
-        if focal is None:
+        center = characters[3] if len(characters) > 3 else None
+        if (
+            len(visible) != 1
+            or visible[0] is not center
+            or not (int(center.get("shapeOverride") or 0) & 4)
+        ):
             script["bgEffect"] = 0
-            continue
-        for character in visible:
-            if character is not focal:
-                character["name"] = ""
-        focal["shapeOverride"] = int(focal.get("shapeOverride") or 0) | 4
-        highlights = script.get("highlightedSlotNums", {}).get("$values")
-        if isinstance(highlights, list):
-            highlights[:] = [
-                slot for slot in highlights
-                if slot == speaker_slot and characters[slot].get("name")
-            ]
     return scripts
 
 

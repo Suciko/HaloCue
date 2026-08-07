@@ -25,6 +25,20 @@
       return new Intl.DateTimeFormat('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false}).format(date);
     } catch (_) { return value; }
   }
+  function formatSourceSize(value) {
+    const size = Number(value);
+    if (!Number.isFinite(size)) return '';
+    if (size < 1024) return size + ' B';
+    if (size < 1024 * 1024) return (size / 1024).toFixed(size < 10 * 1024 ? 1 : 0) + ' KB';
+    return (size / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+  function formatSourceTime(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    try { return date.toLocaleString('zh-CN', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false}); }
+    catch (_) { return value; }
+  }
 
   function StoryContextBar(root) {
     this.root = root;
@@ -38,12 +52,20 @@
   StoryContextBar.prototype.render = function (story) {
     this.root.classList.toggle('is-empty', !story);
     if (this.status) this.status.hidden = !story;
-    text(this.name, story ? story.source_name || story.project : '尚未打开剧情');
-    text(this.meta, story ? ('AA 工程：' + story.project) : '打开一份剧本，就会建立只属于它的工作区');
+    text(this.name, story ? story.source_display || story.source_name || story.project : '尚未打开剧情');
+    if (story) {
+      const details = [
+        'AA 工程：' + story.project,
+        story.source_type ? '文件类型：' + story.source_type : '',
+        formatSourceSize(story.source_size) ? '大小：' + formatSourceSize(story.source_size) : '',
+        formatSourceTime(story.source_modified) ? '修改：' + formatSourceTime(story.source_modified) : '',
+      ].filter(Boolean);
+      text(this.meta, details.join(' · '));
+    } else text(this.meta, '打开一份剧本，就会建立只属于它的工作区');
     text(this.action, story ? '更换剧情' : '打开剧情文件');
   };
 
-  function RecentStories(root, onOpen) { this.root = root; this.onOpen = onOpen; this.refreshGeneration = 0; }
+  function RecentStories(root, onOpen) { this.root = root; this.onOpen = onOpen; this.refreshGeneration = 0; this.expanded = false; }
   RecentStories.prototype.refresh = async function () {
     const generation = ++this.refreshGeneration;
     try {
@@ -54,20 +76,35 @@
     const title = element('h2', '', '最近使用的剧情');
     const list = element('div', 'recent-story-list');
     const onOpen = this.onOpen;
-    stories.forEach(function (story) {
+    const visibleStories = this.expanded ? stories : stories.slice(0, 3);
+    visibleStories.forEach(function (story) {
       const entry = element('button', 'ghost recent-story');
       entry.type = 'button';
       const detail = element('span', 'recent-story-detail');
-      detail.append(
-        element('b', '', story.source_name || story.project),
+      const metadata = [
+        story.source_type ? '文件类型：' + story.source_type : '',
+        formatSourceSize(story.source_size) ? '大小：' + formatSourceSize(story.source_size) : '',
+        formatSourceTime(story.source_modified) ? '修改：' + formatSourceTime(story.source_modified) : '',
+      ].filter(Boolean).join(' · ');
+      const detailChildren = [
+        element('b', '', story.source_display || story.source_name || story.project),
         element('span', 'dim', 'AA 工程：' + story.project),
-        element('span', 'dim', '最近打开：' + formatRecentTime(story.last_opened_at))
-      );
+      ];
+      if (metadata) detailChildren.push(element('span', 'dim', metadata));
+      detailChildren.push(element('span', 'dim', '最近打开：' + formatRecentTime(story.last_opened_at)));
+      detail.append.apply(detail, detailChildren);
       const button = element('span', 'recent-story-button', '继续');
-      entry.addEventListener('click', function () { onOpen(story); });
+      entry.addEventListener('click', function () { return onOpen(story); });
       entry.append(detail, button);
       list.appendChild(entry);
     });
+    if (stories.length > 3) {
+      const toggle = element('button', 'ghost recent-story-more', this.expanded ? '收起' : '打开查看更多');
+      toggle.type = 'button';
+      const self = this;
+      toggle.addEventListener('click', function () { self.expanded = !self.expanded; self.refresh(); });
+      list.appendChild(toggle);
+    }
     this.root.append(title, list);
     } catch (error) {
       if (generation !== this.refreshGeneration) return;
@@ -80,15 +117,15 @@
   StoryAssetStrip.prototype.clear = function () {
     this.root.textContent = '';
     this.root.classList.add('is-empty');
-    this.root.appendChild(element('p', 'dim', '打开剧情后显示共享素材。'));
+    this.root.appendChild(element('p', 'dim', '打开剧情后显示当前剧情的自定义素材。'));
   };
   StoryAssetStrip.prototype.load = async function (storyToken) {
     const story = store.get();
     if (!story || story.story_token !== storyToken) return;
     this.root.textContent = '';
     this.root.classList.remove('is-empty');
-    const heading = element('h2', '', '本剧情素材');
-    const summary = element('p', 'dim', '正在读取共享素材…');
+    const heading = element('h2', '', '本剧情自定义素材');
+    const summary = element('p', 'dim', '正在读取自定义素材…');
     this.root.append(heading, summary);
     try {
       const data = await exports.Api.request('/api/story/assets?story_token=' + encodeURIComponent(storyToken));

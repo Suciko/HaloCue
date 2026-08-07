@@ -9,6 +9,7 @@ from annotate import (
     normalize_contextual_sounds,
     normalize_emoticon_density,
 )
+from direction_rules import infer_direction_cues, normalize_direction_density
 from camera import plan_camera
 from dialogue_pacing import split_strong_dialogue_items
 from performance_rules import enforce_focusline_shots, enforce_persistent_closeups
@@ -17,6 +18,36 @@ from prompt import build_rules
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_semantic_direction_cues_cover_comedy_reaction_examples():
+    assert infer_direction_cues("所以我才想问，你为什么已经到了！？")["emo"] == "惊叹"
+    assert infer_direction_cues("被天气、路线、店铺营业时间……淘汰了。") ["emo"] == "冒烟"
+    assert infer_direction_cues("当然吃！不然不是浪费吗！只是……")["act"] == "jump"
+
+
+def test_hophop_is_preserved_for_an_escalating_steam_sequence():
+    items = [
+        {"kind": "line", "who": "凯伊", "emo": "冒烟"},
+        {"kind": "line", "who": "凯伊", "emo": "冒烟", "act": "hophop"},
+    ]
+
+    normalize_direction_density(items)
+
+    assert items[1]["emo"] == "冒烟"
+    assert items[1]["act"] == "hophop"
+
+
+def test_adjacent_distinct_comedy_emoticons_are_preserved():
+    items = [
+        {"kind": "line", "who": "凯伊", "emo": "惊叹"},
+        {"kind": "line", "who": "凯伊", "emo": "冒烟"},
+    ]
+
+    normalize_direction_density(items)
+
+    assert items[0]["emo"] == "惊叹"
+    assert items[1]["emo"] == "冒烟"
 
 
 def _script(names, *, bg_effect=0, shapes=None, speaker_slot=0):
@@ -35,32 +66,47 @@ def _script(names, *, bg_effect=0, shapes=None, speaker_slot=0):
     }
 
 
-def test_focusline_turns_a_multi_character_shot_into_speaker_solo():
+def test_focusline_is_removed_from_a_side_closeup_without_mutating_the_cast():
     script = _script(
         {1: "kei", 3: "momoi"},
         bg_effect=tables.BGEFFECT["BG_FocusLine"],
+        shapes={1: 4},
         speaker_slot=1,
     )
 
     enforce_focusline_shots([script])
 
-    assert script["bgEffect"] == tables.BGEFFECT["BG_FocusLine"]
+    assert script["bgEffect"] == 0
     assert script["characters"]["$values"][1]["name"] == "kei"
     assert script["characters"]["$values"][1]["shapeOverride"] == 4
-    assert script["characters"]["$values"][3]["name"] == ""
+    assert script["characters"]["$values"][3]["name"] == "momoi"
 
 
-def test_focusline_forces_closeup_on_the_only_visible_character():
+def test_focusline_is_removed_when_the_center_character_is_not_already_closeup():
     script = _script(
-        {2: "kei"},
+        {3: "kei"},
         bg_effect=tables.BGEFFECT["BG_FocusLine"],
-        shapes={2: 1},
+        shapes={3: 1},
+    )
+
+    enforce_focusline_shots([script])
+
+    assert script["bgEffect"] == 0
+    assert script["characters"]["$values"][3]["shapeOverride"] == 1
+
+
+def test_focusline_is_kept_only_for_an_existing_centered_solo_closeup():
+    script = _script(
+        {3: "kei"},
+        bg_effect=tables.BGEFFECT["BG_FocusLine"],
+        shapes={3: 5},
+        speaker_slot=3,
     )
 
     enforce_focusline_shots([script])
 
     assert script["bgEffect"] == tables.BGEFFECT["BG_FocusLine"]
-    assert script["characters"]["$values"][2]["shapeOverride"] == 5
+    assert script["characters"]["$values"][3]["shapeOverride"] == 5
 
 
 def test_closeup_persists_until_the_focal_character_leaves_the_shot():
@@ -91,7 +137,7 @@ def test_scene_break_clears_previous_cast_before_the_next_speaker():
     assert shots[3] == ["kei"]
 
 
-def test_first_portrait_dialogue_is_already_present_even_after_opening_narration():
+def test_first_portrait_dialogue_fades_even_after_opening_narration():
     events = [
         {
             "k": "line", "who": "旁白", "text": "商店街入口。",
@@ -120,7 +166,7 @@ def test_first_portrait_dialogue_is_already_present_even_after_opening_narration
         if character["name"] == "kei"
     )
 
-    assert kei["appear"] == 0
+    assert kei["appear"] == 3
 
 
 def test_strong_emotional_dialogue_splits_at_existing_em_dash_without_rewriting():
@@ -206,12 +252,13 @@ def test_contextual_sound_fallback_never_overwrites_the_models_registered_choice
     assert items[0]["se"] == "SE_Clothes_01"
 
 
-def test_expression_prompt_prefers_continuity_and_safe_repetition_over_jitter():
+def test_expression_prompt_prefers_a_suitable_change_and_keeps_only_as_fallback():
     rules = build_rules()
 
-    assert "重复一个合适表情，优于换成语义不对的表情" in rules
-    assert "检查上一表情到下一表情的过渡" in rules
-    assert "不要为了多样性机械轮换" in rules
+    assert "优先选择一个与上一句不同、又符合当前语义的已标注表情" in rules
+    assert "即使相邻台词的情绪接近" in rules
+    assert "实在没有其他合适候选时，才保持上一表情" in rules
+    assert "不要为了变化而换成明显不合语境的表情" in rules
 
 
 def test_expression_prompt_treats_usage_context_as_guidance_not_trigger():

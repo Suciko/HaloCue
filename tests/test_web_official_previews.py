@@ -1,3 +1,4 @@
+import io
 from pathlib import Path
 import contextlib
 import json
@@ -93,6 +94,18 @@ def test_character_avatar_prefers_custom_then_uses_official(
     assert webui.character_avatar_path(avatar_key, spine) == custom
 
 
+def test_character_avatar_uses_preview_matching_official_spine(
+    tmp_path,
+    monkeypatch,
+):
+    store = _configure_preview_store(tmp_path, monkeypatch)
+    monkeypatch.setitem(webui.CFG, "overrides", str(tmp_path / "empty"))
+
+    assert webui.character_avatar_path(
+        "", "UIs/03_Scenario/02_Character/CharacterSpine_Hifumi"
+    ) == (store.root / "official-avatar.png")
+
+
 def test_character_list_exposes_avatar_route_only_when_preview_exists(
     tmp_path,
     monkeypatch,
@@ -101,6 +114,8 @@ def test_character_list_exposes_avatar_route_only_when_preview_exists(
     monkeypatch.setitem(webui.CFG, "overrides", str(tmp_path / "empty"))
     monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
     con = assetdb.connect(webui.DB)
+    import asset_catalog
+    asset_catalog.migrate(con)
     assetdb.import_index(con, {"characters": [{
         "identifier": "hifumi",
         "name": "日步美",
@@ -122,6 +137,165 @@ def test_character_list_exposes_avatar_route_only_when_preview_exists(
         "/Student_Portrait_Hifumi"
     )
     assert rows["missing"]["avatar"] == ""
+
+
+def test_character_list_orders_official_default_before_outfit_variant(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    con = assetdb.connect(webui.DB)
+    assetdb.import_index(con, {"characters": [
+        {"identifier": "winter", "name": "爱丽丝", "spine": "characters/NP0234_spr/NP0234_spr", "avatar": "", "faces": []},
+        {"identifier": "아리스N", "name": "愛麗絲", "spine": "UIs/03_Scenario/02_Character/CharacterSpine_aris_noweapon", "avatar": "Student_Portrait_Aris", "faces": []},
+        {"identifier": "아리스", "name": "愛麗絲", "spine": "UIs/03_Scenario/02_Character/CharacterSpine_aris", "avatar": "Student_Portrait_Aris", "faces": []},
+    ]})
+    con.execute("UPDATE character SET name='爱丽丝', source='overrides' WHERE ident='winter'")
+    con.execute("UPDATE character SET name='愛麗絲', source='observed' WHERE ident IN ('아리스N','아리스')")
+    con.commit()
+    con.close()
+    rows = webui.list_characters("爱丽丝", 20)
+    assert rows[0]["ident"] == "아리스"
+
+
+def test_character_list_uses_registered_custom_avatar_when_catalog_row_has_no_avatar(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    con = assetdb.connect(webui.DB)
+    import asset_catalog
+    asset_catalog.migrate(con)
+    assetdb.import_index(con, {"characters": [{
+        "identifier": "custom-kei", "name": "凯伊", "avatar": "", "spine": "", "faces": [],
+    }]})
+    installed = tmp_path / "projects" / "chapter" / "characters" / "custom-kei"
+    _make_image(installed / "kei-avatar.png", "red")
+    con.execute(
+        """INSERT INTO asset_install
+        (scope,kind,aa_key,display_name,source_path,sha256,status,install_path,metadata_json)
+        VALUES (?,?,?,?,?,?,?,?,?)""",
+        (
+            str(installed.parents[2]), "character", "custom-kei", "凯伊", str(installed), "digest",
+            "registered", str(installed), json.dumps({
+                "files": {"avatar": "private/source/kei-avatar.png"},
+                "catalog_source": "history_import",
+            }),
+        ),
+    )
+    con.commit()
+    con.close()
+
+    row = webui.list_characters("凯伊")[0]
+
+    assert row["avatar"] == "/thumb/av/custom-kei"
+    assert str(tmp_path) not in repr(row)
+
+
+def test_character_list_uses_catalog_avatar_when_database_row_lacks_it(
+    tmp_path,
+    monkeypatch,
+):
+    store = _configure_preview_store(tmp_path, monkeypatch)
+    catalog = tmp_path / "aa_resources.json"
+    catalog.write_text(json.dumps({"characters": [{
+        "identifier": "observed-hifumi", "name": "Hifumi",
+        "spine": "UIs/03_Scenario/02_Character/CharacterSpine_Hifumi",
+        "avatar": "UIs/01_Common/01_Character/Student_Portrait_Hifumi",
+    }]}), encoding="utf-8")
+    monkeypatch.setattr(webui, "INDEX", str(catalog))
+    monkeypatch.setattr(
+        webui, "CHARACTER_CATALOG_METADATA", {"stamp": None, "items": {}},
+        raising=False,
+    )
+    monkeypatch.setitem(webui.CFG, "overrides", str(tmp_path / "empty"))
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    con = assetdb.connect(webui.DB)
+    assetdb.import_index(con, {"characters": [{
+        "identifier": "observed-hifumi", "name": "Hifumi", "avatar": "", "spine": "",
+        "faces": [],
+    }]})
+    con.close()
+
+    row = webui.list_characters("Hifumi")[0]
+
+    assert row["avatar"] == "/thumb/av/Student_Portrait_Hifumi"
+    assert store.root.as_posix() not in repr(row)
+    assert store.root.as_posix() not in repr(row)
+
+
+def test_character_search_returns_default_catalog_identity_for_simplified_alias(
+    tmp_path,
+    monkeypatch,
+):
+    store = _configure_preview_store(tmp_path, monkeypatch)
+    catalog = tmp_path / "aa_resources.json"
+    catalog.write_text(json.dumps({"characters": [{
+        "identifier": "\uc544\ub9ac\uc2a4N", "name": "\u611b\u9e97\u7d72",
+        "spine": "UIs/03_Scenario/02_Character/CharacterSpine_aris_noweapon",
+        "avatar": "UIs/01_Common/01_Character/Student_Portrait_Aris",
+    }]}), encoding="utf-8")
+    monkeypatch.setattr(webui, "INDEX", str(catalog))
+    monkeypatch.setattr(
+        webui, "CHARACTER_CATALOG_METADATA", {"stamp": None, "items": {}},
+        raising=False,
+    )
+    monkeypatch.setitem(webui.CFG, "overrides", str(tmp_path / "empty"))
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    con = assetdb.connect(webui.DB)
+    assetdb.import_index(con, {"characters": [{
+        "identifier": "\uc544\ub9ac\uc2a4N", "name": "\u611b\u9e97\u7d72", "avatar": "", "spine": "",
+        "faces": [],
+    }, {
+        "identifier": "\u7231\u4e3d\u4e1d\uff08\u9632\u5bd2\u670d-\u51ac\u88c5\uff09", "name": "\u7231\u4e3d\u4e1d", "avatar": "", "spine": "characters/winter", "source": "overrides",
+        "faces": [],
+    }]})
+    con.execute(
+        "UPDATE character SET source='overrides' WHERE ident=?",
+        ("\u7231\u4e3d\u4e1d\uff08\u9632\u5bd2\u670d-\u51ac\u88c5\uff09",),
+    )
+    con.execute(
+        "UPDATE character SET source='observed' WHERE ident=?",
+        ("\uc544\ub9ac\uc2a4N",),
+    )
+    assetdb.seed_alias(con)
+    con.close()
+
+    rows = webui.list_characters("\u7231\u4e3d\u4e1d")
+
+    assert rows[0]["ident"] == "\uc544\ub9ac\uc2a4N"
+    assert rows[1]["ident"] == "\u7231\u4e3d\u4e1d\uff08\u9632\u5bd2\u670d-\u51ac\u88c5\uff09"
+
+
+def test_avatar_thumb_keeps_transparent_background_as_png(tmp_path, monkeypatch):
+    source = tmp_path / "portrait.png"
+    image = Image.new("RGBA", (24, 16), (0, 0, 0, 0))
+    image.paste((20, 80, 180, 255), (6, 2, 18, 15))
+    image.save(source)
+    monkeypatch.setattr(webui, "THUMBS", str(tmp_path / "thumbs"))
+
+    data, content_type = webui.avatar_thumb(source, 96, "transparent")
+
+    assert content_type == "image/png"
+    assert data.startswith(b"\x89PNG\r\n\x1a\n")
+    assert Image.open(io.BytesIO(data)).getchannel("A").getextrema()[0] == 0
+
+
+def test_avatar_thumb_preserves_full_transparent_canvas_without_crop(tmp_path, monkeypatch):
+    source = tmp_path / "wide-portrait.png"
+    image = Image.new("RGBA", (240, 80), (0, 0, 0, 0))
+    image.paste((20, 80, 180, 255), (100, 20, 140, 60))
+    image.save(source)
+    monkeypatch.setattr(webui, "THUMBS", str(tmp_path / "thumbs"))
+
+    data, content_type = webui.avatar_thumb(source, 96, "wide")
+
+    out = Image.open(io.BytesIO(data))
+    assert content_type == "image/png"
+    assert out.size == (96, 96)
+    bbox = out.getchannel("A").getbbox()
+    assert bbox is not None
+    assert bbox[0] > 30 and bbox[2] < 66
+    assert bbox[1] > 30 and bbox[3] < 66
 
 
 @contextlib.contextmanager

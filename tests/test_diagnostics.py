@@ -33,6 +33,28 @@ def test_diagnostic_codes_registry():
     assert expected_codes.issubset(set(DIAGNOSTIC_CODES.keys()))
 
 
+def test_blank_node_is_reported_but_separator_is_not():
+    nodes = [
+        DocNode(kind="blank", raw="\n", line_no=2, fields={}),
+        DocNode(
+            kind="separator",
+            raw="---\n",
+            line_no=3,
+            fields={"marker": "---"},
+        ),
+    ]
+
+    diagnostics = validate_script_diagnostics(
+        nodes, {"旁白": {"narrator": True}}, {}
+    )
+
+    assert any(
+        item["code"] == "draft.blank_node" and item["line_no"] == 2
+        for item in diagnostics
+    )
+    assert not any(item["line_no"] == 3 for item in diagnostics)
+
+
 def test_all_diagnostic_codes_triggered():
     cast = {"凯伊": {"id": "kei"}}
     assets = {

@@ -6,6 +6,15 @@ import re
 
 DIRECTION_FIELDS = frozenset({"face", "emo", "act", "fx"})
 STRONG_ACTIONS = frozenset({"jump", "shake", "hophop"})
+COMEDY_EMOTICON_ESCALATIONS = frozenset(
+    {
+        ("疑问", "惊叹"),
+        ("惊叹", "冒烟"),
+        ("冒烟", "怒筋"),
+        ("冷汗", "冒烟"),
+        ("沉默", "惊叹"),
+    }
+)
 
 
 def mark_explicit_directions(item):
@@ -41,6 +50,7 @@ def normalize_emoticon_density(items):
     """Apply balanced emoticon cooldowns while preserving authored fields."""
     dialogue_no = -1
     previous_had_emoticon = False
+    previous_emoticon = None
     last_emoticon = {}
     for item in items:
         if item.get("kind") != "line":
@@ -51,14 +61,28 @@ def normalize_emoticon_density(items):
         if emoticon:
             cooldown = 8 if emoticon == "脸红" else 4
             too_soon = dialogue_no - last_emoticon.get(emoticon, -10_000) <= cooldown
-            if "emo" not in explicit and (previous_had_emoticon or too_soon):
+            escalating_steam = (
+                emoticon == "冒烟"
+                and item.get("act") == "hophop"
+                and previous_had_emoticon
+            )
+            semantic_escalation = (previous_emoticon, emoticon) in COMEDY_EMOTICON_ESCALATIONS
+            if (
+                "emo" not in explicit
+                and (previous_had_emoticon or too_soon)
+                and not semantic_escalation
+                and not escalating_steam
+            ):
                 _remove_automatic_field(item, "emo")
                 previous_had_emoticon = False
+                previous_emoticon = None
             else:
                 last_emoticon[emoticon] = dialogue_no
                 previous_had_emoticon = True
+                previous_emoticon = emoticon
         else:
             previous_had_emoticon = False
+            previous_emoticon = None
 
 
 def normalize_action_density(items):
@@ -95,8 +119,10 @@ def normalize_direction_density(items):
 
 
 def _direction_candidates(text, previous_text=""):
-    del previous_text  # Reserved for contextual rules that need the prior beat.
+    previous_text = re.sub(r"\s+", "", str(previous_text or ""))
     value = re.sub(r"\s+", "", str(text or ""))
+    if re.search(r"[！？!?]$", value) and ("！？" in value or "?!" in value or "!?" in value):
+        return {"emo": ("惊叹", "mixed_surprise_question")}
     if re.fullmatch(r"[…⋯.·]+[!！]+", value):
         return {"emo": ("惊叹", "punctuation_only_exclaim")}
     if (
@@ -119,6 +145,18 @@ def _direction_candidates(text, previous_text=""):
         and ("！" in value or "!" in value)
     ):
         return {"emo": ("冒烟", "irritated_urgent_command")}
+    listed_setback = (
+        "淘汰" in value
+        and ("……" in value or "..." in value)
+        and ("、" in value or "路线" in value or "营业时间" in value)
+    )
+    sustained_complaint = (
+        any(token in value for token in ("没辙", "没办法", "全都", "不会等人"))
+        and ("……" in value or "..." in value or "路线" in value or "营业时间" in value)
+        and any(token in value for token in ("算了", "真的是", "结果", "只能"))
+    )
+    if listed_setback or sustained_complaint:
+        return {"emo": ("冒烟", "sustained_complaint")}
     if (
         len(value) <= 24
         and re.search(r"[!！]{2,}$", value)
@@ -136,6 +174,13 @@ def _direction_candidates(text, previous_text=""):
         )
     ):
         return {"act": ("jump", "forceful_short_rebuttal")}
+    if (
+        len(value) <= 40
+        and re.search(r"[！!。.]", value)
+        and any(token in value for token in ("当然吃", "浪费", "只是", "总、总之", "总总之"))
+        and ("！" in value or "!" in value)
+    ):
+        return {"act": ("jump", "defensive_comedy_reaction")}
     return {}
 
 

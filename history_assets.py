@@ -346,6 +346,9 @@ class HistoryAssetBrowser:
                 copy_token = self._remember_library_copy(copy)
                 item["copies"].append({
                     "chapter": copy.chapter,
+                    "registered_at": asset_catalog._safe_iso_timestamp(
+                        row["registered_at"]
+                    ),
                     "is_current": copy.scope == current_scope,
                     "copy_token": copy_token,
                 })
@@ -358,6 +361,17 @@ class HistoryAssetBrowser:
             for item in groups.values():
                 item["copies"].sort(key=lambda copy: (not copy["is_current"], copy["chapter"].casefold()))
                 item["copy_count"] = len(item["copies"])
+                timed_copies = [
+                    copy for copy in item["copies"] if copy["registered_at"]
+                ]
+                item["imported_at"] = min(
+                    (copy["registered_at"] for copy in timed_copies), default=""
+                )
+                latest = max(
+                    timed_copies, key=lambda copy: copy["registered_at"], default=None
+                )
+                item["last_used_at"] = latest["registered_at"] if latest else ""
+                item["last_used_chapter"] = latest["chapter"] if latest else ""
                 out[bucket[item["kind"]]].append(item)
             for values in out.values():
                 values.sort(key=lambda item: (item["series_name"].casefold(), item["name"].casefold()))

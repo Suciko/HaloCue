@@ -8,10 +8,29 @@ import os
 import threading
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 _TARGET_PREFIX = "AA-AutoWriter/"
 _PROVIDERS = {"openai", "anthropic"}
+MODEL_PRESETS = {
+    "openai": {"label": "OpenAI", "provider": "openai", "base_url": "https://api.openai.com/v1", "model": "gpt-4o", "vision": True, "official_url": "https://openai.com/api/", "api_key_url": "https://platform.openai.com/api-keys"},
+    "anthropic": {"label": "Anthropic", "provider": "anthropic", "base_url": "https://api.anthropic.com", "model": "claude-sonnet-4-5", "vision": True, "official_url": "https://www.anthropic.com/api", "api_key_url": "https://console.anthropic.com/settings/keys"},
+    "gemini": {"label": "Gemini", "provider": "openai", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "model": "gemini-2.5-flash", "vision": True, "official_url": "https://ai.google.dev/gemini-api/docs", "api_key_url": "https://aistudio.google.com/apikey"},
+    "deepseek": {"label": "DeepSeek", "provider": "openai", "base_url": "https://api.deepseek.com/v1", "model": "deepseek-v4-flash", "vision": False, "official_url": "https://www.deepseek.com/", "api_key_url": "https://platform.deepseek.com/api_keys"},
+    "glm": {"label": "GLM / 智谱", "provider": "openai", "base_url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-4.6", "vision": True, "official_url": "https://open.bigmodel.cn/", "api_key_url": "https://open.bigmodel.cn/usercenter/apikeys"},
+    "qwen": {"label": "千问 / 百炼", "provider": "openai", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen-max", "vision": True, "official_url": "https://bailian.console.aliyun.com/", "api_key_url": "https://bailian.console.aliyun.com/?apiKey=1"},
+    "moonshot": {"label": "Kimi / Moonshot", "provider": "openai", "base_url": "https://api.moonshot.cn/v1", "model": "kimi-k2-0905-preview", "vision": False, "official_url": "https://platform.kimi.com/", "api_key_url": "https://platform.kimi.com/console/api-keys"},
+    "siliconflow": {"label": "硅基流动", "provider": "openai", "base_url": "https://api.siliconflow.cn/v1", "model": "deepseek-ai/DeepSeek-V3", "vision": False, "official_url": "https://siliconflow.cn/", "api_key_url": "https://cloud.siliconflow.cn/account/ak"},
+    "openrouter": {"label": "OpenRouter", "provider": "openai", "base_url": "https://openrouter.ai/api/v1", "model": "openai/gpt-4o-mini", "vision": True, "official_url": "https://openrouter.ai/", "api_key_url": "https://openrouter.ai/settings/keys"},
+    "ollama": {"label": "Ollama", "provider": "openai", "base_url": "http://localhost:11434/v1", "model": "llama3.2", "vision": False, "official_url": "https://ollama.com/", "api_key_url": ""},
+    "custom": {"label": "自定义", "provider": "openai", "base_url": "", "model": "", "vision": True, "official_url": "", "api_key_url": ""},
+}
+
+_CAPABILITY_STATUSES = {"untested", "passed", "failed", "unsupported"}
+_VISION_MODES = {"separate", "base", "disabled"}
+_MAX_TOKEN_SOURCES = {"legacy", "api", "catalog", "unknown", "manual"}
+_RECOMMENDATION_SOURCES = {"api", "catalog", "unknown"}
 
 
 class ModelProfileError(ValueError):
@@ -200,21 +219,52 @@ class ModelProfileStore:
     def _target(profile_id: str) -> str:
         return _TARGET_PREFIX + profile_id
 
+    @staticmethod
+    def _connection_target(connection_id: str) -> str:
+        return _TARGET_PREFIX + "connection/" + connection_id
+
+    @staticmethod
+    def _empty_state() -> dict:
+        return {
+            "version": 2,
+            "active_profile_id": "",
+            "profiles": [],
+            "connections": [],
+            "models": [],
+            "assignments": {
+                "base_model_id": "",
+                "vision_mode": "disabled",
+                "vision_model_id": "",
+            },
+        }
+
     def _load(self) -> dict:
         if not self.path.is_file():
-            return {"version": 1, "active_profile_id": "", "profiles": []}
+            return self._empty_state()
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ModelProfileError(f"无法读取模型配置：{exc}") from exc
-        profiles = data.get("profiles")
+        profiles = data.get("profiles", [])
         if not isinstance(profiles, list):
             raise ModelProfileError("模型配置中的 profiles 必须是数组")
-        return {
-            "version": 1,
-            "active_profile_id": str(data.get("active_profile_id") or ""),
-            "profiles": profiles,
-        }
+        state = self._empty_state()
+        state["version"] = int(data.get("version") or 1)
+        state["active_profile_id"] = str(data.get("active_profile_id") or "")
+        state["profiles"] = profiles
+        for key in ("connections", "models"):
+            value = data.get(key, [])
+            if not isinstance(value, list):
+                raise ModelProfileError(f"模型配置中的 {key} 必须是数组")
+            state[key] = value
+        assignments = data.get("assignments")
+        if isinstance(assignments, dict):
+            state["assignments"] = {
+                "base_model_id": str(assignments.get("base_model_id") or ""),
+                "vision_mode": str(assignments.get("vision_mode") or "disabled"),
+                "vision_model_id": str(assignments.get("vision_model_id") or ""),
+            }
+        return state
 
     def _write(self, state: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -247,13 +297,38 @@ class ModelProfileStore:
             raise ModelProfileError("max_tokens 必须是整数") from exc
         if not 1 <= max_tokens <= 1_000_000:
             raise ModelProfileError("max_tokens 必须在 1 到 1000000 之间")
+        max_tokens_source = str(payload.get("max_tokens_source") or "legacy").strip().lower()
+        if max_tokens_source not in _MAX_TOKEN_SOURCES:
+            raise ModelProfileError("invalid max token source")
+        raw_recommended = payload.get("recommended_max_tokens")
+        if raw_recommended in (None, ""):
+            recommended = None
+        else:
+            try:
+                recommended = int(raw_recommended)
+            except (TypeError, ValueError) as exc:
+                raise ModelProfileError("recommended_max_tokens must be an integer") from exc
+            if not 1 <= recommended <= 1_000_000:
+                raise ModelProfileError("recommended_max_tokens out of range")
+        recommended_source = str(payload.get("recommended_source") or "unknown").strip().lower()
+        if recommended_source not in _RECOMMENDATION_SOURCES:
+            raise ModelProfileError("invalid recommendation source")
+        recommended_label = str(payload.get("recommended_label") or "上限未识别").strip()[:120]
+        service_preset = str(payload.get("service_preset") or "custom").strip().lower()
+        if service_preset not in MODEL_PRESETS:
+            raise ModelProfileError("service_preset 无效")
         return {
             "id": profile_id,
             "name": name,
             "provider": provider,
+            "service_preset": service_preset,
             "base_url": str(payload.get("base_url") or "").strip(),
             "model": model,
             "max_tokens": max_tokens,
+            "max_tokens_source": max_tokens_source,
+            "recommended_max_tokens": recommended,
+            "recommended_source": recommended_source,
+            "recommended_label": recommended_label or "上限未识别",
             "vision": bool(payload.get("vision", True)),
         }
 
@@ -265,6 +340,7 @@ class ModelProfileStore:
         return "missing"
 
     def _public(self, record: dict) -> dict:
+        record = self._provenance(record)
         result = {
             key: record.get(key)
             for key in (
@@ -274,7 +350,12 @@ class ModelProfileStore:
                 "base_url",
                 "model",
                 "max_tokens",
+                "max_tokens_source",
+                "recommended_max_tokens",
+                "recommended_source",
+                "recommended_label",
                 "vision",
+                "service_preset",
             )
         }
         result["secret_status"] = self._secret_status(str(record["id"]))
@@ -282,6 +363,373 @@ class ModelProfileStore:
             getattr(self.credentials, "available", False)
         )
         return result
+
+    @staticmethod
+    def _provenance(record: dict) -> dict:
+        """Normalize provenance for old JSON records without rewriting them."""
+        result = dict(record)
+        source = str(result.get("max_tokens_source") or "legacy").strip().lower()
+        result["max_tokens_source"] = source if source in _MAX_TOKEN_SOURCES else "legacy"
+        raw_recommended = result.get("recommended_max_tokens")
+        try:
+            recommended = int(raw_recommended) if raw_recommended not in (None, "") else None
+        except (TypeError, ValueError):
+            recommended = None
+        result["recommended_max_tokens"] = (
+            recommended if recommended and 1 <= recommended <= 1_000_000 else None
+        )
+        recommendation_source = str(result.get("recommended_source") or "unknown").strip().lower()
+        result["recommended_source"] = (
+            recommendation_source
+            if recommendation_source in _RECOMMENDATION_SOURCES
+            else "unknown"
+        )
+        result["recommended_label"] = (
+            str(result.get("recommended_label") or "\u4e0a\u9650\u672a\u8bc6\u522b").strip()[:120]
+            or "\u4e0a\u9650\u672a\u8bc6\u522b"
+        )
+        return result
+
+    @staticmethod
+    def _validated_connection(payload: dict, *, connection_id: str) -> dict:
+        name = str(payload.get("name") or "").strip()
+        protocol = str(payload.get("protocol") or payload.get("provider") or "").strip().lower()
+        preset = str(payload.get("service_preset") or "custom").strip().lower()
+        base_url = str(payload.get("base_url") or "").strip().rstrip("/")
+        if not name:
+            raise ModelProfileError("连接名称不能为空")
+        if protocol not in _PROVIDERS:
+            raise ModelProfileError("接口协议必须是 openai 或 anthropic")
+        if preset not in MODEL_PRESETS:
+            raise ModelProfileError("service_preset 无效")
+        if base_url:
+            parsed = urlparse(base_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ModelProfileError("API 地址必须是有效的 HTTP(S) URL")
+        return {
+            "id": connection_id,
+            "name": name,
+            "service_preset": preset,
+            "protocol": protocol,
+            "base_url": base_url,
+        }
+
+    @staticmethod
+    def _validated_model(payload: dict, *, model_id: str, connection_ids: set[str]) -> dict:
+        connection_id = str(payload.get("connection_id") or "").strip()
+        model = str(payload.get("model") or "").strip()
+        if connection_id not in connection_ids:
+            raise ModelProfileError("找不到模型所属的供应商连接")
+        if not model:
+            raise ModelProfileError("模型名称不能为空")
+        try:
+            max_tokens = int(payload.get("max_tokens") or 16000)
+        except (TypeError, ValueError) as exc:
+            raise ModelProfileError("max_tokens 必须是整数") from exc
+        if not 1 <= max_tokens <= 1_000_000:
+            raise ModelProfileError("max_tokens 必须在 1 到 1000000 之间")
+        max_tokens_source = str(payload.get("max_tokens_source") or "legacy").strip().lower()
+        if max_tokens_source not in _MAX_TOKEN_SOURCES:
+            raise ModelProfileError("invalid max token source")
+        raw_recommended = payload.get("recommended_max_tokens")
+        if raw_recommended in (None, ""):
+            recommended = None
+        else:
+            try:
+                recommended = int(raw_recommended)
+            except (TypeError, ValueError) as exc:
+                raise ModelProfileError("recommended_max_tokens must be an integer") from exc
+            if not 1 <= recommended <= 1_000_000:
+                raise ModelProfileError("recommended_max_tokens out of range")
+        recommended_source = str(payload.get("recommended_source") or "unknown").strip().lower()
+        if recommended_source not in _RECOMMENDATION_SOURCES:
+            raise ModelProfileError("invalid recommendation source")
+        recommended_label = str(payload.get("recommended_label") or "上限未识别").strip()[:120]
+        text_status = str(payload.get("text_status") or "untested")
+        vision_status = str(payload.get("vision_status") or "untested")
+        if text_status not in _CAPABILITY_STATUSES or vision_status not in _CAPABILITY_STATUSES:
+            raise ModelProfileError("模型能力状态无效")
+        return {
+            "id": model_id,
+            "connection_id": connection_id,
+            "model": model,
+            "max_tokens": max_tokens,
+            "max_tokens_source": max_tokens_source,
+            "recommended_max_tokens": recommended,
+            "recommended_source": recommended_source,
+            "recommended_label": recommended_label or "上限未识别",
+            "text_status": text_status,
+            "vision_status": vision_status,
+        }
+
+    def _public_connection(self, record: dict) -> dict:
+        result = dict(record)
+        result["secret_status"] = (
+            "saved" if self.resolve_connection_key(str(record["id"])) else "missing"
+        )
+        return result
+
+    def migrate_legacy_profiles(self) -> dict:
+        with self._lock:
+            state = self._load()
+            if state["version"] >= 2:
+                return self._public_v2_state(state)
+
+            active_profile_id = str(state.get("active_profile_id") or "")
+            model_by_profile: dict[str, str] = {}
+            for profile in state["profiles"]:
+                profile_id = str(profile.get("id") or uuid.uuid4().hex)
+                connection_id = "connection-" + profile_id
+                model_id = "model-" + profile_id
+                connection = self._validated_connection(
+                    {
+                        "name": profile.get("name") or profile.get("model") or "模型连接",
+                        "service_preset": profile.get("service_preset") or "custom",
+                        "protocol": profile.get("provider") or "openai",
+                        "base_url": profile.get("base_url") or "",
+                    },
+                    connection_id=connection_id,
+                )
+                model = self._validated_model(
+                    {
+                        "connection_id": connection_id,
+                        "model": profile.get("model"),
+                        "max_tokens": profile.get("max_tokens", 16000),
+                        "text_status": "untested",
+                        "vision_status": "unsupported" if profile.get("vision") is False else "untested",
+                    },
+                    model_id=model_id,
+                    connection_ids={connection_id},
+                )
+                state["connections"].append(connection)
+                state["models"].append(model)
+                model_by_profile[profile_id] = model_id
+                old_secret = self.resolve_api_key(profile_id)
+                if old_secret and not self.credentials.read(self._connection_target(connection_id)):
+                    self.credentials.write(self._connection_target(connection_id), old_secret)
+
+            state["version"] = 2
+            state["assignments"] = {
+                "base_model_id": model_by_profile.get(active_profile_id, next(iter(model_by_profile.values()), "")),
+                "vision_mode": "disabled",
+                "vision_model_id": "",
+            }
+            self._write(state)
+            return self._public_v2_state(state)
+
+    def _public_v2_state(self, state: dict) -> dict:
+        return {
+            "schema_version": 2,
+            "connections": [self._public_connection(row) for row in state["connections"]],
+            "models": [self._provenance(row) for row in state["models"]],
+            "assignments": dict(state["assignments"]),
+        }
+
+    def save_connection(self, payload: dict) -> dict:
+        with self._lock:
+            self.migrate_legacy_profiles()
+            state = self._load()
+            requested_id = str(payload.get("id") or "").strip()
+            existing = next((row for row in state["connections"] if row["id"] == requested_id), None)
+            connection_id = requested_id if existing else uuid.uuid4().hex
+            record = self._validated_connection(payload, connection_id=connection_id)
+            secret = str(payload.get("api_key") or "").strip()
+            if payload.get("clear_secret"):
+                self.credentials.delete(self._connection_target(connection_id))
+            elif secret:
+                self.credentials.write(self._connection_target(connection_id), secret)
+            if existing:
+                existing.clear(); existing.update(record)
+            else:
+                state["connections"].append(record)
+            self._write(state)
+            return self._public_connection(record)
+
+    def resolve_connection_key(self, connection_id: str) -> str | None:
+        return self.credentials.read(self._connection_target(str(connection_id)))
+
+    def save_model(self, payload: dict) -> dict:
+        with self._lock:
+            self.migrate_legacy_profiles()
+            state = self._load()
+            requested_id = str(payload.get("id") or "").strip()
+            existing = next((row for row in state["models"] if row["id"] == requested_id), None)
+            model_id = requested_id if existing else uuid.uuid4().hex
+            record = self._validated_model(
+                payload,
+                model_id=model_id,
+                connection_ids={str(row["id"]) for row in state["connections"]},
+            )
+            if existing:
+                existing.clear(); existing.update(record)
+            else:
+                state["models"].append(record)
+            self._write(state)
+            return dict(record)
+
+    def connection_record(self, connection_id: str) -> dict:
+        with self._lock:
+            self.migrate_legacy_profiles()
+            state = self._load()
+            record = next(
+                (row for row in state["connections"] if str(row["id"]) == str(connection_id)),
+                None,
+            )
+            if record is None:
+                raise ModelProfileError("找不到指定供应商连接")
+            return dict(record)
+
+    def model_record(self, model_id: str) -> dict:
+        with self._lock:
+            self.migrate_legacy_profiles()
+            state = self._load()
+            record = next(
+                (row for row in state["models"] if str(row["id"]) == str(model_id)),
+                None,
+            )
+            if record is None:
+                raise ModelProfileError("找不到指定模型")
+            return dict(record)
+
+    def provider_settings_for_model(self, model_id: str) -> tuple[str, dict]:
+        """Build runtime settings from a workbench model without exposing metadata."""
+        with self._lock:
+            self.migrate_legacy_profiles()
+            state = self._load()
+            model = next(
+                (row for row in state["models"] if str(row["id"]) == str(model_id)),
+                None,
+            )
+            if model is None:
+                raise ModelProfileError("model not found")
+            connection = next(
+                (
+                    row for row in state["connections"]
+                    if str(row["id"]) == str(model.get("connection_id") or "")
+                ),
+                None,
+            )
+            if connection is None:
+                raise ModelProfileError("model connection not found")
+            secret = self.resolve_connection_key(str(connection["id"]))
+            if not secret:
+                raise ModelProfileError("model connection has no API Key")
+            return str(connection["protocol"]), {
+                "model": str(model["model"]),
+                "base_url": str(connection.get("base_url") or ""),
+                "max_tokens": int(model.get("max_tokens") or 16000),
+                "vision": model.get("vision_status") in {"passed", "untested"},
+                "api_key": secret,
+            }
+
+    def set_model_capability(self, model_id: str, mode: str, status: str) -> dict:
+        if mode not in {"text", "vision"}:
+            raise ModelProfileError("mode 必须是 text 或 vision")
+        if status not in _CAPABILITY_STATUSES:
+            raise ModelProfileError("模型能力状态无效")
+        with self._lock:
+            model = self.model_record(model_id)
+            model[f"{mode}_status"] = status
+            return self.save_model(model)
+
+    def set_assignments(self, payload: dict) -> dict:
+        with self._lock:
+            self.migrate_legacy_profiles()
+            state = self._load()
+            models = {str(row["id"]): row for row in state["models"]}
+            base_id = str(payload.get("base_model_id") or "")
+            vision_mode = str(payload.get("vision_mode") or "disabled")
+            vision_id = str(payload.get("vision_model_id") or "")
+            if base_id not in models:
+                raise ModelProfileError("请选择基础模型")
+            if models[base_id].get("text_status") == "unsupported":
+                raise ModelProfileError("基础模型不支持文字请求")
+            if vision_mode not in _VISION_MODES:
+                raise ModelProfileError("图片识别模式无效")
+            if vision_mode == "base" and models[base_id].get("vision_status") != "passed":
+                raise ModelProfileError("基础模型必须先通过图片测试")
+            if vision_mode == "separate":
+                if vision_id not in models:
+                    raise ModelProfileError("请选择图片识别模型")
+                if models[vision_id].get("vision_status") != "passed":
+                    raise ModelProfileError("图片识别模型必须先通过图片测试")
+            else:
+                vision_id = ""
+            state["assignments"] = {
+                "base_model_id": base_id,
+                "vision_mode": vision_mode,
+                "vision_model_id": vision_id,
+            }
+            self._write(state)
+            return dict(state["assignments"])
+
+    def delete_model(
+        self,
+        model_id: str,
+        *,
+        delete_empty_connection: bool = False,
+    ) -> dict:
+        with self._lock:
+            self.migrate_legacy_profiles()
+            state = self._load()
+            assignments = state["assignments"]
+            if model_id in {assignments.get("base_model_id"), assignments.get("vision_model_id")}:
+                raise ModelProfileError("模型仍被使用，请先更换任务模型")
+            model = next(
+                (row for row in state["models"] if str(row["id"]) == str(model_id)),
+                None,
+            )
+            if model is None:
+                raise ModelProfileError("找不到指定模型")
+            connection_id = str(model["connection_id"])
+            kept = [row for row in state["models"] if str(row["id"]) != str(model_id)]
+            if len(kept) == len(state["models"]):
+                raise ModelProfileError("找不到指定模型")
+            state["models"] = kept
+
+            # Remove the compatibility profile that originally produced this model.
+            for profile in list(state["profiles"]):
+                profile_id = str(profile.get("id") or "")
+                if str(model_id) != "model-" + profile_id:
+                    continue
+                state["profiles"].remove(profile)
+                self.credentials.delete(self._target(profile_id))
+                if state.get("active_profile_id") == profile_id:
+                    state["active_profile_id"] = str(
+                        (state["profiles"][0] if state["profiles"] else {}).get("id") or ""
+                    )
+                break
+
+            deleted_connection = False
+            if delete_empty_connection and not any(
+                str(row["connection_id"]) == connection_id for row in kept
+            ):
+                state["connections"] = [
+                    row for row in state["connections"]
+                    if str(row["id"]) != connection_id
+                ]
+                self.credentials.delete(self._connection_target(connection_id))
+                deleted_connection = True
+            self._write(state)
+            return {
+                "ok": True,
+                "model_id": str(model_id),
+                "deleted_connection": deleted_connection,
+                "connection_id": connection_id if deleted_connection else "",
+            }
+
+    def delete_connection(self, connection_id: str) -> None:
+        with self._lock:
+            self.migrate_legacy_profiles()
+            state = self._load()
+            if any(str(row["connection_id"]) == str(connection_id) for row in state["models"]):
+                raise ModelProfileError("连接下仍有模型，请先删除模型")
+            kept = [row for row in state["connections"] if str(row["id"]) != str(connection_id)]
+            if len(kept) == len(state["connections"]):
+                raise ModelProfileError("找不到指定供应商连接")
+            state["connections"] = kept
+            self.credentials.delete(self._connection_target(str(connection_id)))
+            self._write(state)
 
     def bootstrap_legacy(self, config_path) -> dict | None:
         """Import one non-secret profile from the legacy ``llm.json``.
@@ -374,13 +822,84 @@ class ModelProfileStore:
                 existing.clear()
                 existing.update(record)
             state["active_profile_id"] = profile_id
+
+            # Keep the compatibility profile API and the v2 workbench in sync.
+            if state["version"] >= 2:
+                connection_id = "connection-" + profile_id
+                model_id = "model-" + profile_id
+                existing_connection = next(
+                    (row for row in state["connections"] if row["id"] == connection_id),
+                    None,
+                )
+                existing_model = next(
+                    (row for row in state["models"] if row["id"] == model_id),
+                    None,
+                )
+                connection = self._validated_connection(
+                    {
+                        "name": record["name"],
+                        "service_preset": record["service_preset"],
+                        "protocol": record["provider"],
+                        "base_url": record["base_url"],
+                    },
+                    connection_id=connection_id,
+                )
+                unchanged_endpoint = bool(
+                    existing_connection
+                    and existing_connection.get("protocol") == connection["protocol"]
+                    and existing_connection.get("base_url") == connection["base_url"]
+                )
+                unchanged_model = bool(
+                    existing_model
+                    and existing_model.get("model") == record["model"]
+                    and unchanged_endpoint
+                )
+                model = self._validated_model(
+                    {
+                        "connection_id": connection_id,
+                        "model": record["model"],
+                        "max_tokens": record["max_tokens"],
+                        "max_tokens_source": record["max_tokens_source"],
+                        "recommended_max_tokens": record["recommended_max_tokens"],
+                        "recommended_source": record["recommended_source"],
+                        "recommended_label": record["recommended_label"],
+                        "text_status": (
+                            existing_model.get("text_status", "untested")
+                            if unchanged_model else "untested"
+                        ),
+                        "vision_status": (
+                            "unsupported" if not record["vision"]
+                            else existing_model.get("vision_status", "untested")
+                            if unchanged_model else "untested"
+                        ),
+                    },
+                    model_id=model_id,
+                    connection_ids={connection_id},
+                )
+                if existing_connection is None:
+                    state["connections"].append(connection)
+                else:
+                    existing_connection.clear(); existing_connection.update(connection)
+                if existing_model is None:
+                    state["models"].append(model)
+                else:
+                    existing_model.clear(); existing_model.update(model)
+                connection_secret = secret or self.resolve_api_key(profile_id)
+                if bool(payload.get("clear_secret")):
+                    self.credentials.delete(self._connection_target(connection_id))
+                elif connection_secret:
+                    self.credentials.write(
+                        self._connection_target(connection_id), connection_secret
+                    )
+                if not state["assignments"].get("base_model_id"):
+                    state["assignments"]["base_model_id"] = model_id
             self._write(state)
             return self._public(record)
 
-    def public_state(self) -> dict:
+    def public_state(self, *, include_links: bool = False) -> dict:
         with self._lock:
             state = self._load()
-            return {
+            result = {
                 "active_profile_id": state["active_profile_id"],
                 "profiles": [
                     self._public(record)
@@ -389,7 +908,18 @@ class ModelProfileStore:
                 "credential_available": bool(
                     getattr(self.credentials, "available", False)
                 ),
+                "presets": {
+                    key: {
+                        field: field_value
+                        for field, field_value in value.items()
+                        if include_links or field not in {"official_url", "api_key_url"}
+                    }
+                    for key, value in MODEL_PRESETS.items()
+                },
             }
+            if state["version"] >= 2:
+                result.update(self._public_v2_state(state))
+            return result
 
     def set_active(self, profile_id: str) -> dict:
         with self._lock:

@@ -5,6 +5,7 @@ const vm = require('vm');
 function createHarness(config) {
   config = config || {};
   const nodes = Object.create(null);
+  const storage = Object.assign(Object.create(null), config.storage || {});
   const documentListeners = Object.create(null);
   const windowListeners = Object.create(null);
   let activeElement = null;
@@ -69,10 +70,12 @@ function createHarness(config) {
     '#bggrid', '#go', '#hint', '#backgroundRequestsPanel', '#backgroundRequestList',
     '#continueBackgroundBuild', '#backgroundContinueHint', '#rvDraftSelect', '#rvStatus',
     '#rvInstall', '#rvCompile', '#rvApproveAll', '#rvValidate', '#rvCards', '#storyPlayer',
+    '#rvReviewFilters', '#rvFilterAll', '#rvFilterPending', '#rvFilterBlocking', '#rvFilterDirection',
+    '#rvCardJump', '#rvJump', '#rvFilterStatus', '#rvSelectionLabel', '#rvCardToolbar', '#reviewPhase',
     '#log', '#goAnnotate', '#bgsel', '#modelProfileSelect', '#modelProfileId', '#modelProfileName',
-    '#modelProvider', '#modelBaseUrl', '#modelName', '#modelMaxTokens', '#modelVision',
-    '#modelApiKey', '#modelSaveKey', '#modelStatus', '#modelOptions', '#welcomePanel', '#recentStories',
-    '#storyContextBar', '#storyContextName', '#storyContextMeta', '#storyContextAction', '#storyContextStatus',
+    '#modelProvider', '#modelBaseUrl', '#modelName', '#modelMaxTokens', '#modelMaxTokensHint', '#modelRestoreMaxTokens', '#modelVision',
+    '#modelApiKey', '#modelSaveKey', '#modelStatus', '#modelOptions', '#modelDiscoveryList', '#welcomePanel', '#recentStories',
+    '#storyContextBar', '#storyContextName', '#storyContextMeta', '#storyContextAction', '#storyHistoryAction', '#storyContextStatus',
     '#storyDraftStatus', '#storySaveStatus', '#storyReviewStatus', '#storyCompileStatus', '#storyInstallStatus',
     '#storyLoadRetry', '#storyAssetStrip', '#stat',
     '#readyAA', '#readyDatabase', '#readyModel', '#mBrowse', '#mEdit', '#closeBrowse', '#closeEdit',
@@ -119,7 +122,7 @@ function createHarness(config) {
     ReviewWorkspace: config.reviewWorkspace,
     Preview: config.preview,
     StoryJobs: config.storyJobs,
-    ModelSettings: {profilePayload: () => ({})},
+    ModelSettings: config.modelSettings,
     CardList: config.cardList || {renderCardList() {}},
     Player: config.Player || function () { this.pause = function () {}; this.loadCards = function () {}; this.jumpToCard = function () {}; },
     addEventListener(type, handler) { (windowListeners[type] || (windowListeners[type] = [])).push(handler); },
@@ -131,17 +134,23 @@ function createHarness(config) {
   function CustomEvent(type, options) { this.type = type; this.detail = options && options.detail; }
   const sandbox = {
     window: window, document: document,
-    localStorage: {getItem() { return null; }, setItem() {}, removeItem() {}},
+    localStorage: {
+      getItem(key) { return Object.prototype.hasOwnProperty.call(storage, key) ? storage[key] : null; },
+      setItem(key, value) { storage[key] = String(value); },
+      removeItem(key) { delete storage[key]; },
+    },
     setTimeout: config.setTimeout || (() => {}),
     console: console, URLSearchParams: URLSearchParams, Promise: Promise, Error: Error,
     CustomEvent: CustomEvent,
   };
   const root = path.resolve(__dirname, '..', 'js');
   vm.runInNewContext(fs.readFileSync(path.join(root, 'story.js'), 'utf8'), sandbox);
+  if (!window.ModelSettings) vm.runInNewContext(fs.readFileSync(path.join(root, 'model.js'), 'utf8'), sandbox);
+  if (config.storyPicker) vm.runInNewContext(fs.readFileSync(path.join(root, 'story_picker.js'), 'utf8'), sandbox);
   vm.runInNewContext(fs.readFileSync(path.join(root, 'app.js'), 'utf8'), sandbox);
 
   return {
-    window: window, document: document, nodes: nodes, get: get,
+    window: window, document: document, nodes: nodes, storage: storage, get: get,
     clickAction(action, trigger) {
       const target = trigger || node(); target.dataset.action = action;
       return document.dispatch('click', {target: target});

@@ -132,7 +132,7 @@ CREATE INDEX IF NOT EXISTS ix_face_visual_label_ident ON face_visual_label(ident
 CREATE INDEX IF NOT EXISTS ix_expression_part_ident ON expression_part(ident);
 """
 
-_SCHEMA_VERSION = "1"
+_SCHEMA_VERSION = "2"
 _MIGRATE_LOCK = threading.RLock()
 
 # 从用户已完成的工程里核对出来的对应关系，作为初始种子。
@@ -177,6 +177,12 @@ def best_alias(con, script_name):
         if char is None or _looks_placeholder(char["name"]):
             continue
         return row
+    # Built-in aliases are a read-only fallback.  Do not seed or mutate the
+    # user's database during lookup; old databases may contain placeholder
+    # targets, so the caller still validates the resolved character.
+    for name, ident, kind in SEED_ALIAS:
+        if name == script_name:
+            return {"ident": ident, "kind": kind}
     return None
 
 FACE_CN = {
@@ -211,9 +217,8 @@ def connect(path):
         needs_schema = not _schema_is_current(con)
         if needs_schema:
             con.executescript(SCHEMA)
-        migrate_visual_face_labels(con)
-        migrate_character_avatar(con)
-        if needs_schema:
+            migrate_visual_face_labels(con)
+            migrate_character_avatar(con)
             con.execute(
                 """
                 INSERT INTO meta(key,value) VALUES('assetdb_schema_version',?)
