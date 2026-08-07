@@ -23,7 +23,7 @@ from annotation_protocol import (
     ChunkProtocolError, build_chunk_schema, validate_chunk_response,
     validate_review_patches,
 )
-from llm import OutputCapacityError, StructuredOutputError
+from llm import OutputCapacityError, RequestDeadlineError, StructuredOutputError
 
 
 _CAPACITY_PROTOCOL_CODES = {"missing_target"}
@@ -37,6 +37,10 @@ def _classify_chunk_error(exc: Exception) -> str:
     if isinstance(exc, (ChunkProtocolError, StructuredOutputError)):
         return "protocol"
     return "fatal"
+
+
+def _is_request_deadline(exc: Exception) -> bool:
+    return isinstance(exc, RequestDeadlineError)
 
 
 def _chunk_error_code(exc: Exception) -> str:
@@ -93,6 +97,15 @@ def _next_subdivision_limit(size: int) -> Optional[int]:
     return None
 
 
+def annotation_mode_limits(mode: str) -> tuple[int, int, int]:
+    mode = str(mode or "balanced").strip().lower()
+    if mode == "speed":
+        return 50, 60, 72
+    if mode in {"deep", "high"}:
+        return 16, 20, 24
+    return 20, 24, 30
+
+
 def run_annotation_agent(
     items: List[Dict[str, Any]], *, provider: Any, static_system: str,
     cast: Mapping[str, Any], constraints: Mapping[str, Any],
@@ -101,6 +114,7 @@ def run_annotation_agent(
     model_activity: Optional[Callable[[Mapping[str, Any]], None]] = None,
     cancelled: Optional[Callable[[], bool]] = None, target: int = 50,
     soft_limit: int = 50, hard_limit: int = 60, before: int = 15, after: int = 10,
+    reasoning_mode: Optional[str] = None, annotation_max_tokens: Optional[int] = None,
 ) -> Dict[str, Any]:
     started_at = time.perf_counter()
     stats_before = dict(getattr(provider, "stats", {}) or {})
@@ -111,6 +125,9 @@ def run_annotation_agent(
     _emit(progress, "planning", 0, 1, "正在分析场景")
     scenes = build_scene_map(items, usage_chain)
     story_plan = build_story_plan(items, scenes, usage_chain)
+    if reasoning_mode:
+        mode_target, mode_soft, mode_hard = annotation_mode_limits(reasoning_mode)
+        target, soft_limit, hard_limit = mode_target, mode_soft, mode_hard
     chunks = build_chunks(items, scenes, target=target, soft_limit=soft_limit, hard_limit=hard_limit)
     run_key = _run_key(run_fingerprint)
     saved = checkpoint_store.load(run_key)
@@ -361,6 +378,27 @@ def run_annotation_agent(
             except Exception as exc:
                 kind = _classify_chunk_error(exc)
                 last_error = exc
+                if _is_request_deadline(exc):
+                    diagnostics.append({
+                        "code": "request_deadline", "level": "warning",
+                        "scene_id": str(chunk["scene_id"]), "chunk_id": chunk_id,
+                        "detail": str(exc), "completed_chunks": len(completed),
+                    })
+                    _emit(progress, "timed_out", current, total, "当前场景块达到时间上限，已保留之前完成的内容")
+                    if model_activity:
+                        emit_model_activity(
+                            {"state": "timed_out", "reason": "request_deadline"},
+                            scene_id=str(chunk["scene_id"]), chunk_id=chunk_id,
+                            current=current, total=total, request_index=request_count,
+                            retry_count=retries, subdivision_count=subdivisions,
+                        )
+                    return {
+                        "items": items, "rows_by_id": rows_by_id, "memory": memory,
+                        "beats": beats, "metrics": build_metrics(),
+                        "diagnostics": diagnostics,
+                        "completed_chunks": len(completed), "resumed_chunks": resumed_chunks,
+                        "cancelled": False, "timed_out": True,
+                    }
                 if kind == "capacity":
                     break
                 if kind == "protocol" and protocol_attempts == 0:
@@ -458,7 +496,7 @@ def run_annotation_agent(
         "beats": beats,
         "metrics": build_metrics(),
         "diagnostics": diagnostics, "completed_chunks": len(completed),
-        "resumed_chunks": resumed_chunks, "cancelled": False,
+        "resumed_chunks": resumed_chunks, "cancelled": False, "timed_out": False,
     }
 
 

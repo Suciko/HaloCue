@@ -339,6 +339,8 @@ def test_v2_store_saves_multiple_models_for_one_connection(tmp_path):
         "max_tokens": 16000,
         "text_status": "passed",
         "vision_status": "unsupported",
+        "reasoning_mode": "speed",
+        "annotation_max_tokens": 12000,
     })
     vision_model = store.save_model({
         "connection_id": connection["id"],
@@ -354,10 +356,31 @@ def test_v2_store_saves_multiple_models_for_one_connection(tmp_path):
         text_model["id"], vision_model["id"],
     }
     assert text_model["recommended_label"] == "上限未识别"
+    assert text_model["reasoning_mode"] == "speed"
+    assert text_model["annotation_max_tokens"] == 12000
     assert all(row["connection_id"] == connection["id"] for row in state["models"])
     serialized = json.dumps(state)
     assert '"api_key": "secret"' not in serialized
     assert all("api_key" not in row for row in state["connections"])
+
+
+def test_provider_settings_include_reasoning_mode_and_task_budget(tmp_path):
+    credentials = FakeCredentials()
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=credentials)
+    connection = store.save_connection({
+        "name": "DeepSeek", "service_preset": "deepseek", "protocol": "openai",
+        "base_url": "https://api.deepseek.com/v1", "api_key": "secret",
+    })
+    model = store.save_model({
+        "connection_id": connection["id"], "model": "deepseek-v4-flash",
+        "max_tokens": 384000, "annotation_max_tokens": 16000,
+        "reasoning_mode": "balanced", "text_status": "passed", "vision_status": "unsupported",
+    })
+    provider, settings = store.provider_settings_for_model(model["id"])
+    assert provider == "openai"
+    assert settings["reasoning_mode"] == "balanced"
+    assert settings["annotation_max_tokens"] == 16000
+    assert settings["reasoning_wire_protocol"] == "deepseek_thinking"
 
 
 def test_v2_assignments_require_compatible_tested_models(tmp_path):

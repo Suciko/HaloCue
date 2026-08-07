@@ -110,6 +110,7 @@ const h=createHarness();
 console.log(JSON.stringify({
   waiting:h.window.AppRuntime.annotationProgressDetail({state:'waiting',detail:'正在标注第 1/4 个场景块',model:'deepseek-v4-flash'}),
   receiving:h.window.AppRuntime.annotationProgressDetail({state:'receiving',detail:'正在标注第 1/4 个场景块',received_chars:8192,elapsed_ms:7300,model:'deepseek-v4-flash'}),
+  reasoning:h.window.AppRuntime.annotationProgressDetail({state:'reasoning',detail:'正在标注第 1/4 个场景块',reasoning_chars:4096,elapsed_ms:7300,model:'deepseek-v4-flash'}),
   retrying:h.window.AppRuntime.annotationProgressDetail({state:'retrying',detail:'正在标注第 1/4 个场景块',retry_count:1,model:'deepseek-v4-flash'}),
   subdividing:h.window.AppRuntime.annotationProgressDetail({state:'subdividing',detail:'正在标注第 1/4 个场景块',subdivision_count:2,model:'deepseek-v4-flash'})
 }));
@@ -117,6 +118,7 @@ console.log(JSON.stringify({
     result = run_harness(script)
     assert "等待模型首段响应" in result["waiting"]
     assert "已接收 8,192 字符" in result["receiving"]
+    assert "已思考 4,096 字符" in result["reasoning"]
     assert "正在纠正返回格式" in result["retrying"]
     assert "正在拆分当前场景块" in result["subdividing"]
 

@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, Mapping, Optional
 class Job:
     _ACTIVITY_FIELDS = frozenset({
         "state", "model", "request_started_at_ms", "elapsed_ms", "first_delta_ms",
+        "first_reasoning_ms", "first_content_ms", "reasoning_chars", "content_chars",
         "received_chars", "finish_reason", "scene_id", "chunk_id", "chunk_current",
         "chunk_total", "request_index", "retry_count", "subdivision_count",
     })

@@ -150,6 +150,9 @@ def build_run_fingerprint(
         "provider": str(model_config.get("provider") or ""),
         "model": str(model_config.get("model") or ""),
         "max_tokens": int(model_config.get("max_tokens") or 0),
+        "annotation_max_tokens": int(model_config.get("annotation_max_tokens") or 0),
+        "reasoning_mode": str(model_config.get("reasoning_mode") or ""),
+        "reasoning_wire_protocol": str(model_config.get("reasoning_wire_protocol") or ""),
     }
     return {
         "script_sha256": _sha(script_text), "cast_sha256": _sha(cast),

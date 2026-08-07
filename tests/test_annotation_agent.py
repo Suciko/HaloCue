@@ -11,6 +11,7 @@ from annotation_agent import (
     build_review_windows,
     run_annotation_agent,
 )
+from annotation_agent import annotation_mode_limits
 from annotation_protocol import validate_review_patches
 from annotation_chunks import assign_annotation_ids
 from annotation_memory import AnnotationCheckpointStore, build_run_fingerprint
@@ -378,6 +379,24 @@ def test_capacity_success_teaches_remaining_chunks_the_safe_limit(tmp_path):
         i for i, row in enumerate(provider.requests) if len(row["target_ids"]) <= 10
     )
     assert all(len(row["target_ids"]) <= 10 for row in provider.requests[first_safe:])
+
+
+def test_reasoning_mode_limits_are_conservative_for_thinking(tmp_path):
+    assert annotation_mode_limits("speed") == (50, 60, 72)
+    assert annotation_mode_limits("balanced") == (20, 24, 30)
+    assert annotation_mode_limits("deep") == (16, 20, 24)
+
+
+def test_request_deadline_returns_checkpointed_partial_result(tmp_path):
+    class DeadlineProvider(RecordingProvider):
+        def complete_json(self, static, volatile, user, schema):
+            raise llm.RequestDeadlineError("deadline")
+
+    result = fixture(tmp_path, DeadlineProvider(), count=25)
+    assert result["timed_out"] is True
+    assert result["completed_chunks"] == 0
+    assert result["rows_by_id"] == {}
+    assert any(item["code"] == "request_deadline" for item in result["diagnostics"])
 
 
 def test_model_activity_adds_chunk_context_to_provider_events(tmp_path):

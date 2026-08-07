@@ -45,6 +45,9 @@ class ModelRouter:
             "model": str(model["model"]),
             "base_url": str(connection.get("base_url") or ""),
             "max_tokens": int(model.get("max_tokens") or 16000),
+            "annotation_max_tokens": int(model.get("annotation_max_tokens") or min(int(model.get("max_tokens") or 16000), 16000)),
+            "reasoning_mode": str(model.get("reasoning_mode") or "balanced"),
+            "reasoning_wire_protocol": "deepseek_thinking" if connection.get("service_preset") == "deepseek" else "none",
             "vision": model.get("vision_status") in {"passed", "untested"},
             "api_key": secret,
         })

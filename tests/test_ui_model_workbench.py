@@ -29,6 +29,7 @@ def test_settings_ui_has_two_role_cards_and_help_entry():
     assert 'data-action="disable-vision-model"' in settings
     assert 'id="modelDiscoveryList" class="model-discovery-list wide"' in settings
     assert 'id="modelMaxTokensHint"' in settings
+    assert 'id="modelReasoningMode"' in settings
     assert 'data-action="restore-model-max-tokens"' in settings
     app = (Path(__file__).parents[1] / "js" / "app.js").read_text(encoding="utf-8")
     assert "delete-workbench-model" in app

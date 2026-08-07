@@ -552,6 +552,10 @@ def build_static(idx, cast, cast_names):
     return PROMPT.build_system(idx, cast, cast_names, faces_by_id)
 
 
+def build_annotation_static_system(static_rules, source_text):
+    return f"{static_rules}\n\nSOURCE_SCRIPT\n{source_text}"
+
+
 def parse_lines(path, cast):
     """保留原文行，同时标出哪些是台词行。"""
     out = []
@@ -835,10 +839,14 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     annotation_beats = []
     if agent_enabled:
         script_text = open(script_path, encoding="utf-8").read()
+        agent_static = build_annotation_static_system(static, script_text)
         model_config = {
             "provider": getattr(prov, "name", provider_name or llmcfg.get("provider") or ""),
             "model": getattr(prov, "model", ""),
             "max_tokens": int(getattr(prov, "cfg", {}).get("max_tokens", 16000)),
+            "annotation_max_tokens": int(getattr(prov, "cfg", {}).get("annotation_max_tokens") or getattr(prov, "cfg", {}).get("max_tokens", 16000)),
+            "reasoning_mode": str(getattr(prov, "cfg", {}).get("reasoning_mode") or "balanced"),
+            "reasoning_wire_protocol": str(getattr(prov, "cfg", {}).get("reasoning_wire_protocol") or ""),
         }
         fingerprint = build_run_fingerprint(
             script_text, cast, idx,
@@ -847,7 +855,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         )
         checkpoint_dir = options.get("checkpoint_dir") or os.path.join(HERE, "out", "annotation-checkpoints")
         agent_result = run_annotation_agent(
-            items, provider=prov, static_system=static, cast=cast,
+            items, provider=prov, static_system=agent_static, cast=cast,
             constraints=constraints, usage_chain=usage_chain,
             checkpoint_store=AnnotationCheckpointStore(checkpoint_dir),
             run_fingerprint=fingerprint, progress=options.get("progress"),
@@ -858,6 +866,8 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             hard_limit=int(llmcfg.get("agent_hard_limit", 60)),
             before=int(llmcfg.get("agent_context_before", 15)),
             after=int(llmcfg.get("agent_context_after", 10)),
+            reasoning_mode=str(getattr(prov, "cfg", {}).get("reasoning_mode") or "balanced"),
+            annotation_max_tokens=int(getattr(prov, "cfg", {}).get("annotation_max_tokens") or getattr(prov, "cfg", {}).get("max_tokens", 16000)),
         )
         diagnostics.extend(agent_result.get("diagnostics") or [])
         agent_meta = {
@@ -865,6 +875,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             "completed_chunks": agent_result.get("completed_chunks", 0),
             "resumed_chunks": agent_result.get("resumed_chunks", 0),
             "cancelled": bool(agent_result.get("cancelled")),
+            "timed_out": bool(agent_result.get("timed_out")),
             "metrics": agent_result.get("metrics") or {},
         }
         if agent_meta["cancelled"]:

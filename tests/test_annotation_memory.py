@@ -80,6 +80,20 @@ def test_checkpoint_round_trip_and_no_temporary_file(tmp_path):
     assert not list(tmp_path.rglob("*.tmp"))
 
 
+def test_run_fingerprint_changes_when_reasoning_mode_changes():
+    base = build_run_fingerprint(
+        "script", {"凯伊": {"id": "kei"}}, {}, "prompt", 1, "chunk",
+        {"provider": "openai", "model": "deepseek-v4-flash", "max_tokens": 384000,
+         "annotation_max_tokens": 16000, "reasoning_mode": "balanced"},
+    )
+    speed = build_run_fingerprint(
+        "script", {"凯伊": {"id": "kei"}}, {}, "prompt", 1, "chunk",
+        {"provider": "openai", "model": "deepseek-v4-flash", "max_tokens": 384000,
+         "annotation_max_tokens": 16000, "reasoning_mode": "speed"},
+    )
+    assert base != speed
+
+
 def test_corrupt_checkpoint_is_ignored_without_deleting_it(tmp_path):
     path = tmp_path / "run-a" / "checkpoint.json"
     path.parent.mkdir()

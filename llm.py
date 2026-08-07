@@ -33,6 +33,10 @@ class UnsupportedResponseFormatError(LLMError):
     """The OpenAI-compatible endpoint rejected the response_format field."""
 
 
+class RequestDeadlineError(LLMError):
+    """The provider kept streaming past the product-level request wall clock."""
+
+
 def _emit_activity(callback, state, **fields):
     if callback:
         callback({"state": state, **fields})
@@ -248,6 +252,9 @@ class AnthropicProvider(Provider):
             self.stats["cache_read"] += int(cache_read or 0)
             self.stats["cache_write"] += int(cache_write or 0)
 
+    def _output_budget(self) -> int:
+        return max(1, int(self.cfg.get("annotation_max_tokens") or self.cfg.get("max_tokens") or 16000))
+
     def complete_json(self, static_system, volatile_system, user, schema):
         # 静态部分打缓存断点；易变部分放它后面，避免整段前缀失效
         system = [{"type": "text", "text": static_system,
@@ -259,7 +266,7 @@ class AnthropicProvider(Provider):
         if self.cfg.get("effort"):
             output_config["effort"] = self.cfg["effort"]
 
-        kw = dict(model=self.model, max_tokens=self.cfg.get("max_tokens", 16000),
+        kw = dict(model=self.model, max_tokens=self._output_budget(),
                   system=system, messages=[{"role": "user", "content": user}],
                   output_config=output_config)
         if self.cfg.get("thinking", True):
@@ -289,7 +296,7 @@ class AnthropicProvider(Provider):
                 "data": base64.standard_b64encode(blob).decode()}})
         content.append({"type": "text", "text": user})
 
-        kw = dict(model=self.model, max_tokens=self.cfg.get("max_tokens", 16000),
+        kw = dict(model=self.model, max_tokens=self._output_budget(),
                   system=[{"type": "text", "text": system,
                            "cache_control": {"type": "ephemeral", "ttl": "1h"}}],
                   messages=[{"role": "user", "content": content}],
@@ -329,7 +336,7 @@ class AnthropicProvider(Provider):
             system.append({"type": "text", "text": volatile_system})
         kw = dict(
             model=self.model,
-            max_tokens=self.cfg.get("max_tokens", 16000),
+            max_tokens=self._output_budget(),
             system=system,
             messages=[{"role": "user", "content": user}],
             output_config={"format": {"type": "json_schema", "schema": schema}},
@@ -409,7 +416,28 @@ class OpenAIProvider(Provider):
         self.api_key = self._key()
         self.base_url = str(cfg.get("base_url") or "https://api.openai.com/v1").rstrip("/")
         self.timeout = max(1, int(cfg.get("timeout") or 180))
+        self.wall_timeout = max(1, int(cfg.get("wall_timeout") or 300))
         self.model = cfg.get("model") or "gpt-5"
+
+    def _apply_reasoning_payload(self, payload):
+        mode = str(self.cfg.get("reasoning_mode") or "").strip().lower()
+        protocol = str(self.cfg.get("reasoning_wire_protocol") or "").strip().lower()
+        if not protocol:
+            preset = str(self.cfg.get("service_preset") or "").strip().lower()
+            if preset == "deepseek" or self.model.startswith("deepseek-v4-"):
+                protocol = "deepseek_thinking"
+        if not mode or protocol != "deepseek_thinking":
+            return
+        if mode == "speed":
+            payload["thinking"] = {"type": "disabled"}
+            return
+        payload["thinking"] = {"type": "enabled"}
+        effort = {"low": "low", "balanced": "medium", "medium": "medium", "deep": "high", "high": "high"}.get(mode)
+        if effort:
+            payload["reasoning_effort"] = effort
+
+    def _output_budget(self) -> int:
+        return max(1, int(self.cfg.get("annotation_max_tokens") or self.cfg.get("max_tokens") or 16000))
 
     @staticmethod
     def _error_message(payload, fallback):
@@ -481,8 +509,9 @@ class OpenAIProvider(Provider):
         payload = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": self.cfg.get("max_tokens", 16000),
+            "max_tokens": self._output_budget(),
         }
+        self._apply_reasoning_payload(payload)
         if response_format is not None:
             payload["response_format"] = response_format
         response = self._request_json("/chat/completions", payload)
@@ -514,10 +543,11 @@ class OpenAIProvider(Provider):
         payload = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": self.cfg.get("max_tokens", 16000),
+            "max_tokens": self._output_budget(),
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        self._apply_reasoning_payload(payload)
         if response_format is not None:
             payload["response_format"] = response_format
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -534,6 +564,14 @@ class OpenAIProvider(Provider):
         chunks = []
         usage = None
         finish_reason = "unknown"
+        started_monotonic = time.monotonic()
+        reasoning_chars = 0
+        first_reasoning_ms = None
+        first_content_ms = None
+        activity.setdefault("first_reasoning_ms", None)
+        activity.setdefault("first_content_ms", None)
+        activity.setdefault("reasoning_chars", 0)
+        activity.setdefault("content_chars", 0)
         try:
             with urlopen(request, timeout=self.timeout) as response:
                 for raw_line in response:
@@ -555,6 +593,30 @@ class OpenAIProvider(Provider):
                     if choice.get("finish_reason"):
                         finish_reason = str(choice["finish_reason"])
                     delta = choice.get("delta") or {}
+                    if time.monotonic() - started_monotonic > self.wall_timeout:
+                        raise RequestDeadlineError(
+                            f"{self.model} 请求超过 {self.wall_timeout} 秒截止时间"
+                        )
+                    reasoning = delta.get("reasoning_content") if isinstance(delta, dict) else ""
+                    reasoning = str(reasoning or "")
+                    elapsed_ms = max(0, int(time.time() * 1000) - started_ms)
+                    if reasoning:
+                        reasoning_chars += len(reasoning)
+                        if first_reasoning_ms is None:
+                            first_reasoning_ms = elapsed_ms
+                            activity["first_reasoning_ms"] = first_reasoning_ms
+                        activity["reasoning_chars"] = reasoning_chars
+                        _emit_activity(
+                            activity["callback"], "reasoning", model=self.model,
+                            request_started_at_ms=started_ms, elapsed_ms=elapsed_ms,
+                            first_delta_ms=activity["first_delta_ms"],
+                            first_reasoning_ms=first_reasoning_ms,
+                            first_content_ms=first_content_ms,
+                            received_chars=activity["received_chars"],
+                            reasoning_chars=reasoning_chars,
+                            content_chars=activity["received_chars"],
+                            finish_reason=finish_reason,
+                        )
                     content = delta.get("content") if isinstance(delta, dict) else ""
                     if isinstance(content, list):
                         content = "".join(
@@ -567,7 +629,10 @@ class OpenAIProvider(Provider):
                         continue
                     chunks.append(content)
                     activity["received_chars"] += len(content)
-                    elapsed_ms = max(0, int(time.time() * 1000) - started_ms)
+                    if first_content_ms is None:
+                        first_content_ms = elapsed_ms
+                        activity["first_content_ms"] = first_content_ms
+                    activity["content_chars"] = activity["received_chars"]
                     if activity["first_delta_ms"] is None:
                         activity["first_delta_ms"] = elapsed_ms
                     _emit_activity(
@@ -577,7 +642,11 @@ class OpenAIProvider(Provider):
                         request_started_at_ms=started_ms,
                         elapsed_ms=elapsed_ms,
                         first_delta_ms=activity["first_delta_ms"],
+                        first_reasoning_ms=first_reasoning_ms,
+                        first_content_ms=first_content_ms,
                         received_chars=activity["received_chars"],
+                        reasoning_chars=reasoning_chars,
+                        content_chars=activity["received_chars"],
                         finish_reason=finish_reason,
                     )
         except HTTPError as exc:
@@ -749,7 +818,11 @@ class OpenAIProvider(Provider):
             request_started_at_ms=started_ms,
             elapsed_ms=max(0, int(time.time() * 1000) - started_ms),
             first_delta_ms=activity["first_delta_ms"],
+            first_reasoning_ms=activity.get("first_reasoning_ms"),
+            first_content_ms=activity.get("first_content_ms"),
             received_chars=activity["received_chars"],
+            reasoning_chars=activity.get("reasoning_chars", 0),
+            content_chars=activity.get("content_chars", 0),
             finish_reason=getattr(self, "_last_finish_reason", "unknown"),
         )
         return result

@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 import pytest
 
-from model_capabilities import normalize_remote_model_record, resolve_output_capability
+from model_capabilities import (
+    normalize_remote_model_record,
+    resolve_output_capability,
+    resolve_reasoning_capability,
+)
 
 
 def test_remote_explicit_output_limit_beats_catalog():
@@ -60,4 +64,23 @@ def test_remote_normalization_drops_untrusted_fields():
         "context_length": 1_000_000,
         "max_output_tokens": 384_000,
         "max_output_field": "max_completion_tokens",
+    }
+
+
+def test_deepseek_reasoning_capability_declares_toggle_and_efforts():
+    result = resolve_reasoning_capability("deepseek-v4-flash", service_preset="deepseek")
+    assert result["toggle"] is True
+    assert result["efforts"] == ["low", "medium", "high"]
+    assert result["default_mode"] == "medium"
+    assert result["wire_protocol"] == "deepseek_thinking"
+
+
+def test_unknown_reasoning_capability_does_not_invent_toggle():
+    result = resolve_reasoning_capability("private-wrapper-7b", service_preset="custom")
+    assert result == {
+        "toggle": False,
+        "efforts": [],
+        "default_mode": "provider_default",
+        "wire_protocol": "none",
+        "source": "unknown",
     }

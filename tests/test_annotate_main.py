@@ -5,6 +5,15 @@ import annotate
 import llm
 
 
+def test_annotation_static_system_keeps_exact_source_after_rules():
+    source = "Kai: original\n\nKai: do not rewrite\n"
+
+    static = annotate.build_annotation_static_system("RULES", source)
+
+    assert static.startswith("RULES")
+    assert static.endswith(source)
+
+
 def test_main_with_mock_provider_writes_a_portrait_annotation(tmp_path, monkeypatch):
     script = tmp_path / "scene.txt"
     script.write_text("Kai: hello\n", encoding="utf-8")
@@ -61,6 +70,43 @@ def test_agent_mode_accepts_mock_provider_source_identity_response(tmp_path):
     }, provider_instance=llm.MockProvider({}))
     assert result["agent"]["enabled"] is True
     assert output.read_text(encoding="utf-8") == "Kai: hello\nKai: goodbye\n"
+
+
+def test_agent_reuses_one_source_prefixed_static_prompt_across_chunks(tmp_path):
+    script = tmp_path / "scene.txt"
+    source = "".join(f"Kai: line {index}\n" for index in range(45))
+    script.write_text(source, encoding="utf-8")
+    cast = tmp_path / "cast.json"
+    cast.write_text(json.dumps({
+        "default_bg": "BG_Black", "default_bgm": 0, "scene_bg": {},
+        "cast": {"Kai": {"id": "kai", "portrait": True}}, "alias": {},
+    }), encoding="utf-8")
+    index = tmp_path / "index.json"
+    index.write_text(json.dumps({
+        "bg": {"BG_Black": 1}, "sounds": [],
+        "characters": [{"identifier": "kai", "faces": [{"id": "00", "raw": "00", "label": "", "cn": ""}]}],
+        "enums": {"emoticon": {}, "action": {}},
+    }), encoding="utf-8")
+
+    class CaptureProvider(llm.MockProvider):
+        def __init__(self):
+            super().__init__({})
+            self.static_prompts = []
+
+        def complete_json(self, static_system, volatile_system, user, schema):
+            self.static_prompts.append(static_system)
+            return super().complete_json(static_system, volatile_system, user, schema)
+
+    provider = CaptureProvider()
+    annotate.annotate_script({
+        "script": str(script), "out": str(tmp_path / "annotated.txt"),
+        "cast": str(cast), "index": str(index), "agent_enabled": True,
+        "checkpoint_dir": str(tmp_path / "checkpoints"),
+    }, provider_instance=provider)
+
+    assert len(provider.static_prompts) >= 2
+    assert len(set(provider.static_prompts)) == 1
+    assert provider.static_prompts[0].endswith(source)
 
 
 def test_confirmed_usage_chain_is_sent_as_annotation_context(tmp_path):

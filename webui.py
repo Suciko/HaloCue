@@ -1105,6 +1105,9 @@ def _temporary_profile_provider(payload):
     return llm.make_provider_from_settings(provider_name, {
         "model": record["model"], "base_url": record["base_url"],
         "max_tokens": record["max_tokens"], "vision": record["vision"],
+        "annotation_max_tokens": record.get("annotation_max_tokens", min(record["max_tokens"], 16000)),
+        "reasoning_mode": record.get("reasoning_mode", "balanced"),
+        "reasoning_wire_protocol": "deepseek_thinking" if record.get("service_preset") == "deepseek" else "none",
         "api_key": secret,
     })
 
@@ -1130,6 +1133,9 @@ def _temporary_connection_provider(connection_payload, model_payload):
         "model": model_name,
         "base_url": record["base_url"],
         "max_tokens": int(model.get("max_tokens") or 16000),
+        "annotation_max_tokens": int(model.get("annotation_max_tokens") or min(int(model.get("max_tokens") or 16000), 16000)),
+        "reasoning_mode": str(model.get("reasoning_mode") or "balanced"),
+        "reasoning_wire_protocol": "deepseek_thinking" if record.get("service_preset") == "deepseek" else "none",
         "vision": model.get("vision_status") != "unsupported",
         "api_key": secret,
     })
@@ -3140,9 +3146,11 @@ def annotate_draft_worker(payload, job=None):
             if phase == "recovery":
                 detail = str(detail)
             phase_start = {"planning": 0.0, "annotating": 0.10, "resumed": 0.10,
-                           "recovery": 0.10, "review": 0.90, "cancelled": 0.0}.get(phase, 0.10)
+                           "recovery": 0.10, "review": 0.90, "cancelled": 0.0,
+                           "timed_out": 0.10}.get(phase, 0.10)
             phase_end = {"planning": 0.10, "annotating": 0.90, "resumed": 0.90,
-                         "recovery": 0.90, "review": 0.98, "cancelled": 1.0}.get(phase, 0.90)
+                         "recovery": 0.90, "review": 0.98, "cancelled": 1.0,
+                         "timed_out": 0.90}.get(phase, 0.90)
             ratio = min(1.0, max(0.0, (current / total) if total else 0.0))
             job.update_progress((phase_start + (phase_end - phase_start) * ratio) * 100, detail)
 
@@ -3187,6 +3195,7 @@ def annotate_draft_worker(payload, job=None):
     return {"draft_token": token, "project": project,
             "lines": len(annotated.splitlines()), "proposals": len(proposals),
              "resumed_chunks": int(agent.get("resumed_chunks") or 0),
+             "timed_out": bool(agent.get("timed_out")),
              "agent_metrics": dict(agent.get("metrics") or {})}
 
 
@@ -4681,10 +4690,13 @@ class H(BaseHTTPRequestHandler):
                     raise model_profiles.ModelProfileError("妯″瀷鍚嶇О涓嶈兘涓虹┖")
                 return self._send(
                     200,
-                    model_capabilities.resolve_output_capability(
+                    dict(model_capabilities.resolve_output_capability(
                         model_name,
                         service_preset=str(data.get("service_preset") or "custom"),
-                    ),
+                    ), reasoning=model_capabilities.resolve_reasoning_capability(
+                        model_name,
+                        service_preset=str(data.get("service_preset") or "custom"),
+                    )),
                 )
             if p == "/api/llm/vision/fallback-test":
                 provider = model_router.ModelRouter(MODEL_PROFILES).one_shot_base_fallback()

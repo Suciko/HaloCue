@@ -31,6 +31,7 @@ _CAPABILITY_STATUSES = {"untested", "passed", "failed", "unsupported"}
 _VISION_MODES = {"separate", "base", "disabled"}
 _MAX_TOKEN_SOURCES = {"legacy", "api", "catalog", "unknown", "manual"}
 _RECOMMENDATION_SOURCES = {"api", "catalog", "unknown"}
+_REASONING_MODES = {"speed", "low", "balanced", "medium", "deep", "high", "provider_default"}
 
 
 class ModelProfileError(ValueError):
@@ -449,6 +450,15 @@ class ModelProfileStore:
         vision_status = str(payload.get("vision_status") or "untested")
         if text_status not in _CAPABILITY_STATUSES or vision_status not in _CAPABILITY_STATUSES:
             raise ModelProfileError("模型能力状态无效")
+        reasoning_mode = str(payload.get("reasoning_mode") or "balanced").strip().lower()
+        if reasoning_mode not in _REASONING_MODES:
+            raise ModelProfileError("reasoning_mode 无效")
+        try:
+            annotation_max_tokens = int(payload.get("annotation_max_tokens") or min(max_tokens, 16000))
+        except (TypeError, ValueError) as exc:
+            raise ModelProfileError("annotation_max_tokens 必须是整数") from exc
+        if not 1 <= annotation_max_tokens <= max_tokens:
+            raise ModelProfileError("annotation_max_tokens 必须在 1 到 max_tokens 之间")
         return {
             "id": model_id,
             "connection_id": connection_id,
@@ -460,6 +470,8 @@ class ModelProfileStore:
             "recommended_label": recommended_label or "上限未识别",
             "text_status": text_status,
             "vision_status": vision_status,
+            "reasoning_mode": reasoning_mode,
+            "annotation_max_tokens": annotation_max_tokens,
         }
 
     def _public_connection(self, record: dict) -> dict:
@@ -521,9 +533,16 @@ class ModelProfileStore:
         return {
             "schema_version": 2,
             "connections": [self._public_connection(row) for row in state["connections"]],
-            "models": [self._provenance(row) for row in state["models"]],
+            "models": [self._public_model(row) for row in state["models"]],
             "assignments": dict(state["assignments"]),
         }
+
+    @staticmethod
+    def _public_model(record: dict) -> dict:
+        result = dict(record)
+        result.setdefault("reasoning_mode", "balanced")
+        result.setdefault("annotation_max_tokens", min(int(result.get("max_tokens") or 16000), 16000))
+        return result
 
     def save_connection(self, payload: dict) -> dict:
         with self._lock:
@@ -565,7 +584,7 @@ class ModelProfileStore:
             else:
                 state["models"].append(record)
             self._write(state)
-            return dict(record)
+            return self._public_model(record)
 
     def connection_record(self, connection_id: str) -> dict:
         with self._lock:
@@ -618,6 +637,9 @@ class ModelProfileStore:
                 "model": str(model["model"]),
                 "base_url": str(connection.get("base_url") or ""),
                 "max_tokens": int(model.get("max_tokens") or 16000),
+                "annotation_max_tokens": int(model.get("annotation_max_tokens") or min(int(model.get("max_tokens") or 16000), 16000)),
+                "reasoning_mode": str(model.get("reasoning_mode") or "balanced"),
+                "reasoning_wire_protocol": "deepseek_thinking" if str(connection.get("service_preset") or "") == "deepseek" else "none",
                 "vision": model.get("vision_status") in {"passed", "untested"},
                 "api_key": secret,
             }

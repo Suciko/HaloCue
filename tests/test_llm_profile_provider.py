@@ -1,5 +1,6 @@
 import io
 import json
+import time
 from types import SimpleNamespace
 from urllib.error import HTTPError
 
@@ -394,6 +395,62 @@ def test_openai_stream_joins_deltas_and_reports_activity(monkeypatch):
     assert provider.stats["cache_read"] == 70
     assert provider.stats["cache_miss"] == 30
     assert provider.stats["cache_reports"] == 1
+
+
+def test_openai_stream_reports_reasoning_separately_and_maps_deepseek_thinking(monkeypatch):
+    lines = [
+        b'data: {"choices":[{"delta":{"reasoning_content":"thinking"},"finish_reason":null}]}\n',
+        b'data: {"choices":[{"delta":{"content":"{}"},"finish_reason":"stop"}]}\n',
+        b'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":3}}\n',
+        b'data: [DONE]\n',
+    ]
+    payloads = []
+
+    def fake_urlopen(request, timeout):
+        payloads.append(json.loads(request.data))
+        return FakeSseResponse(lines)
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen, raising=False)
+    events = []
+    provider = llm.OpenAIProvider({
+        "api_key": "secret", "model": "deepseek-v4-flash",
+        "service_preset": "deepseek", "reasoning_mode": "speed",
+    })
+
+    assert provider.complete_json_stream("system", "", "user", {"type": "object"}, on_activity=events.append) == {}
+    assert payloads[0]["thinking"] == {"type": "disabled"}
+    assert any(event["state"] == "reasoning" and event["reasoning_chars"] == 8 for event in events)
+    assert events[-1]["first_reasoning_ms"] is not None
+    assert events[-1]["first_content_ms"] is not None
+    assert events[-1]["reasoning_chars"] == 8
+
+
+def test_openai_stream_wall_timeout_applies_during_reasoning(monkeypatch):
+    class SlowSse(FakeSseResponse):
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"reasoning_content":"x"}}]}\n'
+            time.sleep(1.05)
+            yield b'data: {"choices":[{"delta":{"reasoning_content":"y"}}]}\n'
+
+    monkeypatch.setattr(llm, "urlopen", lambda request, timeout: SlowSse([]), raising=False)
+    provider = llm.OpenAIProvider({
+        "api_key": "secret", "model": "deepseek-v4-flash",
+        "reasoning_mode": "deep", "wall_timeout": 1,
+    })
+    with pytest.raises(llm.RequestDeadlineError):
+        provider.complete_json_stream("system", "", "user", {"type": "object"})
+
+
+def test_openai_uses_annotation_budget_instead_of_model_limit(monkeypatch):
+    payloads = []
+    lines = [
+        b'data: {"choices":[{"delta":{"content":"{}"},"finish_reason":"stop"}]}\n',
+        b'data: [DONE]\n',
+    ]
+    monkeypatch.setattr(llm, "urlopen", lambda request, timeout: (payloads.append(json.loads(request.data)) or FakeSseResponse(lines)), raising=False)
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "deepseek-v4-flash", "max_tokens": 384000, "annotation_max_tokens": 16000})
+    provider.complete_json_stream("system", "", "user", {"type": "object"})
+    assert payloads[0]["max_tokens"] == 16000
 
 
 @pytest.mark.parametrize(
