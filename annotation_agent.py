@@ -148,6 +148,7 @@ def run_annotation_agent(
         str(value)
         for value in (memory.get("progress") or {}).get("completed_target_ids") or []
     )
+    request_telemetry: List[Dict[str, Any]] = []
     base_chunk_targets = [
         {str(items[index].get("annotation_id") or "") for index in chunk["target_indices"]}
         for chunk in chunks
@@ -267,6 +268,14 @@ def run_annotation_agent(
         cache_miss = token_delta("cache_miss")
         cache_reported = bool(cache_reports)
         cache_total = (cache_read or 0) + (cache_miss or 0)
+        records = [dict(record) for record in request_telemetry[-50:]]
+
+        def record_sum(key):
+            values = [record.get(key) for record in records]
+            if not any(value is not None for value in values):
+                return None
+            return sum(int(value or 0) for value in values)
+
         return {
             "requests": request_count,
             "retries": retries,
@@ -283,7 +292,31 @@ def run_annotation_agent(
             "cache_reported": cache_reported,
             "elapsed_ms": round((time.perf_counter() - started_at) * 1000),
             "actual_model": str(getattr(provider, "model", "") or ""),
+            "request_records": records,
+            "reasoning_tokens": record_sum("reasoning_tokens"),
+            "reasoning_chars": record_sum("reasoning_chars"),
+            "content_chars": record_sum("content_chars"),
         }
+
+    def capture_request_records(
+        previous_records: Sequence[Mapping[str, Any]], *, scene_id: str, chunk_id: str,
+        current_retry_count: int, current_subdivision_count: int, agent_request_index: int,
+    ) -> None:
+        records = list(getattr(provider, "request_records", []) or [])
+        offset = len(previous_records)
+        new_records = records[offset:] if len(records) >= offset else records
+        for record in new_records:
+            safe = dict(record)
+            safe.update({
+                "scene_id": scene_id,
+                "chunk_id": chunk_id,
+                "agent_request_index": agent_request_index,
+                "retry_count": current_retry_count,
+                "subdivision_count": current_subdivision_count,
+            })
+            request_telemetry.append(safe)
+        if len(request_telemetry) > 50:
+            del request_telemetry[:-50]
 
     while queue:
         chunk = queue.popleft()
@@ -356,6 +389,7 @@ def run_annotation_agent(
                     f"\n\n上次响应无效：{_chunk_error_code(last_error)} - {_chunk_error_detail(last_error)}。"
                     "请修正内容，保持相同 TARGET，并且只返回 TARGET。"
                 )
+            previous_records = list(getattr(provider, "request_records", []) or [])
             try:
                 request_count += 1
                 response = complete_chunk(
@@ -429,6 +463,15 @@ def run_annotation_agent(
                 raise AnnotationAgentError(
                     "model_call", str(chunk["scene_id"]), chunk_id, str(exc)
                 ) from exc
+            finally:
+                capture_request_records(
+                    previous_records,
+                    scene_id=str(chunk["scene_id"]),
+                    chunk_id=chunk_id,
+                    current_retry_count=retries,
+                    current_subdivision_count=subdivisions,
+                    agent_request_index=request_count,
+                )
         if validated is None:
             subdivision = _next_subdivision_limit(len(targets))
             if subdivision is not None:

@@ -139,6 +139,7 @@
   }
   function formatAnnotationCompletion(metrics) {
     metrics = metrics || {};
+    const count = function (value) { return Number.isFinite(Number(value)) ? Number(value).toLocaleString('en-US') : ''; };
     const model = String(metrics.actual_model || metrics.model || '模型未知');
     const requests = Number(metrics.requests);
     const retries = Number(metrics.retries);
@@ -152,8 +153,15 @@
       const seconds = Math.max(0, Math.round(elapsed / 1000));
       parts.push('耗时 ' + (seconds >= 60 ? Math.floor(seconds / 60) + ' 分 ' + (seconds % 60) + ' 秒' : seconds + ' 秒'));
     }
+    if (Number.isFinite(Number(metrics.input_tokens))) parts.push('输入 ' + count(metrics.input_tokens));
+    if (Number.isFinite(Number(metrics.output_tokens))) parts.push('输出 ' + count(metrics.output_tokens));
+    if (Number.isFinite(Number(metrics.reasoning_tokens))) parts.push('思考 ' + count(metrics.reasoning_tokens));
+    if (Number.isFinite(Number(metrics.content_chars))) parts.push('正文 ' + count(metrics.content_chars) + ' 字符');
     if (metrics.cache_reported === true && Number.isFinite(Number(metrics.cache_hit_rate))) {
       parts.push('缓存命中 ' + Math.round(Number(metrics.cache_hit_rate) * 100) + '%');
+      if (Number.isFinite(Number(metrics.cache_read_tokens)) || Number.isFinite(Number(metrics.uncached_input_tokens))) {
+        parts.push('缓存输入 ' + count(metrics.cache_read_tokens || 0) + ' / 未命中 ' + count(metrics.uncached_input_tokens || 0));
+      }
     } else {
       parts.push('缓存未报告');
     }

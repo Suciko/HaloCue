@@ -149,10 +149,12 @@ def parse_json_response(text):
 
 class Provider:
     name = "?"
+    max_request_records = 50
 
     def __init__(self, cfg):
         self.cfg = cfg
         self.model = cfg.get("model") or ""
+        self.request_records = []
         self.stats = {
             "in": 0,
             "out": 0,
@@ -228,6 +230,13 @@ class Provider:
         if s["cache_read"] or s["cache_write"]:
             out += f"  缓存读 {s['cache_read']:,}  缓存写 {s['cache_write']:,}"
         return out
+
+    def _append_request_record(self, record):
+        safe = dict(record or {})
+        safe["request_index"] = int(self.stats.get("calls") or 0)
+        self.request_records.append(safe)
+        if len(self.request_records) > self.max_request_records:
+            del self.request_records[:-self.max_request_records]
 
 
 # ---------------------------------------------------------------- Anthropic
@@ -493,9 +502,10 @@ class OpenAIProvider(Provider):
             raise LLMError(f"{self.model} 接口返回格式不正确")
         return result
 
-    def _record_usage(self, response):
+    def _record_usage(self, response, *, request_record=None):
         usage = response.get("usage") or {}
         details = usage.get("prompt_tokens_details") or {}
+        completion_details = usage.get("completion_tokens_details") or {}
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
         cached = usage.get("prompt_cache_hit_tokens")
         if cached is None:
@@ -510,6 +520,20 @@ class OpenAIProvider(Provider):
             self.stats["cache_reports"] += 1
             self.stats["cache_read"] += int(cached or 0)
             self.stats["cache_miss"] += int(missed or 0)
+        if request_record is not None:
+            record = dict(request_record)
+            record.update({
+                "input_tokens": prompt_tokens,
+                "cache_read_tokens": int(cached) if cached is not None else None,
+                "uncached_input_tokens": int(missed) if missed is not None else None,
+                "output_tokens": int(usage.get("completion_tokens") or 0),
+                "reasoning_tokens": (
+                    int(completion_details.get("reasoning_tokens"))
+                    if completion_details.get("reasoning_tokens") is not None
+                    else None
+                ),
+            })
+            self._append_request_record(record)
 
     def _completion_text(self, messages, response_format, *, vision=False):
         payload = {
@@ -521,7 +545,6 @@ class OpenAIProvider(Provider):
         if response_format is not None:
             payload["response_format"] = response_format
         response = self._request_json("/chat/completions", payload)
-        self._record_usage(response)
         choices = response.get("choices") or []
         choice = choices[0] if choices and isinstance(choices[0], dict) else {}
         self._last_finish_reason = choice.get("finish_reason") or "unknown"
@@ -534,6 +557,15 @@ class OpenAIProvider(Provider):
                 if isinstance(block, dict) and block.get("type") in {"text", "output_text"}
             )
         text = str(text or "")
+        reasoning = message.get("reasoning_content") if isinstance(message, dict) else ""
+        self._record_usage(
+            response,
+            request_record={
+                "reasoning_chars": len(str(reasoning or "")),
+                "content_chars": len(text),
+                "finish_reason": self._last_finish_reason,
+            },
+        )
         if not text.strip():
             finish_reason = choice.get("finish_reason") or "unknown"
             prefix = "视觉调用" if vision else "调用"
@@ -671,9 +703,19 @@ class OpenAIProvider(Provider):
             reason = getattr(exc, "reason", None) or str(exc)
             raise LLMError(f"{self.model} 无法连接模型接口: {reason}") from exc
 
-        self._record_usage({"usage": usage or {}})
         self._last_finish_reason = finish_reason
         text = "".join(chunks)
+        self._record_usage(
+            {"usage": usage or {}},
+            request_record={
+                "elapsed_ms": max(0, int((time.monotonic() - started_monotonic) * 1000)),
+                "first_reasoning_ms": first_reasoning_ms,
+                "first_content_ms": first_content_ms,
+                "reasoning_chars": reasoning_chars,
+                "content_chars": activity["received_chars"],
+                "finish_reason": finish_reason,
+            },
+        )
         if not text.strip():
             prefix = "调用"
             if finish_reason == "length":

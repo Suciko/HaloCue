@@ -128,12 +128,15 @@ def test_annotation_completion_formatter_reports_real_cache_state():
 const {createHarness}=require(process.argv[1]);
 const h=createHarness();
 console.log(JSON.stringify({
-  hit:h.window.AppRuntime.formatAnnotationCompletion({actual_model:'deepseek-v4-flash',requests:7,retries:1,subdivisions:2,elapsed_ms:123456,cache_reported:true,cache_hit_rate:0.69}),
+  hit:h.window.AppRuntime.formatAnnotationCompletion({actual_model:'deepseek-v4-flash',requests:7,retries:1,subdivisions:2,elapsed_ms:123456,cache_reported:true,cache_hit_rate:0.69,input_tokens:360075,output_tokens:118591,reasoning_tokens:80000,content_chars:12000}),
   unknown:h.window.AppRuntime.formatAnnotationCompletion({actual_model:'deepseek-v4-flash',requests:7,retries:1,subdivisions:2,elapsed_ms:123456,cache_reported:false,cache_hit_rate:null})
 }));
 '''
     result = run_harness(script)
     assert "69%" in result["hit"]
+    assert "360,075" in result["hit"]
+    assert "118,591" in result["hit"]
+    assert "80,000" in result["hit"]
     assert "缓存未报告" in result["unknown"]
 
 

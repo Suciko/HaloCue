@@ -397,6 +397,37 @@ def test_openai_stream_joins_deltas_and_reports_activity(monkeypatch):
     assert provider.stats["cache_reports"] == 1
 
 
+def test_openai_stream_request_record_captures_redacted_usage(monkeypatch):
+    lines = [
+        b'data: {"choices":[{"delta":{"reasoning_content":"think"},"finish_reason":null}]}\n',
+        b'data: {"choices":[{"delta":{"content":"{}"},"finish_reason":"stop"}]}\n',
+        b'data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":9,"prompt_cache_hit_tokens":70,"prompt_cache_miss_tokens":30,"completion_tokens_details":{"reasoning_tokens":7}}}\n',
+        b'data: [DONE]\n',
+    ]
+    monkeypatch.setattr(llm, "urlopen", lambda request, timeout: FakeSseResponse(lines), raising=False)
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "stream-model"})
+
+    assert provider.complete_json_stream("stable", "volatile", "user", {"type": "object"}) == {}
+
+    assert provider.request_records == [
+        {
+            "request_index": 1,
+            "input_tokens": 100,
+            "cache_read_tokens": 70,
+            "uncached_input_tokens": 30,
+            "output_tokens": 9,
+            "reasoning_tokens": 7,
+            "reasoning_chars": 5,
+            "content_chars": 2,
+            "elapsed_ms": 0,
+            "first_reasoning_ms": 0,
+            "first_content_ms": 0,
+            "finish_reason": "stop",
+        }
+    ]
+    assert all("stable" not in str(record) and "user" not in str(record) for record in provider.request_records)
+
+
 def test_openai_stream_reports_reasoning_separately_and_maps_deepseek_thinking(monkeypatch):
     lines = [
         b'data: {"choices":[{"delta":{"reasoning_content":"thinking"},"finish_reason":null}]}\n',
@@ -423,6 +454,26 @@ def test_openai_stream_reports_reasoning_separately_and_maps_deepseek_thinking(m
     assert events[-1]["first_reasoning_ms"] is not None
     assert events[-1]["first_content_ms"] is not None
     assert events[-1]["reasoning_chars"] == 8
+
+
+def test_openai_stream_empty_visible_text_records_reasoning_before_failure(monkeypatch):
+    lines = [
+        b'data: {"choices":[{"delta":{"reasoning_content":"thinking"},"finish_reason":null}]}\n',
+        b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n',
+        b'data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":12,"prompt_cache_hit_tokens":80,"prompt_cache_miss_tokens":20,"completion_tokens_details":{"reasoning_tokens":12}}}\n',
+        b'data: [DONE]\n',
+    ]
+    monkeypatch.setattr(llm, "urlopen", lambda request, timeout: FakeSseResponse(lines), raising=False)
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "deepseek-v4-flash"})
+
+    with pytest.raises(llm.EmptyModelResponseError, match="finish_reason=stop"):
+        provider.complete_json_stream("stable", "volatile", "user", {"type": "object"})
+
+    record = provider.request_records[0]
+    assert record["reasoning_tokens"] == 12
+    assert record["reasoning_chars"] == 8
+    assert record["content_chars"] == 0
+    assert record["finish_reason"] == "stop"
 
 
 def test_openai_stream_wall_timeout_applies_during_reasoning(monkeypatch):

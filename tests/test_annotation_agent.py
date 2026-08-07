@@ -102,6 +102,39 @@ def test_agent_carries_state_and_event_into_next_chunk(tmp_path):
     assert len(result["rows_by_id"]) == 70
 
 
+def test_agent_attaches_request_telemetry_to_chunk_without_prompt_text(tmp_path):
+    class TelemetryProvider(RecordingProvider):
+        def __init__(self):
+            super().__init__()
+            self.request_records = []
+
+        def complete_json(self, static, volatile, user, schema):
+            result = super().complete_json(static, volatile, user, schema)
+            self.request_records.append({
+                "request_index": self.calls,
+                "input_tokens": 100,
+                "cache_read_tokens": 70,
+                "uncached_input_tokens": 30,
+                "output_tokens": 9,
+                "reasoning_tokens": 7,
+                "reasoning_chars": 5,
+                "content_chars": 2,
+                "finish_reason": "stop",
+            })
+            return result
+
+    result = fixture(tmp_path, TelemetryProvider(), count=10)
+
+    records = result["metrics"]["request_records"]
+    assert records[0]["scene_id"] == "scene-1"
+    assert records[0]["chunk_id"] == "scene-1-chunk-1"
+    assert records[0]["request_index"] == 1
+    assert records[0]["retry_count"] == 0
+    assert records[0]["subdivision_count"] == 0
+    assert "user" not in records[0]
+    assert "volatile" not in records[0]
+
+
 def test_structural_failure_retries_without_partial_commit(tmp_path):
     provider = RecordingProvider(omit_last_calls=1)
     result = fixture(tmp_path, provider, count=25)
