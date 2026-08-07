@@ -629,10 +629,38 @@ def render_annotated_items(items):
             out_lines.append("@bgshake")
         if item.get("se"):
             out_lines.append(f"@se {item['se']}")
+        if item.get("wait_ms"):
+            out_lines.append(f"@wait {item['wait_ms']}")
         out_lines.extend(annotation_directives(item))
         out_lines.append(render(item))
 
     return "\n".join(out_lines) + "\n"
+
+
+def insert_annotation_beats(items, beats):
+    """Insert validated dialogue-free reaction nodes around source anchors."""
+    before, after = {}, {}
+    for beat in beats or []:
+        target = before if beat.get("position") == "before" else after
+        target.setdefault(str(beat.get("anchor_id") or ""), []).append(beat)
+    result = []
+    for item in items:
+        anchor_id = str(item.get("annotation_id") or "")
+        for beat in before.get(anchor_id, []):
+            result.append(_beat_item(beat))
+        result.append(item)
+        for beat in after.get(anchor_id, []):
+            result.append(_beat_item(beat))
+    return result
+
+
+def _beat_item(beat):
+    return {
+        "kind": "line", "raw": "", "who": beat["who"], "text": "",
+        "face": beat.get("face", ""), "emo": beat.get("emo", ""),
+        "act": beat.get("act", ""), "fx": "", "wait_ms": beat.get("wait_ms", 0),
+        "_annotation_beat": True,
+    }
 
 
 def build_proposal(
@@ -804,6 +832,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     proposals = []
     agent_enabled = bool(options.get("agent_enabled", llmcfg.get("agent_enabled", False))) and not range_str
     agent_meta = {}
+    annotation_beats = []
     if agent_enabled:
         script_text = open(script_path, encoding="utf-8").read()
         model_config = {
@@ -822,10 +851,11 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             constraints=constraints, usage_chain=usage_chain,
             checkpoint_store=AnnotationCheckpointStore(checkpoint_dir),
             run_fingerprint=fingerprint, progress=options.get("progress"),
+            model_activity=options.get("model_activity"),
             cancelled=options.get("cancelled"),
-            target=int(llmcfg.get("agent_target_lines", 20)),
-            soft_limit=int(llmcfg.get("agent_soft_limit", 24)),
-            hard_limit=int(llmcfg.get("agent_hard_limit", 30)),
+            target=int(llmcfg.get("agent_target_lines", 50)),
+            soft_limit=int(llmcfg.get("agent_soft_limit", 50)),
+            hard_limit=int(llmcfg.get("agent_hard_limit", 60)),
             before=int(llmcfg.get("agent_context_before", 15)),
             after=int(llmcfg.get("agent_context_after", 10)),
         )
@@ -835,11 +865,13 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             "completed_chunks": agent_result.get("completed_chunks", 0),
             "resumed_chunks": agent_result.get("resumed_chunks", 0),
             "cancelled": bool(agent_result.get("cancelled")),
+            "metrics": agent_result.get("metrics") or {},
         }
         if agent_meta["cancelled"]:
             return {"text": "", "proposals": [], "diagnostics": diagnostics,
                     "out": out_path, "agent": agent_meta, "cancelled": True}
         rows_by_id = agent_result["rows_by_id"]
+        annotation_beats = agent_result.get("beats") or []
         for item_index in todo:
             item = items[item_index]
             row = rows_by_id.get(item.get("annotation_id"))
@@ -895,7 +927,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     normalize_direction_density(items)
     normalize_bgfx_lifetime(items)
 
-    final_text = render_annotated_items(items)
+    final_text = render_annotated_items(insert_annotation_beats(items, annotation_beats))
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(final_text)
