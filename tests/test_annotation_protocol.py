@@ -81,6 +81,83 @@ def test_state_delta_still_rejects_wrong_non_null_types(field, value):
     assert error.value.code == "invalid_state_delta"
 
 
+def test_explicit_null_beats_is_rejected():
+    response = complete_response()
+    response["beats"] = None
+
+    with pytest.raises(ChunkProtocolError) as error:
+        validate_chunk_response(response, TARGETS)
+
+    assert error.value.code == "invalid_beats"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("source_id", 1),
+    ("text_fingerprint", 123),
+])
+def test_line_identity_fields_require_strings(field, value):
+    response = complete_response()
+    response["lines"][0][field] = value
+
+    with pytest.raises(ChunkProtocolError) as error:
+        validate_chunk_response(response, TARGETS)
+
+    assert error.value.code == "invalid_line"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("face", None),
+    ("shake", 1),
+    ("move", True),
+])
+def test_annotation_fields_keep_schema_types(field, value):
+    response = complete_response()
+    response["lines"][0][field] = value
+
+    with pytest.raises(ChunkProtocolError) as error:
+        validate_chunk_response(response, TARGETS)
+
+    assert error.value.code == "invalid_line"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("kind", None),
+    ("participants", [None]),
+    ("keywords", "callback"),
+    ("summary", None),
+    ("source_ids", [1]),
+    ("evidence", None),
+    ("importance", True),
+    ("status", None),
+])
+def test_memory_event_fields_keep_schema_types(field, value):
+    response = complete_response()
+    response["memory_events"] = [{
+        "kind": "callback", "participants": ["凯伊"], "keywords": ["称呼"],
+        "summary": "发生了称呼变化", "source_ids": ["src-1-0-a"],
+        "evidence": "证据", "importance": 0.8, "status": "open",
+    }]
+    response["memory_events"][0][field] = value
+
+    with pytest.raises(ChunkProtocolError) as error:
+        validate_chunk_response(response, TARGETS)
+
+    assert error.value.code == "invalid_memory_event"
+
+
+def test_beat_fields_do_not_coerce_null_to_empty_string():
+    response = complete_response()
+    response["beats"] = [{
+        "anchor_id": "src-1-0-a", "position": "after", "who": None,
+        "face": "", "emo": "", "act": "", "wait_ms": 0,
+    }]
+
+    with pytest.raises(ChunkProtocolError) as error:
+        validate_chunk_response(response, TARGETS)
+
+    assert error.value.code == "invalid_beat"
+
+
 def test_event_requires_visible_source_evidence():
     response = complete_response()
     response["memory_events"] = [{

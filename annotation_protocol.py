@@ -9,6 +9,11 @@ ANNOTATION_FIELDS = (
     "face", "emo", "act", "fx", "se", "bg", "bg_request", "place",
     "shake", "bgfx", "trans", "move", "shot",
 )
+ANNOTATION_FIELD_TYPES = {
+    name: bool if name == "shake" else int if name == "move" else str
+    for name in ANNOTATION_FIELDS
+}
+LINE_FIELDS = set(ANNOTATION_FIELDS) | {"source_id", "text_fingerprint"}
 STATE_FIELDS = {
     "background", "place", "bgfx", "visible_characters", "positions",
     "last_faces", "recent_emoticons", "recent_actions", "recent_sounds",
@@ -108,8 +113,6 @@ def _validate_beats(
     value: Any, expected_ids: Iterable[str], cast: Mapping[str, Any],
     constraints: Mapping[str, Any],
 ) -> List[Dict[str, Any]]:
-    if value is None:
-        return []
     if not isinstance(value, list):
         raise ChunkProtocolError("invalid_beats", "beats 必须是数组")
     expected = set(expected_ids)
@@ -118,26 +121,29 @@ def _validate_beats(
         beat = _require_dict(beat, "invalid_beat", "beats 每项必须是对象")
         if set(beat) != BEAT_FIELDS:
             raise ChunkProtocolError("invalid_beat", "beat 字段不完整或包含未知字段")
-        anchor_id = str(beat.get("anchor_id") or "")
+        for name in ("anchor_id", "position", "who", "face", "emo", "act"):
+            if not isinstance(beat.get(name), str):
+                raise ChunkProtocolError("invalid_beat", f"beat.{name} 必须是字符串")
+        anchor_id = beat["anchor_id"]
         if anchor_id not in expected:
             raise ChunkProtocolError("unknown_beat_anchor", f"beat 引用了未知目标行: {anchor_id}")
         if beat.get("position") not in {"before", "after"}:
             raise ChunkProtocolError("invalid_beat_position", "beat position 只能是 before 或 after")
-        who = str(beat.get("who") or "")
+        who = beat["who"]
         character = cast.get(who) if isinstance(cast, Mapping) else None
         if not character or not character.get("portrait") or character.get("narrator"):
             raise ChunkProtocolError("invalid_beat_character", f"beat 角色不可显示: {who}")
         wait_ms = beat.get("wait_ms")
         if isinstance(wait_ms, bool) or not isinstance(wait_ms, int) or not 0 <= wait_ms <= MAX_BEAT_WAIT_MS:
             raise ChunkProtocolError("invalid_beat_wait", "beat wait_ms 必须在 0-10000 之间")
-        face = str(beat.get("face") or "")
+        face = beat["face"]
         allowed_faces = constraints.get("faces_by_id", {}).get(character.get("id"), set())
         if face and face not in allowed_faces and face.zfill(2) not in allowed_faces:
             raise ChunkProtocolError("illegal_beat_face", f"{who} 没有已验证表情 {face}")
-        emo = str(beat.get("emo") or "")
+        emo = beat["emo"]
         if emo and emo not in constraints.get("ok_emo", set()):
             raise ChunkProtocolError("illegal_beat_emoticon", f"未知气泡 {emo}")
-        act = str(beat.get("act") or "")
+        act = beat["act"]
         if act and act not in constraints.get("ok_act", set()):
             raise ChunkProtocolError("illegal_beat_action", f"未知动作 {act}")
         result.append({
@@ -179,6 +185,22 @@ def _validate_events(value: Any, visible_ids: Iterable[str]) -> List[Dict[str, A
         event = _require_dict(event, "invalid_memory_event", "memory_events 每项必须是对象")
         if set(event) != EVENT_FIELDS:
             raise ChunkProtocolError("invalid_memory_event", "memory event 字段不完整或包含未知字段")
+        for name in ("kind", "summary", "evidence", "status"):
+            if not isinstance(event.get(name), str):
+                raise ChunkProtocolError("invalid_memory_event", f"memory event.{name} 必须是字符串")
+        for name in ("participants", "keywords", "source_ids"):
+            values = event.get(name)
+            if not isinstance(values, list) or any(not isinstance(item, str) for item in values):
+                raise ChunkProtocolError("invalid_memory_event", f"memory event.{name} 必须是字符串数组")
+        importance = event.get("importance")
+        if (
+            isinstance(importance, bool)
+            or not isinstance(importance, (int, float))
+            or not 0 <= importance <= 1
+        ):
+            raise ChunkProtocolError("invalid_memory_event", "memory event.importance 必须在 0 到 1 之间")
+        if event["status"] not in {"open", "resolved", "reference"}:
+            raise ChunkProtocolError("invalid_memory_event", "memory event.status 无效")
         source_ids = event.get("source_ids")
         if not isinstance(source_ids, list) or not source_ids or not set(source_ids) <= visible:
             raise ChunkProtocolError("invalid_event_source", "memory event 必须引用当前可见原文行")
@@ -186,6 +208,23 @@ def _validate_events(value: Any, visible_ids: Iterable[str]) -> List[Dict[str, A
             raise ChunkProtocolError("invalid_memory_event", "memory event 缺少证据文本")
         result.append(dict(event))
     return result
+
+
+def _validate_annotation_row(value: Any) -> Mapping[str, Any]:
+    row = _require_dict(value, "invalid_line", "lines 每项必须是对象")
+    if set(row) != LINE_FIELDS:
+        raise ChunkProtocolError("invalid_line", "line 字段不完整或包含未知字段")
+    if not isinstance(row.get("source_id"), str) or not isinstance(row.get("text_fingerprint"), str):
+        raise ChunkProtocolError("invalid_line", "source_id 和 text_fingerprint 必须是字符串")
+    for name, expected_type in ANNOTATION_FIELD_TYPES.items():
+        field_value = row.get(name)
+        if expected_type is int:
+            valid = isinstance(field_value, int) and not isinstance(field_value, bool)
+        else:
+            valid = isinstance(field_value, expected_type)
+        if not valid:
+            raise ChunkProtocolError("invalid_line", f"line.{name} 类型不正确")
+    return row
 
 
 def validate_chunk_response(
@@ -200,14 +239,14 @@ def validate_chunk_response(
     seen = set()
     rows_by_id: Dict[str, Dict[str, Any]] = {}
     for row in lines:
-        row = _require_dict(row, "invalid_line", "lines 每项必须是对象")
-        source_id = str(row.get("source_id") or "")
+        row = _validate_annotation_row(row)
+        source_id = row["source_id"]
         if source_id in seen:
             raise ChunkProtocolError("duplicate_target", f"目标行重复: {source_id}")
         if source_id not in expected:
             raise ChunkProtocolError("unknown_target", f"响应包含未知目标行: {source_id}")
         seen.add(source_id)
-        if str(row.get("text_fingerprint") or "") != expected[source_id]:
+        if row["text_fingerprint"] != expected[source_id]:
             raise ChunkProtocolError("fingerprint_mismatch", f"原文指纹不匹配: {source_id}")
         rows_by_id[source_id] = dict(row)
     missing = set(expected) - seen
@@ -215,7 +254,7 @@ def validate_chunk_response(
         raise ChunkProtocolError("missing_target", f"响应缺少目标行: {sorted(missing)}")
     state = _validate_state_delta(response.get("state_delta", {}))
     events = _validate_events(response.get("memory_events", []), set(expected) | set(visible_ids))
-    beats = _validate_beats(response.get("beats"), expected, cast, constraints)
+    beats = _validate_beats(response.get("beats", []), expected, cast, constraints)
     return {
         "lines_by_id": rows_by_id, "state_delta": state,
         "memory_events": events, "beats": beats,
