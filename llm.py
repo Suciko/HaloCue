@@ -23,6 +23,10 @@ class StructuredOutputError(LLMError):
     """The provider response is not the JSON shape requested by the caller."""
 
 
+class OutputCapacityError(StructuredOutputError):
+    """The provider stopped because the configured output budget was exhausted."""
+
+
 class UnsupportedResponseFormatError(LLMError):
     """The OpenAI-compatible endpoint rejected the response_format field."""
 
@@ -354,8 +358,12 @@ class OpenAIProvider(Provider):
         if not text.strip():
             finish_reason = choice.get("finish_reason") or "unknown"
             prefix = "视觉调用" if vision else "调用"
-            error_type = StructuredOutputError if finish_reason == "length" else LLMError
-            raise error_type(f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）")
+            if finish_reason == "length":
+                raise OutputCapacityError(
+                    f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens="
+                    f"{self.cfg.get('max_tokens', 16000)}）；请提高最大输出或缩小 Agent 分块"
+                )
+            raise LLMError(f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）")
         return text
 
     @staticmethod
@@ -399,7 +407,7 @@ class OpenAIProvider(Provider):
             )
         except StructuredOutputError as exc:
             if getattr(self, "_last_finish_reason", "") == "length":
-                raise StructuredOutputError(
+                raise OutputCapacityError(
                     f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens={self.cfg.get('max_tokens', 16000)}）；"
                     "请提高最大输出或缩小 Agent 分块"
                 ) from exc
@@ -423,9 +431,13 @@ class OpenAIProvider(Provider):
             return self._complete_compatible(messages, schema, prefix, vision=vision)
         try:
             return parse_and_validate_json_response(text, schema, f"{self.model} {prefix}")
-        except StructuredOutputError:
-            self._strict_response_format_unavailable = True
-            return self._complete_compatible(messages, schema, prefix, vision=vision)
+        except StructuredOutputError as exc:
+            if getattr(self, "_last_finish_reason", "") == "length":
+                raise OutputCapacityError(
+                    f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens={self.cfg.get('max_tokens', 16000)}）；"
+                    "请提高最大输出或缩小 Agent 分块"
+                ) from exc
+            raise
 
     def complete_json(self, static_system, volatile_system, user, schema):
         system = static_system + (("\n\n" + volatile_system) if volatile_system else "")

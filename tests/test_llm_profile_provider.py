@@ -1,4 +1,6 @@
+import io
 import json
+from urllib.error import HTTPError
 
 import pytest
 
@@ -172,3 +174,134 @@ def test_openai_vision_empty_text_reports_model_and_finish_reason(monkeypatch):
             "user",
             {"type": "object"},
         )
+
+
+def test_openai_empty_text_length_is_capacity_error(monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "urlopen",
+        lambda request, timeout: FakeHttpResponse({
+            "choices": [{"message": {"content": ""}, "finish_reason": "length"}],
+        }),
+        raising=False,
+    )
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "deepseek-chat"})
+
+    with pytest.raises(llm.OutputCapacityError, match="finish_reason=length"):
+        provider.complete_json("system", "volatile", "user", {"type": "object"})
+
+
+def test_openai_length_finish_reason_explains_output_budget(monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "urlopen",
+        lambda request, timeout: FakeHttpResponse({
+            "choices": [{"message": {"content": "{"}, "finish_reason": "length"}],
+        }),
+        raising=False,
+    )
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "deepseek-chat", "max_tokens": 16000})
+
+    with pytest.raises(llm.OutputCapacityError, match="finish_reason=length.*max_tokens=16000"):
+        provider.complete_json("system", "volatile", "user", {"type": "object"})
+
+
+def test_openai_structured_call_rejects_markdown_response(monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "urlopen",
+        lambda request, timeout: FakeHttpResponse({
+            "choices": [{
+                "message": {"content": "### 场景演出时间线\n- 商店街入口"},
+                "finish_reason": "stop",
+            }],
+        }),
+        raising=False,
+    )
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "scene-model", "max_tokens": 100})
+
+    with pytest.raises(llm.StructuredOutputError, match="合法 JSON"):
+        provider.complete_json(
+            "system", "volatile", "请只返回 JSON",
+            {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+        )
+
+
+def test_invalid_strict_content_does_not_replay_full_request(monkeypatch):
+    payloads = []
+
+    def fake_urlopen(request, timeout):
+        payloads.append(json.loads(request.data))
+        return FakeHttpResponse({
+            "choices": [{"message": {"content": "### 不是 JSON"}, "finish_reason": "stop"}],
+        })
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen, raising=False)
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "scene-model", "max_tokens": 100})
+
+    with pytest.raises(llm.StructuredOutputError, match="合法 JSON"):
+        provider.complete_json("system", "", "user", {"type": "object"})
+
+    assert len(payloads) == 1
+
+
+def test_openai_retries_with_json_object_when_endpoint_rejects_json_schema(monkeypatch):
+    payloads = []
+
+    def fake_urlopen(request, timeout):
+        payload = json.loads(request.data)
+        payloads.append(payload)
+        if len(payloads) == 1:
+            body = io.BytesIO(json.dumps({
+                "error": {"message": "This response_format type is unavailable now"},
+            }).encode("utf-8"))
+            raise HTTPError(request.full_url, 400, "Bad Request", {}, body)
+        return FakeHttpResponse({
+            "choices": [{"message": {"content": '{"ok": true}'}, "finish_reason": "stop"}],
+        })
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen, raising=False)
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "deepseek-v4-flash"})
+    schema = {
+        "type": "object",
+        "properties": {"ok": {"type": "boolean"}},
+        "required": ["ok"],
+        "additionalProperties": False,
+    }
+
+    assert provider.complete_json("system", "", "user", schema) == {"ok": True}
+    assert payloads[0]["response_format"]["type"] == "json_schema"
+    assert payloads[1]["response_format"]["type"] == "json_object"
+    assert '"ok"' in payloads[1]["messages"][0]["content"]
+
+
+def test_openai_retries_without_response_format_when_both_formats_are_rejected(
+    monkeypatch,
+):
+    payloads = []
+
+    def fake_urlopen(request, timeout):
+        payload = json.loads(request.data)
+        payloads.append(payload)
+        if len(payloads) <= 2:
+            body = io.BytesIO(json.dumps({
+                "error": {"message": "This response_format type is unavailable now"},
+            }).encode("utf-8"))
+            raise HTTPError(request.full_url, 400, "Bad Request", {}, body)
+        return FakeHttpResponse({
+            "choices": [{"message": {"content": '{"ok": true}'}, "finish_reason": "stop"}],
+        })
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen, raising=False)
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "compatible-model"})
+    schema = {
+        "type": "object",
+        "properties": {"ok": {"type": "boolean"}},
+        "required": ["ok"],
+        "additionalProperties": False,
+    }
+
+    assert provider.complete_json("system", "", "user", schema) == {"ok": True}
+    assert payloads[0]["response_format"]["type"] == "json_schema"
+    assert payloads[1]["response_format"]["type"] == "json_object"
+    assert "response_format" not in payloads[2]
