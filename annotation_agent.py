@@ -23,6 +23,7 @@ from annotation_protocol import (
     ChunkProtocolError, build_chunk_schema, validate_chunk_response,
     validate_review_patches,
 )
+from annotation_telemetry import ReasoningTelemetryWriter
 from llm import EmptyModelResponseError, OutputCapacityError, RequestDeadlineError, StructuredOutputError
 
 
@@ -130,6 +131,12 @@ def run_annotation_agent(
         target, soft_limit, hard_limit = mode_target, mode_soft, mode_hard
     chunks = build_chunks(items, scenes, target=target, soft_limit=soft_limit, hard_limit=hard_limit)
     run_key = _run_key(run_fingerprint)
+    telemetry_root = (
+        checkpoint_store.root.parent / "annotation-telemetry"
+        if checkpoint_store.root.name == "annotation-checkpoints"
+        else checkpoint_store.root / "annotation-telemetry"
+    )
+    reasoning_writer = ReasoningTelemetryWriter(telemetry_root, run_key)
     saved = checkpoint_store.load(run_key)
     if saved and saved.get("fingerprint") == dict(run_fingerprint):
         memory = copy.deepcopy(saved.get("memory") or initial_memory(story_plan["summary"]))
@@ -303,6 +310,7 @@ def run_annotation_agent(
         current_retry_count: int, current_subdivision_count: int, agent_request_index: int,
     ) -> None:
         records = list(getattr(provider, "request_records", []) or [])
+        reasoning_records = list(getattr(provider, "reasoning_records", []) or [])
         offset = len(previous_records)
         new_records = records[offset:] if len(records) >= offset else records
         for record in new_records:
@@ -317,6 +325,16 @@ def run_annotation_agent(
             request_telemetry.append(safe)
         if len(request_telemetry) > 50:
             del request_telemetry[:-50]
+        reasoning_offset = len(previous_records)
+        for record in reasoning_records[reasoning_offset:]:
+            reasoning_writer.write({
+                **dict(record),
+                "scene_id": scene_id,
+                "chunk_id": chunk_id,
+                "agent_request_index": agent_request_index,
+                "retry_count": current_retry_count,
+                "subdivision_count": current_subdivision_count,
+            })
 
     while queue:
         chunk = queue.popleft()

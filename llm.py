@@ -155,6 +155,7 @@ class Provider:
         self.cfg = cfg
         self.model = cfg.get("model") or ""
         self.request_records = []
+        self.reasoning_records = []
         self.stats = {
             "in": 0,
             "out": 0,
@@ -237,6 +238,12 @@ class Provider:
         self.request_records.append(safe)
         if len(self.request_records) > self.max_request_records:
             del self.request_records[:-self.max_request_records]
+
+    def _append_reasoning_record(self, record):
+        safe = dict(record or {})
+        self.reasoning_records.append(safe)
+        if len(self.reasoning_records) > self.max_request_records:
+            del self.reasoning_records[:-self.max_request_records]
 
 
 # ---------------------------------------------------------------- Anthropic
@@ -566,6 +573,15 @@ class OpenAIProvider(Provider):
                 "finish_reason": self._last_finish_reason,
             },
         )
+        if reasoning:
+            self._append_reasoning_record({
+                "request_index": int(self.stats.get("calls") or 0),
+                "model": self.model,
+                "reasoning_text": str(reasoning),
+                "reasoning_chars": len(str(reasoning)),
+                "content_chars": len(text),
+                "finish_reason": self._last_finish_reason,
+            })
         if not text.strip():
             finish_reason = choice.get("finish_reason") or "unknown"
             prefix = "视觉调用" if vision else "调用"
@@ -606,6 +622,7 @@ class OpenAIProvider(Provider):
         finish_reason = "unknown"
         started_monotonic = time.monotonic()
         reasoning_chars = 0
+        reasoning_chunks = []
         first_reasoning_ms = None
         first_content_ms = None
         activity.setdefault("first_reasoning_ms", None)
@@ -642,6 +659,7 @@ class OpenAIProvider(Provider):
                     elapsed_ms = max(0, int(time.time() * 1000) - started_ms)
                     if reasoning:
                         reasoning_chars += len(reasoning)
+                        reasoning_chunks.append(reasoning)
                         if first_reasoning_ms is None:
                             first_reasoning_ms = elapsed_ms
                             activity["first_reasoning_ms"] = first_reasoning_ms
@@ -716,6 +734,15 @@ class OpenAIProvider(Provider):
                 "finish_reason": finish_reason,
             },
         )
+        if reasoning_chars:
+            self._append_reasoning_record({
+                "request_index": int(self.stats.get("calls") or 0),
+                "model": self.model,
+                "reasoning_text": "".join(reasoning_chunks),
+                "reasoning_chars": reasoning_chars,
+                "content_chars": activity["received_chars"],
+                "finish_reason": finish_reason,
+            })
         if not text.strip():
             prefix = "调用"
             if finish_reason == "length":

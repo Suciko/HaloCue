@@ -426,6 +426,7 @@ def test_openai_stream_request_record_captures_redacted_usage(monkeypatch):
         }
     ]
     assert all("stable" not in str(record) and "user" not in str(record) for record in provider.request_records)
+    assert provider.reasoning_records[0]["reasoning_text"] == "think"
 
 
 def test_openai_stream_reports_reasoning_separately_and_maps_deepseek_thinking(monkeypatch):

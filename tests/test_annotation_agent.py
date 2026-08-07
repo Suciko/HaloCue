@@ -135,6 +135,36 @@ def test_agent_attaches_request_telemetry_to_chunk_without_prompt_text(tmp_path)
     assert "volatile" not in records[0]
 
 
+def test_agent_writes_reasoning_diagnostics_outside_checkpoint(tmp_path):
+    class ReasoningProvider(RecordingProvider):
+        def __init__(self):
+            super().__init__()
+            self.request_records = []
+            self.reasoning_records = []
+
+        def complete_json(self, static, volatile, user, schema):
+            result = super().complete_json(static, volatile, user, schema)
+            self.request_records.append({"request_index": self.calls})
+            self.reasoning_records.append({
+                "request_index": self.calls,
+                "model": self.model,
+                "reasoning_text": "重复检查 TARGET 格式",
+                "reasoning_chars": 10,
+                "content_chars": 2,
+                "finish_reason": "stop",
+            })
+            return result
+
+    provider = ReasoningProvider()
+    fixture(tmp_path, provider, count=10)
+
+    files = list((tmp_path / "annotation-telemetry").rglob("reasoning.jsonl"))
+    assert len(files) == 1
+    assert "重复检查 TARGET 格式" in files[0].read_text(encoding="utf-8")
+    assert "scene-1-chunk-1" in files[0].read_text(encoding="utf-8")
+    assert not list((tmp_path / "annotation-checkpoints").rglob("*reasoning*"))
+
+
 def test_structural_failure_retries_without_partial_commit(tmp_path):
     provider = RecordingProvider(omit_last_calls=1)
     result = fixture(tmp_path, provider, count=25)
