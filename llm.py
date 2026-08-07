@@ -10,7 +10,7 @@
 static_system 是跨请求不变的部分（资源表），会被缓存；volatile_system 放会变的内容。
 加新家只要再写一个 Provider 子类并在 make_provider 里登记。
 """
-import json, os, sys
+import json, os, sys, time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -29,6 +29,11 @@ class OutputCapacityError(StructuredOutputError):
 
 class UnsupportedResponseFormatError(LLMError):
     """The OpenAI-compatible endpoint rejected the response_format field."""
+
+
+def _emit_activity(callback, state, **fields):
+    if callback:
+        callback({"state": state, **fields})
 
 
 def _schema_error(path: str, detail: str) -> StructuredOutputError:
@@ -136,7 +141,15 @@ class Provider:
     def __init__(self, cfg):
         self.cfg = cfg
         self.model = cfg.get("model") or ""
-        self.stats = {"in": 0, "out": 0, "cache_read": 0, "cache_write": 0, "calls": 0}
+        self.stats = {
+            "in": 0,
+            "out": 0,
+            "cache_read": 0,
+            "cache_miss": 0,
+            "cache_write": 0,
+            "cache_reports": 0,
+            "calls": 0,
+        }
 
     def _key(self):
         direct = str(self.cfg.get("api_key") or "").strip()
@@ -153,6 +166,33 @@ class Provider:
 
     def complete_json(self, static_system, volatile_system, user, schema):
         raise NotImplementedError
+
+    def complete_json_stream(
+        self, static_system, volatile_system, user, schema, *, on_activity=None,
+    ):
+        started_ms = int(time.time() * 1000)
+        _emit_activity(
+            on_activity,
+            "waiting",
+            model=self.model,
+            request_started_at_ms=started_ms,
+            elapsed_ms=0,
+            first_delta_ms=None,
+            received_chars=0,
+            finish_reason="",
+        )
+        result = self.complete_json(static_system, volatile_system, user, schema)
+        _emit_activity(
+            on_activity,
+            "completed",
+            model=self.model,
+            request_started_at_ms=started_ms,
+            elapsed_ms=max(0, int(time.time() * 1000) - started_ms),
+            first_delta_ms=None,
+            received_chars=0,
+            finish_reason="unknown",
+        )
+        return result
 
     def complete_json_vision(self, system, images, user, schema):
         """images = [(标识, jpeg_bytes), ...]"""
@@ -187,6 +227,17 @@ class AnthropicProvider(Provider):
         self.client = anthropic.Anthropic(**client_options)
         self.model = cfg.get("model") or "claude-opus-4-6"
 
+    def _record_anthropic_usage(self, usage):
+        self.stats["calls"] += 1
+        self.stats["in"] += int(getattr(usage, "input_tokens", 0) or 0)
+        self.stats["out"] += int(getattr(usage, "output_tokens", 0) or 0)
+        cache_read = getattr(usage, "cache_read_input_tokens", None)
+        cache_write = getattr(usage, "cache_creation_input_tokens", None)
+        if cache_read is not None or cache_write is not None:
+            self.stats["cache_reports"] += 1
+            self.stats["cache_read"] += int(cache_read or 0)
+            self.stats["cache_write"] += int(cache_write or 0)
+
     def complete_json(self, static_system, volatile_system, user, schema):
         # 静态部分打缓存断点；易变部分放它后面，避免整段前缀失效
         system = [{"type": "text", "text": static_system,
@@ -211,11 +262,7 @@ class AnthropicProvider(Provider):
             raise LLMError(f"Anthropic 返回 {e.status_code}: {e.message}") from e
 
         u = msg.usage
-        self.stats["calls"] += 1
-        self.stats["in"] += u.input_tokens
-        self.stats["out"] += u.output_tokens
-        self.stats["cache_read"] += getattr(u, "cache_read_input_tokens", 0) or 0
-        self.stats["cache_write"] += getattr(u, "cache_creation_input_tokens", 0) or 0
+        self._record_anthropic_usage(u)
 
         text = "".join(b.text for b in msg.content if b.type == "text")
         if not text.strip():
@@ -244,14 +291,90 @@ class AnthropicProvider(Provider):
             raise LLMError(f"Anthropic 返回 {e.status_code}: {e.message}") from e
 
         u = msg.usage
-        self.stats["calls"] += 1
-        self.stats["in"] += u.input_tokens
-        self.stats["out"] += u.output_tokens
-        self.stats["cache_read"] += getattr(u, "cache_read_input_tokens", 0) or 0
-        self.stats["cache_write"] += getattr(u, "cache_creation_input_tokens", 0) or 0
+        self._record_anthropic_usage(u)
         return parse_and_validate_json_response(
             "".join(b.text for b in msg.content if b.type == "text"), schema, "Anthropic 视觉调用"
         )
+
+    def complete_json_stream(
+        self, static_system, volatile_system, user, schema, *, on_activity=None,
+    ):
+        started_ms = int(time.time() * 1000)
+        _emit_activity(
+            on_activity,
+            "waiting",
+            model=self.model,
+            request_started_at_ms=started_ms,
+            elapsed_ms=0,
+            first_delta_ms=None,
+            received_chars=0,
+            finish_reason="",
+        )
+        system = [{
+            "type": "text",
+            "text": static_system,
+            "cache_control": {"type": "ephemeral", "ttl": "1h"},
+        }]
+        if volatile_system:
+            system.append({"type": "text", "text": volatile_system})
+        kw = dict(
+            model=self.model,
+            max_tokens=self.cfg.get("max_tokens", 16000),
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            output_config={"format": {"type": "json_schema", "schema": schema}},
+        )
+        if self.cfg.get("thinking", True):
+            kw["thinking"] = {"type": "adaptive"}
+
+        chunks = []
+        received_chars = 0
+        first_delta_ms = None
+        try:
+            with self.client.messages.stream(**kw) as stream:
+                for delta in stream.text_stream:
+                    delta = str(delta or "")
+                    if not delta:
+                        continue
+                    chunks.append(delta)
+                    received_chars += len(delta)
+                    elapsed_ms = max(0, int(time.time() * 1000) - started_ms)
+                    if first_delta_ms is None:
+                        first_delta_ms = elapsed_ms
+                    _emit_activity(
+                        on_activity,
+                        "receiving",
+                        model=self.model,
+                        request_started_at_ms=started_ms,
+                        elapsed_ms=elapsed_ms,
+                        first_delta_ms=first_delta_ms,
+                        received_chars=received_chars,
+                        finish_reason="",
+                    )
+                msg = stream.get_final_message()
+        except Exception as exc:
+            api_error = getattr(self._sdk, "APIStatusError", None)
+            if api_error is not None and isinstance(exc, api_error):
+                raise LLMError(f"Anthropic 返回 {exc.status_code}: {exc.message}") from exc
+            raise
+
+        self._record_anthropic_usage(msg.usage)
+        finish_reason = str(getattr(msg, "stop_reason", "") or "unknown")
+        text = "".join(chunks)
+        if not text.strip():
+            raise LLMError(f"Anthropic 调用返回了空文本（finish_reason={finish_reason}）")
+        result = parse_and_validate_json_response(text, schema, "Anthropic 调用")
+        _emit_activity(
+            on_activity,
+            "completed",
+            model=self.model,
+            request_started_at_ms=started_ms,
+            elapsed_ms=max(0, int(time.time() * 1000) - started_ms),
+            first_delta_ms=first_delta_ms,
+            received_chars=received_chars,
+            finish_reason=finish_reason,
+        )
+        return result
 
     def list_models(self):
         try:
@@ -328,10 +451,20 @@ class OpenAIProvider(Provider):
     def _record_usage(self, response):
         usage = response.get("usage") or {}
         details = usage.get("prompt_tokens_details") or {}
+        prompt_tokens = int(usage.get("prompt_tokens") or 0)
+        cached = usage.get("prompt_cache_hit_tokens")
+        if cached is None:
+            cached = details.get("cached_tokens")
+        missed = usage.get("prompt_cache_miss_tokens")
+        if missed is None and cached is not None:
+            missed = max(0, prompt_tokens - int(cached or 0))
         self.stats["calls"] += 1
-        self.stats["in"] += int(usage.get("prompt_tokens") or 0)
+        self.stats["in"] += prompt_tokens
         self.stats["out"] += int(usage.get("completion_tokens") or 0)
-        self.stats["cache_read"] += int(details.get("cached_tokens") or 0)
+        if cached is not None or missed is not None:
+            self.stats["cache_reports"] += 1
+            self.stats["cache_read"] += int(cached or 0)
+            self.stats["cache_miss"] += int(missed or 0)
 
     def _completion_text(self, messages, response_format, *, vision=False):
         payload = {
@@ -358,6 +491,103 @@ class OpenAIProvider(Provider):
         if not text.strip():
             finish_reason = choice.get("finish_reason") or "unknown"
             prefix = "视觉调用" if vision else "调用"
+            if finish_reason == "length":
+                raise OutputCapacityError(
+                    f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens="
+                    f"{self.cfg.get('max_tokens', 16000)}）；请提高最大输出或缩小 Agent 分块"
+                )
+            raise LLMError(f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）")
+        return text
+
+    def _stream_completion_text(self, messages, response_format, *, activity, started_ms):
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": self.cfg.get("max_tokens", 16000),
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if response_format is not None:
+            payload["response_format"] = response_format
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            self.base_url + "/chat/completions",
+            data=body,
+            method="POST",
+            headers={
+                "Accept": "text/event-stream",
+                "Authorization": "Bearer " + self.api_key,
+                "Content-Type": "application/json; charset=utf-8",
+            },
+        )
+        chunks = []
+        usage = None
+        finish_reason = "unknown"
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", errors="replace") if isinstance(raw_line, bytes) else str(raw_line)
+                    line = line.strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(data)
+                    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                        raise LLMError(f"{self.model} 流式接口返回了非法 SSE JSON") from exc
+                    if isinstance(event.get("usage"), dict):
+                        usage = event["usage"]
+                    choices = event.get("choices") or []
+                    choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+                    if choice.get("finish_reason"):
+                        finish_reason = str(choice["finish_reason"])
+                    delta = choice.get("delta") or {}
+                    content = delta.get("content") if isinstance(delta, dict) else ""
+                    if isinstance(content, list):
+                        content = "".join(
+                            str(block.get("text") or "")
+                            for block in content
+                            if isinstance(block, dict)
+                        )
+                    content = str(content or "")
+                    if not content:
+                        continue
+                    chunks.append(content)
+                    activity["received_chars"] += len(content)
+                    elapsed_ms = max(0, int(time.time() * 1000) - started_ms)
+                    if activity["first_delta_ms"] is None:
+                        activity["first_delta_ms"] = elapsed_ms
+                    _emit_activity(
+                        activity["callback"],
+                        "receiving",
+                        model=self.model,
+                        request_started_at_ms=started_ms,
+                        elapsed_ms=elapsed_ms,
+                        first_delta_ms=activity["first_delta_ms"],
+                        received_chars=activity["received_chars"],
+                        finish_reason=finish_reason,
+                    )
+        except HTTPError as exc:
+            try:
+                error_payload = json.loads(exc.read().decode("utf-8", errors="replace"))
+            except (json.JSONDecodeError, OSError):
+                error_payload = None
+            message = self._error_message(error_payload, str(exc.reason or exc))
+            formatted = f"{self.model} 接口返回 HTTP {exc.code}: {message}"
+            if exc.code == 400 and "response_format" in message.lower():
+                raise UnsupportedResponseFormatError(formatted) from exc
+            raise LLMError(formatted) from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            reason = getattr(exc, "reason", None) or str(exc)
+            raise LLMError(f"{self.model} 无法连接模型接口: {reason}") from exc
+
+        self._record_usage({"usage": usage or {}})
+        self._last_finish_reason = finish_reason
+        text = "".join(chunks)
+        if not text.strip():
+            prefix = "调用"
             if finish_reason == "length":
                 raise OutputCapacityError(
                     f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens="
@@ -412,6 +642,106 @@ class OpenAIProvider(Provider):
                     "请提高最大输出或缩小 Agent 分块"
                 ) from exc
             raise
+
+    def _complete_stream_compatible(
+        self, messages, schema, prefix, *, activity, started_ms,
+    ):
+        response_format = None if getattr(self, "_response_format_unavailable", False) else {"type": "json_object"}
+        compatible_messages = self._json_object_messages(messages, schema)
+        try:
+            fallback_text = self._stream_completion_text(
+                compatible_messages,
+                response_format,
+                activity=activity,
+                started_ms=started_ms,
+            )
+        except UnsupportedResponseFormatError:
+            self._response_format_unavailable = True
+            fallback_text = self._stream_completion_text(
+                compatible_messages,
+                None,
+                activity=activity,
+                started_ms=started_ms,
+            )
+        try:
+            return parse_and_validate_json_response(
+                fallback_text, schema, f"{self.model} {prefix}兼容模式"
+            )
+        except StructuredOutputError as exc:
+            if getattr(self, "_last_finish_reason", "") == "length":
+                raise OutputCapacityError(
+                    f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens={self.cfg.get('max_tokens', 16000)}）；"
+                    "请提高最大输出或缩小 Agent 分块"
+                ) from exc
+            raise
+
+    def complete_json_stream(
+        self, static_system, volatile_system, user, schema, *, on_activity=None,
+    ):
+        started_ms = int(time.time() * 1000)
+        activity = {
+            "callback": on_activity,
+            "received_chars": 0,
+            "first_delta_ms": None,
+        }
+        _emit_activity(
+            on_activity,
+            "waiting",
+            model=self.model,
+            request_started_at_ms=started_ms,
+            elapsed_ms=0,
+            first_delta_ms=None,
+            received_chars=0,
+            finish_reason="",
+        )
+        system = static_system + (("\n\n" + volatile_system) if volatile_system else "")
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        prefix = "调用"
+        if (
+            getattr(self, "_strict_response_format_unavailable", False)
+            or getattr(self, "_response_format_unavailable", False)
+        ):
+            result = self._complete_stream_compatible(
+                messages, schema, prefix, activity=activity, started_ms=started_ms,
+            )
+        else:
+            strict_format = {
+                "type": "json_schema",
+                "json_schema": {"name": "annotations", "schema": schema, "strict": True},
+            }
+            try:
+                text = self._stream_completion_text(
+                    messages,
+                    strict_format,
+                    activity=activity,
+                    started_ms=started_ms,
+                )
+            except UnsupportedResponseFormatError:
+                self._strict_response_format_unavailable = True
+                result = self._complete_stream_compatible(
+                    messages, schema, prefix, activity=activity, started_ms=started_ms,
+                )
+            else:
+                try:
+                    result = parse_and_validate_json_response(text, schema, f"{self.model} {prefix}")
+                except StructuredOutputError as exc:
+                    if getattr(self, "_last_finish_reason", "") == "length":
+                        raise OutputCapacityError(
+                            f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens={self.cfg.get('max_tokens', 16000)}）；"
+                            "请提高最大输出或缩小 Agent 分块"
+                        ) from exc
+                    raise
+        _emit_activity(
+            on_activity,
+            "completed",
+            model=self.model,
+            request_started_at_ms=started_ms,
+            elapsed_ms=max(0, int(time.time() * 1000) - started_ms),
+            first_delta_ms=activity["first_delta_ms"],
+            received_chars=activity["received_chars"],
+            finish_reason=getattr(self, "_last_finish_reason", "unknown"),
+        )
+        return result
 
     def _complete(self, messages, schema, schema_name, *, vision=False):
         prefix = "视觉调用" if vision else "调用"

@@ -1,5 +1,6 @@
 import io
 import json
+from types import SimpleNamespace
 from urllib.error import HTTPError
 
 import pytest
@@ -103,6 +104,20 @@ class FakeHttpResponse:
         return json.dumps(self.payload).encode("utf-8")
 
 
+class FakeSseResponse:
+    def __init__(self, lines):
+        self.lines = lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def __iter__(self):
+        return iter(self.lines)
+
+
 def test_openai_model_discovery_uses_builtin_http(monkeypatch):
     requests = []
 
@@ -155,7 +170,15 @@ def test_openai_text_and_vision_use_builtin_http_contract(monkeypatch):
     assert payloads[0]["messages"][0]["content"] == "stable\n\nvolatile"
     assert payloads[0]["response_format"]["type"] == "json_schema"
     assert payloads[1]["messages"][1]["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
-    assert provider.stats == {"in": 24, "out": 8, "cache_read": 6, "cache_write": 0, "calls": 2}
+    assert provider.stats == {
+        "in": 24,
+        "out": 8,
+        "cache_read": 6,
+        "cache_miss": 18,
+        "cache_write": 0,
+        "cache_reports": 2,
+        "calls": 2,
+    }
 
 
 def test_openai_vision_empty_text_reports_model_and_finish_reason(monkeypatch):
@@ -305,3 +328,113 @@ def test_openai_retries_without_response_format_when_both_formats_are_rejected(
     assert payloads[0]["response_format"]["type"] == "json_schema"
     assert payloads[1]["response_format"]["type"] == "json_object"
     assert "response_format" not in payloads[2]
+
+
+def test_openai_stream_joins_deltas_and_reports_activity(monkeypatch):
+    lines = [
+        b'data: {"choices":[{"delta":{"content":"{\\"ok\\":"},"finish_reason":null}]}\n',
+        b'data: {"choices":[{"delta":{"content":"true}"},"finish_reason":"stop"}]}\n',
+        b'data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":2,"prompt_cache_hit_tokens":70,"prompt_cache_miss_tokens":30}}\n',
+        b'data: [DONE]\n',
+    ]
+    payloads = []
+
+    def fake_urlopen(request, timeout):
+        payloads.append(json.loads(request.data))
+        return FakeSseResponse(lines)
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen, raising=False)
+    events = []
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "stream-model"})
+    schema = {
+        "type": "object", "properties": {"ok": {"type": "boolean"}},
+        "required": ["ok"], "additionalProperties": False,
+    }
+
+    result = provider.complete_json_stream(
+        "stable", "volatile", "user", schema, on_activity=events.append,
+    )
+
+    assert result == {"ok": True}
+    assert payloads[0]["stream"] is True
+    assert payloads[0]["stream_options"] == {"include_usage": True}
+    assert events[0]["state"] == "waiting"
+    assert any(event["state"] == "receiving" and event["received_chars"] > 0 for event in events)
+    assert events[-1]["state"] == "completed"
+    assert events[-1]["finish_reason"] == "stop"
+    assert provider.stats["cache_read"] == 70
+    assert provider.stats["cache_miss"] == 30
+    assert provider.stats["cache_reports"] == 1
+
+
+@pytest.mark.parametrize(
+    "usage, expected_read, expected_miss, expected_reports",
+    [
+        ({"prompt_tokens": 100, "prompt_tokens_details": {"cached_tokens": 40}}, 40, 60, 1),
+        ({"prompt_tokens": 100}, 0, 0, 0),
+    ],
+)
+def test_openai_stream_cache_usage_variants(
+    monkeypatch, usage, expected_read, expected_miss, expected_reports,
+):
+    lines = [
+        b'data: {"choices":[{"delta":{"content":"{}"},"finish_reason":"stop"}]}\n',
+        ("data: " + json.dumps({"choices": [], "usage": usage}) + "\n").encode("utf-8"),
+        b"data: [DONE]\n",
+    ]
+    monkeypatch.setattr(llm, "urlopen", lambda request, timeout: FakeSseResponse(lines), raising=False)
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "stream-model"})
+
+    assert provider.complete_json_stream("system", "", "user", {"type": "object"}) == {}
+    assert provider.stats["cache_read"] == expected_read
+    assert provider.stats["cache_miss"] == expected_miss
+    assert provider.stats["cache_reports"] == expected_reports
+
+
+def test_provider_stream_fallback_emits_waiting_and_completed():
+    events = []
+    provider = llm.MockProvider({})
+
+    assert provider.complete_json_stream("system", "", "user", {"type": "object"}, on_activity=events.append) == {"lines": []}
+    assert [event["state"] for event in events] == ["waiting", "completed"]
+    assert events[0]["model"] == "mock"
+
+
+def test_anthropic_stream_reports_text_deltas_and_usage():
+    class FakeStream:
+        text_stream = iter(["{", "}"])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get_final_message(self):
+            return SimpleNamespace(
+                stop_reason="end_turn",
+                content=[SimpleNamespace(type="text", text="{}")],
+                usage=SimpleNamespace(
+                    input_tokens=12,
+                    output_tokens=2,
+                    cache_read_input_tokens=7,
+                    cache_creation_input_tokens=1,
+                ),
+            )
+
+    class FakeMessages:
+        def stream(self, **kwargs):
+            self.kwargs = kwargs
+            return FakeStream()
+
+    provider = object.__new__(llm.AnthropicProvider)
+    llm.Provider.__init__(provider, {"model": "claude-stream"})
+    provider.client = SimpleNamespace(messages=FakeMessages())
+    events = []
+
+    assert provider.complete_json_stream("system", "", "user", {"type": "object"}, on_activity=events.append) == {}
+    assert any(event["state"] == "receiving" and event["received_chars"] == 2 for event in events)
+    assert events[-1]["finish_reason"] == "end_turn"
+    assert provider.stats["cache_read"] == 7
+    assert provider.stats["cache_write"] == 1
+    assert provider.stats["cache_reports"] == 1
