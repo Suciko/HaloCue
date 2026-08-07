@@ -34,6 +34,10 @@ _RECOMMENDATION_SOURCES = {"api", "catalog", "unknown"}
 _REASONING_MODES = {"speed", "low", "balanced", "medium", "deep", "high", "provider_default"}
 
 
+def source_context_strategy_for_connection(connection: dict) -> str:
+    return "window" if str(connection.get("service_preset") or "") == "ollama" else "preserve"
+
+
 class ModelProfileError(ValueError):
     pass
 
@@ -640,6 +644,7 @@ class ModelProfileStore:
                 "annotation_max_tokens": int(model.get("annotation_max_tokens") or min(int(model.get("max_tokens") or 16000), 16000)),
                 "reasoning_mode": str(model.get("reasoning_mode") or "balanced"),
                 "reasoning_wire_protocol": "deepseek_thinking" if str(connection.get("service_preset") or "") == "deepseek" else "none",
+                "source_context_strategy": source_context_strategy_for_connection(connection),
                 "vision": model.get("vision_status") in {"passed", "untested"},
                 "api_key": secret,
             }

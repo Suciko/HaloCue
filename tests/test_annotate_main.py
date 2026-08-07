@@ -14,6 +14,14 @@ def test_annotation_static_system_keeps_exact_source_after_rules():
     assert static.endswith(source)
 
 
+def test_annotation_static_system_uses_window_only_when_explicitly_requested():
+    static = annotate.build_annotation_static_system(
+        "RULES", "Kai: keep this source\n", source_context_strategy="window",
+    )
+
+    assert static == "RULES"
+
+
 def test_main_with_mock_provider_writes_a_portrait_annotation(tmp_path, monkeypatch):
     script = tmp_path / "scene.txt"
     script.write_text("Kai: hello\n", encoding="utf-8")

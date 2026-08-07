@@ -552,7 +552,9 @@ def build_static(idx, cast, cast_names):
     return PROMPT.build_system(idx, cast, cast_names, faces_by_id)
 
 
-def build_annotation_static_system(static_rules, source_text):
+def build_annotation_static_system(static_rules, source_text, *, source_context_strategy="preserve"):
+    if source_context_strategy == "window":
+        return static_rules
     return f"{static_rules}\n\nSOURCE_SCRIPT\n{source_text}"
 
 
@@ -839,7 +841,11 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     annotation_beats = []
     if agent_enabled:
         script_text = open(script_path, encoding="utf-8").read()
-        agent_static = build_annotation_static_system(static, script_text)
+        agent_static = build_annotation_static_system(
+            static,
+            script_text,
+            source_context_strategy=str(getattr(prov, "cfg", {}).get("source_context_strategy") or "preserve"),
+        )
         model_config = {
             "provider": getattr(prov, "name", provider_name or llmcfg.get("provider") or ""),
             "model": getattr(prov, "model", ""),

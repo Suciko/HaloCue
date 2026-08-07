@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import llm
-from model_profiles import ModelProfileError, ModelProfileStore
+from model_profiles import ModelProfileError, ModelProfileStore, source_context_strategy_for_connection
 
 
 class ModelRouter:
@@ -48,6 +48,7 @@ class ModelRouter:
             "annotation_max_tokens": int(model.get("annotation_max_tokens") or min(int(model.get("max_tokens") or 16000), 16000)),
             "reasoning_mode": str(model.get("reasoning_mode") or "balanced"),
             "reasoning_wire_protocol": "deepseek_thinking" if connection.get("service_preset") == "deepseek" else "none",
+            "source_context_strategy": source_context_strategy_for_connection(connection),
             "vision": model.get("vision_status") in {"passed", "untested"},
             "api_key": secret,
         })

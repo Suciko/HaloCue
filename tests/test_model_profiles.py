@@ -381,6 +381,23 @@ def test_provider_settings_include_reasoning_mode_and_task_budget(tmp_path):
     assert settings["reasoning_mode"] == "balanced"
     assert settings["annotation_max_tokens"] == 16000
     assert settings["reasoning_wire_protocol"] == "deepseek_thinking"
+    assert settings["source_context_strategy"] == "preserve"
+
+
+def test_provider_settings_use_window_context_for_ollama(tmp_path):
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=FakeCredentials())
+    connection = store.save_connection({
+        "name": "Ollama", "service_preset": "ollama", "protocol": "openai",
+        "base_url": "http://localhost:11434/v1", "api_key": "local-test-key",
+    })
+    model = store.save_model({
+        "connection_id": connection["id"], "model": "llama3.2",
+        "text_status": "passed", "vision_status": "unsupported",
+    })
+
+    _provider, settings = store.provider_settings_for_model(model["id"])
+
+    assert settings["source_context_strategy"] == "window"
 
 
 def test_v2_assignments_require_compatible_tested_models(tmp_path):
