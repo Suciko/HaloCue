@@ -36,6 +36,8 @@ def test_settings_ui_has_two_role_cards_and_help_entry():
     app = (Path(__file__).parents[1] / "js" / "app.js").read_text(encoding="utf-8")
     assert "delete-workbench-model" in app
     assert "delete_empty_connection" in app
+    assert "reasoning_mode: payload.reasoning_mode" in app
+    assert "annotation_max_tokens_source: 'auto'" in app
     assert "当前模型正在使用，请先更换" in app
 
 
@@ -90,6 +92,68 @@ console.log(JSON.stringify({
         "legacyDelete": {"disabled": True, "title": "重新启动程序后可删除模型"},
         "unusedDelete": {"disabled": False, "title": "删除模型"},
     }
+
+
+def test_reasoning_slider_uses_capability_filtered_modes_and_persists_mode():
+    runtime = Path(__file__).parents[1] / "js" / "model.js"
+    script = r'''
+const fs=require('fs'),vm=require('vm');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const sandbox={window:{}};vm.runInNewContext(source,sandbox);
+const api=sandbox.window.ModelSettings;
+const deep=api.reasoningOptions({toggle:true,efforts:['low','medium','high']});
+const provider=api.reasoningOptions({toggle:false,efforts:[]});
+console.log(JSON.stringify({
+ deep:deep.map(x=>x[0]),
+ balanced:api.reasoningModeIndex('balanced',deep),
+ fallback:api.reasoningModeIndex('speed',provider),
+ persisted:api.reasoningModeFromControl({value:'2',dataset:{modes:'speed|low|balanced|deep'}})
+}));
+'''
+    result = json.loads(run_node(script, runtime))
+    assert result == {
+        "deep": ["speed", "low", "balanced", "deep"],
+        "balanced": 2,
+        "fallback": 0,
+        "persisted": "balanced",
+    }
+
+
+def test_reasoning_slider_exposes_extended_model_specific_efforts():
+    runtime = Path(__file__).parents[1] / "js" / "model.js"
+    script = r'''
+const fs=require('fs'),vm=require('vm');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const sandbox={window:{}};vm.runInNewContext(source,sandbox);
+const api=sandbox.window.ModelSettings;
+console.log(JSON.stringify({
+ full:api.reasoningOptions({toggle:true,efforts:['minimal','low','medium','high','xhigh','max']}).map(x=>x[0]),
+ effortOnly:api.reasoningOptions({toggle:false,efforts:['high','max']}).map(x=>x[0])
+}));
+'''
+    result = json.loads(run_node(script, runtime))
+    assert result["full"] == [
+        "speed", "minimal", "low", "balanced", "deep", "xhigh", "max",
+    ]
+    assert result["effortOnly"] == ["deep", "max"]
+
+
+def test_reasoning_slider_missing_balanced_falls_back_to_thinking_not_speed():
+    runtime = Path(__file__).parents[1] / "js" / "model.js"
+    script = r'''
+const fs=require('fs'),vm=require('vm');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const sandbox={window:{}};vm.runInNewContext(source,sandbox);
+const api=sandbox.window.ModelSettings;
+const options=api.reasoningOptions({toggle:true,efforts:['low','high','max']});
+console.log(JSON.stringify({
+  modes:options.map(x=>x[0]),
+  selected:options[api.reasoningModeIndex('balanced',options)][0]
+}));
+'''
+    result = json.loads(run_node(script, runtime))
+    assert result["modes"] == ["speed", "low", "deep", "max"]
+    assert result["selected"] == "low"
 
 
 def test_model_settings_builds_legacy_workbench_fallback():
@@ -166,6 +230,82 @@ const h=createHarness({request:async(path,options)=>{
         },
         "chosen": "deepseek-v4-pro",
         "status": "已选择 deepseek-v4-pro。",
+    }
+
+
+def test_discovered_model_applies_server_reasoning_capability_and_clears_stale_context():
+    harness = Path(__file__).parents[1] / "tests" / "ui_runtime_harness.js"
+    script = r'''
+const {createHarness}=require(process.argv[1]);
+const h=createHarness({request:async(path)=>{
+  if(path==='/api/llm/models/list') return {models:[
+    {model_id:'deepseek-v4-flash',context_window_tokens:1000000,context_window_source:'api',reasoning:{toggle:true,efforts:['low','medium','high'],default_mode:'medium',wire_protocol:'deepseek_thinking',source:'catalog'}},
+    {model_id:'private-wrapper',context_window_tokens:null,context_window_source:'unknown',reasoning:{toggle:false,efforts:[],default_mode:'provider_default',wire_protocol:'none',source:'unknown'}}
+  ]};
+  return {};
+}});
+(async()=>{
+  h.clickAction('discover-models'); await h.drain();
+  const list=h.get('#modelDiscoveryList');
+  h.clickAction('choose-discovered-model',list.children[0]);
+  const verified={modes:h.get('#modelReasoningMode').dataset.modes,disabled:h.get('#modelReasoningMode').disabled,context:h.get('#modelContextWindowTokens').value,source:h.get('#modelContextWindowSource').value};
+  h.clickAction('choose-discovered-model',list.children[1]);
+  const unknown={modes:h.get('#modelReasoningMode').dataset.modes,disabled:h.get('#modelReasoningMode').disabled,context:h.get('#modelContextWindowTokens').value,source:h.get('#modelContextWindowSource').value};
+  console.log(JSON.stringify({verified,unknown}));
+})();
+'''
+    result = json.loads(run_node(script, harness))
+    assert result == {
+        "verified": {
+            "modes": "speed|low|balanced|deep", "disabled": False,
+            "context": "1000000", "source": "api",
+        },
+        "unknown": {
+            "modes": "provider_default", "disabled": True,
+            "context": "", "source": "unknown",
+        },
+    }
+
+
+def test_editing_verified_model_replaces_stale_profile_reasoning_capability():
+    runtime = Path(__file__).parents[1] / "js" / "model.js"
+    script = r'''
+const fs=require('fs'),vm=require('vm');
+const sandbox={window:{}};vm.runInNewContext(fs.readFileSync(process.argv[1],'utf8'),sandbox);
+const api=sandbox.window.ModelSettings;
+const stale=api.reasoningCapability('gemini-private','custom');
+const next=api.nextReasoningCapability(stale,{model:'deepseek-v4-flash',service_preset:'deepseek'});
+console.log(JSON.stringify(next));
+'''
+    result = json.loads(run_node(script, runtime))
+    assert result == {
+        "toggle": True, "efforts": ["low", "medium", "high"],
+        "default_mode": "balanced", "wire_protocol": "deepseek_thinking",
+        "source": "catalog",
+    }
+
+
+def test_saved_model_capability_refresh_helper_uses_recommendation_payload():
+    harness = Path(__file__).parents[1] / "tests" / "ui_runtime_harness.js"
+    script = r'''
+const {createHarness}=require(process.argv[1]);
+let submitted=null;
+const h=createHarness({request:async(path,options)=>{
+  if(path==='/api/llm/models/recommend') {submitted=options.payload; return {model_id:'gemini-3.6-flash',max_output_tokens:65536,source:'models_dev',source_label:'models.dev 路 65,536',context_window_tokens:1048576,context_window_source:'models_dev',reasoning:{toggle:false,efforts:['minimal','low','medium','high'],source:'models_dev'}};}
+  return {};
+}});
+(async()=>{
+  h.get('#modelServicePreset').value='custom';
+  h.get('#modelName').value='gemini-3.6-flash';
+  h.get('#modelName').dispatch('change'); await h.drain();
+  console.log(JSON.stringify({submitted,value:h.get('#modelMaxTokens').value,context:h.get('#modelContextWindowTokens').value,modes:h.get('#modelReasoningMode').dataset.modes}));
+})();
+'''
+    result = json.loads(run_node(script, harness))
+    assert result == {
+        "submitted": {"model": "gemini-3.6-flash", "service_preset": "custom"},
+        "value": 65536, "context": "1048576",
+        "modes": "minimal|low|balanced|deep",
     }
 
 

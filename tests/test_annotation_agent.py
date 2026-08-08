@@ -11,7 +11,6 @@ from annotation_agent import (
     build_review_windows,
     run_annotation_agent,
 )
-from annotation_agent import annotation_mode_limits
 from annotation_protocol import validate_review_patches
 from annotation_chunks import assign_annotation_ids
 from annotation_memory import AnnotationCheckpointStore, build_run_fingerprint
@@ -76,7 +75,10 @@ class RecordingProvider:
         return f"fake calls={self.calls}"
 
 
-def fixture(tmp_path, provider, count=70, cancelled=None, progress=None, model_activity=None):
+def fixture(
+    tmp_path, provider, count=70, cancelled=None, progress=None,
+    model_activity=None, **agent_options,
+):
     items = make_items(count)
     constraints = {"ok_bg": {"BG_Street"}, "faces_by_id": {"kei": {"00"}}}
     fingerprint = build_run_fingerprint(
@@ -89,6 +91,7 @@ def fixture(tmp_path, provider, count=70, cancelled=None, progress=None, model_a
         constraints=constraints, usage_chain=[], checkpoint_store=AnnotationCheckpointStore(tmp_path),
         run_fingerprint=fingerprint, cancelled=cancelled, progress=progress,
         model_activity=model_activity,
+        **agent_options,
     )
 
 
@@ -131,6 +134,11 @@ def test_agent_attaches_request_telemetry_to_chunk_without_prompt_text(tmp_path)
     assert records[0]["request_index"] == 1
     assert records[0]["retry_count"] == 0
     assert records[0]["subdivision_count"] == 0
+    assert records[0]["stable_prefix_hash"]
+    assert records[0]["dynamic_tail_hash"]
+    assert records[0]["schema_hash"]
+    assert records[0]["target_count"] == 10
+    assert records[0]["adaptation_reason"] == "initial"
     assert "user" not in records[0]
     assert "volatile" not in records[0]
 
@@ -163,6 +171,30 @@ def test_agent_writes_reasoning_diagnostics_outside_checkpoint(tmp_path):
     assert "重复检查 TARGET 格式" in files[0].read_text(encoding="utf-8")
     assert "scene-1-chunk-1" in files[0].read_text(encoding="utf-8")
     assert not list((tmp_path / "annotation-checkpoints").rglob("*reasoning*"))
+
+
+def test_reasoning_cursor_is_independent_from_request_record_cursor(tmp_path):
+    class LateReasoningProvider(RecordingProvider):
+        def __init__(self):
+            super().__init__()
+            self.request_records = []
+            self.reasoning_records = []
+
+        def complete_json(self, static, volatile, user, schema):
+            result = super().complete_json(static, volatile, user, schema)
+            self.request_records.append({"request_index": self.calls})
+            if self.calls == 2:
+                self.reasoning_records.append({
+                    "request_index": 2, "reasoning_text": "late reasoning",
+                    "reasoning_chars": 14, "content_chars": 2, "finish_reason": "stop",
+                })
+            return result
+
+    fixture(tmp_path, LateReasoningProvider(), count=70)
+
+    files = list((tmp_path / "annotation-telemetry").rglob("reasoning.jsonl"))
+    assert len(files) == 1
+    assert "late reasoning" in files[0].read_text(encoding="utf-8")
 
 
 def test_structural_failure_retries_without_partial_commit(tmp_path):
@@ -237,6 +269,80 @@ def test_empty_stop_response_retries_once_without_partial_commit(tmp_path):
     assert provider.calls == 2
     assert result["completed_chunks"] == 1
     assert len(result["rows_by_id"]) == 10
+    assert result["metrics"]["retries"] == 1
+
+
+def test_reasoning_only_empty_response_retries_at_lower_effort_then_restores_mode(tmp_path):
+    class ReasoningEmptyProvider(RecordingProvider):
+        supports_compact_annotation = False
+
+        def __init__(self):
+            super().__init__()
+            self.cfg = {"reasoning_mode": "deep"}
+            self.modes = []
+
+        def complete_json(self, static, volatile, user, schema):
+            self.modes.append(self.cfg["reasoning_mode"])
+            if self.calls == 0:
+                self.calls += 1
+                raise llm.EmptyModelResponseError(
+                    "empty stop response", finish_reason="stop", reasoning_chars=1200,
+                )
+            return super().complete_json(static, volatile, user, schema)
+
+    provider = ReasoningEmptyProvider()
+    result = fixture(tmp_path, provider, count=10)
+
+    assert provider.modes == ["deep", "balanced"]
+    assert provider.cfg["reasoning_mode"] == "deep"
+    assert result["metrics"]["retries"] == 1
+
+
+def test_reasoning_mode_is_restored_when_empty_retry_exhausts(tmp_path):
+    class AlwaysReasoningEmptyProvider(RecordingProvider):
+        supports_compact_annotation = False
+
+        def __init__(self):
+            super().__init__()
+            self.cfg = {"reasoning_mode": "deep"}
+            self.modes = []
+
+        def complete_json(self, static, volatile, user, schema):
+            self.modes.append(self.cfg["reasoning_mode"])
+            raise llm.EmptyModelResponseError(
+                "empty stop response", finish_reason="stop", reasoning_chars=1200,
+            )
+
+    provider = AlwaysReasoningEmptyProvider()
+    with pytest.raises(AnnotationAgentError):
+        fixture(tmp_path, provider, count=10)
+
+    assert provider.modes == ["deep", "balanced"]
+    assert provider.cfg["reasoning_mode"] == "deep"
+
+
+def test_empty_without_reasoning_does_not_lower_effort(tmp_path):
+    class EmptyWithoutReasoningProvider(RecordingProvider):
+        supports_compact_annotation = False
+
+        def __init__(self):
+            super().__init__()
+            self.cfg = {"reasoning_mode": "deep"}
+            self.modes = []
+
+        def complete_json(self, static, volatile, user, schema):
+            self.modes.append(self.cfg["reasoning_mode"])
+            if self.calls == 0:
+                self.calls += 1
+                raise llm.EmptyModelResponseError(
+                    "empty stop response", finish_reason="stop", reasoning_chars=0,
+                )
+            return super().complete_json(static, volatile, user, schema)
+
+    provider = EmptyWithoutReasoningProvider()
+    result = fixture(tmp_path, provider, count=10)
+
+    assert provider.modes == ["deep", "deep"]
     assert result["metrics"]["retries"] == 1
 
 
@@ -446,10 +552,16 @@ def test_capacity_success_teaches_remaining_chunks_the_safe_limit(tmp_path):
     assert all(len(row["target_ids"]) <= 10 for row in provider.requests[first_safe:])
 
 
-def test_reasoning_mode_limits_are_conservative_for_thinking(tmp_path):
-    assert annotation_mode_limits("speed") == (50, 60, 72)
-    assert annotation_mode_limits("balanced") == (20, 24, 30)
-    assert annotation_mode_limits("deep") == (16, 20, 24)
+def test_reasoning_mode_does_not_change_chunk_capacity(tmp_path):
+    speed = RecordingProvider()
+    deep = RecordingProvider()
+
+    fixture(tmp_path / "speed", speed, count=80, reasoning_mode="speed")
+    fixture(tmp_path / "deep", deep, count=80, reasoning_mode="deep")
+
+    assert [len(request["target_ids"]) for request in speed.requests] == [
+        len(request["target_ids"]) for request in deep.requests
+    ]
 
 
 def test_request_deadline_returns_checkpointed_partial_result(tmp_path):

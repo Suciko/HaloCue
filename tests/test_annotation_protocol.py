@@ -1,6 +1,12 @@
 import pytest
 
-from annotation_protocol import ChunkProtocolError, build_chunk_schema, validate_chunk_response
+from annotation_protocol import (
+    ChunkProtocolError,
+    build_chunk_schema,
+    build_compact_chunk_schema,
+    expand_compact_chunk_response,
+    validate_chunk_response,
+)
 
 
 TARGETS = [
@@ -235,3 +241,69 @@ def test_chunk_schema_offers_optional_bounded_beats():
     assert "beats" not in schema["required"]
     assert beat["properties"]["anchor_id"]["enum"] == ["src-1-0-a"]
     assert beat["properties"]["wait_ms"]["maximum"] == 10000
+
+
+def test_compact_schema_uses_one_based_index_and_optional_annotation_fields():
+    schema = build_compact_chunk_schema(2, ["src-1-0-a", "src-2-0-b"])
+    row = schema["properties"]["lines"]["items"]
+
+    assert row["required"] == ["i"]
+    assert row["properties"]["i"] == {"type": "integer", "minimum": 1, "maximum": 2}
+    assert "source_id" not in row["properties"]
+    assert "text_fingerprint" not in row["properties"]
+    assert row["additionalProperties"] is False
+
+
+def test_compact_response_restores_identity_and_protocol_defaults():
+    expanded = expand_compact_chunk_response({
+        "lines": [{"i": 1, "face": "05"}, {"i": 2, "shake": True}],
+        "state_delta": {}, "memory_events": [],
+    }, TARGETS)
+
+    assert expanded["lines"] == [
+        row("src-1-0-a", "fp-a") | {"face": "05"},
+        row("src-2-0-b", "fp-b") | {"shake": True},
+    ]
+    validated = validate_chunk_response(expanded, TARGETS)
+    assert list(validated["lines_by_id"]) == ["src-1-0-a", "src-2-0-b"]
+
+
+def test_compact_response_expands_beat_anchor_index_to_source_id():
+    expanded = expand_compact_chunk_response({
+        "lines": [{"i": 1}, {"i": 2}],
+        "state_delta": {}, "memory_events": [],
+        "beats": [{
+            "anchor_id": 2, "position": "after", "who": "Kai",
+            "face": "", "emo": "", "act": "", "wait_ms": 250,
+        }],
+    }, TARGETS)
+
+    assert expanded["beats"][0]["anchor_id"] == "src-2-0-b"
+
+
+def test_compact_response_expands_event_source_indices_to_source_ids():
+    expanded = expand_compact_chunk_response({
+        "lines": [{"i": 1}, {"i": 2}], "state_delta": {},
+        "memory_events": [{
+            "kind": "callback", "participants": ["Kai"], "keywords": ["ticket"],
+            "summary": "remember", "source_ids": [1, 2], "evidence": "line",
+            "importance": 0.8, "status": "open",
+        }],
+    }, TARGETS)
+
+    assert expanded["memory_events"][0]["source_ids"] == ["src-1-0-a", "src-2-0-b"]
+
+
+@pytest.mark.parametrize("lines,code", [
+    ([{"i": 1}], "missing_target"),
+    ([{"i": 1}, {"i": 1}], "duplicate_target"),
+    ([{"i": 1}, {"i": 3}], "unknown_target"),
+    ([{"i": True}, {"i": 2}], "invalid_line"),
+])
+def test_compact_response_rejects_unsafe_index_coverage(lines, code):
+    with pytest.raises(ChunkProtocolError) as error:
+        expand_compact_chunk_response({
+            "lines": lines, "state_delta": {}, "memory_events": [],
+        }, TARGETS)
+
+    assert error.value.code == code

@@ -4,10 +4,84 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 
 _HEADING_RE = re.compile(r"^\s*(?:#{1,6}\s+|场景\s*[:：]?|地点\s*[:：]?)")
+
+
+@dataclass(frozen=True)
+class ChunkLimits:
+    target: int
+    soft_limit: int
+    hard_limit: int
+
+
+def estimate_initial_chunk_limits(task_profile: Dict[str, Any]) -> ChunkLimits:
+    """Estimate a starting tier for one run; never persists the result."""
+    target_lines = max(1, int(task_profile.get("target_lines") or 1))
+    speakers = max(1, int(task_profile.get("speaker_count") or 1))
+    resources = max(1, int(task_profile.get("resource_complexity") or 1))
+    context = int(task_profile.get("context_window_tokens") or 0)
+    output_capacity = int(task_profile.get("annotation_max_tokens") or 0)
+    prompt_tokens = int(task_profile.get("estimated_prompt_tokens") or 0)
+    target = 50
+    if speakers >= 6 or resources >= 6:
+        target -= 15
+    if context and context < 256_000:
+        target -= 10
+    if output_capacity and output_capacity < 32_000:
+        target -= 10
+    if context and prompt_tokens and prompt_tokens * 5 > context:
+        target -= 5
+    elif prompt_tokens > 50_000:
+        target -= 5
+    if target_lines < target:
+        target = max(5, target_lines)
+    target = max(10, min(50, target))
+    return ChunkLimits(target=target, soft_limit=min(60, target + 5), hard_limit=min(72, target + 12))
+
+
+class RunChunkController:
+    """Learn only within the current run, with two-success hysteresis."""
+
+    def __init__(self, *, target: int, soft_limit: int, hard_limit: int):
+        self._limits = ChunkLimits(int(target), int(soft_limit), int(hard_limit))
+        self._successes = 0
+        self.last_reason = "initial"
+
+    def next_limits(self) -> ChunkLimits:
+        return self._limits
+
+    def observe(self, result: Dict[str, Any]) -> ChunkLimits:
+        if not result.get("success") or result.get("reason") in {"empty_response", "capacity", "deadline", "protocol"}:
+            self._successes = 0
+            target = max(5, self._limits.target // 2)
+            self._limits = ChunkLimits(target, min(self._limits.soft_limit, target + 4), min(self._limits.hard_limit, target + 8))
+            self.last_reason = str(result.get("reason") or "failure")
+            return self._limits
+        ratio_value = result.get("reasoning_content_ratio")
+        if ratio_value is None:
+            self._successes = 0
+            self.last_reason = "insufficient_telemetry"
+            return self._limits
+        ratio = float(ratio_value)
+        if ratio > 6:
+            self._successes = 0
+            target = max(5, self._limits.target - 5)
+            self._limits = ChunkLimits(target, min(self._limits.soft_limit, target + 4), min(self._limits.hard_limit, target + 8))
+            self.last_reason = "high_reasoning_ratio"
+            return self._limits
+        self._successes += 1
+        if self._successes >= 2 and self._limits.target < self._limits.hard_limit:
+            self._successes = 0
+            target = min(self._limits.hard_limit, self._limits.target + 5)
+            self._limits = ChunkLimits(target, min(self._limits.hard_limit, target + 5), self._limits.hard_limit)
+            self.last_reason = "two_efficient_successes"
+        else:
+            self.last_reason = "efficient_success"
+        return self._limits
 
 
 def _fingerprint(who: Any, text: Any) -> str:

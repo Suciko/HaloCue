@@ -283,6 +283,35 @@ def test_background_generation_request_suppresses_an_unconfirmed_background_swap
     ]
 
 
+def test_confirmed_preflight_background_extends_allowlist_and_wins_over_request():
+    usage_chain = [{
+        "segment": "场景一",
+        "needs": [{
+            "kind": "background", "status": "registered",
+            "aa_key": "BG_HighlanderCentral_Sunset",
+        }],
+    }]
+    constraints = annotation_constraints(
+        {"bg": {"BG_TrainStation": 1}, "sounds": [], "enums": {"emoticon": {}, "action": {}}},
+        {"凯伊": {"id": "kei", "portrait": True}},
+        usage_chain=usage_chain,
+    )
+
+    clean, dropped = filter_annotation_row(
+        {
+            "bg": "BG_HighlanderCentral_Sunset",
+            "bg_request": "重新生成一个夕阳列车总站",
+        },
+        {"who": "凯伊", "kind": "line"},
+        {"id": "kei", "portrait": True},
+        constraints,
+    )
+
+    assert "BG_HighlanderCentral_Sunset" in constraints["ok_bg"]
+    assert clean == {"bg": "BG_HighlanderCentral_Sunset"}
+    assert dropped == ["已确认背景不再生成背景请求"]
+
+
 def test_annotation_rows_accepts_the_schema_lines_object_or_equivalent_list():
     rows = [{"i": 0, "face": ""}]
 

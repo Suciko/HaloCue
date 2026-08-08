@@ -130,7 +130,7 @@ def _allowed_face_records(
     ]
 
 
-def annotation_constraints(idx, cast):
+def annotation_constraints(idx, cast, *, usage_chain=None):
     """Build the complete allowlist used to filter one model response.
 
     The result is plain data so it can be tested independently from an LLM call.
@@ -179,6 +179,16 @@ def annotation_constraints(idx, cast):
         for value in idx["enums"]["emoticon"].values()
         if value.get("cn")
     }
+    confirmed_backgrounds = {
+        str(need.get("aa_key") or "").strip()
+        for entry in (usage_chain or [])
+        if isinstance(entry, dict)
+        for need in (entry.get("needs") or [])
+        if isinstance(need, dict)
+        and str(need.get("kind") or "").strip().lower() in {"background", "bg"}
+        and str(need.get("status") or "").strip().lower() in {"registered", "builtin"}
+        and str(need.get("aa_key") or "").strip()
+    }
     return {
         "faces_by_id": faces_by_id,
         "sym2cn": sym2cn,
@@ -186,7 +196,8 @@ def annotation_constraints(idx, cast):
         "ok_act": {value["verb"] for value in idx["enums"]["action"].values()},
         "ok_fx": _FX_PARTS,
         "ok_se": set(idx.get("sounds", [])),
-        "ok_bg": set(idx.get("bg", {})),
+        "ok_bg": set(idx.get("bg", {})) | confirmed_backgrounds,
+        "confirmed_bg": confirmed_backgrounds,
         "ok_shot": {
             name for name, character in cast.items()
             if character.get("portrait") and not character.get("narrator")
@@ -248,8 +259,12 @@ def filter_annotation_row(row, item, character, constraints, *, include_details=
             rejected_details.append({"field": field, "value": value, "reason": msg})
     bg_request = str(row.get("bg_request") or "").strip()
     if bg_request:
-        clean.pop("bg", None)
-        clean["bg_request"] = bg_request[:320]
+        confirmed_bg = set(constraints.get("confirmed_bg") or set())
+        if clean.get("bg") and clean["bg"] in confirmed_bg:
+            dropped.append("已确认背景不再生成背景请求")
+        else:
+            clean.pop("bg", None)
+            clean["bg_request"] = bg_request[:320]
     shot = row.get("shot")
     if shot:
         if shot in constraints["ok_shot"]:
@@ -814,8 +829,12 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             continue
         seen_id.add(key)
         used.append(w)
-    static = build_static(idx, cast, used)
-    constraints = annotation_constraints(idx, cast)
+    constraints = annotation_constraints(idx, cast, usage_chain=usage_chain)
+    prompt_idx = dict(idx)
+    prompt_idx["bg"] = dict(idx.get("bg", {}))
+    for background in constraints.get("confirmed_bg") or set():
+        prompt_idx["bg"].setdefault(background, 0)
+    static = build_static(prompt_idx, cast, used)
 
     print(f"剧本      {script_path}")
     print(f"待标注    {len(todo)} 行台词（全文 {len(dialog)} 行）")
@@ -853,10 +872,12 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             "annotation_max_tokens": int(getattr(prov, "cfg", {}).get("annotation_max_tokens") or getattr(prov, "cfg", {}).get("max_tokens", 16000)),
             "reasoning_mode": str(getattr(prov, "cfg", {}).get("reasoning_mode") or "balanced"),
             "reasoning_wire_protocol": str(getattr(prov, "cfg", {}).get("reasoning_wire_protocol") or ""),
+            "context_window_tokens": int(getattr(prov, "cfg", {}).get("context_window_tokens") or 0) or None,
+            "compact_annotation": bool(getattr(prov, "supports_compact_annotation", False)),
         }
         fingerprint = build_run_fingerprint(
             script_text, cast, idx,
-            hashlib.sha256(static.encode("utf-8")).hexdigest()[:16], 1, "scene-v1",
+            hashlib.sha256(static.encode("utf-8")).hexdigest()[:16], 2, "scene-v2",
             model_config,
         )
         checkpoint_dir = options.get("checkpoint_dir") or os.path.join(HERE, "out", "annotation-checkpoints")
@@ -867,13 +888,14 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             run_fingerprint=fingerprint, progress=options.get("progress"),
             model_activity=options.get("model_activity"),
             cancelled=options.get("cancelled"),
-            target=int(llmcfg.get("agent_target_lines", 50)),
-            soft_limit=int(llmcfg.get("agent_soft_limit", 50)),
-            hard_limit=int(llmcfg.get("agent_hard_limit", 60)),
+            target=None,
+            soft_limit=None,
+            hard_limit=None,
             before=int(llmcfg.get("agent_context_before", 15)),
             after=int(llmcfg.get("agent_context_after", 10)),
             reasoning_mode=str(getattr(prov, "cfg", {}).get("reasoning_mode") or "balanced"),
             annotation_max_tokens=int(getattr(prov, "cfg", {}).get("annotation_max_tokens") or getattr(prov, "cfg", {}).get("max_tokens", 16000)),
+            context_window_tokens=int(getattr(prov, "cfg", {}).get("context_window_tokens") or 0) or None,
         )
         diagnostics.extend(agent_result.get("diagnostics") or [])
         agent_meta = {

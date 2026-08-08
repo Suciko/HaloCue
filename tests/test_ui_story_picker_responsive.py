@@ -154,3 +154,22 @@ def test_settings_locks_root_scrollbar_but_keeps_drawer_scroll(browser, app_url,
         assert page.evaluate("getComputedStyle(document.body).scrollbarWidth") == "none"
     finally:
         page.close()
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_settings_drawer_open_state_stays_inside_viewport(browser, app_url, width):
+    """The visible settings surface must remain reachable at desktop and mobile widths."""
+    page = browser.new_page(viewport={"width": width, "height": 720})
+    try:
+        page.goto(app_url, wait_until="domcontentloaded")
+        page.locator('[data-action="open-settings"]').click()
+        drawer = page.locator("#settingsDrawer.open")
+        drawer.wait_for()
+        page.wait_for_timeout(300)
+        box = drawer.bounding_box()
+        assert box is not None
+        assert box["x"] >= 0
+        assert box["x"] + box["width"] <= width
+        assert page.locator("#modelRoleOverview").bounding_box()["x"] >= 0
+    finally:
+        page.close()

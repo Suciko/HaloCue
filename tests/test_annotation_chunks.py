@@ -3,6 +3,8 @@ from annotation_chunks import (
     build_chunks,
     build_scene_map,
     context_indices,
+    estimate_initial_chunk_limits,
+    RunChunkController,
 )
 
 
@@ -71,3 +73,38 @@ def test_default_chunks_target_forty_to_fifty_with_hard_cap_sixty():
     assert 4 <= len(chunks) <= 6
     assert max(sizes) <= 60
     assert min(sizes) >= 40 or len(chunks) == 1
+
+
+def test_initial_chunk_limits_are_task_specific_and_bounded():
+    simple = estimate_initial_chunk_limits({"target_lines": 40, "speaker_count": 2, "resource_complexity": 1, "context_window_tokens": 1_000_000})
+    complex_task = estimate_initial_chunk_limits({"target_lines": 40, "speaker_count": 8, "resource_complexity": 8, "context_window_tokens": 200_000})
+
+    assert simple.target > complex_task.target
+    assert 1 <= complex_task.target <= complex_task.hard_limit <= 60
+
+
+def test_initial_chunk_limits_consider_output_capacity_and_prompt_cost():
+    unconstrained = estimate_initial_chunk_limits({
+        "target_lines": 200, "speaker_count": 2, "resource_complexity": 1,
+        "context_window_tokens": 1_000_000, "annotation_max_tokens": 384_000,
+        "estimated_prompt_tokens": 4_000,
+    })
+    constrained = estimate_initial_chunk_limits({
+        "target_lines": 200, "speaker_count": 2, "resource_complexity": 1,
+        "context_window_tokens": 128_000, "annotation_max_tokens": 16_000,
+        "estimated_prompt_tokens": 30_000,
+    })
+
+    assert constrained.target < unconstrained.target
+    assert constrained.hard_limit <= 40
+
+
+def test_chunk_controller_requires_two_successes_before_growth_and_shrinks_on_failure():
+    controller = RunChunkController(target=20, soft_limit=24, hard_limit=30)
+    assert controller.next_limits().target == 20
+    controller.observe({"success": True, "reasoning_content_ratio": 1.0})
+    assert controller.next_limits().target == 20
+    controller.observe({"success": True, "reasoning_content_ratio": 1.0})
+    assert controller.next_limits().target > 20
+    controller.observe({"success": False, "reason": "empty_response"})
+    assert controller.next_limits().target < 24

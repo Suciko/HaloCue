@@ -53,6 +53,39 @@
     };
   }
 
+  function reasoningOptions(capability) {
+    capability = capability || {};
+    const options = [];
+    const efforts = Array.isArray(capability.efforts) ? capability.efforts : [];
+    if (capability.toggle) options.push(['speed', '速度（关闭思考）']);
+    if (efforts.indexOf('minimal') >= 0) options.push(['minimal', '最低（开启思考）']);
+    if (efforts.indexOf('low') >= 0) options.push(['low', '低（开启思考）']);
+    if (efforts.indexOf('medium') >= 0) options.push(['balanced', '均衡（开启思考）']);
+    if (efforts.indexOf('high') >= 0) options.push(['deep', '深入（开启思考）']);
+    if (efforts.indexOf('xhigh') >= 0) options.push(['xhigh', '更深（开启思考）']);
+    if (efforts.indexOf('max') >= 0) options.push(['max', '最大（开启思考）']);
+    return options.length ? options : [['provider_default', '供应商默认']];
+  }
+
+  function reasoningModeIndex(mode, options) {
+    options = Array.isArray(options) && options.length ? options : [['provider_default', '供应商默认']];
+    const wanted = String(mode || '').trim();
+    const exact = options.findIndex(function (entry) { return entry[0] === wanted; });
+    if (exact >= 0) return exact;
+    const balanced = options.findIndex(function (entry) { return entry[0] === 'balanced'; });
+    if (balanced >= 0) return balanced;
+    const thinking = options.findIndex(function (entry) { return entry[0] !== 'speed'; });
+    return thinking >= 0 ? thinking : 0;
+  }
+
+  function reasoningModeFromControl(control) {
+    control = control || {};
+    const modes = String(control.dataset && control.dataset.modes || '').split('|').filter(Boolean);
+    if (!modes.length) return String(control.value || 'provider_default');
+    const index = Math.max(0, Math.min(modes.length - 1, Number(control.value) || 0));
+    return modes[index] || modes[0];
+  }
+
   function profilePayload(documentRef) {
     const maxInput = value(documentRef, '#modelMaxTokens');
     const payload = {
@@ -71,18 +104,26 @@
       api_key: value(documentRef, '#modelApiKey').value
     };
     const reasoning = value(documentRef, '#modelReasoningMode');
-    if (reasoning && reasoning.value) payload.reasoning_mode = reasoning.value;
+    if (reasoning && (reasoning.value || (reasoning.dataset && reasoning.dataset.modes))) payload.reasoning_mode = reasoningModeFromControl(reasoning);
+    const contextInput = value(documentRef, '#modelContextWindowTokens');
+    const contextSource = value(documentRef, '#modelContextWindowSource');
+    const contextTokens = positiveInteger(contextInput && contextInput.value);
+    const contextOrigin = contextSource && contextSource.value || 'unknown';
+    if (contextTokens) {
+      payload.context_window_tokens = contextTokens;
+      payload.context_window_source = contextOrigin;
+    }
     return payload;
   }
 
   function newProfileDraft() {
-    return {id: '', name: '新模型配置', provider: 'openai', service_preset: 'custom', base_url: '', model: '', max_tokens: 16000, max_tokens_source: 'legacy', recommended_max_tokens: null, recommended_source: 'unknown', recommended_label: '上限未识别', reasoning_mode: 'balanced', vision: true, api_key: ''};
+    return {id: '', name: '新模型配置', provider: 'openai', service_preset: 'custom', base_url: '', model: '', max_tokens: 16000, max_tokens_source: 'legacy', recommended_max_tokens: null, recommended_source: 'unknown', recommended_label: '上限未识别', reasoning_mode: 'balanced', context_window_tokens: null, context_window_source: 'unknown', vision: true, api_key: ''};
   }
 
   function profileChanged(before, after) {
     if (!before || !after) return Boolean(before || after);
     if (String(after.api_key || '').trim()) return true;
-      return ['name', 'provider', 'service_preset', 'base_url', 'model', 'max_tokens', 'max_tokens_source', 'recommended_max_tokens', 'recommended_source', 'recommended_label', 'reasoning_mode', 'vision'].some(function (field) {
+      return ['name', 'provider', 'service_preset', 'base_url', 'model', 'max_tokens', 'max_tokens_source', 'recommended_max_tokens', 'recommended_source', 'recommended_label', 'reasoning_mode', 'context_window_tokens', 'context_window_source', 'vision'].some(function (field) {
       return String(before[field] == null ? '' : before[field]) !== String(after[field] == null ? '' : after[field]);
     });
   }
@@ -173,6 +214,11 @@
     return {toggle: false, efforts: [], default_mode: 'provider_default', wire_protocol: 'none', source: 'unknown'};
   }
 
+  function nextReasoningCapability(_current, profile) {
+    profile = profile || {};
+    return reasoningCapability(profile.model, profile.service_preset);
+  }
+
   function legacyWorkbench(payload) {
     payload = payload || {};
     const profiles = Array.isArray(payload.profiles) ? payload.profiles : [];
@@ -229,6 +275,10 @@
     connectionDisplayName: connectionDisplayName,
     filterModels: filterModels,
     reasoningCapability: reasoningCapability,
+    nextReasoningCapability: nextReasoningCapability,
+    reasoningOptions: reasoningOptions,
+    reasoningModeIndex: reasoningModeIndex,
+    reasoningModeFromControl: reasoningModeFromControl,
     legacyWorkbench: legacyWorkbench
   };
 })(window);

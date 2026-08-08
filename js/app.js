@@ -3,7 +3,7 @@
 
   const $ = function (selector) { return document.querySelector(selector); };
   const $$ = function (selector) { return Array.from(document.querySelectorAll(selector)); };
-  const state = {analysis: null, mapping: {}, preflight: null, preflightApproved: false, preflightStale: false, background: null, backgroundJob: null, generationPrompt: null, generationPromptTarget: null, generationPromptStoryToken: null, buildActive: false, fileToken: null, sourcePath: null, browseMode: 'script', browseDirectory: '', profiles: [], profileBaseline: null, modelWorkbench: null, discoveredModelCapabilities: [], modelRole: 'text', modelEditorMode: 'new', workflowStage: 'script', review: {token: null, revision: 1, buildId: null, cards: [], selected: null, filter: 'all', cardLimit: 80}, reviewAssets: null, bgReplaceCard: null, reviewBackgroundRequest: null, operationId: 0, operations: {annotate: null, compile: null, build: null, analyze: null, preflight: null}, transitionId: 0, viewEpoch: 0, loadFailure: null};
+  const state = {analysis: null, mapping: {}, preflight: null, preflightApproved: false, preflightStale: false, background: null, backgroundJob: null, generationPrompt: null, generationPromptTarget: null, generationPromptStoryToken: null, buildActive: false, fileToken: null, sourcePath: null, browseMode: 'script', browseDirectory: '', profiles: [], profileBaseline: null, modelWorkbench: null, discoveredModelCapabilities: [], activeReasoningCapability: null, modelRole: 'text', modelEditorMode: 'new', workflowStage: 'script', review: {token: null, revision: 1, buildId: null, cards: [], selected: null, filter: 'all', cardLimit: 80}, reviewAssets: null, bgReplaceCard: null, reviewBackgroundRequest: null, operationId: 0, operations: {annotate: null, compile: null, build: null, analyze: null, preflight: null}, transitionId: 0, viewEpoch: 0, loadFailure: null};
   let activeFilePicker = null;
   let settingsPickerMode = '';
   let aaIndexPollTimer = null;
@@ -1151,7 +1151,7 @@
   }
   function normalizeDiscoveredModel(model) {
     if (typeof model === 'string') {
-      return {model_id: model, max_output_tokens: null, source: 'unknown', source_label: '上限未识别', source_url: '', verified_at: '', context_length: null};
+      return {model_id: model, max_output_tokens: null, source: 'unknown', source_label: '上限未识别', source_url: '', verified_at: '', context_length: null, context_window_tokens: null, context_window_source: 'unknown'};
     }
     model = model || {};
     return {
@@ -1161,7 +1161,10 @@
       source_label: model.source_label || '上限未识别',
       source_url: model.source_url || '',
       verified_at: model.verified_at || '',
-      context_length: Number(model.context_length || 0) || null
+      context_length: Number(model.context_length || 0) || null,
+      context_window_tokens: Number(model.context_window_tokens || model.context_length || 0) || null,
+      context_window_source: model.context_window_source || (model.context_length ? 'api' : 'unknown'),
+      reasoning: model.reasoning && typeof model.reasoning === 'object' ? model.reasoning : null
     };
   }
   function currentOutputLimitState() {
@@ -1189,20 +1192,26 @@
     const restore = $('#modelRestoreMaxTokens');
     if (restore) restore.hidden = !(input.dataset.source === 'manual' && Number(input.dataset.recommended || 0));
   }
-  function renderReasoningCapability() {
-    const select = $('#modelReasoningMode');
-    if (!select || !window.ModelSettings || !window.ModelSettings.reasoningCapability) return;
-    const capability = window.ModelSettings.reasoningCapability($('#modelName').value, $('#modelServicePreset').value);
-    const current = select.value;
-    clearElement(select);
-    const options = [];
-    if (capability.toggle) options.push(['speed', '速度（关闭思考）']);
-    if (capability.efforts.indexOf('low') >= 0) options.push(['low', '低（开启思考）']);
-    if (capability.efforts.indexOf('medium') >= 0) options.push(['balanced', '均衡（开启思考）']);
-    if (capability.efforts.indexOf('high') >= 0) options.push(['deep', '深入（开启思考）']);
-    if (!options.length) options.push(['provider_default', '供应商默认']);
-    options.forEach(function (entry) { const option = document.createElement('option'); option.value = entry[0]; option.textContent = entry[1]; select.appendChild(option); });
-    select.value = options.some(function (entry) { return entry[0] === current; }) ? current : options[0][0];
+  function renderReasoningCapability(capability) {
+    const control = $('#modelReasoningMode');
+    if (!control || !window.ModelSettings || !window.ModelSettings.reasoningCapability) return;
+    capability = capability && typeof capability.toggle === 'boolean' ? capability : (state.activeReasoningCapability || window.ModelSettings.reasoningCapability($('#modelName').value, $('#modelServicePreset').value));
+    state.activeReasoningCapability = capability;
+    const options = window.ModelSettings.reasoningOptions(capability);
+    const current = control.dataset.pendingMode || window.ModelSettings.reasoningModeFromControl(control);
+    delete control.dataset.pendingMode;
+    control.dataset.modes = options.map(function (entry) { return entry[0]; }).join('|');
+    control.min = '0'; control.max = String(Math.max(0, options.length - 1)); control.step = '1';
+    control.value = String(window.ModelSettings.reasoningModeIndex(current, options));
+    control.disabled = options.length < 2;
+    const label = $('#modelReasoningLabel');
+    const selected = options[Number(control.value)] || options[0];
+    if (label) label.textContent = selected[1];
+    control.setAttribute('aria-valuenow', control.value);
+    control.setAttribute('aria-valuemax', control.max);
+    control.setAttribute('aria-valuetext', selected[1]);
+    const stops = $('#modelReasoningStops');
+    if (stops) { clearElement(stops); options.forEach(function (entry) { const stop = document.createElement('span'); stop.textContent = entry[1].split('（')[0]; stops.appendChild(stop); }); }
     const hint = $('#modelReasoningHint');
     if (hint) hint.textContent = capability.toggle ? '默认开启思考；速度模式会关闭思考，复杂场景质量可能下降。' : '此模型未确认支持关闭或调节思考，使用供应商默认行为。';
   }
@@ -1210,6 +1219,13 @@
     options = options || {};
     const next = window.ModelSettings.nextOutputLimitState(currentOutputLimitState(), capability, options);
     renderOutputLimitState(next, options.modelId);
+    const contextInput = $('#modelContextWindowTokens');
+    const contextSource = $('#modelContextWindowSource');
+    const contextTokens = Number(capability && (capability.context_window_tokens || capability.context_length) || 0) || null;
+    if (contextInput) contextInput.value = contextTokens ? String(contextTokens) : '';
+    if (contextSource) contextSource.value = contextTokens ? capability && (capability.context_window_source || capability.source) || 'unknown' : 'unknown';
+    state.activeReasoningCapability = capability && capability.reasoning || window.ModelSettings.reasoningCapability(options.modelId || $('#modelName').value, $('#modelServicePreset').value);
+    renderReasoningCapability(state.activeReasoningCapability);
     return next;
   }
   function renderDiscoveredModels(models) {
@@ -1388,13 +1404,18 @@
   function renderProfile(profile) {
     profile = profile || {};
     clearDiscoveredModels();
+    state.activeReasoningCapability = window.ModelSettings.nextReasoningCapability(
+      state.activeReasoningCapability, profile
+    );
     $('#modelProfileId').value = profile.id || '';
     $('#modelProfileName').value = profile.name || '';
     $('#modelProvider').value = profile.provider || 'openai';
     if ($('#modelServicePreset')) $('#modelServicePreset').value = profile.service_preset || 'custom';
     $('#modelBaseUrl').value = profile.base_url || '';
     $('#modelName').value = profile.model || '';
-    if ($('#modelReasoningMode')) $('#modelReasoningMode').value = profile.reasoning_mode || 'balanced';
+    if ($('#modelReasoningMode')) $('#modelReasoningMode').dataset.pendingMode = profile.reasoning_mode || 'balanced';
+    if ($('#modelContextWindowTokens')) $('#modelContextWindowTokens').value = profile.context_window_tokens || '';
+    if ($('#modelContextWindowSource')) $('#modelContextWindowSource').value = profile.context_window_source || 'unknown';
     renderOutputLimitState({
       value: profile.max_tokens || 16000,
       source: profile.max_tokens_source || 'legacy',
@@ -1413,6 +1434,7 @@
     $('#modelClearKey').disabled = !saved;
     $('#modelStatus').textContent = profile.id ? '配置已载入，可以验证连接。' : '填写连接信息并保存配置。';
     renderProviderLinks(presetByKey(profile.service_preset || 'custom'));
+    renderReasoningCapability(state.activeReasoningCapability);
     state.profileBaseline = modelPayload();
   }
   async function loadProfiles(selected) {
@@ -1457,7 +1479,8 @@
     state.modelEditorMode = 'edit';
     $('#modelSelectionLayer').hidden = true; $('#modelProviderLayer').hidden = true; $('#modelRoleOverview').hidden = true; $('#modelConnectionEditor').hidden = false;
     $('#modelConnectionId').value = connection.id; $('#modelRecordId').value = model.id; $('#modelProfileId').value = '';
-    renderProfile({name: connection.name, provider: connection.protocol, service_preset: connection.service_preset, base_url: connection.base_url, model: model.model, max_tokens: model.max_tokens, max_tokens_source: model.max_tokens_source, recommended_max_tokens: model.recommended_max_tokens, recommended_source: model.recommended_source, recommended_label: model.recommended_label, reasoning_mode: model.reasoning_mode, vision: model.vision_status !== 'unsupported', secret_status: connection.secret_status});
+     renderProfile({name: connection.name, provider: connection.protocol, service_preset: connection.service_preset, base_url: connection.base_url, model: model.model, max_tokens: model.max_tokens, max_tokens_source: model.max_tokens_source, recommended_max_tokens: model.recommended_max_tokens, recommended_source: model.recommended_source, recommended_label: model.recommended_label, reasoning_mode: model.reasoning_mode, context_window_tokens: model.context_window_tokens, context_window_source: model.context_window_source, vision: model.vision_status !== 'unsupported', secret_status: connection.secret_status});
+    recommendOutputForModel(model.model, {modelChanged: false}).catch(function (error) { $('#modelStatus').textContent = error.message; });
     $('#modelServicePreset').disabled = true; $('#modelSaveAsNew').hidden = false; $('#modelEditorTitle').textContent = '编辑模型'; $('#modelEditorSubtitle').textContent = connection.name;
   }
   async function deleteWorkbenchModel(target) {
@@ -1498,7 +1521,7 @@
       }
       const existing = state.modelWorkbench && (state.modelWorkbench.models || []).find(function (item) { return item.id === $('#modelRecordId').value; });
       const sameModel = existing && existing.model === payload.model;
-      const model = await post('/api/llm/models/save', {id: $('#modelRecordId').value, connection_id: connection.id, model: payload.model, max_tokens: payload.max_tokens, max_tokens_source: payload.max_tokens_source, recommended_max_tokens: payload.recommended_max_tokens, recommended_source: payload.recommended_source, recommended_label: payload.recommended_label, text_status: sameModel ? existing.text_status : 'untested', vision_status: payload.vision ? (sameModel ? existing.vision_status : 'untested') : 'unsupported'});
+       const model = await post('/api/llm/models/save', {id: $('#modelRecordId').value, connection_id: connection.id, model: payload.model, max_tokens: payload.max_tokens, max_tokens_source: payload.max_tokens_source, recommended_max_tokens: payload.recommended_max_tokens, recommended_source: payload.recommended_source, recommended_label: payload.recommended_label, reasoning_mode: payload.reasoning_mode, context_window_tokens: payload.context_window_tokens, context_window_source: payload.context_window_source, annotation_max_tokens_source: 'auto', text_status: sameModel ? existing.text_status : 'untested', vision_status: payload.vision ? (sameModel ? existing.vision_status : 'untested') : 'unsupported'});
       $('#modelConnectionId').value = connection.id; $('#modelRecordId').value = model.id; state.modelEditorMode = 'edit';
       await loadModelWorkbench(); $('#modelServicePreset').disabled = true; $('#modelSaveAsNew').hidden = false; $('#modelEditorTitle').textContent = '编辑模型'; $('#modelEditorSubtitle').textContent = connection.name;
       $('#modelStatus').textContent = connection.secret_status === 'saved' ? '模型和密钥已保存。' : '模型已保存；调用前还需要填写 API Key。';
@@ -2459,6 +2482,7 @@
     recommendOutputForModel(modelId, {modelChanged: previousModel !== modelId}).catch(function (error) { $('#modelStatus').textContent = error.message; });
     renderReasoningCapability();
   });
+  $('#modelReasoningMode').addEventListener('input', function () { renderReasoningCapability(state.activeReasoningCapability); });
   const castSearchInput = $('#castSearch'); if (castSearchInput) castSearchInput.addEventListener('input', function () { clearTimeout(castSearchTimer); const value = this.value; castSearchTimer = setTimeout(function () { searchCharacters(value); }, 180); }); document.addEventListener('keydown', function (event) { if (event.key === 'Escape') { setDrawer('settings', false); setDrawer('help', false); if ($('#mInstall').classList.contains('on')) closeModal('#mInstall'); else if ($('#mBackgroundPicker').classList.contains('on')) actions['close-background-picker'](); else if ($('#mBgReplace').classList.contains('on')) { closeModal('#mBgReplace'); state.bgReplaceCard = null; } else if ($('#mCast').classList.contains('on')) closeModal('#mCast'); else if ($('#mEdit').classList.contains('on')) closeModal('#mEdit'); else if (activeFilePicker && !$('#mBrowse').hidden) { activeFilePicker.close(); activeFilePicker = storyFilePicker; } else closeModal('#mBrowse'); } });
   // 记住工作台偏好（生成方式 / 是否安装），同一浏览器内持续生效。
   function restoreWorkbenchPreferences() {

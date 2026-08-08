@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import llm
-from model_profiles import ModelProfileError, ModelProfileStore, source_context_strategy_for_connection
+from model_capabilities import resolve_reasoning_capability
+from model_profiles import (
+    ModelProfileError,
+    ModelProfileStore,
+    resolve_annotation_budget,
+    source_context_strategy_for_connection,
+)
 
 
 class ModelRouter:
@@ -41,13 +47,22 @@ class ModelRouter:
         secret = self.store.resolve_connection_key(connection["id"])
         if not secret:
             raise ModelProfileError("所选模型配置尚未设置 API Key")
+        annotation_max_tokens, _source = resolve_annotation_budget(model)
+        reasoning = resolve_reasoning_capability(
+            str(model["model"]),
+            service_preset=str(connection.get("service_preset") or "custom"),
+        )
         return llm.make_provider_from_settings(connection["protocol"], {
             "model": str(model["model"]),
             "base_url": str(connection.get("base_url") or ""),
             "max_tokens": int(model.get("max_tokens") or 16000),
-            "annotation_max_tokens": int(model.get("annotation_max_tokens") or min(int(model.get("max_tokens") or 16000), 16000)),
+            "annotation_max_tokens": annotation_max_tokens,
+            "context_window_tokens": model.get("context_window_tokens"),
+            "context_window_source": model.get("context_window_source", "unknown"),
             "reasoning_mode": str(model.get("reasoning_mode") or "balanced"),
-            "reasoning_wire_protocol": "deepseek_thinking" if connection.get("service_preset") == "deepseek" else "none",
+            "reasoning_wire_protocol": reasoning["wire_protocol"],
+            "reasoning_budget_min": reasoning.get("budget_min"),
+            "reasoning_budget_max": reasoning.get("budget_max"),
             "source_context_strategy": source_context_strategy_for_connection(connection),
             "vision": model.get("vision_status") in {"passed", "untested"},
             "api_key": secret,

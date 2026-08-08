@@ -10,6 +10,8 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
+from model_capabilities import resolve_reasoning_capability
+
 
 _TARGET_PREFIX = "AA-AutoWriter/"
 _PROVIDERS = {"openai", "anthropic"}
@@ -29,9 +31,30 @@ MODEL_PRESETS = {
 
 _CAPABILITY_STATUSES = {"untested", "passed", "failed", "unsupported"}
 _VISION_MODES = {"separate", "base", "disabled"}
-_MAX_TOKEN_SOURCES = {"legacy", "api", "catalog", "unknown", "manual"}
-_RECOMMENDATION_SOURCES = {"api", "catalog", "unknown"}
-_REASONING_MODES = {"speed", "low", "balanced", "medium", "deep", "high", "provider_default"}
+_MAX_TOKEN_SOURCES = {"legacy", "api", "catalog", "models_dev", "unknown", "manual"}
+_RECOMMENDATION_SOURCES = {"api", "catalog", "models_dev", "unknown"}
+_REASONING_MODES = {
+    "speed", "minimal", "low", "balanced", "medium", "deep", "high",
+    "xhigh", "max", "provider_default",
+}
+_ANNOTATION_BUDGET_SOURCES = {"auto", "manual"}
+def resolve_annotation_budget(record: dict) -> tuple[int, str]:
+    """Return the effective Agent output budget and whether it is automatic."""
+    maximum = max(1, int(record.get("max_tokens") or 16_000))
+    configured = record.get("annotation_max_tokens")
+    try:
+        configured_value = int(configured) if configured not in (None, "") else None
+    except (TypeError, ValueError):
+        configured_value = None
+    raw_source = str(record.get("annotation_max_tokens_source") or "").strip().lower()
+    if raw_source in _ANNOTATION_BUDGET_SOURCES:
+        source = raw_source
+    else:
+        # Previous releases wrote 16000 automatically without recording provenance.
+        source = "auto" if configured_value in (None, 16_000) else "manual"
+    if source == "manual" and configured_value is not None:
+        return min(maximum, max(1, configured_value)), source
+    return maximum, "auto"
 
 
 def source_context_strategy_for_connection(connection: dict) -> str:
@@ -322,6 +345,17 @@ class ModelProfileStore:
         service_preset = str(payload.get("service_preset") or "custom").strip().lower()
         if service_preset not in MODEL_PRESETS:
             raise ModelProfileError("service_preset 无效")
+        context_window = payload.get("context_window_tokens")
+        if context_window not in (None, ""):
+            try:
+                context_window = int(context_window)
+            except (TypeError, ValueError) as exc:
+                raise ModelProfileError("context_window_tokens 必须是整数") from exc
+            if not 1 <= context_window <= 10_000_000:
+                raise ModelProfileError("context_window_tokens 超出范围")
+        context_source = str(payload.get("context_window_source") or "unknown").strip().lower()
+        if context_source not in {"api", "catalog", "models_dev", "manual", "unknown"}:
+            raise ModelProfileError("context_window_source 无效")
         return {
             "id": profile_id,
             "name": name,
@@ -334,6 +368,8 @@ class ModelProfileStore:
             "recommended_max_tokens": recommended,
             "recommended_source": recommended_source,
             "recommended_label": recommended_label or "上限未识别",
+            "context_window_tokens": context_window,
+            "context_window_source": context_source,
             "vision": bool(payload.get("vision", True)),
         }
 
@@ -359,6 +395,8 @@ class ModelProfileStore:
                 "recommended_max_tokens",
                 "recommended_source",
                 "recommended_label",
+                "context_window_tokens",
+                "context_window_source",
                 "vision",
                 "service_preset",
             )
@@ -457,12 +495,44 @@ class ModelProfileStore:
         reasoning_mode = str(payload.get("reasoning_mode") or "balanced").strip().lower()
         if reasoning_mode not in _REASONING_MODES:
             raise ModelProfileError("reasoning_mode 无效")
+        raw_annotation_budget = payload.get("annotation_max_tokens")
+        raw_annotation_source = str(
+            payload.get("annotation_max_tokens_source") or ""
+        ).strip().lower()
+        if raw_annotation_source and raw_annotation_source not in _ANNOTATION_BUDGET_SOURCES:
+            raise ModelProfileError("annotation_max_tokens_source 无效")
+        annotation_source = raw_annotation_source or (
+            "manual" if raw_annotation_budget not in (None, "") else "auto"
+        )
+        if annotation_source == "manual":
+            try:
+                manual_annotation_budget = int(raw_annotation_budget)
+            except (TypeError, ValueError) as exc:
+                raise ModelProfileError("annotation_max_tokens 必须是整数") from exc
+            if not 1 <= manual_annotation_budget <= max_tokens:
+                raise ModelProfileError("annotation_max_tokens 必须在 1 到 max_tokens 之间")
         try:
-            annotation_max_tokens = int(payload.get("annotation_max_tokens") or min(max_tokens, 16000))
+            annotation_max_tokens, annotation_source = resolve_annotation_budget({
+                "max_tokens": max_tokens,
+                "reasoning_mode": reasoning_mode,
+                "annotation_max_tokens": raw_annotation_budget,
+                "annotation_max_tokens_source": annotation_source,
+            })
         except (TypeError, ValueError) as exc:
             raise ModelProfileError("annotation_max_tokens 必须是整数") from exc
         if not 1 <= annotation_max_tokens <= max_tokens:
             raise ModelProfileError("annotation_max_tokens 必须在 1 到 max_tokens 之间")
+        context_window = payload.get("context_window_tokens")
+        if context_window not in (None, ""):
+            try:
+                context_window = int(context_window)
+            except (TypeError, ValueError) as exc:
+                raise ModelProfileError("context_window_tokens 必须是整数") from exc
+            if not 1 <= context_window <= 10_000_000:
+                raise ModelProfileError("context_window_tokens 超出范围")
+        context_source = str(payload.get("context_window_source") or "unknown").strip().lower()
+        if context_source not in {"api", "catalog", "models_dev", "manual", "unknown"}:
+            raise ModelProfileError("context_window_source 无效")
         return {
             "id": model_id,
             "connection_id": connection_id,
@@ -476,6 +546,9 @@ class ModelProfileStore:
             "vision_status": vision_status,
             "reasoning_mode": reasoning_mode,
             "annotation_max_tokens": annotation_max_tokens,
+            "annotation_max_tokens_source": annotation_source,
+            "context_window_tokens": context_window,
+            "context_window_source": context_source,
         }
 
     def _public_connection(self, record: dict) -> dict:
@@ -545,7 +618,9 @@ class ModelProfileStore:
     def _public_model(record: dict) -> dict:
         result = dict(record)
         result.setdefault("reasoning_mode", "balanced")
-        result.setdefault("annotation_max_tokens", min(int(result.get("max_tokens") or 16000), 16000))
+        budget, source = resolve_annotation_budget(result)
+        result["annotation_max_tokens"] = budget
+        result["annotation_max_tokens_source"] = source
         return result
 
     def save_connection(self, payload: dict) -> dict:
@@ -637,13 +712,22 @@ class ModelProfileStore:
             secret = self.resolve_connection_key(str(connection["id"]))
             if not secret:
                 raise ModelProfileError("model connection has no API Key")
+            public_model = self._public_model(model)
+            reasoning = resolve_reasoning_capability(
+                str(model["model"]),
+                service_preset=str(connection.get("service_preset") or "custom"),
+            )
             return str(connection["protocol"]), {
                 "model": str(model["model"]),
                 "base_url": str(connection.get("base_url") or ""),
                 "max_tokens": int(model.get("max_tokens") or 16000),
-                "annotation_max_tokens": int(model.get("annotation_max_tokens") or min(int(model.get("max_tokens") or 16000), 16000)),
+                "annotation_max_tokens": int(public_model["annotation_max_tokens"]),
+                "context_window_tokens": public_model.get("context_window_tokens"),
+                "context_window_source": public_model.get("context_window_source", "unknown"),
                 "reasoning_mode": str(model.get("reasoning_mode") or "balanced"),
-                "reasoning_wire_protocol": "deepseek_thinking" if str(connection.get("service_preset") or "") == "deepseek" else "none",
+                "reasoning_wire_protocol": reasoning["wire_protocol"],
+                "reasoning_budget_min": reasoning.get("budget_min"),
+                "reasoning_budget_max": reasoning.get("budget_max"),
                 "source_context_strategy": source_context_strategy_for_connection(connection),
                 "vision": model.get("vision_status") in {"passed", "untested"},
                 "api_key": secret,

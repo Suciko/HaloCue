@@ -71,6 +71,21 @@ def test_context_marks_target_past_and_future_and_limits_events():
     assert "不得标注 FUTURE_CONTEXT" in user
 
 
+def test_target_context_uses_short_indices_without_full_fingerprints():
+    items = make_items(3)
+    _volatile, user = assemble_chunk_context(
+        items=items,
+        chunk={"scene_id": "scene-1", "target_indices": [0, 1]},
+        memory=initial_memory(), events=[], usage_chain=[], before=0, after=0,
+        compact=True,
+    )
+
+    assert "[TARGET 1]" in user
+    assert "[TARGET 2]" in user
+    assert items[0]["text_fingerprint"] not in user
+    assert "不复述规则、哈希、原文或候选比较" in user
+
+
 def test_checkpoint_round_trip_and_no_temporary_file(tmp_path):
     store = AnnotationCheckpointStore(tmp_path)
     state = {"schema_version": 1, "progress": {"completed_chunks": ["chunk-1"]}}

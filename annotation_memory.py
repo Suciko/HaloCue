@@ -100,14 +100,16 @@ def complete_scene(memory: Mapping[str, Any], scene: Mapping[str, Any], summary:
     return updated
 
 
-def _line_record(label: str, item: Mapping[str, Any]) -> str:
-    return f"[{label} {item.get('annotation_id')}] {item.get('who')}: {item.get('text')} | fingerprint={item.get('text_fingerprint')}"
+def _line_record(label: str, item: Mapping[str, Any], index: int = 0, *, compact: bool = False) -> str:
+    marker = str(index) if compact and index else str(item.get("annotation_id"))
+    suffix = "" if compact else f" | fingerprint={item.get('text_fingerprint')}"
+    return f"[{label} {marker}] {item.get('who')}: {item.get('text')}{suffix}"
 
 
 def assemble_chunk_context(
     items: Sequence[Mapping[str, Any]], chunk: Mapping[str, Any], memory: Mapping[str, Any],
     events: Sequence[Mapping[str, Any]], usage_chain: Sequence[Mapping[str, Any]], *,
-    before: int = 15, after: int = 10, max_events: int = 8,
+    before: int = 15, after: int = 10, max_events: int = 8, compact: bool = False,
 ) -> Tuple[str, str]:
     dialogue = [i for i, item in enumerate(items) if item.get("kind") == "line"]
     past, future = context_indices(dialogue, dict(chunk), before=before, after=after)
@@ -123,12 +125,15 @@ def assemble_chunk_context(
     volatile_parts.append("RELEVANT_MEMORY_EVENTS\n" + json.dumps(selected, ensure_ascii=False, separators=(",", ":")))
     body = [
         "只为 TARGET 行输出标注；PAST_CONTEXT 和 FUTURE_CONTEXT 只用于理解，不得标注 FUTURE_CONTEXT。",
-        "响应协议：只返回一个 JSON 对象，顶层必须有 lines、state_delta、memory_events；可选 beats 只表达独立无台词反应；lines 必须恰好覆盖每个 TARGET，"
-        "每项必须复制对应 TARGET 的 source_id 和 text_fingerprint，并只填写演出字段；不要使用旧版 i/speaker/wait 格式。",
+        ("响应协议：只返回一个 JSON 对象；lines 使用从 1 开始的 i 对应 TARGET 顺序，只填写有值的演出字段；"
+         "不复述规则、哈希、原文或候选比较；每行只做一次决策，完成语义判断后立即返回 JSON。"
+         if compact else
+         "响应协议：只返回一个 JSON 对象，顶层必须有 lines、state_delta、memory_events；可选 beats 只表达独立无台词反应；lines 必须恰好覆盖每个 TARGET，"
+         "每项必须复制对应 TARGET 的 source_id 和 text_fingerprint，并只填写演出字段；不要使用旧版 i/speaker/wait 格式。"),
     ]
-    body.extend(_line_record("PAST_CONTEXT", items[index]) for index in past)
-    body.extend(_line_record("TARGET", items[index]) for index in targets)
-    body.extend(_line_record("FUTURE_CONTEXT", items[index]) for index in future)
+    body.extend(_line_record("PAST_CONTEXT", items[index], compact=compact) for index in past)
+    body.extend(_line_record("TARGET", items[index], position + 1, compact=compact) for position, index in enumerate(targets))
+    body.extend(_line_record("FUTURE_CONTEXT", items[index], compact=compact) for index in future)
     return "\n\n".join(volatile_parts), "\n".join(body)
 
 

@@ -358,6 +358,12 @@ def test_workbench_model_list_returns_resolved_capability_objects(tmp_path, monk
         "model_id": "deepseek-v4-flash", "context_length": 1_000_000,
         "max_output_tokens": 384_000, "source": "api",
         "source_label": "接口返回 · 384,000", "source_url": "", "verified_at": "",
+        "context_window_tokens": 1_000_000, "context_window_source": "api",
+        "reasoning": {
+            "toggle": True, "efforts": ["low", "medium", "high"],
+            "default_mode": "medium", "wire_protocol": "deepseek_thinking",
+            "source": "catalog",
+        },
     }]
 
 

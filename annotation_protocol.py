@@ -109,6 +109,122 @@ def build_chunk_schema(target_ids: Sequence[str]) -> Dict[str, Any]:
     }
 
 
+def build_compact_chunk_schema(target_count: int, target_ids: Sequence[str] = ()) -> Dict[str, Any]:
+    """Build the low-overhead wire schema used by capable providers.
+
+    The model returns a one-based target index and only non-empty annotation
+    fields. Source identities and protocol defaults are restored locally.
+    """
+    if target_count < 1:
+        raise ValueError("target_count must be positive")
+    row_properties: Dict[str, Any] = {
+        "i": {"type": "integer", "minimum": 1, "maximum": int(target_count)},
+    }
+    for name in ANNOTATION_FIELDS:
+        field_type = "boolean" if name == "shake" else "integer" if name == "move" else "string"
+        row_properties[name] = {"type": field_type}
+    row_schema = {
+        "type": "object", "properties": row_properties,
+        "required": ["i"], "additionalProperties": False,
+    }
+    state_properties = {
+        name: {"type": [STATE_SCHEMA_TYPES[field_type], "null"]}
+        for name, field_type in STATE_FIELD_TYPES.items()
+    }
+    event_properties = {
+        "kind": {"type": "string"}, "participants": {"type": "array", "items": {"type": "string"}},
+        "keywords": {"type": "array", "items": {"type": "string"}}, "summary": {"type": "string"},
+        "source_ids": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": int(target_count)}}, "evidence": {"type": "string"},
+        "importance": {"type": "number", "minimum": 0, "maximum": 1},
+        "status": {"type": "string", "enum": ["open", "resolved", "reference"]},
+    }
+    beat_properties = {
+        "anchor_id": {"type": "integer", "minimum": 1, "maximum": int(target_count)},
+        "position": {"type": "string", "enum": ["before", "after"]},
+        "who": _field("who", "执行无台词反应的角色名"),
+        "face": _field("face", "表情编号，不使用时省略"),
+        "emo": _field("emo", "气泡中文名，不使用时省略"),
+        "act": _field("act", "动作英文名，不使用时省略"),
+        "wait_ms": {"type": "integer", "minimum": 0, "maximum": MAX_BEAT_WAIT_MS},
+    }
+    return {
+        "type": "object", "properties": {
+            "lines": {"type": "array", "items": row_schema},
+            "state_delta": {"type": "object", "properties": state_properties, "additionalProperties": False},
+            "memory_events": {"type": "array", "items": {"type": "object", "properties": event_properties, "required": sorted(EVENT_FIELDS), "additionalProperties": False}},
+            "beats": {"type": "array", "items": {"type": "object", "properties": beat_properties, "required": ["anchor_id", "position", "who", "face", "emo", "act", "wait_ms"], "additionalProperties": False}},
+        }, "required": ["lines", "state_delta", "memory_events"], "additionalProperties": False,
+    }
+
+
+def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Restore complete line identities/defaults before normal validation."""
+    response = _require_dict(response, "invalid_response", "模型响应必须是对象")
+    lines = response.get("lines")
+    if not isinstance(lines, list):
+        raise ChunkProtocolError("invalid_lines", "lines 必须是数组")
+    expanded = []
+    seen = set()
+    for compact in lines:
+        compact = _require_dict(compact, "invalid_line", "compact line 必须是对象")
+        index = compact.get("i")
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise ChunkProtocolError("invalid_line", "compact line.i 必须是整数")
+        if not 1 <= index <= len(targets):
+            raise ChunkProtocolError("unknown_target", f"compact line.i 超出目标范围: {index}")
+        if index in seen:
+            raise ChunkProtocolError("duplicate_target", f"目标行重复: {index}")
+        seen.add(index)
+        unknown = set(compact) - ({"i"} | set(ANNOTATION_FIELDS))
+        if unknown:
+            raise ChunkProtocolError("invalid_line", f"compact line 包含未知字段: {sorted(unknown)}")
+        target = targets[index - 1]
+        row = {
+            "source_id": str(target.get("annotation_id") or ""),
+            "text_fingerprint": str(target.get("text_fingerprint") or ""),
+            **{name: (False if name == "shake" else 0 if name == "move" else "") for name in ANNOTATION_FIELDS},
+        }
+        for name in ANNOTATION_FIELDS:
+            if name in compact:
+                row[name] = compact[name]
+        expanded.append(row)
+    expected = set(range(1, len(targets) + 1))
+    missing = expected - seen
+    if missing:
+        raise ChunkProtocolError("missing_target", f"响应缺少目标行: {sorted(missing)}")
+    expanded_beats = []
+    for beat in response.get("beats", []):
+        expanded_beat = dict(_require_dict(beat, "invalid_beat", "compact beat 必须是对象"))
+        anchor_index = expanded_beat.get("anchor_id")
+        if isinstance(anchor_index, bool) or not isinstance(anchor_index, int):
+            raise ChunkProtocolError("invalid_beat", "compact beat.anchor_id 必须是整数")
+        if not 1 <= anchor_index <= len(targets):
+            raise ChunkProtocolError("unknown_beat_anchor", f"compact beat.anchor_id 超出目标范围: {anchor_index}")
+        expanded_beat["anchor_id"] = str(targets[anchor_index - 1].get("annotation_id") or "")
+        expanded_beats.append(expanded_beat)
+    expanded_events = []
+    for event in response.get("memory_events", []):
+        expanded_event = dict(_require_dict(event, "invalid_memory_event", "compact memory_event 必须是对象"))
+        source_ids = expanded_event.get("source_ids")
+        if not isinstance(source_ids, list):
+            raise ChunkProtocolError("invalid_memory_event", "compact memory_event.source_ids 必须是数组")
+        mapped_ids = []
+        for source_index in source_ids:
+            if isinstance(source_index, bool) or not isinstance(source_index, int):
+                raise ChunkProtocolError("invalid_memory_event", "compact memory_event.source_ids 必须使用整数索引")
+            if not 1 <= source_index <= len(targets):
+                raise ChunkProtocolError("unknown_event_source", f"compact event source 超出目标范围: {source_index}")
+            mapped_ids.append(str(targets[source_index - 1].get("annotation_id") or ""))
+        expanded_event["source_ids"] = mapped_ids
+        expanded_events.append(expanded_event)
+    return {
+        "lines": expanded,
+        "state_delta": response.get("state_delta", {}),
+        "memory_events": expanded_events,
+        **({"beats": expanded_beats} if "beats" in response else {}),
+    }
+
+
 def _validate_beats(
     value: Any, expected_ids: Iterable[str], cast: Mapping[str, Any],
     constraints: Mapping[str, Any],

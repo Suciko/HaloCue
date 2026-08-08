@@ -75,14 +75,18 @@ def test_agent_mode_accepts_mock_provider_source_identity_response(tmp_path):
     result = annotate.annotate_script({
         "script": str(script), "out": str(output), "cast": str(cast),
         "index": str(index), "agent_enabled": True,
+        "checkpoint_dir": str(tmp_path / "checkpoints"),
     }, provider_instance=llm.MockProvider({}))
     assert result["agent"]["enabled"] is True
     assert output.read_text(encoding="utf-8") == "Kai: hello\nKai: goodbye\n"
+    checkpoint = json.loads(next((tmp_path / "checkpoints").rglob("checkpoint.json")).read_text(encoding="utf-8"))
+    assert checkpoint["fingerprint"]["schema_version"] == 2
+    assert checkpoint["fingerprint"]["chunk_version"] == "scene-v2"
 
 
 def test_agent_reuses_one_source_prefixed_static_prompt_across_chunks(tmp_path):
     script = tmp_path / "scene.txt"
-    source = "".join(f"Kai: line {index}\n" for index in range(45))
+    source = "".join(f"Kai: line {index}\n" for index in range(80))
     script.write_text(source, encoding="utf-8")
     cast = tmp_path / "cast.json"
     cast.write_text(json.dumps({
@@ -127,7 +131,7 @@ def test_confirmed_usage_chain_is_sent_as_annotation_context(tmp_path):
     }), encoding="utf-8")
     index = tmp_path / "index.json"
     index.write_text(json.dumps({
-        "bg": {"BG_Black": 1, "BG_RoofNight": 2}, "sounds": [],
+        "bg": {"BG_Black": 1}, "sounds": [],
         "characters": [{"identifier": "kai", "faces": [{"id": "00", "raw": "00", "label": "", "cn": ""}]}],
         "enums": {"emoticon": {}, "action": {}},
     }), encoding="utf-8")
@@ -137,7 +141,8 @@ def test_confirmed_usage_chain_is_sent_as_annotation_context(tmp_path):
         name = "capture"
         model = "capture"
 
-        def complete_json(self, _static, volatile, _user, _schema):
+        def complete_json(self, static, volatile, _user, _schema):
+            captured["static"] = static
             captured["volatile"] = volatile
             return {"lines": []}
 
@@ -148,6 +153,7 @@ def test_confirmed_usage_chain_is_sent_as_annotation_context(tmp_path):
         "segment": "转场", "location": "夜间天台", "start": "第1行", "end": "第1行",
         "evidence": "夜色中的天台。", "needs": [{
             "kind": "background", "name": "BG_RoofNight", "status": "builtin",
+            "aa_key": "BG_RoofNight",
             "location": "第1行", "reason": "已确认", "confidence": 0.98,
         }],
     }]
@@ -159,6 +165,7 @@ def test_confirmed_usage_chain_is_sent_as_annotation_context(tmp_path):
 
     assert "已确认的场景演出规划" in captured["volatile"]
     assert "BG_RoofNight" in captured["volatile"]
+    assert "BG_RoofNight" in captured["static"]
 
 
 def test_annotation_writer_does_not_repeat_same_background():

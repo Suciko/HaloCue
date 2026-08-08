@@ -1102,12 +1102,18 @@ def _temporary_profile_provider(payload):
     if not secret:
         raise model_profiles.ModelProfileError("临时测试配置尚未设置 API Key")
     provider_name = str(record["provider"])
+    reasoning = model_capabilities.resolve_reasoning_capability(
+        str(record["model"]),
+        service_preset=str(record.get("service_preset") or "custom"),
+    )
     return llm.make_provider_from_settings(provider_name, {
         "model": record["model"], "base_url": record["base_url"],
         "max_tokens": record["max_tokens"], "vision": record["vision"],
         "annotation_max_tokens": record.get("annotation_max_tokens", min(record["max_tokens"], 16000)),
         "reasoning_mode": record.get("reasoning_mode", "balanced"),
-        "reasoning_wire_protocol": "deepseek_thinking" if record.get("service_preset") == "deepseek" else "none",
+        "reasoning_wire_protocol": reasoning["wire_protocol"],
+        "reasoning_budget_min": reasoning.get("budget_min"),
+        "reasoning_budget_max": reasoning.get("budget_max"),
         "api_key": secret,
     })
 
@@ -1129,13 +1135,22 @@ def _temporary_connection_provider(connection_payload, model_payload):
     model_name = str(model.get("model") or "").strip()
     if not model_name:
         raise model_profiles.ModelProfileError("模型名称不能为空")
+    annotation_max_tokens, _source = model_profiles.resolve_annotation_budget(model)
+    reasoning = model_capabilities.resolve_reasoning_capability(
+        model_name,
+        service_preset=str(record.get("service_preset") or "custom"),
+    )
     return llm.make_provider_from_settings(record["protocol"], {
         "model": model_name,
         "base_url": record["base_url"],
         "max_tokens": int(model.get("max_tokens") or 16000),
-        "annotation_max_tokens": int(model.get("annotation_max_tokens") or min(int(model.get("max_tokens") or 16000), 16000)),
+        "annotation_max_tokens": annotation_max_tokens,
+        "context_window_tokens": model.get("context_window_tokens"),
+        "context_window_source": model.get("context_window_source", "unknown"),
         "reasoning_mode": str(model.get("reasoning_mode") or "balanced"),
-        "reasoning_wire_protocol": "deepseek_thinking" if record.get("service_preset") == "deepseek" else "none",
+        "reasoning_wire_protocol": reasoning["wire_protocol"],
+        "reasoning_budget_min": reasoning.get("budget_min"),
+        "reasoning_budget_max": reasoning.get("budget_max"),
         "vision": model.get("vision_status") != "unsupported",
         "api_key": secret,
     })
@@ -1201,11 +1216,22 @@ def list_workbench_models(connection, model_payload):
             model_id = str(record.get("id") or "").strip()
             if not model_id:
                 continue
-            resolved[model_id] = model_capabilities.resolve_output_capability(
+            registry_record = model_capabilities.registry_model_record(
+                model_id, service_preset=str(preset or "custom"),
+            )
+            capability = model_capabilities.resolve_output_capability(
                 model_id,
                 service_preset=str(preset or "custom"),
                 remote_record=record,
+                registry_record=registry_record,
             )
+            capability["reasoning"] = model_capabilities.resolve_reasoning_capability(
+                model_id,
+                service_preset=str(preset or "custom"),
+                remote_record=record,
+                registry_record=registry_record,
+            )
+            resolved[model_id] = capability
         return sorted(resolved.values(), key=lambda item: item["model_id"].casefold())
 
     provider = _temporary_connection_provider(connection, model_payload)

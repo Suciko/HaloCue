@@ -81,3 +81,22 @@ def test_base_vision_requires_passed_status(tmp_path, monkeypatch):
 
     with pytest.raises(model_profiles.ModelProfileError, match="图片测试"):
         router.one_shot_base_fallback()
+
+
+def test_runtime_router_forwards_reasoning_budget_capability(tmp_path, monkeypatch):
+    router, _, _, _ = make_router(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        model_router,
+        "resolve_reasoning_capability",
+        lambda *_args, **_kwargs: {
+            "wire_protocol": "qwen_thinking",
+            "budget_min": 0,
+            "budget_max": 81920,
+        },
+    )
+
+    settings = router.text_provider().settings
+
+    assert settings["reasoning_wire_protocol"] == "qwen_thinking"
+    assert settings["reasoning_budget_min"] == 0
+    assert settings["reasoning_budget_max"] == 81920

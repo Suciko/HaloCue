@@ -384,6 +384,160 @@ def test_provider_settings_include_reasoning_mode_and_task_budget(tmp_path):
     assert settings["source_context_strategy"] == "preserve"
 
 
+def test_unknown_deepseek_model_does_not_guess_reasoning_wire_protocol(tmp_path):
+    credentials = FakeCredentials()
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=credentials)
+    connection = store.save_connection({
+        "name": "DeepSeek gateway", "service_preset": "deepseek", "protocol": "openai",
+        "base_url": "https://api.deepseek.com/v1", "api_key": "secret",
+    })
+    model = store.save_model({
+        "connection_id": connection["id"], "model": "deepseek-private-preview",
+        "reasoning_mode": "provider_default", "text_status": "passed",
+        "vision_status": "unsupported",
+    })
+
+    _provider, settings = store.provider_settings_for_model(model["id"])
+
+    assert settings["reasoning_wire_protocol"] == "none"
+
+
+def test_legacy_automatic_annotation_budget_follows_model_output_limit(tmp_path):
+    credentials = FakeCredentials()
+    path = tmp_path / "profiles.json"
+    path.write_text(json.dumps({
+        "version": 2,
+        "profiles": [],
+        "connections": [{
+            "id": "deepseek", "name": "DeepSeek", "service_preset": "deepseek",
+            "protocol": "openai", "base_url": "https://api.deepseek.com/v1",
+        }],
+        "models": [{
+            "id": "reasoner", "connection_id": "deepseek", "model": "deepseek-v4-flash",
+            "max_tokens": 384000, "annotation_max_tokens": 16000,
+            "reasoning_mode": "balanced", "text_status": "passed",
+            "vision_status": "unsupported",
+        }],
+        "assignments": {"base_model_id": "reasoner", "vision_mode": "disabled", "vision_model_id": ""},
+    }), encoding="utf-8")
+    credentials.write("AA-AutoWriter/connection/deepseek", "secret")
+    store = ModelProfileStore(path, credentials=credentials)
+
+    _provider, settings = store.provider_settings_for_model("reasoner")
+    public_model = store.public_state()["models"][0]
+
+    assert settings["annotation_max_tokens"] == 384000
+    assert public_model["annotation_max_tokens"] == 384000
+    assert public_model["annotation_max_tokens_source"] == "auto"
+
+
+@pytest.mark.parametrize("reasoning_mode", ["speed", "balanced", "deep"])
+def test_reasoning_mode_does_not_change_automatic_output_capacity(
+    tmp_path, reasoning_mode,
+):
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=FakeCredentials())
+    connection = store.save_connection({
+        "name": "DeepSeek", "service_preset": "deepseek", "protocol": "openai",
+        "base_url": "https://api.deepseek.com/v1", "api_key": "secret",
+    })
+
+    model = store.save_model({
+        "connection_id": connection["id"], "model": "deepseek-v4-flash",
+        "max_tokens": 384000, "reasoning_mode": reasoning_mode,
+        "text_status": "passed", "vision_status": "unsupported",
+    })
+
+    assert model["annotation_max_tokens"] == 384000
+    assert model["annotation_max_tokens_source"] == "auto"
+
+
+def test_model_persists_context_window_separately_from_output_limit(tmp_path):
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=FakeCredentials())
+    connection = store.save_connection({
+        "name": "Gateway", "service_preset": "custom", "protocol": "openai",
+        "base_url": "https://example.invalid/v1", "api_key": "secret",
+    })
+    model = store.save_model({
+        "connection_id": connection["id"], "model": "deepseek-v4-flash",
+        "max_tokens": 384000, "context_window_tokens": 1000000,
+        "context_window_source": "api",
+    })
+
+    assert model["max_tokens"] == 384000
+    assert model["context_window_tokens"] == 1000000
+    assert model["context_window_source"] == "api"
+    _provider, settings = store.provider_settings_for_model(model["id"])
+    assert settings["context_window_tokens"] == 1000000
+
+
+def test_model_accepts_models_dev_capability_provenance(tmp_path):
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=FakeCredentials())
+    connection = store.save_connection({
+        "name": "Bailian", "service_preset": "qwen", "protocol": "openai",
+        "base_url": "https://example.invalid/v1", "api_key": "secret",
+    })
+
+    model = store.save_model({
+        "connection_id": connection["id"], "model": "qwen3.7-plus",
+        "max_tokens": 65536, "max_tokens_source": "models_dev",
+        "recommended_max_tokens": 65536, "recommended_source": "models_dev",
+        "recommended_label": "models.dev · 65,536",
+        "context_window_tokens": 1000000, "context_window_source": "models_dev",
+    })
+
+    assert model["max_tokens_source"] == "models_dev"
+    assert model["context_window_source"] == "models_dev"
+
+
+@pytest.mark.parametrize("mode", ["minimal", "xhigh", "max"])
+def test_model_accepts_extended_reasoning_modes(tmp_path, mode):
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=FakeCredentials())
+    connection = store.save_connection({
+        "name": "Model", "service_preset": "openai", "protocol": "openai",
+        "base_url": "https://example.invalid/v1", "api_key": "secret",
+    })
+
+    model = store.save_model({
+        "connection_id": connection["id"], "model": "gpt-5.2",
+        "max_tokens": 128000, "reasoning_mode": mode,
+    })
+
+    assert model["reasoning_mode"] == mode
+
+
+def test_model_save_validates_context_window_metadata(tmp_path):
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=FakeCredentials())
+    connection = store.save_connection({
+        "name": "Gateway", "service_preset": "custom", "protocol": "openai",
+        "base_url": "https://example.invalid/v1", "api_key": "secret",
+    })
+
+    with pytest.raises(ModelProfileError, match="context_window_tokens"):
+        store.save_model({
+            "connection_id": connection["id"], "model": "custom-model",
+            "max_tokens": 384000, "context_window_tokens": "not-a-number",
+        })
+
+
+@pytest.mark.parametrize("annotation_max_tokens", ["not-a-number", 384001])
+def test_manual_annotation_budget_rejects_invalid_values(
+    tmp_path, annotation_max_tokens,
+):
+    store = ModelProfileStore(tmp_path / "profiles.json", credentials=FakeCredentials())
+    connection = store.save_connection({
+        "name": "DeepSeek", "service_preset": "deepseek", "protocol": "openai",
+        "base_url": "https://api.deepseek.com/v1", "api_key": "secret",
+    })
+
+    with pytest.raises(ModelProfileError, match="annotation_max_tokens"):
+        store.save_model({
+            "connection_id": connection["id"], "model": "deepseek-v4-flash",
+            "max_tokens": 384000,
+            "annotation_max_tokens": annotation_max_tokens,
+            "annotation_max_tokens_source": "manual",
+        })
+
+
 def test_provider_settings_use_window_context_for_ollama(tmp_path):
     store = ModelProfileStore(tmp_path / "profiles.json", credentials=FakeCredentials())
     connection = store.save_connection({

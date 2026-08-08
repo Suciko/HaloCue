@@ -11,6 +11,7 @@ static_system 是跨请求不变的部分（资源表），会被缓存；volati
 加新家只要再写一个 Provider 子类并在 make_provider 里登记。
 """
 import json, os, sys, time
+from contextlib import contextmanager
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -25,6 +26,12 @@ class EmptyModelResponseError(LLMError):
     """The provider stopped normally without returning visible content."""
 
     code = "empty_response"
+
+    def __init__(self, message: str, *, finish_reason: str = "unknown", reasoning_chars: int = 0, content_chars: int = 0):
+        super().__init__(message)
+        self.finish_reason = finish_reason
+        self.reasoning_chars = int(reasoning_chars or 0)
+        self.content_chars = int(content_chars or 0)
 
 
 class StructuredOutputError(LLMError):
@@ -156,6 +163,7 @@ class Provider:
         self.model = cfg.get("model") or ""
         self.request_records = []
         self.reasoning_records = []
+        self._request_metadata = {}
         self.stats = {
             "in": 0,
             "out": 0,
@@ -181,6 +189,18 @@ class Provider:
 
     def complete_json(self, static_system, volatile_system, user, schema):
         raise NotImplementedError
+
+    @contextmanager
+    def temporary_reasoning_mode(self, mode):
+        previous = self.cfg.get("reasoning_mode")
+        self.cfg["reasoning_mode"] = mode
+        try:
+            yield
+        finally:
+            if previous is None:
+                self.cfg.pop("reasoning_mode", None)
+            else:
+                self.cfg["reasoning_mode"] = previous
 
     def complete_json_stream(
         self, static_system, volatile_system, user, schema, *, on_activity=None,
@@ -274,8 +294,51 @@ class AnthropicProvider(Provider):
             self.stats["cache_read"] += int(cache_read or 0)
             self.stats["cache_write"] += int(cache_write or 0)
 
+    def _record_anthropic_response(self, msg, *, text, finish_reason):
+        usage = getattr(msg, "usage", None)
+        reasoning_parts = []
+        for block in getattr(msg, "content", []) or []:
+            block_type = getattr(block, "type", "") if not isinstance(block, dict) else block.get("type", "")
+            if block_type in {"thinking", "reasoning"}:
+                value = getattr(block, "thinking", None) if not isinstance(block, dict) else block.get("thinking")
+                if value is None:
+                    value = getattr(block, "text", "") if not isinstance(block, dict) else block.get("text", "")
+                if value:
+                    reasoning_parts.append(str(value))
+        reasoning_text = "".join(reasoning_parts)
+        record = {
+            "requested_max_tokens": self._output_budget(),
+            "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
+            "cache_read_tokens": int(getattr(usage, "cache_read_input_tokens", 0) or 0),
+            "cache_write_tokens": int(getattr(usage, "cache_creation_input_tokens", 0) or 0),
+            "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
+            "reasoning_chars": len(reasoning_text),
+            "content_chars": len(str(text or "")),
+            "finish_reason": finish_reason,
+        }
+        self._append_request_record(record)
+        if reasoning_text:
+            self._append_reasoning_record({
+                "request_index": int(self.stats.get("calls") or 0),
+                "model": self.model,
+                "reasoning_text": reasoning_text,
+                "reasoning_chars": len(reasoning_text),
+                "content_chars": len(str(text or "")),
+                "finish_reason": finish_reason,
+            })
+        return reasoning_text
+
     def _output_budget(self) -> int:
         return max(1, int(self.cfg.get("annotation_max_tokens") or self.cfg.get("max_tokens") or 16000))
+
+    def _reasoning_effort(self):
+        if str(self.cfg.get("reasoning_wire_protocol") or "").strip().lower() != "anthropic_thinking":
+            return None
+        return {
+            "minimal": "low", "low": "low", "balanced": "medium",
+            "medium": "medium", "deep": "high", "high": "high",
+            "xhigh": "xhigh", "max": "max",
+        }.get(str(self.cfg.get("reasoning_mode") or "").strip().lower())
 
     def complete_json(self, static_system, volatile_system, user, schema):
         # 静态部分打缓存断点；易变部分放它后面，避免整段前缀失效
@@ -285,8 +348,9 @@ class AnthropicProvider(Provider):
             system.append({"type": "text", "text": volatile_system})
 
         output_config = {"format": {"type": "json_schema", "schema": schema}}
-        if self.cfg.get("effort"):
-            output_config["effort"] = self.cfg["effort"]
+        effort = self.cfg.get("effort") or self._reasoning_effort()
+        if effort:
+            output_config["effort"] = effort
 
         kw = dict(model=self.model, max_tokens=self._output_budget(),
                   system=system, messages=[{"role": "user", "content": user}],
@@ -304,8 +368,15 @@ class AnthropicProvider(Provider):
         self._record_anthropic_usage(u)
 
         text = "".join(b.text for b in msg.content if b.type == "text")
+        finish_reason = str(getattr(msg, "stop_reason", "") or "unknown")
+        reasoning_text = self._record_anthropic_response(msg, text=text, finish_reason=finish_reason)
         if not text.strip():
-            raise LLMError("Anthropic 返回了空文本")
+            raise EmptyModelResponseError(
+                f"Anthropic 调用返回了空文本（finish_reason={finish_reason}）",
+                finish_reason=finish_reason,
+                reasoning_chars=len(reasoning_text),
+                content_chars=len(text),
+            )
         return parse_and_validate_json_response(text, schema, "Anthropic 调用")
 
     def complete_json_vision(self, system, images, user, schema):
@@ -363,6 +434,9 @@ class AnthropicProvider(Provider):
             messages=[{"role": "user", "content": user}],
             output_config={"format": {"type": "json_schema", "schema": schema}},
         )
+        effort = self.cfg.get("effort") or self._reasoning_effort()
+        if effort:
+            kw["output_config"]["effort"] = effort
         if self.cfg.get("thinking", True):
             kw["thinking"] = {"type": "adaptive"}
 
@@ -400,8 +474,14 @@ class AnthropicProvider(Provider):
         self._record_anthropic_usage(msg.usage)
         finish_reason = str(getattr(msg, "stop_reason", "") or "unknown")
         text = "".join(chunks)
+        reasoning_text = self._record_anthropic_response(msg, text=text, finish_reason=finish_reason)
         if not text.strip():
-            raise LLMError(f"Anthropic 调用返回了空文本（finish_reason={finish_reason}）")
+            raise EmptyModelResponseError(
+                f"Anthropic 调用返回了空文本（finish_reason={finish_reason}）",
+                finish_reason=finish_reason,
+                reasoning_chars=len(reasoning_text),
+                content_chars=len(text),
+            )
         result = parse_and_validate_json_response(text, schema, "Anthropic 调用")
         _emit_activity(
             on_activity,
@@ -432,6 +512,7 @@ class AnthropicProvider(Provider):
 # ---------------------------------------------------------------- OpenAI 兼容
 class OpenAIProvider(Provider):
     name = "openai"
+    supports_compact_annotation = True
 
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -444,22 +525,58 @@ class OpenAIProvider(Provider):
     def _apply_reasoning_payload(self, payload):
         mode = str(self.cfg.get("reasoning_mode") or "").strip().lower()
         protocol = str(self.cfg.get("reasoning_wire_protocol") or "").strip().lower()
-        if not protocol:
-            preset = str(self.cfg.get("service_preset") or "").strip().lower()
-            if preset == "deepseek" or self.model.startswith("deepseek-v4-"):
-                protocol = "deepseek_thinking"
-        if not mode or protocol != "deepseek_thinking":
+        if mode in {"", "provider_default"}:
+            return
+        effort = {
+            "speed": "none", "minimal": "minimal", "low": "low",
+            "balanced": "medium", "medium": "medium", "deep": "high",
+            "high": "high", "xhigh": "xhigh", "max": "max",
+        }.get(mode)
+        if protocol in {"openai_reasoning_effort", "gemini_reasoning_effort"}:
+            if effort:
+                payload["reasoning_effort"] = effort
+            return
+        if protocol in {"deepseek_thinking", "glm_thinking", "kimi_thinking"}:
+            if mode == "speed":
+                payload["thinking"] = {"type": "disabled"}
+                return
+            payload["thinking"] = {"type": "enabled"}
+            if protocol == "deepseek_thinking" and effort:
+                payload["reasoning_effort"] = effort
+            return
+        if protocol == "qwen_thinking":
+            enabled = mode != "speed"
+            payload["enable_thinking"] = enabled
+            if enabled and mode in {"deep", "high"}:
+                budget = self.cfg.get("reasoning_budget_max")
+                if budget not in (None, ""):
+                    payload["thinking_budget"] = max(1, int(budget))
+            return
+        if protocol != "deepseek_thinking":
             return
         if mode == "speed":
             payload["thinking"] = {"type": "disabled"}
             return
         payload["thinking"] = {"type": "enabled"}
-        effort = {"low": "low", "balanced": "medium", "medium": "medium", "deep": "high", "high": "high"}.get(mode)
         if effort:
             payload["reasoning_effort"] = effort
 
     def _output_budget(self) -> int:
         return max(1, int(self.cfg.get("annotation_max_tokens") or self.cfg.get("max_tokens") or 16000))
+
+    def _capacity_error_message(self, prefix: str) -> str:
+        record = self.request_records[-1] if self.request_records else {}
+        requested = int(record.get("requested_max_tokens") or self._output_budget())
+        reasoning = record.get("reasoning_tokens")
+        content_chars = int(record.get("content_chars") or 0)
+        reasoning_detail = (
+            f"，reasoning_tokens={int(reasoning)}" if reasoning is not None else ""
+        )
+        return (
+            f"{self.model} {prefix}输出被截断（finish_reason=length，"
+            f"requested_max_tokens={requested}{reasoning_detail}，content_chars={content_chars}）；"
+            "推理与正文共享该输出预算，请提高 Agent 单请求输出预算或缩小 Agent 分块"
+        )
 
     @staticmethod
     def _error_message(payload, fallback):
@@ -568,6 +685,7 @@ class OpenAIProvider(Provider):
         self._record_usage(
             response,
             request_record={
+                "requested_max_tokens": self._output_budget(),
                 "reasoning_chars": len(str(reasoning or "")),
                 "content_chars": len(text),
                 "finish_reason": self._last_finish_reason,
@@ -586,12 +704,12 @@ class OpenAIProvider(Provider):
             finish_reason = choice.get("finish_reason") or "unknown"
             prefix = "视觉调用" if vision else "调用"
             if finish_reason == "length":
-                raise OutputCapacityError(
-                    f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens="
-                    f"{self.cfg.get('max_tokens', 16000)}）；请提高最大输出或缩小 Agent 分块"
-                )
+                raise OutputCapacityError(self._capacity_error_message(prefix))
             raise EmptyModelResponseError(
-                f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）"
+                f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）",
+                finish_reason=finish_reason,
+                reasoning_chars=len(str(reasoning or "")),
+                content_chars=len(text),
             )
         return text
 
@@ -726,6 +844,7 @@ class OpenAIProvider(Provider):
         self._record_usage(
             {"usage": usage or {}},
             request_record={
+                "requested_max_tokens": self._output_budget(),
                 "elapsed_ms": max(0, int((time.monotonic() - started_monotonic) * 1000)),
                 "first_reasoning_ms": first_reasoning_ms,
                 "first_content_ms": first_content_ms,
@@ -746,12 +865,12 @@ class OpenAIProvider(Provider):
         if not text.strip():
             prefix = "调用"
             if finish_reason == "length":
-                raise OutputCapacityError(
-                    f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens="
-                    f"{self.cfg.get('max_tokens', 16000)}）；请提高最大输出或缩小 Agent 分块"
-                )
+                raise OutputCapacityError(self._capacity_error_message(prefix))
             raise EmptyModelResponseError(
-                f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）"
+                f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）",
+                finish_reason=finish_reason,
+                reasoning_chars=reasoning_chars,
+                content_chars=len(text),
             )
         return text
 
@@ -796,10 +915,7 @@ class OpenAIProvider(Provider):
             )
         except StructuredOutputError as exc:
             if getattr(self, "_last_finish_reason", "") == "length":
-                raise OutputCapacityError(
-                    f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens={self.cfg.get('max_tokens', 16000)}）；"
-                    "请提高最大输出或缩小 Agent 分块"
-                ) from exc
+                raise OutputCapacityError(self._capacity_error_message(prefix)) from exc
             raise
 
     def _complete_stream_compatible(
@@ -828,10 +944,7 @@ class OpenAIProvider(Provider):
             )
         except StructuredOutputError as exc:
             if getattr(self, "_last_finish_reason", "") == "length":
-                raise OutputCapacityError(
-                    f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens={self.cfg.get('max_tokens', 16000)}）；"
-                    "请提高最大输出或缩小 Agent 分块"
-                ) from exc
+                raise OutputCapacityError(self._capacity_error_message(prefix)) from exc
             raise
 
     def complete_json_stream(
@@ -857,7 +970,8 @@ class OpenAIProvider(Provider):
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         prefix = "调用"
         if (
-            getattr(self, "_strict_response_format_unavailable", False)
+            str(self.cfg.get("reasoning_wire_protocol") or "").strip().lower() == "deepseek_thinking"
+            or getattr(self, "_strict_response_format_unavailable", False)
             or getattr(self, "_response_format_unavailable", False)
         ):
             result = self._complete_stream_compatible(
@@ -885,10 +999,7 @@ class OpenAIProvider(Provider):
                     result = parse_and_validate_json_response(text, schema, f"{self.model} {prefix}")
                 except StructuredOutputError as exc:
                     if getattr(self, "_last_finish_reason", "") == "length":
-                        raise OutputCapacityError(
-                            f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens={self.cfg.get('max_tokens', 16000)}）；"
-                            "请提高最大输出或缩小 Agent 分块"
-                        ) from exc
+                        raise OutputCapacityError(self._capacity_error_message(prefix)) from exc
                     raise
         _emit_activity(
             on_activity,
@@ -909,7 +1020,8 @@ class OpenAIProvider(Provider):
     def _complete(self, messages, schema, schema_name, *, vision=False):
         prefix = "视觉调用" if vision else "调用"
         if (
-            getattr(self, "_strict_response_format_unavailable", False)
+            str(self.cfg.get("reasoning_wire_protocol") or "").strip().lower() == "deepseek_thinking"
+            or getattr(self, "_strict_response_format_unavailable", False)
             or getattr(self, "_response_format_unavailable", False)
         ):
             return self._complete_compatible(messages, schema, prefix, vision=vision)
@@ -926,10 +1038,7 @@ class OpenAIProvider(Provider):
             return parse_and_validate_json_response(text, schema, f"{self.model} {prefix}")
         except StructuredOutputError as exc:
             if getattr(self, "_last_finish_reason", "") == "length":
-                raise OutputCapacityError(
-                    f"{self.model} {prefix}输出被截断（finish_reason=length，max_tokens={self.cfg.get('max_tokens', 16000)}）；"
-                    "请提高最大输出或缩小 Agent 分块"
-                ) from exc
+                raise OutputCapacityError(self._capacity_error_message(prefix)) from exc
             raise
 
     def complete_json(self, static_system, volatile_system, user, schema):

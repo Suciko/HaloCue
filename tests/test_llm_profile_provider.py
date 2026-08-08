@@ -211,6 +211,143 @@ def test_openai_text_and_vision_use_builtin_http_contract(monkeypatch):
     }
 
 
+def test_provider_default_omits_reasoning_extensions_for_verified_deepseek(monkeypatch):
+    payloads = []
+
+    def fake_urlopen(request, timeout):
+        payloads.append(json.loads(request.data))
+        return FakeHttpResponse({
+            "choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}],
+        })
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen, raising=False)
+    provider = llm.OpenAIProvider({
+        "api_key": "secret",
+        "model": "deepseek-v4-flash",
+        "reasoning_mode": "provider_default",
+        "reasoning_wire_protocol": "deepseek_thinking",
+    })
+
+    assert provider.complete_json("system", "", "user", {"type": "object"}) == {}
+    assert "thinking" not in payloads[0]
+    assert "reasoning_effort" not in payloads[0]
+
+
+@pytest.mark.parametrize(
+    "protocol,mode,expected",
+    [
+        ("openai_reasoning_effort", "speed", {"reasoning_effort": "none"}),
+        ("openai_reasoning_effort", "balanced", {"reasoning_effort": "medium"}),
+        ("gemini_reasoning_effort", "deep", {"reasoning_effort": "high"}),
+        ("glm_thinking", "speed", {"thinking": {"type": "disabled"}}),
+        ("glm_thinking", "balanced", {"thinking": {"type": "enabled"}}),
+        ("kimi_thinking", "deep", {"thinking": {"type": "enabled"}}),
+        ("qwen_thinking", "speed", {"enable_thinking": False}),
+        ("qwen_thinking", "balanced", {"enable_thinking": True}),
+    ],
+)
+def test_openai_compatible_reasoning_wire_profiles(monkeypatch, protocol, mode, expected):
+    payloads = []
+
+    def fake_urlopen(request, timeout):
+        payloads.append(json.loads(request.data))
+        return FakeHttpResponse({
+            "choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}],
+        })
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen, raising=False)
+    provider = llm.OpenAIProvider({
+        "api_key": "secret",
+        "model": "reasoning-model",
+        "reasoning_mode": mode,
+        "reasoning_wire_protocol": protocol,
+    })
+
+    assert provider.complete_json("system", "", "user", {"type": "object"}) == {}
+    for key, value in expected.items():
+        assert payloads[0][key] == value
+
+
+def test_qwen_deep_mode_uses_catalog_budget_ceiling(monkeypatch):
+    payloads = []
+    monkeypatch.setattr(
+        llm,
+        "urlopen",
+        lambda request, timeout: (
+            payloads.append(json.loads(request.data))
+            or FakeHttpResponse({"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}]})
+        ),
+        raising=False,
+    )
+    provider = llm.OpenAIProvider({
+        "api_key": "secret",
+        "model": "qwen3.7-plus",
+        "reasoning_mode": "deep",
+        "reasoning_wire_protocol": "qwen_thinking",
+        "reasoning_budget_max": 81920,
+    })
+
+    provider.complete_json("system", "", "user", {"type": "object"})
+
+    assert payloads[0]["enable_thinking"] is True
+    assert payloads[0]["thinking_budget"] == 81920
+
+
+def test_anthropic_reasoning_mode_maps_to_native_effort():
+    captured = []
+    class FakeStream:
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def get_final_message(self):
+            return SimpleNamespace(
+                stop_reason="end_turn",
+                content=[SimpleNamespace(type="text", text="{}")],
+                usage=SimpleNamespace(input_tokens=1, output_tokens=1),
+            )
+    provider = object.__new__(llm.AnthropicProvider)
+    llm.Provider.__init__(provider, {
+        "model": "claude-sonnet-4-6",
+        "reasoning_mode": "xhigh", "reasoning_wire_protocol": "anthropic_thinking",
+    })
+    provider.client = SimpleNamespace(messages=SimpleNamespace(
+        stream=lambda **payload: (captured.append(payload) or FakeStream())
+    ))
+    provider._sdk = SimpleNamespace(APIStatusError=RuntimeError)
+
+    provider.complete_json("system", "", "user", {"type": "object"})
+
+    assert captured[0]["thinking"] == {"type": "adaptive"}
+    assert captured[0]["output_config"]["effort"] == "xhigh"
+
+
+def test_verified_deepseek_uses_json_object_on_first_request(monkeypatch):
+    payloads = []
+
+    def fake_urlopen(request, timeout):
+        payloads.append(json.loads(request.data))
+        return FakeHttpResponse({
+            "choices": [{"message": {"content": '{"ok": true}'}, "finish_reason": "stop"}],
+        })
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen, raising=False)
+    provider = llm.OpenAIProvider({
+        "api_key": "secret",
+        "model": "deepseek-v4-flash",
+        "reasoning_wire_protocol": "deepseek_thinking",
+    })
+    schema = {
+        "type": "object",
+        "properties": {"ok": {"type": "boolean"}},
+        "required": ["ok"],
+        "additionalProperties": False,
+    }
+
+    assert provider.complete_json("system", "", "user", schema) == {"ok": True}
+    assert len(payloads) == 1
+    assert payloads[0]["response_format"] == {"type": "json_object"}
+    assert '"ok"' in payloads[0]["messages"][0]["content"]
+
+
 def test_openai_vision_empty_text_reports_model_and_finish_reason(monkeypatch):
     monkeypatch.setattr(
         llm,
@@ -242,6 +379,38 @@ def test_openai_empty_text_length_is_capacity_error(monkeypatch):
 
     with pytest.raises(llm.OutputCapacityError, match="finish_reason=length"):
         provider.complete_json("system", "volatile", "user", {"type": "object"})
+
+
+def test_openai_length_error_reports_annotation_budget_and_reasoning_exhaustion(monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "urlopen",
+        lambda request, timeout: FakeHttpResponse({
+            "choices": [{
+                "message": {"content": "", "reasoning_content": "model spent its budget thinking"},
+                "finish_reason": "length",
+            }],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 16000,
+                "completion_tokens_details": {"reasoning_tokens": 16000},
+            },
+        }),
+        raising=False,
+    )
+    provider = llm.OpenAIProvider({
+        "api_key": "secret",
+        "model": "deepseek-v4-flash",
+        "max_tokens": 384000,
+        "annotation_max_tokens": 16000,
+    })
+
+    with pytest.raises(llm.OutputCapacityError, match="requested_max_tokens=16000.*reasoning_tokens=16000"):
+        provider.complete_json("system", "volatile", "user", {"type": "object"})
+
+    assert provider.request_records[0]["requested_max_tokens"] == 16000
+    assert provider.request_records[0]["reasoning_tokens"] == 16000
+    assert provider.request_records[0]["content_chars"] == 0
 
 
 def test_openai_length_finish_reason_explains_output_budget(monkeypatch):
@@ -409,22 +578,21 @@ def test_openai_stream_request_record_captures_redacted_usage(monkeypatch):
 
     assert provider.complete_json_stream("stable", "volatile", "user", {"type": "object"}) == {}
 
-    assert provider.request_records == [
-        {
-            "request_index": 1,
-            "input_tokens": 100,
-            "cache_read_tokens": 70,
-            "uncached_input_tokens": 30,
-            "output_tokens": 9,
-            "reasoning_tokens": 7,
-            "reasoning_chars": 5,
-            "content_chars": 2,
-            "elapsed_ms": 0,
-            "first_reasoning_ms": 0,
-            "first_content_ms": 0,
-            "finish_reason": "stop",
-        }
-    ]
+    assert len(provider.request_records) == 1
+    record = provider.request_records[0]
+    assert record["request_index"] == 1
+    assert record["requested_max_tokens"] == 16000
+    assert record["input_tokens"] == 100
+    assert record["cache_read_tokens"] == 70
+    assert record["uncached_input_tokens"] == 30
+    assert record["output_tokens"] == 9
+    assert record["reasoning_tokens"] == 7
+    assert record["reasoning_chars"] == 5
+    assert record["content_chars"] == 2
+    assert record["elapsed_ms"] >= 0
+    assert record["first_reasoning_ms"] >= 0
+    assert record["first_content_ms"] >= 0
+    assert record["finish_reason"] == "stop"
     assert all("stable" not in str(record) and "user" not in str(record) for record in provider.request_records)
     assert provider.reasoning_records[0]["reasoning_text"] == "think"
 
@@ -447,6 +615,7 @@ def test_openai_stream_reports_reasoning_separately_and_maps_deepseek_thinking(m
     provider = llm.OpenAIProvider({
         "api_key": "secret", "model": "deepseek-v4-flash",
         "service_preset": "deepseek", "reasoning_mode": "speed",
+        "reasoning_wire_protocol": "deepseek_thinking",
     })
 
     assert provider.complete_json_stream("system", "", "user", {"type": "object"}, on_activity=events.append) == {}
@@ -467,8 +636,11 @@ def test_openai_stream_empty_visible_text_records_reasoning_before_failure(monke
     monkeypatch.setattr(llm, "urlopen", lambda request, timeout: FakeSseResponse(lines), raising=False)
     provider = llm.OpenAIProvider({"api_key": "secret", "model": "deepseek-v4-flash"})
 
-    with pytest.raises(llm.EmptyModelResponseError, match="finish_reason=stop"):
+    with pytest.raises(llm.EmptyModelResponseError, match="finish_reason=stop") as error:
         provider.complete_json_stream("stable", "volatile", "user", {"type": "object"})
+
+    assert error.value.reasoning_chars == 8
+    assert error.value.finish_reason == "stop"
 
     record = provider.request_records[0]
     assert record["reasoning_tokens"] == 12
@@ -576,3 +748,52 @@ def test_anthropic_stream_reports_text_deltas_and_usage():
     assert provider.stats["cache_read"] == 7
     assert provider.stats["cache_write"] == 1
     assert provider.stats["cache_reports"] == 1
+
+
+def test_anthropic_stream_empty_text_preserves_usage_and_reasoning_metadata():
+    class FakeStream:
+        text_stream = iter([])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get_final_message(self):
+            return SimpleNamespace(
+                stop_reason="end_turn",
+                content=[SimpleNamespace(type="thinking", thinking="plan")],
+                usage=SimpleNamespace(
+                    input_tokens=20,
+                    output_tokens=4,
+                    cache_read_input_tokens=12,
+                    cache_creation_input_tokens=0,
+                ),
+            )
+
+    class FakeMessages:
+        def stream(self, **kwargs):
+            return FakeStream()
+
+    provider = object.__new__(llm.AnthropicProvider)
+    llm.Provider.__init__(provider, {"model": "claude-stream"})
+    provider.client = SimpleNamespace(messages=FakeMessages())
+
+    with pytest.raises(llm.EmptyModelResponseError) as error:
+        provider.complete_json_stream("stable", "volatile", "user", {"type": "object"})
+
+    assert error.value.finish_reason == "end_turn"
+    assert error.value.reasoning_chars == 4
+    assert provider.request_records == [{
+        "requested_max_tokens": 16000,
+        "input_tokens": 20,
+        "cache_read_tokens": 12,
+        "cache_write_tokens": 0,
+        "output_tokens": 4,
+        "reasoning_chars": 4,
+        "content_chars": 0,
+        "finish_reason": "end_turn",
+        "request_index": 1,
+    }]
+    assert provider.reasoning_records[0]["reasoning_text"] == "plan"
