@@ -88,6 +88,26 @@ def test_pcm16_wav_uses_filename_stem_as_aa_key(tmp_path):
     assert result.candidate.metadata["bits_per_sample"] == 16
 
 
+def test_pcm16_wav_does_not_require_external_ffprobe(tmp_path):
+    path = tmp_path / "portable.wav"
+    make_wav(path, rate=22050, channels=1, width=2)
+
+    result = validate_sound(
+        path,
+        ffprobe_path=tmp_path / "missing-ffprobe.exe",
+    )
+
+    assert result.ok
+    assert result.candidate.metadata == {
+        "codec": "pcm_s16le",
+        "sample_rate": 22050,
+        "channels": 1,
+        "sample_fmt": "s16",
+        "bits_per_sample": 16,
+        "duration": pytest.approx(0.05, abs=1 / 22050),
+    }
+
+
 def test_non_pcm16_wav_reports_transcode_required(tmp_path):
     path = tmp_path / "eight-bit.wav"
     make_wav(path, width=1)

@@ -122,8 +122,8 @@
     },
     {
       "path": "asset_validation.py",
-      "sha256": "02379a683df3e6dd4f77943e1173eb73f433b5726a4854645128c31b1e2f7178",
-      "size": 13862
+      "sha256": "75d8ae6c88e4fc817f14e7d51da8ea098bbd444719f82651cca29577f32eccb5",
+      "size": 13286
     },
     {
       "path": "assetdb.py",
@@ -642,8 +642,8 @@
     },
     {
       "path": "tests/test_asset_validation.py",
-      "sha256": "4e177b7566f77aacc3e1ecec42e4d8fbf1204f22a012a6f2f4d49d7a267ddee3",
-      "size": 10108
+      "sha256": "018cdd342956611e90ecce2b08431b7cd680f0d3dee67f7e91eac4859242f829",
+      "size": 10637
     },
     {
       "path": "tests/test_background_draft_api.py",
@@ -1112,8 +1112,8 @@
     },
     {
       "path": "tests/test_ui_story_workspace.py",
-      "sha256": "684a7fc26981a4029a894ff213ff082c848061075918e9fb335ad875a90945ff",
-      "size": 51031
+      "sha256": "2846130fd4b3014a1bbc977bb0643672992a8fc393828ea370f20711d972109e",
+      "size": 51289
     },
     {
       "path": "tests/test_ui_workbench.py",

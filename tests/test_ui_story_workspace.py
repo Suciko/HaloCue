@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 import json
 import re
 import subprocess
@@ -72,13 +73,16 @@ def test_startup_and_recent_story_resume_render_only_one_current_workspace():
 const {createHarness}=require(process.argv[1]);const calls=[];
 const recent={story_token:'story-b',source_name:'第二章.txt',project:'第二章工程',last_opened_at:'2026-08-01T09:30:00Z'};
 const h=createHarness({recent:[recent],request:async(p)=>{calls.push(p);if(p==='/api/stories/recent')return [recent];if(p==='/api/story/current?story_token=story-b')return Object.assign({},recent);if(p==='/api/drafts')return [];if(p.startsWith('/api/story/assets'))return {characters:[],backgrounds:[],sounds:[],bgms:[]};return {profiles:[]};}});
-(async()=>{await h.load();const startup={cta:h.get('#storyContextAction').textContent,assetEmpty:h.get('#storyAssetStrip').classList.contains('is-empty')};const list=h.get('#recentStories').children[1];const entry=list.children[0];await entry.click();await h.drain();console.log(JSON.stringify({startup,entry:{source:entry.children[0].children[0].textContent,project:entry.children[0].children[1].textContent,time:entry.children[0].children[2].textContent,resume:entry.children[1].textContent},story:h.window.StoryStore.get(),currentCalls:calls.filter(x=>x.startsWith('/api/story/current?'))}));})();
+(async()=>{await h.load();const startup={cta:h.get('#storyContextAction').textContent,assetEmpty:h.get('#storyAssetStrip').classList.contains('is-empty')};const list=h.get('#recentStories').children[1];const entry=list.children[0];await entry.click();await h.drain();console.log(JSON.stringify({startup,entry:{source:entry.children[0].children[0].textContent,project:entry.children[0].children[1].textContent,time:entry.children[0].children[2].textContent,resume:entry.children[1].textContent},timezoneOffset:new Date(recent.last_opened_at).getTimezoneOffset(),story:h.window.StoryStore.get(),currentCalls:calls.filter(x=>x.startsWith('/api/story/current?'))}));})();
 '''
     result = run_runtime(script)
+    local_time = datetime(2026, 8, 1, 9, 30, tzinfo=timezone.utc) - timedelta(
+        minutes=result["timezoneOffset"]
+    )
     assert result["startup"] == {"cta": "打开剧情文件", "assetEmpty": True}
     assert result["entry"] == {
         "source": "第二章.txt", "project": "AA 工程：第二章工程",
-        "time": "最近打开：08/01 17:30", "resume": "继续",
+        "time": f"最近打开：{local_time:%m/%d %H:%M}", "resume": "继续",
     }
     assert result["story"]["story_token"] == "story-b"
     assert result["currentCalls"] == ["/api/story/current?story_token=story-b"]

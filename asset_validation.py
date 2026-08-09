@@ -4,11 +4,9 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
-import shutil
-import subprocess
 import unicodedata
+import wave
 from pathlib import Path
 from typing import Iterable
 
@@ -100,17 +98,6 @@ def validate_background(
     return ValidationResult(candidate, tuple(issues))
 
 
-def _find_ffprobe(explicit: str | Path | None) -> str | None:
-    if explicit:
-        p = Path(explicit)
-        return str(p) if p.is_file() else None
-    found = shutil.which("ffprobe")
-    if found:
-        return found
-    bundled = Path(r"E:\ffmpeg\bin\ffprobe.exe")
-    return str(bundled) if bundled.is_file() else None
-
-
 def validate_sound(
     source_path: str | Path,
     *,
@@ -126,48 +113,33 @@ def validate_sound(
         issues.append(ValidationIssue("file_missing", f"音效文件不存在：{path}"))
         return ValidationResult(None, tuple(issues))
 
-    probe = _find_ffprobe(ffprobe_path)
-    if not probe:
-        issues.append(ValidationIssue("probe_unavailable", "找不到 ffprobe，无法验证音频"))
-        return ValidationResult(None, tuple(issues))
-    command = [
-        probe,
-        "-v",
-        "error",
-        "-select_streams",
-        "a:0",
-        "-show_entries",
-        "stream=codec_name,sample_rate,channels,sample_fmt,bits_per_sample:format=duration",
-        "-of",
-        "json",
-        str(path),
-    ]
-    try:
-        proc = subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
+    # Kept for source compatibility with callers from development builds. WAV
+    # validation is deliberately self-contained and never executes this path.
+    _ = ffprobe_path
+    if path.suffix.casefold() != ".wav":
+        issues.append(
+            ValidationIssue(
+                "transcode_required",
+                "首版安装只接受 PCM signed 16-bit WAV；请先转码",
+            )
         )
-        payload = json.loads(proc.stdout)
-        stream = payload["streams"][0]
+        return ValidationResult(None, tuple(issues))
+    try:
+        with wave.open(str(path), "rb") as stream:
+            channels = stream.getnchannels()
+            sample_rate = stream.getframerate()
+            sample_width = stream.getsampwidth()
+            frame_count = stream.getnframes()
+            compression = stream.getcomptype()
     except Exception as exc:
-        issues.append(ValidationIssue("audio_unreadable", f"ffprobe 无法读取音频：{exc}"))
+        issues.append(ValidationIssue("audio_unreadable", f"无法读取 WAV 音频：{exc}"))
         return ValidationResult(None, tuple(issues))
 
-    codec = str(stream.get("codec_name") or "")
-    sample_rate = int(stream.get("sample_rate") or 0)
-    channels = int(stream.get("channels") or 0)
-    bits = int(stream.get("bits_per_sample") or 0)
-    sample_fmt = str(stream.get("sample_fmt") or "")
-    duration = float(payload.get("format", {}).get("duration") or 0)
-    if (
-        path.suffix.casefold() != ".wav"
-        or codec != "pcm_s16le"
-        or bits != 16
-        or sample_fmt != "s16"
-    ):
+    bits = sample_width * 8
+    codec = "pcm_s16le" if compression == "NONE" and bits == 16 else ""
+    sample_fmt = "s16" if codec == "pcm_s16le" else ""
+    duration = frame_count / sample_rate if sample_rate else 0.0
+    if codec != "pcm_s16le":
         issues.append(
             ValidationIssue(
                 "transcode_required",
