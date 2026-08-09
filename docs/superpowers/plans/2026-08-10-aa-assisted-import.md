@@ -98,27 +98,27 @@ Commit as `feat(android): track assisted AA imports`.
 - Produces: one `VivoImportAction`: `ClickText`, `LongClickText`, `Back`, `Wait`, `Complete`, or `Fail`.
 - The service executes only the action returned by the navigator and persists every state transition through `AaImportTaskStore`.
 
-- [ ] **Step 1: Write failing navigator tests**
+- [x] **Step 1: Write failing navigator tests**
 
 Cover these cases: wrong foreground package returns `Wait`; visible source filename returns `LongClickText`; a copy action returns `ClickText("复制")`; directory labels are visited in exact order `Android`, `data`, `com.foxxlight.AzureArchive`, `files`, `data`, `projects`; a same-name/replace dialog returns `Fail`; a visible copy-success state returns `Complete`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run the navigator unit test and confirm the missing navigator causes failure.
 
-- [ ] **Step 3: Implement the pure decision engine**
+- [x] **Step 3: Implement the pure decision engine**
 
 Use text/resource semantics only. Keep navigation phase in the persisted task, reject unexpected packages, cap each phase at 20 seconds, and never return an action which confirms replacement/overwrite.
 
-- [ ] **Step 4: Implement the thin accessibility adapter**
+- [x] **Step 4: Implement the thin accessibility adapter**
 
-Register a non-exported `AccessibilityService` limited to the verified OriginOS package `com.android.filemanager`, with window-content retrieval enabled. Convert the active window into `VivoUiSnapshot`, locate exact text nodes, execute click/long-click/back, and stop itself logically when there is no active `IMPORTING` task. On `Complete`, persist `IMPORTED` and launch the original AA; on timeout or incompatible UI, persist `FAILED` without deleting files.
+Register an `AccessibilityService` limited to the verified OriginOS package `com.android.filemanager`, with window-content retrieval enabled. Per the Android platform contract it is `exported=true` so Settings can discover it, while `android.permission.BIND_ACCESSIBILITY_SERVICE` ensures only the system can bind. Convert the active window into `VivoUiSnapshot`, locate exact text nodes, execute click/long-click/back, and stop itself logically when there is no active `IMPORTING` task. On `Complete`, persist `IMPORTED` and launch the original AA; on timeout or incompatible UI, persist `FAILED` without deleting files.
 
-- [ ] **Step 5: Verify automated tests**
+- [x] **Step 5: Verify automated tests**
 
 Run navigator tests and Android manifest/build validation. Confirm the service never treats `READY` or `NEEDS_ACCESSIBILITY` as permission to act.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Commit as `feat(android): add vivo assisted import service`.
 

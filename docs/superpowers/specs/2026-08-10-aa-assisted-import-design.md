@@ -43,6 +43,8 @@
 
 辅助功能只在用户点击“生成并导入原版 AA”后执行可见操作，不后台扫描，不读取其他应用内容。服务根据控件文字、可点击状态和当前包名操作 vivo 文件管理器，把公共暂存文件复制到：
 
+服务按 Android 无障碍服务规范声明为可由系统发现，并由 `android.permission.BIND_ACCESSIBILITY_SERVICE` 保护，只有系统能绑定。
+
 `Android/data/com.foxxlight.AzureArchive/files/data/projects/`
 
 每一步都设置超时并校验当前界面；不符合预期时停止，不盲点屏幕固定坐标。首版只支持已经真机验证的 vivo X100s Pro / Android 16 / OriginOS 16 文件管理器流程；该机当前文件管理器包名为 `com.android.filemanager`，启动页为 `.FileManagerActivity`。

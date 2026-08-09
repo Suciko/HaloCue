@@ -10,11 +10,29 @@ enum class AaImportState {
     FAILED,
 }
 
+enum class AaImportPhase {
+    OPEN_SOURCE_STORAGE,
+    OPEN_DOWNLOAD,
+    OPEN_HALOCUE,
+    SELECT_SOURCE,
+    CHOOSE_COPY,
+    OPEN_DESTINATION_STORAGE,
+    OPEN_ANDROID,
+    OPEN_ANDROID_DATA,
+    OPEN_AA_PACKAGE,
+    OPEN_AA_FILES,
+    OPEN_AA_DATA,
+    OPEN_PROJECTS,
+    PASTE,
+    VERIFY_COPY,
+}
+
 data class AaImportTask(
     val project: String,
     val displayName: String,
     val sourceUri: String,
     val state: AaImportState,
+    val phase: AaImportPhase,
     val message: String,
     val updatedAt: Long,
 )
@@ -31,6 +49,7 @@ class AaImportTaskStore(context: Context) {
             .putString(KEY_DISPLAY_NAME, task.displayName)
             .putString(KEY_SOURCE_URI, task.sourceUri)
             .putString(KEY_STATE, task.state.name)
+            .putString(KEY_PHASE, task.phase.name)
             .putString(KEY_MESSAGE, task.message)
             .putLong(KEY_UPDATED_AT, task.updatedAt)
             .apply()
@@ -42,11 +61,14 @@ class AaImportTaskStore(context: Context) {
         val sourceUri = preferences.getString(KEY_SOURCE_URI, null) ?: return null
         val stateName = preferences.getString(KEY_STATE, null) ?: return null
         val state = runCatching { AaImportState.valueOf(stateName) }.getOrNull() ?: return null
+        val phaseName = preferences.getString(KEY_PHASE, null) ?: return null
+        val phase = runCatching { AaImportPhase.valueOf(phaseName) }.getOrNull() ?: return null
         return AaImportTask(
             project = project,
             displayName = displayName,
             sourceUri = sourceUri,
             state = state,
+            phase = phase,
             message = preferences.getString(KEY_MESSAGE, "").orEmpty(),
             updatedAt = preferences.getLong(KEY_UPDATED_AT, 0L),
         )
@@ -62,6 +84,7 @@ class AaImportTaskStore(context: Context) {
         private const val KEY_DISPLAY_NAME = "display_name"
         private const val KEY_SOURCE_URI = "source_uri"
         private const val KEY_STATE = "state"
+        private const val KEY_PHASE = "phase"
         private const val KEY_MESSAGE = "message"
         private const val KEY_UPDATED_AT = "updated_at"
     }

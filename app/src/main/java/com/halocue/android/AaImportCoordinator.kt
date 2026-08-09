@@ -32,6 +32,7 @@ class AaImportCoordinator(
             displayName = exported.displayName,
             sourceUri = exported.uri.toString(),
             state = AaImportState.READY,
+            phase = AaImportPhase.OPEN_SOURCE_STORAGE,
             message = "已准备导入",
             updatedAt = System.currentTimeMillis(),
         )

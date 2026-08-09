@@ -17,6 +17,7 @@ class AaImportTaskStoreTest {
             displayName = "PersistenceProbe.aap",
             sourceUri = "content://media/external/downloads/4321",
             state = AaImportState.READY,
+            phase = AaImportPhase.OPEN_SOURCE_STORAGE,
             message = "已准备导入",
             updatedAt = 123456789L,
         )
