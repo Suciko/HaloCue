@@ -465,6 +465,10 @@ def verify(
             shutil.rmtree(scenario, ignore_errors=True)
 
 
+def _print_result(payload: dict) -> None:
+    print(json.dumps(payload, ensure_ascii=True, indent=2))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("archive", type=Path)
@@ -480,9 +484,9 @@ def main(argv: list[str] | None = None) -> int:
             browser_check=not args.skip_browser,
         )
     except (OSError, ValueError, VerificationError, zipfile.BadZipFile) as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
+        _print_result({"ok": False, "error": str(exc)})
         return 1
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _print_result(result)
     return 0
 
 

@@ -962,8 +962,8 @@
     },
     {
       "path": "tests/test_release_smoke_driver.py",
-      "sha256": "5165c9dc4599d559ee8a2028c83b174b3ebcba4c6ea060c4feada08cc48b3504",
-      "size": 6204
+      "sha256": "22329f653feb5d13956536b0953aef3a107385cbc3d83b86453d391a232b0f0b",
+      "size": 6785
     },
     {
       "path": "tests/test_release_workflows.py",
@@ -1217,8 +1217,8 @@
     },
     {
       "path": "tools/verify_release.py",
-      "sha256": "e8823463160b089bf86d2652f7b0fab0fcb16c6b98db39d8dd95a4b61806eede",
-      "size": 20062
+      "sha256": "c454ea67fb0485bc3b091a77c19f817ab949d5e726c4bba953cafb66fae792f8",
+      "size": 20098
     },
     {
       "path": "ui.html",

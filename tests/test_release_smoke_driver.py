@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import signal
 import threading
@@ -8,6 +9,7 @@ from pathlib import Path
 import launcher
 import webui
 from release_smoke import create_synthetic_aa_workspace, tree_digests
+from tools import verify_release
 from tools.verify_release import _content_type_matches, _narrator_binding_payload
 
 
@@ -62,6 +64,18 @@ def test_release_smoke_binds_synthetic_speaker_as_narrator_before_review():
         "mapping": {"narrator": True},
         "expected_draft_version": 3,
     }
+
+
+def test_verify_release_cli_prints_unicode_result_on_cp1252_console(monkeypatch):
+    result = {"ok": True, "workspace": "另一个中文目录"}
+    output = io.BytesIO()
+    console = io.TextIOWrapper(output, encoding="cp1252", errors="strict")
+    monkeypatch.setattr(verify_release, "verify", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(verify_release.sys, "stdout", console)
+
+    assert verify_release.main(["release.zip"]) == 0
+    console.flush()
+    assert json.loads(output.getvalue().decode("cp1252")) == result
 
 
 def test_launcher_forwards_ready_file_to_application(tmp_path, monkeypatch):
