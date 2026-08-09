@@ -1,0 +1,53 @@
+name: Public prerelease
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Install Playwright Chromium
+        run: python -m playwright install chromium
+      - name: Validate exact tag and public seed
+        run: python tools/check_release_version.py --tag "$env:GITHUB_REF_NAME"
+      - name: Run full test suite
+        run: python -m pytest -q
+      - name: Rebuild public database twice
+        shell: pwsh
+        run: |
+          python -m release_tools.public_db --source data/halocue_labels.db --output build/db-first.db
+          python -m release_tools.public_db --source data/halocue_labels.db --output build/db-second.db
+          $difference = Compare-Object (Get-FileHash build/db-first.db).Hash (Get-FileHash build/db-second.db).Hash
+          if ($difference) { throw 'Public database rebuild is not deterministic.' }
+      - name: Export, scan, build, and verify public release
+        shell: pwsh
+        run: |
+          python tools/export_public_source.py --source . --output build/public-source/HaloCue
+          python tools/scan_release.py build/public-source/HaloCue --mode source
+          python tools/verify_clean_source.py --source build/public-source/HaloCue
+          python tools/build_public_release.py --source build/public-source/HaloCue --output build/releases
+          python tools/scan_release.py build/releases/HaloCue --mode public
+          python tools/verify_release.py build/releases/HaloCue-0.9.0-beta.1-windows.zip
+      - name: Create draft public prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" --verify-tag --draft --prerelease --title "HaloCue 0.9 Beta" --notes-file CHANGELOG.md
+          gh release upload "$env:GITHUB_REF_NAME" "build/releases/HaloCue-0.9.0-beta.1-windows.zip" "build/releases/HaloCue-0.9.0-beta.1-windows.zip.sha256"

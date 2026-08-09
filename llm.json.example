@@ -1,0 +1,37 @@
+{
+  "_说明": "演出标注用的 LLM 配置。provider 选 anthropic 或 openai；openai 那套改 base_url 就能打 DeepSeek / GLM / Kimi / Qwen。",
+
+  "provider": "anthropic",
+
+  "anthropic": {
+    "model": "claude-opus-4-6",
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "effort": "medium",
+    "thinking": true,
+    "max_tokens": 16000
+  },
+
+  "openai": {
+    "model": "gpt-5",
+    "base_url": null,
+    "api_key_env": "OPENAI_API_KEY",
+    "max_tokens": 16000
+  },
+
+  "_其它服务商示例": {
+    "deepseek": { "model": "deepseek-chat", "base_url": "https://api.deepseek.com/v1", "api_key_env": "DEEPSEEK_API_KEY" },
+    "glm":      { "model": "glm-4.6",       "base_url": "https://open.bigmodel.cn/api/paas/v4", "api_key_env": "ZHIPU_API_KEY" },
+    "kimi":     { "model": "kimi-k2-0905-preview", "base_url": "https://api.moonshot.cn/v1", "api_key_env": "MOONSHOT_API_KEY" },
+    "qwen":     { "model": "qwen-max",      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "api_key_env": "DASHSCOPE_API_KEY" }
+  },
+
+  "chunk_lines": 40,
+  "context_lines": 10,
+  "agent_enabled": true,
+  "agent_target_lines": 50,
+  "agent_soft_limit": 50,
+  "agent_hard_limit": 60,
+  "agent_context_before": 15,
+  "agent_context_after": 10,
+  "agent_output_note": "max_tokens 是单次模型输出上限；遇到 finish_reason=length 时优先缩小 Agent 分块"
+}

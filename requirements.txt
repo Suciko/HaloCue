@@ -1,0 +1,4 @@
+anthropic>=0.40,<1
+Pillow>=10,<13
+pywin32>=306; sys_platform == "win32"
+UnityPy>=1.25.2,<2

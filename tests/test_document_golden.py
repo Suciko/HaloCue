@@ -1,0 +1,121 @@
+# -*- coding: utf-8 -*-
+import os
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent.parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+import pytest
+from document import (
+    parse_document_lossless,
+    normalize_draft_nodes,
+    serialize_document,
+    compile_document,
+    DocNode,
+)
+from script2aap import parse_script, load_cast
+
+
+def test_background_request_parsing():
+    sample = (
+        "# 待生成自定义背景：雨夜车站\n"
+        "# 待生成自定义背景 : 阳光海滩\n"
+        " # 待生成自定义背景: 商店街  \n"
+        "# 普通标题\n"
+    )
+    nodes = parse_document_lossless(sample)
+    assert len(nodes) == 4
+    assert nodes[0].kind == "background_request"
+    assert nodes[0].fields["description"] == "雨夜车站"
+    assert nodes[1].kind == "background_request"
+    assert nodes[1].fields["description"] == "阳光海滩"
+    assert nodes[2].kind == "background_request"
+    assert nodes[2].fields["description"] == "商店街"
+    assert nodes[3].kind == "title"
+    assert nodes[3].fields["title"] == "普通标题"
+
+
+def test_golden_roundtrip_bytes(annotated_script_path):
+    original_text = annotated_script_path.read_text(encoding="utf-8")
+    nodes = parse_document_lossless(original_text)
+    serialized = serialize_document(nodes)
+
+    assert serialized == original_text
+
+
+def test_raw_directive_is_dir_node():
+    sample = "@raw #任意指令 参数"
+    nodes = parse_document_lossless(sample)
+    assert len(nodes) == 1
+    assert nodes[0].kind == "dir"
+    assert nodes[0].fields["cmd"] == "raw"
+    assert nodes[0].fields["arg"] == "#任意指令 参数"
+
+
+def test_normalize_draft_nodes_drops_blank_lines_and_classifies_thematic_breaks():
+    nodes = parse_document_lossless("旁白: 第一幕。\n\n---\n\n旁白: 第二幕。\n")
+    normalized = normalize_draft_nodes(nodes)
+
+    assert [node.kind for node in normalized] == ["line", "separator", "line"]
+    assert normalized[1].fields["marker"] == "---"
+    assert [node.line_no for node in normalized] == [1, 3, 5]
+
+
+def test_normalize_draft_nodes_drops_first_scene_transition_and_redundant_transition():
+    nodes = parse_document_lossless(
+        "@bg BG_ShoppingDistrict\n"
+        "@trans 淡入淡出\n"
+        "@place 商店街\n"
+        "旁白: 第一幕。\n"
+        "---\n"
+        "@bg BG_ShoppingDistrict\n"
+        "@trans 淡入淡出\n"
+        "@place 可丽饼摊前\n"
+        "旁白: 第二幕。\n"
+        "@bg BG_GameCenter\n"
+        "@trans 淡入淡出\n"
+        "旁白: 第三幕。\n"
+    )
+
+    normalized = normalize_draft_nodes(nodes)
+    directives = [
+        (node.fields["cmd"], node.fields["arg"])
+        for node in normalized
+        if node.kind == "dir"
+    ]
+
+    assert directives == [
+        ("bg", "BG_ShoppingDistrict"),
+        ("place", "商店街"),
+        ("place", "可丽饼摊前"),
+        ("bg", "BG_GameCenter"),
+        ("trans", "淡入淡出"),
+    ]
+
+
+def test_unbound_actor_line_preserved_with_error_diagnostic():
+    sample = (
+        "## 场景1\n"
+        "未注册演员: 你好世界\n"
+    )
+    cast = {"凯伊": {"id": "kei"}}
+    nodes = parse_document_lossless(sample)
+    assert len(nodes) == 2
+    assert nodes[1].kind == "line"
+    assert nodes[1].fields["who"] == "未注册演员"
+
+    events, diagnostics = compile_document(nodes, cast, {})
+    assert any(d["code"] == "actor.unbound" and d["severity"] == "error" for d in diagnostics)
+    # 未绑定演员的台词在 compile_document 中不产生 line 事件
+    line_events = [e for e in events if e.get("k") == "line"]
+    assert len(line_events) == 0
+
+
+def test_parse_script_equivalence(annotated_script_path, synthetic_cast_path):
+    _, cast, _ = load_cast(str(synthetic_cast_path))
+    events = parse_script(str(annotated_script_path), cast)
+
+    assert isinstance(events, list)
+    assert len(events) > 0

@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest>=8,<10
+playwright>=1.49,<2
+PyInstaller>=6,<7

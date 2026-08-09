@@ -1,0 +1,44 @@
+{
+  "_说明": "剧本里的角色名 -> AA 内部标识。portrait=false 的角色只出声不出立绘（占 slot 0）。custom 表示自定义骨骼，转换时会自动拷贝并注册到工程 manifest。",
+
+  "default_bg": "BG_GameDevRoom",
+  "default_bgm": 999,
+
+  "_场景背景": "剧本里的 ## 场景标题 -> 背景名。没列到的沿用上一个背景。也可在剧本里用 @bg 直接指定。",
+  "scene_bg": {
+    "千年科技学园·游戏开发部活动室": "BG_GameDevRoom",
+    "当晚": "BG_MainOffice_Night"
+  },
+
+  "cast": {
+    "旁白": { "narrator": true },
+
+    "老师":     { "id": "45145456", "name": "老师",     "club": "夏莱",       "portrait": false },
+    "系统凯伊": { "id": "47165156", "name": "系统凯伊", "club": "",           "portrait": false },
+    "系统提示": { "id": "45145",    "name": "系统提示", "club": "",           "portrait": false },
+
+    "凯伊": {
+      "id": "1516544", "name": "凯伊", "club": "特殊现象调查部", "portrait": true,
+      "custom": {
+        "src": "凯伊骨骼/key -无武器",
+        "asset": "CH0335_noweapon_spr"
+      }
+    },
+
+    "桃井":   { "id": "모모이",  "portrait": true },
+    "绿":     { "id": "미도리",  "portrait": true },
+    "柚子":   { "id": "유즈",    "portrait": true },
+    "爱丽丝": { "id": "아리스N", "portrait": true }
+  },
+
+  "_别名": "剧本里可能出现的其它写法 / 角色变体（如短信桥段），一律映射回本体",
+  "alias": {
+    "Kei": "凯伊",
+    "sensei": "老师",
+    "system": "系统提示",
+    "凯伊（消息）": "凯伊",
+    "凯伊(消息)": "凯伊",
+    "老师（消息）": "老师",
+    "老师(消息)": "老师"
+  }
+}

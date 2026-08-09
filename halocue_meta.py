@@ -1,0 +1,9 @@
+PRODUCT_NAME = "HaloCue"
+CHINESE_SUBTITLE = "AzureArchive 剧情演出工具"
+ENGLISH_SUBTITLE = "Narrative Staging for AzureArchive"
+VERSION = "0.9.0-beta.1"
+DISPLAY_NAME = "HaloCue 0.9 Beta"
+APP_ID = "halocue-local-server-v1"
+MIN_PYTHON = (3, 10)
+PUBLIC_ARCHIVE_NAME = f"{PRODUCT_NAME}-{VERSION}-windows.zip"
+PRIVATE_ARCHIVE_NAME = f"{PRODUCT_NAME}-{VERSION}-private-windows.zip"

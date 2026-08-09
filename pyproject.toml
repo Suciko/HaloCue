@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "halocue"
+version = "0.9.0b1"
+description = "Narrative staging for AzureArchive"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "anthropic>=0.40,<1",
+    "Pillow>=10,<13",
+    "pywin32>=306; sys_platform == 'win32'",
+    "UnityPy>=1.25.2,<2",
+]
+
+[tool.pytest.ini_options]
+norecursedirs = ["backup-*", ".worktrees"]
+markers = [
+    "browser: requires Playwright and a locally installed Chromium browser",
+]

@@ -1,0 +1,312 @@
+# -*- coding: utf-8 -*-
+"""Background-safe orchestration for rendering and labeling custom Spine faces."""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Callable, Sequence
+
+from runtime_paths import resolve_runtime_layout
+
+from spine_face_labeler import (
+    label_face_images,
+    persist_visual_face_labels,
+    refresh_visual_face_preview_paths,
+)
+from spine_face_renderer import render_face_variations
+from spine_semantic_faces import extract_semantic_face_combinations
+
+
+ProgressCallback = Callable[[str, str, int | None, int | None], None]
+RUNTIME_LAYOUT = resolve_runtime_layout(module_file=__file__)
+
+
+def make_variant_key(ident: str, spine_signature: str, outfit_key: str, face_id: str) -> str:
+    """生成结合 ident + spine_signature + outfit_key + face_id 的变体隔离键。"""
+    return f"{ident}:{spine_signature[:16]}:{outfit_key}:{face_id}"
+
+
+def resolve_spine_cli(
+    explicit: str | Path | None = None,
+    *,
+    config_path: str | Path | None = None,
+    fallback_config_paths: Sequence[str | Path] = (),
+) -> Path | None:
+    """Find Spine CLI without baking one user's installation into the program."""
+    candidates: list[Path] = []
+    if explicit and str(explicit).strip():
+        candidates.append(Path(explicit).expanduser())
+    environment = os.environ.get("SPINE_CLI", "").strip()
+    if environment:
+        candidates.append(Path(environment).expanduser())
+
+    config = (
+        Path(config_path)
+        if config_path is not None
+        else RUNTIME_LAYOUT.config_path
+    )
+    configurations: dict = {}
+    for candidate_config in (config, *map(Path, fallback_config_paths)):
+        if not candidate_config.is_file():
+            continue
+        try:
+            loaded = json.loads(candidate_config.read_text(encoding="utf-8-sig"))
+            if isinstance(loaded, dict):
+                for key, value in loaded.items():
+                    if key not in configurations:
+                        configurations[key] = value
+        except (OSError, ValueError, TypeError):
+            pass
+    configured = str(configurations.get("spine_cli") or "").strip()
+    if configured:
+        candidates.append(Path(configured).expanduser())
+
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved.is_file():
+            return resolved
+    return None
+
+
+def _notify(
+    callback: ProgressCallback | None,
+    phase: str,
+    message: str,
+    current: int | None = None,
+    total: int | None = None,
+) -> None:
+    if callback:
+        callback(phase, message, current, total)
+
+
+def _semantic_hints(source_dir: Path) -> dict[str, dict]:
+    skeletons = sorted(source_dir.glob("*.skel"))
+    if len(skeletons) != 1:
+        return {}
+    try:
+        return extract_semantic_face_combinations(skeletons[0])
+    except (OSError, ValueError):
+        return {}
+
+
+def _existing_visual_ids(
+    con,
+    *,
+    ident: str,
+    spine_signature: str,
+    outfit_key: str,
+    model: str,
+) -> set[str]:
+    rows = con.execute(
+        """
+        SELECT face_id FROM face_visual_label
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND model=?
+        """,
+        (ident, spine_signature, outfit_key, model),
+    ).fetchall()
+    return {str(row["face_id"]) for row in rows}
+
+
+def analyze_character_faces(
+    con,
+    *,
+    source_dir: str | Path,
+    ident: str,
+    spine_signature: str,
+    outfit_key: str,
+    spine_cli: str | Path,
+    cache_root: str | Path,
+    provider=None,
+    force_vision: bool = False,
+    progress: ProgressCallback | None = None,
+    workers: int = 4,
+) -> dict:
+    """Render all real numbered faces and optionally add visual semantic labels."""
+    source = Path(source_dir).resolve()
+    _notify(progress, "rendering", "正在渲染人物表情差分")
+
+    def report_render_progress(face_id: str, current: int, total: int) -> None:
+        _notify(
+            progress,
+            "rendering",
+            f"正在渲染表情 {face_id}（{current} / {total}）",
+            current,
+            total,
+        )
+
+    report = render_face_variations(
+        source,
+        spine_cli=spine_cli,
+        cache_root=cache_root,
+        workers=workers,
+        progress=report_render_progress,
+    )
+    refreshed_preview_count = refresh_visual_face_preview_paths(
+        con,
+        ident=str(ident),
+        spine_signature=str(spine_signature or ""),
+        outfit_key=str(outfit_key or ""),
+        faces=report.faces,
+    )
+    face_ids = {face.face_id for face in report.faces}
+    semantic_hints = _semantic_hints(source)
+    semantic_faces = []
+    for face_id in sorted(face_ids):
+        hint = semantic_hints.get(face_id) or {}
+        primary = str(hint.get("primary_emotion") or "").strip()
+        labels = [
+            str(label).strip()
+            for label in hint.get("semantic_labels") or []
+            if str(label).strip()
+        ]
+        if primary or labels:
+            semantic_faces.append(
+                {
+                    "face_id": face_id,
+                    "primary_emotion": primary or labels[0],
+                    "semantic_labels": labels or [primary],
+                }
+            )
+    _notify(
+        progress,
+        "rendered",
+        f"已渲染 {len(report.faces)} 个表情差分",
+        len(report.faces),
+        len(report.faces),
+    )
+
+    result = {
+        "ok": True,
+        "status": (
+            "partial"
+            if any(
+                isinstance(item, dict)
+                and item.get("status") == "needs_manual_calibration"
+                for item in report.calibration
+            )
+            else "complete"
+        ),
+        "rendered_count": len(report.faces),
+        "refreshed_preview_count": refreshed_preview_count,
+        "render_cache": str(report.cache_dir),
+        "render_cached": bool(report.cached),
+        "actual_workers": report.actual_workers,
+        "retried_faces": list(report.retried_faces),
+        "fallback_workers": report.fallback_workers,
+        "calibration": list(report.calibration),
+        "vision_status": "skipped_missing_key",
+        "labeled_count": 0,
+        "semantic_faces": semantic_faces,
+    }
+    if provider is None:
+        _notify(
+            progress,
+            result["status"],
+            "渲染完成；未配置模型密钥，已保留语义命名解析结果",
+            len(report.faces),
+            len(report.faces),
+        )
+        return result
+
+    model = str(getattr(provider, "model", "") or "unknown")
+    existing = _existing_visual_ids(
+        con,
+        ident=str(ident),
+        spine_signature=str(spine_signature or ""),
+        outfit_key=str(outfit_key or ""),
+        model=model,
+    )
+    if not force_vision and face_ids and face_ids.issubset(existing):
+        saved = con.execute(
+            """
+            SELECT COUNT(DISTINCT face_id), MAX(updated_at)
+            FROM face_visual_label
+            WHERE ident=? AND spine_signature=? AND outfit_key=? AND model=?
+            """,
+            (str(ident), str(spine_signature or ""), str(outfit_key or ""), model),
+        ).fetchone()
+        result.update(
+            vision_status="cached",
+            labeled_count=len(face_ids),
+            saved_count=int(saved[0] or 0),
+            failed_count=0,
+            completed_at=str(saved[1] or ""),
+            model=model,
+        )
+        _notify(
+            progress,
+            result["status"],
+            f"已复用 {len(face_ids)} 个视觉表情标注",
+            len(face_ids),
+            len(face_ids),
+        )
+        return result
+
+    _notify(
+        progress,
+        "labeling",
+        f"正在使用 {model} 按九宫格批次识别表情",
+        0,
+        len(report.faces),
+    )
+
+    def report_label_progress(
+        completed: int,
+        total: int,
+        completed_batches: int,
+        reviewed: int,
+    ) -> None:
+        detail = f"完成 {completed_batches} 个九宫格批次"
+        if reviewed:
+            detail += f"，单项复核 {reviewed} 个"
+        _notify(
+            progress,
+            "labeling",
+            f"AI 已识别 {completed} / {total} 个表情（{detail}）",
+            completed,
+            total,
+        )
+
+    labels = label_face_images(
+        provider,
+        report.faces,
+        semantic_hints=semantic_hints,
+        progress=report_label_progress,
+    )
+    _notify(
+        progress,
+        "persisting",
+        f"正在保存 {len(labels)} 个表情标注到数据库",
+        0,
+        len(labels),
+    )
+    saved = persist_visual_face_labels(
+        con,
+        ident=str(ident),
+        spine_signature=str(spine_signature or ""),
+        outfit_key=str(outfit_key or ""),
+        model=model,
+        labels=labels,
+    )
+    if int(saved.get("failed_count") or 0) > 0:
+        result["status"] = "partial"
+    result.update(
+        vision_status="labeled",
+        labeled_count=int(saved.get("saved_count") or 0),
+        model=model,
+        **saved,
+    )
+    _notify(
+        progress,
+        result["status"],
+        f"已写入 {saved['saved_count']} 个视觉表情标注"
+        f"，{saved['failed_count']} 个失败",
+        int(saved["saved_count"]),
+        len(report.faces),
+    )
+    return result
