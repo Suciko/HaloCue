@@ -2,8 +2,8 @@
   "files": [
     {
       "path": ".github/workflows/ci.yml",
-      "sha256": "9c35b780cfc4f312704448ca01f6270e68a3a7aa79f95dc07cbe3e5c7a8a3f95",
-      "size": 2650
+      "sha256": "e6b6d76e5bcce3d562b69dce9056e8c4d5689221677d5bcb0640e7e25d2cd2bc",
+      "size": 2743
     },
     {
       "path": ".github/workflows/release.yml",
@@ -967,8 +967,8 @@
     },
     {
       "path": "tests/test_release_workflows.py",
-      "sha256": "8a943edc705bd5abc5c647bedf32625d23a63ca11f1dd112684e804861d9a879",
-      "size": 3760
+      "sha256": "fe963c3b1add826e51d951f291390b51934ca5bbab2f40976f211956364472cd",
+      "size": 4593
     },
     {
       "path": "tests/test_retry_conditions.py",

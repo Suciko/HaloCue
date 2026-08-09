@@ -16,6 +16,22 @@ def _workflow(name: str) -> str:
     return (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
 
 
+def _job_block(workflow: str, job_name: str) -> str:
+    lines = workflow.splitlines()
+    start = lines.index(f"  {job_name}:")
+    end = next(
+        (
+            index
+            for index in range(start + 1, len(lines))
+            if lines[index].startswith("  ")
+            and not lines[index].startswith("    ")
+            and lines[index].endswith(":")
+        ),
+        len(lines),
+    )
+    return "\n".join(lines[start:end])
+
+
 def test_ci_workflow_has_windows_matrix_and_complete_public_gates():
     workflow = _workflow("ci.yml")
 
@@ -36,6 +52,15 @@ def test_ci_workflow_has_windows_matrix_and_complete_public_gates():
     assert "tools/verify_release.py" in workflow
     assert "needs: test" in workflow
     assert PUBLIC_ARCHIVE_NAME in workflow
+
+
+def test_ci_package_job_installs_browser_before_release_verification():
+    package_job = _job_block(_workflow("ci.yml"), "package")
+
+    browser_install = "python -m playwright install chromium"
+    release_verification = "python tools/verify_release.py"
+    assert browser_install in package_job
+    assert package_job.index(browser_install) < package_job.index(release_verification)
 
 
 def test_release_workflow_is_exact_tag_gated_and_public_only():

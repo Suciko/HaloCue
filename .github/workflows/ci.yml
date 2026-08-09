@@ -42,6 +42,8 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - name: Install dependencies
         run: python -m pip install -r requirements-dev.txt
+      - name: Install Playwright Chromium
+        run: python -m playwright install chromium
       - name: Validate release identity and public database
         shell: pwsh
         run: |
