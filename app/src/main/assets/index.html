@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>HaloCue Android</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div class="mark" aria-hidden="true">H</div>
+      <div>
+        <p class="eyebrow">HALOCUE FOR ANDROID</p>
+        <h1>手机端运行探针</h1>
+        <p class="intro">这是 APK 内部页面，不会跳转到浏览器。</p>
+      </div>
+    </header>
+
+    <section class="status-grid" aria-label="运行状态">
+      <article class="status-card">
+        <span class="status-icon" id="python-dot" aria-hidden="true"></span>
+        <div>
+          <p class="status-label">本地编译后端</p>
+          <p class="status-value" id="python-status">正在启动本地 Python…</p>
+        </div>
+      </article>
+
+      <article class="status-card">
+        <span class="status-icon" id="aa-dot" aria-hidden="true"></span>
+        <div>
+          <p class="status-label">原版 AzureArchive</p>
+          <p class="status-value" id="aa-status">正在检查安装状态…</p>
+        </div>
+      </article>
+    </section>
+
+    <section class="compiler-card" aria-labelledby="compiler-title">
+      <p class="step-kicker">本地生成</p>
+      <h2 id="compiler-title">把剧本文本编译成 .aap</h2>
+      <label for="project-name">工程名</label>
+      <input id="project-name" type="text" value="AndroidDemo" autocomplete="off">
+      <label for="script-input">剧本文本</label>
+      <textarea id="script-input" rows="7" spellcheck="false">桃井: 安卓端你好</textarea>
+      <button type="button" id="compile-aap">生成 .aap</button>
+      <p class="compile-status" id="compile-status" aria-live="polite">尚未生成</p>
+      <code class="compile-path" id="compile-path" hidden></code>
+    </section>
+
+    <section class="next-step">
+      <p class="step-kicker">第一阶段</p>
+      <h2>原生外壳已经接管页面</h2>
+      <p>生成结果暂存在 HaloCue 自身目录；下一步接入导出到公共目录和完整剧本工作台。</p>
+      <button type="button" id="open-aa" disabled>打开原版 AA</button>
+    </section>
+
+    <footer>开发构建 <span id="app-version">—</span></footer>
+  </main>
+
+  <script>
+    window.HaloCueApp = {
+      bootstrap(payload) {
+        const python = payload.python || {};
+        const aa = payload.aa || {};
+
+        document.getElementById('python-status').textContent = python.message || '本地 Python 状态未知';
+        document.getElementById('python-dot').classList.toggle('ready', python.ready === true);
+        document.getElementById('aa-status').textContent = aa.message || '原版 AA 状态未知';
+        document.getElementById('aa-dot').classList.toggle('ready', aa.installed === true);
+        document.getElementById('app-version').textContent = payload.appVersion || '开发版';
+        document.getElementById('open-aa').disabled = aa.installed !== true;
+        document.body.dataset.ready = 'true';
+      },
+      compileFinished(payload) {
+        const button = document.getElementById('compile-aap');
+        const status = document.getElementById('compile-status');
+        const path = document.getElementById('compile-path');
+        button.disabled = false;
+        if (payload.ok === true) {
+          status.textContent = `已生成，尚未导入 AA（${payload.dialogueCount} 条台词）`;
+          status.className = 'compile-status success';
+          path.textContent = payload.aapFile || '';
+          path.hidden = !payload.aapFile;
+        } else {
+          status.textContent = payload.message || '生成失败';
+          status.className = 'compile-status error';
+          path.hidden = true;
+        }
+      }
+    };
+
+    document.getElementById('compile-aap').addEventListener('click', () => {
+      const button = document.getElementById('compile-aap');
+      const status = document.getElementById('compile-status');
+      const project = document.getElementById('project-name').value.trim();
+      const script = document.getElementById('script-input').value;
+      if (!window.HaloCueNative || typeof window.HaloCueNative.compileAap !== 'function') {
+        status.textContent = '本地编译桥尚未就绪';
+        return;
+      }
+      button.disabled = true;
+      status.className = 'compile-status';
+      status.textContent = '正在本机编译…';
+      document.getElementById('compile-path').hidden = true;
+      window.HaloCueNative.compileAap(project, script);
+    });
+
+    document.getElementById('open-aa').addEventListener('click', () => {
+      if (window.HaloCueNative && typeof window.HaloCueNative.openAzureArchive === 'function') {
+        window.HaloCueNative.openAzureArchive();
+      }
+    });
+  </script>
+</body>
+</html>

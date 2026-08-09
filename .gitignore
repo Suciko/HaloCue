@@ -1,0 +1,12 @@
+.gradle/
+.kotlin/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.idea/
+local.properties
+**/build/
+*.iml
+captures/
+evidence/*.xml
+tmp/
