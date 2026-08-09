@@ -5,6 +5,7 @@
 
     <queries>
         <package android:name="com.foxxlight.AzureArchive" />
+        <package android:name="com.android.filemanager" />
     </queries>
 
     <application

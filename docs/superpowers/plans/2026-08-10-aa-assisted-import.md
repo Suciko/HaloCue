@@ -56,7 +56,7 @@ Commit the exporter and its passing test as `feat(android): stage generated aap 
 **Files:**
 - Create: `app/src/main/java/com/halocue/android/AaImportTaskStore.kt`
 - Create: `app/src/main/java/com/halocue/android/AaImportCoordinator.kt`
-- Create: `app/src/test/java/com/halocue/android/AaImportTaskStoreTest.kt`
+- Create: `app/src/androidTest/java/com/halocue/android/AaImportTaskStoreTest.kt`
 - Create: `app/src/androidTest/java/com/halocue/android/AaImportCoordinatorTest.kt`
 
 **Interfaces:**
@@ -64,23 +64,23 @@ Commit the exporter and its passing test as `feat(android): stage generated aap 
 - Produces: `AaImportTask(project, displayName, sourceUri, state, message, updatedAt)` and `AaImportCoordinator.prepare(result): AaImportOutcome`.
 - States: `READY`, `NEEDS_ACCESSIBILITY`, `IMPORTING`, `IMPORTED`, `FAILED`.
 
-- [ ] **Step 1: Write failing persistence and capability tests**
+- [x] **Step 1: Write failing persistence and capability tests**
 
 Assert a task round-trips through `SharedPreferences`; assert `prepare` returns `NEEDS_ACCESSIBILITY` when the HaloCue service is absent from `AccessibilityManager.getEnabledAccessibilityServiceList`, while preserving the staged URI and project.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
-Run the focused unit and device tests and confirm they fail because the task store/coordinator are absent.
+Run the focused device tests and confirm they fail because the task store/coordinator are absent. `SharedPreferences` is verified on Android directly rather than through a simulated JVM environment.
 
-- [ ] **Step 3: Implement the task store and coordinator**
+- [x] **Step 3: Implement the task store and coordinator**
 
 Serialize only scalar fields into a private named preference file. Determine service availability using its exact component name. Expose intents for `Settings.ACTION_ACCESSIBILITY_SETTINGS` and the vivo file manager launcher. Do not launch either from `prepare`; return the required next action.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run focused tests, then the existing compiler bridge test to ensure the compiler remains independent of import state.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit as `feat(android): track assisted AA imports`.
 
@@ -112,7 +112,7 @@ Use text/resource semantics only. Keep navigation phase in the persisted task, r
 
 - [ ] **Step 4: Implement the thin accessibility adapter**
 
-Register a non-exported `AccessibilityService` limited to `com.vivo.filemanager`, with window-content retrieval enabled. Convert the active window into `VivoUiSnapshot`, locate exact text nodes, execute click/long-click/back, and stop itself logically when there is no active `IMPORTING` task. On `Complete`, persist `IMPORTED` and launch the original AA; on timeout or incompatible UI, persist `FAILED` without deleting files.
+Register a non-exported `AccessibilityService` limited to the verified OriginOS package `com.android.filemanager`, with window-content retrieval enabled. Convert the active window into `VivoUiSnapshot`, locate exact text nodes, execute click/long-click/back, and stop itself logically when there is no active `IMPORTING` task. On `Complete`, persist `IMPORTED` and launch the original AA; on timeout or incompatible UI, persist `FAILED` without deleting files.
 
 - [ ] **Step 5: Verify automated tests**
 

@@ -45,7 +45,7 @@
 
 `Android/data/com.foxxlight.AzureArchive/files/data/projects/`
 
-每一步都设置超时并校验当前界面；不符合预期时停止，不盲点屏幕固定坐标。首版只支持已经真机验证的 vivo X100s Pro / Android 16 / OriginOS 16 文件管理器流程。
+每一步都设置超时并校验当前界面；不符合预期时停止，不盲点屏幕固定坐标。首版只支持已经真机验证的 vivo X100s Pro / Android 16 / OriginOS 16 文件管理器流程；该机当前文件管理器包名为 `com.android.filemanager`，启动页为 `.FileManagerActivity`。
 
 ## 状态与文案
 
