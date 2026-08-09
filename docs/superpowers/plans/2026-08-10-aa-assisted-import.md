@@ -31,23 +31,23 @@
 - Consumes: `File` returned by `AndroidCompilerBridge.compileText`.
 - Produces: `AapPublicExporter.export(source: File, project: String): PublicAapExportResult`; result fields are `uri: Uri`, `displayName: String`, `relativePath: String`, and `size: Long`.
 
-- [ ] **Step 1: Write a failing device test**
+- [x] **Step 1: Write a failing device test**
 
 Create a unique private source file, call `AapPublicExporter.export`, query its returned URI through `ContentResolver`, and assert the bytes match, `DISPLAY_NAME == "HaloCueExportProbe.aap"`, and `RELATIVE_PATH == "Download/HaloCue/"`. Delete only the returned URI in `finally`.
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run the single instrumentation class and confirm compilation fails because `AapPublicExporter` does not exist.
 
-- [ ] **Step 3: Implement MediaStore staging**
+- [x] **Step 3: Implement MediaStore staging**
 
 Use `MediaStore.Downloads.EXTERNAL_CONTENT_URI`, `DISPLAY_NAME`, MIME `application/json`, `RELATIVE_PATH`, and `IS_PENDING=1`. Copy bytes through `openOutputStream`, then publish with `IS_PENDING=0`. On failure, delete the new URI and rethrow. Reject missing source files and blank project names.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run the single instrumentation class and confirm the exported bytes and metadata pass on the vivo device without storage permission.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit the exporter and its passing test as `feat(android): stage generated aap in downloads`.
 
@@ -193,4 +193,3 @@ Set `versionCode = 3` and `versionName = "0.3.0-dev"`; run all host tests, assem
 - [ ] **Step 5: Update handoff memory and commit**
 
 Record exact device labels/resource IDs, authorization behavior, verified limitations, artifact path/hash, and fallback behavior. Commit as `docs(android): record assisted import verification`.
-
