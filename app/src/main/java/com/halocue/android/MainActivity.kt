@@ -73,6 +73,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        AndroidRuntimeRegistry.initialize(applicationContext)
         LegacyImportStateCleaner.clear(this)
 
         webRuntime = LocalWebRuntime(this)
