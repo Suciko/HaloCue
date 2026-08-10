@@ -36,11 +36,18 @@ foreach ($relativePath in $required) {
 }
 
 $forbidden = @('out', 'output', '__pycache__', '.env', 'llm.json', 'assets.db')
-$manifestPaths = @(
-    @($manifest.python) +
-    @($manifest.directories | ForEach-Object { $_.files }) +
-    @($manifest.static)
-)
+$manifestPaths = [System.Collections.Generic.List[object]]::new()
+foreach ($entry in @($manifest.python) + @($manifest.static) + @($manifest.overrides)) {
+    $manifestPaths.Add($entry)
+}
+foreach ($directory in @($manifest.directories)) {
+    foreach ($entry in @($directory.files)) {
+        $manifestPaths.Add([PSCustomObject]@{
+            path = (Join-Path ([string]$directory.path) ([string]$entry.path))
+            sha256 = [string]$entry.sha256
+        })
+    }
+}
 foreach ($entry in $manifestPaths) {
     $relativePath = if ($entry -is [string]) { $entry } else { $entry.path }
     if ([string]::IsNullOrWhiteSpace($relativePath)) {
@@ -57,6 +64,15 @@ foreach ($entry in $manifestPaths) {
         if ($hash -notmatch '^[0-9A-F]{64}$') {
             throw "Manifest entry '$relativePath' must include an uppercase SHA-256 value"
         }
+    }
+}
+
+foreach ($desktopOnly in @('install_manager.py', 'spine_face_analysis.py', 'spine_face_renderer.py')) {
+    if (@($manifest.python | ForEach-Object { [string]$_.path }) -contains $desktopOnly) {
+        throw "Desktop-only module must be supplied by an Android override: $desktopOnly"
+    }
+    if (@($manifest.overrides | ForEach-Object { [string]$_.path }) -notcontains $desktopOnly) {
+        throw "Missing Android runtime override: $desktopOnly"
     }
 }
 

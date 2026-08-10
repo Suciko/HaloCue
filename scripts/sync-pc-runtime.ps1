@@ -58,7 +58,7 @@ Assert-InRoot $destinationRoot $androidProjectRoot "Destination root"
 $entries = [System.Collections.Generic.List[object]]::new()
 foreach ($entry in @($manifest.python)) {
     Assert-RelativePath ([string]$entry.path)
-    $entries.Add([PSCustomObject]@{ RelativePath = ([string]$entry.path).Replace('/', '\'); SourcePath = ([string]$entry.path).Replace('/', '\'); ManifestEntry = $entry })
+    $entries.Add([PSCustomObject]@{ RelativePath = ([string]$entry.path).Replace('/', '\'); SourceRoot = $sourceRoot; SourcePath = ([string]$entry.path).Replace('/', '\'); ManifestEntry = $entry })
 }
 foreach ($directory in @($manifest.directories)) {
     Assert-RelativePath ([string]$directory.path)
@@ -66,13 +66,23 @@ foreach ($directory in @($manifest.directories)) {
         Assert-RelativePath ([string]$entry.path)
         $relative = Join-Path ([string]$directory.path) ([string]$entry.path)
         Assert-RelativePath $relative
-        $entries.Add([PSCustomObject]@{ RelativePath = $relative.Replace('/', '\'); SourcePath = $relative.Replace('/', '\'); ManifestEntry = $entry })
+        $entries.Add([PSCustomObject]@{ RelativePath = $relative.Replace('/', '\'); SourceRoot = $sourceRoot; SourcePath = $relative.Replace('/', '\'); ManifestEntry = $entry })
     }
 }
 foreach ($entry in @($manifest.static)) {
     Assert-RelativePath ([string]$entry.path)
     $relative = ([string]$entry.path).Replace('/', '\')
-    $entries.Add([PSCustomObject]@{ RelativePath = $relative; SourcePath = $relative; ManifestEntry = $entry })
+    $entries.Add([PSCustomObject]@{ RelativePath = $relative; SourceRoot = $sourceRoot; SourcePath = $relative; ManifestEntry = $entry })
+}
+foreach ($entry in @($manifest.overrides)) {
+    Assert-RelativePath ([string]$entry.path)
+    Assert-RelativePath ([string]$entry.source)
+    $entries.Add([PSCustomObject]@{
+        RelativePath = ([string]$entry.path).Replace('/', '\')
+        SourceRoot = $PSScriptRoot
+        SourcePath = ([string]$entry.source).Replace('/', '\')
+        ManifestEntry = $entry
+    })
 }
 
 $sourceRecordName = 'PC' + ([char]0x8FD0) + ([char]0x884C) + ([char]0x65F6) + ([char]0x6765) + ([char]0x6E90) + '.json'
@@ -98,7 +108,7 @@ foreach ($stale in $previousPaths | Where-Object { $currentPaths -notcontains $_
 
 $recordFiles = [System.Collections.Generic.List[object]]::new()
 foreach ($item in $entries) {
-    $sourcePath = Join-Path $sourceRoot $item.SourcePath
+    $sourcePath = Join-Path $item.SourceRoot $item.SourcePath
     $destinationPath = Join-Path $destinationRoot $item.RelativePath
     Assert-InRoot $destinationPath $destinationRoot "Destination"
     if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {

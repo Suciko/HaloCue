@@ -82,10 +82,6 @@
                        "sha256":  "E15E716C195B359451A527D6021FDFC2D458DE8615ADC7E16B069E7102E52BDB"
                    },
                    {
-                       "path":  "install_manager.py",
-                       "sha256":  "BDAFE57152A9D6A47EEB14386AD90006847DB625FAD6AFDF3DC0963769C141F0"
-                   },
-                   {
                        "path":  "jobs.py",
                        "sha256":  "89040E2BB1F320C440AABA761516A866E922FAA06764D2EE8857E39DA95DDF3F"
                    },
@@ -130,16 +126,8 @@
                        "sha256":  "CA82509ADD2A245CFD4BB2C6DEF3440B1D11F9F2F480E51F8B39DA1494938ADE"
                    },
                    {
-                       "path":  "spine_face_analysis.py",
-                       "sha256":  "BDE0418EE8AE63D7001CB6CD4390497DB060641489B2BDAD94D66990D73A1524"
-                   },
-                   {
                        "path":  "spine_face_labeler.py",
                        "sha256":  "A19F51C0874F37C0482B06F935AA0532A282116E89A6D42C8CF4DF6E7C2C3506"
-                   },
-                   {
-                       "path":  "spine_face_renderer.py",
-                       "sha256":  "D77E8C54D7E05487C0D02CF06B16A6F6A267F389D7608071B32A5F8514878250"
                    },
                    {
                        "path":  "spine_semantic_faces.py",
@@ -154,6 +142,23 @@
                        "sha256":  "3889A642B65E7849D612D4A2E8A228F5470E6B74EF3E62DA7346F2EA854F7512"
                    }
                ],
+    "overrides":  [
+                      {
+                          "path":  "install_manager.py",
+                          "source":  "android-runtime-overrides/install_manager.py",
+                          "sha256":  "58063210088D4EECEF43EF818A239DD6F10D8591B5114529816E0EEA6742D73B"
+                      },
+                      {
+                          "path":  "spine_face_analysis.py",
+                          "source":  "android-runtime-overrides/spine_face_analysis.py",
+                          "sha256":  "B0B0E1B910F9B0B8E3DECF689C7917F73002C19732219E28046EC05EB14EE3C1"
+                      },
+                      {
+                          "path":  "spine_face_renderer.py",
+                          "source":  "android-runtime-overrides/spine_face_renderer.py",
+                          "sha256":  "589CE81733D194382C2C759296A0D0E42811D2ABD4CAFD9979E44A9E151788DD"
+                      }
+                  ],
     "directories":  [
                         {
                             "path":  "css",
