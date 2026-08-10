@@ -10,3 +10,4 @@ local.properties
 captures/
 evidence/*.xml
 tmp/
+.worktrees/
