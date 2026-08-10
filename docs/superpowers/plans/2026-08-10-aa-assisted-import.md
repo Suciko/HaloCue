@@ -128,34 +128,35 @@ Commit as `feat(android): add vivo assisted import service`.
 - Modify: `app/src/main/java/com/halocue/android/MainActivity.kt`
 - Modify: `app/src/main/assets/index.html`
 - Modify: `app/src/main/assets/app.css`
-- Modify: `app/src/androidTest/java/com/halocue/android/MainActivityCompileTest.kt`
+- Delete: `app/src/androidTest/java/com/halocue/android/MainActivityCompileTest.kt` (OriginOS WebView automation hangs)
+- Create: `scripts/test-device-page-contract.ps1`
 
 **Interfaces:**
 - JavaScript calls `HaloCueNative.generateAndImport(project, text)`.
 - Native calls `window.HaloCueApp.importUpdated(payload)` with `state`, `message`, `action`, and no private path in normal success output.
 - Actions are `none`, `open_accessibility_settings`, and `retry_import`.
 
-- [ ] **Step 1: Change the page contract test first**
+- [x] **Step 1: Change the page contract test first**
 
-Require the primary button text “生成并导入原版 AA”, initial status “尚未处理”, a hidden authorization explanation, and absence of a visible private path.
+Launch the installed app, dump the real device accessibility hierarchy, and require the primary button text “生成并导入原版 AA”, initial status “尚未处理”, a first-use authorization explanation, and absence of a visible private path. Do not use Espresso Web or in-process `UiAutomation` on this OriginOS WebView because both have been observed to hang.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run the page contract test and confirm it fails on the old “生成 .aap” UI.
 
-- [ ] **Step 3: Implement native orchestration**
+- [x] **Step 3: Implement native orchestration**
 
 In the existing executor: compile, stage through `AapPublicExporter`, persist/prepare the import task, then return either authorization-required or start the file manager and mark `IMPORTING`. Add a separate bridge method which opens accessibility settings only after an explicit page button click. Refresh persisted import state in `onResume`.
 
-- [ ] **Step 4: Implement user-facing states**
+- [x] **Step 4: Implement user-facing states**
 
 Replace technical copy with the approved phrases. Keep the public/private file path out of normal UI. Show the authorization card only for `NEEDS_ACCESSIBILITY`; show “继续导入” only for `FAILED`; disable repeated submission while generation/import launch is in progress.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run page contract, compiler bridge, exporter, coordinator, and unit tests. Manually verify the screen on the vivo device before enabling the service.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Commit as `feat(android): add one-button generate and import flow`.
 

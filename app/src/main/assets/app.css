@@ -9,6 +9,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -113,6 +117,17 @@ textarea {
   font: inherit;
 }
 
+.accessibility-note {
+  margin: 17px 0 0;
+  padding: 13px 14px;
+  border: 1px solid #dbe5f5;
+  border-radius: 13px;
+  color: #53657f;
+  background: #f2f6fd;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
 input {
   min-height: 46px;
   padding: 0 13px;
@@ -210,6 +225,14 @@ button {
 button:disabled {
   color: #8794aa;
   background: #e7ebf2;
+  box-shadow: none;
+}
+
+.secondary-button {
+  margin-top: 12px;
+  border: 1px solid #9eb8e9;
+  color: #3d67b9;
+  background: #f3f7ff;
   box-shadow: none;
 }
 

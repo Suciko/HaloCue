@@ -13,8 +13,8 @@
       <div class="mark" aria-hidden="true">H</div>
       <div>
         <p class="eyebrow">HALOCUE FOR ANDROID</p>
-        <h1>手机端运行探针</h1>
-        <p class="intro">这是 APK 内部页面，不会跳转到浏览器。</p>
+        <h1>手机端剧本生成</h1>
+        <p class="intro">处理完成后会直接打开你安装的原版 AA。</p>
       </div>
     </header>
 
@@ -22,8 +22,8 @@
       <article class="status-card">
         <span class="status-icon" id="python-dot" aria-hidden="true"></span>
         <div>
-          <p class="status-label">本地编译后端</p>
-          <p class="status-value" id="python-status">正在启动本地 Python…</p>
+          <p class="status-label">本地处理核心</p>
+          <p class="status-value" id="python-status">正在启动…</p>
         </div>
       </article>
 
@@ -37,21 +37,25 @@
     </section>
 
     <section class="compiler-card" aria-labelledby="compiler-title">
-      <p class="step-kicker">本地生成</p>
-      <h2 id="compiler-title">把剧本文本编译成 .aap</h2>
+      <p class="step-kicker">生成工程</p>
+      <h2 id="compiler-title">生成并导入原版 AA</h2>
       <label for="project-name">工程名</label>
       <input id="project-name" type="text" value="AndroidDemo" autocomplete="off">
       <label for="script-input">剧本文本</label>
       <textarea id="script-input" rows="7" spellcheck="false">桃井: 安卓端你好</textarea>
-      <button type="button" id="compile-aap">生成 .aap</button>
-      <p class="compile-status" id="compile-status" aria-live="polite">尚未生成</p>
-      <code class="compile-path" id="compile-path" hidden></code>
+
+      <p class="accessibility-note" id="accessibility-card">首次使用会引导你开启“自动导入辅助功能”。它只会在你点击下方按钮后，协助操作 vivo 文件管理器。</p>
+
+      <button type="button" id="compile-aap">生成并导入原版 AA</button>
+      <p class="compile-status" id="compile-status" aria-live="polite">尚未处理</p>
+      <button type="button" class="secondary-button" id="enable-accessibility" hidden>前往开启自动导入</button>
+      <button type="button" class="secondary-button" id="continue-import" hidden>继续导入</button>
     </section>
 
     <section class="next-step">
-      <p class="step-kicker">第一阶段</p>
-      <h2>原生外壳已经接管页面</h2>
-      <p>生成结果暂存在 HaloCue 自身目录；下一步接入导出到公共目录和完整剧本工作台。</p>
+      <p class="step-kicker">使用说明</p>
+      <h2>点一次，处理到可以使用</h2>
+      <p>HaloCue 会在手机本地生成工程并导入原版 AA。只有自动导入没有完成时，才会提示你继续操作。</p>
       <button type="button" id="open-aa" disabled>打开原版 AA</button>
     </section>
 
@@ -59,51 +63,70 @@
   </main>
 
   <script>
+    const primaryButton = document.getElementById('compile-aap');
+    const status = document.getElementById('compile-status');
+    const accessibilityButton = document.getElementById('enable-accessibility');
+    const continueButton = document.getElementById('continue-import');
+
+    function applyImportState(payload) {
+      if (!payload || !payload.state) return;
+      const state = payload.state;
+      primaryButton.disabled = state === 'IMPORTING';
+      accessibilityButton.hidden = payload.action !== 'open_accessibility_settings';
+      continueButton.hidden = payload.action !== 'retry_import';
+      status.textContent = payload.message || '尚未处理';
+      status.className = 'compile-status';
+      if (state === 'IMPORTED') status.classList.add('success');
+      if (state === 'FAILED') status.classList.add('error');
+    }
+
     window.HaloCueApp = {
       bootstrap(payload) {
         const python = payload.python || {};
         const aa = payload.aa || {};
 
-        document.getElementById('python-status').textContent = python.message || '本地 Python 状态未知';
+        document.getElementById('python-status').textContent = python.message || '本地处理核心状态未知';
         document.getElementById('python-dot').classList.toggle('ready', python.ready === true);
         document.getElementById('aa-status').textContent = aa.message || '原版 AA 状态未知';
         document.getElementById('aa-dot').classList.toggle('ready', aa.installed === true);
         document.getElementById('app-version').textContent = payload.appVersion || '开发版';
         document.getElementById('open-aa').disabled = aa.installed !== true;
+        applyImportState(payload.import);
         document.body.dataset.ready = 'true';
       },
-      compileFinished(payload) {
-        const button = document.getElementById('compile-aap');
-        const status = document.getElementById('compile-status');
-        const path = document.getElementById('compile-path');
-        button.disabled = false;
-        if (payload.ok === true) {
-          status.textContent = `已生成，尚未导入 AA（${payload.dialogueCount} 条台词）`;
-          status.className = 'compile-status success';
-          path.textContent = payload.aapFile || '';
-          path.hidden = !payload.aapFile;
-        } else {
-          status.textContent = payload.message || '生成失败';
-          status.className = 'compile-status error';
-          path.hidden = true;
-        }
+      importUpdated(payload) {
+        applyImportState(payload);
       }
     };
 
-    document.getElementById('compile-aap').addEventListener('click', () => {
-      const button = document.getElementById('compile-aap');
-      const status = document.getElementById('compile-status');
+    primaryButton.addEventListener('click', () => {
       const project = document.getElementById('project-name').value.trim();
       const script = document.getElementById('script-input').value;
-      if (!window.HaloCueNative || typeof window.HaloCueNative.compileAap !== 'function') {
-        status.textContent = '本地编译桥尚未就绪';
+      if (!window.HaloCueNative || typeof window.HaloCueNative.generateAndImport !== 'function') {
+        status.textContent = '本地处理功能尚未就绪';
+        status.className = 'compile-status error';
         return;
       }
-      button.disabled = true;
+      primaryButton.disabled = true;
+      accessibilityButton.hidden = true;
+      continueButton.hidden = true;
       status.className = 'compile-status';
-      status.textContent = '正在本机编译…';
-      document.getElementById('compile-path').hidden = true;
-      window.HaloCueNative.compileAap(project, script);
+      status.textContent = '正在生成工程…';
+      window.HaloCueNative.generateAndImport(project, script);
+    });
+
+    accessibilityButton.addEventListener('click', () => {
+      if (window.HaloCueNative && typeof window.HaloCueNative.openImportAccessibilitySettings === 'function') {
+        window.HaloCueNative.openImportAccessibilitySettings();
+      }
+    });
+
+    continueButton.addEventListener('click', () => {
+      continueButton.disabled = true;
+      status.textContent = '正在继续导入…';
+      if (window.HaloCueNative && typeof window.HaloCueNative.continueImport === 'function') {
+        window.HaloCueNative.continueImport();
+      }
     });
 
     document.getElementById('open-aa').addEventListener('click', () => {
