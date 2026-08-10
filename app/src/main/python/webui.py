@@ -154,7 +154,16 @@ class InvalidProjectNameError(ValueError):
 def _story_workspace_index_path(aa_data: Path) -> Path:
     identity = os.path.normcase(str(aa_data.resolve())).encode("utf-8")
     digest = hashlib.sha256(identity).hexdigest()[:16]
-    return Path(HERE) / "out" / "story-workspaces" / f"{digest}.json"
+    if aapaths.android_workspace_root() is None:
+        return Path(HERE) / "out" / "story-workspaces" / f"{digest}.json"
+    return aapaths.app_storage_path("story-workspaces", f"{digest}.json")
+
+
+def _default_aa_data_path() -> Path:
+    android_root = aapaths.android_workspace_root()
+    if android_root is not None:
+        return android_root / "aa-data"
+    return Path(HERE) / "out" / "aa-data"
 
 
 def _migrate_legacy_story_index(aa_data: Path, index_path: Path) -> None:
@@ -176,7 +185,7 @@ def _migrate_legacy_story_index(aa_data: Path, index_path: Path) -> None:
 def story_workspace() -> StoryWorkspaceRegistry:
     """Return app-owned story state scoped to the configured AA data root."""
     global STORY_WORKSPACE
-    aa_data = Path(CFG.get("aa_data") or (Path(HERE) / "out" / "aa-data")).resolve()
+    aa_data = Path(CFG.get("aa_data") or _default_aa_data_path()).resolve()
     with STORY_WORKSPACE_LOCK:
         if STORY_WORKSPACE is None or STORY_WORKSPACE.aa_data != aa_data:
             index_path = _story_workspace_index_path(aa_data)
@@ -190,7 +199,7 @@ def story_workspace() -> StoryWorkspaceRegistry:
 def history_asset_browser() -> HistoryAssetBrowser:
     """Return the server-local token registry for the configured AA data root."""
     global HISTORY_ASSET_BROWSER
-    aa_data = Path(CFG.get("aa_data") or (Path(HERE) / "out" / "aa-data")).resolve()
+    aa_data = Path(CFG.get("aa_data") or _default_aa_data_path()).resolve()
     with HISTORY_ASSET_BROWSER_LOCK:
         if HISTORY_ASSET_BROWSER is None or HISTORY_ASSET_BROWSER.aa_data != aa_data:
             HISTORY_ASSET_BROWSER = HistoryAssetBrowser(aa_data=aa_data)

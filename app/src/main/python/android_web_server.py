@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import shutil
 import threading
 from http.cookies import SimpleCookie
 from http.server import ThreadingHTTPServer
@@ -12,6 +13,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 import assetdb
+import aapaths
 import model_profiles
 import webui
 from official_preview_index import OfficialPreviewIndex
@@ -28,17 +30,36 @@ _ANDROID_ASSET_SUFFIXES = {
 }
 
 
+def _copy_legacy_tree(source: Path, target: Path) -> None:
+    if not source.is_dir():
+        return
+    for item in source.rglob("*"):
+        if item.is_symlink():
+            continue
+        relative = item.relative_to(source)
+        destination = target / relative
+        if item.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+        elif item.is_file() and not destination.exists():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, destination)
+
+
 def configure_android_runtime(workspace_dir: str) -> None:
     root = Path(workspace_dir).resolve()
-    databases = root / "databases"
-    cache = root / "cache"
     workspace = root / "workspace"
+    databases = workspace / "databases"
+    cache = workspace / "cache"
     workspace.mkdir(parents=True, exist_ok=True)
     databases.mkdir(parents=True, exist_ok=True)
     cache.mkdir(parents=True, exist_ok=True)
+    _copy_legacy_tree(root / "databases", databases)
+    _copy_legacy_tree(root / "cache", cache)
     os.environ["HALOCUE_PLATFORM"] = "android"
     os.environ["HALOCUE_ANDROID_FILES_DIR"] = str(root)
     os.environ["HALOCUE_WORKSPACE_DIR"] = str(workspace)
+    runtime_paths = aapaths.detect()
+    aa_data = Path(runtime_paths["data"])
     webui.HERE = str(Path(__file__).resolve().parent)
     webui.STORY_ROOT = str(root / "workspace")
     webui.DB = str(databases / "aa_assets.db")
@@ -65,7 +86,9 @@ def configure_android_runtime(workspace_dir: str) -> None:
     webui.ASSET_FILE_PICKER = webui.StoryFilePicker(
         roots=(workspace,), upload_dir=uploads, allowed_suffixes=_ANDROID_ASSET_SUFFIXES
     )
-    webui.CFG.update({"overrides": None, "aa_data": None, "spine_cli": None})
+    webui.CFG.update({"overrides": None, "aa_data": str(aa_data), "spine_cli": None})
+    webui.STORY_WORKSPACE = None
+    webui.HISTORY_ASSET_BROWSER = None
     with webui.RESOURCE_INDEX_LOCK:
         webui.RESOURCE_INDEX_JOB.clear()
         webui.RESOURCE_INDEX_JOB.update(webui._empty_resource_index_job())

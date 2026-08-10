@@ -77,7 +77,7 @@ def test_api_accepts_session_header(running_server):
 
 
 def test_root_sets_strict_cookie_and_cookie_authenticates_media(tmp_path):
-    preview_root = tmp_path / "cache" / "official-previews"
+    preview_root = tmp_path / "workspace" / "cache" / "official-previews"
     preview = preview_root / "avatars" / "student.png"
     preview.parent.mkdir(parents=True)
     preview.write_bytes(b"preview-bytes")
@@ -154,8 +154,8 @@ def test_android_runtime_uses_workspace_token_pickers_and_capability_errors(tmp_
     )
     assert [root["name"] for root in picker["roots"]] == ["workspace"]
     assert picker["roots"][0]["entry_token"].startswith("entry-")
-    assert (tmp_path / "databases" / "aa_resources.json").is_file()
-    assert json.loads((tmp_path / "databases" / "aa_resources.json").read_text(encoding="utf-8")) == {
+    assert (tmp_path / "workspace" / "databases" / "aa_resources.json").is_file()
+    assert json.loads((tmp_path / "workspace" / "databases" / "aa_resources.json").read_text(encoding="utf-8")) == {
         "bg": {},
         "characters": {},
         "sounds": [],

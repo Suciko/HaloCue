@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import aapaths
 from aa_project_assets import validate_windows_path_component
 from document import compile_document, normalize_draft_nodes, parse_document_lossless
 from draft_identity import (
@@ -61,7 +62,7 @@ class DraftStore:
         if base_dir:
             self.base_dir = Path(base_dir)
         else:
-            self.base_dir = HERE / "out" / "drafts"
+            self.base_dir = aapaths.app_storage_path("drafts")
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def get_draft_path(self, token: str) -> Path:
