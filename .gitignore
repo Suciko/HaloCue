@@ -11,3 +11,10 @@ captures/
 evidence/*.xml
 tmp/
 .worktrees/
+
+# PC runtime sync must never package generated data or user configuration.
+app/src/main/python/out/
+app/src/main/python/output/
+app/src/main/python/.env
+app/src/main/python/llm.json
+app/src/main/python/assets.db

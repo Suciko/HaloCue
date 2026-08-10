@@ -1,0 +1,247 @@
+{
+    "source":  "../01-完整程序/aa",
+    "python":  [
+                   {
+                       "path":  "webui.py",
+                       "sha256":  "07FBB10C8D19486E7DA5671A37DE2456EB41DEDBED7460FE62E530B2D5BB1BAD"
+                   },
+                   {
+                       "path":  "aa_resource_cache.py",
+                       "sha256":  "2FFF0864FD9D0220C1F5308CE87A47AE72C4809BF4CF9D1098A4E73684B537D7"
+                   },
+                   {
+                       "path":  "annotate.py",
+                       "sha256":  "6750332186A52E8C8C6E0D99B725C8DCDE1098F758A9E8EB46C39F92F9ABD50D"
+                   },
+                   {
+                       "path":  "annotation_agent.py",
+                       "sha256":  "1FAA527DE899BFEA063D6C96F4AC4400281096D918285EA947EA09A2A7C02072"
+                   },
+                   {
+                       "path":  "annotation_chunks.py",
+                       "sha256":  "93C8CFD32A5CC289C50A856DA5D9A83D7E5CF6942F2360656ADA4C41C463544A"
+                   },
+                   {
+                       "path":  "annotation_memory.py",
+                       "sha256":  "11C6811A7A0E6E574CEC7B9C5A34E61504B4FA0C1E80802837DA7F35F732C081"
+                   },
+                   {
+                       "path":  "annotation_protocol.py",
+                       "sha256":  "C352D19F7E15B13F9EC5D0AF1A78E9DCD2A55C8A3625FD955C198A04F260FFE9"
+                   },
+                   {
+                       "path":  "annotation_telemetry.py",
+                       "sha256":  "A4B28F519BA1BFAE0FCD49F17DE1BC2D11DCCDF7201C5B440117D119B04666E0"
+                   },
+                   {
+                       "path":  "asset_catalog.py",
+                       "sha256":  "9D67A536FA6860C6027886D184DDA8C55C00E04CF00E486F147BA8C82D6A8C8F"
+                   },
+                   {
+                       "path":  "asset_import.py",
+                       "sha256":  "42CA2AC9F0FAB403E79DA34A157B5B1952905B7A579575D8C0AB92E9FF6F771A"
+                   },
+                   {
+                       "path":  "assetdb.py",
+                       "sha256":  "64DC09AF0BE5C7AF297D8F5B5F4CC04352BA655C347A4CD13F51C6B025BE2B61"
+                   },
+                   {
+                       "path":  "background_labeler.py",
+                       "sha256":  "C43A5490312C71F52135698E47C4F8844A53EA3695FD68A06757C4CA46E14534"
+                   },
+                   {
+                       "path":  "background_workflow.py",
+                       "sha256":  "98DFDCE9C8326D0B4F222D1B88729804E3D8CEA173CEE88E8863F12BD7D68AE3"
+                   },
+                   {
+                       "path":  "build_bundle.py",
+                       "sha256":  "DF1E07959DBC6F05BB603C80281B44C2BA1D8B21AC156AC89948D730090A7B27"
+                   },
+                   {
+                       "path":  "build_index.py",
+                       "sha256":  "DCD9C45F39AC632D81F4C8B1A6C1EDB76127B7E1C3A6B396AD21A18BFAFBC730"
+                   },
+                   {
+                       "path":  "dialogue_pacing.py",
+                       "sha256":  "910DC8F2B9AE0BE5183CC85F7267233DEBDA41FFBD141F5632A2E4DEAC9B4768"
+                   },
+                   {
+                       "path":  "direction_rules.py",
+                       "sha256":  "154A67ED037BB5E9B18D5632FE2AAF163E0CAEA21E1AEBBC497210B729465083"
+                   },
+                   {
+                       "path":  "draft_identity.py",
+                       "sha256":  "FC4573B36A36196908C13B28A7E2FFB9AE624EC11BA66B3F7AFEEDCE51C0CE8F"
+                   },
+                   {
+                       "path":  "draft_store.py",
+                       "sha256":  "6007DED9CD1C26D08DD69ABD2B085EF57032EABA362CCC7F3462540F3C9C9ED5"
+                   },
+                   {
+                       "path":  "history_assets.py",
+                       "sha256":  "E15E716C195B359451A527D6021FDFC2D458DE8615ADC7E16B069E7102E52BDB"
+                   },
+                   {
+                       "path":  "install_manager.py",
+                       "sha256":  "BDAFE57152A9D6A47EEB14386AD90006847DB625FAD6AFDF3DC0963769C141F0"
+                   },
+                   {
+                       "path":  "jobs.py",
+                       "sha256":  "89040E2BB1F320C440AABA761516A866E922FAA06764D2EE8857E39DA95DDF3F"
+                   },
+                   {
+                       "path":  "label_assets.py",
+                       "sha256":  "01518D6CC85D2B356D5AE4B50478C8EADF4862F30FA3F8631E4B48AAAE040AE1"
+                   },
+                   {
+                       "path":  "llm.py",
+                       "sha256":  "1C25A424E9E4BD312270B8916B1D178D8A28B38F665B5E636C0BF21B6EEAC9DE"
+                   },
+                   {
+                       "path":  "model_capabilities.py",
+                       "sha256":  "2D57A61447FEF7AF4B0171908EBA470A3082F2D87326082367CBFDCE0A76431F"
+                   },
+                   {
+                       "path":  "model_profiles.py",
+                       "sha256":  "84EA11FA717F4958BB6D1E094DC6E4E1049D3F14AC0F163D554BA787B1F29270"
+                   },
+                   {
+                       "path":  "model_router.py",
+                       "sha256":  "BCEE471D31E12FC70449FA496BDA8A3B0821CF9C75B6C0284C0534E5AB05173B"
+                   },
+                   {
+                       "path":  "official_catalog.py",
+                       "sha256":  "32A528B903CF6B0354C5D09D47266C5D8B8B58E957E72B1B5350A3887361BEBD"
+                   },
+                   {
+                       "path":  "official_preview_index.py",
+                       "sha256":  "F00D176D9B511D0BE270CDB5483C91F1F922A2023628CE39B3A195210E0621D4"
+                   },
+                   {
+                       "path":  "official_staging_corpus.py",
+                       "sha256":  "7893206D407E8BA10E8B8056A60F0434D005F7274DA23BD5CB1F7DC80C658F67"
+                   },
+                   {
+                       "path":  "picker_token.py",
+                       "sha256":  "934BE74B2B94B48FF0A84E5320564371E48299ADA473B0DA51F691C42C092AB2"
+                   },
+                   {
+                       "path":  "prompt.py",
+                       "sha256":  "CA82509ADD2A245CFD4BB2C6DEF3440B1D11F9F2F480E51F8B39DA1494938ADE"
+                   },
+                   {
+                       "path":  "spine_face_analysis.py",
+                       "sha256":  "BDE0418EE8AE63D7001CB6CD4390497DB060641489B2BDAD94D66990D73A1524"
+                   },
+                   {
+                       "path":  "spine_face_labeler.py",
+                       "sha256":  "A19F51C0874F37C0482B06F935AA0532A282116E89A6D42C8CF4DF6E7C2C3506"
+                   },
+                   {
+                       "path":  "spine_face_renderer.py",
+                       "sha256":  "D77E8C54D7E05487C0D02CF06B16A6F6A267F389D7608071B32A5F8514878250"
+                   },
+                   {
+                       "path":  "spine_semantic_faces.py",
+                       "sha256":  "8C3B49BC36FB034E108A96232E2C1DE380B6D48E649B33080914F5490914EFE3"
+                   },
+                   {
+                       "path":  "story_file_picker.py",
+                       "sha256":  "42ADAD930981BC4C5D02103B11F5B81128392F5159E91E444A1DDB93FD5E265C"
+                   },
+                   {
+                       "path":  "story_workspace.py",
+                       "sha256":  "3889A642B65E7849D612D4A2E8A228F5470E6B74EF3E62DA7346F2EA854F7512"
+                   }
+               ],
+    "directories":  [
+                        {
+                            "path":  "css",
+                            "files":  [
+                                          {
+                                              "path":  "app.css",
+                                              "sha256":  "3067F841F6E15E3AFEBD7C1F5D7251219DE5B298C1DFCA3833F19D8E10EF34DB"
+                                          },
+                                          {
+                                              "path":  "layout.css",
+                                              "sha256":  "78687CD2A64111D29361B48973F1EB9F9D9F3777A626E08D4CF821313F83CAED"
+                                          }
+                                      ]
+                        },
+                        {
+                            "path":  "js",
+                            "files":  [
+                                          {
+                                              "path":  "api.js",
+                                              "sha256":  "360FC8E9D60172FEB9A15832553BF005AA12CC5D6ABE9DF6E5D87F7F20C0C469"
+                                          },
+                                          {
+                                              "path":  "app.js",
+                                              "sha256":  "5F033C459F77528E3A35D0113C54424A89050CA5494ADCDD4A56EAA0A897BD0A"
+                                          },
+                                          {
+                                              "path":  "assets.js",
+                                              "sha256":  "E2ABF8D97C486C6BB31ED1A7468D890C819855D0E6F605851BE82463F194AC59"
+                                          },
+                                          {
+                                              "path":  "cards.js",
+                                              "sha256":  "25E8D9B39F362B135CE57667226710BDD337892299BC38A52F65A2E705A6A1CA"
+                                          },
+                                          {
+                                              "path":  "history.js",
+                                              "sha256":  "FDBFF83221FD2423AE191256EBEFA0707F16125019ADC58377721A5FACFCD047"
+                                          },
+                                          {
+                                              "path":  "library.js",
+                                              "sha256":  "4A83A03738609FE8746C9D0F4849136CEF7CEEE0C5ADB6B15AECCDD5DF124BF6"
+                                          },
+                                          {
+                                              "path":  "library_copies.js",
+                                              "sha256":  "82311ABB81F44219CC087DBA7D1C36CF5349A49D1F425288F22B88E83474E53C"
+                                          },
+                                          {
+                                              "path":  "library_faces.js",
+                                              "sha256":  "30CFCE4C29C6E31409DB13E4845F7231810C67885DCDF166DA363E9F6F0B6D67"
+                                          },
+                                          {
+                                              "path":  "library_import.js",
+                                              "sha256":  "084369CCBEB57AA9D78A3FC6BA883EFAAAABD4DE9523395C7419A45F78ADD551"
+                                          },
+                                          {
+                                              "path":  "library_preview.js",
+                                              "sha256":  "C1EACBFE4E168027F1F37CF7CE50F8D32430AEE734C5D5057A0C7B4944FB2095"
+                                          },
+                                          {
+                                              "path":  "library_transfer.js",
+                                              "sha256":  "B8FD342D819757C0BF8C6BA35BDA4655DF76369336445765649A831B2DFC2DBB"
+                                          },
+                                          {
+                                              "path":  "model.js",
+                                              "sha256":  "B658BD1A2130BD87A73B88165771F26DC1EFC63101AA314C2084C4A863B3AE02"
+                                          },
+                                          {
+                                              "path":  "player.js",
+                                              "sha256":  "CCDAA7E22136C33164E8C9813EED5CAE4A4ABFC01619DEA9E560E7ADEAC0033C"
+                                          },
+                                          {
+                                              "path":  "story.js",
+                                              "sha256":  "7F3AF93789408C4A7125C2592BE46F9295537A1BD3E0BD75694264FC3136C1E8"
+                                          },
+                                          {
+                                              "path":  "story_picker.js",
+                                              "sha256":  "8950782A068A064F0AF4DFBFBFA572DD3643299403FF4F79BCE9B5F3A7778021"
+                                          }
+                                      ]
+                        }
+                    ],
+    "static":  [
+                   {
+                       "path":  "ui.html",
+                       "sha256":  "8166546208A635A1E2F18B544DC1F00221C8827B2BB37AF017AB2C0C755B5B59"
+                   },
+                   {
+                       "path":  "branding/halocue-favicon.png",
+                       "sha256":  "EA217A967AF5FD03222BDB283DC43B0AF28C6D9C40573ED9D7E2A0CE9B09BDC7"
+                   }
+               ]
+}
