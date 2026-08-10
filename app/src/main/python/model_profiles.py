@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
@@ -234,12 +235,72 @@ class WindowsCredentialStore:
             ) from exc
 
 
+class AndroidCredentialStore:
+    """Adapt model profile targets to the Android Keystore-backed bridge."""
+
+    available = True
+
+    def __init__(self, *, android_credentials_module=None):
+        if android_credentials_module is None:
+            import android_credentials as android_credentials_module
+        self._api = android_credentials_module
+
+    @staticmethod
+    def credential_name(target: str) -> str:
+        digest = hashlib.sha256(str(target).encode("utf-8")).hexdigest()
+        return "halocue_model_" + digest
+
+    def read(self, target: str) -> str | None:
+        try:
+            return self._api.get_secret(self.credential_name(target))
+        except Exception as exc:
+            raise CredentialStoreError(
+                f"Unable to read Android credential: {type(exc).__name__}"
+            ) from exc
+
+    def write(self, target: str, secret: str) -> None:
+        try:
+            self._api.set_secret(self.credential_name(target), str(secret))
+        except Exception as exc:
+            raise CredentialStoreError(
+                f"Unable to write Android credential: {type(exc).__name__}"
+            ) from exc
+
+    def delete(self, target: str) -> None:
+        try:
+            self._api.delete_secret(self.credential_name(target))
+        except Exception as exc:
+            raise CredentialStoreError(
+                f"Unable to delete Android credential: {type(exc).__name__}"
+            ) from exc
+
+    def status(self, target: str) -> dict[str, object]:
+        try:
+            value = self._api.secret_status(self.credential_name(target))
+        except Exception as exc:
+            raise CredentialStoreError(
+                f"Unable to inspect Android credential: {type(exc).__name__}"
+            ) from exc
+        return {
+            "configured": bool(value.get("configured", False)),
+            "masked": value.get("masked"),
+        }
+
+
+def _default_credential_store():
+    if os.environ.get("HALOCUE_PLATFORM", "").strip().lower() == "android":
+        return AndroidCredentialStore()
+    return WindowsCredentialStore()
+
+
 class ModelProfileStore:
     """Persist non-secret model settings and keep secrets out of JSON."""
 
     def __init__(self, path, *, credentials=None):
         self.path = Path(path)
-        self.credentials = credentials or WindowsCredentialStore()
+        self.credentials = (
+            credentials if credentials is not None else _default_credential_store()
+        )
         self._session_secrets: dict[str, str] = {}
         self._lock = threading.RLock()
 
@@ -373,15 +434,32 @@ class ModelProfileStore:
             "vision": bool(payload.get("vision", True)),
         }
 
-    def _secret_status(self, profile_id: str) -> str:
+    def _credential_status(self, target: str) -> dict[str, object] | None:
+        status = getattr(self.credentials, "status", None)
+        if not callable(status):
+            return None
+        value = status(target)
+        masked = value.get("masked")
+        return {
+            "configured": bool(value.get("configured", False)),
+            "masked": None if masked is None else str(masked),
+        }
+
+    def _secret_status(
+        self, profile_id: str, credential: dict[str, object] | None = None
+    ) -> str:
         if self._session_secrets.get(profile_id):
             return "session"
+        if credential is not None:
+            return "saved" if credential["configured"] else "missing"
         if self.credentials.read(self._target(profile_id)):
             return "saved"
         return "missing"
 
     def _public(self, record: dict) -> dict:
         record = self._provenance(record)
+        profile_id = str(record["id"])
+        credential = self._credential_status(self._target(profile_id))
         result = {
             key: record.get(key)
             for key in (
@@ -401,10 +479,12 @@ class ModelProfileStore:
                 "service_preset",
             )
         }
-        result["secret_status"] = self._secret_status(str(record["id"]))
+        result["secret_status"] = self._secret_status(profile_id, credential)
         result["credential_available"] = bool(
             getattr(self.credentials, "available", False)
         )
+        if credential is not None:
+            result["credential"] = credential
         return result
 
     @staticmethod
@@ -553,9 +633,14 @@ class ModelProfileStore:
 
     def _public_connection(self, record: dict) -> dict:
         result = dict(record)
-        result["secret_status"] = (
-            "saved" if self.resolve_connection_key(str(record["id"])) else "missing"
-        )
+        target = self._connection_target(str(record["id"]))
+        credential = self._credential_status(target)
+        if credential is None:
+            configured = bool(self.credentials.read(target))
+        else:
+            configured = bool(credential["configured"])
+            result["credential"] = credential
+        result["secret_status"] = "saved" if configured else "missing"
         return result
 
     def migrate_legacy_profiles(self) -> dict:
