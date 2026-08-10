@@ -15,6 +15,7 @@ data class LocalWebSession(
 class LocalWebRuntime(context: Context) {
     private val applicationContext = context.applicationContext
     private var activeSession: LocalWebSession? = null
+    private var serverStartAttempted = false
 
     @Synchronized
     fun start(): LocalWebSession {
@@ -27,9 +28,13 @@ class LocalWebRuntime(context: Context) {
             tokenBytes,
             Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
         )
-        val result = Python.getInstance()
-            .getModule("android_web_server")
-            .callAttr("start", applicationContext.filesDir.absolutePath, token)
+        val server = Python.getInstance().getModule("android_web_server")
+        serverStartAttempted = true
+        val result = server.callAttr(
+            "start",
+            applicationContext.filesDir.absolutePath,
+            token,
+        )
         check(result.callAttr("get", "ready").toBoolean()) {
             "Local WebUI service did not become ready"
         }
@@ -42,11 +47,12 @@ class LocalWebRuntime(context: Context) {
 
     @Synchronized
     fun stop() {
-        if (!Python.isStarted() || activeSession == null) return
+        if (!Python.isStarted() || !serverStartAttempted) return
         try {
             Python.getInstance().getModule("android_web_server").callAttr("stop")
         } finally {
             activeSession = null
+            serverStartAttempted = false
         }
     }
 

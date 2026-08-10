@@ -31,6 +31,7 @@ class LocalWebRuntimeTest {
             connection.disconnect()
         } finally {
             runtime.stop()
+            runtime.stop()
         }
     }
 }
