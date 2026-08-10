@@ -255,6 +255,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun shareExport(shareId: String) {
+        val intent = AndroidRuntimeRegistry.platformServices().shareIntent(shareId)
+        if (intent == null) {
+            Toast.makeText(this, "分享记录已失效，请重新编译", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            startActivity(Intent.createChooser(intent, "分享工程文件"))
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "没有可分享此文件的应用", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun pickDocument(requestId: String, purpose: String, suffixesJson: String) {
         val suffixes = runCatching {
             val values = JSONArray(suffixesJson)
@@ -425,6 +438,11 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun shareLastExport() {
             runOnUiThread { this@MainActivity.shareLastExport() }
+        }
+
+        @JavascriptInterface
+        fun shareExport(shareId: String) {
+            runOnUiThread { this@MainActivity.shareExport(shareId) }
         }
 
         @JavascriptInterface

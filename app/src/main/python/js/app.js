@@ -3,7 +3,7 @@
 
   const $ = function (selector) { return document.querySelector(selector); };
   const $$ = function (selector) { return Array.from(document.querySelectorAll(selector)); };
-  const state = {analysis: null, mapping: {}, preflight: null, preflightApproved: false, preflightStale: false, background: null, backgroundJob: null, generationPrompt: null, generationPromptTarget: null, generationPromptStoryToken: null, buildActive: false, fileToken: null, sourcePath: null, browseMode: 'script', browseDirectory: '', profiles: [], profileBaseline: null, modelWorkbench: null, discoveredModelCapabilities: [], activeReasoningCapability: null, modelRole: 'text', modelEditorMode: 'new', workflowStage: 'script', review: {token: null, revision: 1, buildId: null, cards: [], selected: null, filter: 'all', cardLimit: 80}, reviewAssets: null, bgReplaceCard: null, reviewBackgroundRequest: null, operationId: 0, operations: {annotate: null, compile: null, build: null, analyze: null, preflight: null}, transitionId: 0, viewEpoch: 0, loadFailure: null};
+  const state = {analysis: null, mapping: {}, preflight: null, preflightApproved: false, preflightStale: false, background: null, backgroundJob: null, generationPrompt: null, generationPromptTarget: null, generationPromptStoryToken: null, buildActive: false, fileToken: null, sourcePath: null, browseMode: 'script', browseDirectory: '', profiles: [], profileBaseline: null, modelWorkbench: null, discoveredModelCapabilities: [], activeReasoningCapability: null, modelRole: 'text', modelEditorMode: 'new', workflowStage: 'script', review: {token: null, revision: 1, buildId: null, export: null, cards: [], selected: null, filter: 'all', cardLimit: 80}, reviewAssets: null, bgReplaceCard: null, reviewBackgroundRequest: null, operationId: 0, operations: {annotate: null, compile: null, build: null, analyze: null, preflight: null}, transitionId: 0, viewEpoch: 0, loadFailure: null};
   let activeFilePicker = null;
   let settingsPickerMode = '';
   let aaIndexPollTimer = null;
@@ -53,6 +53,15 @@
       : '';
   }
   function status(value) { $('#rvStatus').textContent = value; }
+  function isAndroidNative() { return Boolean(window.HaloCueNative && typeof window.HaloCueNative.shareExport === 'function'); }
+  function hasAndroidExport() { return Boolean(isAndroidNative() && state.review && state.review.export && state.review.export.shareId); }
+  function updateReviewInstallButton() {
+    const button = $('#rvInstall');
+    if (!button) return;
+    const android = isAndroidNative();
+    button.textContent = android ? (hasAndroidExport() ? '分享 .aap' : '重新编译后分享') : '安装到 AA';
+    button.title = android ? (hasAndroidExport() ? '分享已导出的 .aap 文件' : '重新编译以创建可分享文件') : '安装到 AA';
+  }
   function setWorkflowStage(name) {
     const names = ['script', 'preflight', 'prepare', 'review'];
     const currentIndex = Math.max(0, names.indexOf(name));
@@ -218,10 +227,10 @@
   }
 
   function resetReview(message) {
-    state.review = {token: null, revision: 1, buildId: null, cards: [], selected: null, filter: 'all', cardLimit: 80}; state.reviewAssets = null; state.bgReplaceCard = null; state.reviewBackgroundRequest = null;
+    state.review = {token: null, revision: 1, buildId: null, export: null, cards: [], selected: null, filter: 'all', cardLimit: 80}; state.reviewAssets = null; state.bgReplaceCard = null; state.reviewBackgroundRequest = null;
     clearElement($('#rvDraftSelect'));
     const option = document.createElement('option'); option.value = ''; option.textContent = '没有草稿'; $('#rvDraftSelect').appendChild(option);
-    clearElement($('#rvCards')); $('#rvOpen').disabled = true; $('#rvApproveAll').disabled = true; $('#rvValidate').disabled = true; $('#rvCompile').disabled = true; $('#rvInstall').disabled = true; setReviewActions(false, false); showReviewPhase(false);
+    clearElement($('#rvCards')); $('#rvOpen').disabled = true; $('#rvApproveAll').disabled = true; $('#rvValidate').disabled = true; $('#rvCompile').disabled = true; $('#rvInstall').disabled = true; updateReviewInstallButton(); setReviewActions(false, false); showReviewPhase(false);
     destroyPlayer();
     status(message || '尚未打开草稿');
     resetContextStatus();
@@ -1896,10 +1905,10 @@
     const selectedCard = selectedId ? cards.find(function (card) { return card.card_id === selectedId; }) || null : null;
     const selectedIndex = selectedCard ? cards.indexOf(selectedCard) : -1;
     const baseCardLimit = sameDraft ? previousReview.cardLimit || 80 : 80;
-    state.review = {token: token, revision: draft.draft_version, buildId: draft.last_compiled_build_id || null, cards: cards, selected: selectedCard, filter: sameDraft ? previousReview.filter || 'all' : 'all', cardLimit: Math.max(baseCardLimit, selectedIndex + 1)}; const counts = draft.counts || {};
+    state.review = {token: token, revision: draft.draft_version, buildId: draft.last_compiled_build_id || null, export: sameDraft ? previousReview.export || null : null, cards: cards, selected: selectedCard, filter: sameDraft ? previousReview.filter || 'all' : 'all', cardLimit: Math.max(baseCardLimit, selectedIndex + 1)}; const counts = draft.counts || {};
     showReviewPhase(true); setWorkflowStage('review'); $('#rvOpen').disabled = false;
     contextStatus({draft: '草稿：v' + displayedDraftVersion(token, draft.draft_version), save: '保存：未修改', review: '审查：待审 ' + (counts.pending || 0) + ' · 待处理 ' + (counts.blocking_errors || 0), compile: state.review.buildId ? '编译：已完成' : '编译：未编译', install: draft.last_installed_build_id ? ('安装：已安装' + (draft.last_installed_project ? ' · ' + draft.last_installed_project : '')) : '安装：未安装'});
-    status('待审 ' + (counts.pending || 0) + ' · 待处理 ' + (counts.blocking_errors || 0) + ' · v' + displayedDraftVersion(token, draft.draft_version)); $('#rvApproveAll').disabled = false; $('#rvValidate').disabled = false; $('#rvCompile').disabled = Boolean(counts.pending || counts.blocking_errors); $('#rvInstall').disabled = !state.review.buildId; setReviewActions(Boolean(state.review.selected), Boolean(state.review.selected && state.review.selected.kind === 'line'));
+    status('待审 ' + (counts.pending || 0) + ' · 待处理 ' + (counts.blocking_errors || 0) + ' · v' + displayedDraftVersion(token, draft.draft_version)); $('#rvApproveAll').disabled = false; $('#rvValidate').disabled = false; $('#rvCompile').disabled = Boolean(counts.pending || counts.blocking_errors); updateReviewInstallButton(); $('#rvInstall').disabled = isAndroidNative() ? !hasAndroidExport() : !state.review.buildId; setReviewActions(Boolean(state.review.selected), Boolean(state.review.selected && state.review.selected.kind === 'line'));
     if (state.review.selected) $('#rvSelectionLabel').textContent = '已选 #' + state.review.selected.line_no;
     rememberActiveReview({story_token: story.story_token, draft_token: token, card_id: state.review.selected && state.review.selected.card_id});
     renderReviewCards();
@@ -2176,11 +2185,11 @@
   async function compile() {
     const op = beginOperation('compile', state.review.token); if (!op.storyToken || !op.reviewToken) return;
     try {
-      setBusyButton('#rvCompile', true, '编译中…', '编译工程'); status('正在编译工程…'); $('#rvInstall').disabled = true;
+      setBusyButton('#rvCompile', true, '编译中…', '编译工程'); status('正在编译工程…'); state.review.export = null; updateReviewInstallButton(); $('#rvInstall').disabled = true;
       const result = await reviewPost('/api/compile', {}); if (!result || !isCurrentOperation('compile', op)) return; const job = await window.Api.poll('/api/jobs/' + result.job_id, function (item) { return ['succeeded', 'failed', 'cancelled'].includes(item.state); }, {isCurrent: function () { return isCurrentOperation('compile', op); }, onRetry: function () { if (isCurrentOperation('compile', op)) status('连接中断，正在重试'); }}); if (!isCurrentOperation('compile', op)) return;
       if (job.state !== 'succeeded' || !result.build_id) throw new Error(job.error || (job.state === 'cancelled' ? '编译已取消' : '编译失败'));
-      state.review.buildId = result.build_id; $('#rvInstall').disabled = false; status('编译成功 · ' + result.build_id + ' · 可安装'); contextStatus({compile: '编译：已完成 · ' + result.build_id});
-    } catch (error) { if (!isCurrentOperation('compile', op)) return; state.review.buildId = null; $('#rvInstall').disabled = true; status('编译失败：' + error.message); contextStatus({compile: '编译：失败'}); }
+      state.review.buildId = job.result.build_id || result.build_id; state.review.export = job.result.export || null; updateReviewInstallButton(); $('#rvInstall').disabled = isAndroidNative() ? !hasAndroidExport() : false; const exported = state.review.export; status(exported ? ('已导出到 ' + (exported.relativePath || 'Download/HaloCue/') + (exported.displayName || '工程.aap') + ' · 可分享') : ('编译成功 · ' + state.review.buildId + ' · 可安装')); contextStatus({compile: exported ? '编译：已完成 · 可分享' : '编译：已完成 · ' + state.review.buildId});
+    } catch (error) { if (!isCurrentOperation('compile', op)) return; state.review.buildId = null; state.review.export = null; updateReviewInstallButton(); $('#rvInstall').disabled = true; status('编译失败：' + error.message); contextStatus({compile: '编译：失败'}); }
     finally { if (isCurrentOperation('compile', op)) setBusyButton('#rvCompile', false, '', '编译工程'); }
   }
   function updateInstallProjectPreview() {
@@ -2218,6 +2227,11 @@
     const view = captureView();
     if (!review.token || !review.buildId || !isCurrentView(view)) {
       status('请先编译当前草稿');
+      return;
+    }
+    if (isAndroidNative()) {
+      if (hasAndroidExport()) window.HaloCueNative.shareExport(review.export.shareId);
+      else status('请重新编译当前草稿以创建可分享文件');
       return;
     }
     const story = currentStory();

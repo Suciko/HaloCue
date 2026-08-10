@@ -19,6 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import aapaths                                                  # noqa: E402
+import android_exports                                          # noqa: E402
 import asset_catalog                                            # noqa: E402
 import asset_import                                             # noqa: E402
 import assetdb                                                  # noqa: E402
@@ -4381,7 +4382,20 @@ class H(BaseHTTPRequestHandler):
                     return self._send(409, {"ok": False, "code": "compile_input_stale", "e": str(exc)})
 
                 def build_worker_task(job):
-                    return bundle_mgr.execute_build_worker(token=token, build_id=build_id)
+                    result = bundle_mgr.execute_build_worker(token=token, build_id=build_id)
+                    if not aapaths.is_android_runtime():
+                        return result
+                    export = android_exports.publish_aap(
+                        result["aap_file"], result["project"]
+                    )
+                    return {
+                        "ok": True,
+                        "project": result["project"],
+                        "build_id": result["build_id"],
+                        "content_revision": result["content_revision"],
+                        "warnings": result["warnings"],
+                        "export": export,
+                    }
 
                 job_id = global_job_manager.submit(build_worker_task, label=f"compile:{token}", prefix="compile-")
                 return self._send(202, {"ok": True, "job_id": job_id, "build_id": build_id})

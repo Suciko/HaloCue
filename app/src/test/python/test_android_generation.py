@@ -5,12 +5,40 @@ import time
 import urllib.request
 from pathlib import Path
 
+import pytest
+
 import android_web_server
+import android_exports
 import annotate
 import script2aap
 import webui
 from build_bundle import BuildBundleManager
 from draft_store import DraftStore
+
+
+class _FakeAndroidExportBackend:
+    def __init__(self):
+        self.calls = []
+
+    def publishAap(self, source, project):
+        self.calls.append((source, project))
+        return {
+            "shareId": "share-http-compile",
+            "displayName": f"{project}.aap",
+            "relativePath": "Download/HaloCue/",
+            "size": Path(source).stat().st_size,
+        }
+
+
+@pytest.fixture
+def android_export_backend():
+    backend = _FakeAndroidExportBackend()
+    android_exports.set_backend_for_tests(backend)
+    try:
+        yield backend
+    finally:
+        android_exports.set_backend_for_tests(None)
+        android_web_server.stop()
 
 
 def _request(origin: str, path: str, payload=None):
@@ -113,7 +141,9 @@ def test_android_annotation_uses_mock_provider_and_persists_editable_draft(
     android_web_server.stop()
 
 
-def test_android_compile_api_returns_completed_private_aap(tmp_path):
+def test_android_compile_api_returns_completed_private_aap(
+    tmp_path, android_export_backend
+):
     android_web_server.stop()
     server = android_web_server.start(str(tmp_path), "generation-session")
     origin = server["url"].split("?", 1)[0].rstrip("/")
@@ -147,11 +177,17 @@ def test_android_compile_api_returns_completed_private_aap(tmp_path):
         if job["state"] in {"succeeded", "failed", "cancelled"}:
             break
         time.sleep(0.05)
-    android_web_server.stop()
-
     assert job is not None
     assert job["state"] == "succeeded", job
     assert job["result"]["ok"] is True
-    assert Path(job["result"]["aap_file"]).resolve().is_relative_to(
+    assert job["result"]["export"]["shareId"] == "share-http-compile"
+    assert job["result"]["export"]["displayName"] == "AndroidApiGeneration.aap"
+    assert job["result"]["export"]["relativePath"] == "Download/HaloCue/"
+    assert job["result"]["export"]["size"] > 0
+    assert "aap_file" not in job["result"]
+    assert "bundle_dir" not in job["result"]
+    assert android_export_backend.calls and Path(
+        android_export_backend.calls[0][0]
+    ).resolve().is_relative_to(
         (tmp_path / "workspace").resolve()
     )
