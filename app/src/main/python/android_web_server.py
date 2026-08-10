@@ -23,6 +23,7 @@ _LOCK = threading.RLock()
 _SERVER: ThreadingHTTPServer | None = None
 _THREAD: threading.Thread | None = None
 _SESSION_TOKEN = ""
+_RUNTIME_SNAPSHOT: dict[str, object] | None = None
 
 _EMPTY_RESOURCE_INDEX = {"bg": {}, "characters": {}, "sounds": []}
 _ANDROID_ASSET_SUFFIXES = {
@@ -30,22 +31,105 @@ _ANDROID_ASSET_SUFFIXES = {
 }
 
 
-def _copy_legacy_tree(source: Path, target: Path) -> None:
+_LEGACY_DATABASE_FILES = frozenset({
+    "aa_assets.db", "aa_resources.json", "llm_profiles.json",
+})
+_LEGACY_CACHE_ROOTS = frozenset({"official-previews", "thumbs"})
+_LEGACY_CACHE_SUFFIXES = frozenset({".json", ".png", ".jpg", ".jpeg", ".webp"})
+_LEGACY_FILE_LIMIT = 20 * 1024 * 1024
+_LEGACY_TOTAL_LIMIT = 100 * 1024 * 1024
+_LEGACY_COUNT_LIMIT = 5000
+
+
+def _safe_destination(target: Path, destination: Path) -> bool:
+    current = destination
+    while True:
+        if current.is_symlink():
+            return False
+        if current == target:
+            return True
+        if target not in current.parents:
+            return False
+        current = current.parent
+
+
+def _copy_legacy_tree(source: Path, target: Path, *, kind: str) -> None:
     if not source.is_dir():
         return
+    copied_count = 0
+    copied_bytes = 0
     for item in source.rglob("*"):
         if item.is_symlink():
             continue
         relative = item.relative_to(source)
         destination = target / relative
-        if item.is_dir():
-            destination.mkdir(parents=True, exist_ok=True)
-        elif item.is_file() and not destination.exists():
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(item, destination)
+        if not item.is_file() or destination.exists():
+            continue
+        if kind == "databases":
+            allowed = len(relative.parts) == 1 and relative.name in _LEGACY_DATABASE_FILES
+        else:
+            allowed = (
+                bool(relative.parts)
+                and relative.parts[0] in _LEGACY_CACHE_ROOTS
+                and item.suffix.casefold() in _LEGACY_CACHE_SUFFIXES
+            )
+        if not allowed:
+            continue
+        size = item.stat().st_size
+        if size > _LEGACY_FILE_LIMIT or copied_count >= _LEGACY_COUNT_LIMIT:
+            continue
+        if copied_bytes + size > _LEGACY_TOTAL_LIMIT:
+            break
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if not _safe_destination(target, destination.parent):
+            continue
+        shutil.copy2(item, destination)
+        copied_count += 1
+        copied_bytes += size
+
+
+def _capture_runtime_snapshot() -> None:
+    global _RUNTIME_SNAPSHOT
+    if _RUNTIME_SNAPSHOT is not None:
+        return
+    names = (
+        "HERE", "STORY_ROOT", "DB", "INDEX", "LLMCFG", "THUMBS",
+        "MODEL_PROFILES", "OFFICIAL_PREVIEW_INDEX", "STORY_FILE_PICKER",
+        "SETTINGS_FILE_PICKER", "ASSET_FILE_PICKER", "STORY_WORKSPACE",
+        "HISTORY_ASSET_BROWSER",
+    )
+    _RUNTIME_SNAPSHOT = {
+        "environment": {
+            key: os.environ.get(key)
+            for key in (
+                "HALOCUE_PLATFORM", "HALOCUE_ANDROID_FILES_DIR",
+                "HALOCUE_WORKSPACE_DIR",
+            )
+        },
+        "webui": {name: getattr(webui, name) for name in names},
+        "cfg": dict(webui.CFG),
+    }
+
+
+def _restore_runtime_snapshot() -> None:
+    global _RUNTIME_SNAPSHOT
+    snapshot = _RUNTIME_SNAPSHOT
+    _RUNTIME_SNAPSHOT = None
+    if snapshot is None:
+        return
+    for key, value in snapshot["environment"].items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = str(value)
+    for name, value in snapshot["webui"].items():
+        setattr(webui, name, value)
+    webui.CFG.clear()
+    webui.CFG.update(snapshot["cfg"])
 
 
 def configure_android_runtime(workspace_dir: str) -> None:
+    _capture_runtime_snapshot()
     root = Path(workspace_dir).resolve()
     workspace = root / "workspace"
     databases = workspace / "databases"
@@ -53,8 +137,8 @@ def configure_android_runtime(workspace_dir: str) -> None:
     workspace.mkdir(parents=True, exist_ok=True)
     databases.mkdir(parents=True, exist_ok=True)
     cache.mkdir(parents=True, exist_ok=True)
-    _copy_legacy_tree(root / "databases", databases)
-    _copy_legacy_tree(root / "cache", cache)
+    _copy_legacy_tree(root / "databases", databases, kind="databases")
+    _copy_legacy_tree(root / "cache", cache, kind="cache")
     os.environ["HALOCUE_PLATFORM"] = "android"
     os.environ["HALOCUE_ANDROID_FILES_DIR"] = str(root)
     os.environ["HALOCUE_WORKSPACE_DIR"] = str(workspace)
@@ -202,3 +286,4 @@ def stop() -> None:
         server.server_close()
     if thread is not None:
         thread.join(timeout=2)
+    _restore_runtime_snapshot()

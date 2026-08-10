@@ -910,7 +910,7 @@ def run_face_job(payload: dict):
             spine_signature=payload.get("spine_signature") or "",
             outfit_key=payload.get("outfit_key") or "",
             spine_cli=payload["spine_cli"],
-            cache_root=os.path.join(HERE, "out", "spine-face-cache"),
+            cache_root=str(_runtime_output_path("spine-face-cache")),
             provider=provider,
             force_vision=bool(payload.get("force_vision")),
             progress=_face_progress,
@@ -975,8 +975,20 @@ def db():
     return assetdb.connect(DB)
 
 
+def _settings_config_path() -> Path:
+    if aapaths.is_android_runtime():
+        return aapaths.app_storage_path("settings", "aa_config.json")
+    return Path(HERE) / "aa_config.json"
+
+
+def _runtime_output_path(*parts: object) -> Path:
+    if aapaths.is_android_runtime():
+        return aapaths.app_storage_path("out", *parts)
+    return Path(HERE).joinpath("out", *(str(part) for part in parts))
+
+
 def _settings_values() -> dict[str, object]:
-    config_path = Path(HERE) / "aa_config.json"
+    config_path = _settings_config_path()
     if not config_path.is_file():
         return {}
     try:
@@ -988,7 +1000,7 @@ def _settings_values() -> dict[str, object]:
 
 def _current_aa_discovery() -> AADiscoveryResult:
     """Refresh AA's own paths without modifying the installed application."""
-    config_path = Path(HERE) / "aa_config.json"
+    config_path = _settings_config_path()
     values = _settings_values()
     configured_executable = str(values.get("aa_executable") or "").strip()
     configured_data = str(CFG.get("aa_data") or "").strip()
@@ -1088,7 +1100,7 @@ def _public_aa_status(
         resource = {"status": probe.status, "path": str(discovery.resource_cache)}
     index = _preview_public_state(preview_state or _preview_state_for_discovery(discovery))
     data = discovery.data or (Path(str(CFG.get("aa_data"))) if CFG.get("aa_data") else None)
-    return {
+    result = {
         "connected": bool(discovery.projects),
         "path": str(data or ""),
         "program": program,
@@ -1097,6 +1109,11 @@ def _public_aa_status(
         "resource": resource,
         "preview_index": index,
     }
+    if aapaths.is_android_runtime():
+        result["path"] = ""
+        for section in ("program", "projects", "saves", "resource"):
+            result[section]["path"] = ""
+    return result
 
 
 def _temporary_profile_provider(payload):
@@ -1344,7 +1361,7 @@ def setup_status():
         finally:
             con.close()
     model = current_model_status()
-    config_path = Path(HERE) / "aa_config.json"
+    config_path = _settings_config_path()
     configured_spine = str(CFG.get("spine_cli") or "").strip()
     if not configured_spine and config_path.is_file():
         try:
@@ -1373,7 +1390,8 @@ def setup_status():
 
 
 def _write_settings_config(**updates: str) -> None:
-    config_path = Path(HERE) / "aa_config.json"
+    config_path = _settings_config_path()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     values = _settings_values()
     for key, value in updates.items():
         if value:
@@ -3064,15 +3082,16 @@ def run_build(payload, job=None):
                 assetdb.remember_alias(con, who, m.get("id", ""), m["kind"])
         attach_registered_variants(cast, con, project_dir)
 
-        cpath = os.path.join(HERE, "cast-" + re.sub(r"[^\w-]", "_", project)[:40] + ".json")
+        cpath = str(_runtime_output_path(
+            "cast-" + re.sub(r"[^\w-]", "_", project)[:40] + ".json"
+        ))
+        Path(cpath).parent.mkdir(parents=True, exist_ok=True)
         with open(cpath, "w", encoding="utf-8") as fh:
             json.dump(cast, fh, ensure_ascii=False, indent=2)
         jlog(f"演员表已写入 {os.path.basename(cpath)}")
-        index_path = os.path.join(
-            HERE,
-            "out",
-            re.sub(r"[^\w-]", "_", project)[:40] + ".resources.json",
-        )
+        index_path = str(_runtime_output_path(
+            re.sub(r"[^\w-]", "_", project)[:40] + ".resources.json"
+        ))
         prepare_project_index(INDEX, project_dir, index_path, con=con)
 
         src = script
@@ -3082,8 +3101,9 @@ def run_build(payload, job=None):
             selected_provider = annotation_provider(
                 payload.get("model_profile_id")
             )
-            out = os.path.join(HERE, "out",
-                               re.sub(r"[^\w-]", "_", project)[:40] + ".annotated.txt")
+            out = str(_runtime_output_path(
+                re.sub(r"[^\w-]", "_", project)[:40] + ".annotated.txt"
+            ))
             os.makedirs(os.path.dirname(out), exist_ok=True)
             opts = {
                 "script": script,
@@ -3154,13 +3174,13 @@ def annotate_draft_worker(payload, job=None):
     attach_registered_variants(cast, con, project_dir)
 
     token = f"draft-{uuid.uuid4().hex[:12]}"
-    cpath = os.path.join(HERE, "out", token + ".cast.json")
+    cpath = str(_runtime_output_path(token + ".cast.json"))
     os.makedirs(os.path.dirname(cpath), exist_ok=True)
     with open(cpath, "w", encoding="utf-8") as fh:
         json.dump(cast, fh, ensure_ascii=False, indent=2)
-    index_path = os.path.join(HERE, "out", token + ".resources.json")
+    index_path = str(_runtime_output_path(token + ".resources.json"))
     prepare_project_index(INDEX, project_dir, index_path, con=con)
-    out_path = os.path.join(HERE, "out", token + ".annotated.txt")
+    out_path = str(_runtime_output_path(token + ".annotated.txt"))
 
     source_text = ""
     try:
@@ -3196,7 +3216,7 @@ def annotate_draft_worker(payload, job=None):
             "index": index_path,
             "usage_chain": payload.get("usage_chain") or [],
             "agent_enabled": payload.get("agent_enabled", True),
-            "checkpoint_dir": os.path.join(HERE, "out", "annotation-checkpoints"),
+            "checkpoint_dir": str(_runtime_output_path("annotation-checkpoints")),
             "progress": annotation_progress,
             "model_activity": annotation_model_activity,
             "cancelled": job.is_cancel_requested if job else None,
@@ -3366,7 +3386,7 @@ def get_sound_file(name: str, sound_dir: Optional[str] = None) -> Optional[Dict[
 
     if CFG.get("aa_data"):
         search_paths.append(Path(CFG["aa_data"]) / "sounds")
-    search_paths.extend([Path(HERE) / "out", Path(HERE) / "sounds"])
+    search_paths.extend([_runtime_output_path(), Path(HERE) / "sounds"])
 
     for sp in search_paths:
         if sp.is_dir():
@@ -3585,7 +3605,7 @@ class H(BaseHTTPRequestHandler):
                 face = q.get("face", "")
                 v_key = spine_face_analysis.make_variant_key(ident, sig, outfit, face)
                 # 尝试从缓存读取变体隔离的表情图片
-                cache_dir = Path(HERE) / "out" / "spine-face-cache" / sig
+                cache_dir = _runtime_output_path("spine-face-cache", sig)
                 f_path = cache_dir / f"{face}.png"
                 if f_path.is_file():
                     return self._send(200, f_path.read_bytes(), "image/png")
@@ -3959,7 +3979,7 @@ class H(BaseHTTPRequestHandler):
                             "code": "aa_install_required",
                             "e": "请选择 AzureArchive.exe 或 AA 安装目录",
                         })
-                    config_path = Path(HERE) / "aa_config.json"
+                    config_path = _settings_config_path()
                     discovery = discover_aa(
                         selection=selection,
                         config_path=config_path,

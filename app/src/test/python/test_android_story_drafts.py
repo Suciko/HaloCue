@@ -133,6 +133,10 @@ def test_android_runtime_copies_legacy_database_and_cache_into_workspace(tmp_pat
     legacy_profile = tmp_path / "databases" / "llm_profiles.json"
     legacy_profile.parent.mkdir(parents=True)
     legacy_profile.write_text('{"profiles": []}', encoding="utf-8")
+    legacy_secret = tmp_path / "databases" / "llm.json"
+    legacy_secret.write_text('{"api_key": "must-not-migrate"}', encoding="utf-8")
+    legacy_unknown = tmp_path / "databases" / "notes.txt"
+    legacy_unknown.write_text("private notes", encoding="utf-8")
     legacy_preview = tmp_path / "cache" / "official-previews" / "manifest.json"
     legacy_preview.parent.mkdir(parents=True)
     legacy_preview.write_text('{"status": "ready"}', encoding="utf-8")
@@ -147,6 +151,51 @@ def test_android_runtime_copies_legacy_database_and_cache_into_workspace(tmp_pat
     ).read_text(encoding="utf-8") == '{"status": "ready"}'
     assert legacy_profile.is_file()
     assert legacy_preview.is_file()
+    assert not (tmp_path / "workspace" / "databases" / "llm.json").exists()
+    assert not (tmp_path / "workspace" / "databases" / "notes.txt").exists()
+
+
+def test_android_runtime_write_paths_and_public_status_are_private(tmp_path):
+    android_web_server.stop()
+    server = android_web_server.start(str(tmp_path), "story-session")
+    origin = server["url"].split("?", 1)[0].rstrip("/")
+    try:
+        assert webui._settings_config_path().resolve() == (
+            tmp_path / "workspace" / "settings" / "aa_config.json"
+        ).resolve()
+        assert webui._runtime_output_path("annotation-checkpoints").resolve() == (
+            tmp_path / "workspace" / "out" / "annotation-checkpoints"
+        ).resolve()
+        status = _request(origin, "/api/setup/status", method="GET")
+    finally:
+        android_web_server.stop()
+
+    serialized = json.dumps(status)
+    assert str(tmp_path) not in serialized
+    assert status["aa"]["path"] == ""
+    assert status["aa"]["projects"]["path"] == ""
+
+
+def test_android_server_stop_restores_pc_webui_globals(tmp_path, monkeypatch):
+    android_web_server.stop()
+    monkeypatch.delenv("HALOCUE_PLATFORM", raising=False)
+    monkeypatch.delenv("HALOCUE_ANDROID_FILES_DIR", raising=False)
+    monkeypatch.delenv("HALOCUE_WORKSPACE_DIR", raising=False)
+    original = {
+        "here": webui.HERE,
+        "db": webui.DB,
+        "index": webui.INDEX,
+        "cfg": dict(webui.CFG),
+    }
+
+    android_web_server.start(str(tmp_path), "story-session")
+    android_web_server.stop()
+
+    assert "HALOCUE_PLATFORM" not in __import__("os").environ
+    assert webui.HERE == original["here"]
+    assert webui.DB == original["db"]
+    assert webui.INDEX == original["index"]
+    assert webui.CFG == original["cfg"]
 
 
 def test_pc_story_index_keeps_webui_here_as_its_storage_root(tmp_path, monkeypatch):
