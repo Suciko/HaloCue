@@ -16,9 +16,7 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 90% 3%, rgba(91, 141, 239, 0.16), transparent 34%),
-    #f4f7fb;
+  background: #f4f7fb;
 }
 
 .shell {
@@ -41,7 +39,7 @@ body {
   width: 54px;
   height: 54px;
   place-items: center;
-  border-radius: 17px;
+  border-radius: 8px;
   color: white;
   background: linear-gradient(145deg, #77a8ff, #4e79da);
   box-shadow: 0 12px 28px rgba(57, 96, 178, 0.25);
@@ -62,7 +60,7 @@ body {
 h1 {
   margin: 3px 0 5px;
   font-size: 25px;
-  letter-spacing: -0.035em;
+  letter-spacing: 0;
 }
 
 .intro,
@@ -82,7 +80,7 @@ h1 {
 .compiler-card,
 .next-step {
   border: 1px solid rgba(96, 118, 158, 0.14);
-  border-radius: 21px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 10px 30px rgba(41, 58, 89, 0.07);
 }
@@ -95,7 +93,7 @@ h1 {
 .compiler-card h2 {
   margin: 7px 0 18px;
   font-size: 20px;
-  letter-spacing: -0.025em;
+  letter-spacing: 0;
 }
 
 .compiler-card label {
@@ -110,22 +108,11 @@ input,
 textarea {
   width: 100%;
   border: 1px solid #d9e1ed;
-  border-radius: 13px;
+  border-radius: 6px;
   outline: none;
   color: #152238;
   background: #f8faff;
   font: inherit;
-}
-
-.accessibility-note {
-  margin: 17px 0 0;
-  padding: 13px 14px;
-  border: 1px solid #dbe5f5;
-  border-radius: 13px;
-  color: #53657f;
-  background: #f2f6fd;
-  font-size: 12px;
-  line-height: 1.65;
 }
 
 input {
@@ -162,13 +149,19 @@ textarea:focus {
   color: #c03f4d;
 }
 
-.compile-path {
+.export-location {
   display: block;
-  margin-top: 9px;
+  margin: 8px 2px 0;
+  padding: 9px 10px;
+  border: 1px solid #dce4ef;
+  border-radius: 5px;
   overflow-wrap: anywhere;
-  color: #697991;
-  font-size: 10px;
+  color: #53657f;
+  background: #f8faff;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
   line-height: 1.45;
+  user-select: text;
 }
 
 .status-card {
@@ -206,7 +199,7 @@ textarea:focus {
 .next-step h2 {
   margin: 7px 0 8px;
   font-size: 20px;
-  letter-spacing: -0.025em;
+  letter-spacing: 0;
 }
 
 button {
@@ -214,7 +207,7 @@ button {
   min-height: 48px;
   margin-top: 20px;
   border: 0;
-  border-radius: 15px;
+  border-radius: 7px;
   color: white;
   background: #4f7ddc;
   font: inherit;
