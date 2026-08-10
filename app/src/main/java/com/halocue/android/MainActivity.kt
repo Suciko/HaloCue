@@ -2,14 +2,18 @@ package com.halocue.android
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.annotation.VisibleForTesting
 import androidx.core.view.ViewCompat
@@ -18,6 +22,40 @@ import androidx.core.view.WindowInsetsCompat
 import java.io.File
 import java.util.concurrent.Executors
 import org.json.JSONObject
+
+internal fun isInternalWebUiUrl(uri: Uri, activePort: Int?): Boolean {
+    if (uri.toString() == "file:///android_asset/index.html") return true
+    return activePort != null &&
+        uri.scheme == "http" &&
+        uri.host == "127.0.0.1" &&
+        uri.port == activePort
+}
+
+internal fun createInsetWebViewContainer(context: Context, content: View): FrameLayout =
+    FrameLayout(context).apply {
+        addView(
+            content,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(0, bars.top, 0, bars.bottom)
+            insets
+        }
+    }
+
+@Suppress("SetJavaScriptEnabled")
+internal fun createSecureWebView(context: Context): WebView = WebView(context).apply {
+    settings.javaScriptEnabled = true
+    settings.domStorageEnabled = true
+    settings.allowContentAccess = false
+    settings.allowFileAccess = false
+    settings.allowFileAccessFromFileURLs = false
+    settings.allowUniversalAccessFromFileURLs = false
+}
 
 class MainActivity : Activity() {
     private lateinit var webView: WebView
@@ -39,7 +77,7 @@ class MainActivity : Activity() {
 
         webRuntime = LocalWebRuntime(this)
         webView = createWebView()
-        setContentView(webView)
+        setContentView(createInsetWebViewContainer(this, webView))
         startLocalWebUi()
     }
 
@@ -77,16 +115,9 @@ class MainActivity : Activity() {
         }
     }
 
-    @Suppress("SetJavaScriptEnabled")
-    private fun createWebView(): WebView = WebView(this).apply {
+    private fun createWebView(): WebView = createSecureWebView(this).apply {
         id = R.id.main_webview
         setBackgroundColor(Color.rgb(244, 247, 251))
-        settings.javaScriptEnabled = true
-        settings.domStorageEnabled = true
-        settings.allowContentAccess = false
-        settings.allowFileAccess = false
-        settings.allowFileAccessFromFileURLs = false
-        settings.allowUniversalAccessFromFileURLs = false
         addJavascriptInterface(AndroidBridge(), NATIVE_BRIDGE_NAME)
 
         webViewClient = object : WebViewClient() {
@@ -104,19 +135,10 @@ class MainActivity : Activity() {
             }
         }
 
-        ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            view.setPadding(0, bars.top, 0, bars.bottom)
-            insets
-        }
     }
 
     private fun isInternalUrl(uri: Uri): Boolean {
-        if (uri.toString() == FALLBACK_ASSET_URL) return true
-        val session = activeSession ?: return false
-        return uri.scheme == "http" &&
-            uri.host == LOOPBACK_HOST &&
-            uri.port == session.port
+        return isInternalWebUiUrl(uri, activeSession?.port)
     }
 
     private fun openExternalUrl(uri: Uri): Boolean = try {
@@ -244,7 +266,6 @@ class MainActivity : Activity() {
 
     companion object {
         private const val AA_PACKAGE = "com.foxxlight.AzureArchive"
-        private const val LOOPBACK_HOST = "127.0.0.1"
         private const val FALLBACK_ASSET_NAME = "index.html"
         private const val FALLBACK_ASSET_URL = "file:///android_asset/index.html"
         private const val NATIVE_BRIDGE_NAME = "HaloCueNative"

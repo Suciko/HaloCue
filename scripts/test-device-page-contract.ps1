@@ -1,66 +1,107 @@
 $ErrorActionPreference = "Stop"
 
+$pythonRoot = Join-Path $PSScriptRoot "..\app\src\main\python"
+$uiPath = Join-Path $pythonRoot "ui.html"
+$uiHtml = Get-Content -Raw -LiteralPath $uiPath
+
+$requiredScripts = @(
+    '/js/api.js',
+    '/js/story.js',
+    '/js/story_picker.js',
+    '/js/assets.js',
+    '/js/history.js',
+    '/js/library_preview.js',
+    '/js/library_transfer.js',
+    '/js/library_copies.js',
+    '/js/library_faces.js',
+    '/js/library_import.js',
+    '/js/library.js',
+    '/js/model.js',
+    '/js/cards.js',
+    '/js/player.js',
+    '/js/app.js'
+)
+foreach ($scriptPath in $requiredScripts) {
+    $scriptTag = 'src="' + $scriptPath + '"'
+    if ($uiHtml -notmatch [regex]::Escape($scriptTag)) {
+        throw "ui.html is missing required script: $scriptPath"
+    }
+}
+
+$requiredRoots = @('storyContextBar', 'view-create', 'modelSettings', 'reviewPhase', 'rvCards', 'assetWorkbench')
+foreach ($rootId in $requiredRoots) {
+    $rootTag = 'id="' + $rootId + '"'
+    if ($uiHtml -notmatch [regex]::Escape($rootTag)) {
+        throw "ui.html is missing required feature root: $rootId"
+    }
+}
+if ($uiHtml -match 'HALOCUE\s+FOR\s+ANDROID|window\.HaloCueApp\.bootstrap') {
+    throw "ui.html still contains the Android MVP bootstrap surface"
+}
+
+$layoutCss = Get-Content -Raw -LiteralPath (Join-Path $pythonRoot "css\layout.css")
+$finalMobileMarker = "/* Final narrow-screen overrides must follow full-screen workbench component rules. */"
+$finalMobileStart = $layoutCss.IndexOf($finalMobileMarker)
+if ($finalMobileStart -lt 0) {
+    throw "layout.css is missing the final mobile override block"
+}
+$finalMobileCss = $layoutCss.Substring($finalMobileStart)
+$requiredMobileTouchSelectors = @(
+    '.story-picker-commandbar .icon-button',
+    '.story-picker-footer button',
+    '.face-card-actions button',
+    '.face-card-editor button'
+)
+foreach ($selector in $requiredMobileTouchSelectors) {
+    if (-not $finalMobileCss.Contains($selector)) {
+        throw "Final mobile overrides are missing touch target: $selector"
+    }
+}
+
 $adbPath = Join-Path $env:LOCALAPPDATA "Android\Sdk\platform-tools\adb.exe"
 if (-not (Test-Path -LiteralPath $adbPath)) {
     throw "ADB not found at $adbPath"
 }
+$deviceLines = & $adbPath devices
+$hasDevice = @($deviceLines | Where-Object { $_ -match '^\S+\s+device$' }).Count -gt 0
+if (-not $hasDevice) {
+    throw "No connected Android device or emulator is available"
+}
 
 & $adbPath shell am force-stop com.halocue.android | Out-Null
-& $adbPath shell monkey -p com.halocue.android -c android.intent.category.LAUNCHER 1 | Out-Null
+$ErrorActionPreference = "Continue"
+$monkeyOutput = & $adbPath shell monkey -p com.halocue.android -c android.intent.category.LAUNCHER 1 2>&1
+$monkeyExitCode = $LASTEXITCODE
+$ErrorActionPreference = "Stop"
+if ($monkeyExitCode -ne 0) {
+    throw "Failed to launch HaloCue: $($monkeyOutput -join ' ')"
+}
 $document = $null
-for ($attempt = 0; $attempt -lt 30; $attempt++) {
-    Start-Sleep -Seconds 1
+for ($attempt = 0; $attempt -lt 12; $attempt++) {
+    Start-Sleep -Milliseconds 250
     & $adbPath shell uiautomator dump /sdcard/halocue-page-contract.xml | Out-Null
     $xmlText = & $adbPath exec-out cat /sdcard/halocue-page-contract.xml
     $candidate = [xml]$xmlText
-    if ($null -ne $candidate.SelectSingleNode("//*[@resource-id='compile-aap']")) {
+    if ($null -ne $candidate.SelectSingleNode("//*[@resource-id='view-create']")) {
         $document = $candidate
         break
     }
 }
 if ($null -eq $document) {
-    throw "HaloCue page did not become ready within 30 seconds"
+    throw "Full PC WebUI did not become ready within the device contract timeout"
 }
-$expectedButton = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("55Sf5oiQ5bel56iL5paH5Lu2"))
-$expectedStatus = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("5bCa5pyq55Sf5oiQ"))
-$expectedShare = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("5YiG5Lqr5bel56iL5paH5Lu2"))
-$forbiddenTexts = @(
-    [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6Ieq5Yqo5a+85YWl6L6F5Yqp5Yqf6IO9")),
-    [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("57un57ut5a+85YWl")),
-    [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("55Sf5oiQ5bm25a+85YWl5Y6f54mIIEFB"))
-)
 
-function Get-RenderedNode([string]$resourceId) {
-    $node = $document.SelectSingleNode("//*[@resource-id='$resourceId']")
+$requiredRenderedRoots = @('appShell', 'view-create', 'workflowProgress', 'readyModel', 's1')
+foreach ($rootId in $requiredRenderedRoots) {
+    $node = $document.SelectSingleNode("//*[@resource-id='$rootId']")
     if ($null -eq $node) {
-        throw "Missing rendered node: $resourceId"
+        throw "Missing rendered feature root: $rootId"
     }
-    return $node
-}
-
-$buttonText = [string](Get-RenderedNode "compile-aap").text
-if ($buttonText -ne $expectedButton) {
-    throw "Primary button mismatch: '$buttonText'"
-}
-
-$statusText = [string](Get-RenderedNode "compile-status").text
-if ($statusText -ne $expectedStatus) {
-    throw "Initial status mismatch: '$statusText'"
-}
-
-$shareNode = Get-RenderedNode "share-aap"
-if ([string]$shareNode.text -ne $expectedShare) {
-    throw "Share button mismatch: '$([string]$shareNode.text)'"
-}
-if ([string]$shareNode.enabled -ne "false") {
-    throw "Share button must start disabled"
 }
 
 $renderedText = (($document.SelectNodes("//*[@text]") | ForEach-Object { [string]$_.text }) -join "`n")
-foreach ($forbiddenText in $forbiddenTexts) {
-    if ($renderedText.Contains($forbiddenText)) {
-        throw "Unsupported assisted-import copy is still rendered: '$forbiddenText'"
-    }
+if ($renderedText -match 'HALOCUE\s+FOR\s+ANDROID') {
+    throw "Android MVP copy is still rendered"
 }
 
-Write-Output "Device page contract passed"
+Write-Output "Full PC WebUI device contract passed"

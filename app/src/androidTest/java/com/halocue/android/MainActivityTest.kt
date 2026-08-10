@@ -1,11 +1,16 @@
 package com.halocue.android
 
+import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
-import android.os.SystemClock
-import androidx.test.core.app.ActivityScenario
+import android.view.View
+import android.view.WindowManager
+import android.webkit.WebView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import org.junit.Assert.assertFalse
@@ -17,31 +22,65 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class MainActivityTest {
     @Test
-    fun loads_the_loopback_webui_and_restricts_internal_navigation() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            var loadedUrl: String? = null
-            val deadline = SystemClock.elapsedRealtime() + WEB_UI_TIMEOUT_MS
-            while (loadedUrl?.startsWith(LOOPBACK_PREFIX) != true &&
-                SystemClock.elapsedRealtime() < deadline
-            ) {
-                scenario.onActivity { activity ->
-                    loadedUrl = activity.webViewForTest().url
-                }
-                if (loadedUrl?.startsWith(LOOPBACK_PREFIX) != true) {
-                    SystemClock.sleep(POLL_INTERVAL_MS)
-                }
-            }
+    fun secure_webview_disables_file_and_content_access() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        lateinit var webView: WebView
 
-            assertTrue("Expected loopback WebUI, got $loadedUrl", loadedUrl?.startsWith(LOOPBACK_PREFIX) == true)
-            scenario.onActivity { activity ->
-                val activeUri = Uri.parse(loadedUrl)
-                assertFalse(activity.webViewForTest().settings.allowFileAccess)
-                assertTrue(activity.isInternalUrlForTest(activeUri))
-                assertFalse(activity.isInternalUrlForTest(Uri.parse("https://example.com")))
-                assertFalse(activity.isInternalUrlForTest(Uri.parse("http://127.0.0.1:1/")))
-                assertTrue(activity.isInternalUrlForTest(Uri.parse(FALLBACK_ASSET_URL)))
-            }
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            webView = createSecureWebView(context)
+            assertTrue(webView.settings.javaScriptEnabled)
+            assertTrue(webView.settings.domStorageEnabled)
+            assertFalse(webView.settings.allowContentAccess)
+            assertFalse(webView.settings.allowFileAccess)
+            assertFalse(webView.settings.allowFileAccessFromFileURLs)
+            assertFalse(webView.settings.allowUniversalAccessFromFileURLs)
+            webView.destroy()
         }
+    }
+
+    @Test
+    fun system_bar_insets_are_applied_to_the_webview_container() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val content = View(context)
+        val container = createInsetWebViewContainer(context, content)
+        val insets = WindowInsetsCompat.Builder()
+            .setInsets(
+                WindowInsetsCompat.Type.systemBars(),
+                androidx.core.graphics.Insets.of(0, 96, 0, 72),
+            )
+            .build()
+
+        ViewCompat.dispatchApplyWindowInsets(container, insets)
+
+        assertTrue(container.paddingTop == 96)
+        assertTrue(container.paddingBottom == 72)
+        assertTrue(content.paddingTop == 0)
+        assertTrue(content.paddingBottom == 0)
+    }
+
+    @Test
+    fun main_activity_resizes_for_the_soft_keyboard() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val activityInfo = context.packageManager.getActivityInfo(
+            ComponentName(context, MainActivity::class.java),
+            0,
+        )
+
+        assertTrue(
+            activityInfo.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST ==
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
+        )
+    }
+
+    @Test
+    fun loopback_policy_rejects_unrelated_origins() {
+        val activePort = 43123
+        assertTrue(isInternalWebUiUrl(Uri.parse("http://127.0.0.1:$activePort/?session=test"), activePort))
+        assertTrue(isInternalWebUiUrl(Uri.parse(FALLBACK_ASSET_URL), activePort))
+        assertFalse(isInternalWebUiUrl(Uri.parse("https://example.com"), activePort))
+        assertFalse(isInternalWebUiUrl(Uri.parse("http://127.0.0.1:1/"), activePort))
+        assertFalse(isInternalWebUiUrl(Uri.parse("http://localhost:$activePort/"), activePort))
+        assertFalse(isInternalWebUiUrl(Uri.parse("http://127.0.0.1:$activePort/"), null))
     }
 
     @Test
@@ -59,9 +98,6 @@ class MainActivityTest {
 
     companion object {
         private const val AA_PACKAGE = "com.foxxlight.AzureArchive"
-        private const val LOOPBACK_PREFIX = "http://127.0.0.1:"
         private const val FALLBACK_ASSET_URL = "file:///android_asset/index.html"
-        private const val WEB_UI_TIMEOUT_MS = 20_000L
-        private const val POLL_INTERVAL_MS = 100L
     }
 }

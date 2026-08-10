@@ -915,3 +915,15 @@ button:disabled {
   .background-label-fields label.is-wide { grid-column: auto; }
   .background-label-actions button { flex: 1 1 130px; }
 }
+
+@media (max-width: 600px) {
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  button,
+  input[type="button"],
+  input[type="submit"] {
+    min-height: 44px;
+  }
+}

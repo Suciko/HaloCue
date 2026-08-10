@@ -327,11 +327,11 @@ git commit -m "feat(android): load the full PC interface"
 - Consumes: unchanged PC DOM IDs and modules.
 - Produces: usable 390 px and tablet layouts without changing desktop information architecture.
 
-- [ ] **Step 1: Extend the device contract before CSS changes**
+- [x] **Step 1: Extend the device contract before CSS changes**
 
 Require `ui.html` to load `js/api.js`, `js/app.js`, `js/model.js`, `js/story.js`, and `js/library.js`; require the rendered document to expose the existing model, story, draft, and asset-library roots. Assert no MVP-only heading `HALOCUE FOR ANDROID` is present.
 
-- [ ] **Step 2: Run contract to verify RED**
+- [x] **Step 2: Run contract to verify RED**
 
 Build and install the APK, then run:
 
@@ -341,15 +341,15 @@ powershell -ExecutionPolicy Bypass -File scripts/test-device-page-contract.ps1
 
 Expected: at least one mobile layout or full-UI assertion fails.
 
-- [ ] **Step 3: Add Android-only responsive overrides**
+- [x] **Step 3: Add Android-only responsive overrides**
 
 At the end of `layout.css`, add a media query for `max-width: 600px` which keeps existing navigation and workbench structure but ensures one-column panels, scrollable tab strips, `min-width: 0` for grid children, 44 px minimum command targets, and safe-area padding using `env(safe-area-inset-*)`. Do not rename DOM IDs or replace desktop modules.
 
-- [ ] **Step 4: Verify installed page contract**
+- [x] **Step 4: Verify installed page contract**
 
 Re-sync, rebuild, install, and rerun the contract. Expected: the full PC UI is present, the local service is ready, and the contract passes on the target device.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add app/src/main/python/css app/src/main/python/PC运行时来源.json scripts/test-device-page-contract.ps1
@@ -366,7 +366,7 @@ git commit -m "fix(android): make the PC WebUI usable on mobile"
 - Consumes: Tasks 1-5.
 - Produces: a testable APK whose first screen is the original PC interface served locally.
 
-- [ ] **Step 1: Run a clean host build and Python suite**
+- [x] **Step 1: Run a clean host build and Python suite**
 
 ```powershell
 .\gradlew.bat clean testDebugUnitTest assembleDebug assembleDebugAndroidTest
@@ -378,11 +378,11 @@ git diff --check
 
 Expected: every command succeeds.
 
-- [ ] **Step 2: Run target-device verification**
+- [x] **Step 2: Run target-device verification**
 
 Install the APK, run `connectedDebugAndroidTest`, run the page contract, and manually confirm model/story/library pages open without a blank WebView. Confirm a request without `X-HaloCue-Session` returns HTTP 403.
 
-- [ ] **Step 3: Record results and commit**
+- [x] **Step 3: Record results and commit**
 
 Record test counts, device, local URL behavior, sync manifest status, and remaining disabled platform actions in `安卓端接手记忆.md`; mark completed checkboxes in this plan.
 
