@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from draft_store import DraftStore, calc_sha256
 from document import parse_document_lossless
-from script2aap import compile_script
+from script2aap import compile_script, warn as compiler_warnings
 
 HERE = Path(__file__).resolve().parent
 
@@ -133,6 +133,8 @@ class BuildBundleManager:
 
         script_tmp = tmp_build_dir / "script.txt"
         script_tmp.write_text(edited_text, encoding="utf-8")
+        compiler_output = tmp_build_dir / "compiler-output"
+        compiler_warnings.items.clear()
 
         # 调纯函数编译生成工程
         res = compile_script(
@@ -142,6 +144,7 @@ class BuildBundleManager:
                 "cast": str(input_dir / "cast.json"),
                 "index": str(input_dir / "resources.json"),
                 "install": False,
+                "output_dir": str(compiler_output),
             }
         )
 
@@ -231,7 +234,11 @@ class BuildBundleManager:
                 session_file.write_text(json.dumps(sess, ensure_ascii=False, indent=2), encoding="utf-8")
 
         return {
+            "ok": True,
+            "project": project_name,
+            "aap_file": str(final_bundle_dir / f"{project_name}.aap"),
             "build_id": build_id,
             "bundle_dir": str(final_bundle_dir),
             "content_revision": content_rev,
+            "warnings": [message for _line, message in compiler_warnings.items],
         }

@@ -1187,6 +1187,7 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
     index_path = options.get("index") or os.path.join(HERE, "aa_resources.json")
     aa_data = options.get("aa_data")
     install = options.get("install", False)
+    output_dir = options.get("output_dir")
     voices = options.get("voices")
     dry_run = options.get("dry_run", False)
 
@@ -1207,7 +1208,13 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
     )
     story_root = os.path.dirname(os.path.dirname(HERE))
     install_target = None
-    outdir = os.path.join(aa_data, "projects") if install else os.path.join(HERE, "out")
+    if install and output_dir:
+        raise ValueError("output_dir cannot be combined with install")
+    outdir = (
+        os.path.join(aa_data, "projects")
+        if install
+        else os.path.abspath(str(output_dir or os.path.join(HERE, "out")))
+    )
     proj_res = os.path.join(outdir, project)
     if install:
         install_target = resolve_project_target(
