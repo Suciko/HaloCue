@@ -1,6 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">HaloCue</string>
-    <string name="aa_import_accessibility_label">HaloCue 自动导入</string>
-    <string name="aa_import_accessibility_description">仅在你点击生成并导入后，协助把工程放入原版 AA；不会后台操作其他应用。</string>
 </resources>

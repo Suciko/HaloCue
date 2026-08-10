@@ -26,21 +26,18 @@ class MainActivity : Activity() {
     private val compilerExecutor = Executors.newSingleThreadExecutor()
     private var pageReady = false
 
+    @Volatile
+    private var lastExport: PublicAapExportResult? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        LegacyImportStateCleaner.clear(this)
 
         bootstrapPayload = buildBootstrapPayload()
         webView = createWebView()
         setContentView(webView)
         webView.loadUrl(APP_ASSET_URL)
-    }
-
-    override fun onResume() {
-        super.onResume()
-        if (::webView.isInitialized && pageReady) {
-            publishPersistedImportState()
-        }
     }
 
     @Suppress("SetJavaScriptEnabled")
@@ -103,11 +100,15 @@ class MainActivity : Activity() {
             .put("installed", aaInstalled)
             .put("packageName", AA_PACKAGE)
             .put("message", if (aaInstalled) "已检测到原版 AA" else "尚未检测到原版 AA")
+        val exportStatus = JSONObject()
+            .put("state", "IDLE")
+            .put("message", "尚未生成")
+            .put("shareAvailable", false)
 
         return JSONObject()
             .put("python", pythonStatus)
             .put("aa", aaStatus)
-            .put("import", AaImportTaskStore(this).load()?.let(::importPayload) ?: JSONObject.NULL)
+            .put("export", exportStatus)
             .put("appVersion", BuildConfig.VERSION_NAME)
     }
 
@@ -133,8 +134,15 @@ class MainActivity : Activity() {
         startActivity(launchIntent)
     }
 
-    private fun generateAndImport(project: String, text: String) {
+    private fun generateAndExport(project: String, text: String) {
         compilerExecutor.execute {
+            lastExport = null
+            publishExportPayload(
+                JSONObject()
+                    .put("state", "GENERATING")
+                    .put("message", "正在本机生成…")
+                    .put("shareAvailable", false),
+            )
             try {
                 require(project.isNotBlank()) { "工程名不能为空" }
                 require(text.isNotBlank()) { "剧本文本不能为空" }
@@ -143,106 +151,52 @@ class MainActivity : Activity() {
                     source = File(compiled.aapFile),
                     project = compiled.project,
                 )
-                val outcome = AaImportCoordinator(this).prepare(exported, compiled.project)
-                dispatchImportOutcome(outcome)
-            } catch (error: Exception) {
-                publishImportPayload(
+                lastExport = exported
+                publishExportPayload(
                     JSONObject()
-                        .put("state", AaImportState.FAILED.name)
+                        .put("state", "EXPORTED")
+                        .put("message", "已生成，尚未导入原版 AA")
+                        .put("displayName", exported.displayName)
+                        .put("relativePath", exported.relativePath)
+                        .put("shareAvailable", true),
+                )
+            } catch (error: Exception) {
+                lastExport = null
+                publishExportPayload(
+                    JSONObject()
+                        .put("state", "FAILED")
                         .put("message", error.message ?: "生成失败")
-                        .put("action", "retry_import"),
+                        .put("shareAvailable", false),
                 )
             }
         }
     }
 
-    private fun continueImport() {
-        compilerExecutor.execute {
-            val task = AaImportTaskStore(this).load()
-            if (task == null) {
-                publishImportPayload(
-                    JSONObject()
-                        .put("state", AaImportState.FAILED.name)
-                        .put("message", "没有可继续导入的工程")
-                        .put("action", "none"),
-                )
-                return@execute
-            }
-            try {
-                val exported = PublicAapExportResult(
-                    uri = Uri.parse(task.sourceUri),
-                    displayName = task.displayName,
-                    relativePath = AapPublicExporter.RELATIVE_PATH,
-                    size = 0L,
-                )
-                dispatchImportOutcome(AaImportCoordinator(this).prepare(exported, task.project))
-            } catch (error: Exception) {
-                publishImportPayload(
-                    importPayload(
-                        task.copy(
-                            state = AaImportState.FAILED,
-                            message = error.message ?: "继续导入失败",
-                            updatedAt = System.currentTimeMillis(),
-                        ),
-                    ),
-                )
-            }
+    private fun shareLastExport() {
+        val exported = lastExport
+        if (exported == null) {
+            Toast.makeText(this, "尚未生成工程文件", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            startActivity(
+                Intent.createChooser(
+                    AapShareIntentFactory.create(exported.uri, exported.displayName),
+                    "分享工程文件",
+                ),
+            )
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "没有可分享此文件的应用", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun dispatchImportOutcome(outcome: AaImportOutcome) {
-        val payload = importPayload(outcome.task).put(
-            "action",
-            when (outcome.nextAction) {
-                AaImportNextAction.OPEN_ACCESSIBILITY_SETTINGS -> "open_accessibility_settings"
-                AaImportNextAction.START_VIVO_FILE_MANAGER -> "none"
-                AaImportNextAction.NONE -> "none"
-            },
-        )
+    private fun publishExportPayload(payload: JSONObject) {
         runOnUiThread {
-            webView.evaluateJavascript("window.HaloCueApp.importUpdated($payload);", null)
-            if (outcome.nextAction == AaImportNextAction.START_VIVO_FILE_MANAGER) {
-                try {
-                    startActivity(AaImportCoordinator(this).vivoFileManagerLaunchIntent())
-                } catch (error: ActivityNotFoundException) {
-                    val failed = outcome.task.copy(
-                        state = AaImportState.FAILED,
-                        message = error.message ?: "未找到 vivo 文件管理器",
-                        updatedAt = System.currentTimeMillis(),
-                    )
-                    AaImportTaskStore(this).save(failed)
-                    webView.evaluateJavascript(
-                        "window.HaloCueApp.importUpdated(${importPayload(failed)});",
-                        null,
-                    )
-                }
+            if (!isFinishing && ::webView.isInitialized && pageReady) {
+                webView.evaluateJavascript("window.HaloCueApp.exportUpdated($payload);", null)
             }
         }
     }
-
-    private fun publishPersistedImportState() {
-        AaImportTaskStore(this).load()?.let { publishImportPayload(importPayload(it)) }
-    }
-
-    private fun publishImportPayload(payload: JSONObject) {
-        runOnUiThread {
-            if (!isFinishing && ::webView.isInitialized) {
-                webView.evaluateJavascript("window.HaloCueApp.importUpdated($payload);", null)
-            }
-        }
-    }
-
-    private fun importPayload(task: AaImportTask): JSONObject = JSONObject()
-        .put("state", task.state.name)
-        .put("message", task.message)
-        .put(
-            "action",
-            when (task.state) {
-                AaImportState.NEEDS_ACCESSIBILITY -> "open_accessibility_settings"
-                AaImportState.FAILED -> "retry_import"
-                else -> "none"
-            },
-        )
 
     private inner class AndroidBridge {
         @JavascriptInterface
@@ -251,20 +205,13 @@ class MainActivity : Activity() {
         }
 
         @JavascriptInterface
-        fun generateAndImport(project: String, text: String) {
-            this@MainActivity.generateAndImport(project, text)
+        fun generateAndExport(project: String, text: String) {
+            this@MainActivity.generateAndExport(project, text)
         }
 
         @JavascriptInterface
-        fun openImportAccessibilitySettings() {
-            runOnUiThread {
-                startActivity(AaImportCoordinator(this@MainActivity).accessibilitySettingsIntent())
-            }
-        }
-
-        @JavascriptInterface
-        fun continueImport() {
-            this@MainActivity.continueImport()
+        fun shareLastExport() {
+            runOnUiThread { this@MainActivity.shareLastExport() }
         }
     }
 
