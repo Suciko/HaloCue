@@ -2,6 +2,9 @@
   'use strict';
 
   async function request(path, options) {
+    options = options || {};
+    const session = new URLSearchParams(window.location.search).get('session') || '';
+    options.headers = Object.assign({}, options.headers || {}, {'X-HaloCue-Session': session});
     const response = await fetch(path, options);
     const contentType = response.headers.get('content-type') || '';
     const body = contentType.includes('application/json') ? await response.json() : {};
