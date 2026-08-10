@@ -59,6 +59,22 @@ def test_normalize_rejects_unknown_people_and_records_diagnostic():
     assert any(diagnostic["code"] == "director_unknown_character" for diagnostic in diagnostics)
 
 
+def test_normalize_reports_a_non_mapping_root_value():
+    state, diagnostics = normalize_director(
+        ["not", "a", "director"],
+        cast_names=set(),
+        displayable_names=set(),
+    )
+
+    assert state == default_director()
+    assert diagnostics == [{
+        "code": "director_invalid_value",
+        "level": "warning",
+        "field": "value",
+        "message": "Director metadata must be an object",
+    }]
+
+
 def test_apply_continuity_holds_and_ends_named_layers():
     state = apply_continuity(
         {"fx": "通讯", "face": "03"},

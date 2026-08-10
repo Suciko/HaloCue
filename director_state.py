@@ -68,12 +68,16 @@ def normalize_director(
     default_scene_type: str = "other",
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
     """Normalize untrusted direction metadata and report discarded values."""
+    invalid_root_value = value is not None and not isinstance(value, Mapping)
     source = value if isinstance(value, Mapping) else {}
     state = default_director(default_scene_type)
     diagnostics: list[dict[str, str]] = []
 
     def diagnostic(code: str, field: str, message: str) -> None:
         diagnostics.append({"code": code, "level": "warning", "field": field, "message": message})
+
+    if invalid_root_value:
+        diagnostic("director_invalid_value", "value", "Director metadata must be an object")
 
     def enum(field: str, allowed: tuple[str, ...]) -> None:
         candidate = source.get(field)
