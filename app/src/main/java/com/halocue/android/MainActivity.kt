@@ -84,6 +84,10 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.OpenDocument(),
     ) { uri -> handleDocumentResult(uri) }
 
+    private val documentTreeLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri -> handleDocumentResult(uri) }
+
     @Volatile
     private var activeSession: LocalWebSession? = null
 
@@ -107,12 +111,15 @@ class MainActivity : ComponentActivity() {
     private fun restoreDocumentRequest(savedInstanceState: Bundle?) {
         val requestId = savedInstanceState?.getString(STATE_DOCUMENT_REQUEST_ID).orEmpty()
         val purpose = savedInstanceState?.getString(STATE_DOCUMENT_PURPOSE).orEmpty()
+        val assetKind = savedInstanceState?.getString(STATE_DOCUMENT_ASSET_KIND).orEmpty()
         val suffixes = savedInstanceState
             ?.getStringArrayList(STATE_DOCUMENT_SUFFIXES)
             ?.toSet()
             .orEmpty()
         if (requestId.isNotBlank() && purpose.isNotBlank() && suffixes.isNotEmpty()) {
-            documentPicker.restore(DocumentPickRequest(requestId, purpose, suffixes))
+            runCatching {
+                DocumentPickRequest.fromBridge(requestId, purpose, assetKind, suffixes)
+            }.getOrNull()?.let(documentPicker::restore)
         }
         savedInstanceState?.getString(STATE_DOCUMENT_RESULT)?.let { serialized ->
             runCatching { JSONObject(serialized) }.getOrNull()?.let { result ->
@@ -268,7 +275,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun pickDocument(requestId: String, purpose: String, suffixesJson: String) {
+    private fun pickDocument(
+        requestId: String,
+        purpose: String,
+        assetKind: String,
+        suffixesJson: String,
+    ) {
         val suffixes = runCatching {
             val values = JSONArray(suffixesJson)
             buildSet {
@@ -278,7 +290,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }.getOrElse { emptySet() }
-        if (requestId.isBlank() || purpose != "story" || suffixes.isEmpty()) {
+        val request = runCatching {
+            DocumentPickRequest.fromBridge(requestId, purpose, assetKind, suffixes)
+        }.getOrNull()
+        if (request == null) {
             publishDocumentPicked(
                 JSONObject()
                     .put("requestId", requestId)
@@ -288,7 +303,6 @@ class MainActivity : ComponentActivity() {
             )
             return
         }
-        val request = DocumentPickRequest(requestId, purpose, suffixes)
         if (!documentPicker.begin(request)) {
             publishDocumentPicked(
                 JSONObject()
@@ -300,7 +314,11 @@ class MainActivity : ComponentActivity() {
             return
         }
         try {
-            documentLauncher.launch(arrayOf("text/plain", "text/markdown", "application/octet-stream"))
+            if (request.usesDirectoryTree) {
+                documentTreeLauncher.launch(null)
+            } else {
+                documentLauncher.launch(mimeTypesFor(request))
+            }
         } catch (_: ActivityNotFoundException) {
             documentPicker.consume()
             publishDocumentPicked(
@@ -311,6 +329,20 @@ class MainActivity : ComponentActivity() {
                     .put("message", "No system document picker is available"),
             )
         }
+    }
+
+    private fun mimeTypesFor(request: DocumentPickRequest): Array<String> = when (request.purpose) {
+        DocumentPickPurpose.STORY -> arrayOf(
+            "text/plain",
+            "text/markdown",
+            "application/octet-stream",
+        )
+        DocumentPickPurpose.ASSET_FILE -> when (request.assetKind) {
+            "background" -> arrayOf("image/png", "image/jpeg")
+            "sound" -> arrayOf("audio/wav", "audio/ogg", "audio/mpeg", "application/ogg")
+            else -> arrayOf("application/octet-stream")
+        }
+        DocumentPickPurpose.ASSET_TREE -> emptyArray()
     }
 
     private fun handleDocumentResult(uri: Uri?) {
@@ -448,7 +480,14 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun pickDocument(requestId: String, purpose: String, suffixesJson: String) {
             runOnUiThread {
-                this@MainActivity.pickDocument(requestId, purpose, suffixesJson)
+                this@MainActivity.pickDocument(requestId, purpose, "", suffixesJson)
+            }
+        }
+
+        @JavascriptInterface
+        fun pickAsset(requestId: String, purpose: String, assetKind: String, suffixesJson: String) {
+            runOnUiThread {
+                this@MainActivity.pickDocument(requestId, purpose, assetKind, suffixesJson)
             }
         }
 
@@ -472,7 +511,8 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         documentPicker.current()?.let { request ->
             outState.putString(STATE_DOCUMENT_REQUEST_ID, request.requestId)
-            outState.putString(STATE_DOCUMENT_PURPOSE, request.purpose)
+            outState.putString(STATE_DOCUMENT_PURPOSE, request.purpose.wireValue)
+            outState.putString(STATE_DOCUMENT_ASSET_KIND, request.assetKind)
             outState.putStringArrayList(
                 STATE_DOCUMENT_SUFFIXES,
                 ArrayList(request.allowedSuffixes),
@@ -511,6 +551,7 @@ class MainActivity : ComponentActivity() {
         private const val MAX_STORY_BYTES = 10L * 1024 * 1024
         private const val STATE_DOCUMENT_REQUEST_ID = "document_request_id"
         private const val STATE_DOCUMENT_PURPOSE = "document_purpose"
+        private const val STATE_DOCUMENT_ASSET_KIND = "document_asset_kind"
         private const val STATE_DOCUMENT_SUFFIXES = "document_suffixes"
         private const val STATE_DOCUMENT_RESULT = "document_result"
     }

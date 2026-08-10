@@ -6,6 +6,7 @@ import java.io.ByteArrayInputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -71,7 +72,12 @@ class IncomingFileStoreTest {
     @Test
     fun picker_consumes_each_request_once() {
         val picker = AndroidDocumentPicker()
-        val request = DocumentPickRequest("request-1", "story", setOf(".txt", ".md"))
+        val request = DocumentPickRequest.fromBridge(
+            requestId = "request-1",
+            purpose = "story",
+            assetKind = "",
+            allowedSuffixes = setOf(".txt", ".md"),
+        )
 
         assertTrue(picker.begin(request))
         assertFalse(picker.begin(request.copy(requestId = "request-2")))
@@ -82,13 +88,55 @@ class IncomingFileStoreTest {
     @Test
     fun picker_request_can_be_restored_after_activity_recreation() {
         val original = AndroidDocumentPicker()
-        val request = DocumentPickRequest("request-rotate", "story", setOf(".txt"))
+        val request = DocumentPickRequest.fromBridge(
+            requestId = "request-rotate",
+            purpose = "asset_tree",
+            assetKind = "character",
+            allowedSuffixes = setOf(".skel", ".atlas", ".png"),
+        )
         assertTrue(original.begin(request))
 
         val restored = AndroidDocumentPicker()
         assertTrue(restored.restore(original.current()!!))
 
         assertEquals(request, restored.consume())
+    }
+
+    @Test
+    fun picker_request_validates_native_asset_modes() {
+        val background = DocumentPickRequest.fromBridge(
+            requestId = "background",
+            purpose = "asset_file",
+            assetKind = "background",
+            allowedSuffixes = setOf(".png", ".jpg"),
+        )
+        val character = DocumentPickRequest.fromBridge(
+            requestId = "character",
+            purpose = "asset_tree",
+            assetKind = "character",
+            allowedSuffixes = setOf(".skel", ".atlas", ".png"),
+        )
+
+        assertEquals(DocumentPickPurpose.ASSET_FILE, background.purpose)
+        assertFalse(background.usesDirectoryTree)
+        assertEquals(DocumentPickPurpose.ASSET_TREE, character.purpose)
+        assertTrue(character.usesDirectoryTree)
+        assertThrows(IllegalArgumentException::class.java) {
+            DocumentPickRequest.fromBridge(
+                requestId = "bad-character",
+                purpose = "asset_file",
+                assetKind = "character",
+                allowedSuffixes = setOf(".skel"),
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DocumentPickRequest.fromBridge(
+                requestId = "bad-purpose",
+                purpose = "desktop_browser",
+                assetKind = "",
+                allowedSuffixes = setOf(".txt"),
+            )
+        }
     }
 
     @Test
