@@ -37,6 +37,8 @@ def configure_android_runtime(workspace_dir: str) -> None:
     databases.mkdir(parents=True, exist_ok=True)
     cache.mkdir(parents=True, exist_ok=True)
     os.environ["HALOCUE_PLATFORM"] = "android"
+    os.environ["HALOCUE_ANDROID_FILES_DIR"] = str(root)
+    os.environ["HALOCUE_WORKSPACE_DIR"] = str(workspace)
     webui.HERE = str(Path(__file__).resolve().parent)
     webui.STORY_ROOT = str(root / "workspace")
     webui.DB = str(databases / "aa_assets.db")

@@ -25,6 +25,31 @@
     const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', {hour12: false});
   }
 
+  const nativeRequests = new Map();
+  const completedNativeRequests = new Set();
+  let nativeRequestSequence = 0;
+  let nativeStoryPicker = null;
+  exports.HaloCueAndroid = exports.HaloCueAndroid || {};
+  exports.HaloCueAndroid.documentPicked = function (payload) {
+    const result = payload || {};
+    const requestId = String(result.requestId || '');
+    if (!requestId || completedNativeRequests.has(requestId)) return;
+    completedNativeRequests.add(requestId);
+    if (completedNativeRequests.size > 64) {
+      completedNativeRequests.delete(completedNativeRequests.values().next().value);
+    }
+    const pending = nativeRequests.get(requestId);
+    nativeRequests.delete(requestId);
+    const picker = pending ? pending.picker : nativeStoryPicker;
+    if (!picker) return;
+    Promise.resolve(picker.handleNativeResult(result, pending ? pending.resolve : function () {}))
+      .then(function (claimed) {
+        if (exports.HaloCueNative && typeof exports.HaloCueNative.ackDocumentResult === 'function') {
+          exports.HaloCueNative.ackDocumentResult(requestId, Boolean(claimed));
+        }
+      });
+  };
+
   function StoryFilePicker(root, options) {
     this.root = root; this.options = options || {};
     this.host = scoped(root, 'host', 'storyPickerHost'); this.status = scoped(root, 'status', 'storyPickerStatus');
@@ -46,6 +71,7 @@
       : null;
     this.directoryOnly = Boolean(this.options.directoryOnly);
     this.hostOnly = Boolean(this.options.hostOnly);
+    if (this.selectEndpoint === '/api/story-files/select') nativeStoryPicker = this;
     this.trigger = null; this._bound = false; this.bind();
   }
 
@@ -60,6 +86,10 @@
   };
 
   StoryFilePicker.prototype.open = function (trigger) {
+    if (this.selectEndpoint === '/api/story-files/select' &&
+        exports.HaloCueNative && typeof exports.HaloCueNative.pickDocument === 'function') {
+      return this.openNative(trigger);
+    }
     this.trigger = trigger || document.activeElement; this.selected = null;
     if (this.root) { this.root.hidden = false; this.root.classList.add('on'); this.root.setAttribute('aria-hidden', 'false'); }
     const title = this.title;
@@ -68,6 +98,52 @@
     if (this.status) this.status.textContent = ''; if (this.selectedLabel) this.selectedLabel.textContent = '尚未选择文件';
     if (this.openButton) this.openButton.disabled = true;
     return this.openHost();
+  };
+
+  StoryFilePicker.prototype.openNative = function (trigger) {
+    const self = this;
+    this.trigger = trigger || document.activeElement;
+    const requestId = 'story-' + Date.now().toString(36) + '-' + (++nativeRequestSequence).toString(36);
+    const suffixes = this.allowedSuffixes ? Array.from(this.allowedSuffixes) : ['.txt', '.md'];
+    return new Promise(function (resolve) {
+      nativeRequests.set(requestId, {picker: self, resolve: resolve});
+      try {
+        exports.HaloCueNative.pickDocument(requestId, 'story', JSON.stringify(suffixes));
+      } catch (error) {
+        nativeRequests.delete(requestId);
+        if (self.status) self.status.textContent = error.message || '无法打开系统文件选择器';
+        resolve(null);
+      }
+    });
+  };
+
+  StoryFilePicker.prototype.handleNativeResult = async function (payload, resolve) {
+    if (!payload.ok) {
+      if (this.status && payload.code !== 'cancelled') this.status.textContent = payload.message || '无法打开所选文件';
+      resolve(null);
+      return false;
+    }
+    let claimed = false;
+    try {
+      const options = exports.Api.json
+        ? exports.Api.json('POST', {incoming_token: payload.token})
+        : {method: 'POST', body: JSON.stringify({incoming_token: payload.token})};
+      const result = await exports.Api.request(this.selectEndpoint, options);
+      claimed = true;
+      if (this.options.onChoose) {
+        await this.options.onChoose({
+          file_token: result.file_token,
+          name: result.name,
+          size: result.size,
+        });
+      }
+      resolve(result);
+      return true;
+    } catch (error) {
+      if (this.status) this.status.textContent = error.message || '无法打开所选文件';
+      resolve(null);
+      return claimed;
+    }
   };
 
   StoryFilePicker.prototype.close = function () {

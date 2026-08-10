@@ -1,12 +1,12 @@
 package com.halocue.android
 
-import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
@@ -15,12 +15,15 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.VisibleForTesting
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import java.io.File
 import java.util.concurrent.Executors
+import org.json.JSONArray
 import org.json.JSONObject
 
 internal fun isInternalWebUiUrl(uri: Uri, activePort: Int?): Boolean {
@@ -30,6 +33,13 @@ internal fun isInternalWebUiUrl(uri: Uri, activePort: Int?): Boolean {
         uri.host == "127.0.0.1" &&
         uri.port == activePort
 }
+
+internal fun canPublishDocumentResult(
+    isFinishing: Boolean,
+    isDestroyed: Boolean,
+    pageReady: Boolean,
+    deliveryDestroyed: Boolean,
+): Boolean = !isFinishing && !isDestroyed && pageReady && !deliveryDestroyed
 
 internal fun createInsetWebViewContainer(context: Context, content: View): FrameLayout =
     FrameLayout(context).apply {
@@ -57,12 +67,22 @@ internal fun createSecureWebView(context: Context): WebView = WebView(context).a
     settings.allowUniversalAccessFromFileURLs = false
 }
 
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     private lateinit var webView: WebView
     private lateinit var webRuntime: LocalWebRuntime
     private val runtimeExecutor = Executors.newSingleThreadExecutor()
     private val compilerExecutor = Executors.newSingleThreadExecutor()
+    private val documentExecutor = Executors.newSingleThreadExecutor()
+    private val documentPicker = AndroidDocumentPicker()
+    private lateinit var incomingFileStore: IncomingFileStore
+    private val documentResultLock = Any()
+    private var pendingDocumentResult: JSONObject? = null
+    private var documentDeliveryDestroyed = false
     private var pageReady = false
+
+    private val documentLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> handleDocumentResult(uri) }
 
     @Volatile
     private var activeSession: LocalWebSession? = null
@@ -72,14 +92,33 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        restoreDocumentRequest(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         AndroidRuntimeRegistry.initialize(applicationContext)
         LegacyImportStateCleaner.clear(this)
+        incomingFileStore = IncomingFileStore(applicationContext.filesDir)
 
         webRuntime = LocalWebRuntime(this)
         webView = createWebView()
         setContentView(createInsetWebViewContainer(this, webView))
         startLocalWebUi()
+    }
+
+    private fun restoreDocumentRequest(savedInstanceState: Bundle?) {
+        val requestId = savedInstanceState?.getString(STATE_DOCUMENT_REQUEST_ID).orEmpty()
+        val purpose = savedInstanceState?.getString(STATE_DOCUMENT_PURPOSE).orEmpty()
+        val suffixes = savedInstanceState
+            ?.getStringArrayList(STATE_DOCUMENT_SUFFIXES)
+            ?.toSet()
+            .orEmpty()
+        if (requestId.isNotBlank() && purpose.isNotBlank() && suffixes.isNotEmpty()) {
+            documentPicker.restore(DocumentPickRequest(requestId, purpose, suffixes))
+        }
+        savedInstanceState?.getString(STATE_DOCUMENT_RESULT)?.let { serialized ->
+            runCatching { JSONObject(serialized) }.getOrNull()?.let { result ->
+                synchronized(documentResultLock) { pendingDocumentResult = result }
+            }
+        }
     }
 
     private fun startLocalWebUi() {
@@ -133,6 +172,7 @@ class MainActivity : Activity() {
 
             override fun onPageFinished(view: WebView, url: String) {
                 pageReady = true
+                publishPendingDocumentResult()
             }
         }
 
@@ -215,6 +255,151 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun pickDocument(requestId: String, purpose: String, suffixesJson: String) {
+        val suffixes = runCatching {
+            val values = JSONArray(suffixesJson)
+            buildSet {
+                for (index in 0 until values.length()) {
+                    val suffix = values.optString(index).trim().lowercase()
+                    if (suffix.matches(Regex("\\.[a-z0-9]{1,12}"))) add(suffix)
+                }
+            }
+        }.getOrElse { emptySet() }
+        if (requestId.isBlank() || purpose != "story" || suffixes.isEmpty()) {
+            publishDocumentPicked(
+                JSONObject()
+                    .put("requestId", requestId)
+                    .put("ok", false)
+                    .put("code", "invalid_request")
+                    .put("message", "Invalid document picker request"),
+            )
+            return
+        }
+        val request = DocumentPickRequest(requestId, purpose, suffixes)
+        if (!documentPicker.begin(request)) {
+            publishDocumentPicked(
+                JSONObject()
+                    .put("requestId", requestId)
+                    .put("ok", false)
+                    .put("code", "picker_busy")
+                    .put("message", "Another document picker is already open"),
+            )
+            return
+        }
+        try {
+            documentLauncher.launch(arrayOf("text/plain", "text/markdown", "application/octet-stream"))
+        } catch (_: ActivityNotFoundException) {
+            documentPicker.consume()
+            publishDocumentPicked(
+                JSONObject()
+                    .put("requestId", requestId)
+                    .put("ok", false)
+                    .put("code", "picker_unavailable")
+                    .put("message", "No system document picker is available"),
+            )
+        }
+    }
+
+    private fun handleDocumentResult(uri: Uri?) {
+        val request = documentPicker.consume() ?: return
+        if (uri == null) {
+            publishDocumentPicked(
+                JSONObject()
+                    .put("requestId", request.requestId)
+                    .put("ok", false)
+                    .put("code", "cancelled"),
+            )
+            return
+        }
+        documentExecutor.execute {
+            val payload = try {
+                val displayName = queryDisplayName(uri) ?: "story.txt"
+                val incoming = contentResolver.openInputStream(uri)?.use { input ->
+                    incomingFileStore.stage(
+                        displayName = displayName,
+                        input = input,
+                        allowedSuffixes = request.allowedSuffixes,
+                        maxBytes = MAX_STORY_BYTES,
+                    )
+                } ?: error("Unable to open selected document")
+                JSONObject()
+                    .put("requestId", request.requestId)
+                    .put("ok", true)
+                    .put("token", incoming.token)
+                    .put("name", incoming.name)
+                    .put("size", incoming.size)
+            } catch (error: Exception) {
+                JSONObject()
+                    .put("requestId", request.requestId)
+                    .put("ok", false)
+                    .put(
+                        "code",
+                        (error as? IncomingFileStoreException)?.code ?: "document_copy_failed",
+                    )
+                    .put("message", error.message ?: "Unable to copy selected document")
+            }
+            publishDocumentPicked(payload)
+        }
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        return contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index < 0) null else cursor.getString(index)
+            }
+    }
+
+    private fun publishDocumentPicked(payload: JSONObject) {
+        val discardedToken = synchronized(documentResultLock) {
+            if (documentDeliveryDestroyed) payload.optString("token") else {
+                pendingDocumentResult = payload
+                ""
+            }
+        }
+        if (discardedToken.isNotEmpty()) {
+            incomingFileStore.discard(discardedToken)
+            return
+        }
+        publishPendingDocumentResult()
+    }
+
+    private fun publishPendingDocumentResult() {
+        runOnUiThread {
+            val deliveryDestroyed = synchronized(documentResultLock) {
+                documentDeliveryDestroyed
+            }
+            if (
+                ::webView.isInitialized && canPublishDocumentResult(
+                    isFinishing,
+                    isDestroyed,
+                    pageReady,
+                    deliveryDestroyed,
+                )
+            ) {
+                val payload = synchronized(documentResultLock) {
+                    if (documentDeliveryDestroyed) return@synchronized null
+                    pendingDocumentResult?.let { JSONObject(it.toString()) }
+                } ?: return@runOnUiThread
+                webView.evaluateJavascript(
+                    "window.HaloCueAndroid && window.HaloCueAndroid.documentPicked($payload);",
+                    null,
+                )
+            }
+        }
+    }
+
+    private fun acknowledgeDocumentResult(requestId: String, claimed: Boolean) {
+        val discardedToken = synchronized(documentResultLock) {
+            val current = pendingDocumentResult
+            if (current?.optString("requestId") != requestId) return
+            pendingDocumentResult = null
+            if (claimed) "" else current.optString("token")
+        }
+        if (discardedToken.isNotEmpty()) incomingFileStore.discard(discardedToken)
+    }
+
     private fun publishExportPayload(payload: JSONObject) {
         runOnUiThread {
             if (!isFinishing && ::webView.isInitialized && pageReady) {
@@ -241,6 +426,18 @@ class MainActivity : Activity() {
         fun shareLastExport() {
             runOnUiThread { this@MainActivity.shareLastExport() }
         }
+
+        @JavascriptInterface
+        fun pickDocument(requestId: String, purpose: String, suffixesJson: String) {
+            runOnUiThread {
+                this@MainActivity.pickDocument(requestId, purpose, suffixesJson)
+            }
+        }
+
+        @JavascriptInterface
+        fun ackDocumentResult(requestId: String, claimed: Boolean) {
+            this@MainActivity.acknowledgeDocumentResult(requestId, claimed)
+        }
     }
 
     @VisibleForTesting
@@ -254,9 +451,32 @@ class MainActivity : Activity() {
         if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        documentPicker.current()?.let { request ->
+            outState.putString(STATE_DOCUMENT_REQUEST_ID, request.requestId)
+            outState.putString(STATE_DOCUMENT_PURPOSE, request.purpose)
+            outState.putStringArrayList(
+                STATE_DOCUMENT_SUFFIXES,
+                ArrayList(request.allowedSuffixes),
+            )
+        }
+        synchronized(documentResultLock) {
+            pendingDocumentResult?.let { result ->
+                outState.putString(STATE_DOCUMENT_RESULT, result.toString())
+            }
+        }
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onDestroy() {
+        val discardedToken = synchronized(documentResultLock) {
+            documentDeliveryDestroyed = true
+            if (isChangingConfigurations) "" else pendingDocumentResult?.optString("token").orEmpty()
+        }
+        if (discardedToken.isNotEmpty()) incomingFileStore.discard(discardedToken)
         runtimeExecutor.shutdownNow()
         compilerExecutor.shutdownNow()
+        documentExecutor.shutdownNow()
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface(NATIVE_BRIDGE_NAME)
             webView.destroy()
@@ -270,5 +490,10 @@ class MainActivity : Activity() {
         private const val FALLBACK_ASSET_NAME = "index.html"
         private const val FALLBACK_ASSET_URL = "file:///android_asset/index.html"
         private const val NATIVE_BRIDGE_NAME = "HaloCueNative"
+        private const val MAX_STORY_BYTES = 10L * 1024 * 1024
+        private const val STATE_DOCUMENT_REQUEST_ID = "document_request_id"
+        private const val STATE_DOCUMENT_PURPOSE = "document_purpose"
+        private const val STATE_DOCUMENT_SUFFIXES = "document_suffixes"
+        private const val STATE_DOCUMENT_RESULT = "document_result"
     }
 }

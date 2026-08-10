@@ -6,6 +6,7 @@ import android.net.Uri
 import android.view.View
 import android.view.WindowManager
 import android.webkit.WebView
+import androidx.activity.ComponentActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.test.core.app.ApplicationProvider
@@ -21,6 +22,19 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityTest {
+    @Test
+    fun main_activity_supports_activity_result_document_picker() {
+        assertTrue(ComponentActivity::class.java.isAssignableFrom(MainActivity::class.java))
+    }
+
+    @Test
+    fun document_result_is_not_published_to_a_destroyed_webview() {
+        assertTrue(canPublishDocumentResult(false, false, true, false))
+        assertFalse(canPublishDocumentResult(false, true, true, false))
+        assertFalse(canPublishDocumentResult(false, false, true, true))
+        assertFalse(canPublishDocumentResult(false, false, false, false))
+    }
+
     @Test
     fun secure_webview_disables_file_and_content_access() {
         val context = ApplicationProvider.getApplicationContext<Context>()

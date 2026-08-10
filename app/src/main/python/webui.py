@@ -3884,6 +3884,28 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "file_token": ft_token})
 
             if p == "/api/story-files/select":
+                incoming_token = str(data.get("incoming_token") or "")
+                if incoming_token:
+                    if os.environ.get("HALOCUE_PLATFORM") != "android":
+                        return self._send(400, {
+                            "ok": False,
+                            "code": "incoming_token_unsupported",
+                            "e": "Incoming document tokens are only available on Android",
+                        })
+                    from android_incoming_files import IncomingFileError, claim_incoming
+                    try:
+                        selected = claim_incoming(incoming_token, {".txt", ".md"})
+                        return self._send(200, {
+                            "ok": True,
+                            "file_token": register_file_token(str(selected)),
+                            "name": selected.name,
+                            "size": selected.stat().st_size,
+                        })
+                    except IncomingFileError as exc:
+                        status = 404 if exc.code == "invalid_incoming_token" else 400
+                        return self._send(status, {
+                            "ok": False, "code": exc.code, "e": str(exc),
+                        })
                 try:
                     return self._send(200, {
                         "ok": True,
