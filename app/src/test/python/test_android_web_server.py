@@ -41,6 +41,16 @@ def test_api_rejects_missing_session(running_server):
     assert json.load(exc.value)["code"] == "invalid_session"
 
 
+def test_encoded_api_path_rejects_missing_session(running_server):
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(
+            _origin(running_server) + "/api%2fandroid%2fhealth"
+        )
+
+    assert exc.value.code == 403
+    assert json.load(exc.value)["code"] == "invalid_session"
+
+
 def test_delete_api_rejects_missing_session(running_server):
     request = urllib.request.Request(
         _origin(running_server) + "/api/cards/card-1",

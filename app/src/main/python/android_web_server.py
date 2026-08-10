@@ -74,6 +74,9 @@ def configure_android_runtime(workspace_dir: str) -> None:
 class AndroidHandler(webui.H):
     session_token = ""
 
+    def _request_path(self) -> str:
+        return unquote(urlparse(self.path).path)
+
     def _authorized(self) -> bool:
         supplied = self.headers.get("X-HaloCue-Session", "")
         if not supplied:
@@ -83,7 +86,7 @@ class AndroidHandler(webui.H):
         return bool(supplied) and hmac.compare_digest(supplied, self.session_token)
 
     def _guard_api(self) -> bool:
-        if urlparse(self.path).path.startswith("/api/") and not self._authorized():
+        if self._request_path().startswith("/api/") and not self._authorized():
             self._send(403, {"ok": False, "code": "invalid_session", "e": "会话已失效"})
             return False
         return True
@@ -113,7 +116,7 @@ class AndroidHandler(webui.H):
         )
 
     def do_GET(self):
-        path = unquote(urlparse(self.path).path)
+        path = self._request_path()
         if path in ("/", "/index.html"):
             return self._serve_root_with_cookie()
         if not self._guard_api():
@@ -127,7 +130,7 @@ class AndroidHandler(webui.H):
     def do_POST(self):
         if not self._guard_api():
             return None
-        path = unquote(urlparse(self.path).path)
+        path = self._request_path()
         if path in {"/api/install", "/api/settings/aa-install"}:
             return self._capability_unavailable("direct_aa_install")
         if path == "/api/settings/spine-cli":
