@@ -324,3 +324,22 @@ def test_explicit_camera_caps_visible_portraits_at_five(tmp_path):
     assert len(visible) == 5
     assert "f" not in visible
     assert any("最多显示 5 个立绘" in message for _, message in warn.items)
+
+
+def test_explicit_fx_clear_ends_persistent_closeup_without_serializing_marker(tmp_path):
+    script = tmp_path / "fx-end.txt"
+    script.write_text(
+        "@camera Alice\n@fx Alice 特写\nAlice: start\n"
+        "@camera Alice\n@fx Alice 无\nAlice: end\n",
+        encoding="utf-8",
+    )
+    cast = {"Alice": {"id": "alice", "portrait": True}}
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+
+    rows = build(parse_script(script, cast), {}, cast, index, "fx-end")[0][1]
+    first = next(char for char in rows[0]["characters"]["$values"] if char["name"] == "alice")
+    second = next(char for char in rows[1]["characters"]["$values"] if char["name"] == "alice")
+
+    assert first["shapeOverride"] == 4
+    assert second["shapeOverride"] == 0
+    assert all("_explicitFxEnds" not in row for row in rows)

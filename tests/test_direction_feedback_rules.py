@@ -125,6 +125,35 @@ def test_closeup_persists_until_the_focal_character_leaves_the_shot():
     assert scripts[4]["characters"]["$values"][2]["shapeOverride"] == 0
 
 
+def test_closeup_ends_only_after_explicit_end():
+    scripts = [
+        _script({2: "kei"}, shapes={2: 4}, speaker_slot=2),
+        _script({2: "kei"}, speaker_slot=2),
+        _script({2: "kei"}, speaker_slot=2),
+    ]
+    scripts[2]["_explicitFxEnds"] = ["kei"]
+
+    enforce_persistent_closeups(scripts)
+
+    assert scripts[1]["characters"]["$values"][2]["shapeOverride"] == 4
+    assert scripts[2]["characters"]["$values"][2]["shapeOverride"] == 0
+    assert "_explicitFxEnds" not in scripts[2]
+
+
+def test_communication_and_closeup_bits_persist_together_until_end():
+    scripts = [
+        _script({2: "kei"}, shapes={2: 5}, speaker_slot=2),
+        _script({2: "kei"}, speaker_slot=2),
+        _script({2: "kei"}, speaker_slot=2),
+    ]
+    scripts[2]["_explicitFxEnds"] = ["kei"]
+
+    enforce_persistent_closeups(scripts)
+
+    assert scripts[1]["characters"]["$values"][2]["shapeOverride"] == 5
+    assert scripts[2]["characters"]["$values"][2]["shapeOverride"] == 0
+
+
 def test_scene_break_clears_previous_cast_before_the_next_speaker():
     shots = plan_camera([
         {"speaker": "momoi", "text": "记下来！"},

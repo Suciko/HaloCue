@@ -408,6 +408,7 @@ class Pending:
         self.exit = []           # (ident, appear值)
         self.move = {}           # ident -> 目标位置
         self.fx = {}             # ident -> shapeOverride
+        self.fx_ends = set()     # 显式清除持久 shapeOverride 的角色
         self.camera = None       # None=自动；[]=空镜；[ident...]=下一行明确镜头
         self.hl = None           # None=自动；[]=都不高亮；[ident...]=指定
 
@@ -641,7 +642,14 @@ def build(events, cfg, cast, idx, project):
                     else:
                         i = ident_of(p[0], no)
                         if i:
-                            pend.fx[i] = resolve_shape(p[1], no)
+                            shape = resolve_shape(p[1], no)
+                            pend.fx[i] = shape
+                            token = p[1].strip()
+                            if shape == 0 and (
+                                token in ("", "无")
+                                or (token.lstrip("-").isdigit() and int(token) == 0)
+                            ):
+                                pend.fx_ends.add(i)
                 elif cmd == "hl":
                     if arg.strip() in ("-", "无", "none"):
                         pend.hl = []
@@ -801,6 +809,7 @@ def build(events, cfg, cast, idx, project):
                 "speakerSlotNum": speaker,
                 "highlightedSlotNums": {"$type": T_ILIST, "$values": hl},
                 "isDialogScript": True, "placeText": pend.place,
+                "_explicitFxEnds": sorted(pend.fx_ends),
             })
 
             for i in leaving:
@@ -809,8 +818,8 @@ def build(events, cfg, cast, idx, project):
             pend.reset()
 
         if scripts:
-            enforce_focusline_shots(scripts)
             enforce_persistent_closeups(scripts)
+            enforce_focusline_shots(scripts)
             out.append((sc["title"], scripts))
 
     return out

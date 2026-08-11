@@ -307,19 +307,47 @@ def normalize_bgfx_lifetime(items):
     remain active until the model or the source script writes ``无``.
     """
     reset_next_line = False
+    active = False
+    reset_at_next_line = False
     for item in items:
         if item.get("kind") != "line":
+            raw = str(item.get("raw") or "").strip()
+            if raw.startswith("##") and active:
+                reset_at_next_line = True
+                reset_next_line = False
+                active = False
             continue
+        director = item.get("_director")
+        continuity = director.get("continuity") if isinstance(director, Mapping) else None
+        command = continuity.get("bgfx", "none") if isinstance(continuity, Mapping) else "none"
         current = item.get("bgfx")
-        if reset_next_line and not current:
+        if command == "end" or (reset_at_next_line and not current):
             item["bgfx"] = "无"
             current = "无"
+            active = False
+            reset_next_line = False
+            reset_at_next_line = False
+        elif reset_next_line and not current and command != "hold":
+            item["bgfx"] = "无"
+            current = "无"
+            active = False
+            reset_next_line = False
+        elif reset_at_next_line and current:
+            reset_at_next_line = False
+        pending_transient_reset = reset_next_line
         reset_next_line = False
         if not current:
+            if command == "hold" and pending_transient_reset:
+                reset_next_line = True
             continue
         value, error = tables.resolve_bgeffect(current)
-        if error or not value:
+        if error:
             continue
+        if not value:
+            active = False
+            reset_next_line = False
+            continue
+        active = True
         if value in _TRANSIENT_BGFX_IDS:
             reset_next_line = True
 
@@ -831,6 +859,17 @@ def build_postprocessor_proposals(items: List[Dict[str, Any]], rule: str = "emot
                     after=it["emo"],
                 )
             )
+        elif rule == "continuity_density":
+            for drop in it.get("_direction_drops", []):
+                proposals.append(build_proposal(
+                    card_id=card_id,
+                    p_type="applied_pending",
+                    origin="deterministic_postprocessor",
+                    rule=str(drop.get("reason") or rule),
+                    field_name=str(drop.get("field") or ""),
+                    before=drop.get("value"),
+                    after=None,
+                ))
     return proposals
 
 
@@ -1036,6 +1075,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             )
         )
     normalize_direction_density(items)
+    proposals.extend(build_postprocessor_proposals(items, rule="continuity_density"))
     normalize_bgfx_lifetime(items)
 
     final_text = render_annotated_items(insert_annotation_beats(items, annotation_beats))

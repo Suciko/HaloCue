@@ -221,6 +221,52 @@ def test_transient_background_effect_resets_but_rain_stays_until_explicit_reset(
     assert items[4]["bgfx"] == "无"
 
 
+def test_background_effect_continuity_hold_defers_reset_and_end_clears_state():
+    items = [
+        {
+            "kind": "line", "bgfx": "集中线",
+            "_director": {"continuity": {"bgfx": "start"}},
+        },
+        {"kind": "line", "_director": {"continuity": {"bgfx": "hold"}}},
+        {"kind": "line", "_director": {"continuity": {"bgfx": "end"}}},
+    ]
+
+    normalize_bgfx_lifetime(items)
+
+    assert "bgfx" not in items[1]
+    assert items[2]["bgfx"] == "无"
+
+
+def test_persistent_weather_hold_does_not_schedule_a_transient_reset():
+    items = [
+        {
+            "kind": "line", "bgfx": "雨",
+            "_director": {"continuity": {"bgfx": "start"}},
+        },
+        {"kind": "line", "_director": {"continuity": {"bgfx": "hold"}}},
+        {"kind": "line"},
+    ]
+
+    normalize_bgfx_lifetime(items)
+
+    assert "bgfx" not in items[1]
+    assert "bgfx" not in items[2]
+
+
+def test_scene_break_resets_persistent_background_effect_once():
+    items = [
+        {"kind": "line", "bgfx": "雨"},
+        {"kind": "other", "raw": "## 下一场"},
+        {"kind": "line"},
+        {"kind": "line"},
+    ]
+
+    normalize_bgfx_lifetime(items)
+
+    assert items[2]["bgfx"] == "无"
+    assert "bgfx" not in items[3]
+
+
 def test_filter_accepts_combinable_character_effects():
     constraints = annotation_constraints(
         {"bg": {}, "sounds": [], "enums": {"emoticon": {}, "action": {}}},

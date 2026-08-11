@@ -21,3 +21,20 @@ def test_postprocessor_emoticon_density_generates_proposals():
     # normalize 稀释连续气泡
     proposals = build_postprocessor_proposals(items, rule="emoticon_density")
     assert isinstance(proposals, list)
+
+
+def test_continuity_density_drop_generates_a_reviewable_proposal():
+    items = [{
+        "kind": "line", "who": "凯伊", "text": "第二句", "card_id": "c-2",
+        "_direction_drops": [{
+            "field": "emo", "value": "惊叹", "reason": "unsupported_transient_repeat",
+        }],
+    }]
+
+    proposals = build_postprocessor_proposals(items, rule="continuity_density")
+
+    assert len(proposals) == 1
+    assert proposals[0]["field"] == "emo"
+    assert proposals[0]["before"] == "惊叹"
+    assert proposals[0]["after"] is None
+    assert proposals[0]["rule"] == "unsupported_transient_repeat"
