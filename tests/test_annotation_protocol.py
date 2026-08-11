@@ -1,5 +1,7 @@
 import pytest
 
+from director_state import default_director
+
 from annotation_protocol import (
     ChunkProtocolError,
     build_chunk_schema,
@@ -29,6 +31,67 @@ def complete_response():
         "lines": [row("src-1-0-a", "fp-a"), row("src-2-0-b", "fp-b")],
         "state_delta": {}, "memory_events": [],
     }
+
+
+def test_complete_line_accepts_normalized_director_metadata():
+    response = complete_response()
+    response["lines"][0]["direction"] = {
+        "scene_type": "bond",
+        "scene_function": "dialogue",
+        "emotion_phase": "hesitating",
+        "subtext": "waiting for an answer",
+        "relation_distance": "approaching",
+        "focus_kind": "listener",
+        "focus_character": "Kai",
+        "reaction_target": "Kai",
+        "visible_characters": ["Kai"],
+        "continuity": {
+            "face": "hold", "emo": "none", "act": "none",
+            "fx": "none", "bgfx": "none",
+        },
+        "reason": "listener_reaction",
+    }
+
+    result = validate_chunk_response(
+        response, TARGETS, cast={"Kai": {"id": "kai", "portrait": True}},
+    )
+
+    assert result["lines_by_id"]["src-1-0-a"]["direction"]["focus_kind"] == "listener"
+    assert result["diagnostics"] == []
+
+
+@pytest.mark.parametrize("direction", [
+    {"camera_hint": "closeup"},
+    {"focus_kind": ["listener"]},
+    {"visible_characters": "Kai"},
+    {"continuity": {"face": 1}},
+])
+def test_complete_line_rejects_unknown_or_wrongly_typed_director_wire_values(direction):
+    response = complete_response()
+    response["lines"][0]["direction"] = direction
+
+    with pytest.raises(ChunkProtocolError) as error:
+        validate_chunk_response(response, TARGETS)
+
+    assert error.value.code == "invalid_line"
+
+
+def test_unknown_director_character_degrades_with_diagnostic_without_losing_source():
+    response = complete_response()
+    response["lines"][0]["direction"] = {
+        "focus_kind": "listener",
+        "focus_character": "Unknown",
+        "visible_characters": ["Kai", "Unknown"],
+    }
+
+    result = validate_chunk_response(
+        response, TARGETS, cast={"Kai": {"id": "kai", "portrait": True}},
+    )
+
+    line = result["lines_by_id"]["src-1-0-a"]
+    assert line["direction"]["focus_character"] == ""
+    assert line["direction"]["visible_characters"] == ["Kai"]
+    assert any(item["code"] == "director_unknown_character" for item in result["diagnostics"])
 
 
 @pytest.mark.parametrize("lines,code", [
@@ -156,6 +219,7 @@ def test_beat_fields_do_not_coerce_null_to_empty_string():
     response["beats"] = [{
         "anchor_id": "src-1-0-a", "position": "after", "who": None,
         "face": "", "emo": "", "act": "", "wait_ms": 0,
+        "reason": "listener_reaction",
     }]
 
     with pytest.raises(ChunkProtocolError) as error:
@@ -187,6 +251,7 @@ def test_valid_dialogue_free_beat_is_normalized_through_resource_constraints():
     response["beats"] = [{
         "anchor_id": "src-1-0-a", "position": "after", "who": "凯伊",
         "face": "31", "emo": "[……]", "act": "", "wait_ms": 2500,
+        "reason": "listener_reaction",
     }]
     constraints = {
         "faces_by_id": {"kei": {"31"}},
@@ -203,7 +268,45 @@ def test_valid_dialogue_free_beat_is_normalized_through_resource_constraints():
     assert validated["beats"] == [{
         "anchor_id": "src-1-0-a", "position": "after", "who": "凯伊",
         "face": "31", "emo": "沉默", "act": "", "wait_ms": 2500,
+        "reason": "listener_reaction",
     }]
+
+
+def test_dialogue_free_beat_preserves_a_valid_reason():
+    response = complete_response()
+    response["beats"] = [{
+        "anchor_id": "src-1-0-a", "position": "after", "who": "Kai",
+        "face": "", "emo": "", "act": "", "wait_ms": 250,
+        "reason": "listener_reaction",
+    }]
+
+    validated = validate_chunk_response(
+        response, TARGETS, cast={"Kai": {"id": "kai", "portrait": True}},
+    )
+
+    assert validated["beats"][0]["reason"] == "listener_reaction"
+
+
+@pytest.mark.parametrize("reason,code", [
+    (None, "invalid_beat"),
+    ("dramatic_pause", "invalid_beat_reason"),
+])
+def test_dialogue_free_beat_rejects_missing_or_unknown_reason(reason, code):
+    response = complete_response()
+    beat = {
+        "anchor_id": "src-1-0-a", "position": "after", "who": "Kai",
+        "face": "", "emo": "", "act": "", "wait_ms": 250,
+    }
+    if reason is not None:
+        beat["reason"] = reason
+    response["beats"] = [beat]
+
+    with pytest.raises(ChunkProtocolError) as error:
+        validate_chunk_response(
+            response, TARGETS, cast={"Kai": {"id": "kai", "portrait": True}},
+        )
+
+    assert error.value.code == code
 
 
 @pytest.mark.parametrize("patch,code", [
@@ -217,6 +320,7 @@ def test_dialogue_free_beat_rejects_invalid_anchor_assets_and_wait(patch, code):
     beat = {
         "anchor_id": "src-1-0-a", "position": "after", "who": "凯伊",
         "face": "31", "emo": "沉默", "act": "", "wait_ms": 2500,
+        "reason": "listener_reaction",
     }
     beat.update(patch)
     response["beats"] = [beat]
@@ -241,6 +345,21 @@ def test_chunk_schema_offers_optional_bounded_beats():
     assert "beats" not in schema["required"]
     assert beat["properties"]["anchor_id"]["enum"] == ["src-1-0-a"]
     assert beat["properties"]["wait_ms"]["maximum"] == 10000
+    assert beat["properties"]["reason"]["enum"] == [
+        "await_response", "relationship_turn", "listener_reaction",
+        "comedy_hold", "decision_pause",
+    ]
+    assert "reason" in beat["required"]
+
+
+def test_complete_and_compact_schemas_expose_strict_optional_direction_objects():
+    complete_line = build_chunk_schema(["src-1-0-a"])["properties"]["lines"]["items"]
+    compact_line = build_compact_chunk_schema(1)["properties"]["lines"]["items"]
+
+    assert "direction" not in complete_line["required"]
+    assert complete_line["properties"]["direction"]["additionalProperties"] is False
+    assert "d" not in compact_line["required"]
+    assert compact_line["properties"]["d"]["additionalProperties"] is False
 
 
 def test_compact_schema_uses_one_based_index_and_optional_annotation_fields():
@@ -261,11 +380,29 @@ def test_compact_response_restores_identity_and_protocol_defaults():
     }, TARGETS)
 
     assert expanded["lines"] == [
-        row("src-1-0-a", "fp-a") | {"face": "05"},
-        row("src-2-0-b", "fp-b") | {"shake": True},
+        row("src-1-0-a", "fp-a") | {"face": "05", "direction": default_director()},
+        row("src-2-0-b", "fp-b") | {"shake": True, "direction": default_director()},
     ]
     validated = validate_chunk_response(expanded, TARGETS)
     assert list(validated["lines_by_id"]) == ["src-1-0-a", "src-2-0-b"]
+
+
+def test_compact_direction_expands_and_omitted_direction_uses_defaults():
+    expanded = expand_compact_chunk_response({
+        "lines": [{
+            "i": 1,
+            "d": {"scene_type": "event", "continuity": {"face": "hold"}},
+        }, {"i": 2}],
+        "state_delta": {}, "memory_events": [],
+    }, TARGETS)
+
+    assert expanded["lines"][0]["direction"]["scene_type"] == "event"
+    assert expanded["lines"][0]["direction"]["continuity"] == {
+        "face": "hold", "emo": "none", "act": "none",
+        "fx": "none", "bgfx": "none",
+    }
+    assert expanded["lines"][1]["direction"]["scene_type"] == "other"
+    assert expanded["lines"][1]["direction"]["focus_kind"] == "speaker"
 
 
 def test_compact_response_expands_beat_anchor_index_to_source_id():
@@ -275,6 +412,7 @@ def test_compact_response_expands_beat_anchor_index_to_source_id():
         "beats": [{
             "anchor_id": 2, "position": "after", "who": "Kai",
             "face": "", "emo": "", "act": "", "wait_ms": 250,
+            "reason": "listener_reaction",
         }],
     }, TARGETS)
 

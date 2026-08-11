@@ -4,6 +4,18 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
+from director_state import (
+    BEAT_REASONS,
+    CONTINUITY_STATES,
+    DIRECTION_REASONS,
+    FOCUS_KINDS,
+    RELATION_DISTANCES,
+    SCENE_FUNCTIONS,
+    SCENE_TYPES,
+    default_director,
+    normalize_director,
+)
+
 
 ANNOTATION_FIELDS = (
     "face", "emo", "act", "fx", "se", "bg", "bg_request", "place",
@@ -13,7 +25,8 @@ ANNOTATION_FIELD_TYPES = {
     name: bool if name == "shake" else int if name == "move" else str
     for name in ANNOTATION_FIELDS
 }
-LINE_FIELDS = set(ANNOTATION_FIELDS) | {"source_id", "text_fingerprint"}
+LINE_REQUIRED_FIELDS = set(ANNOTATION_FIELDS) | {"source_id", "text_fingerprint"}
+LINE_FIELDS = LINE_REQUIRED_FIELDS | {"direction"}
 STATE_FIELDS = {
     "background", "place", "bgfx", "visible_characters", "positions",
     "last_faces", "recent_emoticons", "recent_actions", "recent_sounds",
@@ -36,8 +49,15 @@ EVENT_FIELDS = {
     "kind", "participants", "keywords", "summary", "source_ids",
     "evidence", "importance", "status",
 }
-BEAT_FIELDS = {"anchor_id", "position", "who", "face", "emo", "act", "wait_ms"}
+BEAT_FIELDS = {"anchor_id", "position", "who", "face", "emo", "act", "wait_ms", "reason"}
 MAX_BEAT_WAIT_MS = 10_000
+CONTINUITY_LAYERS = {"face", "emo", "act", "fx", "bgfx"}
+DIRECTION_STRING_FIELDS = {
+    "scene_type", "scene_function", "emotion_phase", "subtext",
+    "relation_distance", "focus_kind", "focus_character",
+    "reaction_target", "reason",
+}
+DIRECTION_FIELDS = DIRECTION_STRING_FIELDS | {"visible_characters", "continuity"}
 
 
 class ChunkProtocolError(ValueError):
@@ -55,6 +75,48 @@ def _field(name: str, description: str, field_type: str = "string") -> Dict[str,
     return value
 
 
+def _direction_schema() -> Dict[str, Any]:
+    properties: Dict[str, Any] = {
+        "scene_type": {"type": "string", "enum": list(SCENE_TYPES)},
+        "scene_function": {"type": "string", "enum": list(SCENE_FUNCTIONS)},
+        "emotion_phase": {"type": "string", "maxLength": 160},
+        "subtext": {"type": "string", "maxLength": 160},
+        "relation_distance": {"type": "string", "enum": list(RELATION_DISTANCES)},
+        "focus_kind": {"type": "string", "enum": list(FOCUS_KINDS)},
+        "focus_character": {"type": "string"},
+        "reaction_target": {"type": "string", "maxLength": 160},
+        "visible_characters": {"type": "array", "items": {"type": "string"}},
+        "continuity": {
+            "type": "object",
+            "properties": {
+                layer: {"type": "string", "enum": list(CONTINUITY_STATES)}
+                for layer in sorted(CONTINUITY_LAYERS)
+            },
+            "additionalProperties": False,
+        },
+        "reason": {"type": "string", "enum": list(DIRECTION_REASONS)},
+    }
+    return {"type": "object", "properties": properties, "additionalProperties": False}
+
+
+def _validate_direction_wire(value: Any, field: str) -> Mapping[str, Any]:
+    direction = _require_dict(value, "invalid_line", f"{field} must be an object")
+    if not set(direction) <= DIRECTION_FIELDS:
+        raise ChunkProtocolError("invalid_line", f"{field} contains unknown fields")
+    for name in DIRECTION_STRING_FIELDS:
+        if name in direction and not isinstance(direction[name], str):
+            raise ChunkProtocolError("invalid_line", f"{field}.{name} must be a string")
+    visible = direction.get("visible_characters", [])
+    if not isinstance(visible, list) or any(not isinstance(name, str) for name in visible):
+        raise ChunkProtocolError("invalid_line", f"{field}.visible_characters must be a string array")
+    continuity = direction.get("continuity", {})
+    if not isinstance(continuity, dict) or not set(continuity) <= CONTINUITY_LAYERS:
+        raise ChunkProtocolError("invalid_line", f"{field}.continuity has an invalid shape")
+    if any(not isinstance(command, str) for command in continuity.values()):
+        raise ChunkProtocolError("invalid_line", f"{field}.continuity values must be strings")
+    return direction
+
+
 def build_chunk_schema(target_ids: Sequence[str]) -> Dict[str, Any]:
     """Build a strict schema whose source_id enum is limited to this chunk."""
     row_properties: Dict[str, Any] = {
@@ -66,6 +128,7 @@ def build_chunk_schema(target_ids: Sequence[str]) -> Dict[str, Any]:
         field_type = "boolean" if name == "shake" else "integer" if name == "move" else "string"
         row_properties[name] = _field(name, "不使用时填空值", field_type)
         row_required.append(name)
+    row_properties["direction"] = _direction_schema()
     row_schema = {
         "type": "object", "properties": row_properties,
         "required": row_required, "additionalProperties": False,
@@ -92,6 +155,7 @@ def build_chunk_schema(target_ids: Sequence[str]) -> Dict[str, Any]:
             "type": "integer", "minimum": 0, "maximum": MAX_BEAT_WAIT_MS,
             "description": "独立无台词反应的显式等待毫秒数",
         },
+        "reason": {"type": "string", "enum": list(BEAT_REASONS)},
     }
     return {
         "type": "object",
@@ -123,6 +187,7 @@ def build_compact_chunk_schema(target_count: int, target_ids: Sequence[str] = ()
     for name in ANNOTATION_FIELDS:
         field_type = "boolean" if name == "shake" else "integer" if name == "move" else "string"
         row_properties[name] = {"type": field_type}
+    row_properties["d"] = _direction_schema()
     row_schema = {
         "type": "object", "properties": row_properties,
         "required": ["i"], "additionalProperties": False,
@@ -146,13 +211,14 @@ def build_compact_chunk_schema(target_count: int, target_ids: Sequence[str] = ()
         "emo": _field("emo", "气泡中文名，不使用时省略"),
         "act": _field("act", "动作英文名，不使用时省略"),
         "wait_ms": {"type": "integer", "minimum": 0, "maximum": MAX_BEAT_WAIT_MS},
+        "reason": {"type": "string", "enum": list(BEAT_REASONS)},
     }
     return {
         "type": "object", "properties": {
             "lines": {"type": "array", "items": row_schema},
             "state_delta": {"type": "object", "properties": state_properties, "additionalProperties": False},
             "memory_events": {"type": "array", "items": {"type": "object", "properties": event_properties, "required": sorted(EVENT_FIELDS), "additionalProperties": False}},
-            "beats": {"type": "array", "items": {"type": "object", "properties": beat_properties, "required": ["anchor_id", "position", "who", "face", "emo", "act", "wait_ms"], "additionalProperties": False}},
+            "beats": {"type": "array", "items": {"type": "object", "properties": beat_properties, "required": sorted(BEAT_FIELDS), "additionalProperties": False}},
         }, "required": ["lines", "state_delta", "memory_events"], "additionalProperties": False,
     }
 
@@ -175,15 +241,23 @@ def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, 
         if index in seen:
             raise ChunkProtocolError("duplicate_target", f"目标行重复: {index}")
         seen.add(index)
-        unknown = set(compact) - ({"i"} | set(ANNOTATION_FIELDS))
+        unknown = set(compact) - ({"i", "d"} | set(ANNOTATION_FIELDS))
         if unknown:
             raise ChunkProtocolError("invalid_line", f"compact line 包含未知字段: {sorted(unknown)}")
+        direction_patch = _validate_direction_wire(compact.get("d", {}), "compact line.d")
         target = targets[index - 1]
         row = {
             "source_id": str(target.get("annotation_id") or ""),
             "text_fingerprint": str(target.get("text_fingerprint") or ""),
             **{name: (False if name == "shake" else 0 if name == "move" else "") for name in ANNOTATION_FIELDS},
+            "direction": default_director(),
         }
+        continuity_patch = direction_patch.get("continuity", {})
+        row["direction"].update({
+            name: value for name, value in direction_patch.items()
+            if name != "continuity"
+        })
+        row["direction"]["continuity"].update(continuity_patch)
         for name in ANNOTATION_FIELDS:
             if name in compact:
                 row[name] = compact[name]
@@ -237,7 +311,7 @@ def _validate_beats(
         beat = _require_dict(beat, "invalid_beat", "beats 每项必须是对象")
         if set(beat) != BEAT_FIELDS:
             raise ChunkProtocolError("invalid_beat", "beat 字段不完整或包含未知字段")
-        for name in ("anchor_id", "position", "who", "face", "emo", "act"):
+        for name in ("anchor_id", "position", "who", "face", "emo", "act", "reason"):
             if not isinstance(beat.get(name), str):
                 raise ChunkProtocolError("invalid_beat", f"beat.{name} 必须是字符串")
         anchor_id = beat["anchor_id"]
@@ -245,6 +319,8 @@ def _validate_beats(
             raise ChunkProtocolError("unknown_beat_anchor", f"beat 引用了未知目标行: {anchor_id}")
         if beat.get("position") not in {"before", "after"}:
             raise ChunkProtocolError("invalid_beat_position", "beat position 只能是 before 或 after")
+        if beat["reason"] not in BEAT_REASONS:
+            raise ChunkProtocolError("invalid_beat_reason", f"beat reason 无效: {beat['reason']}")
         who = beat["who"]
         character = cast.get(who) if isinstance(cast, Mapping) else None
         if not character or not character.get("portrait") or character.get("narrator"):
@@ -266,7 +342,7 @@ def _validate_beats(
             "anchor_id": anchor_id, "position": beat["position"], "who": who,
             "face": face.zfill(2) if face else "",
             "emo": constraints.get("sym2cn", {}).get(emo, emo), "act": act,
-            "wait_ms": wait_ms,
+            "wait_ms": wait_ms, "reason": beat["reason"],
         })
     return result
 
@@ -328,8 +404,10 @@ def _validate_events(value: Any, visible_ids: Iterable[str]) -> List[Dict[str, A
 
 def _validate_annotation_row(value: Any) -> Mapping[str, Any]:
     row = _require_dict(value, "invalid_line", "lines 每项必须是对象")
-    if set(row) != LINE_FIELDS:
+    if not LINE_REQUIRED_FIELDS <= set(row) or not set(row) <= LINE_FIELDS:
         raise ChunkProtocolError("invalid_line", "line 字段不完整或包含未知字段")
+    if "direction" in row:
+        _validate_direction_wire(row["direction"], "line.direction")
     if not isinstance(row.get("source_id"), str) or not isinstance(row.get("text_fingerprint"), str):
         raise ChunkProtocolError("invalid_line", "source_id 和 text_fingerprint 必须是字符串")
     for name, expected_type in ANNOTATION_FIELD_TYPES.items():
@@ -354,6 +432,12 @@ def validate_chunk_response(
     expected = {str(item.get("annotation_id")): str(item.get("text_fingerprint") or "") for item in targets}
     seen = set()
     rows_by_id: Dict[str, Dict[str, Any]] = {}
+    diagnostics: List[Dict[str, str]] = []
+    cast_names = set(cast) if isinstance(cast, Mapping) else set()
+    displayable_names = {
+        name for name, character in cast.items()
+        if isinstance(character, Mapping) and character.get("portrait") and not character.get("narrator")
+    } if isinstance(cast, Mapping) else set()
     for row in lines:
         row = _validate_annotation_row(row)
         source_id = row["source_id"]
@@ -364,7 +448,15 @@ def validate_chunk_response(
         seen.add(source_id)
         if row["text_fingerprint"] != expected[source_id]:
             raise ChunkProtocolError("fingerprint_mismatch", f"原文指纹不匹配: {source_id}")
-        rows_by_id[source_id] = dict(row)
+        direction, row_diagnostics = normalize_director(
+            row.get("direction"),
+            cast_names=cast_names,
+            displayable_names=displayable_names,
+        )
+        normalized_row = dict(row)
+        normalized_row["direction"] = direction
+        rows_by_id[source_id] = normalized_row
+        diagnostics.extend(row_diagnostics)
     missing = set(expected) - seen
     if missing:
         raise ChunkProtocolError("missing_target", f"响应缺少目标行: {sorted(missing)}")
@@ -373,7 +465,7 @@ def validate_chunk_response(
     beats = _validate_beats(response.get("beats", []), expected, cast, constraints)
     return {
         "lines_by_id": rows_by_id, "state_delta": state,
-        "memory_events": events, "beats": beats,
+        "memory_events": events, "beats": beats, "diagnostics": diagnostics,
     }
 
 

@@ -442,6 +442,7 @@ def test_resume_preserves_dialogue_free_beats_from_completed_chunks(tmp_path):
                 response["beats"] = [{
                     "anchor_id": anchor_id, "position": "after", "who": "凯伊",
                     "face": "00", "emo": "", "act": "", "wait_ms": 2500,
+                    "reason": "listener_reaction",
                 }]
             return response
 
@@ -454,6 +455,7 @@ def test_resume_preserves_dialogue_free_beats_from_completed_chunks(tmp_path):
 
     assert len(result["beats"]) == 1
     assert result["beats"][0]["wait_ms"] == 2500
+    assert result["beats"][0]["reason"] == "listener_reaction"
 
 
 def test_cancellation_stops_before_next_call_and_keeps_checkpoint(tmp_path):
