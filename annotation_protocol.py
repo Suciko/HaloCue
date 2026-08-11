@@ -44,13 +44,14 @@ STATE_FIELD_TYPES = {
     "recent_sounds": list,
     "open_threads": list,
 }
-STATE_SCHEMA_TYPES = {str: "string", list: "array", dict: "object"}
 EVENT_FIELDS = {
     "kind", "participants", "keywords", "summary", "source_ids",
     "evidence", "importance", "status",
 }
 BEAT_FIELDS = {"anchor_id", "position", "who", "face", "emo", "act", "wait_ms", "reason"}
 MAX_BEAT_WAIT_MS = 10_000
+MAX_BEATS_PER_CHUNK = 4
+MAX_MEMORY_EVENTS_PER_CHUNK = 6
 CONTINUITY_LAYERS = {"face", "emo", "act", "fx", "bgfx"}
 DIRECTION_STRING_FIELDS = {
     "scene_type", "scene_function", "emotion_phase", "subtext",
@@ -79,6 +80,40 @@ def _field(name: str, description: str, field_type: str = "string") -> Dict[str,
     if field_type == "integer":
         value["minimum"] = 0
     return value
+
+
+def _state_properties() -> Dict[str, Any]:
+    """Bound state_delta to the same sizes used by the memory reducer."""
+    bounded_string = {"type": "string", "maxLength": 160}
+    return {
+        "background": {"type": ["string", "null"], "maxLength": 160},
+        "place": {"type": ["string", "null"], "maxLength": 80},
+        "bgfx": {"type": ["string", "null"], "maxLength": 80},
+        "visible_characters": {
+            "type": ["array", "null"], "maxItems": 5,
+            "items": {"type": "string", "maxLength": 80},
+        },
+        "positions": {
+            "type": ["object", "null"], "maxProperties": 5,
+            "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 5},
+        },
+        "last_faces": {
+            "type": ["object", "null"], "maxProperties": 12,
+            "additionalProperties": {"type": "string", "maxLength": 32},
+        },
+        "recent_emoticons": {
+            "type": ["array", "null"], "maxItems": 12, "items": bounded_string,
+        },
+        "recent_actions": {
+            "type": ["array", "null"], "maxItems": 12, "items": bounded_string,
+        },
+        "recent_sounds": {
+            "type": ["array", "null"], "maxItems": 12, "items": bounded_string,
+        },
+        "open_threads": {
+            "type": ["array", "null"], "maxItems": 20, "items": bounded_string,
+        },
+    }
 
 
 def _direction_schema() -> Dict[str, Any]:
@@ -157,10 +192,7 @@ def build_chunk_schema(target_ids: Sequence[str]) -> Dict[str, Any]:
         "type": "object", "properties": row_properties,
         "required": row_required, "additionalProperties": False,
     }
-    state_properties = {
-        name: {"type": [STATE_SCHEMA_TYPES[field_type], "null"]}
-        for name, field_type in STATE_FIELD_TYPES.items()
-    }
+    state_properties = _state_properties()
     event_properties = {
         "kind": {"type": "string"}, "participants": {"type": "array", "items": {"type": "string"}},
         "keywords": {"type": "array", "items": {"type": "string"}}, "summary": {"type": "string"},
@@ -184,10 +216,10 @@ def build_chunk_schema(target_ids: Sequence[str]) -> Dict[str, Any]:
     return {
         "type": "object",
         "properties": {
-            "lines": {"type": "array", "items": row_schema},
+            "lines": {"type": "array", "maxItems": len(target_ids), "items": row_schema},
             "state_delta": {"type": "object", "properties": state_properties, "additionalProperties": False},
-            "memory_events": {"type": "array", "items": {"type": "object", "properties": event_properties, "required": sorted(EVENT_FIELDS), "additionalProperties": False}},
-            "beats": {"type": "array", "items": {
+            "memory_events": {"type": "array", "maxItems": MAX_MEMORY_EVENTS_PER_CHUNK, "items": {"type": "object", "properties": event_properties, "required": sorted(EVENT_FIELDS), "additionalProperties": False}},
+            "beats": {"type": "array", "maxItems": MAX_BEATS_PER_CHUNK, "items": {
                 "type": "object", "properties": beat_properties,
                 "required": sorted(BEAT_FIELDS), "additionalProperties": False,
             }},
@@ -216,10 +248,7 @@ def build_compact_chunk_schema(target_count: int, target_ids: Sequence[str] = ()
         "type": "object", "properties": row_properties,
         "required": ["i"], "additionalProperties": False,
     }
-    state_properties = {
-        name: {"type": [STATE_SCHEMA_TYPES[field_type], "null"]}
-        for name, field_type in STATE_FIELD_TYPES.items()
-    }
+    state_properties = _state_properties()
     event_properties = {
         "kind": {"type": "string"}, "participants": {"type": "array", "items": {"type": "string"}},
         "keywords": {"type": "array", "items": {"type": "string"}}, "summary": {"type": "string"},
@@ -239,21 +268,21 @@ def build_compact_chunk_schema(target_count: int, target_ids: Sequence[str] = ()
     }
     return {
         "type": "object", "properties": {
-            "lines": {"type": "array", "items": row_schema},
+            "lines": {"type": "array", "maxItems": int(target_count), "items": row_schema},
             "state_delta": {"type": "object", "properties": state_properties, "additionalProperties": False},
-            "memory_events": {"type": "array", "items": {"type": "object", "properties": event_properties, "required": sorted(EVENT_FIELDS), "additionalProperties": False}},
-            "beats": {"type": "array", "items": {"type": "object", "properties": beat_properties, "required": sorted(BEAT_FIELDS), "additionalProperties": False}},
+            "memory_events": {"type": "array", "maxItems": MAX_MEMORY_EVENTS_PER_CHUNK, "items": {"type": "object", "properties": event_properties, "required": sorted(EVENT_FIELDS), "additionalProperties": False}},
+            "beats": {"type": "array", "maxItems": MAX_BEATS_PER_CHUNK, "items": {"type": "object", "properties": beat_properties, "required": sorted(BEAT_FIELDS), "additionalProperties": False}},
         }, "required": ["lines", "state_delta", "memory_events"], "additionalProperties": False,
     }
 
 
 def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
-    """Restore complete line identities/defaults before normal validation."""
+    """Restore omitted no-op rows, identities and defaults before validation."""
     response = _require_dict(response, "invalid_response", "模型响应必须是对象")
     lines = response.get("lines")
     if not isinstance(lines, list):
         raise ChunkProtocolError("invalid_lines", "lines 必须是数组")
-    expanded = []
+    expanded_by_index: Dict[int, Dict[str, Any]] = {}
     seen = set()
     director_intents: Dict[str, Dict[str, Any]] = {}
     for compact in lines:
@@ -288,11 +317,20 @@ def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, 
         for name in ANNOTATION_FIELDS:
             if name in compact:
                 row[name] = compact[name]
-        expanded.append(row)
-    expected = set(range(1, len(targets) + 1))
-    missing = expected - seen
-    if missing:
-        raise ChunkProtocolError("missing_target", f"响应缺少目标行: {sorted(missing)}")
+        expanded_by_index[index] = row
+    for index, target in enumerate(targets, 1):
+        if index in expanded_by_index:
+            continue
+        expanded_by_index[index] = {
+            "source_id": str(target.get("annotation_id") or ""),
+            "text_fingerprint": str(target.get("text_fingerprint") or ""),
+            **{
+                name: (False if name == "shake" else 0 if name == "move" else "")
+                for name in ANNOTATION_FIELDS
+            },
+            "direction": default_director(),
+        }
+    expanded = [expanded_by_index[index] for index in range(1, len(targets) + 1)]
     expanded_beats = []
     for beat in response.get("beats", []):
         expanded_beat = dict(_require_dict(beat, "invalid_beat", "compact beat 必须是对象"))
@@ -334,7 +372,10 @@ def _validate_beats(
         raise ChunkProtocolError("invalid_beats", "beats 必须是数组")
     expected = set(expected_ids)
     result = []
+    seen_anchors = set()
     for beat in value:
+        if len(result) >= MAX_BEATS_PER_CHUNK:
+            raise ChunkProtocolError("too_many_beats", f"每个场景块最多 {MAX_BEATS_PER_CHUNK} 个 beat")
         beat = _require_dict(beat, "invalid_beat", "beats 每项必须是对象")
         if set(beat) != BEAT_FIELDS:
             raise ChunkProtocolError("invalid_beat", "beat 字段不完整或包含未知字段")
@@ -346,6 +387,10 @@ def _validate_beats(
             raise ChunkProtocolError("unknown_beat_anchor", f"beat 引用了未知目标行: {anchor_id}")
         if beat.get("position") not in {"before", "after"}:
             raise ChunkProtocolError("invalid_beat_position", "beat position 只能是 before 或 after")
+        anchor_key = (anchor_id, beat.get("position"), beat.get("who"))
+        if anchor_key in seen_anchors:
+            raise ChunkProtocolError("duplicate_beat", "同一角色不能在同一锚点重复输出 beat")
+        seen_anchors.add(anchor_key)
         if beat["reason"] not in BEAT_REASONS:
             raise ChunkProtocolError("invalid_beat_reason", f"beat reason 无效: {beat['reason']}")
         who = beat["who"]
@@ -401,6 +446,11 @@ def _validate_events(value: Any, visible_ids: Iterable[str]) -> List[Dict[str, A
     visible = set(visible_ids)
     result = []
     for event in value:
+        if len(result) >= MAX_MEMORY_EVENTS_PER_CHUNK:
+            raise ChunkProtocolError(
+                "too_many_memory_events",
+                f"每个场景块最多 {MAX_MEMORY_EVENTS_PER_CHUNK} 条长期记忆",
+            )
         event = _require_dict(event, "invalid_memory_event", "memory_events 每项必须是对象")
         if set(event) != EVENT_FIELDS:
             raise ChunkProtocolError("invalid_memory_event", "memory event 字段不完整或包含未知字段")
@@ -484,6 +534,14 @@ def validate_chunk_response(
         )
         normalized_row = dict(row)
         normalized_row["direction"] = direction
+        for layer, command in list(direction.get("continuity", {}).items()):
+            if command in {"start", "escalate"} and not normalized_row.get(layer):
+                direction["continuity"][layer] = "none"
+                row_diagnostics.append({
+                    "code": "director_continuity_without_value", "level": "warning",
+                    "field": f"continuity.{layer}",
+                    "message": f"continuity.{layer}={command} requires a {layer} value",
+                })
         raw_intent = (
             director_intents.get(source_id, {})
             if expanded_compact else row.get("direction", {})

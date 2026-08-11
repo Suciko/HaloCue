@@ -142,6 +142,7 @@ SYNTAX = """
   @stage 桃井@1 绿@3 柚子@5        钉死站位，关掉自动排布
   @auto                          恢复自动排布
   @camera 绿,柚子                 下一行只显示这些角色；@camera - 表示明确空镜
+  @camera_hold 绿,柚子            持续保持镜头；auto 恢复自动镜头（生成器内部使用）
   @fx 绿 特写                     立绘效果：特写 / 剪影 / 变暗 / 无
   @hl 桃井,柚子                   本行高亮谁；@hl - 表示都不高亮
                                  默认是台上除说话者外全部高亮
@@ -444,7 +445,6 @@ def build(events, cfg, cast, idx, project):
     vseq = itertools.count()          # 全工程连续的配音槽编号
     bg = cfg.get("default_bg", "BG_Black")
     bgm = cfg.get("default_bgm", 999)
-    face_state = {}
     scene_bg = cfg.get("scene_bg", {}) or {}
 
     def ident_of(nm, no, need_portrait=True):
@@ -463,6 +463,8 @@ def build(events, cfg, cast, idx, project):
     appearance = AppearanceState()
     for sc in scenes:
         scripts = []
+        face_state = {}
+        held_camera = None
         appearance.reset_scene()
         if sc["title"] in scene_bg:
             bg = scene_bg[sc["title"]]
@@ -495,6 +497,7 @@ def build(events, cfg, cast, idx, project):
         trans = 0
         bgfx = 0
         pending_place = ""
+        pending_fx_scene_reset = False
         # 本场登场顺序（决定自动排布的左右次序）
         seen_order = []
         ever = set()          # 曾经进过画面的（用来区分"首次登场"和"再次入镜"）
@@ -505,6 +508,10 @@ def build(events, cfg, cast, idx, project):
                 cmd, arg, no = e["cmd"], e["arg"], e["no"]
                 if cmd in ("bg", "place"):
                     appearance.reset_scene()
+                    face_state.clear()
+                    held_camera = None
+                    bgfx = 0
+                    pending_fx_scene_reset = True
                 if cmd == "bg":
                     selected_bg = parse_bg_argument(arg)
                     if selected_bg:
@@ -635,6 +642,26 @@ def build(events, cfg, cast, idx, project):
                                 if len(resolved) > 5:
                                     warn(no, "@camera 最多显示 5 个立绘，已保留前 5 个")
                                 pend.camera = resolved[:5]
+                elif cmd == "camera_hold":
+                    value = arg.strip()
+                    if value.lower() in ("auto", "自动"):
+                        held_camera = None
+                    elif value in ("-", "无", "none"):
+                        held_camera = []
+                    else:
+                        names = [name for name in re.split(r"[,，、\s]+", value) if name]
+                        resolved = []
+                        valid = bool(names)
+                        for name in names:
+                            ident = ident_of(name, no)
+                            if ident is None:
+                                valid = False
+                            elif ident not in resolved:
+                                resolved.append(ident)
+                        if valid:
+                            if len(resolved) > 5:
+                                warn(no, "@camera_hold 最多显示 5 个立绘，已保留前 5 个")
+                            held_camera = resolved[:5]
                 elif cmd == "fx":
                     p = arg.split(None, 1)
                     if len(p) < 2:
@@ -693,6 +720,8 @@ def build(events, cfg, cast, idx, project):
             want = None
             if pend.camera is not None:
                 want = [w for w in pend.camera if w not in leaving]
+            elif held_camera is not None:
+                want = [w for w in held_camera if w not in leaving]
             elif cam_plan is not None and cam_i < len(cam_plan):
                 want = [w for w in cam_plan[cam_i] if w not in leaving]
             cam_i += 1
@@ -810,7 +839,9 @@ def build(events, cfg, cast, idx, project):
                 "highlightedSlotNums": {"$type": T_ILIST, "$values": hl},
                 "isDialogScript": True, "placeText": pend.place,
                 "_explicitFxEnds": sorted(pend.fx_ends),
+                "_sceneReset": pending_fx_scene_reset,
             })
+            pending_fx_scene_reset = False
 
             for i in leaving:
                 st.leave(i)

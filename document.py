@@ -298,6 +298,10 @@ def compile_document(
 
         if k == "scene":
             events.append({"k": "scene", "title": f.get("title", ""), "no": no})
+        elif k == "separator" or (
+            k == "unknown" and THEMATIC_BREAK_RE.fullmatch(node.raw.strip())
+        ):
+            events.append({"k": "scene", "title": "", "no": no})
         elif k == "title":
             events.append({"k": "title", "title": f.get("title", ""), "no": no})
         elif k == "dir":

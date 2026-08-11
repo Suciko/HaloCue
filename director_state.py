@@ -40,7 +40,7 @@ BEAT_REASONS = (
 )
 
 _CONTINUITY_LAYERS = ("face", "emo", "act", "fx", "bgfx")
-_TEXT_FIELDS = ("emotion_phase", "subtext", "reaction_target")
+_TEXT_FIELDS = ("emotion_phase", "subtext")
 
 
 def default_director(scene_type: str = "other") -> dict[str, Any]:
@@ -116,9 +116,21 @@ def normalize_director(
         elif candidate not in (None, ""):
             diagnostic("director_invalid_value", field, f"{field} must be a character name")
 
+    reaction_target = source.get("reaction_target", "")
+    if isinstance(reaction_target, str) and reaction_target:
+        if reaction_target not in cast_names:
+            diagnostic(
+                "director_unknown_character", "reaction_target",
+                f"Unknown character: {reaction_target}",
+            )
+        else:
+            state["reaction_target"] = reaction_target
+    elif reaction_target not in (None, ""):
+        diagnostic("director_invalid_value", "reaction_target", "reaction_target must be a character name")
+
     visible = source.get("visible_characters", [])
     if isinstance(visible, (list, tuple)):
-        for candidate in visible:
+        for candidate in visible[:5]:
             if not isinstance(candidate, str):
                 diagnostic("director_invalid_value", "visible_characters", "Visible characters must be names")
             elif candidate not in cast_names:
@@ -127,6 +139,11 @@ def normalize_director(
                 diagnostic("director_non_displayable_character", "visible_characters", f"Character cannot be displayed: {candidate}")
             elif candidate not in state["visible_characters"]:
                 state["visible_characters"].append(candidate)
+        if len(visible) > 5:
+            diagnostic(
+                "director_visible_characters_limited", "visible_characters",
+                "At most five characters can be visible in an AA shot",
+            )
     elif visible is not None:
         diagnostic("director_invalid_value", "visible_characters", "Visible characters must be a list")
 

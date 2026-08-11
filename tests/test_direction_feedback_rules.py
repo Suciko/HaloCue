@@ -109,7 +109,7 @@ def test_focusline_is_kept_only_for_an_existing_centered_solo_closeup():
     assert script["characters"]["$values"][3]["shapeOverride"] == 5
 
 
-def test_closeup_persists_until_the_focal_character_leaves_the_shot():
+def test_closeup_survives_a_listener_cut_until_explicit_end_or_scene_reset():
     scripts = [
         _script({2: "kei"}, shapes={2: 4}, speaker_slot=2),
         _script({2: "kei"}, speaker_slot=2),
@@ -122,7 +122,7 @@ def test_closeup_persists_until_the_focal_character_leaves_the_shot():
 
     assert [row["characters"]["$values"][2]["shapeOverride"] for row in scripts[:3]] == [4, 4, 4]
     assert scripts[3]["characters"]["$values"][4]["shapeOverride"] == 0
-    assert scripts[4]["characters"]["$values"][2]["shapeOverride"] == 0
+    assert scripts[4]["characters"]["$values"][2]["shapeOverride"] == 4
 
 
 def test_closeup_ends_only_after_explicit_end():

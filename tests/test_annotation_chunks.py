@@ -48,6 +48,20 @@ def test_explicit_separator_closes_scene_and_chunk():
     assert [chunk["target_indices"] for chunk in chunks] == [[0, 1], [3, 4]]
 
 
+def test_background_and_place_commands_close_annotation_scenes():
+    items = assign_annotation_ids([
+        {"kind": "line", "line_no": 1, "who": "凯伊", "text": "第一句。"},
+        {"kind": "other", "raw": "@bg BG_Second"},
+        {"kind": "line", "line_no": 3, "who": "老师", "text": "第二句。"},
+        {"kind": "other", "raw": "@place 天台"},
+        {"kind": "line", "line_no": 5, "who": "凯伊", "text": "第三句。"},
+    ])
+
+    scenes = build_scene_map(items)
+
+    assert [scene["target_indices"] for scene in scenes] == [[0], [2], [4]]
+
+
 def test_blank_lines_do_not_split_a_scene():
     items = assign_annotation_ids([
         {"kind": "line", "line_no": 1, "who": "凯伊", "text": "第一句。"},

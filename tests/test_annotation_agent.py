@@ -9,6 +9,7 @@ from annotation_agent import (
     AnnotationAgentError,
     apply_review_patches,
     build_review_windows,
+    estimate_chunk_output_budget,
     run_annotation_agent,
 )
 from annotation_protocol import validate_review_patches
@@ -17,6 +18,21 @@ from annotation_memory import AnnotationCheckpointStore, build_run_fingerprint
 
 
 FIELDS = ("face", "emo", "act", "fx", "se", "bg", "bg_request", "place", "bgfx", "trans", "shot")
+
+
+def test_chunk_output_budget_scales_with_wire_shape_and_reasoning_mode():
+    compact = estimate_chunk_output_budget(
+        20, compact=True, reasoning_mode="balanced", maximum=16000,
+    )
+    full = estimate_chunk_output_budget(
+        20, compact=False, reasoning_mode="balanced", maximum=16000,
+    )
+    deep = estimate_chunk_output_budget(
+        20, compact=True, reasoning_mode="deep", maximum=16000,
+    )
+
+    assert 1200 <= compact < full < 16000
+    assert compact < deep <= 16000
 
 
 def make_items(count, separator_at=None):
@@ -80,7 +96,12 @@ def fixture(
     model_activity=None, **agent_options,
 ):
     items = make_items(count)
-    constraints = {"ok_bg": {"BG_Street"}, "faces_by_id": {"kei": {"00"}}}
+    constraints = {
+        "ok_bg": {"BG_Street"}, "confirmed_bg": set(),
+        "faces_by_id": {"kei": {"00"}}, "sym2cn": {},
+        "ok_emo": set(), "ok_act": set(), "ok_se": set(),
+        "ok_shot": {"凯伊"},
+    }
     story_type = str(agent_options.get("story_type") or "auto")
     fingerprint = build_run_fingerprint(
         "\n".join(item.get("raw", "") for item in items), {"凯伊": {"id": "kei"}},
@@ -107,12 +128,33 @@ def test_agent_carries_state_and_event_into_next_chunk(tmp_path):
     assert len(result["rows_by_id"]) == 70
 
 
+def test_compact_agent_accepts_a_fully_sparse_noop_response(tmp_path):
+    class SparseProvider:
+        name = "sparse"
+        model = "sparse"
+        supports_compact_annotation = True
+
+        def __init__(self):
+            self.calls = 0
+
+        def complete_json(self, _static, _volatile, _user, _schema):
+            self.calls += 1
+            return {"lines": [], "state_delta": {}, "memory_events": []}
+
+    provider = SparseProvider()
+    result = fixture(tmp_path, provider, count=35)
+
+    assert provider.calls >= 1
+    assert len(result["rows_by_id"]) == 35
+    assert all(not row.get("face") and not row.get("emo") for row in result["rows_by_id"].values())
+
+
 def test_agent_persists_line_focus_and_continuity_without_overwriting_visible_snapshot(tmp_path):
     class DirectorProvider(RecordingProvider):
         def complete_json(self, static, volatile, user, schema):
             response = super().complete_json(static, volatile, user, schema)
             if self.calls == 1:
-                response["lines"][-1]["fx"] = "communication"
+                response["lines"][-1]["fx"] = "通讯"
                 response["lines"][-1]["direction"] = {
                     "scene_type": "bond",
                     "focus_kind": "listener",
@@ -127,10 +169,11 @@ def test_agent_persists_line_focus_and_continuity_without_overwriting_visible_sn
     provider = DirectorProvider()
     result = fixture(tmp_path, provider, count=70, story_type="bond")
 
+    assert '"scene_type":"bond"' in provider.requests[0]["volatile"]
     assert result["memory"]["direction"]["focus"] == {
         "kind": "listener", "character": "凯伊",
     }
-    assert result["memory"]["direction"]["continuity"]["fx"] == "communication"
+    assert result["memory"]["direction"]["continuity"]["fx"] == "通讯"
     assert result["memory"]["direction"]["visible_characters"] == ["凯伊"]
     assert '"character":"凯伊"' in provider.requests[1]["volatile"]
 
@@ -139,6 +182,30 @@ def test_agent_persists_line_focus_and_continuity_without_overwriting_visible_sn
     assert checkpoint["schema_version"] == 2
     assert checkpoint["director_plan"]["story_type"] == "bond"
     assert checkpoint["memory"]["story"]["type"] == "bond"
+
+
+def test_agent_memory_ignores_resource_values_rejected_by_final_application(tmp_path):
+    class InvalidResourceProvider(RecordingProvider):
+        def complete_json(self, static, volatile, user, schema):
+            response = super().complete_json(static, volatile, user, schema)
+            if self.calls == 1:
+                response["lines"][-1].update({
+                    "face": "99", "emo": "missing-emo", "act": "missing-act",
+                    "fx": "missing-fx", "se": "missing-se", "bg": "missing-bg",
+                    "direction": {"continuity": {"fx": "start"}},
+                })
+            return response
+
+    provider = InvalidResourceProvider()
+    result = fixture(tmp_path, provider, count=70)
+    direction = result["memory"]["direction"]
+
+    assert direction["last_faces"] == {}
+    assert direction["recent_emoticons"] == []
+    assert direction["recent_actions"] == []
+    assert direction["recent_sounds"] == []
+    assert "fx" not in direction["continuity"]
+    assert all("missing-" not in request["volatile"] for request in provider.requests[1:])
 
 
 def test_partial_director_intent_does_not_reset_prior_focus(tmp_path):

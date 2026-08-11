@@ -89,6 +89,9 @@ def test_prompt_contains_story_modes_scene_functions_and_continuity():
     assert "喜剧升级" in text and "情绪转折" in text
     assert "listener" in text and "offscreen_space" in text
     assert "start / hold / escalate / end" in text
+    assert "face变化<=" in text
+    assert "保持上一表情，不重复 face" in text
+    assert "authored=..." in text
 
 
 def test_prompt_forbids_mechanical_face_rotation_and_dialogue_rewrite():

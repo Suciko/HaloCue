@@ -1028,20 +1028,15 @@ def test_custom_background_candidate_preflight_job_keeps_story_preview_scope(tmp
 
     class Provider:
         def complete_json(self, _static, volatile, _user, _schema):
-            custom = json.loads(volatile)["custom_backgrounds"]
-            captured["custom"] = custom
-            key = str(custom[0]["aa_key"])
+            captured["volatile"] = json.loads(volatile)
             return {
-                "characters": [], "assets": [], "issues": [],
-                "usage_chain": [{
-                    "segment": "开场", "location": "车站", "start": "第1行", "end": "第1行",
-                    "evidence": "雨夜的车站。", "needs": [{
-                        "kind": "background", "name": "雨夜车站", "location": "第1行",
-                        "reason": "场景匹配", "confidence": 0.95,
-                        "candidates": [
-                            {"aa_key": key, "confidence": 0.92, "reason": "本章已生成"},
-                            {"aa_key": "forged", "confidence": 0.99, "reason": "跨章伪造"},
-                        ],
+                "extra_speakers": [], "ambiguities": [],
+                "scenes": [{
+                    "label": "开场", "start_line": 1, "end_line": 1,
+                    "location": "车站", "time": "夜晚",
+                    "story_type": "other", "scene_function": "establishing",
+                    "needs": [{
+                        "kind": "background", "name": "雨夜车站", "required": True,
                     }],
                 }],
             }
@@ -1072,11 +1067,11 @@ def test_custom_background_candidate_preflight_job_keeps_story_preview_scope(tmp
         )
 
     assert status == 202 and job["state"] == "succeeded"
+    assert "custom_backgrounds" not in captured["volatile"]
     candidate = job["result"]["usage_chain"][0]["needs"][0]["candidates"][0]
     assert candidate["aa_key"] == str(imported["aa_key"])
     assert candidate["source"] == "custom"
     assert candidate["preview_source"] == "story"
-    assert [item["aa_key"] for item in captured["custom"]] == [str(imported["aa_key"])]
     assert preview[0] == 200 and preview[2].startswith(b"\x89PNG")
     assert "forged" not in json.dumps(job["result"])
     assert str(tmp_path) not in json.dumps(job["result"], ensure_ascii=False)

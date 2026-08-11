@@ -279,7 +279,7 @@ def test_response_row_downgrades_non_displayable_director_focus_with_diagnostic(
     assert any(entry["code"] == "director_non_displayable_character" for entry in diagnostics)
 
 
-def test_listener_focus_renders_one_shot_camera_without_rewriting_source():
+def test_listener_focus_renders_persistent_generated_camera_without_rewriting_source():
     item = {
         "kind": "line", "annotation_id": "src-1", "who": "A",
         "text": "原文", "raw": "A: 原文",
@@ -291,7 +291,7 @@ def test_listener_focus_renders_one_shot_camera_without_rewriting_source():
 
     rendered = annotate.render_annotated_items([item])
 
-    assert "@camera B\n" in rendered
+    assert "@camera_hold B\n" in rendered
     assert rendered.endswith("A: 原文\n")
 
 
@@ -339,4 +339,4 @@ def test_explicit_empty_visibility_intent_survives_row_application():
         {"A": {"id": "a", "portrait": True}}, constraints, [], [],
     )
 
-    assert "@camera -" in annotate.annotation_directives(item)
+    assert "@camera_hold -" in annotate.annotation_directives(item)

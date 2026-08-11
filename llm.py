@@ -202,6 +202,18 @@ class Provider:
             else:
                 self.cfg["reasoning_mode"] = previous
 
+    @contextmanager
+    def temporary_output_budget(self, max_tokens):
+        previous = self.cfg.get("_output_budget_override")
+        self.cfg["_output_budget_override"] = max(1, int(max_tokens))
+        try:
+            yield
+        finally:
+            if previous is None:
+                self.cfg.pop("_output_budget_override", None)
+            else:
+                self.cfg["_output_budget_override"] = previous
+
     def complete_json_stream(
         self, static_system, volatile_system, user, schema, *, on_activity=None,
     ):
@@ -269,6 +281,7 @@ class Provider:
 # ---------------------------------------------------------------- Anthropic
 class AnthropicProvider(Provider):
     name = "anthropic"
+    supports_compact_annotation = True
 
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -329,7 +342,12 @@ class AnthropicProvider(Provider):
         return reasoning_text
 
     def _output_budget(self) -> int:
-        return max(1, int(self.cfg.get("annotation_max_tokens") or self.cfg.get("max_tokens") or 16000))
+        return max(1, int(
+            self.cfg.get("_output_budget_override")
+            or self.cfg.get("annotation_max_tokens")
+            or self.cfg.get("max_tokens")
+            or 16000
+        ))
 
     def _reasoning_effort(self):
         if str(self.cfg.get("reasoning_wire_protocol") or "").strip().lower() != "anthropic_thinking":
@@ -562,7 +580,12 @@ class OpenAIProvider(Provider):
             payload["reasoning_effort"] = effort
 
     def _output_budget(self) -> int:
-        return max(1, int(self.cfg.get("annotation_max_tokens") or self.cfg.get("max_tokens") or 16000))
+        return max(1, int(
+            self.cfg.get("_output_budget_override")
+            or self.cfg.get("annotation_max_tokens")
+            or self.cfg.get("max_tokens")
+            or 16000
+        ))
 
     def _capacity_error_message(self, prefix: str) -> str:
         record = self.request_records[-1] if self.request_records else {}

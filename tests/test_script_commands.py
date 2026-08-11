@@ -40,6 +40,121 @@ def test_first_background_transition_is_ignored_but_later_switch_is_kept(tmp_pat
     assert scenes[0][1][1]["transition"] != 0
 
 
+def test_face_state_resets_at_scene_and_background_boundaries(tmp_path):
+    script = tmp_path / "face-reset.txt"
+    script.write_text(
+        "## one\nAlice(03): first\n@bg BG_Second\nAlice: after background\n"
+        "## two\nAlice: next scene\n",
+        encoding="utf-8",
+    )
+    cast = {"Alice": {"id": "alice", "portrait": True}}
+    index = {
+        "bg": {"BG_Second": 2}, "characters": [],
+        "enums": {"emoticon": {}, "action": {}},
+    }
+
+    scenes = build(
+        parse_script(script, cast),
+        {"default_bg": "BG_Second", "camera": {"enabled": False}},
+        cast, index, "face-reset",
+    )
+
+    first, after_background = scenes[0][1]
+    next_scene = scenes[1][1][0]
+    assert first["characters"]["$values"][first["speakerSlotNum"]]["faceId"] == "03"
+    assert after_background["characters"]["$values"][after_background["speakerSlotNum"]]["faceId"] == "00"
+    assert next_scene["characters"]["$values"][next_scene["speakerSlotNum"]]["faceId"] == "00"
+
+
+def test_persistent_character_effect_resets_at_background_boundary(tmp_path):
+    script = tmp_path / "fx-reset.txt"
+    script.write_text(
+        "@fx Alice 特写\nAlice: first\n@bg BG_Second\nAlice: second\n",
+        encoding="utf-8",
+    )
+    cast = {"Alice": {"id": "alice", "portrait": True}}
+    index = {
+        "bg": {"BG_Second": 2}, "characters": [],
+        "enums": {"emoticon": {}, "action": {}},
+    }
+
+    scripts = build(
+        parse_script(script, cast),
+        {"default_bg": "BG_Second", "camera": {"enabled": False}},
+        cast, index, "fx-reset",
+    )[0][1]
+
+    first = scripts[0]["characters"]["$values"][scripts[0]["speakerSlotNum"]]
+    second = scripts[1]["characters"]["$values"][scripts[1]["speakerSlotNum"]]
+    assert first["shapeOverride"] & 4
+    assert not second["shapeOverride"] & 4
+    assert "_sceneReset" not in scripts[1]
+
+
+def test_background_effect_resets_at_background_boundary(tmp_path):
+    script = tmp_path / "bgfx-reset.txt"
+    script.write_text(
+        "@bgfx 雨\nAlice: first\n@bg BG_Second\nAlice: second\n",
+        encoding="utf-8",
+    )
+    cast = {"Alice": {"id": "alice", "portrait": True}}
+    index = {
+        "bg": {"BG_Second": 2}, "characters": [],
+        "enums": {"emoticon": {}, "action": {}},
+    }
+
+    scripts = build(
+        parse_script(script, cast),
+        {"default_bg": "BG_Second", "camera": {"enabled": False}},
+        cast, index, "bgfx-reset",
+    )[0][1]
+
+    assert scripts[0]["bgEffect"] != 0
+    assert scripts[1]["bgEffect"] == 0
+
+
+def test_persistent_camera_holds_until_auto_without_changing_authored_one_shot(tmp_path):
+    script = tmp_path / "camera-hold.txt"
+    script.write_text(
+        "@camera_hold Alice\nAlice: first\nBob: listener cut\n"
+        "@camera_hold auto\nBob: automatic again\n",
+        encoding="utf-8",
+    )
+    cast = {
+        "Alice": {"id": "alice", "portrait": True},
+        "Bob": {"id": "bob", "portrait": True},
+    }
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+
+    scripts = build(
+        parse_script(script, cast),
+        {"camera": {"enabled": False}}, cast, index, "camera-hold",
+    )[0][1]
+
+    visible = [
+        [character["name"] for character in row["characters"]["$values"][1:] if character["name"]]
+        for row in scripts
+    ]
+    assert visible[:2] == [["alice"], ["alice"]]
+    assert "bob" in visible[2]
+
+
+def test_thematic_separator_is_a_real_compiler_scene_boundary(tmp_path):
+    script = tmp_path / "separator-scene.txt"
+    script.write_text("Alice(03): first\n---\nAlice: second\n", encoding="utf-8")
+    cast = {"Alice": {"id": "alice", "portrait": True}}
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+
+    scenes = build(
+        parse_script(script, cast),
+        {"camera": {"enabled": False}}, cast, index, "separator-scene",
+    )
+
+    assert len(scenes) == 2
+    second = scenes[1][1][0]
+    assert second["characters"]["$values"][second["speakerSlotNum"]]["faceId"] == "00"
+
+
 def test_chat_and_jump_resolve_to_separate_character_fields():
     assert resolve_emo(EMOTICON[1], {EMOTICON[1]: 1}, {}, 9) == 1
     assert resolve_act(ACTION[6], {ACTION[6]: 6}, {}, 9) == 6

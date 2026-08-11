@@ -3,6 +3,8 @@
 
 import re
 
+from director_policy import normalize_direction_plan
+
 
 DIRECTION_FIELDS = frozenset({"face", "emo", "act", "fx"})
 STRONG_ACTIONS = frozenset({"jump", "shake", "hophop"})
@@ -30,12 +32,11 @@ def apply_model_directions(item, clean):
     explicit = set(item.get("_explicit_direction_fields", ()))
     applied = {}
     for field, value in clean.items():
-        if field in DIRECTION_FIELDS and field in explicit:
+        if field in explicit:
             continue
         item[field] = value
         applied[field] = value
-        if field in DIRECTION_FIELDS:
-            item.setdefault("_direction_origins", {})[field] = "model"
+        item.setdefault("_direction_origins", {})[field] = "model"
     return applied
 
 
@@ -151,7 +152,10 @@ def normalize_action_density(items):
 
 
 def normalize_direction_density(items):
-    """Apply all balanced cooldowns while preserving authored direction."""
+    """Apply the stateful scene policy, with the legacy fallback kept for old callers."""
+    if any(isinstance(item.get("_director_intent"), dict) for item in items):
+        normalize_direction_plan(items)
+        return
     normalize_emoticon_density(items)
     normalize_action_density(items)
 

@@ -150,7 +150,11 @@ def test_story_mode_preserves_source_and_compiles_director_cues(tmp_path, story_
     ]
     assert "等待确认" not in annotated
     assert "listener_reaction" not in annotated
-    assert annotated.count("@camera") == len(case["directions"])
+    camera_changes = [
+        line for line in annotated.splitlines() if line.startswith("@camera_hold")
+    ]
+    assert camera_changes
+    assert len(camera_changes) <= len(case["directions"])
     assert ("@fx Operator 通讯" in annotated) == (story_type == "main")
     assert result["story_type"] == story_type
     assert f"当前剧情类型：{story_type}" in provider.static

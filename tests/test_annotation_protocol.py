@@ -94,6 +94,38 @@ def test_unknown_director_character_degrades_with_diagnostic_without_losing_sour
     assert any(item["code"] == "director_unknown_character" for item in result["diagnostics"])
 
 
+def test_reaction_target_and_visible_cast_are_bounded_by_the_real_cast_and_aa_slots():
+    response = complete_response()
+    response["lines"][0]["direction"] = {
+        "reaction_target": "Unknown",
+        "visible_characters": ["A", "B", "C", "D", "E", "F"],
+    }
+    cast = {name: {"id": name.lower(), "portrait": True} for name in "ABCDEF"}
+
+    result = validate_chunk_response(response, TARGETS, cast=cast)
+    direction = result["lines_by_id"]["src-1-0-a"]["direction"]
+
+    assert direction["reaction_target"] == ""
+    assert direction["visible_characters"] == ["A", "B", "C", "D", "E"]
+    assert {row["code"] for row in result["diagnostics"]} >= {
+        "director_unknown_character", "director_visible_characters_limited",
+    }
+
+
+def test_continuity_start_without_a_layer_value_degrades_to_no_command():
+    response = complete_response()
+    response["lines"][0]["direction"] = {"continuity": {"emo": "start"}}
+
+    result = validate_chunk_response(response, TARGETS)
+
+    line = result["lines_by_id"]["src-1-0-a"]
+    assert line["direction"]["continuity"]["emo"] == "none"
+    assert any(
+        row["code"] == "director_continuity_without_value"
+        for row in result["diagnostics"]
+    )
+
+
 def test_visible_character_intent_distinguishes_omission_from_explicit_empty_shot():
     omitted = validate_chunk_response(complete_response(), TARGETS)
     explicit_response = complete_response()
@@ -393,6 +425,29 @@ def test_compact_schema_uses_one_based_index_and_optional_annotation_fields():
     assert "source_id" not in row["properties"]
     assert "text_fingerprint" not in row["properties"]
     assert row["additionalProperties"] is False
+    assert schema["properties"]["lines"]["maxItems"] == 2
+
+
+def test_state_delta_schema_matches_memory_bounds():
+    state = build_compact_chunk_schema(3)["properties"]["state_delta"]["properties"]
+
+    assert state["visible_characters"]["maxItems"] == 5
+    assert state["recent_actions"]["maxItems"] == 12
+    assert state["open_threads"]["maxItems"] == 20
+    assert state["positions"]["maxProperties"] == 5
+
+
+def test_compact_response_restores_completely_omitted_noop_rows():
+    expanded = expand_compact_chunk_response({
+        "lines": [], "state_delta": {}, "memory_events": [],
+    }, TARGETS)
+
+    assert expanded["lines"] == [
+        row("src-1-0-a", "fp-a") | {"direction": default_director()},
+        row("src-2-0-b", "fp-b") | {"direction": default_director()},
+    ]
+    validated = validate_chunk_response(expanded, TARGETS)
+    assert set(validated["lines_by_id"]) == {"src-1-0-a", "src-2-0-b"}
 
 
 def test_compact_response_restores_identity_and_protocol_defaults():
@@ -461,7 +516,6 @@ def test_compact_response_expands_event_source_indices_to_source_ids():
 
 
 @pytest.mark.parametrize("lines,code", [
-    ([{"i": 1}], "missing_target"),
     ([{"i": 1}, {"i": 1}], "duplicate_target"),
     ([{"i": 1}, {"i": 3}], "unknown_target"),
     ([{"i": True}, {"i": 2}], "invalid_line"),

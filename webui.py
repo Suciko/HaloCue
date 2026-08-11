@@ -8,6 +8,7 @@ AA 剧本编译器 · 本地网页界面
 只用标准库 + PIL（缩略图），不需要装框架。
 """
 import argparse, hashlib, io, json, mimetypes, os, re, socket, sys, threading, traceback, uuid, webbrowser
+from contextlib import ExitStack
 from dataclasses import replace
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Dict, List, Any, Optional
@@ -31,6 +32,7 @@ import llm                                                      # noqa: E402
 import model_capabilities                                       # noqa: E402
 import model_profiles                                           # noqa: E402
 import model_router                                             # noqa: E402
+from director_state import SCENE_FUNCTIONS, SCENE_TYPES        # noqa: E402
 from official_preview_index import (                             # noqa: E402
     OfficialPreviewIndex,
     PreviewIndexState,
@@ -1880,7 +1882,7 @@ def _story_custom_character_mapping(who: str, custom_assets: dict) -> dict | Non
     }
 
 
-_PREFLIGHT_SCHEMA = {
+_LEGACY_PREFLIGHT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
@@ -1934,6 +1936,200 @@ _PREFLIGHT_SCHEMA = {
     },
     "required": ["characters", "assets", "usage_chain", "issues"],
 }
+
+
+_PREFLIGHT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "extra_speakers": {
+            "type": "array", "maxItems": 64,
+            "items": {"type": "string", "maxLength": 28},
+        },
+        "scenes": {
+            "type": "array", "maxItems": 160,
+            "items": {"type": "object", "additionalProperties": False, "properties": {
+                "label": {"type": "string", "maxLength": 80},
+                "start_line": {"type": "integer", "minimum": 1},
+                "end_line": {"type": "integer", "minimum": 1},
+                "location": {"type": "string", "maxLength": 120},
+                "time": {"type": "string", "maxLength": 40},
+                "story_type": {"type": "string", "enum": list(SCENE_TYPES)},
+                "scene_function": {"type": "string", "enum": list(SCENE_FUNCTIONS)},
+                "needs": {"type": "array", "maxItems": 8, "items": {
+                    "type": "object", "additionalProperties": False,
+                    "properties": {
+                        "kind": {"type": "string", "enum": ["background", "sound", "bgm"]},
+                        "name": {"type": "string", "maxLength": 120},
+                        "required": {"type": "boolean"},
+                    },
+                    "required": ["kind", "name", "required"],
+                }},
+            }, "required": [
+                "label", "start_line", "end_line", "location", "time",
+                "story_type", "scene_function", "needs",
+            ]},
+        },
+        "ambiguities": {
+            "type": "array", "maxItems": 80,
+            "items": {"type": "object", "additionalProperties": False, "properties": {
+                "code": {"type": "string", "maxLength": 80},
+                "line": {"type": "integer", "minimum": 0},
+                "message": {"type": "string", "maxLength": 240},
+            }, "required": ["code", "line", "message"]},
+        },
+    },
+    "required": ["extra_speakers", "scenes", "ambiguities"],
+}
+
+
+def _compact_preflight_to_internal(value: dict, text: str) -> dict:
+    """Expand the small AI contract into the existing backend/UI contract."""
+    lines = text.splitlines()
+    usage_chain = []
+    for index, scene in enumerate((value.get("scenes") or [])[:160]):
+        if not isinstance(scene, dict):
+            continue
+        try:
+            start_line = max(1, int(scene.get("start_line") or 1))
+            end_line = max(start_line, int(scene.get("end_line") or start_line))
+        except (TypeError, ValueError):
+            continue
+        if lines:
+            start_line = min(start_line, len(lines))
+            end_line = min(end_line, len(lines))
+        evidence = " ".join(
+            raw.strip() for raw in lines[start_line - 1:end_line] if raw.strip()
+        )[:500]
+        needs = []
+        for need in (scene.get("needs") or [])[:8]:
+            if not isinstance(need, dict):
+                continue
+            kind = _PREFLIGHT_KIND_ALIASES.get(str(need.get("kind") or "").casefold())
+            name = str(need.get("name") or "").strip()
+            if not kind or not name:
+                continue
+            required = bool(need.get("required", kind == "background"))
+            if kind == "background":
+                reason = "场景地点与时间需要稳定的空间背景。"
+            elif required:
+                reason = "正文中有明确的声音演出线索。"
+            else:
+                reason = "用于强化当前场景氛围的可选演出。"
+            needs.append({
+                "kind": kind, "name": name, "location": f"第{start_line}行",
+                "reason": reason, "confidence": 0.9 if required else 0.65,
+                "required": required,
+            })
+        usage_chain.append({
+            "segment": str(scene.get("label") or f"场景 {index + 1}"),
+            "location": str(scene.get("location") or "位置未标注"),
+            "start": f"第{start_line}行", "end": f"第{end_line}行",
+            "evidence": evidence,
+            "time": str(scene.get("time") or ""),
+            "scene_type": str(scene.get("story_type") or "other"),
+            "scene_function": str(scene.get("scene_function") or "dialogue"),
+            "needs": needs,
+        })
+
+    issues = []
+    for ambiguity in (value.get("ambiguities") or [])[:80]:
+        if not isinstance(ambiguity, dict):
+            continue
+        try:
+            line = max(0, int(ambiguity.get("line") or 0))
+        except (TypeError, ValueError):
+            line = 0
+        location = f"第{line}行：" if line else ""
+        issues.append({
+            "severity": "warning",
+            "code": str(ambiguity.get("code") or "ai_ambiguity"),
+            "message": location + str(
+                ambiguity.get("message") or "有一处语义需要人工确认。"
+            ),
+            "action": "请核对原剧本含义后再确认初审。",
+        })
+    speakers = [{
+            "speaker": str(speaker), "kind": "unset", "id": "", "name": "",
+            "custom": False, "confidence": 0.0,
+            "reason": "AI 从非标准写法的全文中发现，等待确认。",
+        } for speaker in (value.get("extra_speakers") or [])[:64]]
+    return {
+        "characters": speakers,
+        "assets": [],
+        "usage_chain": usage_chain,
+        "issues": issues,
+    }
+
+
+def _preflight_script_windows(text: str, max_lines: int = 240) -> list[dict]:
+    """Split only long scripts at nearby natural boundaries, preserving source line ids."""
+    lines = text.splitlines()
+    if not lines:
+        return [{"start_line": 1, "end_line": 1, "text": ""}]
+    windows = []
+    start = 0
+    while start < len(lines):
+        end = min(len(lines), start + max_lines)
+        if end < len(lines):
+            lower = min(end, start + max(1, int(max_lines * 0.70)))
+            boundaries = [
+                index for index in range(lower, end)
+                if not lines[index].strip()
+                or lines[index].lstrip().startswith(("## ", "---"))
+            ]
+            if boundaries:
+                end = boundaries[-1]
+        if end <= start:
+            end = min(len(lines), start + max_lines)
+        numbered = "\n".join(
+            f"L{index + 1}\t{lines[index]}"
+            for index in range(start, end)
+            if lines[index].strip()
+        )
+        windows.append({
+            "start_line": start + 1, "end_line": end, "text": numbered,
+        })
+        start = end
+    return windows
+
+
+def _merge_preflight_internal(parts: list[dict]) -> dict:
+    """Merge bounded preflight windows without multiplying duplicate model output."""
+    characters, assets, scenes, issues = [], [], [], []
+    seen_characters, seen_assets, seen_scenes, seen_issues = set(), set(), set(), set()
+    for part in parts:
+        for item in part.get("characters") or []:
+            key = str(item.get("speaker") or "").strip().casefold()
+            if key and key not in seen_characters and len(characters) < 64:
+                characters.append(item)
+                seen_characters.add(key)
+        for item in part.get("assets") or []:
+            key = (
+                str(item.get("kind") or "").casefold(),
+                str(item.get("name") or "").strip().casefold(),
+            )
+            if all(key) and key not in seen_assets:
+                assets.append(item)
+                seen_assets.add(key)
+        for item in part.get("usage_chain") or []:
+            key = (
+                str(item.get("start") or ""), str(item.get("end") or ""),
+                str(item.get("location") or "").casefold(),
+            )
+            if key not in seen_scenes and len(scenes) < 160:
+                scenes.append(item)
+                seen_scenes.add(key)
+        for item in part.get("issues") or []:
+            key = (str(item.get("code") or ""), str(item.get("message") or ""))
+            if key not in seen_issues and len(issues) < 80:
+                issues.append(item)
+                seen_issues.add(key)
+    scenes.sort(key=lambda item: int((re.search(r"\d+", str(item.get("start") or "")) or [0])[0]))
+    return {
+        "characters": characters, "assets": assets,
+        "usage_chain": scenes, "issues": issues,
+    }
 
 
 def _preflight_character_library(con, speakers: list[dict], custom_assets: dict,
@@ -2164,6 +2360,10 @@ def _background_generation_prompt(name: str, reason: str, evidence: str, locatio
 
 _BACKGROUND_CATALOG_FALLBACK_HINTS = (
     (("夜晚", "晚上", "夜间", "深夜", "当晚"), (("night", 3.0),)),
+    (("商店街", "商业街", "购物街"), (("shopping", 3.0), ("district", 1.5))),
+    (("教室", "课堂"), (("classroom", 4.0), ("school", 1.5))),
+    (("车站", "站台", "候车厅"), (("station", 4.0), ("platform", 2.0))),
+    (("天台", "屋顶"), (("rooftop", 4.0), ("roof", 2.0))),
     (("室内", "屋内", "房间", "房内"), (("office", 1.5), ("room", 1.5), ("indoor", 1.5))),
     (("夏莱", "沙勒", "schale"), (("schale", 4.0),)),
     (("夏莱办公室", "夏莱办事处", "老师办公室"), (("main", 4.0), ("office", 2.0))),
@@ -2216,6 +2416,37 @@ def _catalog_background_candidates(con, *context: str, limit: int = 3) -> list[d
         }))
     ranked.sort(key=lambda item: (-item[0], item[1]))
     return [item[2] for item in ranked[:limit]]
+
+
+def _custom_background_candidates(custom_backgrounds: dict, *context: str, limit: int = 3) -> list[dict]:
+    """Rank labeled backgrounds locally; the model no longer needs the catalog."""
+    query = " ".join(str(value or "") for value in context).casefold()
+    if not query:
+        return []
+    ranked = []
+    for item in custom_backgrounds.values():
+        searchable = " ".join(
+            str(item.get(field) or "")
+            for field in ("aa_key", "label", "name", "description", "place", "time", "mood", "tags")
+        ).casefold()
+        score = 0.0
+        if str(item.get("label") or "").casefold() in query:
+            score += 5.0
+        for token in re.findall(r"[a-z0-9_]+|[\u4e00-\u9fff]{2,}", searchable):
+            if token in query:
+                score += 1.5 if len(token) > 2 else 1.0
+        if score <= 0:
+            continue
+        ranked.append((score, str(item.get("aa_key") or "").casefold(), {
+            "aa_key": str(item.get("aa_key") or ""),
+            "label": str(item.get("label") or item.get("name") or ""),
+            "source": "custom", "preview_source": "story",
+            "confidence": min(0.89, 0.60 + score * 0.05),
+            "reason": "根据当前剧情已登记背景的地点、时间和氛围标签匹配。",
+            "preview_available": bool(item.get("preview_available")),
+        }))
+    ranked.sort(key=lambda row: (-row[0], row[1]))
+    return [row[2] for row in ranked[:limit]]
 
 
 def _normalize_usage_chain(raw_chain: object, custom_assets: dict, con) -> tuple[list[dict], list[dict]]:
@@ -2316,6 +2547,10 @@ def _normalize_usage_chain(raw_chain: object, custom_assets: dict, con) -> tuple
                 candidates.sort(key=lambda item: (-item["confidence"], item["aa_key"].casefold()))
                 candidates = candidates[:3]
                 if not candidates:
+                    candidates = _custom_background_candidates(
+                        custom_backgrounds, name, reason, evidence, need_location, location
+                    )
+                if not candidates:
                     candidates = _catalog_background_candidates(
                         con, name, reason, evidence, need_location, location
                     )
@@ -2361,6 +2596,7 @@ def _normalize_usage_chain(raw_chain: object, custom_assets: dict, con) -> tuple
             need = {
                 "kind": kind, "name": name, "location": need_location,
                 "reason": reason, "confidence": confidence, "status": status,
+                "required": bool(raw_need.get("required", kind == "background")),
                 "evidence": evidence, "candidates": candidates if not (found or builtin) else [],
             }
             if found:
@@ -2388,11 +2624,14 @@ def _normalize_usage_chain(raw_chain: object, custom_assets: dict, con) -> tuple
                     "confidence": confidence,
                 })
                 ref_keys.add(key)
-        if needs:
-            chain.append({
-                "segment": segment, "location": location, "start": start,
-                "end": end, "evidence": evidence, "needs": needs,
-            })
+        chain.append({
+            "segment": segment, "location": location, "start": start,
+            "end": end, "evidence": evidence,
+            "time": str(raw_segment.get("time") or "").strip()[:40],
+            "scene_type": str(raw_segment.get("scene_type") or "other").strip()[:32],
+            "scene_function": str(raw_segment.get("scene_function") or "dialogue").strip()[:48],
+            "needs": needs,
+        })
     return chain, refs
 
 
@@ -2400,7 +2639,7 @@ _PREFLIGHT_COMMANDS = {
     "bg", "trans", "bgfx", "popup", "bgm", "music", "se", "sound",
     "place", "wait", "raw", "bgshake", "clearst", "hidemenu", "showmenu",
     "aronatouch", "shot", "st", "stm", "zoom", "enter", "exit", "move",
-    "stage", "auto", "fx", "hl",
+    "stage", "auto", "camera", "camera_hold", "fx", "hl",
 }
 _PREFLIGHT_ARG_REQUIRED = _PREFLIGHT_COMMANDS - {
     "bgshake", "clearst", "hidemenu", "showmenu", "aronatouch", "auto",
@@ -2439,18 +2678,49 @@ def _preflight_directive_issues(text: str) -> list[dict]:
     return issues
 
 
-def _complete_preflight(provider, static: str, volatile: str, user: str) -> dict:
-    """Request a schema-valid preflight result, retrying one format failure."""
+def _preflight_output_budget(provider, analysis: dict) -> int:
+    """Use a bounded, scene-scaled budget independent from annotation chunks."""
+    line_count = max(1, int(analysis.get("lines") or 0))
+    header_count = len(analysis.get("scenes") or [])
+    estimated_scenes = max(header_count, (line_count + 39) // 40, 1)
+    target = min(6000, max(2048, 2048 + estimated_scenes * 192))
+    cfg = getattr(provider, "cfg", {}) or {}
     try:
-        result = provider.complete_json(static, volatile, user, _PREFLIGHT_SCHEMA)
+        model_limit = int(cfg.get("annotation_max_tokens") or cfg.get("max_tokens") or target)
+    except (TypeError, ValueError):
+        model_limit = target
+    return max(1, min(target, model_limit))
+
+
+def _complete_preflight(
+    provider, static: str, volatile: str, user: str, *, output_budget: int | None = None,
+) -> dict:
+    """Request compact preflight JSON with one strict-format retry."""
+    def call(system):
+        with ExitStack() as stack:
+            reason_mode = getattr(provider, "temporary_reasoning_mode", None)
+            if callable(reason_mode):
+                stack.enter_context(reason_mode("speed"))
+            budget_mode = getattr(provider, "temporary_output_budget", None)
+            if output_budget and callable(budget_mode):
+                stack.enter_context(budget_mode(output_budget))
+            return provider.complete_json(system, volatile, user, _PREFLIGHT_SCHEMA)
+
+    try:
+        result = call(static)
+        # A 0.9.1 provider/cache response remains readable during the rollout.
+        if isinstance(result, dict) and {"characters", "assets", "usage_chain", "issues"} <= set(result):
+            return llm.validate_json_schema(result, _LEGACY_PREFLIGHT_SCHEMA)
         return llm.validate_json_schema(result, _PREFLIGHT_SCHEMA)
     except llm.StructuredOutputError:
         retry_static = static + (
-            "\n\n上一次返回不符合要求。请重新输出，严格只允许一个 JSON 对象，"
-            "必须包含 characters、assets、usage_chain、issues 四个字段；"
-            "不要输出 Markdown、解释文字、标题或代码围栏。"
+            "\n\n上一次返回不符合要求。请立即重试，严格只返回一个 JSON 对象。"
+            "对象只能包含 extra_speakers、scenes、ambiguities；不要返回角色映射、素材状态、"
+            "候选、证据原文、理由、问题文案、Markdown 或代码围栏。"
         )
-        result = provider.complete_json(retry_static, volatile, user, _PREFLIGHT_SCHEMA)
+        result = call(retry_static)
+        if isinstance(result, dict) and {"characters", "assets", "usage_chain", "issues"} <= set(result):
+            return llm.validate_json_schema(result, _LEGACY_PREFLIGHT_SCHEMA)
         return llm.validate_json_schema(result, _PREFLIGHT_SCHEMA)
 
 
@@ -2467,11 +2737,9 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
             story_mapping = _story_custom_character_mapping(who, custom_assets)
             if story_mapping is not None:
                 baseline[who] = story_mapping
-        custom_backgrounds = _preflight_custom_background_library(custom_assets)
         character_library = _preflight_character_library(
             con, analysis.get("speakers") or [], custom_assets, baseline
         )
-        official_backgrounds = _preflight_background_library(con)
         refs = _preflight_asset_refs(text, custom_assets, con)
         builtin_asset_names = {
             "background": {
@@ -2523,38 +2791,65 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
     usage_chain_status = "not_run"
     usage_chain: list[dict] = []
     ai_diagnostics: dict | None = None
+    ai_usage: dict | None = None
     ai_issues = []
     provider = annotation_provider(model_profile_id)
     if provider is not None:
+        before_stats = dict(getattr(provider, "stats", {}) or {})
         static = (
-            "你是 AA 剧本编译器的剧本初审助手。只返回 JSON，不要编造文件路径。"
-            "请通读全文，即使写法不是“角色：台词”，也要列出明确出场或说话的角色。"
-            "请按地点、时间或空间变化把全文分成完整场景段落，并在 usage_chain 中描述每段需要的背景、BGM 和音效。"
-            "不要要求用户书写 @bg、@bgm 或 @sound；这些只是后续生成层的内部指令。"
-            "每个演出需求都要提供原文证据、位置、理由和 0 到 1 的置信度。"
-            "只能把角色映射到提供的候选或明确标记为 unset；自定义角色/骨骼必须标记 custom=true。"
-            "素材状态只能依据当前剧情自定义素材清单判断，不能把缺失素材改成已登记。"
-            "背景需求必须先检查当前剧情 custom_backgrounds，再检查 official_backgrounds；"
-            "语义合适时优先使用当前剧情已标注的自定义背景，只能从这两个清单返回最多三个 candidates，"
-            "每项包含精确 aa_key、匹配置信度和差异说明；不得返回未列出的自定义背景或编造 aa_key。"
-            "商店街背景即使没有钟塔等次要细节，也可以作为 0.60 到 0.74 的近似候选。"
-            "商店街或商业街应优先考虑 BG_ShoppingDistrict；只有它不符合室内外、时间或剧情关键细节时，"
-            "才改选更泛化的 CityTown、Downtown 等候选。"
-            "音效和 BGM 是可选演出增强，不要因为缺少它们而报告 error。"
+            "你是 AA 剧本编译器的轻量初审规划器。你只做必须理解全文才能完成的语义判断，"
+            "不改写台词，也不输出 AA 标注。只返回 schema 规定的紧凑 JSON。"
+            "extra_speakers 只列规则结果遗漏、但正文明确说话或出场的人物；不要重复 speakers。"
+            "scenes 按地点、时间或空间变化完整覆盖正文，用 L 行号填写 start_line/end_line。"
+            "每场填写地点、时间、main/event/bond/other 和 scene_function。"
+            "needs 只写语义素材名：每场通常只需一个 background；只有正文有明确声音线索时才写 sound，"
+            "只有音乐对情绪结构不可替代时才写 bgm。不要输出候选、aa_key、状态、证据原文、理由或置信度。"
+            "required 表示缺少该素材会破坏场景理解；纯氛围增强一律 false。"
+            "ambiguities 只写真正需要人工确认、且后端规则无法确定的文本歧义；不要生成素材缺失、"
+            "人物未映射、格式或指令问题，这些由后端确定性检查。"
+            "不要输出 Markdown、解释、总结或重复剧本文本。"
         )
-        volatile = json.dumps({
-            "speakers": analysis.get("speakers", []),
-            "scenes": analysis.get("scenes", []),
-            "rule_mapping": characters,
-            "character_library": character_library,
-            "official_backgrounds": official_backgrounds,
-            "custom_backgrounds": custom_backgrounds,
-            "custom_assets": custom_assets,
-            "script_asset_refs": refs,
-        }, ensure_ascii=False)
-        user = "请先理解以下剧本全文，再给出可编辑的角色、场景演出时间线、素材需求和问题清单。\n\n剧本全文：\n" + text
+        windows = _preflight_script_windows(text)
+        volatile_base = {
+            "speakers": [{
+                "name": str(item.get("who") or ""), "count": int(item.get("n") or 0),
+            } for item in analysis.get("speakers", [])],
+        }
+        if len(windows) == 1:
+            volatile_base["scene_headers"] = analysis.get("scenes", [])
+        output_budgets = []
+        prompt_chars = 0
         try:
-            ai = _complete_preflight(provider, static, volatile, user)
+            ai_parts = []
+            for window_index, window in enumerate(windows, 1):
+                volatile_payload = dict(volatile_base)
+                if len(windows) > 1:
+                    volatile_payload["window"] = {
+                        "index": window_index, "count": len(windows),
+                        "start_line": window["start_line"], "end_line": window["end_line"],
+                    }
+                volatile = json.dumps(
+                    volatile_payload, ensure_ascii=False, separators=(",", ":")
+                )
+                user = (
+                    "分析下列带行号剧本。行号仅用于定位，不属于原文。"
+                    "只分析本窗口，不要补写窗口外场景。直接返回 JSON。\n\n"
+                    + window["text"]
+                )
+                window_analysis = {
+                    "lines": window["end_line"] - window["start_line"] + 1,
+                    "scenes": analysis.get("scenes", []) if len(windows) == 1 else [],
+                }
+                output_budget = _preflight_output_budget(provider, window_analysis)
+                output_budgets.append(output_budget)
+                prompt_chars += len(static) + len(volatile) + len(user)
+                part = _complete_preflight(
+                    provider, static, volatile, user, output_budget=output_budget
+                )
+                if not {"characters", "assets", "usage_chain", "issues"} <= set(part):
+                    part = _compact_preflight_to_internal(part, text)
+                ai_parts.append(part)
+            ai = _merge_preflight_internal(ai_parts)
             if isinstance(ai, dict):
                 ai_status = "completed"
                 usage_chain_status = "completed"
@@ -2720,6 +3015,22 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
                     "检查模型配置、接口地址和网络后重试；场景演出规划暂未完成。"
                 ),
             })
+        after_stats = dict(getattr(provider, "stats", {}) or {})
+        ai_usage = {
+            "input_chars": prompt_chars,
+            "input_tokens": max(
+                0, int(after_stats.get("in", 0) or 0) - int(before_stats.get("in", 0) or 0)
+            ),
+            "output_tokens": max(
+                0, int(after_stats.get("out", 0) or 0) - int(before_stats.get("out", 0) or 0)
+            ),
+            "calls": max(
+                0, int(after_stats.get("calls", 0) or 0) - int(before_stats.get("calls", 0) or 0)
+            ),
+            "output_budget": max(output_budgets, default=0),
+            "window_count": len(windows),
+            "scene_count": len(usage_chain),
+        }
     else:
         usage_chain_status = "unavailable"
         ai_diagnostics = {"stage": "configuration", "message": "未配置可用模型"}
@@ -2799,6 +3110,7 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
         "usage_chain": usage_chain,
         "usage_chain_status": usage_chain_status,
         "ai_diagnostics": ai_diagnostics,
+        "ai_usage": ai_usage,
         "character_library": character_library, "issues": issues,
         "analysis": {"lines": analysis.get("lines", 0), "scenes": analysis.get("scenes", []),
                       "speakers": analysis.get("speakers", []),

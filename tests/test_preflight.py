@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import json
+import re
 
 import assetdb
 import webui
@@ -199,6 +200,14 @@ def test_ai_cannot_mark_a_missing_asset_as_registered(tmp_path, monkeypatch):
     assert {issue["code"] for issue in result["issues"]} >= {
         "missing_custom_asset", "unknown_directive",
     }
+
+
+def test_preflight_accepts_generated_and_authored_camera_commands():
+    issues = webui._preflight_directive_issues(
+        "@camera 凯伊,老师\n@camera_hold 凯伊\n@camera_hold auto\n"
+    )
+
+    assert issues == []
 
 
 def test_nonstandard_script_blocks_when_full_text_ai_review_did_not_run(tmp_path, monkeypatch):
@@ -481,7 +490,9 @@ def test_usage_chain_does_not_hide_missing_background_with_weak_candidate(tmp_pa
     assert "钟塔机械室" in need["generation_prompt"]
 
 
-def test_preflight_exposes_official_background_catalog_to_model(tmp_path, monkeypatch):
+def test_preflight_keeps_background_catalog_local_instead_of_sending_it_to_model(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
     con = assetdb.connect(tmp_path / "assets.db")
     con.execute(
@@ -493,9 +504,10 @@ def test_preflight_exposes_official_background_catalog_to_model(tmp_path, monkey
     captured = {}
 
     class Provider:
-        def complete_json(self, _static, volatile, _user, _schema):
+        def complete_json(self, _static, volatile, _user, schema):
             captured.update(json.loads(volatile))
-            return {"characters": [], "assets": [], "usage_chain": [], "issues": []}
+            captured["schema"] = schema
+            return {"extra_speakers": [], "scenes": [], "ambiguities": []}
 
     monkeypatch.setattr(webui, "annotation_provider", lambda _profile=None: Provider())
     script = tmp_path / "story.txt"
@@ -503,10 +515,138 @@ def test_preflight_exposes_official_background_catalog_to_model(tmp_path, monkey
 
     webui._preflight_result(str(script), scope=str(tmp_path / "project"))
 
-    assert captured["official_backgrounds"] == [{
-        "aa_key": "BG_ShoppingDistrict", "label": "Shopping District",
-        "place": "", "time": "", "mood": "", "tags": "shopping,district",
-    }]
+    assert set(captured) == {"speakers", "scene_headers", "schema"}
+    assert "official_backgrounds" not in captured
+    assert captured["schema"]["required"] == ["extra_speakers", "scenes", "ambiguities"]
+
+
+def test_compact_preflight_expands_line_ranges_and_scene_direction_locally(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    con = assetdb.connect(tmp_path / "assets.db")
+    con.execute(
+        "INSERT INTO bg(name,hash,label,tags) VALUES(?,?,?,?)",
+        ("BG_ShoppingDistrict", 101, "Shopping District", "shopping,district"),
+    )
+    con.commit()
+    con.close()
+    captured = {}
+
+    class Provider:
+        def complete_json(self, _static, volatile, user, _schema):
+            captured["volatile"] = json.loads(volatile)
+            captured["user"] = user
+            return {
+                "extra_speakers": ["店员"],
+                "scenes": [{
+                    "label": "集合",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "location": "商店街入口",
+                    "time": "傍晚",
+                    "story_type": "event",
+                    "scene_function": "entrance",
+                    "needs": [{
+                        "kind": "background",
+                        "name": "商店街入口",
+                        "required": True,
+                    }],
+                }],
+                "ambiguities": [],
+            }
+
+    monkeypatch.setattr(webui, "annotation_provider", lambda _profile=None: Provider())
+    script = tmp_path / "story.txt"
+    script.write_text(
+        "旁白：傍晚，众人在商店街入口集合。\n店员从门口探出头。\n",
+        encoding="utf-8",
+    )
+
+    result = webui._preflight_result(str(script), scope=str(tmp_path / "project"))
+
+    assert set(captured["volatile"]) == {"speakers", "scene_headers"}
+    assert "L1\t旁白：傍晚，众人在商店街入口集合。" in captured["user"]
+    assert "店员" in {item["speaker"] for item in result["characters"]}
+    scene = result["usage_chain"][0]
+    assert (scene["start"], scene["end"]) == ("第1行", "第2行")
+    assert scene["evidence"] == "旁白：傍晚，众人在商店街入口集合。 店员从门口探出头。"
+    assert scene["time"] == "傍晚"
+    assert scene["scene_type"] == "event"
+    assert scene["scene_function"] == "entrance"
+    need = scene["needs"][0]
+    assert need["name"] == "商店街入口"
+    assert need["required"] is True
+    assert need["suggested_aa_key"] == "BG_ShoppingDistrict"
+
+
+def test_preflight_uses_a_small_task_budget_and_restores_provider_settings(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    observed = {}
+
+    class Provider(webui.llm.Provider):
+        def complete_json(self, _static, _volatile, _user, _schema):
+            observed["budget"] = self.cfg.get("_output_budget_override")
+            observed["reasoning_mode"] = self.cfg.get("reasoning_mode")
+            return {"extra_speakers": [], "scenes": [], "ambiguities": []}
+
+    provider = Provider({
+        "model": "test", "max_tokens": 128000,
+        "annotation_max_tokens": 64000, "reasoning_mode": "deep",
+    })
+    monkeypatch.setattr(webui, "annotation_provider", lambda _profile=None: provider)
+    script = tmp_path / "story.txt"
+    script.write_text("旁白：教室里很安静。\n", encoding="utf-8")
+
+    result = webui._preflight_result(str(script), scope=str(tmp_path / "project"))
+
+    assert 2048 <= observed["budget"] <= 8192
+    assert observed["budget"] < provider.cfg["annotation_max_tokens"]
+    assert observed["reasoning_mode"] == "speed"
+    assert "_output_budget_override" not in provider.cfg
+    assert provider.cfg["reasoning_mode"] == "deep"
+    assert result["ai_usage"]["output_budget"] == observed["budget"]
+
+
+def test_long_preflight_uses_bounded_windows_and_merges_duplicate_findings(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    calls = []
+
+    class Provider:
+        def complete_json(self, _static, volatile, user, _schema):
+            calls.append({"volatile": json.loads(volatile), "user": user})
+            line_numbers = [int(value) for value in re.findall(r"L(\d+)\t", user)]
+            return {
+                "extra_speakers": ["店员"],
+                "scenes": [{
+                    "label": "连续场景",
+                    "start_line": line_numbers[0], "end_line": line_numbers[-1],
+                    "location": "商店街", "time": "傍晚",
+                    "story_type": "event", "scene_function": "dialogue", "needs": [],
+                }],
+                "ambiguities": [],
+            }
+
+    monkeypatch.setattr(webui, "annotation_provider", lambda _profile=None: Provider())
+    script = tmp_path / "long.txt"
+    script.write_text("\n".join(f"旁白：第{i}行。" for i in range(1, 501)), encoding="utf-8")
+
+    result = webui._preflight_result(str(script), scope=str(tmp_path / "project"))
+
+    assert len(calls) == 3
+    assert all(len(call["user"]) < 8_000 for call in calls)
+    assert calls[0]["volatile"]["window"] == {
+        "index": 1, "count": 3, "start_line": 1, "end_line": 240,
+    }
+    assert [item["speaker"] for item in result["characters"]].count("店员") == 1
+    assert len(result["usage_chain"]) == 3
+    assert result["usage_chain"][0]["start"] == "第1行"
+    assert result["usage_chain"][-1]["end"] == "第500行"
+    assert result["ai_usage"]["window_count"] == 3
 
 
 def test_background_library_collapses_duplicate_variants_before_limit(tmp_path):
@@ -866,12 +1006,8 @@ def test_custom_background_candidate_model_input_excludes_unlabeled_and_other_sc
 
     webui._preflight_result(str(script), scope=current_scope)
 
-    assert captured["custom_backgrounds"] == [{
-        "aa_key": "current-labeled", "label": "雨夜车站", "name": "current-labeled",
-        "description": "", "place": "车站", "indoor_outdoor": "", "time": "",
-        "weather": "", "season": "", "mood": "", "tags": "",
-        "source": "custom", "preview_available": True,
-    }]
-    assert "current-unlabeled" not in json.dumps(captured["custom_backgrounds"])
+    assert set(captured) == {"speakers", "scene_headers"}
+    assert "custom_backgrounds" not in captured
+    assert "current-unlabeled" not in json.dumps(captured)
     assert "other-labeled" not in json.dumps(captured)
     assert str(tmp_path) not in json.dumps(captured, ensure_ascii=False)

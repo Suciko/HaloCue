@@ -10,6 +10,8 @@
 （这部分跨请求不变，会被缓存）。
 """
 
+from director_policy import prompt_policy
+
 # ---------------------------------------------------------------- 角色与铁律
 ROLE = """你是蔚蓝档案（Blue Archive）同人剧情的**演出指导**。
 
@@ -285,8 +287,8 @@ face 的证据门槛：只能选择资源表提供了语义、或已被项目明
 # ---------------------------------------------------------------- 示范
 FEWSHOT = """# 自写示范（不来自官方剧情文本）
 
-下面这段只演示资源层的边界；真正输出还要同时维护 direction 中的 scene_function、focus 和 continuity。
-注意多数强演出字段是空的，克制才是常态。
+下面这段演示“只在状态变化点输出”的稀疏标注；真正输出还要同时维护 direction 中的
+scene_function、focus 和 continuity。未列标注的行在紧凑协议中应从 lines 完全省略。
 
     [0] 旁白: 哒哒哒哒哒。
         se=SE_Typing_01   （旁白明确写了键盘声）
@@ -295,17 +297,19 @@ FEWSHOT = """# 自写示范（不来自官方剧情文本）
     [2] 旁白: 距离游戏原型上传，只剩四十分钟。
         （普通文本行不写 wait；若确需留白，另建带 reason 的 beat）
     [3] 桃井: 告白演出就再加一段！真的只要一段！
-        face=03   （笑着耍赖）
+        face=03，continuity.face=start，reason=new_stimulus   （建立笑着耍赖的状态）
     [4] 桃井: 难得这次千年游戏展把"角色互动"列成重点展示项目……
-        face=02   （接着解释，但说话态度已从耍赖转为回应）
+        （完全省略。人物仍在同一意图中，保持上一表情，不重复 face）
     [5] 绿: 今天上传的只是内部选拔用原型。
-        face=05   （认真，跟桃井形成对比）
+        face=05，continuity.face=start，reason=new_stimulus   （首次建立绿的认真状态）
     [6] 桃井: 正因为是原型，第一印象才更重要嘛！
-        face=03 emo=怒筋   （尖峰，配气泡；注意这一行自动带 2.5 秒停顿）
+        emo=怒筋，continuity.emo=start，reason=comedy_escalation
+        （只加瞬时尖峰；桃井继续保持 03，不再输出 face；气泡已自动带 2.5 秒停顿）
     [7] 绿: 我们本来就在赶工。
-        face=01   （平淡拆台，反差在于不加任何修饰）
+        （完全省略。平淡拆台的力量来自不加气泡、动作和重效果）
     [8] 凯伊: 都停一下。
-        face=05 fx=特写 bgfx=集中线   （这一镜必须只留凯伊一人）
+        face=05 fx=特写 bgfx=集中线，visible_characters=[凯伊]，reason=action_impact
+        continuity.face=start / fx=start / bgfx=start   （唯一重拍，画面只留凯伊）
     [9] 旁白: 键盘声停了下来。
         （声音结果已经落地，不重复音效；必要留白由独立 beat 表达）
 
@@ -321,8 +325,14 @@ FEWSHOT = """# 自写示范（不来自官方剧情文本）
 
 OUTPUT = """# 输出
 
-输出 lines 数组，**每一个待标注行都要有一项**；具体字段和行身份以本轮请求中的 JSON Schema 与 TARGET 标识为准。
-不加的字段填空串（数字字段填 0，布尔填 false）。
+输出 lines 数组，具体字段和行身份以本轮请求中的 JSON Schema 与 TARGET 标识为准。
+TARGET 若带 authored=...，这些字段已经由原作者写好，不要再次输出，也不要用其他字段覆盖其意图。
+紧凑协议只返回真正发生变化的行，没有变化的 TARGET 行完全省略，不要返回只有 i 的占位项；
+完整协议仍须覆盖每一个待标注行，不加的字段填空串
+（数字字段填 0，布尔填 false），direction 也只写发生变化或为本行标注提供证据的字段。
+不要逐行复述 scene_type、scene_function、emotion_phase、subtext、visible_characters 或 continuity=hold；
+这些状态已由 DIRECTOR_CONTEXT 继承。state_delta 通常输出空对象，行级状态由后端从 direction 确定性归约。
+大多数普通对白行应没有 emo / act / fx / bgfx / shake；空标注是正确结果，不要为了“完成标注”制造变化。
 宁可少标也不要瞎标 —— 漏标只是平淡，乱标是直接出戏。
 """
 
@@ -338,7 +348,7 @@ def build_rules(story_type="auto"):
     return "\n\n".join([
         ROLE, _story_priority(story_type), DIRECTOR_CONTRACT,
         SHOT, WAIT_POLICY, BACKGROUND_REQUEST, PACING, CAMERA,
-        DIMENSIONS, FEWSHOT, OUTPUT, MEMORY_POLICY,
+        prompt_policy(story_type), DIMENSIONS, FEWSHOT, OUTPUT, MEMORY_POLICY,
     ])
 
 

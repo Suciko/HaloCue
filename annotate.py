@@ -27,6 +27,13 @@ from annotation_memory import (                                 # noqa: E402
     build_run_fingerprint,
 )
 from annotation_agent import run_annotation_agent               # noqa: E402
+from annotation_safety import (                                 # noqa: E402
+    FX_PARTS as _FX_PARTS,
+    filter_annotation_row,
+    is_face_allowed,
+    is_fx_allowed,
+    project_effective_annotation_row,
+)
 from director_state import normalize_director                   # noqa: E402
 from direction_rules import (                                  # noqa: E402
     apply_model_directions,
@@ -35,11 +42,17 @@ from direction_rules import (                                  # noqa: E402
     normalize_emoticon_density as _normalize_emoticon_density,
     supplement_directions,
 )
+from director_policy import normalize_direction_plan                 # noqa: E402
 import prompt as PROMPT                                        # noqa: E402
 import tables                                                  # noqa: E402
 
 
 _STORY_TYPES = frozenset({"auto", "main", "event", "bond"})
+_DIRECTIVE_FIELDS = {
+    "bg": "bg", "trans": "trans", "place": "place", "move": "move",
+    "bgshake": "shake", "bgfx": "bgfx", "se": "se", "sound": "se",
+    "shot": "shot", "fx": "fx", "camera": "camera", "camera_hold": "camera_hold",
+}
 
 
 def normalize_story_type(value):
@@ -47,20 +60,6 @@ def normalize_story_type(value):
     if normalized not in _STORY_TYPES:
         raise ValueError("invalid_story_type")
     return normalized
-
-
-def is_face_allowed(allow, face):
-    """表情表未知时拒绝模型猜测；只有明确存在的 faceId 才能写入。"""
-    return bool(allow) and face in allow
-
-
-_FX_PARTS = frozenset({"通讯", "黑屏剪影", "特写"})
-
-
-def is_fx_allowed(value):
-    """Only accept one or more documented, non-duplicated shape bit names."""
-    parts = [part.strip() for part in re.split(r"[+＋、,，/]", str(value)) if part.strip()]
-    return bool(parts) and len(parts) == len(set(parts)) and set(parts) <= _FX_PARTS
 
 
 def _selected_variants(capabilities, identifier, spine_signature="", outfit_key=""):
@@ -240,114 +239,13 @@ def annotation_constraints(idx, cast, *, usage_chain=None):
         "ok_fx": _FX_PARTS,
         "ok_se": set(idx.get("sounds", [])),
         "ok_bg": set(idx.get("bg", {})) | confirmed_backgrounds,
+        "ok_bgfx": set(tables.BGEFFECT) | set(tables.BGFX_CN),
         "confirmed_bg": confirmed_backgrounds,
         "ok_shot": {
             name for name, character in cast.items()
             if character.get("portrait") and not character.get("narrator")
         },
     }
-
-
-def filter_annotation_row(row, item, character, constraints, *, include_details=False):
-    """Return legal model fields and exact reasons for every rejected field."""
-    clean, dropped, rejected_details = {}, [], []
-    who = item["who"]
-    portrait = character.get("portrait") and not character.get("narrator")
-    for field in ("face", "emo", "act", "fx"):
-        value = row.get(field)
-        if not value:
-            continue
-        if not portrait:
-            msg = f"{who}无立绘，不能使用 {field}"
-            dropped.append(msg)
-            rejected_details.append({"field": field, "value": value, "reason": msg})
-            continue
-        if field == "face":
-            character_id = character.get("id")
-            allowed = constraints["faces_by_id"].get(character_id, set())
-            evidence_by_id = constraints.get("face_evidence_by_id")
-            evidence_level = (
-                evidence_by_id.get(character_id, {}).get(value, "unknown")
-                if evidence_by_id is not None else "visual_confirmed"
-            )
-            if (
-                is_face_allowed(allowed, value)
-                and evidence_level in {"visual_confirmed", "asset_semantic"}
-            ):
-                clean[field] = value
-            elif is_face_allowed(allowed, value):
-                evidence_text = (
-                    "只有上下文证据"
-                    if evidence_level == "context_inferred"
-                    else "缺少可审阅的视觉或资产语义证据"
-                )
-                msg = f"{who} 的表情 {value} {evidence_text}，需要人工审阅"
-                dropped.append(msg)
-                rejected_details.append({
-                    "code": "face_inferred_only",
-                    "field": field,
-                    "value": value,
-                    "reason": msg,
-                    "character": who,
-                    "character_id": character_id,
-                    "outfit_key": character.get("outfit_key", ""),
-                    "spine_signature": character.get("spine_signature", ""),
-                    "face_id": value,
-                    "evidence_level": evidence_level,
-                })
-            else:
-                msg = f"{who} 没有已验证表情 {value}"
-                dropped.append(msg)
-                rejected_details.append({"field": field, "value": value, "reason": msg})
-        elif field == "emo":
-            if value in constraints["ok_emo"]:
-                clean[field] = constraints["sym2cn"].get(value, value)
-            else:
-                msg = f"未知气泡 {value}"
-                dropped.append(msg)
-                rejected_details.append({"field": field, "value": value, "reason": msg})
-        elif field == "act":
-            if value in constraints["ok_act"]:
-                clean[field] = value
-            else:
-                msg = f"未知动作 {value}"
-                dropped.append(msg)
-                rejected_details.append({"field": field, "value": value, "reason": msg})
-        elif field == "fx" and is_fx_allowed(value):
-            clean[field] = value
-        else:
-            msg = f"未知效果 {value}"
-            dropped.append(msg)
-            rejected_details.append({"field": field, "value": value, "reason": msg})
-    for field, message in (("se", "未知音效"), ("bg", "未知背景")):
-        value = row.get(field)
-        if not value:
-            continue
-        if value in constraints[f"ok_{field}"]:
-            clean[field] = value
-        else:
-            msg = f"{message} {value}"
-            dropped.append(msg)
-            rejected_details.append({"field": field, "value": value, "reason": msg})
-    bg_request = str(row.get("bg_request") or "").strip()
-    if bg_request:
-        confirmed_bg = set(constraints.get("confirmed_bg") or set())
-        if clean.get("bg") and clean["bg"] in confirmed_bg:
-            dropped.append("已确认背景不再生成背景请求")
-        else:
-            clean.pop("bg", None)
-            clean["bg_request"] = bg_request[:320]
-    shot = row.get("shot")
-    if shot:
-        if shot in constraints["ok_shot"]:
-            clean["shot"] = shot
-        else:
-            msg = f"射击目标‘{shot}’不是可显示角色"
-            dropped.append(msg)
-            rejected_details.append({"field": "shot", "value": shot, "reason": msg})
-    if include_details:
-        return clean, dropped, rejected_details
-    return clean, dropped
 
 
 def annotation_rows(response):
@@ -552,7 +450,9 @@ def annotation_directives(item):
         visible = list(dict.fromkeys(
             str(name) for name in director.get("visible_characters", []) if str(name)
         ))[:5]
-        directives.append(f"@camera {','.join(visible)}" if visible else "@camera -")
+        directives.append(f"@camera_hold {','.join(visible)}" if visible else "@camera_hold -")
+    elif item.get("_camera_reset"):
+        directives.append("@camera_hold auto")
     continuity = director.get("continuity")
     fx_command = continuity.get("fx") if isinstance(continuity, Mapping) else "none"
     target = str(director.get("focus_character") or item.get("who") or "")
@@ -729,6 +629,42 @@ def parse_lines(path, cast):
                 "face": face, "emo": emo, "act": act, "fx": fx}
         mark_explicit_directions(item)
         out.append(item)
+    pending_directives = set()
+    authored_camera_hold = False
+    for item in out:
+        if item.get("kind") != "line":
+            raw = str(item.get("raw") or "")
+            structural_boundary = (
+                raw.strip() == "---"
+                or bool(re.match(r"^\s*#{1,6}\s+", raw))
+            )
+            scene_directive = bool(re.match(r"^\s*@(bg|place)\b", raw, re.IGNORECASE))
+            if structural_boundary:
+                pending_directives.clear()
+                authored_camera_hold = False
+            elif scene_directive:
+                authored_camera_hold = False
+            match = re.match(r"^\s*@([A-Za-z_]+)\b\s*(.*)$", raw)
+            if match and match.group(1).lower() in _DIRECTIVE_FIELDS:
+                command = match.group(1).lower()
+                pending_directives.add(_DIRECTIVE_FIELDS[command])
+                if command == "camera_hold":
+                    authored_camera_hold = match.group(2).strip().lower() not in {"auto", "自动"}
+                elif command == "camera":
+                    authored_camera_hold = False
+            continue
+        effective_directives = set(pending_directives)
+        if authored_camera_hold:
+            effective_directives.add("camera_hold")
+        if effective_directives:
+            item["_explicit_directives"] = tuple(sorted(effective_directives))
+            if pending_directives:
+                item["_explicit_directive_starts"] = tuple(sorted(pending_directives))
+            item["_explicit_direction_fields"] = tuple(sorted(
+                set(item.get("_explicit_direction_fields", ()))
+                | (effective_directives - {"camera", "camera_hold"})
+            ))
+        pending_directives.clear()
     return out
 
 
@@ -852,6 +788,9 @@ def apply_annotation_response_row(
     diagnostic_sink = diagnostics if diagnostics is not None else []
     character = cast[item["who"]]
     portrait = character.get("portrait") and not character.get("narrator")
+    effective_row, clean, rejected, rejected_details = project_effective_annotation_row(
+        row, item, character, constraints,
+    )
     if "direction" in row:
         cast_names = set(cast)
         displayable_names = {
@@ -859,18 +798,15 @@ def apply_annotation_response_row(
             if candidate.get("portrait") and not candidate.get("narrator")
         }
         director, director_diagnostics = normalize_director(
-            row.get("direction"),
+            effective_row.get("direction"),
             cast_names=cast_names,
             displayable_names=displayable_names,
         )
         item["_director"] = director
-        if isinstance(row.get("direction_intent"), Mapping):
-            item["_director_intent"] = dict(row["direction_intent"])
+        if isinstance(effective_row.get("direction_intent"), Mapping):
+            item["_director_intent"] = dict(effective_row["direction_intent"])
         source_id = str(item.get("annotation_id") or "")
         diagnostic_sink.extend({**entry, "source_id": source_id} for entry in director_diagnostics)
-    clean, rejected, rejected_details = filter_annotation_row(
-        row, item, character, constraints, include_details=True
-    )
     card_id = item.get("card_id") or str(uuid.uuid4())
     applied_clean = apply_model_directions(item, clean)
     for field_name, field_value in applied_clean.items():
@@ -991,7 +927,10 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
 
     cfg, cast, _ = load_cast(cast_path)
     idx = json.load(open(index_path, encoding="utf-8"))
-    llmcfg = json.load(open(llm_path, encoding="utf-8"))
+    llmcfg = (
+        json.load(open(llm_path, encoding="utf-8"))
+        if os.path.isfile(llm_path) else {}
+    )
     load_custom_faces(cast, os.path.dirname(os.path.dirname(HERE)), idx)
     items = assign_annotation_ids(
         split_strong_dialogue_items(parse_lines(script_path, cast), cast)
@@ -1143,8 +1082,14 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             done = min(start + n, len(todo))
             print(f"  已标注 {done}/{len(todo)} 行")
 
-    normalize_contextual_sounds(items, idx)
-    supplements, supplement_diagnostics = apply_direction_supplements(items, cast)
+    if not agent_enabled:
+        normalize_contextual_sounds(items, idx)
+    # The Agent already made the semantic decision. Keyword supplementation is
+    # retained only for the legacy stateless path and must not refill an
+    # intentional blank in a stateful run.
+    supplements, supplement_diagnostics = (
+        ([], []) if agent_enabled else apply_direction_supplements(items, cast)
+    )
     diagnostics.extend(supplement_diagnostics)
     for change in supplements:
         item = items[change["item_index"]]
@@ -1159,7 +1104,11 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
                 after=change["after"],
             )
         )
-    normalize_direction_density(items)
+    if agent_enabled:
+        annotation_beats, policy_diagnostics = normalize_direction_plan(items, annotation_beats)
+        diagnostics.extend(policy_diagnostics)
+    else:
+        normalize_direction_density(items)
     proposals.extend(build_postprocessor_proposals(items, rule="continuity_density"))
     normalize_bgfx_lifetime(items)
 

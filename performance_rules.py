@@ -26,10 +26,12 @@ def enforce_focusline_shots(scripts):
 
 
 def enforce_persistent_closeups(scripts):
-    """Persist communication/closeup bits until a named end or shot exit."""
+    """Persist communication/closeup bits until an explicit end or scene reset."""
     persistent_mask = 1 | 4
     active = {}
     for script in scripts:
+        if script.pop("_sceneReset", False):
+            active.clear()
         explicit_ends = set(script.pop("_explicitFxEnds", []) or [])
         for name in explicit_ends:
             active.pop(name, None)
@@ -39,9 +41,6 @@ def enforce_persistent_closeups(scripts):
             for character in characters[1:]
             if character.get("name")
         }
-        for name in list(active):
-            if name not in visible:
-                active.pop(name, None)
         for name, character in visible.items():
             if name in explicit_ends:
                 continue
