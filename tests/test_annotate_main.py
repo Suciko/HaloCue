@@ -72,16 +72,23 @@ def test_agent_mode_accepts_mock_provider_source_identity_response(tmp_path):
         "enums": {"emoticon": {}, "action": {}},
     }), encoding="utf-8")
     output = tmp_path / "annotated.txt"
+    llm_config = tmp_path / "llm.json"
+    llm_config.write_text("{}", encoding="utf-8")
     result = annotate.annotate_script({
         "script": str(script), "out": str(output), "cast": str(cast),
-        "index": str(index), "agent_enabled": True,
+        "index": str(index), "llm": str(llm_config), "agent_enabled": True,
         "checkpoint_dir": str(tmp_path / "checkpoints"),
     }, provider_instance=llm.MockProvider({}))
     assert result["agent"]["enabled"] is True
     assert output.read_text(encoding="utf-8") == "Kai: hello\nKai: goodbye\n"
     checkpoint = json.loads(next((tmp_path / "checkpoints").rglob("checkpoint.json")).read_text(encoding="utf-8"))
-    assert checkpoint["fingerprint"]["schema_version"] == 2
-    assert checkpoint["fingerprint"]["chunk_version"] == "scene-v2"
+    assert checkpoint["schema_version"] == 2
+    assert checkpoint["fingerprint"]["schema_version"] == 3
+    assert checkpoint["fingerprint"]["chunk_version"] == "scene-v3"
+    assert checkpoint["fingerprint"]["director_version"] == "stateful-v1"
+    assert checkpoint["fingerprint"]["story_type"] == "auto"
+    assert checkpoint["director_plan"]["story_type"] == "auto"
+    assert checkpoint["memory"]["story"]["type"] == "auto"
 
 
 def test_agent_reuses_one_source_prefixed_static_prompt_across_chunks(tmp_path):
@@ -206,3 +213,130 @@ def test_annotation_writer_does_not_repeat_same_background():
     assert "@bg BG_ShoppingDistrict\n@trans 淡入淡出" not in result
     assert "@place 可丽饼摊前\n旁白: 二" in result
     assert "@bg BG_GameCenter\n@trans 淡入淡出" in result
+
+
+def test_response_row_stores_director_metadata_without_rewriting_source():
+    item = {
+        "kind": "line", "annotation_id": "src-1", "who": "A",
+        "text": "原文", "raw": "A: 原文",
+    }
+    row = {"direction": {
+        "scene_type": "bond", "scene_function": "emotional_turn",
+        "emotion_phase": "waiting", "subtext": "等待对方回应",
+        "focus_kind": "listener", "focus_character": "B",
+        "visible_characters": ["B"],
+        "continuity": {
+            "face": "hold", "emo": "none", "act": "none",
+            "fx": "none", "bgfx": "none",
+        },
+    }}
+    constraints = {
+        "faces_by_id": {"a": set()}, "sym2cn": {}, "ok_emo": set(),
+        "ok_act": set(), "ok_fx": set(), "ok_se": set(), "ok_bg": set(),
+        "confirmed_bg": set(), "ok_shot": {"A", "B"},
+    }
+    diagnostics = []
+
+    annotate.apply_annotation_response_row(
+        item, row,
+        {"A": {"id": "a", "portrait": True}, "B": {"id": "b", "portrait": True}},
+        constraints, [], [], diagnostics,
+    )
+
+    assert (item["who"], item["text"], item["raw"], item["annotation_id"]) == (
+        "A", "原文", "A: 原文", "src-1",
+    )
+    assert item["_director"]["focus_character"] == "B"
+    assert item["_director"]["subtext"] == "等待对方回应"
+    assert annotate.render_annotated_items([item]).endswith("A: 原文\n")
+    assert diagnostics == []
+
+
+def test_response_row_downgrades_non_displayable_director_focus_with_diagnostic():
+    item = {
+        "kind": "line", "annotation_id": "src-1", "who": "A",
+        "text": "原文", "raw": "A: 原文",
+    }
+    diagnostics = []
+
+    annotate.apply_annotation_response_row(
+        item,
+        {"direction": {
+            "focus_kind": "listener", "focus_character": "Voice",
+            "visible_characters": ["Voice"],
+        }},
+        {"A": {"id": "a", "portrait": True}, "Voice": {"id": "v", "portrait": False}},
+        {
+            "faces_by_id": {"a": set()}, "sym2cn": {}, "ok_emo": set(),
+            "ok_act": set(), "ok_fx": set(), "ok_se": set(), "ok_bg": set(),
+            "confirmed_bg": set(), "ok_shot": {"A"},
+        },
+        [], [], diagnostics,
+    )
+
+    assert item["_director"]["focus_character"] == ""
+    assert item["_director"]["visible_characters"] == []
+    assert any(entry["code"] == "director_non_displayable_character" for entry in diagnostics)
+
+
+def test_listener_focus_renders_persistent_generated_camera_without_rewriting_source():
+    item = {
+        "kind": "line", "annotation_id": "src-1", "who": "A",
+        "text": "原文", "raw": "A: 原文",
+        "_director": {
+            "visible_characters": ["B"], "focus_kind": "listener",
+            "focus_character": "B", "continuity": {"fx": "none"},
+        },
+    }
+
+    rendered = annotate.render_annotated_items([item])
+
+    assert "@camera_hold B\n" in rendered
+    assert rendered.endswith("A: 原文\n")
+
+
+def test_explicit_fx_end_renders_a_named_clear_command():
+    item = {
+        "kind": "line", "annotation_id": "src-2", "who": "A",
+        "text": "结束", "raw": "A: 结束",
+        "_director": {
+            "focus_kind": "speaker", "focus_character": "A",
+            "visible_characters": ["A"], "continuity": {"fx": "end"},
+        },
+    }
+
+    assert "@fx A 无" in annotate.annotation_directives(item)
+
+
+def test_omitted_visibility_intent_does_not_render_an_empty_camera():
+    item = {
+        "kind": "line", "annotation_id": "src-3", "who": "A",
+        "text": "继续", "raw": "A: 继续",
+        "_director": {"visible_characters": [], "continuity": {"fx": "none"}},
+        "_director_intent": {},
+    }
+
+    assert not any(line.startswith("@camera") for line in annotate.annotation_directives(item))
+
+
+def test_explicit_empty_visibility_intent_survives_row_application():
+    item = {
+        "kind": "line", "annotation_id": "src-4", "who": "A",
+        "text": "画外", "raw": "A: 画外",
+    }
+    constraints = {
+        "faces_by_id": {"a": set()}, "sym2cn": {}, "ok_emo": set(),
+        "ok_act": set(), "ok_fx": set(), "ok_se": set(), "ok_bg": set(),
+        "confirmed_bg": set(), "ok_shot": {"A"},
+    }
+
+    annotate.apply_annotation_response_row(
+        item,
+        {
+            "direction": {"visible_characters": []},
+            "direction_intent": {"visible_characters": []},
+        },
+        {"A": {"id": "a", "portrait": True}}, constraints, [], [],
+    )
+
+    assert "@camera_hold -" in annotate.annotation_directives(item)

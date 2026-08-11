@@ -40,6 +40,121 @@ def test_first_background_transition_is_ignored_but_later_switch_is_kept(tmp_pat
     assert scenes[0][1][1]["transition"] != 0
 
 
+def test_face_state_resets_at_scene_and_background_boundaries(tmp_path):
+    script = tmp_path / "face-reset.txt"
+    script.write_text(
+        "## one\nAlice(03): first\n@bg BG_Second\nAlice: after background\n"
+        "## two\nAlice: next scene\n",
+        encoding="utf-8",
+    )
+    cast = {"Alice": {"id": "alice", "portrait": True}}
+    index = {
+        "bg": {"BG_Second": 2}, "characters": [],
+        "enums": {"emoticon": {}, "action": {}},
+    }
+
+    scenes = build(
+        parse_script(script, cast),
+        {"default_bg": "BG_Second", "camera": {"enabled": False}},
+        cast, index, "face-reset",
+    )
+
+    first, after_background = scenes[0][1]
+    next_scene = scenes[1][1][0]
+    assert first["characters"]["$values"][first["speakerSlotNum"]]["faceId"] == "03"
+    assert after_background["characters"]["$values"][after_background["speakerSlotNum"]]["faceId"] == "00"
+    assert next_scene["characters"]["$values"][next_scene["speakerSlotNum"]]["faceId"] == "00"
+
+
+def test_persistent_character_effect_resets_at_background_boundary(tmp_path):
+    script = tmp_path / "fx-reset.txt"
+    script.write_text(
+        "@fx Alice 特写\nAlice: first\n@bg BG_Second\nAlice: second\n",
+        encoding="utf-8",
+    )
+    cast = {"Alice": {"id": "alice", "portrait": True}}
+    index = {
+        "bg": {"BG_Second": 2}, "characters": [],
+        "enums": {"emoticon": {}, "action": {}},
+    }
+
+    scripts = build(
+        parse_script(script, cast),
+        {"default_bg": "BG_Second", "camera": {"enabled": False}},
+        cast, index, "fx-reset",
+    )[0][1]
+
+    first = scripts[0]["characters"]["$values"][scripts[0]["speakerSlotNum"]]
+    second = scripts[1]["characters"]["$values"][scripts[1]["speakerSlotNum"]]
+    assert first["shapeOverride"] & 4
+    assert not second["shapeOverride"] & 4
+    assert "_sceneReset" not in scripts[1]
+
+
+def test_background_effect_resets_at_background_boundary(tmp_path):
+    script = tmp_path / "bgfx-reset.txt"
+    script.write_text(
+        "@bgfx 雨\nAlice: first\n@bg BG_Second\nAlice: second\n",
+        encoding="utf-8",
+    )
+    cast = {"Alice": {"id": "alice", "portrait": True}}
+    index = {
+        "bg": {"BG_Second": 2}, "characters": [],
+        "enums": {"emoticon": {}, "action": {}},
+    }
+
+    scripts = build(
+        parse_script(script, cast),
+        {"default_bg": "BG_Second", "camera": {"enabled": False}},
+        cast, index, "bgfx-reset",
+    )[0][1]
+
+    assert scripts[0]["bgEffect"] != 0
+    assert scripts[1]["bgEffect"] == 0
+
+
+def test_persistent_camera_holds_until_auto_without_changing_authored_one_shot(tmp_path):
+    script = tmp_path / "camera-hold.txt"
+    script.write_text(
+        "@camera_hold Alice\nAlice: first\nBob: listener cut\n"
+        "@camera_hold auto\nBob: automatic again\n",
+        encoding="utf-8",
+    )
+    cast = {
+        "Alice": {"id": "alice", "portrait": True},
+        "Bob": {"id": "bob", "portrait": True},
+    }
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+
+    scripts = build(
+        parse_script(script, cast),
+        {"camera": {"enabled": False}}, cast, index, "camera-hold",
+    )[0][1]
+
+    visible = [
+        [character["name"] for character in row["characters"]["$values"][1:] if character["name"]]
+        for row in scripts
+    ]
+    assert visible[:2] == [["alice"], ["alice"]]
+    assert "bob" in visible[2]
+
+
+def test_thematic_separator_is_a_real_compiler_scene_boundary(tmp_path):
+    script = tmp_path / "separator-scene.txt"
+    script.write_text("Alice(03): first\n---\nAlice: second\n", encoding="utf-8")
+    cast = {"Alice": {"id": "alice", "portrait": True}}
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+
+    scenes = build(
+        parse_script(script, cast),
+        {"camera": {"enabled": False}}, cast, index, "separator-scene",
+    )
+
+    assert len(scenes) == 2
+    second = scenes[1][1][0]
+    assert second["characters"]["$values"][second["speakerSlotNum"]]["faceId"] == "00"
+
+
 def test_chat_and_jump_resolve_to_separate_character_fields():
     assert resolve_emo(EMOTICON[1], {EMOTICON[1]: 1}, {}, 9) == 1
     assert resolve_act(ACTION[6], {ACTION[6]: 6}, {}, 9) == 6
@@ -254,3 +369,92 @@ def test_shot_target_is_rejected_when_that_character_is_not_on_screen(tmp_path):
 
     assert scenes[0][1][0]["additionalPrompt"] == ""
     assert any("不在当前画面" in message for _, message in warn.items)
+
+
+def test_camera_dash_compiles_an_empty_shot(tmp_path):
+    script = tmp_path / "empty-shot.txt"
+    script.write_text("@camera -\nAlice: 画外声音\n", encoding="utf-8")
+    cast = {"Alice": {"id": "alice", "portrait": True}}
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+
+    row = build(
+        parse_script(script, cast), {"camera": {"enabled": False}},
+        cast, index, "empty-shot",
+    )[0][1][0]
+
+    assert row["speakerSlotNum"] == 0
+    assert not any(character["name"] for character in row["characters"]["$values"][1:])
+
+
+def test_explicit_camera_is_one_shot_and_deduplicates_names(tmp_path):
+    script = tmp_path / "listener-shot.txt"
+    script.write_text(
+        "@camera Bob,Bob\nAlice: first\nAlice: second\n",
+        encoding="utf-8",
+    )
+    cast = {
+        "Alice": {"id": "alice", "portrait": True},
+        "Bob": {"id": "bob", "portrait": True},
+    }
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+
+    rows = build(parse_script(script, cast), {}, cast, index, "listener-shot")[0][1]
+
+    assert [
+        char["name"] for char in rows[0]["characters"]["$values"][1:]
+        if char["name"]
+    ] == ["bob"]
+    assert rows[0]["speakerSlotNum"] == 0
+    assert any(char["name"] == "alice" for char in rows[1]["characters"]["$values"][1:])
+
+
+def test_invalid_explicit_camera_falls_back_to_automatic_shot(tmp_path):
+    script = tmp_path / "invalid-camera.txt"
+    script.write_text("@camera Bob,Missing\nAlice: first\n", encoding="utf-8")
+    cast = {
+        "Alice": {"id": "alice", "portrait": True},
+        "Bob": {"id": "bob", "portrait": True},
+    }
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+    warn.items.clear()
+
+    row = build(parse_script(script, cast), {}, cast, index, "invalid-camera")[0][1][0]
+
+    assert any(char["name"] == "alice" for char in row["characters"]["$values"][1:])
+    assert not any(char["name"] == "bob" for char in row["characters"]["$values"][1:])
+    assert any("未知角色" in message for _, message in warn.items)
+
+
+def test_explicit_camera_caps_visible_portraits_at_five(tmp_path):
+    names = ["A", "B", "C", "D", "E", "F"]
+    script = tmp_path / "five-camera.txt"
+    script.write_text("@camera " + ",".join(names) + "\nA: first\n", encoding="utf-8")
+    cast = {name: {"id": name.lower(), "portrait": True} for name in names}
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+    warn.items.clear()
+
+    row = build(parse_script(script, cast), {}, cast, index, "five-camera")[0][1][0]
+    visible = [char["name"] for char in row["characters"]["$values"][1:] if char["name"]]
+
+    assert len(visible) == 5
+    assert "f" not in visible
+    assert any("最多显示 5 个立绘" in message for _, message in warn.items)
+
+
+def test_explicit_fx_clear_ends_persistent_closeup_without_serializing_marker(tmp_path):
+    script = tmp_path / "fx-end.txt"
+    script.write_text(
+        "@camera Alice\n@fx Alice 特写\nAlice: start\n"
+        "@camera Alice\n@fx Alice 无\nAlice: end\n",
+        encoding="utf-8",
+    )
+    cast = {"Alice": {"id": "alice", "portrait": True}}
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+
+    rows = build(parse_script(script, cast), {}, cast, index, "fx-end")[0][1]
+    first = next(char for char in rows[0]["characters"]["$values"] if char["name"] == "alice")
+    second = next(char for char in rows[1]["characters"]["$values"] if char["name"] == "alice")
+
+    assert first["shapeOverride"] == 4
+    assert second["shapeOverride"] == 0
+    assert all("_explicitFxEnds" not in row for row in rows)

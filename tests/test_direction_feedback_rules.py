@@ -109,7 +109,7 @@ def test_focusline_is_kept_only_for_an_existing_centered_solo_closeup():
     assert script["characters"]["$values"][3]["shapeOverride"] == 5
 
 
-def test_closeup_persists_until_the_focal_character_leaves_the_shot():
+def test_closeup_survives_a_listener_cut_until_explicit_end_or_scene_reset():
     scripts = [
         _script({2: "kei"}, shapes={2: 4}, speaker_slot=2),
         _script({2: "kei"}, speaker_slot=2),
@@ -122,7 +122,36 @@ def test_closeup_persists_until_the_focal_character_leaves_the_shot():
 
     assert [row["characters"]["$values"][2]["shapeOverride"] for row in scripts[:3]] == [4, 4, 4]
     assert scripts[3]["characters"]["$values"][4]["shapeOverride"] == 0
-    assert scripts[4]["characters"]["$values"][2]["shapeOverride"] == 0
+    assert scripts[4]["characters"]["$values"][2]["shapeOverride"] == 4
+
+
+def test_closeup_ends_only_after_explicit_end():
+    scripts = [
+        _script({2: "kei"}, shapes={2: 4}, speaker_slot=2),
+        _script({2: "kei"}, speaker_slot=2),
+        _script({2: "kei"}, speaker_slot=2),
+    ]
+    scripts[2]["_explicitFxEnds"] = ["kei"]
+
+    enforce_persistent_closeups(scripts)
+
+    assert scripts[1]["characters"]["$values"][2]["shapeOverride"] == 4
+    assert scripts[2]["characters"]["$values"][2]["shapeOverride"] == 0
+    assert "_explicitFxEnds" not in scripts[2]
+
+
+def test_communication_and_closeup_bits_persist_together_until_end():
+    scripts = [
+        _script({2: "kei"}, shapes={2: 5}, speaker_slot=2),
+        _script({2: "kei"}, speaker_slot=2),
+        _script({2: "kei"}, speaker_slot=2),
+    ]
+    scripts[2]["_explicitFxEnds"] = ["kei"]
+
+    enforce_persistent_closeups(scripts)
+
+    assert scripts[1]["characters"]["$values"][2]["shapeOverride"] == 5
+    assert scripts[2]["characters"]["$values"][2]["shapeOverride"] == 0
 
 
 def test_scene_break_clears_previous_cast_before_the_next_speaker():
@@ -252,13 +281,13 @@ def test_contextual_sound_fallback_never_overwrites_the_models_registered_choice
     assert items[0]["se"] == "SE_Clothes_01"
 
 
-def test_expression_prompt_prefers_a_suitable_change_and_keeps_only_as_fallback():
+def test_expression_prompt_holds_a_state_until_evidence_supports_change():
     rules = build_rules()
 
-    assert "优先选择一个与上一句不同、又符合当前语义的已标注表情" in rules
-    assert "即使相邻台词的情绪接近" in rules
-    assert "实在没有其他合适候选时，才保持上一表情" in rules
-    assert "不要为了变化而换成明显不合语境的表情" in rules
+    assert "相同情绪阶段内默认 hold" in rules
+    assert "不要为了画面变化而换 face" in rules
+    assert "保持正确表情比制造变化更重要" in rules
+    assert "优先选择一个与上一句不同" not in rules
 
 
 def test_expression_prompt_treats_usage_context_as_guidance_not_trigger():

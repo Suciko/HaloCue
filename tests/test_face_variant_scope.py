@@ -8,6 +8,7 @@ if str(HERE) not in sys.path:
 
 import pytest
 from spine_face_analysis import make_variant_key
+from annotate import annotation_constraints
 
 
 def test_face_variant_key_isolation():
@@ -27,3 +28,35 @@ def test_face_variant_key_isolation():
     # outfit_key 不同，生成的变体隔离键必须完全不同
     assert key1 != key2
     assert "Kei_Date_Outfit" in key1 or "fe379325" in key1
+
+
+def test_annotation_face_evidence_is_scoped_to_exact_outfit_and_spine():
+    index = {
+        "bg": {}, "sounds": [], "enums": {"emoticon": {}, "action": {}},
+        "characters": [{"identifier": "kai", "faces": []}],
+        "face_capabilities": {"kai": [
+            {
+                "spine_signature": "sig-date", "outfit_key": "date",
+                "faces": [{
+                    "id": "07", "sources": ["vision:model-a"],
+                    "visual_evidence": "visual_confirmed",
+                }],
+            },
+            {
+                "spine_signature": "sig-winter", "outfit_key": "winter",
+                "faces": [{
+                    "id": "07", "sources": ["aap_observed"],
+                    "visual_evidence": "context_inferred",
+                }],
+            },
+        ]},
+    }
+    cast = {"Kai": {
+        "id": "kai", "portrait": True,
+        "spine_signature": "sig-winter", "outfit_key": "winter",
+    }}
+
+    constraints = annotation_constraints(index, cast)
+
+    assert constraints["faces_by_id"]["kai"] == {"07"}
+    assert constraints["face_evidence_by_id"]["kai"] == {"07": "context_inferred"}

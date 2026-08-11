@@ -368,5 +368,6 @@ def test_character_export_includes_variant_metadata(tmp_path):
         "faces": [{
             "id": "00", "raw": "00", "label": "", "cn": "",
             "sources": ["atlas_candidate"], "observed_count": 0, "verified": False,
+            "visual_evidence": "unknown",
         }],
     }]

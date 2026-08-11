@@ -1,4 +1,11 @@
 from annotate import SCHEMA, build_batch_context
+import prompt
+from director_state import (
+    BEAT_REASONS,
+    DIRECTION_REASONS,
+    RELATION_DISTANCES,
+    SCENE_FUNCTIONS,
+)
 from prompt import build_rules
 
 
@@ -72,3 +79,64 @@ def test_prompt_limits_long_term_memory_to_evidence_backed_events():
     assert "原样摘录" in rules
     assert "不能把猜测升级为事实" in rules
     assert "普通表情变化" in rules
+
+
+def test_prompt_contains_story_modes_scene_functions_and_continuity():
+    idx = {"enums": {"emoticon": {}, "action": {}}, "sounds": [], "bg": {}}
+    text = prompt.build_system(idx, {}, [], {}, story_type="event")
+
+    assert "main / event / bond" in text
+    assert "喜剧升级" in text and "情绪转折" in text
+    assert "listener" in text and "offscreen_space" in text
+    assert "start / hold / escalate / end" in text
+    assert "face变化<=" in text
+    assert "保持上一表情，不重复 face" in text
+    assert "authored=..." in text
+
+
+def test_prompt_forbids_mechanical_face_rotation_and_dialogue_rewrite():
+    idx = {"enums": {"emoticon": {}, "action": {}}, "sounds": [], "bg": {}}
+    text = prompt.build_system(idx, {}, [], {}, story_type="bond")
+
+    assert "不要为了画面变化而换 face" in text
+    assert "一个字都不改" in text
+    assert "优先选择一个与上一句不同" not in text
+
+
+def test_each_story_mode_receives_a_distinct_directing_priority():
+    idx = {"enums": {"emoticon": {}, "action": {}}, "sounds": [], "bg": {}}
+    main = prompt.build_system(idx, {}, [], {}, story_type="main")
+    event = prompt.build_system(idx, {}, [], {}, story_type="event")
+    bond = prompt.build_system(idx, {}, [], {}, story_type="bond")
+
+    assert "画外动作" in main
+    assert "群体同步" in event
+    assert "关系距离" in bond
+    assert len({main, event, bond}) == 3
+
+
+def test_prompt_defines_scene_sequences_emotion_chains_and_reason_contract():
+    rules = build_rules("bond")
+
+    for scene_function in (
+        "建立场景", "日常对话", "喜剧升级", "情绪转折", "信息揭示",
+        "做出决定", "动作事件", "转场", "余波",
+    ):
+        assert scene_function in rules
+    assert rules.count("触发：") >= 9
+    assert rules.count("序列：") >= 9
+    assert rules.count("禁用：") >= 9
+    assert rules.count("退出：") >= 9
+    assert "平静 → 注意 → 疑惑 → 确认 → 释然" in rules
+    assert "direction.reason" in rules
+    assert "短枚举值" in rules
+
+
+def test_prompt_director_values_match_the_validated_protocol_enums():
+    rules = build_rules("main")
+
+    assert "scene_function 只使用：" + " / ".join(SCENE_FUNCTIONS) in rules
+    assert "relation_distance 只使用：" + " / ".join(RELATION_DISTANCES) in rules
+    assert "direction.reason 只使用：" + " / ".join(DIRECTION_REASONS) in rules
+    assert "beat.reason 只使用：" + " / ".join(BEAT_REASONS) in rules
+    assert "confrontational" not in rules

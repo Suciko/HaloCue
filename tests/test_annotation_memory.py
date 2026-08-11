@@ -10,6 +10,33 @@ from annotation_memory import (
 )
 
 
+def test_initial_memory_contains_director_state():
+    memory = initial_memory("summary", "bond")
+
+    assert memory["story"]["type"] == "bond"
+    assert memory["scene"]["scene_type"] == "bond"
+    assert memory["direction"]["focus"] == {"kind": "speaker", "character": ""}
+    assert memory["direction"]["continuity"] == {}
+
+
+def test_fingerprint_changes_when_director_version_or_story_type_changes():
+    base = build_run_fingerprint(
+        "text", {}, {}, "p", 3, "scene-v3", {},
+        story_type="main", director_version="d1",
+    )
+    changed_type = build_run_fingerprint(
+        "text", {}, {}, "p", 3, "scene-v3", {},
+        story_type="bond", director_version="d1",
+    )
+    changed_version = build_run_fingerprint(
+        "text", {}, {}, "p", 3, "scene-v3", {},
+        story_type="main", director_version="d2",
+    )
+
+    assert base != changed_type
+    assert base != changed_version
+
+
 def test_state_delta_preserves_background_and_rejects_unknown_character():
     memory = initial_memory("约会故事")
     updated = apply_state_delta(
@@ -24,11 +51,38 @@ def test_state_delta_preserves_background_and_rejects_unknown_character():
     assert "不存在" not in updated["direction"]["last_faces"]
 
 
+def test_state_delta_rejects_unverified_faces_and_unknown_recent_assets():
+    memory = initial_memory()
+    updated = apply_state_delta(
+        memory,
+        {
+            "last_faces": {"凯伊": "07"},
+            "bgfx": "missing-bgfx",
+            "recent_emoticons": ["Question", "missing-emo"],
+            "recent_actions": ["jump", "missing-act"],
+            "recent_sounds": ["SE_OK", "missing-se"],
+        },
+        cast={"凯伊": {"id": "kei", "portrait": True}},
+        constraints={
+            "ok_bg": set(), "ok_bgfx": {"雨"}, "faces_by_id": {"kei": {"07"}},
+            "face_evidence_by_id": {"kei": {"07": "context_inferred"}},
+            "ok_emo": {"Question"}, "sym2cn": {"Question": "疑问"},
+            "ok_act": {"jump"}, "ok_se": {"SE_OK"},
+        },
+    )
+
+    assert updated["direction"]["last_faces"] == {}
+    assert updated["direction"]["bgfx"] is None
+    assert updated["direction"]["recent_emoticons"] == ["疑问"]
+    assert updated["direction"]["recent_actions"] == ["jump"]
+    assert updated["direction"]["recent_sounds"] == ["SE_OK"]
+
+
 def test_transient_effect_is_not_persisted_as_background_state():
     memory = initial_memory()
     updated = apply_state_delta(
         memory, {"bgfx": "集中线"}, cast={},
-        constraints={"ok_bg": set(), "faces_by_id": {}},
+        constraints={"ok_bg": set(), "ok_bgfx": {"集中线"}, "faces_by_id": {}},
     )
     assert updated["direction"]["bgfx"] is None
 
@@ -71,8 +125,30 @@ def test_context_marks_target_past_and_future_and_limits_events():
     assert "不得标注 FUTURE_CONTEXT" in user
 
 
+def test_context_emits_bounded_director_context_and_continuity_instruction():
+    items = make_items(3)
+    memory = initial_memory("summary", "bond")
+    memory["direction"]["emotion_phase"] = "x" * 5000
+
+    volatile, user = assemble_chunk_context(
+        items=items,
+        chunk={"scene_id": "scene-1", "target_indices": [0, 1]},
+        memory=memory, events=[], usage_chain=[], story_type="bond",
+        before=0, after=0,
+    )
+
+    marker = volatile.split("DIRECTOR_CONTEXT\n", 1)[1].split("\n\n", 1)[0]
+    director_context = json.loads(marker)
+    assert director_context["story_type"] == "bond"
+    assert director_context["scene_type"] == "bond"
+    assert len(marker) <= 4000
+    assert "continuity" in user.lower()
+    assert "line" in user.lower()
+
+
 def test_target_context_uses_short_indices_without_full_fingerprints():
     items = make_items(3)
+    items[0]["_explicit_direction_fields"] = ("face", "emo")
     _volatile, user = assemble_chunk_context(
         items=items,
         chunk={"scene_id": "scene-1", "target_indices": [0, 1]},
@@ -82,6 +158,7 @@ def test_target_context_uses_short_indices_without_full_fingerprints():
 
     assert "[TARGET 1]" in user
     assert "[TARGET 2]" in user
+    assert "authored=face,emo" in user
     assert items[0]["text_fingerprint"] not in user
     assert "不复述规则、哈希、原文或候选比较" in user
 

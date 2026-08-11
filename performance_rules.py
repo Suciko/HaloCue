@@ -26,33 +26,29 @@ def enforce_focusline_shots(scripts):
 
 
 def enforce_persistent_closeups(scripts):
-    """Keep camera-distance closeup active until its character leaves the shot."""
-    active_name = None
+    """Persist communication/closeup bits until an explicit end or scene reset."""
+    persistent_mask = 1 | 4
+    active = {}
     for script in scripts:
+        if script.pop("_sceneReset", False):
+            active.clear()
+        explicit_ends = set(script.pop("_explicitFxEnds", []) or [])
+        for name in explicit_ends:
+            active.pop(name, None)
         characters = script.get("characters", {}).get("$values", [])
         visible = {
             character.get("name"): character
             for character in characters[1:]
             if character.get("name")
         }
-        explicit = [
-            character
-            for character in visible.values()
-            if int(character.get("shapeOverride") or 0) & 4
-        ]
-        if explicit:
-            speaker_slot = int(script.get("speakerSlotNum") or 0)
-            speaker = (
-                characters[speaker_slot]
-                if 0 < speaker_slot < len(characters)
-                and characters[speaker_slot].get("name")
-                else None
-            )
-            focal = speaker if speaker in explicit else explicit[0]
-            active_name = focal.get("name")
-        elif active_name not in visible:
-            active_name = None
-        if active_name in visible:
-            focal = visible[active_name]
-            focal["shapeOverride"] = int(focal.get("shapeOverride") or 0) | 4
+        for name, character in visible.items():
+            if name in explicit_ends:
+                continue
+            bits = int(character.get("shapeOverride") or 0) & persistent_mask
+            if bits:
+                active[name] = bits
+        for name, bits in active.items():
+            if name in visible:
+                character = visible[name]
+                character["shapeOverride"] = int(character.get("shapeOverride") or 0) | bits
     return scripts

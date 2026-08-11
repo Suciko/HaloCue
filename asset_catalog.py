@@ -66,11 +66,46 @@ _SOURCE_PRIORITY = {
     "atlas_candidate": 4,
 }
 
+_FACE_VISUAL_EVIDENCE = {
+    "unknown": 0,
+    "context_inferred": 1,
+    "asset_semantic": 2,
+    "visual_confirmed": 3,
+}
+
 
 def _source_priority(source: str) -> int:
     if source.startswith("vision:"):
         return 1
     return _SOURCE_PRIORITY.get(source, 99)
+
+
+def face_visual_evidence(face: dict) -> str:
+    """Return the strongest reviewable evidence class for one scoped face."""
+    explicit = str(face.get("visual_evidence") or "")
+    strongest = explicit if explicit in _FACE_VISUAL_EVIDENCE else "unknown"
+    sources = {str(source) for source in (face.get("sources") or [])}
+    if any(source.startswith("vision:") for source in sources):
+        strongest = _stronger_face_visual_evidence(strongest, "visual_confirmed")
+    if "spine_semantic" in sources:
+        strongest = _stronger_face_visual_evidence(strongest, "asset_semantic")
+    has_semantic_label = any(
+        str(face.get(field) or "").strip()
+        for field in ("semantic_cn", "cn", "label")
+    )
+    if "atlas_candidate" in sources and has_semantic_label:
+        strongest = _stronger_face_visual_evidence(strongest, "asset_semantic")
+    if "aa_verified" in sources and has_semantic_label:
+        strongest = _stronger_face_visual_evidence(strongest, "asset_semantic")
+    if {"aap_observed", "aa_verified"} & sources:
+        strongest = _stronger_face_visual_evidence(strongest, "context_inferred")
+    return strongest
+
+
+def _stronger_face_visual_evidence(current: str, candidate: str) -> str:
+    if _FACE_VISUAL_EVIDENCE[candidate] > _FACE_VISUAL_EVIDENCE[current]:
+        return candidate
+    return current
 
 
 def _face_capabilities(con) -> dict[str, list[dict]]:
@@ -104,10 +139,19 @@ def _face_capabilities(con) -> dict[str, list[dict]]:
             "id": row["face_id"], "raw": row["raw"], "label": row["label"],
             "cn": row["label_cn"], "semantic_cn": "", "sources": [],
             "observed_count": 0, "verified": False, "semantic_level": "unknown",
+            "visual_evidence": "unknown",
         })
         face["sources"].append(row["source"])
         face["observed_count"] += row["observed_count"] or 0
         face["verified"] = face["verified"] or row["source"] == "aa_verified"
+        row_evidence = face_visual_evidence({
+            "sources": [row["source"]],
+            "label": row["label"],
+            "cn": row["label_cn"],
+        })
+        face["visual_evidence"] = _stronger_face_visual_evidence(
+            face["visual_evidence"], row_evidence
+        )
         if row["source"].startswith("vision:"):
             try:
                 rich = json.loads(row["raw"] or "{}")
@@ -175,6 +219,9 @@ def _metadata_face_capabilities(metadata: dict) -> list[dict]:
         records.append({
             "id": face_id, "raw": raw, "label": label, "cn": cn,
             "sources": ["atlas_candidate"], "observed_count": 0, "verified": False,
+            "visual_evidence": face_visual_evidence({
+                "sources": ["atlas_candidate"], "label": label, "cn": cn,
+            }),
         })
     return [{
         "spine_signature": metadata.get("spine_signature", ""),
