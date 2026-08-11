@@ -95,6 +95,8 @@ def face_visual_evidence(face: dict) -> str:
     )
     if "atlas_candidate" in sources and has_semantic_label:
         strongest = _stronger_face_visual_evidence(strongest, "asset_semantic")
+    if "aa_verified" in sources and has_semantic_label:
+        strongest = _stronger_face_visual_evidence(strongest, "asset_semantic")
     if {"aap_observed", "aa_verified"} & sources:
         strongest = _stronger_face_visual_evidence(strongest, "context_inferred")
     return strongest

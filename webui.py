@@ -4587,7 +4587,9 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/annotate":
                 mapping = data.get("mapping")
                 try:
-                    data["story_type"] = normalize_story_type(data.get("story_type"))
+                    story_type = normalize_story_type(data.get("story_type"))
+                    if "story_type" in data:
+                        data["story_type"] = story_type
                 except ValueError:
                     return self._send(400, {
                         "ok": False, "code": "invalid_story_type",
@@ -4820,7 +4822,9 @@ class H(BaseHTTPRequestHandler):
                 return self._send(400, {"ok": False, "e": str(exc)})
         if p == "/api/build":
             try:
-                data["story_type"] = normalize_story_type(data.get("story_type"))
+                story_type = normalize_story_type(data.get("story_type"))
+                if "story_type" in data:
+                    data["story_type"] = story_type
                 inherit_story_context(data)
                 project_name = build_project_name(data)
             except StoryProjectMismatchError:

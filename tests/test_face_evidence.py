@@ -281,6 +281,8 @@ def test_face_capabilities_expose_strongest_visual_evidence_per_variant(tmp_path
             ("kai", "sig", "winter", "03", "atlas_candidate", "03", "", "", 0),
             ("kai", "sig", "winter", "04", "atlas_candidate", "smile", "smile", "微笑", 0),
             ("kai", "sig", "winter", "04", "aap_observed", "04", "", "", 1),
+            ("kai", "sig", "winter", "05", "aa_verified", "smile", "smile", "微笑", 0),
+            ("kai", "sig", "winter", "06", "aa_verified", "06", "", "", 0),
         ],
     )
     con.commit()
@@ -293,4 +295,6 @@ def test_face_capabilities_expose_strongest_visual_evidence_per_variant(tmp_path
         "02": "context_inferred",
         "03": "unknown",
         "04": "asset_semantic",
+        "05": "asset_semantic",
+        "06": "context_inferred",
     }
