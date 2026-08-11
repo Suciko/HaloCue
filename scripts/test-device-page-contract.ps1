@@ -91,7 +91,7 @@ if ($null -eq $document) {
     throw "Full PC WebUI did not become ready within the device contract timeout"
 }
 
-$requiredRenderedRoots = @('appShell', 'view-create', 'workflowProgress', 'readyModel', 's1')
+$requiredRenderedRoots = @('appShell', 'view-create', 'welcomePanel', 'workflowProgress', 's1')
 foreach ($rootId in $requiredRenderedRoots) {
     $node = $document.SelectSingleNode("//*[@resource-id='$rootId']")
     if ($null -eq $node) {

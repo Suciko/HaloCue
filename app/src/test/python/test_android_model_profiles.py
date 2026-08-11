@@ -9,6 +9,7 @@ import pytest
 import android_credentials
 import android_web_server
 import model_profiles
+import webui
 
 
 class FakeCredentialBackend:
@@ -165,3 +166,31 @@ def test_explicit_pc_credential_store_contract_is_unchanged(tmp_path, monkeypatc
 
     assert store.credentials is credentials
     assert "credential" not in store.save_profile(_profile_payload(""))
+
+
+def test_model_discovery_uses_short_network_timeout(monkeypatch):
+    captured = {}
+
+    class FakeProvider:
+        def list_model_records(self):
+            return [{"id": "available-model"}]
+
+    def make_provider(protocol, settings):
+        captured.update(settings)
+        return FakeProvider()
+
+    monkeypatch.setattr(webui.llm, "make_provider_from_settings", make_provider)
+
+    result = webui.list_workbench_models(
+        {
+            "name": "Temporary",
+            "protocol": "openai",
+            "service_preset": "custom",
+            "base_url": "https://example.invalid/v1",
+            "api_key": "test-only-key",
+        },
+        {"model": "model-list", "max_tokens": 16000},
+    )
+
+    assert captured["timeout"] == 20
+    assert result["models"][0]["model_id"] == "available-model"

@@ -6,6 +6,12 @@
     background: ['.png', '.jpg', '.jpeg'],
     sound: ['.wav', '.ogg', '.mp3']
   };
+  const NATIVE_SUFFIXES = {
+    character: ['.skel', '.atlas', '.png', '.jpg', '.jpeg', '.webp'],
+    background: SUFFIXES.background,
+    sound: SUFFIXES.sound,
+    batch: ['.skel', '.atlas', '.png', '.jpg', '.jpeg', '.webp', '.wav', '.ogg', '.mp3']
+  };
 
   function byId(id) { return document.getElementById(id); }
   function story() {
@@ -24,6 +30,10 @@
     this.selectedFile = byId('assetImportSelectedFile');
     this.status = byId('assetImportStatus');
     this.submitButton = byId('assetImportSubmit');
+    this.chooseButton = this.root && this.root.querySelector
+      ? this.root.querySelector('[data-asset-import-action="choose-file"]') : null;
+    this.scanButton = this.root && this.root.querySelector
+      ? this.root.querySelector('[data-asset-import-action="scan"]') : null;
     this.historyRoot = byId('assetImportHistoryRoot');
     this.historySearch = byId('assetImportHistorySearch');
     this.filePickerRoot = byId('assetImportFilePicker');
@@ -37,6 +47,7 @@
     if (this.filePickerRoot && exports.StoryUI && exports.StoryUI.StoryFilePicker) {
       this.picker = new exports.StoryUI.StoryFilePicker(this.filePickerRoot, {
         hostEndpoint: '/api/assets/host', selectEndpoint: '/api/assets/select',
+        nativeSelectEndpoint: '/api/assets/select-native',
         hostOnly: true, allowedSuffixes: SUFFIXES.character,
         title: '选择素材文件', searchPlaceholder: '搜索素材文件',
         emptyStatus: '这个文件夹中没有可选择的素材文件',
@@ -46,6 +57,9 @@
     }
     if (this.historyRoot && exports.StoryUI && exports.StoryUI.HistoryDrawer) {
       this.history = new exports.StoryUI.HistoryDrawer(this.historyRoot, {embedded: true});
+    }
+    if (this.usesNativePicker() && this.scanButton && this.scanButton.dataset.androidLabel) {
+      this.scanButton.textContent = this.scanButton.dataset.androidLabel;
     }
     this.bind();
   }
@@ -81,6 +95,16 @@
 
   LibraryImportDialog.prototype.isOpen = function () {
     return Boolean(this.root && !this.root.hidden);
+  };
+
+  LibraryImportDialog.prototype.usesNativePicker = function () {
+    return Boolean(exports.HaloCueNative && typeof exports.HaloCueNative.pickAsset === 'function');
+  };
+
+  LibraryImportDialog.prototype.openForKind = function (kind, trigger) {
+    if (!this.open(trigger)) return false;
+    this.setKind(kind);
+    return true;
   };
 
   LibraryImportDialog.prototype.open = function (trigger) {
@@ -132,6 +156,13 @@
     this.selection = null;
     if (this.selectedFile) this.selectedFile.textContent = '尚未选择文件';
     if (this.characterFields) this.characterFields.hidden = this.kind !== 'character';
+    if (this.chooseButton) {
+      this.chooseButton.textContent = this.usesNativePicker()
+        ? (this.kind === 'character'
+          ? this.chooseButton.dataset.androidCharacterLabel
+          : this.chooseButton.dataset.androidFileLabel)
+        : this.chooseButton.dataset.desktopLabel;
+    }
     if (this.root && this.root.querySelectorAll) {
       Array.prototype.forEach.call(this.root.querySelectorAll('[data-asset-import-kind]'), function (button) {
         const active = button.dataset.assetImportKind === this.kind;
@@ -155,10 +186,17 @@
 
   LibraryImportDialog.prototype.openPicker = function (trigger) {
     if (!this.picker) return null;
-    this.picker.allowedSuffixes = new Set(SUFFIXES[this.kind]);
+    const nativePicker = this.usesNativePicker();
+    this.picker.allowedSuffixes = new Set(
+      nativePicker ? NATIVE_SUFFIXES[this.kind] : SUFFIXES[this.kind]
+    );
     this.picker.options.title = this.kind === 'character'
       ? '选择角色 .skel 文件'
       : this.kind === 'sound' ? '选择音效文件' : '选择背景图片';
+    if (nativePicker) {
+      const purpose = this.kind === 'character' ? 'asset_tree' : 'asset_file';
+      return this.picker.openNative(trigger, purpose, this.kind);
+    }
     return this.picker.open(trigger);
   };
 
@@ -167,10 +205,13 @@
       if (this.status) this.status.textContent = '请先选择要导入的素材文件。';
       return null;
     }
-    const displayName = String(this.displayName && this.displayName.value || '').trim();
+    const selectionDisplayName = String(this.selection.name || '')
+      .replace(/\.(skel|atlas)$/i, '').trim();
+    const displayName = String(this.displayName && this.displayName.value || '').trim()
+      || selectionDisplayName || '自定义角色';
     const identifier = String(this.identifier && this.identifier.value || '').trim();
-    if (this.kind === 'character' && (!identifier || !displayName)) {
-      if (this.status) this.status.textContent = '导入角色需要填写角色标识和显示名称。';
+    if (this.kind === 'character' && !identifier) {
+      if (this.status) this.status.textContent = '导入角色需要填写角色标识。';
       return null;
     }
     const context = {
@@ -199,7 +240,19 @@
     this.busy = true;
     if (this.status) this.status.textContent = '正在扫描当前剧情素材目录…';
     try {
-      const result = await exports.StoryAssets.scanInbox();
+      let result;
+      if (this.usesNativePicker() && this.picker) {
+        this.picker.allowedSuffixes = new Set(NATIVE_SUFFIXES.batch);
+        await this.picker.openNative(null, 'asset_tree', 'batch', async function (selection) {
+          result = await exports.StoryAssets.scanInbox({
+            nativeSelection: true,
+            fileToken: selection.file_token,
+            name: selection.name
+          });
+        });
+      } else {
+        result = await exports.StoryAssets.scanInbox();
+      }
       const rows = result && result.results || {};
       if (this.status) this.status.textContent = result
         ? '扫描完成：登记 ' + (rows.registered || []).length + ' · 跳过 ' +

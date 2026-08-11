@@ -10,6 +10,7 @@ import pytest
 import android_web_server
 import android_exports
 import annotate
+import llm
 import script2aap
 import webui
 from build_bundle import BuildBundleManager
@@ -138,6 +139,36 @@ def test_android_annotation_uses_mock_provider_and_persists_editable_draft(
     assert draft["edited_text"] == "桃井: AI 标注结果\n"
     assert draft["session"]["project"] == "AndroidAnnotation"
     assert result["agent_metrics"] == {"chunks": 1}
+    android_web_server.stop()
+
+
+def test_android_annotation_provider_does_not_require_packaged_llm_json(
+    tmp_path, monkeypatch
+):
+    android_web_server.stop()
+    android_web_server.configure_android_runtime(str(tmp_path))
+    source = tmp_path / "workspace" / "imports" / "story.txt"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("Narrator: Android model draft\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        webui,
+        "annotation_provider",
+        lambda _profile=None: llm.MockProvider({}),
+    )
+    result = webui.annotate_draft_worker(
+        {
+            "script": str(source),
+            "project": "AndroidNoPackagedLlmConfig",
+            "mapping": {"Narrator": {"kind": "narrator"}},
+            "annotate": True,
+            "agent_enabled": False,
+        }
+    )
+
+    draft = DraftStore().load_draft(result["draft_token"])
+    assert draft["edited_text"]
+    assert draft["session"]["project"] == "AndroidNoPackagedLlmConfig"
     android_web_server.stop()
 
 

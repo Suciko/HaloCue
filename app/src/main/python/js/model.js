@@ -120,6 +120,15 @@
     return {id: '', name: '新模型配置', provider: 'openai', service_preset: 'custom', base_url: '', model: '', max_tokens: 16000, max_tokens_source: 'legacy', recommended_max_tokens: null, recommended_source: 'unknown', recommended_label: '上限未识别', reasoning_mode: 'balanced', context_window_tokens: null, context_window_source: 'unknown', vision: true, api_key: ''};
   }
 
+  function preferredDiscoveredModel(currentModel, models) {
+    const current = String(currentModel || '').trim();
+    if (current) return current;
+    const first = (models || []).find(function (model) {
+      return String(model && (model.model_id || model.id) || '').trim();
+    });
+    return first ? String(first.model_id || first.id).trim() : '';
+  }
+
   function profileChanged(before, after) {
     if (!before || !after) return Boolean(before || after);
     if (String(after.api_key || '').trim()) return true;
@@ -267,6 +276,7 @@
     nextOutputLimitState: nextOutputLimitState,
     restoreOutputLimitState: restoreOutputLimitState,
     newProfileDraft: newProfileDraft,
+    preferredDiscoveredModel: preferredDiscoveredModel,
     profileChanged: profileChanged,
     statusLabel: statusLabel,
     assignmentSecretStatus: assignmentSecretStatus,

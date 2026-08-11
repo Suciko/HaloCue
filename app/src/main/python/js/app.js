@@ -54,6 +54,69 @@
   }
   function status(value) { $('#rvStatus').textContent = value; }
   function isAndroidNative() { return Boolean(window.HaloCueNative && typeof window.HaloCueNative.shareExport === 'function'); }
+  function isAndroidLayoutPreview() {
+    const url = new URL(window.location.href);
+    return ['127.0.0.1', 'localhost'].includes(url.hostname)
+      && url.searchParams.get('android-preview') === '1';
+  }
+  function usesAndroidLayout() { return isAndroidNative() || isAndroidLayoutPreview(); }
+  let lastAndroidScrollTop = 0;
+  let androidScrollScheduled = false;
+  function applyAndroidRuntimeUI() {
+    const android = usesAndroidLayout();
+    if (document.body) document.body.classList.toggle('android-native', android);
+    const mappingPanel = $('#androidResourceMapping');
+    if (mappingPanel) mappingPanel.hidden = !android;
+    if (android) updateAndroidScrollChrome(0, 'up');
+  }
+  function renderAndroidResourceMapping(mapping) {
+    const root = $('#androidResourceMapping');
+    if (!root || !isAndroidNative()) return;
+    mapping = mapping || {};
+    const ready = mapping.status === 'ready';
+    let aaInstalled = false;
+    try {
+      aaInstalled = Boolean(window.HaloCueNative.isAzureArchiveInstalled());
+    } catch (_) { /* 旧版原生桥接没有安装状态接口 */ }
+    root.hidden = false;
+    $('#androidMappingCharacters').textContent = Number(mapping.characters || 0);
+    $('#androidMappingBackgrounds').textContent = Number(mapping.backgrounds || 0);
+    $('#androidMappingSounds').textContent = Number(mapping.sounds || 0);
+    $('#androidMappingAliases').textContent = Number(mapping.identifier_aliases || 0);
+    $('#androidMappingBadge').textContent = ready ? '可用' : '缺失';
+    $('#androidMappingState').textContent = ready
+      ? '编译标识已随 APK 提供'
+      : 'APK 中没有找到可用标识映射';
+    $('#androidMappingDetail').textContent = ready
+      ? '用于编译资源标识，不代表手机已安装原版 AA。已覆盖 ' + Number(mapping.package_characters || 0) + ' 个额外包角色，新增 ' + Number(mapping.new_characters || 0) + ' 个 PC 索引外角色。'
+      : '请更新应用内置资源映射后再生成 AAP。';
+    $('#androidAAInstallState').textContent = aaInstalled
+      ? '原版 AA：已安装'
+      : '原版 AA：未安装（仍可生成并分享 .aap）';
+  }
+  function updateAndroidScrollChrome(scrollTop, direction) {
+    if (!usesAndroidLayout()) return;
+    const topbar = $('.topbar');
+    if (!topbar) return;
+    const current = Math.max(0, Number.isFinite(scrollTop) ? scrollTop : Number(window.scrollY || 0));
+    const delta = current - lastAndroidScrollTop;
+    const movement = direction || (delta > 6 ? 'down' : delta < -6 ? 'up' : 'none');
+    const compact = current > 16;
+    const hidden = current > 120 && movement === 'down';
+    topbar.classList.toggle('is-scroll-compact', compact);
+    if (movement === 'up' || current < 48) topbar.classList.remove('is-scroll-hidden');
+    else if (hidden) topbar.classList.add('is-scroll-hidden');
+    lastAndroidScrollTop = current;
+  }
+  function scheduleAndroidScrollChrome() {
+    if (!usesAndroidLayout() || androidScrollScheduled) return;
+    androidScrollScheduled = true;
+    const schedule = window.requestAnimationFrame || function (callback) { return window.setTimeout(callback, 16); };
+    schedule(function () {
+      androidScrollScheduled = false;
+      updateAndroidScrollChrome();
+    });
+  }
   function hasAndroidExport() { return Boolean(isAndroidNative() && state.review && state.review.export && state.review.export.shareId); }
   function updateReviewInstallButton() {
     const button = $('#rvInstall');
@@ -273,13 +336,26 @@
   async function loadSetupStatus() {
     try {
       const result = await request('/api/setup/status');
-      readiness('#readyAA', result.aa.connected, result.aa.connected ? result.aa.path : '请检查 AA 工作区');
-      readiness('#readyDatabase', result.database.ready, result.database.ready ? '素材索引已准备好' : '缺少素材数据库');
+      const android = isAndroidNative();
+      const mapping = result.aa && result.aa.resource_mapping || {};
+      const aaReady = android ? mapping.status === 'ready' : result.aa.connected;
+      const databaseReady = Boolean(result.database.ready);
+      if (android) $('#readyAA').querySelector('.readiness-top b').textContent = '编译资源';
+      readiness('#readyAA', aaReady, android ? (aaReady ? 'APK 内置标识映射可用' : 'APK 缺少资源标识映射') : (aaReady ? result.aa.path : '请检查 AA 工作区'));
+      readiness('#readyDatabase', databaseReady, databaseReady ? '素材索引已准备好' : '缺少素材数据库');
       const modelDetail = window.ModelSettings && window.ModelSettings.modelReadinessLabel
         ? window.ModelSettings.modelReadinessLabel(result.model)
         : (result.model.configured ? result.model.name + ' · ' + result.model.model : '仅转换格式时无需 AI');
       readiness('#readyModel', result.model.configured, modelDetail);
-    } catch (_) { ['#readyAA', '#readyDatabase', '#readyModel'].forEach(function (id) { readiness(id, false, '暂时无法读取状态'); }); }
+      if (android) renderAndroidResourceMapping(mapping);
+      const welcome = $('#welcomePanel');
+      if (welcome) welcome.classList.toggle('is-compact', android && aaReady && databaseReady);
+    } catch (_) {
+      ['#readyAA', '#readyDatabase', '#readyModel'].forEach(function (id) { readiness(id, false, '暂时无法读取状态'); });
+      const welcome = $('#welcomePanel');
+      if (welcome) welcome.classList.remove('is-compact');
+      renderAndroidResourceMapping({status: 'missing'});
+    }
   }
   async function loadState() {
     try {
@@ -444,7 +520,18 @@
     (result.characters || []).forEach(function (item) {
       if (!item || !item.speaker) return;
       const kind = item.kind || 'unset';
-      state.mapping[item.speaker] = kind === 'unset' ? {kind: 'unset'} : {kind: kind, id: item.id || '', name: item.name || item.speaker, spine: item.spine || '', source: item.source || '', avatar: item.avatar || '', custom: Boolean(item.custom)};
+      const previous = state.mapping[item.speaker] || {};
+      const sameCharacter = String(previous.id || '') === String(item.id || '');
+      state.mapping[item.speaker] = kind === 'unset' ? {kind: 'unset'} : {
+        kind: kind,
+        id: item.id || '',
+        name: item.name || item.speaker,
+        spine: item.spine || (sameCharacter ? previous.spine : '') || '',
+        source: item.source || (sameCharacter ? previous.source : '') || '',
+        avatar: item.avatar || (sameCharacter ? previous.avatar : '') || '',
+        faces: item.faces !== undefined ? item.faces : (sameCharacter ? previous.faces : undefined),
+        custom: Boolean(item.custom),
+      };
     });
   }
   function preflightKindLabel(kind) { return kind === 'background' ? '背景' : kind === 'sound' ? '音效' : kind === 'character' ? '骨骼' : kind === 'bgm' ? 'BGM' : kind; }
@@ -802,6 +889,15 @@
     const source = String(item && item.source || '').toLowerCase();
     return Boolean(item && item.custom) || source === 'custom' || source === 'current_story_custom';
   }
+  function syncPreflightCharacterMapping(item) {
+    if (!item || !item.speaker) return;
+    const mapping = state.mapping[item.speaker];
+    if (!mapping || String(mapping.id || '') !== String(item.id || '')) return;
+    ['avatar', 'source', 'club', 'faces', 'spine'].forEach(function (field) {
+      if (item[field] !== undefined && item[field] !== null && item[field] !== '') mapping[field] = item[field];
+    });
+    mapping.custom = Boolean(item.custom);
+  }
   async function hydratePreflightCharacters(result) {
     const characters = Array.isArray(result && result.characters) ? result.characters : [];
     const lookups = characters.filter(function (item) {
@@ -862,6 +958,7 @@
         if (match[field] !== undefined && match[field] !== null && match[field] !== '') item[field] = match[field];
       });
       item.custom = isCustomCharacter(item);
+      syncPreflightCharacterMapping(item);
     });
     return result;
   }
@@ -984,9 +1081,9 @@
         const job = await window.Api.poll('/api/jobs/' + response.job_id, function (item) { return ['succeeded', 'failed', 'cancelled'].includes(item.state); }, {isCurrent: function () { return isCurrentOperation('analyze', op) && currentStory() && currentStory().story_token === storyToken; }, onRetry: function () { if (isCurrentOperation('analyze', op)) { $('#preflightStatus').textContent = '连接中断，正在重试'; setScriptScanProgress('ai', 'AI 初审连接中断，正在重试…'); } }});
         if (!job || job.state !== 'succeeded') throw new Error((job && job.error) || (job && job.state === 'cancelled' ? '初审任务已取消' : '初审任务未完成'));
         const result = job.result || {};
-        applyPreflightMapping(result); await hydratePreflightCharacters(result); renderPreflight(result); return result;
+        await hydratePreflightCharacters(result); applyPreflightMapping(result); renderPreflight(result); return result;
       }
-      if (response && Array.isArray(response.characters)) { applyPreflightMapping(response); await hydratePreflightCharacters(response); renderPreflight(response); return response; }
+      if (response && Array.isArray(response.characters)) { await hydratePreflightCharacters(response); applyPreflightMapping(response); renderPreflight(response); return response; }
       // 兼容尚未实现初审端点的旧后端；新版后端始终返回 job_id。
       state.preflightApproved = true;
       return null;
@@ -1072,8 +1169,8 @@
   function openCastPicker(who) {
     castPickerSpeaker = who;
     const speakerLabel = $('#castPickerSpeaker'); if (speakerLabel) speakerLabel.textContent = '说话者：' + who;
-    const search = $('#castSearch'); if (search) search.value = '';
-    searchCharacters('');
+    const search = $('#castSearch'); if (search) search.value = who;
+    searchCharacters(who);
     openModal('#mCast', document.activeElement);
   }
   async function searchCharacters(q) {
@@ -1097,7 +1194,7 @@
         row.appendChild(characterAvatar({name: item.name || item.ident, ident: item.ident, avatar: item.avatar}, 'cast-avatar'));
         const body = document.createElement('span'); body.className = 'cast-result-body';
         const name = document.createElement('b'); name.textContent = item.name || item.ident;
-        const meta = document.createElement('span'); meta.className = 'cast-result-meta'; meta.textContent = [item.club, item.ident, item.spine ? item.spine.split('/').pop() : '', item.faces ? item.faces + ' 表情' : ''].filter(Boolean).join(' · ');
+        const meta = document.createElement('span'); meta.className = 'cast-result-meta'; meta.textContent = [item.club, item.ident, item.spine ? item.spine.replace(/\\/g, '/').split('/').pop() : '', item.faces ? '已知至少 ' + item.faces + ' 个差分' : '差分尚无可靠记录'].filter(Boolean).join(' · ');
         body.append(name, meta); row.appendChild(body);
         row.addEventListener('click', function () { pickCharacter(item); });
         root.appendChild(row);
@@ -1471,9 +1568,17 @@
   function openProviderLayer() {
     $('#modelRoleOverview').hidden = true; $('#modelSelectionLayer').hidden = true; $('#modelConnectionEditor').hidden = true; $('#modelProviderLayer').hidden = false; renderProviderCatalog();
   }
+  function setModelSaveNotice(message, stateName) {
+    const notice = $('#modelSaveNotice');
+    if (!notice) return;
+    notice.textContent = message || '';
+    notice.dataset.state = stateName || '';
+    notice.hidden = !message;
+  }
   function openNewModelEditor(preset) {
     state.modelEditorMode = 'new';
     $('#modelProviderLayer').hidden = true; $('#modelSelectionLayer').hidden = true; $('#modelRoleOverview').hidden = true; $('#modelConnectionEditor').hidden = false;
+    setModelSaveNotice('', '');
     $('#modelConnectionId').value = ''; $('#modelRecordId').value = ''; $('#modelProfileId').value = '';
     renderProfile(window.ModelSettings.newProfileDraft());
     $('#modelServicePreset').disabled = false; $('#modelSaveAsNew').hidden = true; $('#modelEditorTitle').textContent = '添加模型'; $('#modelEditorSubtitle').textContent = '新连接';
@@ -1487,6 +1592,7 @@
     if (!model || !connection) return;
     state.modelEditorMode = 'edit';
     $('#modelSelectionLayer').hidden = true; $('#modelProviderLayer').hidden = true; $('#modelRoleOverview').hidden = true; $('#modelConnectionEditor').hidden = false;
+    setModelSaveNotice('', '');
     $('#modelConnectionId').value = connection.id; $('#modelRecordId').value = model.id; $('#modelProfileId').value = '';
      renderProfile({name: connection.name, provider: connection.protocol, service_preset: connection.service_preset, base_url: connection.base_url, model: model.model, max_tokens: model.max_tokens, max_tokens_source: model.max_tokens_source, recommended_max_tokens: model.recommended_max_tokens, recommended_source: model.recommended_source, recommended_label: model.recommended_label, reasoning_mode: model.reasoning_mode, context_window_tokens: model.context_window_tokens, context_window_source: model.context_window_source, vision: model.vision_status !== 'unsupported', secret_status: connection.secret_status});
     recommendOutputForModel(model.model, {modelChanged: false}).catch(function (error) { $('#modelStatus').textContent = error.message; });
@@ -1517,7 +1623,15 @@
   }
   async function saveWorkbenchModel() {
     const payload = modelPayload();
+    if (!payload.model) {
+      const message = '请先填写模型名称，或读取可用模型后再保存';
+      $('#modelStatus').textContent = message;
+      setModelSaveNotice(message, 'error');
+      $('#modelName').focus();
+      return;
+    }
     $('#modelStatus').textContent = '正在安全保存模型…';
+    setModelSaveNotice('正在安全保存模型和 API Key…', 'saving');
     try {
       const connection = await post('/api/llm/connections/save', {id: $('#modelConnectionId').value, name: payload.name, protocol: payload.provider, service_preset: payload.service_preset, base_url: payload.base_url, api_key: payload.api_key});
       if (connection.secret_status === 'saved') {
@@ -1534,7 +1648,11 @@
       $('#modelConnectionId').value = connection.id; $('#modelRecordId').value = model.id; state.modelEditorMode = 'edit';
       await loadModelWorkbench(); $('#modelServicePreset').disabled = true; $('#modelSaveAsNew').hidden = false; $('#modelEditorTitle').textContent = '编辑模型'; $('#modelEditorSubtitle').textContent = connection.name;
       $('#modelStatus').textContent = connection.secret_status === 'saved' ? '模型和密钥已保存。' : '模型已保存；调用前还需要填写 API Key。';
-    } catch (error) { $('#modelStatus').textContent = error.message; }
+      setModelSaveNotice(connection.secret_status === 'saved' ? '模型和 API Key 已安全保存' : '模型已保存，但还没有 API Key', connection.secret_status === 'saved' ? 'saved' : 'error');
+    } catch (error) {
+      $('#modelStatus').textContent = error.message;
+      setModelSaveNotice('保存失败：' + error.message, 'error');
+    }
   }
   function saveProfileAsNew() {
     state.modelEditorMode = 'new'; $('#modelConnectionId').value = ''; $('#modelRecordId').value = ''; $('#modelProfileId').value = ''; $('#modelApiKey').value = '';
@@ -1663,6 +1781,10 @@
   async function loadAAData() {
     try {
       const result = await request('/api/setup/status');
+      if (isAndroidNative()) {
+        renderAndroidResourceMapping(result && result.aa && result.aa.resource_mapping);
+        return;
+      }
       loadToolSettings(result);
       renderAAStatus(result && result.aa);
       const aa = result && result.aa || {};
@@ -2423,8 +2545,11 @@
   actions['new-profile'] = openProviderLayer;
   actions['discover-models'] = async function () {
     $('#modelStatus').textContent = '正在读取可用模型…';
+    setBusyButton('#modelDiscover', true, '正在读取…', '读取可用模型');
     clearDiscoveredModels();
     const payload = modelPayload();
+    const controller = typeof window.AbortController === 'function' ? new window.AbortController() : null;
+    const timeoutId = controller ? window.setTimeout(function () { controller.abort(); }, 25000) : null;
     try {
       const connectionId = $('#modelConnectionId').value;
       const requestPayload = {
@@ -2438,14 +2563,33 @@
         },
         model: {model: payload.model || 'model-list', max_tokens: payload.max_tokens}
       };
-      const result = await post('/api/llm/models/list', requestPayload);
-      const list = $('#modelOptions'); clearElement(list); (result.models || []).map(normalizeDiscoveredModel).forEach(function (model) { const option = document.createElement('option'); option.value = model.model_id; list.appendChild(option); });
-      renderDiscoveredModels(result.models);
+      const requestOptions = window.Api.json('POST', requestPayload);
+      if (controller) requestOptions.signal = controller.signal;
+      const result = await request('/api/llm/models/list', requestOptions);
+      const discovered = (result.models || []).map(normalizeDiscoveredModel).filter(function (model) { return model.model_id; });
+      const selectedId = window.ModelSettings.preferredDiscoveredModel(payload.model, discovered);
+      const autoSelected = !payload.model && Boolean(selectedId);
+      if (autoSelected) {
+        $('#modelName').value = selectedId;
+        const capability = discovered.find(function (model) { return model.model_id === selectedId; });
+        if (capability) applyOutputCapability(capability, {modelChanged: true, modelId: selectedId});
+        renderReasoningCapability(capability && capability.reasoning);
+      }
+      const list = $('#modelOptions'); clearElement(list); discovered.forEach(function (model) { const option = document.createElement('option'); option.value = model.model_id; list.appendChild(option); });
+      renderDiscoveredModels(discovered);
       if (result.base_url_adjusted && result.base_url) $('#modelBaseUrl').value = result.base_url;
-      $('#modelStatus').textContent = result.base_url_adjusted
-        ? '已自动补全 /v1，读取 ' + result.models.length + ' 个模型。'
-        : '已读取 ' + result.models.length + ' 个模型。';
-    } catch (error) { $('#modelStatus').textContent = error.message; }
+      const prefix = result.base_url_adjusted ? '已自动补全 /v1，' : '';
+      $('#modelStatus').textContent = discovered.length
+        ? prefix + '已读取 ' + discovered.length + ' 个模型' + (autoSelected ? '，已自动选择 ' + selectedId : '') + '。'
+        : prefix + '没有读取到可用模型，请手动填写模型名称。';
+    } catch (error) {
+      $('#modelStatus').textContent = error && error.name === 'AbortError'
+        ? '读取超时，请检查网络或 API 地址后重试'
+        : error.message;
+    } finally {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      setBusyButton('#modelDiscover', false, '', '读取可用模型');
+    }
   };
   actions['close-background-picker'] = function () { closeModal('#mBackgroundPicker'); state.reviewBackgroundRequest = null; if (state.backgroundJob) state.backgroundJob.resolveRequestId = null; };
   actions['show-history'] = showRecentStories;
@@ -2540,10 +2684,13 @@
     if (!story || detail.story_token !== story.story_token) return;
     if (detail.preflight_snapshot) restorePreflightSnapshot(detail.preflight_snapshot);
   });
-  window.AppRuntime = {analyze: analyze, annotate: annotate, build: build, compile: compile, beginOperation: beginOperation, loadBackgrounds: loadBackgrounds, loadReview: loadReview, refreshDrafts: refreshDrafts, reviewPost: reviewPost, renderBackgroundRequests: renderBackgroundRequests, resolveBackground: resolveBackground, pollBuild: pollBuild, continueBackground: continueBackground, replaceStory: replaceStory, restoreActiveReview: restoreActiveReview, fillBackgroundFromHistory: fillBackgroundFromHistory, openDraftBackgroundPicker: openDraftBackgroundPicker, resolveDraftBackgroundRequest: resolveDraftBackgroundRequest, setReviewFilter: setReviewFilter, jumpToReviewCard: jumpToReviewCard, searchCharacters: searchCharacters, pickCharacter: pickCharacter, castSetKind: castSetKind, openCastPicker: openCastPicker, renderReviewCards: renderReviewCards, renderReviewAssets: renderReviewAssets, renderPreflight: renderPreflight, buildPreflightAssetTasks: buildPreflightAssetTasks, refreshAfterAssetWorkbench: refreshAfterAssetWorkbench, applyWorkbenchBackground: applyWorkbenchBackground, approvePreflight: approvePreflight, rerunPreflight: rerunPreflight, renderBackgroundTimeline: renderBackgroundTimeline, openBgReplace: openBgReplace, applyBgReplace: applyBgReplace, renderAAStatus: renderAAStatus, openInstallDialog: openInstallDialog, confirmInstall: confirmInstall, updateInstallProjectPreview: updateInstallProjectPreview, annotationProgressDetail: annotationProgressDetail, formatAnnotationCompletion: formatAnnotationCompletion};
+  window.AppRuntime = {analyze: analyze, annotate: annotate, build: build, compile: compile, beginOperation: beginOperation, loadBackgrounds: loadBackgrounds, loadReview: loadReview, refreshDrafts: refreshDrafts, reviewPost: reviewPost, renderBackgroundRequests: renderBackgroundRequests, resolveBackground: resolveBackground, pollBuild: pollBuild, continueBackground: continueBackground, replaceStory: replaceStory, restoreActiveReview: restoreActiveReview, fillBackgroundFromHistory: fillBackgroundFromHistory, openDraftBackgroundPicker: openDraftBackgroundPicker, resolveDraftBackgroundRequest: resolveDraftBackgroundRequest, setReviewFilter: setReviewFilter, jumpToReviewCard: jumpToReviewCard, searchCharacters: searchCharacters, pickCharacter: pickCharacter, castSetKind: castSetKind, openCastPicker: openCastPicker, renderReviewCards: renderReviewCards, renderReviewAssets: renderReviewAssets, renderPreflight: renderPreflight, buildPreflightAssetTasks: buildPreflightAssetTasks, refreshAfterAssetWorkbench: refreshAfterAssetWorkbench, applyWorkbenchBackground: applyWorkbenchBackground, approvePreflight: approvePreflight, rerunPreflight: rerunPreflight, renderBackgroundTimeline: renderBackgroundTimeline, openBgReplace: openBgReplace, applyBgReplace: applyBgReplace, renderAAStatus: renderAAStatus, renderAndroidResourceMapping: renderAndroidResourceMapping, openInstallDialog: openInstallDialog, confirmInstall: confirmInstall, updateInstallProjectPreview: updateInstallProjectPreview, annotationProgressDetail: annotationProgressDetail, formatAnnotationCompletion: formatAnnotationCompletion};
+  window.HaloCueUI = Object.assign({}, window.HaloCueUI || {}, {updateAndroidScrollChrome: updateAndroidScrollChrome});
+  window.addEventListener('scroll', scheduleAndroidScrollChrome, {passive: true});
   window.AppRuntime.buildAAIndex = buildAAIndex;
   window.AppRuntime.pollAAIndex = pollAAIndex;
   window.addEventListener('load', function () {
+    applyAndroidRuntimeUI();
     if (localStorage.getItem('aa-welcome-dismissed-v1') === '1') $('#welcomePanel').hidden = true;
     loadSetupStatus(); loadState(); loadProfiles().catch(function () {}); loadModelWorkbench(); recentStories.refresh();
     const savedReview = readActiveReview();

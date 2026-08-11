@@ -236,11 +236,13 @@ button:disabled {
 .usage-bound-background-preview,.usage-bound-background-placeholder { display: grid; width: 100%; aspect-ratio: 16 / 9; place-items: center; object-fit: cover; border: 1px solid var(--line); border-radius: 5px; background: var(--card); }
 .usage-bound-background-placeholder { color: var(--dim); font-size: 11px; }
 .usage-bound-background-body { min-width: 0; }
-.usage-bound-background-body b,.usage-bound-background-body small { display: block; overflow-wrap: anywhere; }
+.usage-bound-background-body b,.usage-bound-background-body small { display: block; }
+.usage-bound-background-body b,.usage-candidate-body b { overflow-wrap: break-word; word-break: normal; }
+.usage-bound-background-body small,.usage-candidate-body small { overflow-wrap: anywhere; }
 .usage-bound-background-body small { margin-top: 4px; font-size: 11px; }
 .usage-candidate-placeholder { display: grid; width: 112px; aspect-ratio: 16 / 9; place-items: center; border: 1px dashed var(--line-strong); border-radius: 6px; background: var(--surface-soft); color: var(--dim); font-size: 11px; }
 .usage-candidate-body { min-width: 0; }
-.usage-candidate-body b,.usage-candidate-body small { display: block; overflow-wrap: anywhere; }
+.usage-candidate-body b,.usage-candidate-body small { display: block; }
 .usage-candidate-body p { margin: 3px 0 7px; font-size: 11px; line-height: 1.5; }
 .usage-candidate-body button { min-height: 32px; padding: 4px 9px; font-size: 12px; }
 .usage-custom-background { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 4px; }
@@ -279,7 +281,7 @@ button:disabled {
 .model-limit-meta .text-command[hidden] { display: none; }
 .preflight-summary-warning { color: var(--warn); }
 @media (max-width: 520px) { .asset-import-local { margin-left: 0; } .asset-card-list, .asset-task-list { grid-template-columns: 1fr; } }
-@media (max-width: 520px) { .usage-candidate { grid-template-columns: 88px minmax(0, 1fr); } .usage-candidate-preview,.usage-candidate-placeholder { width: 88px; } }
+@media (max-width: 520px) { .usage-bound-background,.usage-candidate { grid-template-columns: minmax(0, 1fr); } .usage-candidate-preview,.usage-candidate-placeholder { width: 100%; } }
 @media (max-width: 520px) { .usage-custom-background-body { padding-left: 0; } .generation-prompt-actions button { flex: 1 1 140px; } .generation-import-result { grid-template-columns: 1fr; } }
 
 /* 卡片与播放器相关 */

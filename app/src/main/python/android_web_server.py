@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+import hashlib
 import json
 import os
 import shutil
@@ -14,6 +15,8 @@ from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 import assetdb
 import aapaths
+import android_resource_mapping
+import bundled_preview_seed
 import model_profiles
 import webui
 from official_preview_index import OfficialPreviewIndex
@@ -26,6 +29,8 @@ _SESSION_TOKEN = ""
 _RUNTIME_SNAPSHOT: dict[str, object] | None = None
 
 _EMPTY_RESOURCE_INDEX = {"bg": {}, "characters": {}, "sounds": []}
+_BUNDLED_RESOURCE_INDEX = Path(__file__).with_name("aa_resources.json")
+_BUNDLED_PREVIEW_SEED = Path(__file__).with_name("android_preview_seed")
 _ANDROID_ASSET_SUFFIXES = {
     ".png", ".jpg", ".jpeg", ".wav", ".ogg", ".mp3", ".skel", ".atlas",
 }
@@ -39,6 +44,106 @@ _LEGACY_CACHE_SUFFIXES = frozenset({".json", ".png", ".jpg", ".jpeg", ".webp"})
 _LEGACY_FILE_LIMIT = 20 * 1024 * 1024
 _LEGACY_TOTAL_LIMIT = 100 * 1024 * 1024
 _LEGACY_COUNT_LIMIT = 5000
+
+
+def _is_empty_resource_index(path: Path) -> bool:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return payload == _EMPTY_RESOURCE_INDEX
+
+
+def _seed_resource_index(index_path: Path) -> None:
+    if index_path.is_file() and not _is_empty_resource_index(index_path):
+        return
+    if not _BUNDLED_RESOURCE_INDEX.is_file():
+        index_path.write_text(
+            json.dumps(_EMPTY_RESOURCE_INDEX, ensure_ascii=False), encoding="utf-8"
+        )
+        return
+    raw_index = _BUNDLED_RESOURCE_INDEX.read_bytes()
+    payload = json.loads(raw_index.decode("utf-8"))
+    try:
+        mapping = android_resource_mapping.load_mapping()
+        expected = str(mapping.get("pc_index_sha256") or "")
+        if expected and expected == hashlib.sha256(raw_index).hexdigest():
+            payload = android_resource_mapping.merge_mapping(payload, mapping)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        pass
+    temporary = index_path.with_name(f".{index_path.name}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        os.replace(temporary, index_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _resource_mapping_status(index_path: str | Path) -> dict[str, object]:
+    try:
+        payload = json.loads(Path(index_path).read_text(encoding="utf-8"))
+        backgrounds = payload.get("bg") or {}
+        characters = payload.get("characters") or []
+        sounds = payload.get("sounds") or []
+        faces = payload.get("faces_used") or {}
+        android_mapping = payload.get("_android_mapping") or {}
+        mapping_summary = android_mapping.get("summary") or {}
+        if not isinstance(backgrounds, dict) or not isinstance(characters, (list, dict)):
+            raise ValueError("invalid resource mapping")
+        if not isinstance(sounds, list) or not isinstance(faces, dict):
+            raise ValueError("invalid resource mapping")
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {
+            "status": "missing",
+            "backgrounds": 0,
+            "characters": 0,
+            "sounds": 0,
+            "face_sets": 0,
+            "identifier_aliases": 0,
+            "new_characters": 0,
+            "source": "pc_index",
+        }
+    return {
+        "status": "ready" if characters else "missing",
+        "backgrounds": len(backgrounds),
+        "characters": len(characters),
+        "sounds": len(sounds),
+        "face_sets": len(faces),
+        "identifier_aliases": int(mapping_summary.get("identifier_aliases") or 0),
+        "new_characters": int(mapping_summary.get("new_characters") or 0),
+        "package_characters": int(mapping_summary.get("mapped_characters") or 0),
+        "source": "pc_index",
+    }
+
+
+def _android_setup_status() -> dict:
+    status = webui.setup_status()
+    aa = dict(status.get("aa") or {})
+    aa["resource_mapping"] = _resource_mapping_status(webui.INDEX)
+    status["aa"] = aa
+    return status
+
+
+def _seed_asset_database(database_path: str | Path, index_path: str | Path) -> None:
+    index_file = Path(index_path)
+    try:
+        raw = index_file.read_bytes()
+        payload = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return
+    fingerprint = hashlib.sha256(raw).hexdigest()
+    with assetdb.connect(str(database_path)) as connection:
+        current = connection.execute(
+            "SELECT value FROM meta WHERE key='android_resource_index_sha256'"
+        ).fetchone()
+        if current and str(current[0]) == fingerprint:
+            return
+        assetdb.import_index(connection, payload)
+        assetdb.set_meta(connection, android_resource_index_sha256=fingerprint)
+        connection.commit()
 
 
 def _safe_destination(target: Path, destination: Path) -> bool:
@@ -151,10 +256,10 @@ def configure_android_runtime(workspace_dir: str) -> None:
     webui.LLMCFG = str(databases / "llm.json")
     webui.THUMBS = str(cache / "thumbs")
     index_path = Path(webui.INDEX)
-    if not index_path.is_file():
-        index_path.write_text(
-            json.dumps(_EMPTY_RESOURCE_INDEX, ensure_ascii=False), encoding="utf-8"
-        )
+    _seed_resource_index(index_path)
+    bundled_preview_seed.seed_bundled_previews(
+        _BUNDLED_PREVIEW_SEED, cache / "official-previews"
+    )
     webui.MODEL_PROFILES = model_profiles.ModelProfileStore(
         str(databases / "llm_profiles.json")
     )
@@ -176,8 +281,7 @@ def configure_android_runtime(workspace_dir: str) -> None:
     with webui.RESOURCE_INDEX_LOCK:
         webui.RESOURCE_INDEX_JOB.clear()
         webui.RESOURCE_INDEX_JOB.update(webui._empty_resource_index_job())
-    with assetdb.connect(webui.DB) as connection:
-        pass
+    _seed_asset_database(webui.DB, webui.INDEX)
 
 
 class AndroidHandler(webui.H):
@@ -232,6 +336,8 @@ class AndroidHandler(webui.H):
             return None
         if path == "/api/android/health":
             return self._send(200, {"ok": True, "runtime": "android-webui"})
+        if path == "/api/setup/status":
+            return self._send(200, _android_setup_status())
         if path == "/api/install/options":
             return self._capability_unavailable("direct_aa_install")
         return super().do_GET()

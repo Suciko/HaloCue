@@ -25,6 +25,14 @@
       return new Intl.DateTimeFormat('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false}).format(date);
     } catch (_) { return value; }
   }
+
+  function storySourceName(story) {
+    if (!story) return '';
+    if (story.source_name) return story.source_name;
+    const display = String(story.source_display || '').replace(/\\/g, '/');
+    const filename = display.split('/').filter(Boolean).pop();
+    return filename || story.project || '';
+  }
   function formatSourceSize(value) {
     const size = Number(value);
     if (!Number.isFinite(size)) return '';
@@ -52,7 +60,7 @@
   StoryContextBar.prototype.render = function (story) {
     this.root.classList.toggle('is-empty', !story);
     if (this.status) this.status.hidden = !story;
-    text(this.name, story ? story.source_display || story.source_name || story.project : '尚未打开剧情');
+    text(this.name, story ? storySourceName(story) : '尚未打开剧情');
     if (story) {
       const details = [
         'AA 工程：' + story.project,
@@ -87,7 +95,7 @@
         formatSourceTime(story.source_modified) ? '修改：' + formatSourceTime(story.source_modified) : '',
       ].filter(Boolean).join(' · ');
       const detailChildren = [
-        element('b', '', story.source_display || story.source_name || story.project),
+        element('b', '', storySourceName(story)),
         element('span', 'dim', 'AA 工程：' + story.project),
       ];
       if (metadata) detailChildren.push(element('span', 'dim', metadata));

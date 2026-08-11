@@ -2,9 +2,11 @@ import json
 import socket
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 
 import pytest
 
+import assetdb
 import android_web_server
 
 
@@ -154,12 +156,32 @@ def test_android_runtime_uses_workspace_token_pickers_and_capability_errors(tmp_
     )
     assert [root["name"] for root in picker["roots"]] == ["workspace"]
     assert picker["roots"][0]["entry_token"].startswith("entry-")
-    assert (tmp_path / "workspace" / "databases" / "aa_resources.json").is_file()
-    assert json.loads((tmp_path / "workspace" / "databases" / "aa_resources.json").read_text(encoding="utf-8")) == {
-        "bg": {},
-        "characters": {},
-        "sounds": [],
+    index = json.loads(
+        (tmp_path / "workspace" / "databases" / "aa_resources.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert len(index["bg"]) >= 500
+    assert len(index["characters"]) >= 900
+    assert len(index["sounds"]) >= 300
+    assert {row["identifier"] for row in index["characters"]} >= {
+        "梦",
+        "阿露(礼服)",
+        "临战莉音",
     }
+    assert index["identifier_aliases"]["阿露(礼服)"] == "阿露（礼服）"
+    assert index["_android_mapping"]["summary"]["identifier_aliases"] == 52
+    setup = json.load(
+        urllib.request.urlopen(_session_request(origin + "/api/setup/status"))
+    )
+    assert setup["aa"]["resource_mapping"]["status"] == "ready"
+    assert setup["aa"]["resource_mapping"]["characters"] == len(index["characters"])
+    characters = json.load(
+        urllib.request.urlopen(
+            _session_request(origin + "/api/characters?q=" + quote("阿露"))
+        )
+    )
+    assert any(row["ident"] == "阿露(礼服)" for row in characters)
 
     with pytest.raises(urllib.error.HTTPError) as install_error:
         urllib.request.urlopen(
@@ -179,3 +201,132 @@ def test_android_runtime_uses_workspace_token_pickers_and_capability_errors(tmp_
         )
     assert spine_error.value.code == 501
     assert json.load(spine_error.value)["code"] == "spine_rendering_unavailable"
+
+
+def test_android_runtime_seeds_and_serves_bundled_official_character_avatars(tmp_path):
+    server = android_web_server.start(str(tmp_path), "test-session")
+    origin = _origin(server)
+
+    characters = json.load(
+        urllib.request.urlopen(
+            _session_request(origin + "/api/characters?q=" + quote("日步美"))
+        )
+    )
+    character = next(row for row in characters if row["name"] == "日步美")
+
+    assert character["avatar"].startswith("/thumb/av/")
+    avatar = urllib.request.urlopen(_session_request(origin + character["avatar"]))
+    assert avatar.headers["Content-Type"] in {"image/png", "image/jpeg"}
+    assert len(avatar.read()) > 100
+
+
+def test_android_runtime_serves_extra_package_character_avatars(tmp_path):
+    server = android_web_server.start(str(tmp_path), "test-session")
+    origin = _origin(server)
+
+    characters = json.load(
+        urllib.request.urlopen(
+            _session_request(origin + "/api/characters?q=" + quote("\u548f\u53f6"))
+        )
+    )
+    character = next(row for row in characters if row["name"] == "\u548f\u53f6")
+
+    assert character["avatar"].startswith("/thumb/av/")
+    avatar = urllib.request.urlopen(_session_request(origin + character["avatar"]))
+    assert avatar.headers["Content-Type"] in {"image/png", "image/jpeg"}
+    assert len(avatar.read()) > 100
+
+
+def test_android_runtime_serves_extra_package_avatar_for_existing_pc_character(tmp_path):
+    server = android_web_server.start(str(tmp_path), "test-session")
+    origin = _origin(server)
+
+    characters = json.load(
+        urllib.request.urlopen(_session_request(origin + "/api/characters"))
+    )
+    character = next(
+        row for row in characters if row["spine"].replace("\\", "/").endswith("/NP0176_spr")
+    )
+
+    assert character["faces"] == 11
+    assert character["avatar"] == "/thumb/av/NP0176_spr"
+    avatar = urllib.request.urlopen(_session_request(origin + character["avatar"]))
+    assert avatar.headers["Content-Type"] == "image/png"
+    assert len(avatar.read()) > 100
+
+
+def test_character_picker_filters_placeholders_and_inherits_variant_club(tmp_path):
+    server = android_web_server.start(str(tmp_path), "test-session")
+    origin = _origin(server)
+
+    characters = json.load(
+        urllib.request.urlopen(
+            _session_request(origin + "/api/characters?q=" + quote("爱丽丝"))
+        )
+    )
+    aris_variants = [
+        row for row in characters
+        if row["spine"].replace("\\", "/").endswith("/CharacterSpine_aris_noweapon")
+    ]
+
+    assert aris_variants
+    assert all(row["club"] for row in aris_variants)
+    assert not any("??" in str(row["ident"]) or "??" in str(row["name"]) for row in characters)
+
+
+def test_placeholder_filter_recognizes_ascii_and_fullwidth_question_marks():
+    assert assetdb._looks_placeholder("???") is True
+    assert assetdb._looks_placeholder("???N") is True
+    assert assetdb._looks_placeholder("？？？") is True
+    assert assetdb._looks_placeholder("？？？N") is True
+    assert assetdb._looks_placeholder("爱丽丝") is False
+
+
+def test_android_runtime_serves_bundled_official_background_previews(tmp_path):
+    server = android_web_server.start(str(tmp_path), "test-session")
+    origin = _origin(server)
+
+    backgrounds = json.load(
+        urllib.request.urlopen(
+            _session_request(origin + "/api/backgrounds?q=BG_GameDevRoom")
+        )
+    )
+    background = next(row for row in backgrounds if row["name"] == "BG_GameDevRoom")
+
+    assert background["img"] is True
+    preview = urllib.request.urlopen(
+        _session_request(origin + "/thumb/bg/BG_GameDevRoom?px=240")
+    )
+    assert preview.headers["Content-Type"] == "image/jpeg"
+    assert len(preview.read()) > 100
+
+
+def test_android_runtime_upgrades_legacy_empty_resource_index(tmp_path):
+    databases = tmp_path / "workspace" / "databases"
+    databases.mkdir(parents=True)
+    index_path = databases / "aa_resources.json"
+    index_path.write_text(
+        json.dumps({"bg": {}, "characters": {}, "sounds": []}),
+        encoding="utf-8",
+    )
+
+    android_web_server.configure_android_runtime(str(tmp_path))
+
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    assert len(index["characters"]) >= 900
+
+
+def test_android_runtime_preserves_nonempty_resource_index(tmp_path):
+    databases = tmp_path / "workspace" / "databases"
+    databases.mkdir(parents=True)
+    index_path = databases / "aa_resources.json"
+    custom = {
+        "bg": {"custom room": 123},
+        "characters": [{"identifier": "custom-character", "faces": []}],
+        "sounds": ["custom-sound"],
+    }
+    index_path.write_text(json.dumps(custom), encoding="utf-8")
+
+    android_web_server.configure_android_runtime(str(tmp_path))
+
+    assert json.loads(index_path.read_text(encoding="utf-8")) == custom

@@ -160,7 +160,8 @@ def remember_alias(con, script_name, ident, kind):
 def _looks_placeholder(value):
     """True for junk/placeholder character names like '???', '???N', '??'."""
     s = str(value or "").strip()
-    return not s or (s.count("?") >= 2 and len(s) <= 8)
+    question_count = s.count("?") + s.count("？")
+    return not s or (question_count >= 2 and len(s) <= 8)
 
 
 def best_alias(con, script_name):

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+import shutil
+from pathlib import Path
 from typing import Protocol
 
 
@@ -10,6 +13,27 @@ class PlatformServicesBackend(Protocol):
 
 
 _backend_override: PlatformServicesBackend | None = None
+
+
+class PreviewExportBackend:
+    """Publish compiled AAP files into an isolated desktop preview workspace."""
+
+    def __init__(self, workspace: Path) -> None:
+        self.export_root = Path(workspace) / "exports" / "HaloCue"
+
+    def publishAap(self, source: str, project: str) -> dict[str, object]:
+        safe_project = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(project)).strip(" .")
+        display_name = f"{safe_project or 'HaloCue-Preview'}.aap"
+        self.export_root.mkdir(parents=True, exist_ok=True)
+        target = self.export_root / display_name
+        shutil.copy2(source, target)
+        stat = target.stat()
+        return {
+            "shareId": f"preview-{stat.st_mtime_ns}-{stat.st_size}",
+            "displayName": display_name,
+            "relativePath": "Preview exports/HaloCue/",
+            "size": stat.st_size,
+        }
 
 
 def _backend() -> PlatformServicesBackend:

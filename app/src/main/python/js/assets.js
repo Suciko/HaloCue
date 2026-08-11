@@ -23,6 +23,9 @@
   function clear(node) { node.textContent = ''; }
   function releaseAudio(node) { const audios = node && node.querySelectorAll ? node.querySelectorAll('audio') : (document.querySelectorAll ? document.querySelectorAll('audio') : []); audios.forEach(function (audio) { if (audio.pause) audio.pause(); if (audio.removeAttribute) audio.removeAttribute('src'); if (audio.load) audio.load(); }); }
   function currentStory() { return exports.StoryStore && exports.StoryStore.get ? exports.StoryStore.get() : null; }
+  function hasNativeAssetPicker() {
+    return Boolean(exports.HaloCueNative && typeof exports.HaloCueNative.pickAsset === 'function');
+  }
   function storage() {
     try { return exports.sessionStorage || (typeof sessionStorage !== 'undefined' ? sessionStorage : null); }
     catch (_) { return null; }
@@ -143,6 +146,9 @@
   };
 
   StoryAssetStrip.prototype.openCharacterForm = function () {
+    if (hasNativeAssetPicker() && exports.AssetImportDialog && exports.AssetImportDialog.openForKind) {
+      return exports.AssetImportDialog.openForKind('character', document.activeElement);
+    }
     if (!document.getElementById) return this.importLocal('character', {});
     const dialog = document.getElementById('mAssetCharacter');
     if (!dialog) return this.importLocal('character', {});
@@ -158,6 +164,7 @@
     clear(this.root);
     const hasDetached = this.tasks.some(function (task) { return ACTIVE_STATES.has(task.state) || task.state === 'interrupted' || task.state === 'failed'; });
     this.root.classList.toggle('is-empty', !hasDetached);
+    this.root.classList.remove('is-empty-state');
     this.root.appendChild(make('p', 'dim', '打开剧情后显示当前剧情的自定义素材。'));
     this.renderTasksForDetachedStory();
   };
@@ -259,8 +266,11 @@
     const story = currentStory();
     releaseAudio(this.root);
     clear(this.root);
-    if (!story) { this.root.classList.add('is-empty'); this.root.appendChild(make('p', 'dim', '打开剧情后显示当前剧情的自定义素材。')); return; }
+    if (!story) { this.root.classList.add('is-empty'); this.root.classList.remove('is-empty-state'); this.root.appendChild(make('p', 'dim', '打开剧情后显示当前剧情的自定义素材。')); return; }
     this.root.classList.remove('is-empty');
+    const storyTasks = this.tasks.filter(function (task) { return task.storyToken === story.story_token; });
+    const hasAssets = assetRows(this.items).length > 0;
+    this.root.classList.toggle('is-empty-state', !loading && !error && !hasAssets && !storyTasks.length);
     const header = make('div', 'asset-strip-heading');
     header.appendChild(make('h2', '', '本剧情自定义素材'));
     const counts = this.items.counts || {};
@@ -348,13 +358,23 @@
     if (task.source || task.fileToken) this.runImport(task, {source: task.source, fileToken: task.fileToken, displayName: task.displayName, identifier: task.identifier, labels: task.labels});
     else this.importLocal(task.kind, {});
   };
-  StoryAssetStrip.prototype.scanInbox = async function () {
+  StoryAssetStrip.prototype.scanInbox = async function (triggerContext) {
     const story = currentStory();
     if (!story) return null;
+    triggerContext = triggerContext || {};
+    if (hasNativeAssetPicker() && !triggerContext.nativeSelection) {
+      if (exports.AssetImportDialog && exports.AssetImportDialog.open) {
+        exports.AssetImportDialog.open(document.activeElement);
+        return exports.AssetImportDialog.scanInbox();
+      }
+      return null;
+    }
     const task = this.beginTask({kind: 'background', name: '素材目录扫描', storyToken: story.story_token, source: 'inbox'});
     this.updateTask(task.id, {state: 'registering', message: '正在扫描素材文件夹…'});
     try {
-      const result = await exports.Api.request('/api/story/assets/scan-inbox', exports.Api.json('POST', {story_token: story.story_token}));
+      const scanPayload = {story_token: story.story_token};
+      if (triggerContext.fileToken) scanPayload.file_token = triggerContext.fileToken;
+      const result = await exports.Api.request('/api/story/assets/scan-inbox', exports.Api.json('POST', scanPayload));
       if (!currentStory() || currentStory().story_token !== task.storyToken) { this.updateTask(task.id, {state: 'interrupted'}); return null; }
       const res = result && result.results ? result.results : {};
       const registered = (res.registered || []).length;
@@ -380,6 +400,12 @@
     if (!['character', 'background', 'sound'].includes(kind)) return null;
     const story = currentStory(); if (!story) return null;
     triggerContext = triggerContext || {};
+    if (hasNativeAssetPicker() && !triggerContext.fileToken && !triggerContext.path && !triggerContext.source) {
+      if (exports.AssetImportDialog && exports.AssetImportDialog.openForKind) {
+        exports.AssetImportDialog.openForKind(kind, document.activeElement);
+      }
+      return null;
+    }
     const fileToken = triggerContext.fileToken || '';
     let path = triggerContext.path || triggerContext.source || '';
     if (!fileToken && !path && typeof exports.prompt === 'function') path = exports.prompt('输入要导入的素材完整路径', '');

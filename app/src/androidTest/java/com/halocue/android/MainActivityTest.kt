@@ -2,6 +2,7 @@ package com.halocue.android
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.view.View
 import android.view.WindowManager
@@ -48,6 +49,7 @@ class MainActivityTest {
             assertFalse(webView.settings.allowFileAccess)
             assertFalse(webView.settings.allowFileAccessFromFileURLs)
             assertFalse(webView.settings.allowUniversalAccessFromFileURLs)
+            assertNotNull(webView.webChromeClient)
             webView.destroy()
         }
     }
@@ -84,6 +86,19 @@ class MainActivityTest {
             activityInfo.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST ==
                 WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
         )
+    }
+
+    @Test
+    fun main_activity_keeps_the_webview_across_orientation_changes() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val activityInfo = context.packageManager.getActivityInfo(
+            ComponentName(context, MainActivity::class.java),
+            0,
+        )
+
+        assertTrue(activityInfo.configChanges and ActivityInfo.CONFIG_ORIENTATION != 0)
+        assertTrue(activityInfo.configChanges and ActivityInfo.CONFIG_SCREEN_SIZE != 0)
+        assertTrue(activityInfo.configChanges and ActivityInfo.CONFIG_SMALLEST_SCREEN_SIZE != 0)
     }
 
     @Test

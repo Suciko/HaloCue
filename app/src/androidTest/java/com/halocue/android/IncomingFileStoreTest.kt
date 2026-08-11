@@ -160,4 +160,134 @@ class IncomingFileStoreTest {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun stages_a_bounded_private_directory_tree() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val root = context.cacheDir.resolve("incoming-tree-test-${System.nanoTime()}")
+        try {
+            val store = IncomingFileStore(root)
+            val result = store.stageTree(
+                displayName = "../../Arona",
+                entries = listOf(
+                    IncomingTreeEntry("Arona.skel") {
+                        ByteArrayInputStream("skeleton".toByteArray())
+                    },
+                    IncomingTreeEntry("Arona.atlas") {
+                        ByteArrayInputStream("Arona.png\n".toByteArray())
+                    },
+                    IncomingTreeEntry("textures/Arona.png") {
+                        ByteArrayInputStream(byteArrayOf(1, 2, 3))
+                    },
+                ),
+                allowedSuffixes = setOf(".skel", ".atlas", ".png"),
+                maxFiles = 10,
+                maxFileBytes = 100,
+                maxTotalBytes = 200,
+            )
+
+            assertEquals("Arona", result.name)
+            assertEquals(3, result.fileCount)
+            assertEquals(21L, result.size)
+            assertEquals(
+                "skeleton",
+                root.resolve("incoming/${result.token}.tree/Arona.skel").readText(),
+            )
+            assertTrue(root.resolve("incoming/${result.token}.tree.json").isFile)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun directory_traversal_filters_non_asset_files_by_suffix() {
+        assertTrue(hasAllowedDocumentSuffix("Arona.SKEL", setOf(".skel", ".atlas")))
+        assertTrue(hasAllowedDocumentSuffix("textures/Arona.png", setOf(".png")))
+        assertFalse(hasAllowedDocumentSuffix(".nomedia", setOf(".png", ".skel")))
+        assertFalse(hasAllowedDocumentSuffix("README.txt", setOf(".png", ".skel")))
+    }
+
+    @Test
+    fun rejects_unsafe_duplicate_and_oversized_tree_entries_without_residue() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val root = context.cacheDir.resolve("incoming-tree-test-${System.nanoTime()}")
+        try {
+            val store = IncomingFileStore(root)
+            val unsafe = assertThrows(IncomingFileStoreException::class.java) {
+                store.stageTree(
+                    "unsafe",
+                    listOf(IncomingTreeEntry("../outside.png") {
+                        ByteArrayInputStream(byteArrayOf(1))
+                    }),
+                    setOf(".png"),
+                    maxFiles = 2,
+                    maxFileBytes = 2,
+                    maxTotalBytes = 2,
+                )
+            }
+            assertEquals("unsafe_tree_path", unsafe.code)
+
+            val duplicate = assertThrows(IncomingFileStoreException::class.java) {
+                store.stageTree(
+                    "duplicate",
+                    listOf(
+                        IncomingTreeEntry("A.png") { ByteArrayInputStream(byteArrayOf(1)) },
+                        IncomingTreeEntry("a.png") { ByteArrayInputStream(byteArrayOf(2)) },
+                    ),
+                    setOf(".png"),
+                    maxFiles = 2,
+                    maxFileBytes = 2,
+                    maxTotalBytes = 2,
+                )
+            }
+            assertEquals("duplicate_tree_path", duplicate.code)
+
+            val oversized = assertThrows(IncomingFileStoreException::class.java) {
+                store.stageTree(
+                    "large",
+                    listOf(IncomingTreeEntry("large.png") {
+                        ByteArrayInputStream(byteArrayOf(1, 2, 3))
+                    }),
+                    setOf(".png"),
+                    maxFiles = 2,
+                    maxFileBytes = 2,
+                    maxTotalBytes = 4,
+                )
+            }
+            assertEquals("file_too_large", oversized.code)
+
+            val tooMany = assertThrows(IncomingFileStoreException::class.java) {
+                store.stageTree(
+                    "many",
+                    listOf(
+                        IncomingTreeEntry("one.png") { ByteArrayInputStream(byteArrayOf(1)) },
+                        IncomingTreeEntry("two.png") { ByteArrayInputStream(byteArrayOf(2)) },
+                    ),
+                    setOf(".png"),
+                    maxFiles = 1,
+                    maxFileBytes = 2,
+                    maxTotalBytes = 4,
+                )
+            }
+            assertEquals("too_many_files", tooMany.code)
+
+            val totalTooLarge = assertThrows(IncomingFileStoreException::class.java) {
+                store.stageTree(
+                    "total",
+                    listOf(
+                        IncomingTreeEntry("one.png") { ByteArrayInputStream(byteArrayOf(1, 2)) },
+                        IncomingTreeEntry("two.png") { ByteArrayInputStream(byteArrayOf(3, 4)) },
+                    ),
+                    setOf(".png"),
+                    maxFiles = 2,
+                    maxFileBytes = 3,
+                    maxTotalBytes = 3,
+                )
+            }
+            assertEquals("tree_too_large", totalTooLarge.code)
+            assertTrue(root.resolve("incoming").listFiles().isNullOrEmpty())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }

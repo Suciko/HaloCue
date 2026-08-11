@@ -6,10 +6,12 @@ import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -22,6 +24,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import java.io.File
+import java.util.ArrayDeque
 import java.util.concurrent.Executors
 import org.json.JSONArray
 import org.json.JSONObject
@@ -65,6 +68,7 @@ internal fun createSecureWebView(context: Context): WebView = WebView(context).a
     settings.allowFileAccess = false
     settings.allowFileAccessFromFileURLs = false
     settings.allowUniversalAccessFromFileURLs = false
+    webChromeClient = WebChromeClient()
 }
 
 class MainActivity : ComponentActivity() {
@@ -351,6 +355,8 @@ class MainActivity : ComponentActivity() {
             publishDocumentPicked(
                 JSONObject()
                     .put("requestId", request.requestId)
+                    .put("purpose", request.purpose.wireValue)
+                    .put("assetKind", request.assetKind)
                     .put("ok", false)
                     .put("code", "cancelled"),
             )
@@ -358,24 +364,43 @@ class MainActivity : ComponentActivity() {
         }
         documentExecutor.execute {
             val payload = try {
-                val displayName = queryDisplayName(uri) ?: "story.txt"
-                val incoming = contentResolver.openInputStream(uri)?.use { input ->
-                    incomingFileStore.stage(
-                        displayName = displayName,
-                        input = input,
-                        allowedSuffixes = request.allowedSuffixes,
-                        maxBytes = MAX_STORY_BYTES,
-                    )
-                } ?: error("Unable to open selected document")
-                JSONObject()
-                    .put("requestId", request.requestId)
-                    .put("ok", true)
-                    .put("token", incoming.token)
-                    .put("name", incoming.name)
-                    .put("size", incoming.size)
+                if (request.usesDirectoryTree) {
+                    val incoming = stageDocumentTree(uri, request)
+                    JSONObject()
+                        .put("requestId", request.requestId)
+                        .put("purpose", request.purpose.wireValue)
+                        .put("assetKind", request.assetKind)
+                        .put("ok", true)
+                        .put("token", incoming.token)
+                        .put("name", incoming.name)
+                        .put("size", incoming.size)
+                        .put("fileCount", incoming.fileCount)
+                        .put("selectionType", "tree")
+                } else {
+                    val displayName = queryDisplayName(uri) ?: defaultDocumentName(request)
+                    val incoming = contentResolver.openInputStream(uri)?.use { input ->
+                        incomingFileStore.stage(
+                            displayName = displayName,
+                            input = input,
+                            allowedSuffixes = request.allowedSuffixes,
+                            maxBytes = maxDocumentBytes(request),
+                        )
+                    } ?: error("Unable to open selected document")
+                    JSONObject()
+                        .put("requestId", request.requestId)
+                        .put("purpose", request.purpose.wireValue)
+                        .put("assetKind", request.assetKind)
+                        .put("ok", true)
+                        .put("token", incoming.token)
+                        .put("name", incoming.name)
+                        .put("size", incoming.size)
+                        .put("selectionType", "file")
+                }
             } catch (error: Exception) {
                 JSONObject()
                     .put("requestId", request.requestId)
+                    .put("purpose", request.purpose.wireValue)
+                    .put("assetKind", request.assetKind)
                     .put("ok", false)
                     .put(
                         "code",
@@ -386,6 +411,138 @@ class MainActivity : ComponentActivity() {
             publishDocumentPicked(payload)
         }
     }
+
+    private fun stageDocumentTree(
+        treeUri: Uri,
+        request: DocumentPickRequest,
+    ): IncomingTree {
+        val rootDocumentId = DocumentsContract.getTreeDocumentId(treeUri)
+        val rootDocumentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootDocumentId)
+        val displayName = queryDisplayName(rootDocumentUri) ?: "assets"
+        val entries = collectDocumentTreeEntries(
+            treeUri,
+            rootDocumentId,
+            request.allowedSuffixes,
+        )
+        return incomingFileStore.stageTree(
+            displayName = displayName,
+            entries = entries,
+            allowedSuffixes = request.allowedSuffixes,
+            maxFiles = MAX_TREE_FILES,
+            maxFileBytes = MAX_TREE_FILE_BYTES,
+            maxTotalBytes = MAX_TREE_BYTES,
+        )
+    }
+
+    private fun collectDocumentTreeEntries(
+        treeUri: Uri,
+        rootDocumentId: String,
+        allowedSuffixes: Set<String>,
+    ): List<IncomingTreeEntry> {
+        data class PendingDirectory(
+            val documentId: String,
+            val relativePath: String,
+            val depth: Int,
+        )
+
+        val pending = ArrayDeque<PendingDirectory>()
+        val visitedDirectories = mutableSetOf<String>()
+        val entries = mutableListOf<IncomingTreeEntry>()
+        pending.add(PendingDirectory(rootDocumentId, "", 0))
+        while (pending.isNotEmpty()) {
+            val directory = pending.removeFirst()
+            if (!visitedDirectories.add(directory.documentId)) {
+                throw IncomingFileStoreException(
+                    "unsafe_tree_path",
+                    "Directory provider returned a repeated directory",
+                )
+            }
+            if (visitedDirectories.size > MAX_TREE_DIRECTORIES) {
+                throw IncomingFileStoreException(
+                    "too_many_files",
+                    "Directory contains too many folders",
+                )
+            }
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+                treeUri,
+                directory.documentId,
+            )
+            contentResolver.query(
+                childrenUri,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE,
+                ),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                )
+                val nameColumn = cursor.getColumnIndexOrThrow(
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                )
+                val mimeColumn = cursor.getColumnIndexOrThrow(
+                    DocumentsContract.Document.COLUMN_MIME_TYPE,
+                )
+                while (cursor.moveToNext()) {
+                    val documentId = cursor.getString(idColumn)
+                    val name = cursor.getString(nameColumn).orEmpty()
+                    val relativePath = if (directory.relativePath.isEmpty()) {
+                        name
+                    } else {
+                        "${directory.relativePath}/$name"
+                    }
+                    if (cursor.getString(mimeColumn) == DocumentsContract.Document.MIME_TYPE_DIR) {
+                        if (directory.depth >= MAX_TREE_DEPTH) {
+                            throw IncomingFileStoreException(
+                                "unsafe_tree_path",
+                                "Directory nesting is too deep",
+                            )
+                        }
+                        pending.add(
+                            PendingDirectory(
+                                documentId = documentId,
+                                relativePath = relativePath,
+                                depth = directory.depth + 1,
+                            ),
+                        )
+                    } else {
+                        if (!hasAllowedDocumentSuffix(relativePath, allowedSuffixes)) continue
+                        if (entries.size >= MAX_TREE_FILES) {
+                            throw IncomingFileStoreException(
+                                "too_many_files",
+                                "Directory contains too many files",
+                            )
+                        }
+                        val documentUri = DocumentsContract.buildDocumentUriUsingTree(
+                            treeUri,
+                            documentId,
+                        )
+                        entries.add(
+                            IncomingTreeEntry(relativePath) {
+                                contentResolver.openInputStream(documentUri)
+                                    ?: error("Unable to open a selected directory file")
+                            },
+                        )
+                    }
+                }
+            } ?: throw IllegalStateException("Unable to read selected directory")
+        }
+        return entries
+    }
+
+    private fun defaultDocumentName(request: DocumentPickRequest): String = when {
+        request.purpose == DocumentPickPurpose.STORY -> "story.txt"
+        request.assetKind == "background" -> "background.png"
+        request.assetKind == "sound" -> "sound.ogg"
+        else -> "document.bin"
+    }
+
+    private fun maxDocumentBytes(request: DocumentPickRequest): Long =
+        if (request.purpose == DocumentPickPurpose.STORY) MAX_STORY_BYTES else MAX_ASSET_FILE_BYTES
 
     private fun queryDisplayName(uri: Uri): String? {
         return contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
@@ -457,6 +614,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private inner class AndroidBridge {
+        @JavascriptInterface
+        fun isAzureArchiveInstalled(): Boolean =
+            packageManager.getLaunchIntentForPackage(AA_PACKAGE) != null
+
         @JavascriptInterface
         fun openAzureArchive() {
             runOnUiThread { this@MainActivity.openAzureArchive() }
@@ -549,6 +710,12 @@ class MainActivity : ComponentActivity() {
         private const val FALLBACK_ASSET_URL = "file:///android_asset/index.html"
         private const val NATIVE_BRIDGE_NAME = "HaloCueNative"
         private const val MAX_STORY_BYTES = 10L * 1024 * 1024
+        private const val MAX_ASSET_FILE_BYTES = 128L * 1024 * 1024
+        private const val MAX_TREE_FILES = 1024
+        private const val MAX_TREE_DIRECTORIES = 4096
+        private const val MAX_TREE_DEPTH = 16
+        private const val MAX_TREE_FILE_BYTES = 64L * 1024 * 1024
+        private const val MAX_TREE_BYTES = 512L * 1024 * 1024
         private const val STATE_DOCUMENT_REQUEST_ID = "document_request_id"
         private const val STATE_DOCUMENT_PURPOSE = "document_purpose"
         private const val STATE_DOCUMENT_ASSET_KIND = "document_asset_kind"

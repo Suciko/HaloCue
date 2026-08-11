@@ -102,6 +102,28 @@ button:active{transform:translateY(1px)}
 button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid #2f6fed32;outline-offset:2px}
 button.ghost{background:var(--card);border-color:var(--line-strong);box-shadow:none}
 button.ghost:hover{background:var(--surface-soft);border-color:#aebbd0;color:var(--fg);box-shadow:none}
+.topbar-actions button,
+.story-context-actions button,
+.asset-strip-controls button,
+.review-build-toolbar button,
+.review-navigation-toolbar button,
+.review-card-toolbar button,
+.settings-primary-actions button,
+.settings-verification button,
+.asset-workbench-header button,
+.asset-kind-segments button,
+.asset-detail-actions button,
+.asset-import-actions button,
+.asset-import-dialog-heading button,
+.asset-import-mode button,
+.asset-import-kind button,
+.asset-import-picker-footer button,
+.story-picker-footer button{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+}
 input[type=text],input[type=password],input[type=number],input[type=url],select{
   min-height:44px;background:var(--card);border-color:var(--line-strong);border-radius:10px;padding:9px 12px}
 input::placeholder{color:#98a3b3}
@@ -162,6 +184,9 @@ html.drawer-open::-webkit-scrollbar,html.drawer-open body::-webkit-scrollbar,bod
 .model-secret-input button{min-height:44px}
 .settings-check{display:flex;align-items:center;gap:8px;align-self:end;min-height:44px;font-size:13px;font-weight:650}
 .settings-primary-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:16px}
+.settings-save-notice{margin:9px 0 0;padding:9px 11px;border-left:3px solid var(--line);background:var(--card);color:var(--dim);font-size:12px}
+.settings-save-notice[data-state="saved"]{border-left-color:var(--ok);color:var(--ok)}
+.settings-save-notice[data-state="error"]{border-left-color:var(--err);color:var(--err)}
 .settings-verification{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:18px;padding:14px 0;border-top:1px solid var(--line)}
 .settings-verification b,.settings-verification span{display:block}.settings-verification span{margin-top:2px;color:var(--dim);font-size:11px}
 .settings-message{min-height:22px;margin:2px 0 0;color:var(--dim);font-size:12px}
@@ -196,6 +221,20 @@ html.drawer-open::-webkit-scrollbar,html.drawer-open body::-webkit-scrollbar,bod
 .aa-workspace-conflict{margin-top:14px;padding-top:14px}.aa-workspace-conflict[hidden]{display:none}
 .aa-workspace-candidates{display:grid;margin:8px 0 12px}.aa-workspace-candidate{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 8px;align-items:start;padding:9px 0;overflow-wrap:anywhere}
 .aa-workspace-candidate input{grid-row:1/3;margin-top:3px}.aa-workspace-candidate b,.aa-workspace-candidate span{grid-column:2;min-width:0}
+.android-resource-mapping{display:grid;gap:14px;margin-top:12px}
+.android-mapping-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.android-mapping-heading b,.android-mapping-heading span{display:block}.android-mapping-heading span{margin-top:2px;color:var(--dim);font-size:12px}
+.android-mapping-heading strong{padding:4px 9px;border-radius:99px;background:#e8f7f0;color:var(--ok);font-size:11px}
+.android-mapping-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.android-mapping-grid>div{padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+.android-mapping-grid span,.android-mapping-grid b{display:block}.android-mapping-grid span{color:var(--dim);font-size:11px}.android-mapping-grid b{margin-top:3px;font-size:18px}
+.android-resource-mapping p{margin:0;color:var(--dim);font-size:12px}
+body.android-native #storageSettings .aa-install-controls,
+body.android-native #storageSettings>#aaInstallStatus,
+body.android-native #storageSettings .aa-status-list,
+body.android-native #storageSettings .aa-index-tools,
+body.android-native #storageSettings .aa-workspace-conflict{display:none!important}
+body.android-native #spineSettings{display:none!important}
 .help-backdrop{position:fixed;inset:0;background:#0b122066;opacity:0;pointer-events:none;
   transition:opacity .2s ease;z-index:10}
 .help-backdrop.open{opacity:1;pointer-events:auto}
@@ -1039,4 +1078,164 @@ html.drawer-open::-webkit-scrollbar,html.drawer-open body::-webkit-scrollbar,bod
     min-width: 44px;
     min-height: 44px;
   }
+}
+
+/* Android runtime chrome stays compact without changing the shared PC workbench. */
+body.android-native .topbar {
+  transition:transform .18s ease,padding .18s ease,min-height .18s ease;
+  will-change:transform;
+}
+body.android-native .topbar.is-scroll-compact {
+  min-height:58px;
+  padding-top:10px;
+  padding-bottom:10px;
+}
+body.android-native .topbar.is-scroll-compact p { display:none; }
+body.android-native .topbar.is-scroll-hidden { transform:translateY(-100%); }
+body.android-native .content-grid { padding-top:14px; }
+body.android-native .welcome-panel.is-compact { padding:13px 16px; }
+body.android-native .welcome-panel.is-compact .welcome-heading { align-items:center; }
+body.android-native .welcome-panel.is-compact .welcome-heading h3 { margin:2px 0 0;font-size:17px; }
+body.android-native .welcome-panel.is-compact .welcome-heading p,
+body.android-native .welcome-panel.is-compact .readiness-grid { display:none; }
+
+@media (max-width: 600px) {
+  body.android-native .topbar {
+    min-height:0;
+    padding:8px 12px 8px;
+    gap:8px;
+    flex-direction:row;
+    align-items:center;
+    flex-wrap:nowrap;
+    border-bottom-color:#e3e9f2;
+    box-shadow:0 1px 0 #14203308;
+  }
+  body.android-native .android-home-header > div:first-child { flex:0 1 auto;min-width:0; }
+  body.android-native .topbar h1 { font-size:17px;line-height:1.15;white-space:nowrap; }
+  body.android-native .topbar p,
+  body.android-native .library-status { display:none; }
+  body.android-native .topbar-tools { width:auto;min-width:0;margin-left:auto; }
+  body.android-native .topbar-actions {
+    width:auto;
+    display:flex;
+    gap:0;
+    overflow:visible;
+    padding:0;
+    background:transparent;
+  }
+  body.android-native .topbar-actions button {
+    width:auto;
+    min-width:0;
+    min-height:44px;
+    padding:6px 9px;
+    border:0;
+    border-radius:5px;
+    background:transparent;
+    white-space:nowrap;
+    font-size:12px;
+  }
+  body.android-native .topbar-action-label { display:none; }
+  body.android-native .topbar-action-icon { display:grid;place-items:center;width:20px;height:20px;font-size:18px;font-weight:800;line-height:1; }
+  body.android-native .topbar-actions button + button { border-left:1px solid var(--line);border-radius:0; }
+  body.android-native .topbar-actions button:hover,
+  body.android-native .topbar-actions button:focus-visible { background:var(--card); }
+  body.android-native .topbar.is-scroll-compact { min-height:0;padding:6px 12px 6px; }
+  body.android-native .topbar.is-scroll-compact>div:first-child { display:none; }
+  body.android-native .topbar.is-scroll-compact .topbar-tools { margin-left:0;width:100%; }
+  body.android-native .topbar.is-scroll-compact .topbar-actions { justify-content:flex-end;width:100%; }
+  body.android-native .content-grid { padding-top:10px; }
+  body.android-native .android-story-summary {
+    padding:12px;
+    gap:8px;
+    border-radius:8px;
+    box-shadow:0 1px 2px #1420330a;
+  }
+  body.android-native .android-story-summary > div:first-child { min-width:0; }
+  body.android-native .android-story-summary b {
+    display:block;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    font-size:15px;
+    line-height:1.25;
+  }
+  body.android-native .android-story-summary #storyContextMeta {
+    display:block;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    margin-top:4px;
+    font-size:11px;
+    line-height:1.35;
+  }
+  body.android-native .android-story-summary .story-context-status {
+    flex-wrap:nowrap;
+    overflow-x:auto;
+    margin-top:7px;
+    padding-bottom:1px;
+    scrollbar-width:none;
+  }
+  body.android-native .android-story-summary .story-context-status::-webkit-scrollbar { display:none; }
+  body.android-native .android-story-summary .story-context-status span { min-height:22px;padding:2px 7px; }
+  body.android-native .android-story-summary .story-context-actions { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px; }
+  body.android-native .android-story-summary .story-context-actions > button { min-height:44px;min-width:0;padding:5px 6px; }
+  body.android-native .story-asset-strip { padding:12px; border-radius:8px;box-shadow:0 1px 2px #1420330a; }
+  body.android-native .story-asset-strip.is-empty-state { padding-bottom:10px; }
+  body.android-native .story-asset-strip.is-empty-state .asset-strip-heading { align-items:baseline; }
+  body.android-native .story-asset-strip.is-empty-state .asset-strip-heading h2 { font-size:15px;margin-bottom:0; }
+  body.android-native .story-asset-strip.is-empty-state .asset-strip-heading p { margin:0;font-size:11px;white-space:nowrap; }
+  body.android-native .story-asset-strip.is-empty-state .asset-strip-controls { display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;margin:8px 0 7px;padding-bottom:1px; }
+  body.android-native .story-asset-strip.is-empty-state .asset-strip-controls > button { min-width:0;min-height:40px;padding:6px 4px; }
+  body.android-native .story-asset-strip.is-empty-state .asset-strip-controls > .asset-import-history,
+  body.android-native .story-asset-strip.is-empty-state .asset-strip-controls > .asset-import-local { grid-column:span 2; }
+  body.android-native .story-asset-strip.is-empty-state .asset-strip-controls > .asset-import-inbox { grid-column:1 / -1; }
+  body.android-native .story-asset-strip.is-empty-state .asset-strip-content { margin-top:0; }
+  body.android-native .story-asset-strip.is-empty-state .asset-strip-empty { margin:0;padding:9px 10px;border-style:dashed;font-size:12px;line-height:1.35; }
+  body.android-native .workflow-progress { margin-bottom:10px;padding:5px;border-radius:8px;box-shadow:0 1px 2px #1420330a; }
+  body.android-native .workflow-progress ol { gap:0; }
+  body.android-native .workflow-stage { justify-items:center;align-items:center;gap:3px;padding:6px 3px;border-left:0;border-top:2px solid var(--line);text-align:center; }
+  body.android-native .workflow-stage.complete { border-top-color:#74b79e; }
+  body.android-native .workflow-stage.current { border-top-color:var(--accent); }
+  body.android-native .workflow-stage b { font-size:10px;line-height:1.25;white-space:nowrap; }
+  body.android-native .workflow-stage small { display:none; }
+  body.android-native .workflow-index { width:22px;height:22px;font-size:10px; }
+  body.android-native .recent-stories { margin-bottom:10px;padding:12px 14px; }
+  body.android-native .recent-stories h2 { margin-bottom:6px;font-size:13px; }
+  body.android-native .recent-story {
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    align-items:center;
+    gap:8px;
+    padding:9px 10px;
+  }
+  body.android-native .recent-story-detail b {
+    display:-webkit-box;
+    overflow:hidden;
+    font-size:12px;
+    -webkit-box-orient:vertical;
+    -webkit-line-clamp:2;
+  }
+  body.android-native .recent-story-detail span { display:none; }
+  body.android-native .recent-story-button { width:auto;font-size:11px;white-space:nowrap; }
+  body.android-native .welcome-panel { margin-bottom:10px;padding:13px 14px; }
+  body.android-native .welcome-panel.is-compact .welcome-heading { flex-direction:row; }
+  body.android-native .welcome-panel.is-compact .welcome-heading button { min-height:40px; }
+  body.android-native .android-mapping-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.android-native .topbar { transition:none; }
+}
+
+/* Native WebView padding already accounts for Android system bars. */
+@media (max-width: 600px) {
+  body.android-native .content-grid { padding-bottom:72px; }
+  body.android-native .settings-drawer { padding-top:18px;padding-bottom:24px; }
+  body.android-native .history-drawer-panel { padding-bottom:22px; }
+  body.android-native .asset-library-shell { padding-bottom:28px; }
+  body.android-native .asset-workbench-header { padding-top:12px; }
+  body.android-native .asset-import-dialog { padding-top:0;padding-bottom:10px; }
+  body.android-native .asset-import-dialog-shell { padding-bottom:18px; }
+  body.android-native .face-workspace-shell { padding-bottom:30px; }
+  body.android-native .recent-story-button { grid-column:1 / -1;justify-self:center;width:min(220px,100%); }
 }

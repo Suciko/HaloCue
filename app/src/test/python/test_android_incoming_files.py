@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import android_web_server
-from android_incoming_files import IncomingFileError, claim_incoming
+from android_incoming_files import IncomingFileError, claim_incoming, claim_incoming_tree
 
 
 def _stage(root, token: str, name: str, content: bytes) -> None:
@@ -19,6 +19,26 @@ def _stage(root, token: str, name: str, content: bytes) -> None:
     (incoming / f"{token}.bin").write_bytes(content)
     (incoming / f"{token}.json").write_text(
         json.dumps({"name": name, "size": len(content)}), encoding="utf-8"
+    )
+
+
+def _stage_tree(root, token: str, name: str, files: dict[str, bytes]) -> None:
+    incoming = root / "incoming"
+    tree = incoming / f"{token}.tree"
+    tree.mkdir(parents=True, exist_ok=True)
+    for relative, content in files.items():
+        target = tree / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    (incoming / f"{token}.tree.json").write_text(
+        json.dumps(
+            {
+                "name": name,
+                "size": sum(len(content) for content in files.values()),
+                "fileCount": len(files),
+            }
+        ),
+        encoding="utf-8",
     )
 
 
@@ -34,6 +54,41 @@ def test_claim_moves_staged_story_once_into_private_workspace(tmp_path, monkeypa
     assert not (tmp_path / "incoming" / f"{token}.json").exists()
     with pytest.raises(IncomingFileError, match="invalid_incoming_token"):
         claim_incoming(token, [".txt", ".md"])
+
+
+def test_claim_tree_moves_complete_spine_directory_once(tmp_path, monkeypatch):
+    token = "1" * 32
+    monkeypatch.setenv("HALOCUE_ANDROID_FILES_DIR", str(tmp_path))
+    _stage_tree(
+        tmp_path,
+        token,
+        "Arona",
+        {
+            "Arona.skel": b"skeleton",
+            "Arona.atlas": b"Arona.png\n",
+            "textures/Arona.png": b"png",
+        },
+    )
+
+    claimed = claim_incoming_tree(token)
+
+    assert claimed == tmp_path / "workspace" / "imports" / token / "Arona"
+    assert (claimed / "Arona.skel").read_bytes() == b"skeleton"
+    assert (claimed / "textures" / "Arona.png").read_bytes() == b"png"
+    with pytest.raises(IncomingFileError, match="invalid_incoming_token"):
+        claim_incoming_tree(token)
+
+
+def test_claim_tree_rejects_tampered_contents_without_moving(tmp_path, monkeypatch):
+    token = "2" * 32
+    monkeypatch.setenv("HALOCUE_ANDROID_FILES_DIR", str(tmp_path))
+    _stage_tree(tmp_path, token, "Assets", {"bg.png": b"png"})
+    (tmp_path / "incoming" / f"{token}.tree" / "extra.png").write_bytes(b"extra")
+
+    with pytest.raises(IncomingFileError, match="incoming_tree_changed"):
+        claim_incoming_tree(token)
+
+    assert (tmp_path / "incoming" / f"{token}.tree" / "bg.png").is_file()
 
 
 @pytest.mark.parametrize("token", ["", "../secret", "a" * 31, "g" * 32])

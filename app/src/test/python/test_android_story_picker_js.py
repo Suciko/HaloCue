@@ -149,3 +149,95 @@ vm.runInNewContext(source,{window,document,URLSearchParams,Promise,Error,console
 
     assert len(result["acks"]) == 1
     assert result["acks"][0]["claimed"] is True
+
+
+def test_android_asset_picker_uses_native_file_and_tree_modes_without_host_browser():
+    script = r"""
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+function n(){return {hidden:true,disabled:false,value:'',dataset:{},children:[],classList:{add(){},remove(){},toggle(){}},appendChild(x){this.children.push(x)},removeChild(){return this.children.shift()},get firstChild(){return this.children[0]},addEventListener(){},setAttribute(){},focus(){},querySelector(){return null},set textContent(v){this.children=[]}}}
+const nodes={};['storyPickerHost','storyPickerStatus','storyPickerEntries','storyPickerBreadcrumbs','storyPickerRoots','storyPickerSearch','storyPickerSelected','storyPickerOpen','storyPickerBack','storyPickerForward','storyPickerUp','browseTitle'].forEach(id=>nodes[id]=n());
+const apiCalls=[],nativeCalls=[],chosen=[];
+const window={Api:{json:(method,payload)=>({method,payload}),request:async(path,options)=>{apiCalls.push({path,options});return {ok:true,file_token:'native-'+options.payload.kind,name:options.payload.kind,size:10}}},StoryUI:{},HaloCueNative:{pickAsset:(requestId,purpose,kind,suffixes)=>nativeCalls.push({requestId,purpose,kind,suffixes}),ackDocumentResult(){}}};
+const document={getElementById:id=>nodes[id],createElement:n,activeElement:n()};
+vm.runInNewContext(source,{window,document,URLSearchParams,Promise,Error,console,setTimeout});
+(async()=>{
+  const picker=new window.StoryUI.StoryFilePicker(n(),{hostEndpoint:'/api/assets/host',selectEndpoint:'/api/assets/select',nativeSelectEndpoint:'/api/assets/select-native',onChoose:value=>chosen.push(value)});
+  picker.allowedSuffixes=new Set(['.png','.jpg']);
+  const background=picker.openNative(null,'asset_file','background');
+  window.HaloCueAndroid.documentPicked({requestId:nativeCalls[0].requestId,ok:true,token:'a'.repeat(32),selectionType:'file'});
+  await background; await new Promise(resolve=>setTimeout(resolve,0));
+  picker.allowedSuffixes=new Set(['.skel','.atlas','.png']);
+  const character=picker.openNative(null,'asset_tree','character');
+  window.HaloCueAndroid.documentPicked({requestId:nativeCalls[1].requestId,ok:true,token:'b'.repeat(32),selectionType:'tree'});
+  await character; await new Promise(resolve=>setTimeout(resolve,0));
+  console.log(JSON.stringify({apiCalls,nativeCalls,chosen,hostHidden:nodes.storyPickerHost.hidden}));
+})();
+"""
+    completed = subprocess.run(
+        ["node", "-e", script, str(HERE / "js" / "story_picker.js")],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    result = json.loads(completed.stdout)
+
+    assert [(row["purpose"], row["kind"]) for row in result["nativeCalls"]] == [
+        ("asset_file", "background"),
+        ("asset_tree", "character"),
+    ]
+    assert [row["path"] for row in result["apiCalls"]] == [
+        "/api/assets/select-native",
+        "/api/assets/select-native",
+    ]
+    assert result["apiCalls"][0]["options"]["payload"] == {
+        "incoming_token": "a" * 32,
+        "kind": "background",
+        "selection_type": "file",
+    }
+    assert result["apiCalls"][1]["options"]["payload"] == {
+        "incoming_token": "b" * 32,
+        "kind": "character",
+        "selection_type": "tree",
+    }
+    assert result["hostHidden"] is True
+
+
+def test_recreated_page_recovers_unmatched_native_asset_result():
+    script = r"""
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+function n(){return {hidden:true,disabled:false,value:'',dataset:{},children:[],classList:{add(){},remove(){},toggle(){}},appendChild(x){this.children.push(x)},removeChild(){return this.children.shift()},get firstChild(){return this.children[0]},addEventListener(){},setAttribute(){},focus(){},querySelector(){return null},set textContent(v){this.children=[]}}}
+const nodes={};['storyPickerHost','storyPickerStatus','storyPickerEntries','storyPickerBreadcrumbs','storyPickerRoots','storyPickerSearch','storyPickerSelected','storyPickerOpen','storyPickerBack','storyPickerForward','storyPickerUp','browseTitle'].forEach(id=>nodes[id]=n());
+const apiCalls=[],chosen=[],acks=[];
+const window={Api:{json:(method,payload)=>({method,payload}),request:async(path,options)=>{apiCalls.push({path,options});return {file_token:'ft-recovered-asset',name:'Arona',size:3}}},StoryUI:{},HaloCueNative:{pickAsset(){},ackDocumentResult:(requestId,claimed)=>acks.push({requestId,claimed})}};
+const document={getElementById:id=>nodes[id],createElement:n,activeElement:n()};
+vm.runInNewContext(source,{window,document,URLSearchParams,Promise,Error,console,setTimeout});
+(async()=>{
+  new window.StoryUI.StoryFilePicker(n(),{hostEndpoint:'/api/assets/host',selectEndpoint:'/api/assets/select',nativeSelectEndpoint:'/api/assets/select-native',onChoose:value=>chosen.push(value)});
+  window.HaloCueAndroid.documentPicked({requestId:'before-recreate-asset',ok:true,token:'d'.repeat(32),purpose:'asset_tree',assetKind:'character',selectionType:'tree'});
+  await new Promise(resolve=>setTimeout(resolve,0));
+  console.log(JSON.stringify({apiCalls,chosen,acks}));
+})();
+"""
+    completed = subprocess.run(
+        ["node", "-e", script, str(HERE / "js" / "story_picker.js")],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    result = json.loads(completed.stdout)
+
+    assert result["apiCalls"] == [{
+        "path": "/api/assets/select-native",
+        "options": {
+            "method": "POST",
+            "payload": {
+                "incoming_token": "d" * 32,
+                "kind": "character",
+                "selection_type": "tree",
+            },
+        },
+    }]
+    assert result["chosen"][0]["file_token"] == "ft-recovered-asset"
+    assert result["acks"] == [{"requestId": "before-recreate-asset", "claimed": True}]

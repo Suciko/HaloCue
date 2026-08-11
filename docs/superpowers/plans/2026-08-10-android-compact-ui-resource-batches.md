@@ -1,107 +1,77 @@
-# Android Compact UI and Incremental Resource Batches Implementation Plan
+# Android Compact UI and AA Resource Mapping Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status:** implementation complete; final regression/build verification is tracked in Task 5.
 
-**Goal:** Make the Android workbench compact and let users import multiple AA resource batches through one entry while preserving the PC mapping keys.
+**Goal:** Keep Android behavior compatible with PC annotations while mapping the ordinary and extra resource packages already imported by the original AA application.
 
-**Architecture:** A small Python resource-library module validates incoming ZIP/tree snapshots and merges Addressables bundles into an app-private canonical cache, recording batch metadata without changing existing catalog/mapping functions. The Android bridge stages either a document or a tree into the existing private incoming area. The WebUI replaces the PC-only AA path controls with an Android batch importer and adds a scroll-aware compact workbench header.
+**Architecture:** Package the PC resource index as the base catalog. Generate an Android-only overlay from the supplied extra package's manifest and atlas metadata. Merge that overlay at runtime, then translate only selected serialized character identifiers at compile time. HaloCue never imports AA's ordinary or extra package.
 
-**Tech Stack:** Kotlin Android ActivityResult APIs, DocumentsContract, Chaquopy Python 3.13 standard library, existing WebUI HTML/CSS/JavaScript, pytest and Android instrumentation tests.
-
-## Global Constraints
+## Global constraints
 
 - Never access or write the original AA app's `Android/data` directory.
-- Never alter PC identifier, native-key, background-key, sound-key, or face-ID mapping algorithms.
+- Never add an AA resource-package importer to HaloCue Android.
+- Never alter PC annotation identifiers, native keys, background keys, sound keys, or face IDs.
 - Do not add Spine rendering to Android.
-- A failed batch must not change the active library or invalidate the previous index.
-- Re-importing identical content is idempotent.
+- Resolve same-name/multi-outfit aliases with `outfit_key`; do not guess.
 
-### Task 1: Resource Library Core
-
-**Files:**
-- Create: `app/src/main/python/android_resource_library.py`
-- Modify: `app/src/main/python/android_web_server.py`
-- Test: `app/src/test/python/test_android_resource_library.py`
-
-**Interfaces:**
-- `import_batch(source: Path, library_root: Path) -> dict` validates and merges one staged directory or archive.
-- `resource_library_status(library_root: Path) -> dict` returns batch count, active catalog, cache counts and last import.
-- The effective catalog remains at `<library_root>/catalog.json`; effective bundles remain under `<library_root>/cache`.
-
-- [ ] **Step 1: Write failing tests** for a base batch followed by an extra batch, idempotent re-import, same-key replacement, traversal rejection, and failed-batch rollback. Use tiny fake UnityFS files beginning with `UnityFS` and minimal Addressables catalog fixtures.
-- [ ] **Step 2: Run the focused pytest file** and confirm failures are caused by the missing module/functions.
-- [ ] **Step 3: Implement staged validation and merge.** Accept a directory containing `catalog.json` plus cache directories, or a ZIP with safe relative paths. Copy only validated `__data` UnityFS bundles and catalog files into a temporary merge directory, then atomically replace active files and append a JSON batch manifest. Count `added`, `duplicate`, and `replaced` by canonical relative key.
-- [ ] **Step 4: Expose status through Android runtime setup** while keeping the existing PC `setup_status()` shape compatible. The Android status must include `aa.resource_library` and must not claim an AA executable is connected.
-- [ ] **Step 5: Run the focused tests** and commit `feat(android): add incremental resource library`.
-
-### Task 2: Native Android Document and Directory Staging
+### Task 1: Build the extra-package mapping
 
 **Files:**
-- Create: `app/src/main/java/com/halocue/android/IncomingResourceStore.kt`
-- Modify: `app/src/main/java/com/halocue/android/MainActivity.kt`
-- Modify: `app/src/main/python/js/resource_import.js`
-- Test: `app/src/androidTest/java/com/halocue/android/IncomingResourceStoreTest.kt`
-- Test: `app/src/test/python/test_android_resource_picker_js.py`
+- `scripts/build-android-resource-mapping.ps1`
+- `app/src/main/python/android_resource_mapping.json`
+- `app/src/test/python/test_android_resource_mapping.py`
 
-**Interfaces:**
-- JavaScript calls `HaloCueNative.pickResource(requestId, mode)` where `mode` is `document` or `tree`.
-- JavaScript receives `HaloCueAndroid.resourcePicked({requestId, ok, token, name, size})` and claims it with `POST /api/resources/import`.
-- `IncomingResourceStore` stages a ZIP document or recursively copies a selected tree into `files/incoming-resources/<token>/` with a manifest and byte limit.
+- [x] Read the extra package's `manifest.json` and portrait `.atlas` metadata without unpacking or shipping full resource assets.
+- [x] Join entries to the PC index by `outfit_key` and preserve the PC identifier.
+- [x] Record package identifier aliases, face IDs/labels, and characters missing from the PC index.
+- [x] Verify the supplied package summary: 194 entries, 192 mapped, 52 aliases, 40 new, 1 skipped.
 
-- [ ] **Step 1: Write failing tests** for safe staging, cancellation, one-use result claiming, and directory traversal/name normalization.
-- [ ] **Step 2: Run the focused JVM/instrumentation tests** and confirm the new contracts fail before implementation.
-- [ ] **Step 3: Implement the store** using temporary files/directories followed by atomic rename; reject symlink-like or invalid relative paths and enforce a bounded total size.
-- [ ] **Step 4: Add `OpenDocument` and `OpenDocumentTree` launchers** to `MainActivity`, preserve pending request/result across rotation, and deliver the same one-use acknowledgement behavior as story imports.
-- [ ] **Step 5: Add `resource_import.js`** to start the picker, claim the token, render progress/status, and refresh setup status after a successful import.
-- [ ] **Step 6: Run Android tests** and commit `feat(android): stage resource directories through SAF`.
-
-### Task 3: Android WebUI Resource Settings
+### Task 2: Merge and compile with outfit-aware aliases
 
 **Files:**
-- Modify: `app/src/main/python/ui.html`
-- Modify: `app/src/main/python/js/app.js`
-- Modify: `app/src/main/python/css/layout.css`
-- Modify: `app/src/main/python/webui.py`
-- Modify: `app/src/main/python/android_web_server.py`
-- Test: `app/src/test/python/test_android_web_server.py`
+- `app/src/main/python/android_resource_mapping.py`
+- `app/src/main/python/android_compiler.py`
+- `app/src/main/python/script2aap.py`
+- `scripts/sync-compiler-core.ps1`
 
-**Interfaces:**
-- Android `POST /api/resources/import` claims a staged token, calls `android_resource_library.import_batch`, and returns counts plus `aa.resource_library` status.
-- Android `GET /api/setup/status` returns an Android-specific resource section; PC keeps its existing AA install controls.
+- [x] Merge the generated Android overlay into the PC base index at runtime.
+- [x] Keep PC annotations stable and attach `android_package_identifier` to the matching outfit.
+- [x] Translate only character names serialized into generated `.aap` scenes.
+- [x] Require `outfit_key` when one PC identifier could refer to multiple outfits.
+- [x] Make compiler synchronization line-ending independent and fail clearly if its injection point is missing.
 
-- [ ] **Step 1: Write failing contract tests** proving Android no longer renders or calls the PC-only AA executable endpoint, that `/api/settings/aa-install` remains explicitly unavailable, and that `/api/resources/import` merges successive batches.
-- [ ] **Step 2: Run the focused tests** and verify the expected failures.
-- [ ] **Step 3: Replace the Android settings block** with one “导入 AA 资源” control, “导入文件/导入目录” actions, current library summary, last batch, and “重建图片预览”. Keep the PC HTML unchanged via a platform class or server-injected data attribute.
-- [ ] **Step 4: Wire the import action and error states** so previous catalog status remains visible after a rejected batch.
-- [ ] **Step 5: Run Python tests** and commit `feat(android): expose cumulative resource imports`.
-
-### Task 4: Compact First Screen and Scroll Toolbar
+### Task 3: Android settings and compact first screen
 
 **Files:**
-- Modify: `app/src/main/python/ui.html`
-- Modify: `app/src/main/python/css/layout.css`
-- Modify: `app/src/main/python/js/app.js`
-- Test: `app/src/test/python/test_android_ui_contract.py`
+- `app/src/main/python/ui.html`
+- `app/src/main/python/css/layout.css`
+- `app/src/main/python/js/app.js`
+- `app/src/test/python/test_android_ui_contract.py`
 
-**Interfaces:**
-- `window.HaloCueUI.updateScrollChrome(scrollTop, direction)` toggles `is-compact` / `is-hidden` classes on the mobile topbar.
-- `window.HaloCueUI.readinessSummary(statuses)` produces the compact readiness label from real status data.
+- [x] Hide PC AA path controls and Spine settings in the Android runtime.
+- [x] Show mapping readiness plus character, background, sound, and alias counts.
+- [x] Remove duplicated system-bar top spacing.
+- [x] Collapse the ready-state panel and recent-story card so the script picker enters the first viewport.
+- [x] Hide the action bar on downward scroll and restore it immediately on upward scroll.
 
-- [ ] **Step 1: Write failing contract tests** for the compact summary markup, readiness details hidden by default when all required checks pass, and scroll-down/up class behavior.
-- [ ] **Step 2: Run focused tests** and confirm failure.
-- [ ] **Step 3: Reduce mobile topbar/content padding**, make the welcome panel collapse to a summary after readiness succeeds, and add a 48-56dp sticky compact toolbar that reappears on upward scroll.
-- [ ] **Step 4: Keep full settings/model workbench in the drawer** and ensure no model editor is pinned to the page viewport.
-- [ ] **Step 5: Run Python contract tests** and commit `feat(android): compact mobile workbench chrome`.
-
-### Task 5: Full Verification and Device Acceptance
+### Task 4: Native file and folder selection parity
 
 **Files:**
-- Modify: `安卓端接手记忆.md`
-- Modify: `docs/superpowers/plans/2026-08-10-android-model-draft-generation.md`
-- Create: `构建产物/HaloCue-Android-Compact-Resources-0.3.0-dev-debug.apk`
+- `app/src/main/java/com/halocue/android/IncomingFileStore.kt`
+- `app/src/main/java/com/halocue/android/MainActivity.kt`
+- `app/src/main/python/android_incoming_files.py`
+- `app/src/main/python/android_web_server.py`
 
-- [ ] **Step 1: Run Android Python tests:** `python -m pytest app/src/test/python -q`.
-- [ ] **Step 2: Build APK and instrumentation tests:** `./gradlew.bat assembleDebug assembleDebugAndroidTest`.
-- [ ] **Step 3: Install to the connected vivo device**, import a base fixture directory, then import an extra fixture directory through the same entry. Verify the status shows two batches and both catalog keys remain selectable.
-- [ ] **Step 4: Capture phone screenshots** at the top, after scrolling down, and after scrolling up; verify the script picker appears earlier and the compact toolbar does not overlap content.
-- [ ] **Step 5: Update the handoff/test counts and commit `test(android): verify compact UI and cumulative resources`.
+- [x] Keep story-file selection tokenized and one-use.
+- [x] Route custom asset files and directories through Android's system picker.
+- [x] Keep these custom-asset flows separate from AA's own ordinary/extra-package importer.
+- [x] Cover native staging and Python claim/cleanup behavior with host and instrumentation tests.
+
+### Task 5: Full verification and device acceptance
+
+- [x] Verify settings on vivo `V2324HA`: 983 characters, 580 backgrounds, 310 sounds, 52 aliases, and no PC AA path/Spine controls.
+- [x] Verify on a loaded story that downward scrolling hides the action bar and upward scrolling restores it.
+- [x] Run the complete Android Python suite: 70 passed, 1 skipped.
+- [x] Build the main and instrumentation APKs.
+- [x] Run the instrumentation suite on the connected vivo device: 29/29 passed.
+- [x] Copy the final APK to `构建产物/`, record size/SHA-256, and update `安卓端接手记忆.md`.

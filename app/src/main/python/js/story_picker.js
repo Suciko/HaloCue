@@ -29,6 +29,7 @@
   const completedNativeRequests = new Set();
   let nativeRequestSequence = 0;
   let nativeStoryPicker = null;
+  let nativeAssetPicker = null;
   exports.HaloCueAndroid = exports.HaloCueAndroid || {};
   exports.HaloCueAndroid.documentPicked = function (payload) {
     const result = payload || {};
@@ -40,9 +41,21 @@
     }
     const pending = nativeRequests.get(requestId);
     nativeRequests.delete(requestId);
-    const picker = pending ? pending.picker : nativeStoryPicker;
+    const resultPurpose = String(result.purpose || 'story');
+    const picker = pending
+      ? pending.picker
+      : (resultPurpose === 'story' ? nativeStoryPicker : nativeAssetPicker);
     if (!picker) return;
-    Promise.resolve(picker.handleNativeResult(result, pending ? pending.resolve : function () {}))
+    const request = pending || {
+      purpose: resultPurpose,
+      assetKind: String(result.assetKind || ''),
+      onChoose: null
+    };
+    Promise.resolve(picker.handleNativeResult(
+      result,
+      pending ? pending.resolve : function () {},
+      request
+    ))
       .then(function (claimed) {
         if (exports.HaloCueNative && typeof exports.HaloCueNative.ackDocumentResult === 'function') {
           exports.HaloCueNative.ackDocumentResult(requestId, Boolean(claimed));
@@ -62,6 +75,7 @@
     this.historyBack = []; this.historyForward = []; this.sort = 'name'; this.direction = 'asc';
     this.hostEndpoint = this.options.hostEndpoint || '/api/story-files/host';
     this.selectEndpoint = this.options.selectEndpoint || '/api/story-files/select';
+    this.nativeSelectEndpoint = this.options.nativeSelectEndpoint || this.selectEndpoint;
     this.searchPlaceholder = this.options.searchPlaceholder || '搜索剧情文本';
     this.allowedSuffixes = Array.isArray(this.options.allowedSuffixes)
       ? new Set(this.options.allowedSuffixes.map(function (value) {
@@ -72,6 +86,7 @@
     this.directoryOnly = Boolean(this.options.directoryOnly);
     this.hostOnly = Boolean(this.options.hostOnly);
     if (this.selectEndpoint === '/api/story-files/select') nativeStoryPicker = this;
+    if (this.options.nativeSelectEndpoint) nativeAssetPicker = this;
     this.trigger = null; this._bound = false; this.bind();
   }
 
@@ -100,15 +115,29 @@
     return this.openHost();
   };
 
-  StoryFilePicker.prototype.openNative = function (trigger) {
+  StoryFilePicker.prototype.openNative = function (trigger, purpose, assetKind, onChoose) {
     const self = this;
     this.trigger = trigger || document.activeElement;
-    const requestId = 'story-' + Date.now().toString(36) + '-' + (++nativeRequestSequence).toString(36);
+    purpose = String(purpose || 'story');
+    assetKind = String(assetKind || '');
+    const requestId = purpose.replace(/_/g, '-') + '-' + Date.now().toString(36) + '-' + (++nativeRequestSequence).toString(36);
     const suffixes = this.allowedSuffixes ? Array.from(this.allowedSuffixes) : ['.txt', '.md'];
     return new Promise(function (resolve) {
-      nativeRequests.set(requestId, {picker: self, resolve: resolve});
+      nativeRequests.set(requestId, {
+        picker: self,
+        resolve: resolve,
+        purpose: purpose,
+        assetKind: assetKind,
+        onChoose: typeof onChoose === 'function' ? onChoose : null
+      });
       try {
-        exports.HaloCueNative.pickDocument(requestId, 'story', JSON.stringify(suffixes));
+        if (purpose === 'story' && exports.HaloCueNative && typeof exports.HaloCueNative.pickDocument === 'function') {
+          exports.HaloCueNative.pickDocument(requestId, purpose, JSON.stringify(suffixes));
+        } else if (purpose !== 'story' && exports.HaloCueNative && typeof exports.HaloCueNative.pickAsset === 'function') {
+          exports.HaloCueNative.pickAsset(requestId, purpose, assetKind, JSON.stringify(suffixes));
+        } else {
+          throw new Error('Native document picker is unavailable');
+        }
       } catch (error) {
         nativeRequests.delete(requestId);
         if (self.status) self.status.textContent = error.message || '无法打开系统文件选择器';
@@ -117,7 +146,7 @@
     });
   };
 
-  StoryFilePicker.prototype.handleNativeResult = async function (payload, resolve) {
+  StoryFilePicker.prototype.handleNativeResult = async function (payload, resolve, pending) {
     if (!payload.ok) {
       if (this.status && payload.code !== 'cancelled') this.status.textContent = payload.message || '无法打开所选文件';
       resolve(null);
@@ -125,16 +154,26 @@
     }
     let claimed = false;
     try {
+      const purpose = pending ? pending.purpose : 'story';
+      const assetKind = pending ? pending.assetKind : '';
+      const requestPayload = {incoming_token: payload.token};
+      if (purpose !== 'story') {
+        requestPayload.kind = assetKind;
+        requestPayload.selection_type = String(payload.selectionType || (purpose === 'asset_tree' ? 'tree' : 'file'));
+      }
       const options = exports.Api.json
-        ? exports.Api.json('POST', {incoming_token: payload.token})
-        : {method: 'POST', body: JSON.stringify({incoming_token: payload.token})};
-      const result = await exports.Api.request(this.selectEndpoint, options);
+        ? exports.Api.json('POST', requestPayload)
+        : {method: 'POST', body: JSON.stringify(requestPayload)};
+      const endpoint = purpose === 'story' ? this.selectEndpoint : this.nativeSelectEndpoint;
+      const result = await exports.Api.request(endpoint, options);
       claimed = true;
-      if (this.options.onChoose) {
-        await this.options.onChoose({
+      const choose = pending && pending.onChoose ? pending.onChoose : this.options.onChoose;
+      if (choose) {
+        await choose({
           file_token: result.file_token,
           name: result.name,
           size: result.size,
+          file_count: result.file_count,
         });
       }
       resolve(result);

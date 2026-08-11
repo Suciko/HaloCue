@@ -146,9 +146,18 @@ def test_android_runtime_copies_legacy_database_and_cache_into_workspace(tmp_pat
     assert (
         tmp_path / "workspace" / "databases" / "llm_profiles.json"
     ).read_text(encoding="utf-8") == '{"profiles": []}'
-    assert (
-        tmp_path / "workspace" / "cache" / "official-previews" / "manifest.json"
-    ).read_text(encoding="utf-8") == '{"status": "ready"}'
+    preview_manifest = json.loads(
+        (
+            tmp_path
+            / "workspace"
+            / "cache"
+            / "official-previews"
+            / "manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert preview_manifest["status"] == "ready"
+    assert preview_manifest["counts"]["avatars"] >= 900
+    assert preview_manifest["counts"]["backgrounds"] >= 2000
     assert legacy_profile.is_file()
     assert legacy_preview.is_file()
     assert not (tmp_path / "workspace" / "databases" / "llm.json").exists()

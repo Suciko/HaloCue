@@ -24,6 +24,43 @@ from asset_validation import (
 class AssetImportRequestError(ValueError):
     """The import request is incomplete or names an unsupported asset type."""
 
+    def __init__(self, message: str, *, code: str = "invalid_asset_request"):
+        self.code = code
+        super().__init__(message)
+
+
+def resolve_character_source(root: str | Path) -> Path:
+    """Return the directory containing the only complete Spine bundle in root."""
+    base = Path(root).expanduser().resolve()
+    if not base.is_dir():
+        raise AssetImportRequestError(
+            "Selected character directory does not exist",
+            code="character_bundle_missing",
+        )
+    files = [path for path in base.rglob("*") if path.is_file()]
+    atlas_keys = {
+        (path.parent, path.stem.casefold())
+        for path in files
+        if path.suffix.casefold() == ".atlas"
+    }
+    bundles = [
+        path
+        for path in files
+        if path.suffix.casefold() == ".skel"
+        and (path.parent, path.stem.casefold()) in atlas_keys
+    ]
+    if not bundles:
+        raise AssetImportRequestError(
+            "Selected directory contains no matching .skel and .atlas pair",
+            code="character_bundle_missing",
+        )
+    if len(bundles) != 1:
+        raise AssetImportRequestError(
+            "Selected directory contains more than one Spine character bundle",
+            code="character_bundle_ambiguous",
+        )
+    return bundles[0].parent
+
 
 def _is_ignored(path: Path, root: Path) -> bool:
     try:

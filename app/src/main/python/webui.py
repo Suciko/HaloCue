@@ -7,7 +7,7 @@ AA 剧本编译器 · 本地网页界面
 跑起来后浏览器打开 http://127.0.0.1:8770 。只监听本机，不对外。
 只用标准库 + PIL（缩略图），不需要装框架。
 """
-import argparse, hashlib, io, json, mimetypes, os, re, socket, sys, threading, traceback, uuid, webbrowser
+import argparse, hashlib, io, json, mimetypes, os, re, shutil, socket, sys, threading, traceback, uuid, webbrowser
 from dataclasses import replace
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Dict, List, Any, Optional
@@ -383,13 +383,50 @@ def resolve_story_context(story_token: str) -> StoryContext:
         raise ValueError("invalid_story_token") from exc
 
 
-def scan_story_inbox(context, *, con=None, running_probe=None):
+def scan_story_inbox(context, *, con=None, running_probe=None, source_root=None):
     """创建当前剧情的「素材收件箱」并批量登记兼容文件。
 
     收件箱位于 <项目目录>/inbox 下：bgs / sounds / characters / bgms。
     用户把自定义素材放进对应子目录后点「素材文件夹」即可扫描登记；
     已登记的文件不会从收件箱删除，重复扫描会以 skipped/失败 形式反馈。
     """
+    if source_root is not None:
+        selected = Path(source_root).resolve()
+        rows = asset_import.discover_assets(selected)
+        results: Dict[str, list] = {"registered": [], "skipped": [], "errors": []}
+        for row in rows:
+            kind = str(row.get("kind") or "")
+            if kind not in {"background", "sound", "character"}:
+                continue
+            payload = {
+                "kind": kind,
+                "source": row["source"],
+                "project_dir": str(context.project_dir),
+            }
+            label = str(row["stem"])
+            if kind == "character":
+                payload["identifier"] = row["stem"]
+                payload["display_name"] = row["stem"]
+            try:
+                res = asset_import.register_asset_request(
+                    payload, con=con,
+                    saves_root=os.path.join(CFG["aa_data"], "saves"),
+                    running_probe=running_probe,
+                )
+            except Exception as exc:
+                results["errors"].append({
+                    "kind": kind, "source": label, "message": str(exc),
+                })
+                continue
+            bucket = "registered" if res.get("status") == "registered" else "skipped"
+            issue = ((res.get("issues") or [{}])[0] or {})
+            results[bucket].append({
+                "kind": kind, "name": label,
+                "status": res.get("status"), "aa_key": res.get("aa_key"),
+                "message": issue.get("message") or "",
+            })
+        return {"ok": True, "inbox": [selected.name], "results": results}
+
     inbox = context.project_dir / "inbox"
     created = []
     for folder in ("bgs", "sounds", "characters", "bgms"):
@@ -1180,6 +1217,7 @@ def _temporary_connection_provider(connection_payload, model_payload):
         "reasoning_budget_max": reasoning.get("budget_max"),
         "vision": model.get("vision_status") != "unsupported",
         "api_key": secret,
+        "timeout": int(model.get("timeout") or 180),
     })
 
 
@@ -1261,7 +1299,9 @@ def list_workbench_models(connection, model_payload):
             resolved[model_id] = capability
         return sorted(resolved.values(), key=lambda item: item["model_id"].casefold())
 
-    provider = _temporary_connection_provider(connection, model_payload)
+    discovery_model = dict(model_payload or {})
+    discovery_model["timeout"] = 20
+    provider = _temporary_connection_provider(connection, discovery_model)
     try:
         return {
             "models": discovered(provider, connection.get("service_preset")),
@@ -1270,7 +1310,7 @@ def list_workbench_models(connection, model_payload):
         fallback = _v1_fallback_connection(connection)
         if fallback is None:
             raise
-    provider = _temporary_connection_provider(fallback, model_payload)
+    provider = _temporary_connection_provider(fallback, discovery_model)
     return {
         "models": discovered(provider, fallback.get("service_preset")),
         "base_url": fallback["base_url"],
@@ -1521,6 +1561,26 @@ def character_catalog_metadata(ident: str) -> dict:
 
 def list_characters(q="", limit=400):
     con = db()
+    club_by_spine = {
+        str(row["spine_key"]): str(row["club"] or "")
+        for row in con.execute(
+            """SELECT LOWER(REPLACE(spine,'\\','/')) AS spine_key,
+                      MAX(club) AS club
+               FROM character
+               WHERE COALESCE(spine,'')<>'' AND COALESCE(club,'')<>''
+               GROUP BY LOWER(REPLACE(spine,'\\','/'))"""
+        )
+    }
+    faces_by_spine = {
+        str(row["spine_key"]): int(row["nface"] or 0)
+        for row in con.execute(
+            """SELECT LOWER(REPLACE(c.spine,'\\','/')) AS spine_key,
+                      COUNT(DISTINCT f.face_id) AS nface
+               FROM character c JOIN face f ON f.ident=c.ident
+               WHERE COALESCE(c.spine,'')<>''
+               GROUP BY LOWER(REPLACE(c.spine,'\\','/'))"""
+        )
+    }
     sql = ("SELECT c.ident, c.name, c.club, c.spine, c.avatar, c.source, "
            "  (SELECT COUNT(*) FROM face f WHERE f.ident=c.ident) AS nface "
            "FROM character c ")
@@ -1550,6 +1610,8 @@ def list_characters(q="", limit=400):
     args.append(limit)
     out = []
     for r in con.execute(sql, args):
+        if assetdb._looks_placeholder(r["ident"]) or assetdb._looks_placeholder(r["name"]):
+            continue
         catalog = character_catalog_metadata(r["ident"])
         avatar_value = str(r["avatar"] or catalog.get("avatar") or "")
         spine_value = str(r["spine"] or catalog.get("spine") or "")
@@ -1561,9 +1623,11 @@ def list_characters(q="", limit=400):
             avatar = registered_character_avatar_path(con, r["ident"])
         if avatar and not avatar_key:
             avatar_key = str(r["ident"])
+        spine_key = spine_value.replace("\\", "/").casefold()
+        known_faces = faces_by_spine.get(spine_key, int(r["nface"] or 0))
         out.append({"ident": r["ident"], "name": r["name"] or r["ident"],
-                    "club": r["club"] or "", "spine": spine_value,
-                    "faces": r["nface"], "source": r["source"],
+                    "club": r["club"] or club_by_spine.get(spine_key, ""), "spine": spine_value,
+                    "faces": known_faces, "source": r["source"],
                     "avatar": (
                         "/thumb/av/" + quote(avatar_key, safe="")
                         if avatar and avatar_key else ""
@@ -2695,7 +2759,10 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
                     suggestion = refs_by_key.get((ref["kind"], ref["name"].casefold()))
                     if suggestion and suggestion.get("reason"):
                         ref["reason"] = str(suggestion["reason"])
-                for row in (ai.get("issues") or []):
+                # Free-form AI issues can confuse fictional operational dialogue
+                # with real build failures. Actionable issues come from the
+                # deterministic evidence checks below.
+                for row in ():
                     if not isinstance(row, dict):
                         continue
                     severity = str(row.get("severity") or "warning").casefold()
@@ -3071,6 +3138,11 @@ def run_build(payload, job=None):
             elif k == "portrait":
                 e = {"id": m["id"], "name": m.get("name") or who,
                      "club": m.get("club", ""), "portrait": True}
+                outfit_key = str(m.get("outfit_key") or "").strip()
+                if not outfit_key:
+                    outfit_key = str(m.get("spine") or "").replace("\\", "/").rsplit("/", 1)[-1]
+                if outfit_key:
+                    e["outfit_key"] = outfit_key
                 if m.get("custom_src"):
                     e["custom"] = {"src": m["custom_src"], "asset": m["custom_asset"]}
                 cast["cast"][who] = e
@@ -3163,6 +3235,11 @@ def annotate_draft_worker(payload, job=None):
         elif k == "portrait":
             e = {"id": m["id"], "name": m.get("name") or who,
                  "club": m.get("club", ""), "portrait": True}
+            outfit_key = str(m.get("outfit_key") or "").strip()
+            if not outfit_key:
+                outfit_key = str(m.get("spine") or "").replace("\\", "/").rsplit("/", 1)[-1]
+            if outfit_key:
+                e["outfit_key"] = outfit_key
             if m.get("custom_src"):
                 e["custom"] = {"src": m["custom_src"], "asset": m["custom_asset"]}
             cast["cast"][who] = e
@@ -3953,6 +4030,75 @@ class H(BaseHTTPRequestHandler):
                 except StoryFilePickerError as exc:
                     return self._send(exc.status, {"ok": False, "code": exc.code, "e": str(exc)})
 
+            if p == "/api/assets/select-native":
+                if os.environ.get("HALOCUE_PLATFORM") != "android":
+                    return self._send(400, {
+                        "ok": False,
+                        "code": "incoming_token_unsupported",
+                        "e": "Incoming asset tokens are only available on Android",
+                    })
+                incoming_token = str(data.get("incoming_token") or "")
+                kind = str(data.get("kind") or "").strip().casefold()
+                selection_type = str(data.get("selection_type") or "").strip().casefold()
+                valid_mode = (
+                    selection_type == "file" and kind in {"background", "sound"}
+                ) or (
+                    selection_type == "tree" and kind in {"character", "batch"}
+                )
+                if not incoming_token or not valid_mode:
+                    return self._send(400, {
+                        "ok": False,
+                        "code": "invalid_native_asset_request",
+                        "e": "Native asset selection mode is invalid",
+                    })
+                from android_incoming_files import (
+                    IncomingFileError,
+                    claim_incoming,
+                    claim_incoming_tree,
+                )
+                try:
+                    if selection_type == "file":
+                        suffixes = {
+                            "background": {".png", ".jpg", ".jpeg"},
+                            "sound": {".wav", ".ogg", ".mp3"},
+                        }[kind]
+                        selected = claim_incoming(
+                            incoming_token,
+                            suffixes,
+                            max_bytes=128 * 1024 * 1024,
+                        )
+                        source = selected
+                        file_count = 1
+                        size = selected.stat().st_size
+                    else:
+                        selected = claim_incoming_tree(incoming_token)
+                        file_count = sum(1 for path in selected.rglob("*") if path.is_file())
+                        size = sum(path.stat().st_size for path in selected.rglob("*") if path.is_file())
+                        if kind == "character":
+                            try:
+                                source = asset_import.resolve_character_source(selected)
+                            except asset_import.AssetImportRequestError:
+                                shutil.rmtree(selected.parent, ignore_errors=True)
+                                raise
+                        else:
+                            source = selected
+                    return self._send(200, {
+                        "ok": True,
+                        "file_token": register_file_token(str(source)),
+                        "name": selected.name,
+                        "size": size,
+                        "file_count": file_count,
+                    })
+                except IncomingFileError as exc:
+                    status = 404 if exc.code == "invalid_incoming_token" else 400
+                    return self._send(status, {
+                        "ok": False, "code": exc.code, "e": str(exc),
+                    })
+                except asset_import.AssetImportRequestError as exc:
+                    return self._send(400, {
+                        "ok": False, "code": exc.code, "e": str(exc),
+                    })
+
             if p == "/api/settings/entry":
                 try:
                     token = str(data.get("entry_token") or "")
@@ -4246,7 +4392,20 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/story/assets/scan-inbox":
                 try:
                     context = resolve_story_context(str(data.get("story_token") or ""))
-                    return self._send(200, scan_story_inbox(context, con=db()))
+                    source_root = None
+                    if data.get("file_token"):
+                        source_root = resolve_file_token(str(data.get("file_token") or ""))
+                        if not source_root or not Path(source_root).is_dir():
+                            return self._send(400, {
+                                "ok": False,
+                                "code": "invalid_file_token",
+                                "e": "Invalid or expired asset directory token",
+                            })
+                    return self._send(200, scan_story_inbox(
+                        context,
+                        con=db(),
+                        source_root=source_root,
+                    ))
                 except ValueError:
                     return self._send(404, {
                         "ok": False, "code": "invalid_story_token", "e": "story not found",

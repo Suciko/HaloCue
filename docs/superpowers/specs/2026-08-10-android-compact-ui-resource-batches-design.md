@@ -1,50 +1,58 @@
-# Android Compact Workbench and Incremental Resource Imports
+# Android Compact Workbench and AA Resource Mapping
 
 ## Goal
 
-Make the Android WebUI reclaim first-screen space and replace the unusable PC-only AA path configuration with a repeatable Android resource import flow. Multiple imports from the same entry are cumulative, while all published identifiers remain compatible with the PC resource mapping.
+Make the Android WebUI reclaim first-screen space and preserve the PC annotation/index behavior when the original AA installation contains both its ordinary resource package and a later extra package.
+
+HaloCue does not import either AA resource package. The original AA application owns that workflow. HaloCue ships a generated mapping which translates the PC-compatible annotations to the identifiers actually published by the supplied extra package.
 
 ## Confirmed constraints
 
 - Android must not probe or write the original AA application's `Android/data` directory.
-- Android users import resources they have copied to an accessible location using the system picker.
-- The ordinary resource set and later extra resource set use the same import entry; they are separate batches, not separate resource types.
-- Existing PC mapping is authoritative: official character identifiers/native keys, AA background keys, sound keys, and face IDs must not be renamed or re-derived.
-- Spine rendering remains unavailable on Android; this change only makes the official resource catalog/import path usable.
+- The ordinary package and extra package are imported by AA itself, potentially at different times through AA's same import entry.
+- The PC index remains authoritative for annotations, background keys, sound keys, character identifiers, outfit keys, and face IDs.
+- Extra-package character identifiers may differ from the PC identifier. Translation must happen only when serializing a selected character into the generated `.aap`.
+- Same-name outfits are not interchangeable. Ambiguous aliases must be resolved with `outfit_key`; an identifier-only global replacement is forbidden.
+- Spine rendering remains unavailable on Android. Atlas metadata may still provide face IDs and semantic labels for manual face selection.
 
 ## Design
 
 ### 1. Compact mobile workbench
 
-The mobile topbar keeps its current visual language but uses a compact initial height. The title block and action row are reduced to the minimum touch-safe spacing. The readiness panel is expanded only when a check needs attention; after all required checks are ready it shows a compact summary with an explicit “查看详情” action.
+The Android top bar uses touch-safe compact spacing. When the runtime and resource mapping are ready, the readiness panel collapses to a short summary and the recent-story area becomes a single compact entry, keeping the script picker in the first viewport.
 
-The full topbar scrolls away with the page. A small sticky toolbar remains only while the user scrolls downward, and reappears immediately on upward scroll. It contains the workbench title and compact icon/text entry points. The full model settings drawer is never pinned to the content viewport.
+On a scrollable story page, the action bar hides while scrolling down and reappears immediately when scrolling up. Settings remain in a drawer and are never pinned over the story content. The native Android shell owns system-bar insets, so the WebUI must not add the same top inset a second time.
 
-### 2. Android resource batches
+### 2. Built-in PC and extra-package mapping
 
-Android exposes one “导入 AA 资源” action with two native picker modes: import a directory tree or import a supported archive. The native layer stages the selected content into the app-private incoming area and returns a one-use token to Python. A batch is validated before it changes the active library.
+`aa_resources.json` is the PC-compatible base index. `scripts/build-android-resource-mapping.ps1` reads only mapping metadata from a user-supplied extra package while developing the APK:
 
-Each accepted batch is recorded in an app-private manifest with:
+- `manifest.json` supplies package identifiers and Spine portrait paths;
+- each portrait's `.atlas` supplies face IDs and labels;
+- `outfit_key` joins extra-package entries to the correct PC outfit;
+- spelling variants in face labels are normalized without changing the numeric face ID.
 
-- batch token and import time;
-- source display name;
-- catalog file and cache root detected in the batch;
-- file count, byte count, duplicate count, replaced count;
-- SHA-256 of each replaced bundle.
+The generated `android_resource_mapping.json` is packaged in the APK. At runtime `android_resource_mapping.merge_mapping()` overlays the extra-package data onto the PC index. It preserves the PC identifier used by annotations, records `android_package_identifier` per outfit, refreshes face lists, and appends package characters missing from the PC index.
 
-Validated bundles are merged into one canonical private cache using their existing Addressables outer/content keys. Identical files are skipped. A later file for the same key replaces the active file but does not change the key. The latest compatible catalog is used for lookup, and the merged cache is passed through the existing PC catalog/index functions. This preserves identifier, background AA key, sound key, and face ID compatibility without adding an Android-specific mapping layer.
+During compilation, only selected serialized character identifiers are translated. If one PC identifier has multiple outfits, translation requires the selected `outfit_key`; otherwise it stays unchanged rather than guessing.
 
-### 3. Failure behavior
+### 3. Android settings
 
-An import that lacks a recognizable catalog/cache, contains a path traversal entry, exceeds configured size limits, or fails UnityFS validation is rejected without changing the active library. The UI reports the batch-level reason and leaves the previous index usable. Preview rebuilding is explicitly separate and can report “无预览” for catalog entries without a bitmap.
+Android settings show mapping readiness and counts instead of PC-only AA path or Spine controls. The current bundled mapping represents:
+
+- 943 PC-index characters plus 40 extra-package-only characters, for 983 selectable characters;
+- 580 backgrounds;
+- 310 sounds;
+- 192 mapped extra-package character entries;
+- 52 identifier aliases;
+- 1 skipped extra-package character entry.
 
 ## Acceptance criteria
 
-1. On the target phone, the first screen exposes the script picker without the current large blank/title/readiness block.
-2. Scrolling down removes the full header and leaves only a compact reappearing toolbar.
-3. The settings drawer no longer asks Android users for an AA executable or direct AA installation path.
-4. Importing a base batch, then an extra batch through the same entry, produces one active catalog and cache containing both batches.
-5. Re-importing the same batch is idempotent.
-6. A same-key replacement keeps the PC identifier/key and is reported as replaced.
-7. Existing Android and PC mapping/index tests remain green.
-
+1. On the target phone, the first screen reaches the script picker without duplicated system-bar spacing.
+2. On a loaded story, scrolling down hides the action bar and scrolling up immediately restores it.
+3. Android settings do not expose the PC AA installation path or Spine settings.
+4. Settings report 983 characters, 580 backgrounds, 310 sounds, and 52 extra-package aliases.
+5. PC identifiers remain stable in annotations and are translated only for the selected Android package outfit during `.aap` serialization.
+6. Ambiguous same-name outfits do not receive a global alias.
+7. Mapping generation, compiler synchronization, Android host tests, and device instrumentation remain green.

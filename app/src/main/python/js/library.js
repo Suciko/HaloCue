@@ -339,6 +339,12 @@
 
   AssetWorkbench.prototype.refresh = async function () {
     const generation = this.generation;
+    if (!this.context.story_token) {
+      this.assets = [];
+      if (this.status) this.status.textContent = '请先打开剧情；之后可在这里浏览和导入素材。';
+      this.renderCatalog();
+      return;
+    }
     if (this.status) this.status.textContent = '正在读取自定义素材履历…';
     try {
       const query = '?story_token=' + encodeURIComponent(this.context.story_token || '');

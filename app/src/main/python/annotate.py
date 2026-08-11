@@ -806,7 +806,12 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
 
     cfg, cast, _ = load_cast(cast_path)
     idx = json.load(open(index_path, encoding="utf-8"))
-    llmcfg = json.load(open(llm_path, encoding="utf-8"))
+    # Android model profiles provide the provider directly.  The legacy
+    # desktop config is optional there because it is intentionally not
+    # packaged (it may contain API credentials).
+    llmcfg = {}
+    if os.path.isfile(llm_path):
+        llmcfg = json.load(open(llm_path, encoding="utf-8"))
     load_custom_faces(cast, os.path.dirname(os.path.dirname(HERE)), idx)
     items = assign_annotation_ids(
         split_strong_dialogue_items(parse_lines(script_path, cast), cast)
