@@ -60,6 +60,17 @@ def make_draft(drafts_dir, text, token="draft-http-1"):
 SAMPLE = "## 场景1\n凯伊: 第一句。\n老师: 第二句。\n"
 
 
+@pytest.mark.parametrize("value", ["auto", "main", "event", "bond"])
+def test_normalize_story_type_accepts_supported_values(value):
+    assert webui.normalize_story_type(value) == value
+
+
+def test_normalize_story_type_defaults_and_rejects_unknown_values():
+    assert webui.normalize_story_type(None) == "auto"
+    with pytest.raises(ValueError, match="invalid_story_type"):
+        webui.normalize_story_type("unknown")
+
+
 def test_strict_csp_is_applied_to_the_external_runtime(tmp_path, monkeypatch):
     """The markup-only shell is served with the strict CSP contract."""
     with draft_server(tmp_path, monkeypatch) as (base, _):
@@ -328,6 +339,59 @@ def test_annotate_endpoint_rejects_missing_script(tmp_path, monkeypatch):
         assert status == 400
 
 
+def test_annotate_endpoint_rejects_unknown_story_type_before_submitting_job(
+    tmp_path, monkeypatch,
+):
+    with draft_server(tmp_path, monkeypatch) as (base, _):
+        script = tmp_path / "剧本.txt"
+        script.write_text("凯伊: 你好。\n", encoding="utf-8")
+
+        status, res = req(base, "/api/annotate", {
+            "script": str(script),
+            "mapping": {"凯伊": {"kind": "portrait", "id": "kai"}},
+            "story_type": "side-story",
+        })
+
+        assert status == 400
+        assert res["code"] == "invalid_story_type"
+
+
+def test_legacy_build_endpoint_rejects_unknown_story_type(tmp_path, monkeypatch):
+    with draft_server(tmp_path, monkeypatch) as (base, _):
+        status, res = req(base, "/api/build", {"story_type": "side-story"})
+
+        assert status == 400
+        assert res["code"] == "invalid_story_type"
+
+
+def test_legacy_build_worker_forwards_story_type_to_annotator(tmp_path, monkeypatch):
+    source = tmp_path / "原稿.txt"
+    source.write_text("旁白: 保留原文\n", encoding="utf-8")
+    captured = {}
+
+    monkeypatch.setattr(webui, "HERE", str(tmp_path))
+    monkeypatch.setitem(webui.CFG, "aa_data", str(tmp_path / "aa-data"))
+    monkeypatch.setattr(webui, "db", lambda: object())
+    monkeypatch.setattr(webui, "prepare_project_index", lambda *args, **kwargs: None)
+    monkeypatch.setattr(webui, "attach_registered_variants", lambda *args, **kwargs: None)
+    monkeypatch.setattr(webui, "annotation_provider", lambda *_: object())
+    monkeypatch.setattr(webui, "pause_for_backgrounds", lambda *_: False)
+    monkeypatch.setattr(webui, "_compile_saved_context", lambda *_: None)
+
+    def fake_annotate(options, provider_instance=None):
+        captured["options"] = options
+        return {"text": "旁白: 保留原文\n"}
+
+    monkeypatch.setattr("annotate.annotate_script", fake_annotate)
+
+    webui.run_build({
+        "script": str(source), "project": "旧入口测试", "mapping": {},
+        "annotate": True, "story_type": "event",
+    })
+
+    assert captured["options"]["story_type"] == "event"
+
+
 def test_annotate_worker_can_create_review_draft_without_calling_model(tmp_path, monkeypatch):
     source = tmp_path / "原稿.txt"
     source.write_text("旁白: 保留原文\n@bg BG_Black\n", encoding="utf-8")
@@ -460,9 +524,11 @@ def test_annotate_worker_forwards_model_activity_and_returns_agent_metrics(tmp_p
     monkeypatch.setattr("annotate.annotate_script", fake_annotate)
     result = webui.annotate_draft_worker({
         "script": str(source), "project": "活动测试", "mapping": {}, "annotate": True,
+        "story_type": "event",
     }, job=job)
 
     assert captured["options"]["model_activity"] is not None
+    assert captured["options"]["story_type"] == "event"
     assert job.activities[-1] == {
         "state": "receiving",
         "model": "deepseek-v4-flash",
@@ -476,6 +542,7 @@ def test_annotate_worker_forwards_model_activity_and_returns_agent_metrics(tmp_p
         "uncached_input_tokens": 58682,
         "cache_hit_rate": pytest.approx(0.69, abs=0.01),
     }
+    assert result["story_type"] == "event"
 
 
 def test_install_options_and_confirmed_name_are_forwarded_through_http(

@@ -129,6 +129,14 @@ FACE_JOB = {
 }
 FACE_JOB_LOCK = threading.Lock()
 RESOURCE_INDEX_LOCK = threading.RLock()
+_STORY_TYPES = frozenset({"auto", "main", "event", "bond"})
+
+
+def normalize_story_type(value: object) -> str:
+    normalized = str(value or "auto").strip().lower()
+    if normalized not in _STORY_TYPES:
+        raise ValueError("invalid_story_type")
+    return normalized
 
 
 def _empty_resource_index_job() -> dict:
@@ -3028,6 +3036,7 @@ def run_build(payload, job=None):
         backgrounds_ready=False,
     )
     try:
+        story_type = normalize_story_type(payload.get("story_type"))
         script = payload["script"]
         project = build_project_name(payload)
         cast = {"default_bg": payload.get("bg") or "BG_Black",
@@ -3081,6 +3090,7 @@ def run_build(payload, job=None):
                 "out": out,
                 "cast": cpath,
                 "index": index_path,
+                "story_type": story_type,
             }
             if payload.get("provider"):
                 opts["provider"] = payload["provider"]
@@ -3119,6 +3129,7 @@ def run_build(payload, job=None):
 def annotate_draft_worker(payload, job=None):
     """AI 演出标注 -> 建草稿 -> 存 cast/proposals。供 /api/annotate 的 Job 调用。"""
     import annotate as ANN
+    story_type = normalize_story_type(payload.get("story_type"))
     project = build_project_name(payload)
     cast = {"default_bg": payload.get("bg") or "BG_Black",
             "default_bgm": 999, "scene_bg": payload.get("scene_bg") or {},
@@ -3191,6 +3202,7 @@ def annotate_draft_worker(payload, job=None):
             "progress": annotation_progress,
             "model_activity": annotation_model_activity,
             "cancelled": job.is_cancel_requested if job else None,
+            "story_type": story_type,
         }
         if payload.get("provider"):
             opts["provider"] = payload["provider"]
@@ -3204,7 +3216,7 @@ def annotate_draft_worker(payload, job=None):
         if result.get("cancelled"):
             return {"project": project, "lines": 0, "proposals": 0,
                     "diagnostics": result.get("diagnostics") or [], "cancelled": True,
-                    "agent": result.get("agent") or {}}
+                    "agent": result.get("agent") or {}, "story_type": story_type}
     else:
         annotated = source_text
 
@@ -3222,7 +3234,9 @@ def annotate_draft_worker(payload, job=None):
             "lines": len(annotated.splitlines()), "proposals": len(proposals),
              "resumed_chunks": int(agent.get("resumed_chunks") or 0),
              "timed_out": bool(agent.get("timed_out")),
-             "agent_metrics": dict(agent.get("metrics") or {})}
+             "agent_metrics": dict(agent.get("metrics") or {}),
+             "diagnostics": result.get("diagnostics") or [],
+             "story_type": story_type}
 
 
 def get_draft_detail_data(token, store=None):
@@ -4573,6 +4587,13 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/annotate":
                 mapping = data.get("mapping")
                 try:
+                    data["story_type"] = normalize_story_type(data.get("story_type"))
+                except ValueError:
+                    return self._send(400, {
+                        "ok": False, "code": "invalid_story_type",
+                        "e": "invalid story type",
+                    })
+                try:
                     context = inherit_story_context(data)
                 except StoryProjectMismatchError:
                     return self._send(409, {"ok": False, "code": "project_mismatch", "e": "project does not match story"})
@@ -4799,6 +4820,7 @@ class H(BaseHTTPRequestHandler):
                 return self._send(400, {"ok": False, "e": str(exc)})
         if p == "/api/build":
             try:
+                data["story_type"] = normalize_story_type(data.get("story_type"))
                 inherit_story_context(data)
                 project_name = build_project_name(data)
             except StoryProjectMismatchError:
@@ -4807,7 +4829,12 @@ class H(BaseHTTPRequestHandler):
                     "e": "project does not match story",
                 })
             except ValueError as exc:
-                return self._send(400, {"ok": False, "e": str(exc)})
+                code = (
+                    "invalid_story_type"
+                    if str(exc) == "invalid_story_type"
+                    else "bad_request"
+                )
+                return self._send(400, {"ok": False, "code": code, "e": str(exc)})
             if not reserve_build_job():
                 return self._send(409, {"e": "已有任务在跑"})
 

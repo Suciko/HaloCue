@@ -39,6 +39,16 @@ import prompt as PROMPT                                        # noqa: E402
 import tables                                                  # noqa: E402
 
 
+_STORY_TYPES = frozenset({"auto", "main", "event", "bond"})
+
+
+def normalize_story_type(value):
+    normalized = str(value or "auto").strip().lower()
+    if normalized not in _STORY_TYPES:
+        raise ValueError("invalid_story_type")
+    return normalized
+
+
 def is_face_allowed(allow, face):
     """表情表未知时拒绝模型猜测；只有明确存在的 faceId 才能写入。"""
     return bool(allow) and face in allow
@@ -648,7 +658,7 @@ SCHEMA = {
     "additionalProperties": False,
 }
 
-def build_static(idx, cast, cast_names):
+def build_static(idx, cast, cast_names, *, story_type="auto"):
     """跨请求不变的系统提示词 —— 这部分会被缓存。规则正文在 prompt.py。"""
     capabilities = idx.get("face_capabilities") or {}
     if capabilities:
@@ -681,11 +691,15 @@ def build_static(idx, cast, cast_names):
                     "_expression_parts", record.get("expression_parts", [])
                 ),
             }
-        return PROMPT.build_system(idx, cast, cast_names, faces_by_id)
+        return PROMPT.build_system(
+            idx, cast, cast_names, faces_by_id, story_type=story_type
+        )
     faces_by_id = {c["identifier"]: c["faces"] for c in idx["characters"] if c["faces"]}
     for ident, fs in (idx.get("faces_used") or {}).items():
         faces_by_id.setdefault(ident, fs)
-    return PROMPT.build_system(idx, cast, cast_names, faces_by_id)
+    return PROMPT.build_system(
+        idx, cast, cast_names, faces_by_id, story_type=story_type
+    )
 
 
 def build_annotation_static_system(static_rules, source_text, *, source_context_strategy="preserve"):
@@ -964,6 +978,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     provider_name = options.get("provider")
     range_str = options.get("range")
     dry_run = options.get("dry_run", False)
+    story_type = normalize_story_type(options.get("story_type"))
     raw_usage_chain = options.get("usage_chain")
     usage_chain = raw_usage_chain[:80] if isinstance(raw_usage_chain, list) else []
     usage_chain_context = ""
@@ -1004,7 +1019,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     prompt_idx["bg"] = dict(idx.get("bg", {}))
     for background in constraints.get("confirmed_bg") or set():
         prompt_idx["bg"].setdefault(background, 0)
-    static = build_static(prompt_idx, cast, used)
+    static = build_static(prompt_idx, cast, used, story_type=story_type)
 
     print(f"剧本      {script_path}")
     print(f"待标注    {len(todo)} 行台词（全文 {len(dialog)} 行）")
@@ -1015,7 +1030,10 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         print("\n" + "=" * 60)
         print(static[:3000])
         print("…（截断）")
-        return {"text": "", "proposals": [], "diagnostics": [], "out": out_path}
+        return {
+            "text": "", "proposals": [], "diagnostics": [], "out": out_path,
+            "story_type": story_type,
+        }
 
     prov = provider_instance or make_provider(llm_path, provider_name)
     print(f"模型      {prov.name} / {prov.model}\n")
@@ -1029,9 +1047,6 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     agent_meta = {}
     annotation_beats = []
     if agent_enabled:
-        story_type = str(options.get("story_type") or "auto").strip().lower()
-        if story_type not in {"auto", "main", "event", "bond"}:
-            story_type = "auto"
         script_text = open(script_path, encoding="utf-8").read()
         agent_static = build_annotation_static_system(
             static,
@@ -1083,7 +1098,8 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         }
         if agent_meta["cancelled"]:
             return {"text": "", "proposals": [], "diagnostics": diagnostics,
-                    "out": out_path, "agent": agent_meta, "cancelled": True}
+                    "out": out_path, "agent": agent_meta, "cancelled": True,
+                    "story_type": story_type}
         rows_by_id = agent_result["rows_by_id"]
         annotation_beats = agent_result.get("beats") or []
         for item_index in todo:
@@ -1173,6 +1189,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         "diagnostics": diagnostics,
         "out": out_path,
         "agent": agent_meta,
+        "story_type": story_type,
     }
 
 
@@ -1184,6 +1201,7 @@ def main(provider_instance=None):
     ap.add_argument("--index", default=os.path.join(HERE, "aa_resources.json"))
     ap.add_argument("--llm", default=os.path.join(HERE, "llm.json"))
     ap.add_argument("--provider", help="覆盖 llm.json 里的 provider")
+    ap.add_argument("--story-type", choices=sorted(_STORY_TYPES), default="auto")
     ap.add_argument("--range", help="只处理这些台词行，如 1-80")
     ap.add_argument("--dry-run", action="store_true", help="只打印将要发送的提示词，不调 API")
     a = ap.parse_args()
@@ -1195,6 +1213,7 @@ def main(provider_instance=None):
         "index": a.index,
         "llm": a.llm,
         "provider": a.provider,
+        "story_type": a.story_type,
         "range": a.range,
         "dry_run": a.dry_run,
     }
