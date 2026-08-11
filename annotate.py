@@ -10,7 +10,7 @@ script2aap.py。任何超出资源表的标注都会被丢弃并告警——模�
   python annotate.py 剧本.txt --range 1-80          只标注前 80 行（先试水）
 """
 import argparse, hashlib, json, os, re, sys, uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 
 sys.stdout.reconfigure(encoding="utf-8")
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -440,7 +440,38 @@ def annotation_directives(item):
         directives.append(f"# 待生成自定义背景：{item['bg_request']}")
     if item.get("shot"):
         directives.append(f"@shot {item['shot']}")
+    director = item.get("_director")
+    if not isinstance(director, Mapping):
+        return directives
+    intent = item.get("_director_intent")
+    visibility_is_explicit = (
+        "visible_characters" in intent
+        if isinstance(intent, Mapping)
+        else "visible_characters" in director
+    )
+    if visibility_is_explicit:
+        visible = list(dict.fromkeys(
+            str(name) for name in director.get("visible_characters", []) if str(name)
+        ))[:5]
+        directives.append(f"@camera {','.join(visible)}" if visible else "@camera -")
+    continuity = director.get("continuity")
+    fx_command = continuity.get("fx") if isinstance(continuity, Mapping) else "none"
+    target = str(director.get("focus_character") or item.get("who") or "")
+    if target and fx_command == "end":
+        directives.append(f"@fx {target} 无")
+    elif target and fx_command in {"start", "escalate"} and item.get("fx"):
+        directives.append(f"@fx {target} {item['fx']}")
     return directives
+
+
+def _has_explicit_fx_lifecycle(item):
+    director = item.get("_director")
+    continuity = director.get("continuity") if isinstance(director, Mapping) else None
+    return (
+        isinstance(continuity, Mapping)
+        and continuity.get("fx") in {"start", "escalate"}
+        and bool(item.get("fx"))
+    )
 
 
 def bind_registered_custom_variants(cast, idx):
@@ -617,7 +648,7 @@ def render(item):
         anno += f"[{item['emo']}]"
     if item.get("act"):
         anno += "{" + item["act"] + "}"
-    if item.get("fx"):
+    if item.get("fx") and not _has_explicit_fx_lifecycle(item):
         anno += f"<{item['fx']}>"
     return f"{item['who']}{anno}: {item['text']}"
 
@@ -730,6 +761,8 @@ def apply_annotation_response_row(
             displayable_names=displayable_names,
         )
         item["_director"] = director
+        if isinstance(row.get("direction_intent"), Mapping):
+            item["_director_intent"] = dict(row["direction_intent"])
         source_id = str(item.get("annotation_id") or "")
         diagnostic_sink.extend({**entry, "source_id": source_id} for entry in director_diagnostics)
     clean, rejected, rejected_details = filter_annotation_row(

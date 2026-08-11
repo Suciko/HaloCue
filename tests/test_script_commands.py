@@ -254,3 +254,73 @@ def test_shot_target_is_rejected_when_that_character_is_not_on_screen(tmp_path):
 
     assert scenes[0][1][0]["additionalPrompt"] == ""
     assert any("不在当前画面" in message for _, message in warn.items)
+
+
+def test_camera_dash_compiles_an_empty_shot(tmp_path):
+    script = tmp_path / "empty-shot.txt"
+    script.write_text("@camera -\nAlice: 画外声音\n", encoding="utf-8")
+    cast = {"Alice": {"id": "alice", "portrait": True}}
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+
+    row = build(
+        parse_script(script, cast), {"camera": {"enabled": False}},
+        cast, index, "empty-shot",
+    )[0][1][0]
+
+    assert row["speakerSlotNum"] == 0
+    assert not any(character["name"] for character in row["characters"]["$values"][1:])
+
+
+def test_explicit_camera_is_one_shot_and_deduplicates_names(tmp_path):
+    script = tmp_path / "listener-shot.txt"
+    script.write_text(
+        "@camera Bob,Bob\nAlice: first\nAlice: second\n",
+        encoding="utf-8",
+    )
+    cast = {
+        "Alice": {"id": "alice", "portrait": True},
+        "Bob": {"id": "bob", "portrait": True},
+    }
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+
+    rows = build(parse_script(script, cast), {}, cast, index, "listener-shot")[0][1]
+
+    assert [
+        char["name"] for char in rows[0]["characters"]["$values"][1:]
+        if char["name"]
+    ] == ["bob"]
+    assert rows[0]["speakerSlotNum"] == 0
+    assert any(char["name"] == "alice" for char in rows[1]["characters"]["$values"][1:])
+
+
+def test_invalid_explicit_camera_falls_back_to_automatic_shot(tmp_path):
+    script = tmp_path / "invalid-camera.txt"
+    script.write_text("@camera Bob,Missing\nAlice: first\n", encoding="utf-8")
+    cast = {
+        "Alice": {"id": "alice", "portrait": True},
+        "Bob": {"id": "bob", "portrait": True},
+    }
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+    warn.items.clear()
+
+    row = build(parse_script(script, cast), {}, cast, index, "invalid-camera")[0][1][0]
+
+    assert any(char["name"] == "alice" for char in row["characters"]["$values"][1:])
+    assert not any(char["name"] == "bob" for char in row["characters"]["$values"][1:])
+    assert any("未知角色" in message for _, message in warn.items)
+
+
+def test_explicit_camera_caps_visible_portraits_at_five(tmp_path):
+    names = ["A", "B", "C", "D", "E", "F"]
+    script = tmp_path / "five-camera.txt"
+    script.write_text("@camera " + ",".join(names) + "\nA: first\n", encoding="utf-8")
+    cast = {name: {"id": name.lower(), "portrait": True} for name in names}
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+    warn.items.clear()
+
+    row = build(parse_script(script, cast), {}, cast, index, "five-camera")[0][1][0]
+    visible = [char["name"] for char in row["characters"]["$values"][1:] if char["name"]]
+
+    assert len(visible) == 5
+    assert "f" not in visible
+    assert any("最多显示 5 个立绘" in message for _, message in warn.items)

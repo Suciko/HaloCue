@@ -141,6 +141,7 @@ SYNTAX = """
   @move 桃井 1                    走位到位置1
   @stage 桃井@1 绿@3 柚子@5        钉死站位，关掉自动排布
   @auto                          恢复自动排布
+  @camera 绿,柚子                 下一行只显示这些角色；@camera - 表示明确空镜
   @fx 绿 特写                     立绘效果：特写 / 剪影 / 变暗 / 无
   @hl 桃井,柚子                   本行高亮谁；@hl - 表示都不高亮
                                  默认是台上除说话者外全部高亮
@@ -407,6 +408,7 @@ class Pending:
         self.exit = []           # (ident, appear值)
         self.move = {}           # ident -> 目标位置
         self.fx = {}             # ident -> shapeOverride
+        self.camera = None       # None=自动；[]=空镜；[ident...]=下一行明确镜头
         self.hl = None           # None=自动；[]=都不高亮；[ident...]=指定
 
     def prompt(self):
@@ -609,6 +611,29 @@ def build(events, cfg, cast, idx, project):
                 elif cmd == "auto":
                     st.auto = True
                     st.pinned.clear()
+                elif cmd == "camera":
+                    value = arg.strip()
+                    if value in ("-", "无", "none"):
+                        pend.camera = []
+                    else:
+                        names = [
+                            name for name in re.split(r"[,，、\s]+", value) if name
+                        ]
+                        if not names:
+                            warn(no, "@camera 要跟角色名，或使用 - 表示空镜")
+                        else:
+                            resolved = []
+                            valid = True
+                            for name in names:
+                                ident = ident_of(name, no)
+                                if ident is None:
+                                    valid = False
+                                elif ident not in resolved:
+                                    resolved.append(ident)
+                            if valid:
+                                if len(resolved) > 5:
+                                    warn(no, "@camera 最多显示 5 个立绘，已保留前 5 个")
+                                pend.camera = resolved[:5]
                 elif cmd == "fx":
                     p = arg.split(None, 1)
                     if len(p) < 2:
@@ -658,7 +683,9 @@ def build(events, cfg, cast, idx, project):
             #    不在镜的人**直接不写进数组**，编译器会发 #N;hide 让他消失 ——
             #    这就是剪辑。跟 @exit 的进出场动画是两回事：那个表示人离开了房间。
             want = None
-            if cam_plan is not None and cam_i < len(cam_plan):
+            if pend.camera is not None:
+                want = [w for w in pend.camera if w not in leaving]
+            elif cam_plan is not None and cam_i < len(cam_plan):
                 want = [w for w in cam_plan[cam_i] if w not in leaving]
             cam_i += 1
 

@@ -72,6 +72,19 @@ def plan_camera(lines, opts=None):
             held = 0
         sp = ln.get("speaker")
 
+        if "visible_characters" in ln and isinstance(ln["visible_characters"], (list, tuple)):
+            before = list(cam)
+            cam = list(dict.fromkeys(
+                str(name) for name in ln["visible_characters"] if str(name)
+            ))[:5]
+            seen.update(cam)
+            if sp:
+                seen.add(sp)
+                last_spoke[sp] = i
+            held = 1 if cam != before else held + 1
+            out.append(list(cam))
+            continue
+
         # 旁白 / 无立绘角色
         if not sp:
             # 连着两行以上旁白 = 镜头离开人物，退空镜。
