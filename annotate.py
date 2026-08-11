@@ -859,6 +859,9 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     agent_meta = {}
     annotation_beats = []
     if agent_enabled:
+        story_type = str(options.get("story_type") or "auto").strip().lower()
+        if story_type not in {"auto", "main", "event", "bond"}:
+            story_type = "auto"
         script_text = open(script_path, encoding="utf-8").read()
         agent_static = build_annotation_static_system(
             static,
@@ -877,8 +880,9 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         }
         fingerprint = build_run_fingerprint(
             script_text, cast, idx,
-            hashlib.sha256(static.encode("utf-8")).hexdigest()[:16], 2, "scene-v2",
+            hashlib.sha256(static.encode("utf-8")).hexdigest()[:16], 3, "scene-v3",
             model_config,
+            story_type=story_type, director_version="stateful-v1",
         )
         checkpoint_dir = options.get("checkpoint_dir") or os.path.join(HERE, "out", "annotation-checkpoints")
         agent_result = run_annotation_agent(
@@ -896,6 +900,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             reasoning_mode=str(getattr(prov, "cfg", {}).get("reasoning_mode") or "balanced"),
             annotation_max_tokens=int(getattr(prov, "cfg", {}).get("annotation_max_tokens") or getattr(prov, "cfg", {}).get("max_tokens", 16000)),
             context_window_tokens=int(getattr(prov, "cfg", {}).get("context_window_tokens") or 0) or None,
+            story_type=story_type,
         )
         diagnostics.extend(agent_result.get("diagnostics") or [])
         agent_meta = {

@@ -68,6 +68,12 @@ class ChunkProtocolError(ValueError):
         self.retryable = retryable
 
 
+class _ExpandedChunkResponse(dict):
+    def __init__(self, *args: Any, director_intents: Mapping[str, Any], **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self.director_intents = dict(director_intents)
+
+
 def _field(name: str, description: str, field_type: str = "string") -> Dict[str, Any]:
     value: Dict[str, Any] = {"type": field_type, "description": description}
     if field_type == "integer":
@@ -115,6 +121,24 @@ def _validate_direction_wire(value: Any, field: str) -> Mapping[str, Any]:
     if any(not isinstance(command, str) for command in continuity.values()):
         raise ChunkProtocolError("invalid_line", f"{field}.continuity values must be strings")
     return direction
+
+
+def _normalized_direction_intent(
+    raw: Mapping[str, Any], normalized: Mapping[str, Any],
+) -> Dict[str, Any]:
+    intent: Dict[str, Any] = {}
+    for name in raw:
+        if name == "visible_characters":
+            intent[name] = list(normalized[name])
+        elif name == "continuity":
+            intent[name] = {
+                layer: normalized[name][layer]
+                for layer in raw[name]
+                if layer in normalized[name]
+            }
+        else:
+            intent[name] = normalized[name]
+    return intent
 
 
 def build_chunk_schema(target_ids: Sequence[str]) -> Dict[str, Any]:
@@ -231,6 +255,7 @@ def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, 
         raise ChunkProtocolError("invalid_lines", "lines 必须是数组")
     expanded = []
     seen = set()
+    director_intents: Dict[str, Dict[str, Any]] = {}
     for compact in lines:
         compact = _require_dict(compact, "invalid_line", "compact line 必须是对象")
         index = compact.get("i")
@@ -258,6 +283,8 @@ def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, 
             if name != "continuity"
         })
         row["direction"]["continuity"].update(continuity_patch)
+        if "d" in compact:
+            director_intents[row["source_id"]] = dict(direction_patch)
         for name in ANNOTATION_FIELDS:
             if name in compact:
                 row[name] = compact[name]
@@ -291,12 +318,12 @@ def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, 
             mapped_ids.append(str(targets[source_index - 1].get("annotation_id") or ""))
         expanded_event["source_ids"] = mapped_ids
         expanded_events.append(expanded_event)
-    return {
+    return _ExpandedChunkResponse({
         "lines": expanded,
         "state_delta": response.get("state_delta", {}),
         "memory_events": expanded_events,
         **({"beats": expanded_beats} if "beats" in response else {}),
-    }
+    }, director_intents=director_intents)
 
 
 def _validate_beats(
@@ -425,6 +452,8 @@ def validate_chunk_response(
     response: Any, targets: Sequence[Mapping[str, Any]], visible_ids: Iterable[str] = (),
     *, cast: Mapping[str, Any] = {}, constraints: Mapping[str, Any] = {},
 ) -> Dict[str, Any]:
+    expanded_compact = isinstance(response, _ExpandedChunkResponse)
+    director_intents = getattr(response, "director_intents", {})
     response = _require_dict(response, "invalid_response", "模型响应必须是对象")
     lines = response.get("lines")
     if not isinstance(lines, list):
@@ -455,6 +484,13 @@ def validate_chunk_response(
         )
         normalized_row = dict(row)
         normalized_row["direction"] = direction
+        raw_intent = (
+            director_intents.get(source_id, {})
+            if expanded_compact else row.get("direction", {})
+        )
+        normalized_row["direction_intent"] = _normalized_direction_intent(
+            raw_intent if isinstance(raw_intent, Mapping) else {}, direction,
+        )
         rows_by_id[source_id] = normalized_row
         diagnostics.extend(row_diagnostics)
     missing = set(expected) - seen

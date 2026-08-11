@@ -94,6 +94,28 @@ def test_unknown_director_character_degrades_with_diagnostic_without_losing_sour
     assert any(item["code"] == "director_unknown_character" for item in result["diagnostics"])
 
 
+def test_visible_character_intent_distinguishes_omission_from_explicit_empty_shot():
+    omitted = validate_chunk_response(complete_response(), TARGETS)
+    explicit_response = complete_response()
+    explicit_response["lines"][0]["direction"] = {"visible_characters": []}
+    explicit = validate_chunk_response(explicit_response, TARGETS)
+
+    assert omitted["lines_by_id"]["src-1-0-a"]["direction_intent"] == {}
+    assert explicit["lines_by_id"]["src-1-0-a"]["direction_intent"] == {
+        "visible_characters": [],
+    }
+
+    compact = expand_compact_chunk_response({
+        "lines": [{"i": 1, "d": {"visible_characters": []}}, {"i": 2}],
+        "state_delta": {}, "memory_events": [],
+    }, TARGETS)
+    compact_validated = validate_chunk_response(compact, TARGETS)
+    assert compact_validated["lines_by_id"]["src-1-0-a"]["direction_intent"] == {
+        "visible_characters": [],
+    }
+    assert compact_validated["lines_by_id"]["src-2-0-b"]["direction_intent"] == {}
+
+
 @pytest.mark.parametrize("lines,code", [
     ([row("src-1-0-a", "fp-a")], "missing_target"),
     ([row("src-1-0-a", "fp-a"), row("src-1-0-a", "fp-a")], "duplicate_target"),
@@ -403,6 +425,12 @@ def test_compact_direction_expands_and_omitted_direction_uses_defaults():
     }
     assert expanded["lines"][1]["direction"]["scene_type"] == "other"
     assert expanded["lines"][1]["direction"]["focus_kind"] == "speaker"
+
+    validated = validate_chunk_response(expanded, TARGETS)
+    assert validated["lines_by_id"]["src-1-0-a"]["direction_intent"] == {
+        "scene_type": "event", "continuity": {"face": "hold"},
+    }
+    assert validated["lines_by_id"]["src-2-0-b"]["direction_intent"] == {}
 
 
 def test_compact_response_expands_beat_anchor_index_to_source_id():

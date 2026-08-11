@@ -10,6 +10,33 @@ from annotation_memory import (
 )
 
 
+def test_initial_memory_contains_director_state():
+    memory = initial_memory("summary", "bond")
+
+    assert memory["story"]["type"] == "bond"
+    assert memory["scene"]["scene_type"] == "bond"
+    assert memory["direction"]["focus"] == {"kind": "speaker", "character": ""}
+    assert memory["direction"]["continuity"] == {}
+
+
+def test_fingerprint_changes_when_director_version_or_story_type_changes():
+    base = build_run_fingerprint(
+        "text", {}, {}, "p", 3, "scene-v3", {},
+        story_type="main", director_version="d1",
+    )
+    changed_type = build_run_fingerprint(
+        "text", {}, {}, "p", 3, "scene-v3", {},
+        story_type="bond", director_version="d1",
+    )
+    changed_version = build_run_fingerprint(
+        "text", {}, {}, "p", 3, "scene-v3", {},
+        story_type="main", director_version="d2",
+    )
+
+    assert base != changed_type
+    assert base != changed_version
+
+
 def test_state_delta_preserves_background_and_rejects_unknown_character():
     memory = initial_memory("约会故事")
     updated = apply_state_delta(
@@ -69,6 +96,27 @@ def test_context_marks_target_past_and_future_and_limits_events():
     event_payload = volatile.split("RELEVANT_MEMORY_EVENTS\n", 1)[1]
     assert len(json.loads(event_payload)) == 8
     assert "不得标注 FUTURE_CONTEXT" in user
+
+
+def test_context_emits_bounded_director_context_and_continuity_instruction():
+    items = make_items(3)
+    memory = initial_memory("summary", "bond")
+    memory["direction"]["emotion_phase"] = "x" * 5000
+
+    volatile, user = assemble_chunk_context(
+        items=items,
+        chunk={"scene_id": "scene-1", "target_indices": [0, 1]},
+        memory=memory, events=[], usage_chain=[], story_type="bond",
+        before=0, after=0,
+    )
+
+    marker = volatile.split("DIRECTOR_CONTEXT\n", 1)[1].split("\n\n", 1)[0]
+    director_context = json.loads(marker)
+    assert director_context["story_type"] == "bond"
+    assert director_context["scene_type"] == "bond"
+    assert len(marker) <= 4000
+    assert "continuity" in user.lower()
+    assert "line" in user.lower()
 
 
 def test_target_context_uses_short_indices_without_full_fingerprints():

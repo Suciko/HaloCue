@@ -13,19 +13,34 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from annotation_chunks import context_indices
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+STORY_TYPES = {"auto", "main", "event", "bond"}
 TRANSIENT_BGFX = {"集中线", "闪白", "闪电", "传送", "BG_FocusLine", "BG_Flash", "BG_Flash_Sound", "BG_Teleport"}
 
 
-def initial_memory(story_summary: str = "") -> Dict[str, Any]:
+def _story_type(value: Any) -> str:
+    normalized = str(value or "auto").strip().lower()
+    return normalized if normalized in STORY_TYPES else "auto"
+
+
+def initial_memory(story_summary: str = "", story_type: str = "auto") -> Dict[str, Any]:
+    normalized_story_type = _story_type(story_type)
     return {
         "schema_version": SCHEMA_VERSION,
-        "story": {"summary": str(story_summary or ""), "relationships": {}, "open_threads": []},
-        "scene": {"id": "", "location": "", "time": "", "purpose": "", "mood": "", "summary": ""},
+        "story": {
+            "summary": str(story_summary or ""), "type": normalized_story_type,
+            "relationships": {}, "open_threads": [],
+        },
+        "scene": {
+            "id": "", "location": "", "time": "", "purpose": "", "mood": "", "summary": "",
+            "scene_type": normalized_story_type if normalized_story_type != "auto" else "other",
+        },
         "direction": {
             "background": None, "place": None, "bgfx": None,
             "visible_characters": [], "positions": {}, "last_faces": {},
             "recent_emoticons": [], "recent_actions": [], "recent_sounds": [],
+            "focus": {"kind": "speaker", "character": ""},
+            "relation_distance": "normal", "emotion_phase": "", "continuity": {},
         },
         "events": [],
         "progress": {"completed_chunks": [], "completed_target_ids": [], "next_scene_id": ""},
@@ -89,6 +104,7 @@ def apply_state_delta(memory: Mapping[str, Any], delta: Mapping[str, Any], *, ca
 
 def complete_scene(memory: Mapping[str, Any], scene: Mapping[str, Any], summary: str) -> Dict[str, Any]:
     updated = copy.deepcopy(dict(memory))
+    previous_scene_type = str((updated.get("scene") or {}).get("scene_type") or "other")
     updated["scene"] = {
         "id": str(scene.get("scene_id") or ""),
         "location": str(scene.get("location") or ""),
@@ -96,6 +112,7 @@ def complete_scene(memory: Mapping[str, Any], scene: Mapping[str, Any], summary:
         "purpose": str(scene.get("purpose") or ""),
         "mood": str(scene.get("mood") or ""),
         "summary": str(summary or "")[:1200],
+        "scene_type": str(scene.get("scene_type") or previous_scene_type)[:32],
     }
     return updated
 
@@ -110,20 +127,58 @@ def assemble_chunk_context(
     items: Sequence[Mapping[str, Any]], chunk: Mapping[str, Any], memory: Mapping[str, Any],
     events: Sequence[Mapping[str, Any]], usage_chain: Sequence[Mapping[str, Any]], *,
     before: int = 15, after: int = 10, max_events: int = 8, compact: bool = False,
+    story_type: str = "auto",
 ) -> Tuple[str, str]:
     dialogue = [i for i, item in enumerate(items) if item.get("kind") == "line"]
     past, future = context_indices(dialogue, dict(chunk), before=before, after=after)
     targets = list(chunk.get("target_indices") or [])
     selected = list(events)[:max_events]
+    direction = memory.get("direction") or {}
+    scene = memory.get("scene") or {}
+    focus = direction.get("focus") if isinstance(direction.get("focus"), Mapping) else {}
+    continuity = direction.get("continuity") if isinstance(direction.get("continuity"), Mapping) else {}
+    normalized_story_type = _story_type(story_type)
+    director_context = {
+        "story_type": normalized_story_type,
+        "scene_type": str(scene.get("scene_type") or (
+            normalized_story_type if normalized_story_type != "auto" else "other"
+        ))[:32],
+        "focus": {
+            "kind": str(focus.get("kind") or "speaker")[:32],
+            "character": str(focus.get("character") or "")[:160],
+        },
+        "relation_distance": str(direction.get("relation_distance") or "normal")[:32],
+        "emotion_phase": str(direction.get("emotion_phase") or "")[:160],
+        "continuity": {
+            name: str(continuity.get(name) or "")[:160]
+            for name in ("face", "emo", "act", "fx", "bgfx")
+            if name in continuity
+        },
+        "visible_characters": _bounded_strings(direction.get("visible_characters"), 8),
+    }
+    positions = direction.get("positions") if isinstance(direction.get("positions"), Mapping) else {}
+    direction_snapshot = {
+        "background": str(direction.get("background") or "")[:160],
+        "place": str(direction.get("place") or "")[:80],
+        "bgfx": str(direction.get("bgfx") or "")[:80],
+        "visible_characters": _bounded_strings(direction.get("visible_characters"), 8),
+        "positions": {
+            str(name)[:160]: value for name, value in positions.items()
+            if isinstance(value, int)
+        },
+        **director_context,
+    }
     volatile_parts = [
         "CURRENT_STORY_MEMORY\n" + json.dumps(memory.get("story") or {}, ensure_ascii=False, separators=(",", ":")),
         "CURRENT_SCENE_MEMORY\n" + json.dumps(memory.get("scene") or {}, ensure_ascii=False, separators=(",", ":")),
-        "CURRENT_DIRECTION_STATE\n" + json.dumps(memory.get("direction") or {}, ensure_ascii=False, separators=(",", ":")),
+        "CURRENT_DIRECTION_STATE\n" + json.dumps(direction_snapshot, ensure_ascii=False, separators=(",", ":")),
+        "DIRECTOR_CONTEXT\n" + json.dumps(director_context, ensure_ascii=False, separators=(",", ":")),
     ]
     if usage_chain:
         volatile_parts.append("CONFIRMED_USAGE_CHAIN\n" + json.dumps(list(usage_chain)[:80], ensure_ascii=False, separators=(",", ":"))[:16000])
     volatile_parts.append("RELEVANT_MEMORY_EVENTS\n" + json.dumps(selected, ensure_ascii=False, separators=(",", ":")))
     body = [
+        "Update continuity across lines from DIRECTOR_CONTEXT; do not reset direction state for each line.",
         "只为 TARGET 行输出标注；PAST_CONTEXT 和 FUTURE_CONTEXT 只用于理解，不得标注 FUTURE_CONTEXT。",
         ("响应协议：只返回一个 JSON 对象；lines 使用从 1 开始的 i 对应 TARGET 顺序，只填写有值的演出字段；"
          "不复述规则、哈希、原文或候选比较；每行只做一次决策，完成语义判断后立即返回 JSON。"
@@ -150,6 +205,7 @@ def build_run_fingerprint(
     script_text: str, cast: Mapping[str, Any], resources: Mapping[str, Any],
     prompt_version: str, schema_version: int, chunk_version: str,
     model_config: Mapping[str, Any], scene_hashes: Optional[Sequence[str]] = None,
+    *, story_type: str = "auto", director_version: str = "",
 ) -> Dict[str, Any]:
     safe_model = {
         "provider": str(model_config.get("provider") or ""),
@@ -163,6 +219,7 @@ def build_run_fingerprint(
         "script_sha256": _sha(script_text), "cast_sha256": _sha(cast),
         "resources_sha256": _sha(resources), "prompt_version": str(prompt_version),
         "schema_version": int(schema_version), "chunk_version": str(chunk_version),
+        "story_type": _story_type(story_type), "director_version": str(director_version or ""),
         "model": safe_model, "scene_hashes": list(scene_hashes or []),
     }
 
@@ -206,7 +263,10 @@ class AnnotationCheckpointStore:
         old_hashes = list(saved_fp.get("scene_hashes") or [])
         new_hashes = list(current_fp.get("scene_hashes") or [])
         first_changed = next((i for i, pair in enumerate(zip(old_hashes, new_hashes)) if pair[0] != pair[1]), min(len(old_hashes), len(new_hashes)))
-        structural = all(saved_fp.get(key) == current_fp.get(key) for key in ("prompt_version", "schema_version", "chunk_version", "model"))
+        structural = all(saved_fp.get(key) == current_fp.get(key) for key in (
+            "prompt_version", "schema_version", "chunk_version", "director_version",
+            "story_type", "model",
+        ))
         exact = saved_fp == current_fp
         restart = scene_ids[first_changed] if first_changed < len(scene_ids) else None
         return {

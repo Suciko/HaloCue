@@ -81,10 +81,12 @@ def fixture(
 ):
     items = make_items(count)
     constraints = {"ok_bg": {"BG_Street"}, "faces_by_id": {"kei": {"00"}}}
+    story_type = str(agent_options.get("story_type") or "auto")
     fingerprint = build_run_fingerprint(
         "\n".join(item.get("raw", "") for item in items), {"凯伊": {"id": "kei"}},
         {"bg": ["BG_Street"]}, "v1", 1, "v1",
         {"provider": "fake", "model": "fake", "max_tokens": 16000},
+        story_type=story_type, director_version="stateful-v1",
     )
     return run_annotation_agent(
         items, provider=provider, static_system="rules", cast={"凯伊": {"id": "kei", "portrait": True}},
@@ -103,6 +105,61 @@ def test_agent_carries_state_and_event_into_next_chunk(tmp_path):
     assert "记住第一句" in provider.requests[1]["volatile"]
     assert result["completed_chunks"] == 2
     assert len(result["rows_by_id"]) == 70
+
+
+def test_agent_persists_line_focus_and_continuity_without_overwriting_visible_snapshot(tmp_path):
+    class DirectorProvider(RecordingProvider):
+        def complete_json(self, static, volatile, user, schema):
+            response = super().complete_json(static, volatile, user, schema)
+            if self.calls == 1:
+                response["lines"][-1]["fx"] = "communication"
+                response["lines"][-1]["direction"] = {
+                    "scene_type": "bond",
+                    "focus_kind": "listener",
+                    "focus_character": "凯伊",
+                    "visible_characters": [],
+                    "relation_distance": "approaching",
+                    "emotion_phase": "waiting",
+                    "continuity": {"fx": "start"},
+                }
+            return response
+
+    provider = DirectorProvider()
+    result = fixture(tmp_path, provider, count=70, story_type="bond")
+
+    assert result["memory"]["direction"]["focus"] == {
+        "kind": "listener", "character": "凯伊",
+    }
+    assert result["memory"]["direction"]["continuity"]["fx"] == "communication"
+    assert result["memory"]["direction"]["visible_characters"] == ["凯伊"]
+    assert '"character":"凯伊"' in provider.requests[1]["volatile"]
+
+    checkpoint_path = next(tmp_path.rglob("checkpoint.json"))
+    checkpoint = AnnotationCheckpointStore(tmp_path).load(checkpoint_path.parent.name)
+    assert checkpoint["schema_version"] == 2
+    assert checkpoint["director_plan"]["story_type"] == "bond"
+    assert checkpoint["memory"]["story"]["type"] == "bond"
+
+
+def test_partial_director_intent_does_not_reset_prior_focus(tmp_path):
+    character = make_items(1)[0]["who"]
+
+    class PartialDirectorProvider(RecordingProvider):
+        def complete_json(self, static, volatile, user, schema):
+            response = super().complete_json(static, volatile, user, schema)
+            response["lines"][-2]["direction"] = {
+                "focus_kind": "listener",
+                "focus_character": character,
+            }
+            response["lines"][-1]["direction"] = {"scene_type": "bond"}
+            return response
+
+    result = fixture(tmp_path, PartialDirectorProvider(), count=10, story_type="bond")
+
+    assert result["memory"]["direction"]["focus"] == {
+        "kind": "listener", "character": character,
+    }
+    assert result["memory"]["scene"]["scene_type"] == "bond"
 
 
 def test_agent_attaches_request_telemetry_to_chunk_without_prompt_text(tmp_path):
@@ -431,6 +488,21 @@ def test_resume_skips_completed_provider_calls(tmp_path):
     assert resumed.calls == 1
     assert result["resumed_chunks"] == 1
     assert len(result["rows_by_id"]) == 70
+
+
+def test_resume_discards_checkpoint_schema_older_than_two(tmp_path):
+    fixture(tmp_path, RecordingProvider(), count=70)
+    checkpoint_path = next(tmp_path.rglob("checkpoint.json"))
+    store = AnnotationCheckpointStore(tmp_path)
+    saved = store.load(checkpoint_path.parent.name)
+    saved["schema_version"] = 1
+    store.commit(checkpoint_path.parent.name, saved)
+
+    provider = RecordingProvider()
+    result = fixture(tmp_path, provider, count=70)
+
+    assert provider.calls == 2
+    assert result["resumed_chunks"] == 0
 
 
 def test_resume_preserves_dialogue_free_beats_from_completed_chunks(tmp_path):

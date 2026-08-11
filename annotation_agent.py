@@ -10,6 +10,8 @@ from collections import deque
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
+from director_state import apply_continuity
+
 from annotation_chunks import (
     RunChunkController, assign_annotation_ids, build_chunks, build_scene_map,
     estimate_initial_chunk_limits, subdivide_chunk,
@@ -103,12 +105,52 @@ def _run_key(fingerprint: Mapping[str, Any]) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
 
 
-def _checkpoint(memory: Mapping[str, Any], fingerprint: Mapping[str, Any], plan: Mapping[str, Any], rows: Mapping[str, Any], beats: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+def _checkpoint(
+    memory: Mapping[str, Any], fingerprint: Mapping[str, Any], plan: Mapping[str, Any],
+    rows: Mapping[str, Any], beats: Sequence[Mapping[str, Any]], *,
+    director_plan: Mapping[str, Any],
+) -> Dict[str, Any]:
     return {
-        "schema_version": 1, "fingerprint": dict(fingerprint), "story_plan": dict(plan),
+        "schema_version": 2, "fingerprint": dict(fingerprint), "story_plan": dict(plan),
+        "director_plan": copy.deepcopy(dict(director_plan)),
         "memory": copy.deepcopy(dict(memory)), "rows_by_id": copy.deepcopy(dict(rows)),
         "beats": copy.deepcopy(list(beats)),
     }
+
+
+def _merge_director_rows(
+    memory: Mapping[str, Any], rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    updated = copy.deepcopy(dict(memory))
+    state = updated.setdefault("direction", {})
+    continuity = dict(state.get("continuity") or {})
+    for row in rows:
+        director = row.get("direction") if isinstance(row, Mapping) else None
+        intent = row.get("direction_intent") if isinstance(row, Mapping) else None
+        if not isinstance(director, Mapping) or not isinstance(intent, Mapping) or not intent:
+            continue
+        focus = dict(state.get("focus") or {})
+        if "focus_kind" in intent:
+            focus["kind"] = str(director.get("focus_kind") or "speaker")[:32]
+        if "focus_character" in intent:
+            focus["character"] = str(director.get("focus_character") or "")[:160]
+        state["focus"] = focus
+        if "relation_distance" in intent:
+            state["relation_distance"] = str(director.get("relation_distance") or "normal")[:32]
+        if "emotion_phase" in intent:
+            state["emotion_phase"] = str(director.get("emotion_phase") or "")[:160]
+        if "scene_type" in intent:
+            scene_type = str(director.get("scene_type") or "other")[:32]
+            if scene_type != "other":
+                updated.setdefault("scene", {})["scene_type"] = scene_type
+        commands = dict(intent.get("continuity") or {})
+        values = {name: str(row.get(name) or "")[:160] for name in commands}
+        changes = apply_continuity(continuity, values, commands)
+        for name, command in commands.items():
+            if command != "none" and name in changes:
+                continuity[name] = changes[name]
+    state["continuity"] = continuity
+    return updated
 
 
 def _visible_items(items: Sequence[Mapping[str, Any]], chunk: Mapping[str, Any], before: int, after: int) -> List[Mapping[str, Any]]:
@@ -150,6 +192,7 @@ def run_annotation_agent(
     before: int = 15, after: int = 10,
     reasoning_mode: Optional[str] = None, annotation_max_tokens: Optional[int] = None,
     context_window_tokens: Optional[int] = None,
+    story_type: str = "auto",
 ) -> Dict[str, Any]:
     started_at = time.perf_counter()
     stats_before = dict(getattr(provider, "stats", {}) or {})
@@ -160,6 +203,17 @@ def run_annotation_agent(
     _emit(progress, "planning", 0, 1, "正在分析场景")
     scenes = build_scene_map(items, usage_chain)
     story_plan = build_story_plan(items, scenes, usage_chain)
+    normalized_story_type = str(story_type or "auto").strip().lower()
+    if normalized_story_type not in {"auto", "main", "event", "bond"}:
+        normalized_story_type = "auto"
+    director_plan = {
+        "story_type": normalized_story_type,
+        "director_version": str(run_fingerprint.get("director_version") or ""),
+        "scenes": [{
+            "scene_id": str(scene.get("scene_id") or "")[:160],
+            "scene_type": normalized_story_type if normalized_story_type != "auto" else "other",
+        } for scene in scenes[:200]],
+    }
     dialogue_items = [item for item in items if item.get("kind") == "line"]
     task_profile = {
         "target_lines": len(dialogue_items),
@@ -201,14 +255,19 @@ def run_annotation_agent(
     reasoning_writer = ReasoningTelemetryWriter(telemetry_root, run_key)
     request_writer = RequestTelemetryWriter(telemetry_root, run_key)
     saved = checkpoint_store.load(run_key)
-    if saved and saved.get("fingerprint") == dict(run_fingerprint):
-        memory = copy.deepcopy(saved.get("memory") or initial_memory(story_plan["summary"]))
+    saved_schema_version = saved.get("schema_version") if isinstance(saved, Mapping) else None
+    if (
+        saved and isinstance(saved_schema_version, int) and not isinstance(saved_schema_version, bool)
+        and saved_schema_version >= 2
+        and saved.get("fingerprint") == dict(run_fingerprint)
+    ):
+        memory = copy.deepcopy(saved.get("memory") or initial_memory(story_plan["summary"], normalized_story_type))
         rows_by_id = copy.deepcopy(saved.get("rows_by_id") or {})
         beats = copy.deepcopy(saved.get("beats") or [])
         completed = set((memory.get("progress") or {}).get("completed_chunks") or [])
         resumed_chunks = len(completed)
     else:
-        memory = initial_memory(story_plan["summary"])
+        memory = initial_memory(story_plan["summary"], normalized_story_type)
         rows_by_id = {}
         beats = []
         completed = set()
@@ -558,6 +617,7 @@ def run_annotation_agent(
             items, chunk, memory, relevant_events, usage_chain,
             before=before, after=after, max_events=8,
             compact=bool(getattr(provider, "supports_compact_annotation", False)),
+            story_type=normalized_story_type,
         )
         compact_protocol = bool(getattr(provider, "supports_compact_annotation", False))
         schema = (
@@ -737,6 +797,8 @@ def run_annotation_agent(
         next_beats = copy.deepcopy(beats)
         next_beats.extend(validated["beats"])
         next_memory = apply_state_delta(memory, validated["state_delta"], cast=cast, constraints=constraints)
+        next_memory = _merge_director_rows(next_memory, list(validated["lines_by_id"].values()))
+        diagnostics.extend(validated.get("diagnostics") or [])
         visible = _visible_items(items, chunk, before, after)
         next_memory["events"] = merge_memory_events(next_memory.get("events") or [], validated["memory_events"], visible)
         next_progress = next_memory.setdefault("progress", {})
@@ -745,7 +807,10 @@ def run_annotation_agent(
         next_progress["completed_target_ids"] = list(dict.fromkeys(
             list(next_progress.get("completed_target_ids") or []) + target_ids
         ))
-        checkpoint_store.commit(run_key, _checkpoint(next_memory, run_fingerprint, story_plan, next_rows, next_beats))
+        checkpoint_store.commit(run_key, _checkpoint(
+            next_memory, run_fingerprint, story_plan, next_rows, next_beats,
+            director_plan=director_plan,
+        ))
         rows_by_id = next_rows
         beats = next_beats
         memory = next_memory

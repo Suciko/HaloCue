@@ -72,16 +72,23 @@ def test_agent_mode_accepts_mock_provider_source_identity_response(tmp_path):
         "enums": {"emoticon": {}, "action": {}},
     }), encoding="utf-8")
     output = tmp_path / "annotated.txt"
+    llm_config = tmp_path / "llm.json"
+    llm_config.write_text("{}", encoding="utf-8")
     result = annotate.annotate_script({
         "script": str(script), "out": str(output), "cast": str(cast),
-        "index": str(index), "agent_enabled": True,
+        "index": str(index), "llm": str(llm_config), "agent_enabled": True,
         "checkpoint_dir": str(tmp_path / "checkpoints"),
     }, provider_instance=llm.MockProvider({}))
     assert result["agent"]["enabled"] is True
     assert output.read_text(encoding="utf-8") == "Kai: hello\nKai: goodbye\n"
     checkpoint = json.loads(next((tmp_path / "checkpoints").rglob("checkpoint.json")).read_text(encoding="utf-8"))
-    assert checkpoint["fingerprint"]["schema_version"] == 2
-    assert checkpoint["fingerprint"]["chunk_version"] == "scene-v2"
+    assert checkpoint["schema_version"] == 2
+    assert checkpoint["fingerprint"]["schema_version"] == 3
+    assert checkpoint["fingerprint"]["chunk_version"] == "scene-v3"
+    assert checkpoint["fingerprint"]["director_version"] == "stateful-v1"
+    assert checkpoint["fingerprint"]["story_type"] == "auto"
+    assert checkpoint["director_plan"]["story_type"] == "auto"
+    assert checkpoint["memory"]["story"]["type"] == "auto"
 
 
 def test_agent_reuses_one_source_prefixed_static_prompt_across_chunks(tmp_path):
