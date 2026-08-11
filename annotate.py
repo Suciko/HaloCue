@@ -19,6 +19,7 @@ from llm import make_provider, LLMError                       # noqa: E402
 from script2aap import HEAD_RE, split_head, load_cast          # noqa: E402
 from build_index import faces_of                               # noqa: E402
 from asset_validation import extract_expression_capabilities   # noqa: E402
+from asset_catalog import face_visual_evidence                  # noqa: E402
 from dialogue_pacing import split_strong_dialogue_items         # noqa: E402
 from annotation_chunks import assign_annotation_ids             # noqa: E402
 from annotation_memory import (                                 # noqa: E402
@@ -127,8 +128,23 @@ def _allowed_face_records(
     # but must not be offered to the model as something it can safely choose.
     return [
         face for face in result
-        if face.get("semantic_cn") or face.get("cn") or face.get("label")
+        if face_visual_evidence(face) in {"visual_confirmed", "asset_semantic"}
+        and (face.get("semantic_cn") or face.get("cn") or face.get("label"))
     ]
+
+
+def _scoped_face_evidence(
+    capabilities, identifier, allowed, *, spine_signature="", outfit_key=""
+):
+    evidence = {}
+    for variant in _selected_variants(
+        capabilities, identifier, spine_signature, outfit_key
+    ):
+        for face in variant.get("faces", []):
+            face_id = face.get("id")
+            if face_id in allowed:
+                evidence[face_id] = face_visual_evidence(face)
+    return evidence
 
 
 def annotation_constraints(idx, cast, *, usage_chain=None):
@@ -149,6 +165,7 @@ def annotation_constraints(idx, cast, *, usage_chain=None):
         if character.get("_expression_mode") == "semantic_modular"
     }
     faces_by_id = {}
+    face_evidence_by_id = {}
     if capabilities:
         for character in cast.values():
             ident = character.get("id")
@@ -168,13 +185,27 @@ def annotation_constraints(idx, cast, *, usage_chain=None):
                     if official
                     else face_allowlist(capabilities, ident, **selector)
                 )
+                face_evidence_by_id[ident] = _scoped_face_evidence(
+                    capabilities, ident, faces_by_id[ident], **selector
+                )
     else:
         faces_by_id = {
             character["identifier"]: {face["id"] for face in character["faces"]}
             for character in idx.get("characters", []) if character.get("faces")
         }
+        # Legacy character catalogs predate evidence metadata, but their face
+        # table is still asset-derived. Historical project usage is not enough
+        # to add another model-selectable face.
+        face_evidence_by_id = {
+            ident: {face_id: "asset_semantic" for face_id in face_ids}
+            for ident, face_ids in faces_by_id.items()
+        }
         for ident, faces in (idx.get("faces_used") or {}).items():
             faces_by_id.setdefault(ident, {face["id"] for face in faces})
+            if ident not in face_evidence_by_id:
+                face_evidence_by_id[ident] = {
+                    face["id"]: "context_inferred" for face in faces
+                }
     sym2cn = {
         value["sym"]: value["cn"]
         for value in idx["enums"]["emoticon"].values()
@@ -192,6 +223,7 @@ def annotation_constraints(idx, cast, *, usage_chain=None):
     }
     return {
         "faces_by_id": faces_by_id,
+        "face_evidence_by_id": face_evidence_by_id,
         "sym2cn": sym2cn,
         "ok_emo": set(sym2cn) | set(sym2cn.values()),
         "ok_act": {value["verb"] for value in idx["enums"]["action"].values()},
@@ -221,9 +253,38 @@ def filter_annotation_row(row, item, character, constraints, *, include_details=
             rejected_details.append({"field": field, "value": value, "reason": msg})
             continue
         if field == "face":
-            allowed = constraints["faces_by_id"].get(character.get("id"), set())
-            if is_face_allowed(allowed, value):
+            character_id = character.get("id")
+            allowed = constraints["faces_by_id"].get(character_id, set())
+            evidence_by_id = constraints.get("face_evidence_by_id")
+            evidence_level = (
+                evidence_by_id.get(character_id, {}).get(value, "unknown")
+                if evidence_by_id is not None else "visual_confirmed"
+            )
+            if (
+                is_face_allowed(allowed, value)
+                and evidence_level in {"visual_confirmed", "asset_semantic"}
+            ):
                 clean[field] = value
+            elif is_face_allowed(allowed, value):
+                evidence_text = (
+                    "只有上下文证据"
+                    if evidence_level == "context_inferred"
+                    else "缺少可审阅的视觉或资产语义证据"
+                )
+                msg = f"{who} 的表情 {value} {evidence_text}，需要人工审阅"
+                dropped.append(msg)
+                rejected_details.append({
+                    "code": "face_inferred_only",
+                    "field": field,
+                    "value": value,
+                    "reason": msg,
+                    "character": who,
+                    "character_id": character_id,
+                    "outfit_key": character.get("outfit_key", ""),
+                    "spine_signature": character.get("spine_signature", ""),
+                    "face_id": value,
+                    "evidence_level": evidence_level,
+                })
             else:
                 msg = f"{who} 没有已验证表情 {value}"
                 dropped.append(msg)
@@ -820,6 +881,14 @@ def apply_annotation_response_row(
             "source_id": str(item.get("annotation_id") or ""),
             "field": rejected_item["field"],
             "message": rejected_item["reason"],
+            **{
+                key: rejected_item[key]
+                for key in (
+                    "character", "character_id", "outfit_key",
+                    "spine_signature", "face_id", "evidence_level",
+                )
+                if key in rejected_item
+            },
         })
     dropped.extend(rejected)
     if row.get("place"):

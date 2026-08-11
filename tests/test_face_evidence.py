@@ -264,3 +264,33 @@ def test_face_display_prefers_verified_metadata_over_observed_and_atlas(tmp_path
     assert (face["raw"], face["label"], face["sources"]) == (
         "verified", "verified", ["aa_verified", "aap_observed", "atlas_candidate"]
     )
+
+
+def test_face_capabilities_expose_strongest_visual_evidence_per_variant(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    con.executemany(
+        """
+        INSERT INTO face_evidence
+          (ident,spine_signature,outfit_key,face_id,source,raw,label,label_cn,observed_count)
+        VALUES (?,?,?,?,?,?,?,?,?)
+        """,
+        [
+            ("kai", "sig", "winter", "00", "vision:model-a", "{}", "", "平静", 0),
+            ("kai", "sig", "winter", "01", "spine_semantic", "smile", "smile", "微笑", 0),
+            ("kai", "sig", "winter", "02", "aap_observed", "02", "", "", 3),
+            ("kai", "sig", "winter", "03", "atlas_candidate", "03", "", "", 0),
+            ("kai", "sig", "winter", "04", "atlas_candidate", "smile", "smile", "微笑", 0),
+            ("kai", "sig", "winter", "04", "aap_observed", "04", "", "", 1),
+        ],
+    )
+    con.commit()
+
+    faces = _face_capabilities(con)["kai"][0]["faces"]
+
+    assert {face["id"]: face["visual_evidence"] for face in faces} == {
+        "00": "visual_confirmed",
+        "01": "asset_semantic",
+        "02": "context_inferred",
+        "03": "unknown",
+        "04": "asset_semantic",
+    }

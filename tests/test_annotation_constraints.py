@@ -2,7 +2,8 @@ import pytest
 
 from annotate import (
     annotation_constraints, annotation_rows, build_static, filter_annotation_row,
-    annotation_directives, load_custom_faces, normalize_bgfx_lifetime,
+    annotation_directives, apply_annotation_response_row, load_custom_faces,
+    normalize_bgfx_lifetime,
 )
 from llm import LLMError
 
@@ -61,6 +62,23 @@ def test_official_named_faces_are_basic_candidates_but_unknown_faces_are_not_sug
     assert "17=" not in prompt
 
 
+def test_legacy_character_face_catalog_remains_model_safe_without_capabilities():
+    constraints = annotation_constraints(
+        {
+            "bg": {}, "sounds": [], "enums": {"emoticon": {}, "action": {}},
+            "characters": [{
+                "identifier": "kai",
+                "faces": [{"id": "00", "raw": "00", "label": "", "cn": ""}],
+            }],
+            "faces_used": {"kai": [{"id": "99", "raw": "99", "label": ""}]},
+        },
+        {"Kai": {"id": "kai", "portrait": True}},
+    )
+
+    assert constraints["faces_by_id"]["kai"] == {"00"}
+    assert constraints["face_evidence_by_id"]["kai"] == {"00": "asset_semantic"}
+
+
 def test_filter_accepts_only_variant_verified_face_id():
     constraints = annotation_constraints(
         {
@@ -94,6 +112,75 @@ def test_filter_accepts_only_variant_verified_face_id():
 
     assert clean == {}
     assert dropped == ["凯伊 没有已验证表情 01"]
+
+
+def test_context_inferred_face_is_not_auto_selectable_and_is_reviewable():
+    constraints = {
+        "faces_by_id": {"kai": {"07"}},
+        "face_evidence_by_id": {"kai": {"07": "context_inferred"}},
+        "sym2cn": {}, "ok_emo": set(), "ok_act": set(),
+        "ok_fx": set(), "ok_se": set(), "ok_bg": set(),
+        "confirmed_bg": set(), "ok_shot": {"Kai"},
+    }
+    character = {
+        "id": "kai", "portrait": True,
+        "spine_signature": "sig-winter", "outfit_key": "winter",
+    }
+
+    clean, dropped, details = filter_annotation_row(
+        {"face": "07"}, {"who": "Kai"}, character,
+        constraints, include_details=True,
+    )
+
+    assert clean == {}
+    assert dropped == ["Kai 的表情 07 只有上下文证据，需要人工审阅"]
+    assert details == [{
+        "code": "face_inferred_only",
+        "field": "face",
+        "value": "07",
+        "reason": "Kai 的表情 07 只有上下文证据，需要人工审阅",
+        "character": "Kai",
+        "character_id": "kai",
+        "outfit_key": "winter",
+        "spine_signature": "sig-winter",
+        "face_id": "07",
+        "evidence_level": "context_inferred",
+    }]
+
+
+def test_inferred_face_review_context_reaches_annotation_diagnostics():
+    constraints = {
+        "faces_by_id": {"kai": {"07"}},
+        "face_evidence_by_id": {"kai": {"07": "context_inferred"}},
+        "sym2cn": {}, "ok_emo": set(), "ok_act": set(),
+        "ok_fx": set(), "ok_se": set(), "ok_bg": set(),
+        "confirmed_bg": set(), "ok_shot": {"Kai"},
+    }
+    item = {"kind": "line", "who": "Kai", "text": "hello", "annotation_id": "line-1"}
+    cast = {"Kai": {
+        "id": "kai", "portrait": True,
+        "spine_signature": "sig-winter", "outfit_key": "winter",
+    }}
+    diagnostics = []
+
+    apply_annotation_response_row(
+        item, {"face": "07"}, cast, constraints, [], [], diagnostics
+    )
+
+    diagnostic = diagnostics[0]
+    assert diagnostic["code"] == "face_inferred_only"
+    assert diagnostic["source_id"] == "line-1"
+    assert {
+        key: diagnostic[key]
+        for key in (
+            "character", "character_id", "outfit_key", "spine_signature",
+            "face_id", "evidence_level",
+        )
+    } == {
+        "character": "Kai", "character_id": "kai", "outfit_key": "winter",
+        "spine_signature": "sig-winter", "face_id": "07",
+        "evidence_level": "context_inferred",
+    }
 
 
 def test_build_static_keeps_semantic_hints_separate_from_verified_faces():
