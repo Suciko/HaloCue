@@ -252,13 +252,13 @@ def test_contextual_sound_fallback_never_overwrites_the_models_registered_choice
     assert items[0]["se"] == "SE_Clothes_01"
 
 
-def test_expression_prompt_prefers_a_suitable_change_and_keeps_only_as_fallback():
+def test_expression_prompt_holds_a_state_until_evidence_supports_change():
     rules = build_rules()
 
-    assert "优先选择一个与上一句不同、又符合当前语义的已标注表情" in rules
-    assert "即使相邻台词的情绪接近" in rules
-    assert "实在没有其他合适候选时，才保持上一表情" in rules
-    assert "不要为了变化而换成明显不合语境的表情" in rules
+    assert "相同情绪阶段内默认 hold" in rules
+    assert "不要为了画面变化而换 face" in rules
+    assert "保持正确表情比制造变化更重要" in rules
+    assert "优先选择一个与上一句不同" not in rules
 
 
 def test_expression_prompt_treats_usage_context_as_guidance_not_trigger():
