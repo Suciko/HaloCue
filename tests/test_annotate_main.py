@@ -213,3 +213,67 @@ def test_annotation_writer_does_not_repeat_same_background():
     assert "@bg BG_ShoppingDistrict\n@trans 淡入淡出" not in result
     assert "@place 可丽饼摊前\n旁白: 二" in result
     assert "@bg BG_GameCenter\n@trans 淡入淡出" in result
+
+
+def test_response_row_stores_director_metadata_without_rewriting_source():
+    item = {
+        "kind": "line", "annotation_id": "src-1", "who": "A",
+        "text": "原文", "raw": "A: 原文",
+    }
+    row = {"direction": {
+        "scene_type": "bond", "scene_function": "emotional_turn",
+        "emotion_phase": "waiting", "subtext": "等待对方回应",
+        "focus_kind": "listener", "focus_character": "B",
+        "visible_characters": ["B"],
+        "continuity": {
+            "face": "hold", "emo": "none", "act": "none",
+            "fx": "none", "bgfx": "none",
+        },
+    }}
+    constraints = {
+        "faces_by_id": {"a": set()}, "sym2cn": {}, "ok_emo": set(),
+        "ok_act": set(), "ok_fx": set(), "ok_se": set(), "ok_bg": set(),
+        "confirmed_bg": set(), "ok_shot": {"A", "B"},
+    }
+    diagnostics = []
+
+    annotate.apply_annotation_response_row(
+        item, row,
+        {"A": {"id": "a", "portrait": True}, "B": {"id": "b", "portrait": True}},
+        constraints, [], [], diagnostics,
+    )
+
+    assert (item["who"], item["text"], item["raw"], item["annotation_id"]) == (
+        "A", "原文", "A: 原文", "src-1",
+    )
+    assert item["_director"]["focus_character"] == "B"
+    assert item["_director"]["subtext"] == "等待对方回应"
+    assert annotate.render_annotated_items([item]) == "A: 原文\n"
+    assert diagnostics == []
+
+
+def test_response_row_downgrades_non_displayable_director_focus_with_diagnostic():
+    item = {
+        "kind": "line", "annotation_id": "src-1", "who": "A",
+        "text": "原文", "raw": "A: 原文",
+    }
+    diagnostics = []
+
+    annotate.apply_annotation_response_row(
+        item,
+        {"direction": {
+            "focus_kind": "listener", "focus_character": "Voice",
+            "visible_characters": ["Voice"],
+        }},
+        {"A": {"id": "a", "portrait": True}, "Voice": {"id": "v", "portrait": False}},
+        {
+            "faces_by_id": {"a": set()}, "sym2cn": {}, "ok_emo": set(),
+            "ok_act": set(), "ok_fx": set(), "ok_se": set(), "ok_bg": set(),
+            "confirmed_bg": set(), "ok_shot": {"A"},
+        },
+        [], [], diagnostics,
+    )
+
+    assert item["_director"]["focus_character"] == ""
+    assert item["_director"]["visible_characters"] == []
+    assert any(entry["code"] == "director_non_displayable_character" for entry in diagnostics)

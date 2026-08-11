@@ -26,6 +26,7 @@ from annotation_memory import (                                 # noqa: E402
     build_run_fingerprint,
 )
 from annotation_agent import run_annotation_agent               # noqa: E402
+from director_state import normalize_director                   # noqa: E402
 from direction_rules import (                                  # noqa: E402
     apply_model_directions,
     mark_explicit_directions,
@@ -710,10 +711,27 @@ def build_proposal(
     }
 
 
-def apply_annotation_response_row(item, row, cast, constraints, proposals, dropped):
+def apply_annotation_response_row(
+    item, row, cast, constraints, proposals, dropped, diagnostics=None,
+):
     """Apply one validated model row through the existing resource guards."""
+    diagnostic_sink = diagnostics if diagnostics is not None else []
     character = cast[item["who"]]
     portrait = character.get("portrait") and not character.get("narrator")
+    if "direction" in row:
+        cast_names = set(cast)
+        displayable_names = {
+            name for name, candidate in cast.items()
+            if candidate.get("portrait") and not candidate.get("narrator")
+        }
+        director, director_diagnostics = normalize_director(
+            row.get("direction"),
+            cast_names=cast_names,
+            displayable_names=displayable_names,
+        )
+        item["_director"] = director
+        source_id = str(item.get("annotation_id") or "")
+        diagnostic_sink.extend({**entry, "source_id": source_id} for entry in director_diagnostics)
     clean, rejected, rejected_details = filter_annotation_row(
         row, item, character, constraints, include_details=True
     )
@@ -731,6 +749,17 @@ def apply_annotation_response_row(item, row, cast, constraints, proposals, dropp
             rule="llm_rejected_annotation", field_name=rejected_item["field"],
             before=None, after=rejected_item["value"],
         ))
+        diagnostic_sink.append({
+            "code": rejected_item.get("code") or (
+                "director_unverified_face"
+                if rejected_item["field"] == "face"
+                else "director_resource_downgraded"
+            ),
+            "level": "warning",
+            "source_id": str(item.get("annotation_id") or ""),
+            "field": rejected_item["field"],
+            "message": rejected_item["reason"],
+        })
     dropped.extend(rejected)
     if row.get("place"):
         item["place"] = str(row["place"])[:40]
@@ -919,7 +948,9 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         for item_index in todo:
             item = items[item_index]
             row = rows_by_id.get(item.get("annotation_id"))
-            if row and apply_annotation_response_row(item, row, cast, constraints, proposals, dropped):
+            if row and apply_annotation_response_row(
+                item, row, cast, constraints, proposals, dropped, diagnostics,
+            ):
                 applied += 1
         print(f"  已标注 {applied}/{len(todo)} 行（Agent）")
     else:
@@ -947,7 +978,10 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
                 row_index = row.get("i")
                 if not isinstance(row_index, int) or not 0 <= row_index < len(batch):
                     continue
-                if apply_annotation_response_row(items[batch[row_index]], row, cast, constraints, proposals, dropped):
+                if apply_annotation_response_row(
+                    items[batch[row_index]], row, cast, constraints,
+                    proposals, dropped, diagnostics,
+                ):
                     applied += 1
             done = min(start + n, len(todo))
             print(f"  已标注 {done}/{len(todo)} 行")

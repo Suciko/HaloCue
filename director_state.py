@@ -104,10 +104,15 @@ def normalize_director(
     for field in ("focus_character",):
         candidate = source.get(field, "")
         if isinstance(candidate, str) and candidate:
-            if candidate in cast_names:
-                state[field] = candidate
-            else:
+            if candidate not in cast_names:
                 diagnostic("director_unknown_character", field, f"Unknown character: {candidate}")
+            elif candidate not in displayable_names:
+                diagnostic(
+                    "director_non_displayable_character", field,
+                    f"Character cannot be displayed: {candidate}",
+                )
+            else:
+                state[field] = candidate
         elif candidate not in (None, ""):
             diagnostic("director_invalid_value", field, f"{field} must be a character name")
 

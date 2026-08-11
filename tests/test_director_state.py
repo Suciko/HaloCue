@@ -75,6 +75,20 @@ def test_normalize_reports_a_non_mapping_root_value():
     }]
 
 
+def test_normalize_downgrades_a_non_displayable_focus_character():
+    state, diagnostics = normalize_director(
+        {"focus_kind": "listener", "focus_character": "Voice"},
+        cast_names={"A", "Voice"}, displayable_names={"A"},
+    )
+
+    assert state["focus_character"] == ""
+    assert any(
+        item["code"] == "director_non_displayable_character"
+        and item["field"] == "focus_character"
+        for item in diagnostics
+    )
+
+
 def test_apply_continuity_holds_and_ends_named_layers():
     state = apply_continuity(
         {"fx": "通讯", "face": "03"},
