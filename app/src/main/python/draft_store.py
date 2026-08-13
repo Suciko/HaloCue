@@ -52,6 +52,40 @@ class ReviewPendingError(ValueError):
         self.counts = counts or {}
 
 
+class AnnotationIncompleteError(ReviewPendingError):
+    """AI 标注尚未完成，草稿只能继续审查或续跑。"""
+    def __init__(self, status=None):
+        status = normalize_annotation_status(status)
+        super().__init__(
+            message=(
+                "AI annotation is incomplete: "
+                f"completed={status['completed_targets']}, "
+                f"total={status['total_targets']}, "
+                f"pending={status['pending_targets']}"
+            ),
+            code="annotation_incomplete",
+            counts={"annotation_pending": status["pending_targets"]},
+        )
+        self.annotation_status = status
+
+
+def normalize_annotation_status(value: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    value = value if isinstance(value, dict) else {}
+    total = max(0, int(value.get("total_targets") or 0))
+    completed = max(0, min(total, int(value.get("completed_targets") or 0)))
+    pending = max(0, int(value.get("pending_targets") or (total - completed)))
+    pending = min(total, pending) if total else 0
+    state = "partial" if value.get("status") == "partial" or pending else "complete"
+    return {
+        "status": state,
+        "completed_targets": completed,
+        "total_targets": total,
+        "pending_targets": pending,
+        "pending_start_line": value.get("pending_start_line") if pending else None,
+        "pending_end_line": value.get("pending_end_line") if pending else None,
+    }
+
+
 def calc_sha256(content: str) -> str:
     """计算 UTF-8 文本的 SHA256"""
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
@@ -121,6 +155,44 @@ class DraftStore:
                 return int(session["generation_version"])
         return 1
 
+    def find_identical_complete_draft(
+        self, *, text: str, source_text: str, project: str,
+        story_token: Optional[str] = None,
+    ) -> Optional[str]:
+        """Return the newest untouched complete draft with identical inputs/output."""
+        text_hash = calc_sha256(text)
+        source_hash = calc_sha256(source_text)
+        sessions = sorted(
+            self.list_sessions(),
+            key=lambda item: (
+                str(item.get("created_at") or ""),
+                str(item.get("draft_token") or ""),
+            ),
+            reverse=True,
+        )
+        for session in sessions:
+            if str(session.get("project") or "") != str(project or ""):
+                continue
+            if str(session.get("story_token") or "") != str(story_token or ""):
+                continue
+            if normalize_annotation_status(session.get("annotation_status"))["status"] != "complete":
+                continue
+            if session.get("edited_sha256") != text_hash:
+                continue
+            token = str(session.get("draft_token") or "")
+            draft_dir = self.get_draft_path(token)
+            source_file = draft_dir / "source.txt"
+            annotated_file = draft_dir / "annotated.txt"
+            try:
+                if calc_sha256(source_file.read_text(encoding="utf-8")) != source_hash:
+                    continue
+                if calc_sha256(annotated_file.read_text(encoding="utf-8")) != text_hash:
+                    continue
+            except OSError:
+                continue
+            return token
+        return None
+
     @contextmanager
     def draft_lock(self, token: str):
         draft_dir = self.get_draft_path(token)
@@ -140,6 +212,7 @@ class DraftStore:
         cast: Optional[Dict[str, Any]] = None,
         story_token: Optional[str] = None,
         bgm_policy: Optional[Dict[str, Any]] = None,
+        annotation_status: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """新建草稿目录并保存各真相源文件"""
         cast = cast if isinstance(cast, dict) else {}
@@ -187,6 +260,7 @@ class DraftStore:
                 "project": project,
                 "story_token": story_token,
                 "bgm_policy": frozen_bgm_policy,
+                "annotation_status": normalize_annotation_status(annotation_status),
                 "edited_sha256": edited_sha256,
                 "identity_sha256": identity_sha256,
                 "created_at": datetime.datetime.now().isoformat(),
@@ -1059,6 +1133,7 @@ class DraftStore:
 
     def assert_review_ready(self, token: str, cast: Optional[Dict[str, Any]] = None):
         """检查草稿是否符合 review_ready 门控。未通过抛出 ReviewPendingError(code="review_pending")"""
+        self.assert_annotation_complete(token)
         draft = self.load_draft(token, cast=cast)
         diagnostics = draft["diagnostics"]
         identities = draft["identities"]
@@ -1079,6 +1154,15 @@ class DraftStore:
                 code="review_pending",
                 counts=counts,
             )
+        return True
+
+    def assert_annotation_complete(self, token: str) -> bool:
+        with self.draft_lock(token):
+            session_file = self.get_draft_path(token) / "session.json"
+            session = json.loads(session_file.read_text(encoding="utf-8"))
+            status = normalize_annotation_status(session.get("annotation_status"))
+        if status["status"] != "complete" or status["pending_targets"] > 0:
+            raise AnnotationIncompleteError(status)
         return True
 
     def batch_approve_reviews(

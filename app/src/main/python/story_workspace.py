@@ -507,6 +507,22 @@ class StoryWorkspaceRegistry:
             })
             need.pop("suggested_aa_key", None)
             need.pop("generation_prompt", None)
+            for segment in result.get("usage_chain", []):
+                if not isinstance(segment, dict):
+                    continue
+                for continued in segment.get("needs", []):
+                    if not isinstance(continued, dict) or continued.get("kind") != "background":
+                        continue
+                    if continued.get("status") != "inherited" or continued.get("inherits_from") != selector:
+                        continue
+                    continued.update({
+                        "aa_key": aa_key,
+                        "selected_label": selected_label,
+                        "source": source,
+                        "preview_source": preview_source,
+                        "preview_available": bool(binding.get("preview_available")),
+                        "candidates": [],
+                    })
             snapshot["saved_at"] = self._now()
             snapshot["approved"] = False
             updated = replace(prior, preflight_snapshot=snapshot)

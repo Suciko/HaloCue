@@ -3,7 +3,7 @@
     "python":  [
                    {
                        "path":  "webui.py",
-                       "sha256":  "07FBB10C8D19486E7DA5671A37DE2456EB41DEDBED7460FE62E530B2D5BB1BAD"
+                       "sha256":  "C065A88372B4F05245119F28EB890F27D349B797A987F8CED10F8F428D85E0B6"
                    },
                    {
                        "path":  "aa_resource_cache.py",
@@ -11,23 +11,27 @@
                    },
                    {
                        "path":  "annotate.py",
-                       "sha256":  "6750332186A52E8C8C6E0D99B725C8DCDE1098F758A9E8EB46C39F92F9ABD50D"
+                       "sha256":  "232A3F5BE20396FB6943E99AA107E3DF2C3AB71BF6ABF9BFFD674F872C761C34"
                    },
                    {
                        "path":  "annotation_agent.py",
-                       "sha256":  "1FAA527DE899BFEA063D6C96F4AC4400281096D918285EA947EA09A2A7C02072"
+                       "sha256":  "23C8A4A02297DE46A28D57D0BCCA0CE3C64D8A383023677CA3703269410F6D65"
                    },
                    {
                        "path":  "annotation_chunks.py",
-                       "sha256":  "93C8CFD32A5CC289C50A856DA5D9A83D7E5CF6942F2360656ADA4C41C463544A"
+                       "sha256":  "022AA0228535089730B89A0CA2EF117E8BDD395344C00941B5D22CFD4DAB6407"
                    },
                    {
                        "path":  "annotation_memory.py",
-                       "sha256":  "11C6811A7A0E6E574CEC7B9C5A34E61504B4FA0C1E80802837DA7F35F732C081"
+                       "sha256":  "988AA5BD8B407DBE6037FF7FE54161CC81C254B9B625A6FBC0FE7B226D2BD00A"
                    },
                    {
                        "path":  "annotation_protocol.py",
-                       "sha256":  "C352D19F7E15B13F9EC5D0AF1A78E9DCD2A55C8A3625FD955C198A04F260FFE9"
+                       "sha256":  "B295A6295961CF842C7814756CFE7F762690141F99C0470D852E5024C675D8C2"
+                   },
+                   {
+                       "path":  "annotation_safety.py",
+                       "sha256":  "9C58886D8FFB2FD6A19DE987A90DF13BFAEE57D9C35D4E702BE2DF7F640E0B84"
                    },
                    {
                        "path":  "annotation_telemetry.py",
@@ -35,11 +39,11 @@
                    },
                    {
                        "path":  "asset_catalog.py",
-                       "sha256":  "9D67A536FA6860C6027886D184DDA8C55C00E04CF00E486F147BA8C82D6A8C8F"
+                       "sha256":  "0840D3431CE7F8C44D175D925A1FB662D7CDEFA565D8F1F23770F317F9AF0F36"
                    },
                    {
                        "path":  "asset_import.py",
-                       "sha256":  "42CA2AC9F0FAB403E79DA34A157B5B1952905B7A579575D8C0AB92E9FF6F771A"
+                       "sha256":  "E57A5C5D975D55B100B5DA9187F1C3374327033CC550FD67FF8FD432F86E69EE"
                    },
                    {
                        "path":  "assetdb.py",
@@ -55,7 +59,7 @@
                    },
                    {
                        "path":  "build_bundle.py",
-                       "sha256":  "DF1E07959DBC6F05BB603C80281B44C2BA1D8B21AC156AC89948D730090A7B27"
+                       "sha256":  "77C8616BD38C7F69330E15D94F42492CAEC7B42C4DC72CE3FD7DC25796DF5F0D"
                    },
                    {
                        "path":  "build_index.py",
@@ -67,7 +71,15 @@
                    },
                    {
                        "path":  "direction_rules.py",
-                       "sha256":  "154A67ED037BB5E9B18D5632FE2AAF163E0CAEA21E1AEBBC497210B729465083"
+                       "sha256":  "208BC13DDB0D0CD41EB4012D3A14588F8696E6EE1D7ECEA58208407B3ECF062C"
+                   },
+                   {
+                       "path":  "director_policy.py",
+                       "sha256":  "82D8226482F1C88DB2CF6A9DD2CF4A6AB4452FAEF4D8A9D7F54D4D8BE3A12447"
+                   },
+                   {
+                       "path":  "director_state.py",
+                       "sha256":  "481AA7FBE4D7B307929401B418C698B53BAD5C36C0CE4A424749400160BBC1B4"
                    },
                    {
                        "path":  "draft_identity.py",
@@ -75,7 +87,7 @@
                    },
                    {
                        "path":  "draft_store.py",
-                       "sha256":  "6007DED9CD1C26D08DD69ABD2B085EF57032EABA362CCC7F3462540F3C9C9ED5"
+                       "sha256":  "FA0576D3D08BFA94CB1EE484A7204ED46746303BA0CDA30994F2633EC78031D1"
                    },
                    {
                        "path":  "history_assets.py",
@@ -83,7 +95,7 @@
                    },
                    {
                        "path":  "jobs.py",
-                       "sha256":  "89040E2BB1F320C440AABA761516A866E922FAA06764D2EE8857E39DA95DDF3F"
+                       "sha256":  "82C56A8BE6B4C5FD318FCE751C59871CA0B9440D2C155BBED952740EF0E4D435"
                    },
                    {
                        "path":  "label_assets.py",
@@ -91,7 +103,7 @@
                    },
                    {
                        "path":  "llm.py",
-                       "sha256":  "1C25A424E9E4BD312270B8916B1D178D8A28B38F665B5E636C0BF21B6EEAC9DE"
+                       "sha256":  "E5EC4C0D2FC415B41A94006CA3FDE77EEDC1F3A2A56DCAB71D875BB4C597E0A4"
                    },
                    {
                        "path":  "model_capabilities.py",
@@ -123,7 +135,7 @@
                    },
                    {
                        "path":  "prompt.py",
-                       "sha256":  "CA82509ADD2A245CFD4BB2C6DEF3440B1D11F9F2F480E51F8B39DA1494938ADE"
+                       "sha256":  "1479665B80E72F448151DA4AEC9127521492460F24F7EF5E65996CF1DB9250EB"
                    },
                    {
                        "path":  "spine_face_labeler.py",
@@ -139,24 +151,24 @@
                    },
                    {
                        "path":  "story_workspace.py",
-                       "sha256":  "3889A642B65E7849D612D4A2E8A228F5470E6B74EF3E62DA7346F2EA854F7512"
+                       "sha256":  "891EFFEA4297597AB3C922B9983E9FF94A23139CD2C620D60BD0F368F0935722"
                    }
                ],
     "overrides":  [
                       {
                           "path":  "install_manager.py",
                           "source":  "android-runtime-overrides/install_manager.py",
-                          "sha256":  "58063210088D4EECEF43EF818A239DD6F10D8591B5114529816E0EEA6742D73B"
+                          "sha256":  "7A1D790326E438ED2C2DB4F61A7AF3A4F99A1DBD5DC7542F7BB981E91C0F2E7A"
                       },
                       {
                           "path":  "spine_face_analysis.py",
                           "source":  "android-runtime-overrides/spine_face_analysis.py",
-                          "sha256":  "B0B0E1B910F9B0B8E3DECF689C7917F73002C19732219E28046EC05EB14EE3C1"
+                          "sha256":  "FAC2ACCCF7BF196329F0AA719FDB08AAA23E1431E6D83ED7AE9518B7BAE1F74A"
                       },
                       {
                           "path":  "spine_face_renderer.py",
                           "source":  "android-runtime-overrides/spine_face_renderer.py",
-                          "sha256":  "589CE81733D194382C2C759296A0D0E42811D2ABD4CAFD9979E44A9E151788DD"
+                          "sha256":  "99D2CEA4C730C9E728A362BB86F8830D2C0984FB5311353158AF80DA1472FFA7"
                       }
                   ],
     "directories":  [
@@ -165,11 +177,11 @@
                             "files":  [
                                           {
                                               "path":  "app.css",
-                                              "sha256":  "3067F841F6E15E3AFEBD7C1F5D7251219DE5B298C1DFCA3833F19D8E10EF34DB"
+                                              "sha256":  "97E8B0B463C620B755CCE61D569E3311C6D0C196DDDC8CF68853AFCBB78148C2"
                                           },
                                           {
                                               "path":  "layout.css",
-                                              "sha256":  "78687CD2A64111D29361B48973F1EB9F9D9F3777A626E08D4CF821313F83CAED"
+                                              "sha256":  "4DC243C5D94BE07FEBD214BE03CA796232E19344AE9B9B6AF90F3D7BE4F21E22"
                                           }
                                       ]
                         },
@@ -182,7 +194,7 @@
                                           },
                                           {
                                               "path":  "app.js",
-                                              "sha256":  "5F033C459F77528E3A35D0113C54424A89050CA5494ADCDD4A56EAA0A897BD0A"
+                                              "sha256":  "2DFF2F29501211D88A6A5378BFCCB6741FF4B7E110794CC565B90CF3839BA129"
                                           },
                                           {
                                               "path":  "assets.js",
@@ -222,7 +234,7 @@
                                           },
                                           {
                                               "path":  "model.js",
-                                              "sha256":  "B658BD1A2130BD87A73B88165771F26DC1EFC63101AA314C2084C4A863B3AE02"
+                                              "sha256":  "1614D343F57D2C2FBBAD24B49BE3FC0D9F78D69447FB1A0AA445E1BF0DF1E7B0"
                                           },
                                           {
                                               "path":  "player.js",
@@ -234,7 +246,7 @@
                                           },
                                           {
                                               "path":  "story_picker.js",
-                                              "sha256":  "8950782A068A064F0AF4DFBFBFA572DD3643299403FF4F79BCE9B5F3A7778021"
+                                              "sha256":  "21A92AE418FA71B7829E2D7DA420CFF797A5C00C045344A2E5BD07E0259ECB47"
                                           }
                                       ]
                         }
@@ -242,7 +254,7 @@
     "static":  [
                    {
                        "path":  "ui.html",
-                       "sha256":  "8166546208A635A1E2F18B544DC1F00221C8827B2BB37AF017AB2C0C755B5B59"
+                       "sha256":  "6B3CB62578D97EC81435984E5DEA1E14E181FB76A21ABBB7A7325848FDA08F50"
                    },
                    {
                        "path":  "branding/halocue-favicon.png",
