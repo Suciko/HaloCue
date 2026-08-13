@@ -42,8 +42,8 @@ android {
         applicationId = "com.halocue.android"
         minSdk = 24
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.3.0-beta.2"
+        versionCode = 6
+        versionName = "0.4.0-beta.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -64,6 +64,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             if (hasBetaSigning) {
                 signingConfig = signingConfigs.getByName("betaRelease")
