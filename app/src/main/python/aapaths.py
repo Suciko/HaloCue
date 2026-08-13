@@ -11,6 +11,7 @@ AA 的存储目录默认在 %USERPROFILE%\\AppData\\LocalLow\\foxxlight\\AzureAr
 任何脚本都不要写死绝对路径 —— 换台电脑就废了。
 """
 import json, os, sys
+from pathlib import Path
 
 from aa_install_discovery import discover_aa, normalize_aa_data_path
 
@@ -18,6 +19,56 @@ APPDATA_LOW = os.path.join(os.path.expanduser("~"), "AppData", "LocalLow")
 VENDOR = os.path.join(APPDATA_LOW, "foxxlight", "AzureArchive")
 CONF_NAME = "aa_config.json"
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def is_android_runtime():
+    return os.environ.get("HALOCUE_PLATFORM", "").strip().casefold() == "android"
+
+
+def android_workspace_root():
+    value = os.environ.get("HALOCUE_WORKSPACE_DIR", "").strip()
+    if not is_android_runtime() or not value:
+        return None
+    return Path(value).resolve()
+
+
+def app_storage_path(*parts):
+    root = android_workspace_root()
+    if root is None:
+        root = (Path(HERE) / "out").resolve()
+    target = root.joinpath(*(str(part) for part in parts)).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("application storage path escapes its root") from exc
+    return target
+
+
+def _android_paths():
+    root = android_workspace_root()
+    if root is None:
+        return None
+    data = root / "aa-data"
+    paths = {
+        "data": data,
+        "projects": data / "projects",
+        "saves": data / "saves",
+        "overrides": data / "overrides",
+        "settings": data / "settings",
+        "cache": root / "cache",
+    }
+    for path in {root, *paths.values()}:
+        path.mkdir(parents=True, exist_ok=True)
+    return {
+        **{name: str(path) for name, path in paths.items()},
+        "source": "android-private-workspace",
+        "tried": [str(data)],
+        "executable": None,
+        "install_root": None,
+        "catalog": None,
+        "recent_project_files": [],
+        "requires_selection": False,
+    }
 
 
 def _read_settings(data_dir):
@@ -46,6 +97,9 @@ def _path_string(value):
 
 def detect(explicit=None, *, aa_install=None):
     """Return legacy string paths backed by structured discovery."""
+    android_paths = _android_paths()
+    if android_paths is not None:
+        return android_paths
     selection = normalize_aa_data_path(explicit) if explicit else aa_install
     selection = selection or explicit or aa_install
     result = discover_aa(
@@ -92,7 +146,8 @@ def require(explicit=None, what="AA 存储目录"):
 
 
 def save_config(data_dir=None, *, executable=None, cache_dir=None):
-    conf = os.path.join(HERE, CONF_NAME)
+    conf = str(app_storage_path("settings", CONF_NAME)) if is_android_runtime() else os.path.join(HERE, CONF_NAME)
+    Path(conf).parent.mkdir(parents=True, exist_ok=True)
     old = {}
     if os.path.exists(conf):
         try:

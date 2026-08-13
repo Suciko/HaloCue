@@ -6,6 +6,7 @@ import json
 import threading
 from pathlib import Path
 
+import android_resource_mapping
 import script2aap
 
 
@@ -38,8 +39,17 @@ def compile_text(text: str, *, project: str, workspace: str | Path) -> dict:
         script2aap.warn.items.clear()
         cfg, cast, _id_to_name = script2aap.load_cast(_CAST_FILE)
         index = json.loads(_INDEX_FILE.read_text(encoding="utf-8"))
+        try:
+            index = android_resource_mapping.merge_mapping(
+                index, android_resource_mapping.load_mapping()
+            )
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            pass
         events = script2aap.parse_script(script_file, cast)
         scenes = script2aap.build(events, cfg, cast, index, safe_project)
+        script2aap.apply_identifier_aliases(
+            scenes, script2aap.identifier_aliases_for_cast(index, cfg)
+        )
         flat = [entry for _title, scripts in scenes for entry in scripts]
 
         first_background = (

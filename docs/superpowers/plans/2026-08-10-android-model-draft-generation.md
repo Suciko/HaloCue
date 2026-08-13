@@ -17,6 +17,12 @@
 - Generated `.aap` files are published only to `Download/HaloCue/` and may be shared; they are not written into AA private directories.
 - Keep the original AA package `com.foxxlight.AzureArchive` unchanged.
 
+## Progress Update (2026-08-10)
+
+- [x] Tasks 1-6: runtime compatibility, Keystore profiles, SAF import, private drafts, annotation, and real `.aap` generation.
+- [x] Task 7: full WebUI build publication and opaque `shareId` system sharing, committed as `4bb4d6d`.
+- [ ] Task 8: final interactive acceptance remains open; automated host/device verification and the development APK are recorded in `安卓端接手记忆.md`.
+
 ---
 
 ### Task 1: Python Dependency Compatibility Gate

@@ -1,5 +1,6 @@
 package com.halocue.android
 
+import android.annotation.TargetApi
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
@@ -23,6 +24,7 @@ class AapPublicExporter(context: Context) {
         Context.MODE_PRIVATE,
     )
 
+    @TargetApi(Build.VERSION_CODES.Q)
     fun export(source: File, project: String): PublicAapExportResult {
         require(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             "公共暂存需要 Android 10 或更高版本"

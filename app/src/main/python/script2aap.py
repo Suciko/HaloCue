@@ -269,6 +269,54 @@ def merge_project_registered_assets(index, project_dir):
     return merged
 
 
+def apply_identifier_aliases(scenes, aliases):
+    """Translate canonical PC identifiers only at the serialized AAP boundary."""
+    aliases = aliases or {}
+    if not aliases:
+        return scenes
+    for _title, scripts in scenes:
+        for script in scripts:
+            for character in script.get("characters", {}).get("$values", []):
+                identifier = str(character.get("name") or "")
+                if identifier in aliases:
+                    character["name"] = str(aliases[identifier])
+    return scenes
+
+
+def identifier_aliases_for_cast(index, cast_config):
+    """Select package aliases only when the chosen portrait variant proves them."""
+    characters = index.get("characters") or []
+    rows_by_identifier = {}
+    for row in characters:
+        identifier = str(row.get("identifier") or "")
+        if identifier:
+            rows_by_identifier.setdefault(identifier, []).append(row)
+    entries = cast_config.get("cast", cast_config) if isinstance(cast_config, dict) else {}
+    selected = {}
+    for entry in entries.values():
+        if not isinstance(entry, dict):
+            continue
+        identifier = str(entry.get("id") or "")
+        if not identifier:
+            continue
+        rows = rows_by_identifier.get(identifier, [])
+        outfit_key = str(entry.get("outfit_key") or "")
+        if outfit_key:
+            rows = [
+                row for row in rows
+                if str(row.get("outfit_key") or "") == outfit_key
+            ]
+        targets = {
+            str(row.get("android_package_identifier") or identifier)
+            for row in rows
+        }
+        if len(targets) == 1:
+            target = next(iter(targets))
+            if target and target != identifier:
+                selected[identifier] = target
+    return selected
+
+
 def restore_registered_cast_assets(cast, aa_data):
     """Restore server-owned custom sources for legacy draft cast bindings."""
     projects = Path(aa_data) / "projects"
@@ -1187,6 +1235,7 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
     index_path = options.get("index") or os.path.join(HERE, "aa_resources.json")
     aa_data = options.get("aa_data")
     install = options.get("install", False)
+    output_dir = options.get("output_dir")
     voices = options.get("voices")
     dry_run = options.get("dry_run", False)
 
@@ -1207,7 +1256,13 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
     )
     story_root = os.path.dirname(os.path.dirname(HERE))
     install_target = None
-    outdir = os.path.join(aa_data, "projects") if install else os.path.join(HERE, "out")
+    if install and output_dir:
+        raise ValueError("output_dir cannot be combined with install")
+    outdir = (
+        os.path.join(aa_data, "projects")
+        if install
+        else os.path.abspath(str(output_dir or os.path.join(HERE, "out")))
+    )
     proj_res = os.path.join(outdir, project)
     if install:
         install_target = resolve_project_target(
@@ -1227,6 +1282,7 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
         idx = merge_project_registered_assets(build_index, proj_res)
         events = parse_script(script_path, cast)
         scenes = build(events, cfg, cast, idx, project)
+        apply_identifier_aliases(scenes, identifier_aliases_for_cast(idx, cfg))
         flat = [s for _, ss in scenes for s in ss]
 
         used = set()

@@ -27,7 +27,8 @@ class AndroidCompilerBridgeTest {
         assertEquals(1, result.dialogueCount)
         assertFalse(result.imported)
         assertTrue(aap.isFile)
-        assertTrue(aap.canonicalPath.startsWith(context.filesDir.canonicalPath + File.separator))
+        val workspace = File(context.filesDir, "workspace").canonicalPath + File.separator
+        assertTrue(aap.canonicalPath.startsWith(workspace))
         assertEquals("AndroidInstrumentedCompiler", payload.getString("ProjectName"))
     }
 }

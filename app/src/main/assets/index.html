@@ -3,124 +3,44 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="color-scheme" content="light">
-  <title>HaloCue Android</title>
-  <link rel="stylesheet" href="app.css">
-</head>
-<body>
-  <main class="shell">
-    <header class="hero">
-      <div class="mark" aria-hidden="true">H</div>
-      <div>
-        <p class="eyebrow">HALOCUE FOR ANDROID</p>
-        <h1>手机端剧本生成</h1>
-        <p class="intro">本地生成与导出</p>
-      </div>
-    </header>
-
-    <section class="status-grid" aria-label="运行状态">
-      <article class="status-card">
-        <span class="status-icon" id="python-dot" aria-hidden="true"></span>
-        <div>
-          <p class="status-label">本地处理核心</p>
-          <p class="status-value" id="python-status">正在启动…</p>
-        </div>
-      </article>
-
-      <article class="status-card">
-        <span class="status-icon" id="aa-dot" aria-hidden="true"></span>
-        <div>
-          <p class="status-label">原版 AzureArchive</p>
-          <p class="status-value" id="aa-status">正在检查安装状态…</p>
-        </div>
-      </article>
-    </section>
-
-    <section class="compiler-card" aria-labelledby="compiler-title">
-      <p class="step-kicker">生成工程</p>
-      <h2 id="compiler-title">工程文件</h2>
-      <label for="project-name">工程名</label>
-      <input id="project-name" type="text" value="AndroidDemo" autocomplete="off">
-      <label for="script-input">剧本文本</label>
-      <textarea id="script-input" rows="7" spellcheck="false">桃井: 安卓端你好</textarea>
-
-      <button type="button" id="compile-aap">生成工程文件</button>
-      <p class="compile-status" id="compile-status" aria-live="polite">尚未生成</p>
-      <p class="export-location" id="export-location" hidden></p>
-      <button type="button" class="secondary-button" id="share-aap" disabled>分享工程文件</button>
-    </section>
-
-    <section class="next-step">
-      <p class="step-kicker">后续操作</p>
-      <h2>原版 AzureArchive</h2>
-      <button type="button" id="open-aa" disabled>打开原版 AA</button>
-    </section>
-
-    <footer>开发构建 <span id="app-version">—</span></footer>
-  </main>
-
-  <script>
-    const primaryButton = document.getElementById('compile-aap');
-    const status = document.getElementById('compile-status');
-    const shareButton = document.getElementById('share-aap');
-    const exportLocation = document.getElementById('export-location');
-
-    function applyExportState(payload) {
-      const state = payload?.state || 'IDLE';
-      primaryButton.disabled = state === 'GENERATING';
-      shareButton.disabled = payload?.shareAvailable !== true || state === 'GENERATING';
-      status.textContent = payload?.message || '尚未生成';
-      status.className = 'compile-status';
-      if (state === 'EXPORTED') status.classList.add('success');
-      if (state === 'FAILED') status.classList.add('error');
-      exportLocation.hidden = state !== 'EXPORTED';
-      exportLocation.textContent = state === 'EXPORTED'
-        ? `${payload.relativePath || ''}${payload.displayName || ''}`
-        : '';
+  <meta name="color-scheme" content="light dark">
+  <title>HaloCue 启动失败</title>
+  <style>
+    :root {
+      font-family: system-ui, sans-serif;
+      color-scheme: light dark;
     }
 
-    window.HaloCueApp = {
-      bootstrap(payload) {
-        const python = payload.python || {};
-        const aa = payload.aa || {};
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      background: Canvas;
+      color: CanvasText;
+    }
 
-        document.getElementById('python-status').textContent = python.message || '本地处理核心状态未知';
-        document.getElementById('python-dot').classList.toggle('ready', python.ready === true);
-        document.getElementById('aa-status').textContent = aa.message || '原版 AA 状态未知';
-        document.getElementById('aa-dot').classList.toggle('ready', aa.installed === true);
-        document.getElementById('app-version').textContent = payload.appVersion || '开发版';
-        document.getElementById('open-aa').disabled = aa.installed !== true;
-        applyExportState(payload.export);
-        document.body.dataset.ready = 'true';
-      },
-      exportUpdated(payload) {
-        applyExportState(payload);
-      }
-    };
+    main {
+      width: min(32rem, calc(100% - 3rem));
+    }
 
-    primaryButton.addEventListener('click', () => {
-      const project = document.getElementById('project-name').value.trim();
-      const script = document.getElementById('script-input').value;
-      if (!window.HaloCueNative || typeof window.HaloCueNative.generateAndExport !== 'function') {
-        status.textContent = '本地处理功能尚未就绪';
-        status.className = 'compile-status error';
-        return;
-      }
-      applyExportState({ state: 'GENERATING', message: '正在本机生成…', shareAvailable: false });
-      window.HaloCueNative.generateAndExport(project, script);
-    });
+    h1 {
+      margin: 0 0 0.75rem;
+      font-size: 1.5rem;
+      letter-spacing: 0;
+    }
 
-    shareButton.addEventListener('click', () => {
-      if (window.HaloCueNative && typeof window.HaloCueNative.shareLastExport === 'function') {
-        window.HaloCueNative.shareLastExport();
-      }
-    });
-
-    document.getElementById('open-aa').addEventListener('click', () => {
-      if (window.HaloCueNative && typeof window.HaloCueNative.openAzureArchive === 'function') {
-        window.HaloCueNative.openAzureArchive();
-      }
-    });
-  </script>
+    p {
+      margin: 0;
+      line-height: 1.6;
+      color: GrayText;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>本地服务启动失败</h1>
+    <p>请完全关闭 HaloCue 后重新打开。</p>
+  </main>
 </body>
 </html>

@@ -22,7 +22,7 @@ class AndroidCompilerBridge(context: Context) {
         if (!Python.isStarted()) {
             Python.start(AndroidPlatform(applicationContext))
         }
-        val workspace = File(applicationContext.filesDir, "compiler")
+        val workspace = File(applicationContext.filesDir, "workspace")
         val result = Python.getInstance()
             .getModule("android_compiler")
             .callAttr(

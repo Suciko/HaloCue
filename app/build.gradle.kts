@@ -1,7 +1,33 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.chaquo.python")
+}
+
+val signingProperties = Properties().apply {
+    val propertiesFile = rootProject.file("local.properties")
+    if (propertiesFile.isFile) {
+        propertiesFile.inputStream().use { load(it) }
+    }
+}
+
+val betaStoreFile = signingProperties.getProperty("halocue.betaStoreFile")
+val betaStorePassword = signingProperties.getProperty("halocue.betaStorePassword")
+val betaKeyAlias = signingProperties.getProperty("halocue.betaKeyAlias")
+val betaKeyPassword = signingProperties.getProperty("halocue.betaKeyPassword")
+val hasBetaSigning = listOf(
+    betaStoreFile,
+    betaStorePassword,
+    betaKeyAlias,
+    betaKeyPassword,
+).all { !it.isNullOrBlank() }
+val requiresBetaSigning = gradle.startParameter.taskNames.any {
+    it.contains("release", ignoreCase = true) || it.contains("deviceBeta", ignoreCase = true)
+}
+if (requiresBetaSigning && !hasBetaSigning) {
+    error("Release builds require the halocue.beta* properties in local.properties")
 }
 
 android {
@@ -16,8 +42,8 @@ android {
         applicationId = "com.halocue.android"
         minSdk = 24
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0-dev"
+        versionCode = 5
+        versionName = "0.3.0-beta.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -26,13 +52,33 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasBetaSigning) {
+            create("betaRelease") {
+                storeFile = file(requireNotNull(betaStoreFile))
+                storePassword = betaStorePassword
+                keyAlias = betaKeyAlias
+                keyPassword = betaKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasBetaSigning) {
+                signingConfig = signingConfigs.getByName("betaRelease")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+        }
+        create("deviceBeta") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".devicebeta"
+            versionNameSuffix = "-device"
+            matchingFallbacks += listOf("release")
         }
     }
 
@@ -56,6 +102,7 @@ chaquopy {
 }
 
 dependencies {
+    implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("androidx.core:core-ktx:1.16.0")
 
     testImplementation("junit:junit:4.13.2")
