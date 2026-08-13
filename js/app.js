@@ -1834,6 +1834,27 @@
       : '骨骼表情渲染需要 Spine 3.8 的 Spine.com 命令行程序。';
   }
 
+  async function copyRuntimeDiagnostics() {
+    const status = $('#runtimeDiagnosticsStatus');
+    try {
+      const report = await request('/api/diagnostics/runtime');
+      const yesNo = function (value) { return value ? '是' : '否'; };
+      const text = [
+        'HaloCue 运行环境诊断',
+        '版本：' + String(report.version || ''),
+        '用户配置：已找到=' + yesNo(report.user_config && report.user_config.found) + '，已保存 AA=' + yesNo(report.user_config && report.user_config.aa_saved),
+        'AA：已连接=' + yesNo(report.aa && report.aa.connected) + '，projects=' + yesNo(report.aa && report.aa.projects_ready) + '，程序已识别=' + yesNo(report.aa && report.aa.program_recognized),
+        'Spine：包内文件=' + yesNo(report.spine && report.spine.bundled) + '，自动识别=' + yesNo(report.spine && report.spine.resolved),
+        'Windows 凭据可用=' + yesNo(report.credentials && report.credentials.available),
+      ].join('\n');
+      if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
+      else window.prompt('请复制以下诊断结果：', text);
+      status.textContent = '诊断结果已复制，可直接发送。';
+    } catch (error) {
+      status.textContent = error.message || '无法生成诊断结果。';
+    }
+  }
+
   function renderAAWorkspaceCandidates(candidates, requestPayload) {
     const root = $('#aaWorkspaceCandidates');
     clearElement(root);
@@ -2610,6 +2631,7 @@
     'build-aa-index': function () { return buildAAIndex(); },
     'browse-aa-install': function (trigger) { if (settingsFilePicker) { settingsPickerMode = 'aa'; settingsFilePicker.allowedSuffixes = new Set(['.exe']); settingsFilePicker.options.title = '选择 AzureArchive.exe'; settingsFilePicker.options.openLabel = '连接 AA'; settingsFilePicker.searchPlaceholder = '搜索 AzureArchive.exe'; activeFilePicker = settingsFilePicker; settingsFilePicker.openPath(trigger); } },
     'browse-spine-cli': function (trigger) { if (settingsFilePicker) { settingsPickerMode = 'spine'; settingsFilePicker.allowedSuffixes = null; settingsFilePicker.options.title = '选择 Spine.com'; settingsFilePicker.options.openLabel = '选择'; settingsFilePicker.searchPlaceholder = '搜索 Spine.com'; activeFilePicker = settingsFilePicker; settingsFilePicker.openPath(trigger); } },
+    'copy-runtime-diagnostics': copyRuntimeDiagnostics,
     'configure-aa': function (trigger) { setDrawer('settings', true); return actions['browse-aa-install'](trigger); },
     'show-create': function () { $('#view-create').scrollIntoView({behavior: 'smooth'}); }, 'open-script': openScript, analyze: analyze, 'retry-story-load': function () { if (state.loadFailure) replaceStory(state.loadFailure.story, state.loadFailure.options); }, 'dismiss-welcome': function () { $('#welcomePanel').hidden = true; localStorage.setItem('aa-welcome-dismissed-v1', '1'); }, 'show-welcome': function () { $('#welcomePanel').hidden = false; localStorage.removeItem('aa-welcome-dismissed-v1'); }, 'open-settings': function () { setDrawer('settings', true); loadAAData(); }, 'close-settings': function () { setDrawer('settings', false); }, 'save-aa-install': function () { return saveAAInstall(); }, 'open-help': function () { setDrawer('help', true); }, 'close-help': function () { setDrawer('help', false); }, 'close-browse': function () { if (storyFilePicker) storyFilePicker.close(); else closeModal('#mBrowse'); }, 'story-picker-device': function () { if (storyFilePicker) storyFilePicker.chooseDevice(); }, 'story-picker-host': function () { if (storyFilePicker) storyFilePicker.openHost(); }, 'story-picker-refresh': function () { if (storyFilePicker) storyFilePicker.load(storyFilePicker.locationToken, false); }, 'story-picker-source': function () { if (storyFilePicker) storyFilePicker.open(storyFilePicker.trigger); }, 'choose-current-dir': chooseCurrentDirectory, 'close-cast': function () { closeModal('#mCast'); }, 'close-bg-replace': function () { closeModal('#mBgReplace'); state.bgReplaceCard = null; }, 'bg-replace-history': openBgHistory, 'approve-preflight': approvePreflight, 'rerun-preflight': rerunPreflight, 'cast-narrator': function () { castSetKind('narrator'); }, 'cast-unset': function () { castSetKind('unset'); }, 'resolve-background': function (target) { state.backgroundJob = Object.assign({}, state.backgroundJob, {resolveRequestId: target.dataset.requestId}); openModal('#mBackgroundPicker', target); loadBackgrounds(); }, 'continue-background': continueBackground, 'refresh-drafts': refreshDrafts, 'load-review': loadReview, 'approve-all': requestApproveAll, 'confirm-approve-all': approveAll, 'cancel-approve-all': function () { closeModal('#mApproveAll'); }, validate: validateReview, compile: compile, install: openInstallDialog, 'confirm-install': confirmInstall, 'close-install': function () { closeModal('#mInstall'); }, 'edit-card': editCard, 'save-edit': saveEdit, 'close-edit': function () { closeModal('#mEdit'); }, 'insert-line': function () { insertCard('line'); }, 'insert-dir': function () { insertCard('dir'); }, 'move-up': function () { moveCard('up'); }, 'move-down': function () { moveCard('down'); }, 'delete-card': deleteCard, 'bind-cast': bindCast, annotate: annotate, build: build, 'new-profile': function () { renderProfile(null); }, 'activate-profile': async function () { try { await post('/api/llm/profiles/activate', {id: $('#modelProfileId').value}); await loadProfiles($('#modelProfileId').value); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'delete-profile': async function () { try { await post('/api/llm/profiles/delete', {id: $('#modelProfileId').value, delete_credential: true}); await loadProfiles(); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'save-profile': saveProfile, 'clear-profile-key': clearProfileKey, 'discover-models': async function () { $('#modelStatus').textContent = '正在读取可用模型…'; try { const result = await post('/api/llm/models', {id: $('#modelProfileId').value}); const list = $('#modelOptions'); clearElement(list); result.models.forEach(function (name) { const option = document.createElement('option'); option.value = name; list.appendChild(option); }); $('#modelStatus').textContent = '已读取 ' + result.models.length + ' 个模型，可在模型输入框中选择。'; } catch (error) { $('#modelStatus').textContent = error.message; } }, 'test-text': function () { testProfile('text'); }, 'test-vision': function () { testProfile('vision'); }, 'preset-openai': function () { applyModelPreset(presetByKey('openai')); }, 'preset-anthropic': function () { applyModelPreset(presetByKey('anthropic')); }, 'preset-deepseek': function () { applyModelPreset(presetByKey('deepseek')); }, 'preset-ollama': function () { applyModelPreset(presetByKey('ollama')); }, 'preset-silicon': function () { applyModelPreset(presetByKey('siliconflow')); }, 'preset-openrouter': function () { applyModelPreset(presetByKey('openrouter')); }
   };

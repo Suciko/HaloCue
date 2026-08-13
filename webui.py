@@ -7,7 +7,7 @@ AA 剧本编译器 · 本地网页界面
 跑起来后浏览器打开 http://127.0.0.1:8770 。只监听本机，不对外。
 只用标准库 + PIL（缩略图），不需要装框架。
 """
-import argparse, hashlib, io, json, mimetypes, os, re, socket, sys, threading, traceback, uuid, webbrowser
+import argparse, hashlib, io, json, mimetypes, os, re, signal, socket, sys, tempfile, threading, traceback, uuid, webbrowser
 from contextlib import ExitStack
 from dataclasses import replace
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -1299,7 +1299,9 @@ def current_model_status():
         try:
             state = public_state()
         except Exception:
-            state = {}
+            # A damaged optional credential provider must not make setup status
+            # unusable: AA and bundled Spine discovery do not depend on it.
+            return {"configured": False, "name": "", "model": ""}
         models = {str(row.get("id")): row for row in state.get("models", [])}
         connections = {
             str(row.get("id")): row for row in state.get("connections", [])
@@ -1333,6 +1335,41 @@ def current_model_status():
             "model": str(active_profile.get("model") or ""),
         }
     return {"configured": False, "name": "", "model": ""}
+
+
+def runtime_diagnostics() -> dict:
+    """Return a secret-free support snapshot for the local setup screen."""
+    config_path = runtime_config_path()
+    values = _settings_values()
+    discovery = _current_aa_discovery()
+    resolved_spine = spine_face_analysis.resolve_spine_cli(
+        CFG.get("spine_cli") or values.get("spine_cli"),
+        config_path=config_path,
+    )
+    bundled_spine = None
+    if LAYOUT.frozen:
+        candidate = Path(sys.executable).resolve().parent / "tools" / "spine" / "Spine.com"
+        bundled_spine = candidate.is_file()
+    return {
+        "version": VERSION,
+        "user_config": {
+            "found": config_path.is_file(),
+            "aa_saved": bool(str(values.get("aa_data") or "").strip()),
+        },
+        "aa": {
+            "connected": discovery.data is not None,
+            "projects_ready": discovery.projects is not None and discovery.projects.is_dir(),
+            "program_recognized": discovery.executable is not None,
+            "source": discovery.source,
+        },
+        "spine": {
+            "bundled": bundled_spine,
+            "resolved": resolved_spine is not None,
+        },
+        "credentials": {
+            "available": bool(getattr(MODEL_PROFILES.credentials, "available", False)),
+        },
+    }
 
 
 def test_profile_payload(payload, mode="text"):
@@ -4227,6 +4264,8 @@ class H(BaseHTTPRequestHandler):
                     "aa_ok": os.path.isdir(CFG["aa_data"])})
             if p == "/api/setup/status":
                 return self._send(200, setup_status())
+            if p == "/api/diagnostics/runtime":
+                return self._send(200, runtime_diagnostics())
             if p == "/api/resources/index":
                 return self._send(200, _resource_index_snapshot())
             if p == "/api/resources/preview":
@@ -4644,6 +4683,12 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         p = urlparse(self.path).path
+        if p == "/api/runtime/stop":
+            if not getattr(self.server, "halocue_allow_api_shutdown", False):
+                return self._send(404, {"ok": False, "e": "not found"})
+            self._send(200, {"ok": True})
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
         n = int(self.headers.get("Content-Length") or 0)
         if p == "/api/story-files/upload":
             if n > 10 * 1024 * 1024:
@@ -5128,7 +5173,12 @@ class H(BaseHTTPRequestHandler):
                         "e": str(exc),
                     })
 
-                bundle_mgr = BuildBundleManager(store=store)
+                bundle_mgr = BuildBundleManager(
+                    store=store,
+                    output_root=RUNTIME_LAYOUT.output_root,
+                    resource_index_path=RUNTIME_LAYOUT.resource_index_path,
+                    aa_data=CFG.get("aa_data"),
+                )
                 try:
                     build_id = bundle_mgr.create_compile_snapshot(token=token, expected_draft_version=expected_ver)
                 except CompileInputStaleError as exc:
@@ -5910,6 +5960,68 @@ def free_port(start):
     return start
 
 
+def _publish_ready_file(path, *, host, port):
+    destination = Path(path).expanduser().resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, dir=destination.parent, prefix=f".{destination.name}.", suffix=".tmp") as handle:
+            temporary = Path(handle.name)
+            json.dump({"app_id": APP_ID, "version": VERSION, "host": host, "port": int(port)}, handle, ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+        temporary = None
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def _remove_ready_file(path):
+    if path is None:
+        return
+    try:
+        Path(path).expanduser().resolve().unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _install_shutdown_handlers(server):
+    stop_requested = threading.Event()
+    previous_handlers = {}
+
+    def request_stop(_signum, _frame):
+        stop_requested.set()
+
+    for name in ("SIGINT", "SIGTERM", "SIGBREAK"):
+        signum = getattr(signal, name, None)
+        if signum is None or signum in previous_handlers:
+            continue
+        try:
+            previous_handlers[signum] = signal.getsignal(signum)
+            signal.signal(signum, request_stop)
+        except (OSError, ValueError):
+            previous_handlers.pop(signum, None)
+
+    worker = threading.Thread(target=lambda: (stop_requested.wait(), server.shutdown()), daemon=True)
+    worker.start()
+
+    def restore():
+        for signum, handler in previous_handlers.items():
+            try:
+                signal.signal(signum, handler)
+            except (OSError, ValueError):
+                pass
+        stop_requested.set()
+        worker.join(timeout=5)
+
+    return restore
+
+
 class LocalWebServer:
     """Own one loopback-only HaloCue HTTP server and its worker thread."""
 
@@ -5967,7 +6079,9 @@ def main(argv=None):
     ap.add_argument("--aa-data")
     ap.add_argument("--spine-cli")
     ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument("--ready-file")
     a = ap.parse_args(argv)
+    _remove_ready_file(a.ready_file)
     P = initialize_runtime(
         aa_data=a.aa_data,
         overrides=a.overrides,
@@ -5977,17 +6091,26 @@ def main(argv=None):
 
     port = free_port(a.port)
     url = f"http://127.0.0.1:{port}"
-    srv = LocalWebServer(port=port)
+    srv = ThreadingHTTPServer(("127.0.0.1", port), H)
+    srv.daemon_threads = True
+    srv.halocue_allow_api_shutdown = bool(a.no_browser)
+    restore_shutdown_handlers = _install_shutdown_handlers(srv)
+    port = int(srv.server_port)
+    url = f"http://127.0.0.1:{port}"
     print(f"AA 剧本编译器  {url}")
     print("按 Ctrl+C 关闭")
     if not a.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
+        if a.ready_file:
+            _publish_ready_file(a.ready_file, host="127.0.0.1", port=port)
         srv.serve_forever()
     except KeyboardInterrupt:
         print("\n已关闭")
     finally:
-        srv.stop()
+        restore_shutdown_handlers()
+        srv.server_close()
+        _remove_ready_file(a.ready_file)
     return 0
 
 

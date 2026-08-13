@@ -1285,6 +1285,7 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
     cast_path = options.get("cast") or os.path.join(HERE, "cast.json")
     index_path = options.get("index") or os.path.join(HERE, "aa_resources.json")
     aa_data = options.get("aa_data")
+    output_root = options.get("output_root")
     install = options.get("install", False)
     voices = options.get("voices")
     dry_run = options.get("dry_run", False)
@@ -1306,7 +1307,11 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
     )
     story_root = os.path.dirname(os.path.dirname(HERE))
     install_target = None
-    outdir = os.path.join(aa_data, "projects") if install else os.path.join(HERE, "out")
+    outdir = (
+        os.path.join(aa_data, "projects")
+        if install
+        else str(Path(output_root or (Path(HERE) / "out")).resolve())
+    )
     proj_res = os.path.join(outdir, project)
     if install:
         install_target = resolve_project_target(
@@ -1422,6 +1427,7 @@ def main(argv=None, *, running_probe=None):
     ap.add_argument("--index", default=os.path.join(HERE, "aa_resources.json"))
     ap.add_argument("--aa-data", help="AA 存储目录（不给就自动探测）")
     ap.add_argument("--install", action="store_true")
+    ap.add_argument("--output-root", help="non-install build output directory")
     ap.add_argument("--voices", help="配音音频目录，会拷进工程并登记")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--syntax", action="store_true", help="打印剧本语法说明")
@@ -1439,6 +1445,7 @@ def main(argv=None, *, running_probe=None):
         "cast": a.cast,
         "index": a.index,
         "aa_data": a.aa_data,
+        "output_root": a.output_root,
         "install": a.install,
         "voices": a.voices,
         "dry_run": a.dry_run,

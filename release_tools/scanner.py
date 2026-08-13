@@ -96,6 +96,7 @@ _ARCHIVE_EXTENSIONS = {".whl", ".zip"}
 _FORBIDDEN_NONEMPTY_TABLES = set(_EMPTY_TABLES)
 _SQLITE_MAGIC = b"SQLite format 3\x00"
 _SQLITE_SIDECAR_SUFFIXES = ("-journal", "-shm", "-wal", ".db-journal", ".db-shm", ".db-wal")
+_PUBLIC_SEED_PATHS = {"data/halocue_labels.db", "_internal/data/halocue_labels.db"}
 _PUBLIC_META = {
     "asset_schema_version": "2",
     "assetdb_schema_version": "2",
@@ -255,11 +256,15 @@ def _path_findings(relative: str, *, mode: ScanMode) -> list[ScanFinding]:
         findings.append(_finding("forbidden-name", relative, "forbidden local filename"))
     if name.endswith(_SQLITE_SIDECAR_SUFFIXES) or name.startswith("aa_assets.db-"):
         findings.append(_finding("forbidden-name", relative, "SQLite sidecar is forbidden"))
-    if suffix == ".db" and relative != "data/halocue_labels.db":
+    if suffix == ".db" and relative not in _PUBLIC_SEED_PATHS:
         findings.append(_finding("forbidden-name", relative, "database is not the public seed"))
     if suffix in _FORBIDDEN_EXTENSIONS:
         findings.append(_finding("forbidden-extension", relative, "forbidden asset extension"))
-    if suffix == ".png" and not relative.startswith("branding/") and not private_spine:
+    if (
+        suffix == ".png"
+        and not relative.startswith(("branding/", "_internal/branding/"))
+        and not private_spine
+    ):
         findings.append(_finding("forbidden-extension", relative, "non-brand image is forbidden"))
     if name.endswith("-avatar.png") or name.startswith(("bg_", "event", "ui_fx_")):
         findings.append(_finding("forbidden-extension", relative, "game or personal image name"))
@@ -439,7 +444,7 @@ def _sqlite_findings(path: Path, relative: str) -> list[ScanFinding]:
             )
             if not row[0].startswith("sqlite_")
         ]
-        if relative == "data/halocue_labels.db":
+        if relative in _PUBLIC_SEED_PATHS:
             expected_tables = set(_TABLE_COLUMNS)
             if set(table_names) != expected_tables:
                 findings.append(
@@ -589,7 +594,7 @@ def scan_tree(root: Path, *, mode: ScanMode) -> tuple[ScanFinding, ...]:
                 continue
             suffix = path.suffix.casefold()
             if data.startswith(_SQLITE_MAGIC):
-                if relative != "data/halocue_labels.db":
+                if relative not in _PUBLIC_SEED_PATHS:
                     findings.append(
                         _finding("sqlite-unapproved", relative, "SQLite file is not the public seed")
                     )

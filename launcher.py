@@ -307,8 +307,26 @@ def _show_error(message: str) -> None:
         pass
 
 
-def _start_application(aa_data: Path | None) -> int:
+def _start_application(
+    aa_data: Path | None,
+    *,
+    port: int = 8770,
+    no_browser: bool = False,
+    ready_file: Path | None = None,
+) -> int:
+    application_args = ["--aa-data", str(aa_data or ""), "--port", str(port)]
+    if no_browser:
+        application_args.append("--no-browser")
+    if ready_file is not None:
+        application_args.extend(("--ready-file", str(ready_file)))
     if getattr(sys, "frozen", False):
+        if no_browser or ready_file is not None:
+            try:
+                import webui
+
+                return webui.main(application_args)
+            except KeyboardInterrupt:
+                return 0
         try:
             from desktop_app import run_desktop
 
@@ -321,7 +339,7 @@ def _start_application(aa_data: Path | None) -> int:
                 pass
             _show_error(message)
             return 1
-    url = "http://127.0.0.1:8770"
+    url = f"http://127.0.0.1:{port}"
     if is_existing_server(url):
         print("程序已经在运行，正在打开现有页面……")
         webbrowser.open(url)
@@ -329,8 +347,7 @@ def _start_application(aa_data: Path | None) -> int:
     command = [
         sys.executable,
         str(PROGRAM_DIR / "webui.py"),
-        "--aa-data",
-        str(aa_data or ""),
+        *application_args,
     ]
     print("环境检查通过，正在打开网页……")
     print("程序运行期间请保留这个窗口；关闭窗口即可停止程序。")
@@ -348,6 +365,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--aa-data")
     parser.add_argument("--aa-install")
+    parser.add_argument("--port", type=int, default=8770)
+    parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--ready-file", type=Path)
     args = parser.parse_args(argv)
 
     report = build_environment_report(
@@ -374,7 +394,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     aa_path = str(report["aa"].get("path") or "").strip()
-    return _start_application(Path(aa_path) if aa_path else None)
+    aa_data = Path(aa_path) if aa_path else None
+    if args.port == 8770 and not args.no_browser and args.ready_file is None:
+        return _start_application(aa_data)
+    return _start_application(
+        aa_data, port=args.port, no_browser=args.no_browser, ready_file=args.ready_file
+    )
 
 
 if __name__ == "__main__":

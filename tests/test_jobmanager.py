@@ -136,3 +136,17 @@ def test_job_failure_exposes_stable_model_error_metadata_from_cause_chain():
     assert info["error_detail"] == {
         "model": "quota-model", "retryable": False, "http_status": 403,
     }
+
+
+def test_jobmanager_marks_system_exit_as_failed_instead_of_leaving_it_running():
+    jm = JobManager()
+
+    job_id = jm.submit(lambda _job: (_ for _ in ()).throw(SystemExit("missing AA path")))
+    for _ in range(20):
+        info = jm.get(job_id)
+        if info["state"] == "failed":
+            break
+        time.sleep(0.05)
+
+    assert info["state"] == "failed"
+    assert "missing AA path" in info["error"]

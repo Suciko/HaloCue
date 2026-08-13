@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>HaloCue 0.9.2</title>
+  <title>HaloCue 0.9.3</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/css/app.css">
   <link rel="stylesheet" href="/css/layout.css">
@@ -116,6 +116,7 @@
       </div>
     </section>
     <section id="spineSettings"><div class="drawer-section-title">Spine 插件</div><p class="dim" id="spineCliInfo">骨骼表情渲染需要 Spine 3.8 的 Spine.com 命令行程序。</p><div class="row settings-path-row"><input id="spineCliInput" type="text" placeholder="Spine.com 文件路径"><button class="ghost" type="button" data-action="browse-spine-cli">浏览文件</button><button type="button" data-action="save-spine-cli">保存</button></div></section>
+    <section><div class="drawer-section-title">运行环境</div><div class="row"><button class="ghost" type="button" data-action="copy-runtime-diagnostics">复制运行环境诊断</button><span class="dim" id="runtimeDiagnosticsStatus" aria-live="polite"></span></div></section>
   </aside>
   <section id="assetWorkbench" class="asset-workbench" aria-label="素材工作台" aria-hidden="true" tabindex="-1" hidden>
     <header class="asset-workbench-header">

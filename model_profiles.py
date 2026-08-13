@@ -160,18 +160,30 @@ class WindowsCredentialStore:
     """Store generic credentials encrypted by the current Windows account."""
 
     def __init__(self, *, win32cred_module=None):
+        fallback_api = None
+        if os.name == "nt":
+            try:
+                fallback_api = _CtypesWindowsCredentials()
+            except (AttributeError, OSError):
+                pass
         if win32cred_module is None:
             try:
                 import win32cred as win32cred_module
             except ImportError:
-                win32cred_module = None
-        if win32cred_module is None and os.name == "nt":
-            try:
-                win32cred_module = _CtypesWindowsCredentials()
-            except (AttributeError, OSError):
-                win32cred_module = None
-        self._api = win32cred_module
+                pass
+        self._fallback_api = fallback_api
+        self._api = win32cred_module or fallback_api
         self.available = self._api is not None
+
+    def _recover_missing_module(self, exc: Exception) -> bool:
+        """Use the stdlib binding when a partially bundled pywin32 fails lazily."""
+        if not isinstance(exc, ModuleNotFoundError):
+            return False
+        if self._fallback_api is None or self._api is self._fallback_api:
+            return False
+        self._api = self._fallback_api
+        self.available = True
+        return True
 
     @staticmethod
     def _missing(exc: Exception) -> bool:
@@ -187,6 +199,8 @@ class WindowsCredentialStore:
                 0,
             )
         except Exception as exc:
+            if self._recover_missing_module(exc):
+                return self.read(target)
             if self._missing(exc):
                 return None
             raise CredentialStoreError(
@@ -213,6 +227,9 @@ class WindowsCredentialStore:
                 0,
             )
         except Exception as exc:
+            if self._recover_missing_module(exc):
+                self.write(target, secret)
+                return
             raise CredentialStoreError(
                 f"无法写入 Windows 凭据：{type(exc).__name__}"
             ) from exc
@@ -227,6 +244,9 @@ class WindowsCredentialStore:
                 0,
             )
         except Exception as exc:
+            if self._recover_missing_module(exc):
+                self.delete(target)
+                return
             if self._missing(exc):
                 return
             raise CredentialStoreError(

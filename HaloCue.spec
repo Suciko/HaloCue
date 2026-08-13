@@ -1,23 +1,30 @@
 # -*- mode: python ; coding: utf-8 -*-
-import os
 from pathlib import Path
 
 ROOT = Path(SPECPATH).resolve()
-SEED = Path(os.environ["HALOCUE_BUILD_SEED_DIR"]).resolve()
 
 datas = [
     (str(ROOT / "ui.html"), "."),
     (str(ROOT / "js"), "js"),
     (str(ROOT / "css"), "css"),
     (str(ROOT / "branding"), "branding"),
-    (str(SEED / "aa_assets.db"), "."),
-    (str(SEED / "aa_resources.json"), "."),
+    (str(ROOT / "data" / "halocue_labels.db"), "data"),
 ]
 
 hiddenimports = [
     "desktop_app",
     "webview",
     "webview.platforms.edgechromium",
+    "anthropic",
+    "UnityPy",
+]
+
+excludes = [
+    "archspec", "av", "bcrypt", "cryptography", "cv2", "hypothesis",
+    "invoke", "matplotlib", "nacl", "numpy", "onnxruntime", "outcome",
+    "pandas", "paramiko", "pkg_resources", "pluggy", "py", "pytest",
+    "_pytest", "scipy", "setuptools", "sklearn", "sympy", "tkinter",
+    "_tkinter", "torch", "torchvision", "transformers", "trio", "yt_dlp",
 ]
 
 a = Analysis(
@@ -29,7 +36,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["pytest", "playwright"],
+    excludes=excludes,
     noarchive=False,
     optimize=0,
 )

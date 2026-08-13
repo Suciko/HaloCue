@@ -35,7 +35,7 @@ from release_smoke import (  # noqa: E402
 
 
 APP_ID = "halocue-local-server-v1"
-VERSION = "0.9.2"
+VERSION = "0.9.3"
 
 
 class VerificationError(RuntimeError):
@@ -225,12 +225,14 @@ def _wait_ready(process: subprocess.Popen, ready_file: Path, timeout: float = 90
     raise VerificationError("timed out waiting for packaged ready-file")
 
 
-def _stop_cleanly(process: subprocess.Popen, ready_file: Path) -> tuple[str, str]:
+def _stop_cleanly(process: subprocess.Popen, ready_file: Path, base: str) -> tuple[str, str]:
     require(process.poll() is None, "HaloCue stopped before shutdown request")
-    if os.name == "nt":
-        process.send_signal(signal.CTRL_BREAK_EVENT)
-    else:
-        process.send_signal(signal.SIGINT)
+    status, payload = json_request(base, "/api/runtime/stop", {})
+    if status != 200 or payload.get("ok") is not True:
+        if os.name == "nt":
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            process.send_signal(signal.SIGINT)
     try:
         stdout, stderr = process.communicate(timeout=20)
     except subprocess.TimeoutExpired as exc:
@@ -401,7 +403,7 @@ def verify(
             draft_token = _exercise_workflow(base, workspace.source_script, model_url)
         status, changed = json_request(base, "/api/settings/aa-data", {"aa_data": str(workspace.alternate_data)})
         require(status == 200 and changed.get("ok") is True, "API path setting was not accepted")
-        _stop_cleanly(process, ready)
+        _stop_cleanly(process, ready, base)
         process = None
         with sqlite3.connect(database) as connection:
             connection.execute("CREATE TABLE IF NOT EXISTS release_smoke_marker (value TEXT NOT NULL)")
@@ -427,7 +429,7 @@ def verify(
             and draft_token in listed_tokens,
             "draft state did not survive restart",
         )
-        _stop_cleanly(process, ready2)
+        _stop_cleanly(process, ready2, base2)
         process = None
         with sqlite3.connect(database) as connection:
             marker = connection.execute("SELECT value FROM release_smoke_marker").fetchone()

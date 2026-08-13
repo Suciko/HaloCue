@@ -27,7 +27,7 @@ def test_desktop_app_opens_the_local_ui_and_stops_its_server(tmp_path):
 
     assert len(view.windows) == 1
     title, url, options = view.windows[0]
-    assert title == "HaloCue 0.9.2"
+    assert title == "HaloCue 0.9.3"
     assert url.startswith("http://127.0.0.1:")
     assert options["min_size"] == (960, 640)
     assert view.start_options["gui"] == "edgechromium"

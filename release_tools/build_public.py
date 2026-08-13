@@ -257,10 +257,10 @@ def _write_version_file(source_root: Path, work_root: Path) -> Path:
     metadata = _source_constants(source_root)
     product = metadata.get("PRODUCT_NAME")
     version = metadata.get("VERSION")
-    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)-beta\.(\d+)", str(version))
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?", str(version))
     if product != "HaloCue" or match is None:
         raise ValueError("halocue_meta.py has unsupported public version metadata")
-    numeric = tuple(int(part) for part in match.groups())
+    numeric = tuple(int(part or 0) for part in match.groups())
     version_path = work_root / "halocue-version.txt"
     version_path.write_text(
         "VSVersionInfo(\n"
@@ -286,17 +286,12 @@ def _write_version_file(source_root: Path, work_root: Path) -> Path:
 def _copy_public_resources(source_root: Path, bundle_dir: Path) -> None:
     for relative in _PUBLIC_RESOURCES:
         source = source_root / relative
-        destination = bundle_dir / relative
-        if source.is_dir():
-            shutil.copytree(source, destination, dirs_exist_ok=True)
-        else:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, destination)
-        internal_copy = bundle_dir / "_internal" / relative
-        if internal_copy.is_dir() and not internal_copy.is_symlink():
-            shutil.rmtree(internal_copy)
-        elif internal_copy.exists() or internal_copy.is_symlink():
-            internal_copy.unlink()
+        for destination in (bundle_dir / relative, bundle_dir / "_internal" / relative):
+            if source.is_dir():
+                shutil.copytree(source, destination, dirs_exist_ok=True)
+            else:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
 
 
 def _remove_environment_payloads(bundle_dir: Path) -> None:

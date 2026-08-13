@@ -49,6 +49,11 @@ class FakeWinCred:
         self.values.pop(target, None)
 
 
+class MissingModuleWinCred(FakeWinCred):
+    def CredRead(self, *_args):
+        raise ModuleNotFoundError("No module named 'pywintypes'")
+
+
 def test_windows_credentials_round_trip_without_returning_encoded_bytes():
     api = FakeWinCred()
     store = WindowsCredentialStore(win32cred_module=api)
@@ -61,6 +66,18 @@ def test_windows_credentials_round_trip_without_returning_encoded_bytes():
     )
     store.delete("AA-AutoWriter/profile-1")
     assert store.read("AA-AutoWriter/profile-1") is None
+
+
+def test_windows_credentials_fall_back_when_pywin32_is_partially_bundled():
+    fallback = FakeWinCred()
+    store = WindowsCredentialStore(win32cred_module=MissingModuleWinCred())
+    store._fallback_api = fallback
+
+    assert store.read("AA-AutoWriter/profile-1") is None
+    assert store._api is fallback
+
+    store.write("AA-AutoWriter/profile-1", "temporary-value")
+    assert store.read("AA-AutoWriter/profile-1") == "temporary-value"
 
 
 def test_saved_profile_keeps_secret_only_in_credential_store(tmp_path):

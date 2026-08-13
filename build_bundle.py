@@ -41,12 +41,14 @@ class BuildBundleManager:
         *,
         output_root: str | Path | None = None,
         resource_index_path: str | Path | None = None,
+        aa_data: str | Path | None = None,
     ):
         self.store = store or DraftStore()
         self.output_root = Path(output_root or (HERE / "out")).resolve()
         self.resource_index_path = Path(
             resource_index_path or (HERE / "aa_resources.json")
         ).resolve()
+        self.aa_data = str(aa_data) if aa_data else None
 
     def create_compile_snapshot(self, token: str, expected_draft_version: int) -> str:
         """202 响应前在事务锁内验证版本并复制不可变快照"""
@@ -154,6 +156,7 @@ class BuildBundleManager:
                 "cast": str(input_dir / "cast.json"),
                 "index": str(input_dir / "resources.json"),
                 "output_root": str(self.output_root),
+                "aa_data": self.aa_data,
                 "install": False,
             }
         )

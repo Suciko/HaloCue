@@ -49,6 +49,18 @@ def test_scanner_rejects_forbidden_names_and_asset_extensions(tmp_path):
     assert "forbidden-extension" in _codes(findings)
 
 
+def test_scanner_allows_the_packaged_internal_public_seed_and_branding(tmp_path):
+    seed = ROOT / "data" / "halocue_labels.db"
+    internal_seed = tmp_path / "_internal" / "data" / "halocue_labels.db"
+    internal_seed.parent.mkdir(parents=True)
+    shutil.copy2(seed, internal_seed)
+    icon = tmp_path / "_internal" / "branding" / "halocue-icon.png"
+    icon.parent.mkdir(parents=True)
+    icon.write_bytes(b"public branding fixture")
+
+    assert scan_tree(tmp_path, mode="public") == ()
+
+
 def test_scanner_finds_personal_paths_in_utf8_and_utf16le(tmp_path):
     windows = "D:" + "\\" + "Users" + "\\" + "SakuraLeak" + "\\" + "story.txt"
     unix = "/" + "home" + "/sakura-leak/story.txt"

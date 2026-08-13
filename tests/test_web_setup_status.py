@@ -101,6 +101,28 @@ def test_setup_status_is_available_over_local_http(
         server.server_close()
 
 
+def test_headless_runtime_stop_endpoint_only_exists_when_explicitly_enabled():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), webui.H)
+    server.halocue_allow_api_shutdown = False
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        request = __import__("urllib.request", fromlist=["Request"]).Request(
+            f"http://127.0.0.1:{server.server_port}/api/runtime/stop",
+            data=b"{}", method="POST", headers={"Content-Type": "application/json"},
+        )
+        try:
+            urlopen(request)
+        except __import__("urllib.error", fromlist=["HTTPError"]).HTTPError as exc:
+            assert exc.code == 404
+        else:
+            raise AssertionError("desktop server unexpectedly accepted a stop request")
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
 def test_setup_status_refreshes_from_saved_executable_after_restart(
     tmp_path,
     monkeypatch,
@@ -183,3 +205,28 @@ def test_setup_status_and_spine_cli_discovery_ignore_non_object_config(
         "path": "",
         "resolved_path": "",
     }
+
+
+def test_setup_status_survives_a_broken_optional_model_profile_store(
+    tmp_path, monkeypatch
+):
+    data = tmp_path / "data"
+    (data / "projects").mkdir(parents=True)
+    database = tmp_path / "assets.db"
+    assetdb.connect(database).close()
+    monkeypatch.setitem(webui.CFG, "aa_data", str(data))
+    monkeypatch.setattr(webui, "DB", str(database))
+
+    class BrokenProfiles:
+        def public_state(self):
+            raise ModuleNotFoundError("No module named 'pywintypes'")
+
+        def active_profile(self):
+            raise AssertionError("broken public state must not fall through")
+
+    monkeypatch.setattr(webui, "MODEL_PROFILES", BrokenProfiles())
+
+    status = webui.setup_status()
+
+    assert status["aa"]["connected"] is True
+    assert status["model"] == {"configured": False, "name": "", "model": ""}

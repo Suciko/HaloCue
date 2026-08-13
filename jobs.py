@@ -149,7 +149,7 @@ class JobManager:
                         if job.progress == 0.0:
                             job.progress = 100.0
                         job.completed_at = datetime.datetime.now(datetime.timezone.utc)
-            except Exception as e:
+            except BaseException as e:
                 with job._lock:
                     if job.state != "cancelled":
                         job.state = "failed"

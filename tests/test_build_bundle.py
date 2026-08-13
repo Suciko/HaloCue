@@ -246,6 +246,7 @@ def test_packaged_compile_uses_user_runtime_paths_without_bundle_writes(
     result = manager.execute_build_worker(token=token, build_id=build_id)
 
     assert captured["output_root"] == str(output_root)
+    assert captured["aa_data"] is None
     snapshot = store.get_draft_path(token) / "builds" / "1" / build_id / "project"
     assert Path(result["bundle_dir"]) == snapshot.parent
     after = {
@@ -253,3 +254,65 @@ def test_packaged_compile_uses_user_runtime_paths_without_bundle_writes(
         for path in resource_root.rglob("*") if path.is_file()
     }
     assert after == before
+
+
+def test_build_worker_passes_the_selected_aa_data_to_the_compiler(
+    temp_draft_store, tmp_path, monkeypatch
+):
+    aa_data = tmp_path / "external AA" / "data"
+    for name in ("projects", "saves", "overrides"):
+        (aa_data / name).mkdir(parents=True, exist_ok=True)
+    store = temp_draft_store
+    token = "selected-aa-data"
+    store.create_draft(token=token, text="旁白: 路径必须保留。\n", project="Selected")
+    draft_dir = store.get_draft_path(token)
+    (draft_dir / "cast.json").write_text(
+        json.dumps({"cast": {"旁白": {"narrator": True}}}), encoding="utf-8"
+    )
+    (draft_dir / "resources.json").write_text(
+        json.dumps({"bg": {"BG_Black": 0}, "characters": [], "enums": {"emoticon": {}, "action": {}, "appear": {}, "shape": {}}}),
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def compile_fixture(options):
+        captured.update(options)
+        generated = tmp_path / "compiler-output"
+        project = generated / "project"
+        project.mkdir(parents=True)
+        aap = generated / "selected.aap"
+        aap.write_bytes(b"aap")
+        return {"aap_file": str(aap), "project_dir": str(project)}
+
+    monkeypatch.setattr(build_bundle, "compile_script", compile_fixture)
+    manager = BuildBundleManager(store=store, aa_data=aa_data)
+    build_id = manager.create_compile_snapshot(token=token, expected_draft_version=1)
+    manager.execute_build_worker(token=token, build_id=build_id)
+
+    assert captured["aa_data"] == str(aa_data)
+
+
+def test_compile_script_respects_explicit_non_install_output_root(tmp_path):
+    script = tmp_path / "story.txt"
+    script.write_text("旁白: 发布验收。\n", encoding="utf-8")
+    cast = tmp_path / "cast.json"
+    cast.write_text(json.dumps({"cast": {"旁白": {"narrator": True}}}), encoding="utf-8")
+    index = tmp_path / "resources.json"
+    index.write_text(json.dumps({
+        "bg": {"BG_Black": 0}, "characters": [],
+        "enums": {"emoticon": {}, "action": {}, "appear": {}, "shape": {}},
+    }), encoding="utf-8")
+    output_root = tmp_path / "user-state" / "out"
+    aa_data = tmp_path / "aa-data"
+    for name in ("projects", "saves", "overrides"):
+        (aa_data / name).mkdir(parents=True, exist_ok=True)
+
+    from script2aap import compile_script
+
+    result = compile_script({
+        "script": str(script), "out": "Demo", "cast": str(cast), "index": str(index),
+        "output_root": str(output_root), "aa_data": str(aa_data), "install": False,
+    })
+
+    assert Path(result["aap_file"]) == output_root / "Demo.aap"
+    assert Path(result["project_dir"]) == output_root / "Demo"

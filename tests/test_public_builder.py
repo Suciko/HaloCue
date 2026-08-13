@@ -145,6 +145,7 @@ def test_pyinstaller_runs_from_isolated_context_with_deterministic_version_file(
 
     assert captured["cwd"] == work
     assert captured["env"]["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert captured["command"][-1] == str(source / "HaloCue.spec")
     version_path = Path(captured["env"]["HALOCUE_VERSION_FILE"])
     assert version_path.parent == work
     version_text = version_path.read_text(encoding="utf-8")
@@ -162,6 +163,34 @@ def test_pyinstaller_runs_from_isolated_context_with_deterministic_version_file(
         assert expected in version_text
     assert not list(source.rglob("*.pyc"))
     assert not list(source.rglob("__pycache__"))
+
+
+def test_version_file_accepts_stable_public_versions(tmp_path):
+    source = tmp_path / "public-source" / "HaloCue"
+    source.mkdir(parents=True)
+    _write_public_source(source)
+    (source / "halocue_meta.py").write_text(
+        "PRODUCT_NAME = 'HaloCue'\nVERSION = '0.9.3'\n",
+        encoding="utf-8",
+    )
+    work = tmp_path / "releases" / "build"
+    work.mkdir(parents=True)
+
+    version_text = public_builder._write_version_file(source, work).read_text(encoding="utf-8")
+
+    assert "filevers=(0, 9, 3, 0)" in version_text
+    assert "StringStruct('FileVersion', '0.9.3')" in version_text
+
+
+def test_public_spec_uses_only_the_desensitized_database_seed():
+    spec = (ROOT / "HaloCue.spec").read_text(encoding="utf-8")
+
+    assert "data\" / \"halocue_labels.db" in spec
+    assert "HALOCUE_BUILD_SEED_DIR" not in spec
+    assert "aa_assets.db" not in spec
+    assert "aa_resources.json" not in spec
+    assert '"anthropic"' in spec and '"UnityPy"' in spec
+    assert '"torch"' in spec and '"transformers"' in spec
 
 
 def test_public_builder_revalidates_source_manifest_after_build(tmp_path, monkeypatch):
@@ -313,6 +342,9 @@ def test_public_builder_creates_exact_audited_archive_layout(tmp_path, monkeypat
         "HaloCue/branding/halocue-icon.png",
         "HaloCue/branding/halocue-favicon.png",
         "HaloCue/data/halocue_labels.db",
+        "HaloCue/_internal/ui.html",
+        "HaloCue/_internal/branding/halocue-icon.png",
+        "HaloCue/_internal/data/halocue_labels.db",
         "HaloCue/LICENSE",
         "HaloCue/THIRD_PARTY_NOTICES.md",
     }
