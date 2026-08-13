@@ -473,6 +473,30 @@ def test_visual_labeler_keeps_valid_low_confidence_result_when_review_fails(tmp_
     assert all(not item.get("failed") for item in labels)
 
 
+def test_visual_labeler_reviews_usage_hint_that_describes_face_parts(tmp_path):
+    class VisualDescriptionProvider(FakeVisionProvider):
+        def complete_json_vision(self, system, images, user, schema):
+            self.calls.append((system, images, user, schema))
+            face_id = images[0][0].split(":", 1)[1].split(",")[0]
+            if len(self.calls) == 1:
+                return {"items": [_compact_label(
+                    face_id, usage="眉毛下垂、眼睛含泪，嘴角向下"
+                )]}
+            return {"items": [_compact_label(
+                face_id, usage="适合受到打击后低声回应或寻求安慰"
+            )]}
+
+    provider = VisualDescriptionProvider()
+    labels = label_face_images(
+        provider,
+        [_face(tmp_path, "07", (120, 160, 200))],
+        max_attempts=1,
+    )
+
+    assert len(provider.calls) == 2
+    assert labels[0]["usage_hint_cn"] == "适合受到打击后低声回应或寻求安慰"
+
+
 def test_failed_rerun_preserves_last_saved_label_and_effective_evidence(tmp_path):
     con = assetdb.connect(tmp_path / "assets.db")
     scope = {

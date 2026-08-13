@@ -3,12 +3,15 @@
 
   const $ = function (selector) { return document.querySelector(selector); };
   const $$ = function (selector) { return Array.from(document.querySelectorAll(selector)); };
-  const state = {analysis: null, mapping: {}, preflight: null, preflightApproved: false, preflightStale: false, background: null, backgroundJob: null, generationPrompt: null, generationPromptTarget: null, generationPromptStoryToken: null, buildActive: false, fileToken: null, sourcePath: null, browseMode: 'script', browseDirectory: '', profiles: [], profileBaseline: null, modelWorkbench: null, discoveredModelCapabilities: [], activeReasoningCapability: null, modelRole: 'text', modelEditorMode: 'new', workflowStage: 'script', review: {token: null, revision: 1, buildId: null, cards: [], selected: null, filter: 'all', cardLimit: 80}, reviewAssets: null, bgReplaceCard: null, reviewBackgroundRequest: null, operationId: 0, operations: {annotate: null, compile: null, build: null, analyze: null, preflight: null}, transitionId: 0, viewEpoch: 0, loadFailure: null};
+  const state = {analysis: null, mapping: {}, preflight: null, preflightApproved: false, preflightStale: false, background: null, backgroundJob: null, preflightBackgroundChoice: null, generationPrompt: null, generationPromptTarget: null, generationPromptStoryToken: null, buildActive: false, fileToken: null, sourcePath: null, browseMode: 'script', browseDirectory: '', profiles: [], profileBaseline: null, modelWorkbench: null, discoveredModelCapabilities: [], activeReasoningCapability: null, modelRole: 'text', modelEditorMode: 'new', workflowStage: 'script', review: {token: null, revision: 1, buildId: null, cards: [], selected: null, filter: 'all', cardLimit: 80}, reviewAssets: null, bgReplaceCard: null, reviewBackgroundRequest: null, operationId: 0, operations: {annotate: null, compile: null, build: null, analyze: null, preflight: null}, transitionId: 0, viewEpoch: 0, loadFailure: null};
   let activeFilePicker = null;
+  state.aaConnected = false;
   let settingsPickerMode = '';
   let aaIndexPollTimer = null;
   let aaStatusSnapshot = {};
   let backgroundLoadId = 0;
+  const BACKGROUND_PAGE_SIZE = 80;
+  const backgroundBrowser = {offset: 0, total: 0, loading: false};
   const reviewActions = ['rvEdit', 'rvInsertLine', 'rvInsertDir', 'rvMoveUp', 'rvMoveDown', 'rvDelete', 'rvBind'];
   const ACTIVE_REVIEW_KEY = 'aa-active-review-v1';
   const MODEL_PRESETS = [
@@ -110,6 +113,41 @@
   function contextStatus(values) { if (window.StoryContextStatus) window.StoryContextStatus.update(values); }
   function resetContextStatus() { if (window.StoryContextStatus) window.StoryContextStatus.reset(); }
   function log(value) { visible('#log', true); $('#log').textContent = value; }
+  function hideGenerationFailure() {
+    const panel = $('#generationFailure'); if (!panel) return;
+    panel.hidden = true; panel.dataset.errorCode = '';
+  }
+  function sanitizeModelError(value) {
+    return String(value || '')
+      .replace(/(request[ _-]?id\s*[:=]?\s*)[\w-]+/gi, '$1(已隐藏)')
+      .replace(/\breq_[A-Za-z0-9_-]+\b/g, 'req_(已隐藏)');
+  }
+  function annotationFailureView(job, error) {
+    job = job || {}; const code = String(job.error_code || '');
+    const detail = job.error_detail && typeof job.error_detail === 'object' ? job.error_detail : {};
+    const model = String(detail.model || '当前基础模型');
+    const views = {
+      insufficient_quota: {title: '当前模型额度不足', message: '基础连通正常，但供应商拒绝了正式剧本生成请求。', action: '请补充该 API Key 的额度，或切换基础模型后重试。', retryable: false},
+      model_authentication_failed: {title: '模型密钥无效', message: model + ' 未通过供应商身份验证。', action: '请在模型设置中检查 API Key 和接口地址。', retryable: false},
+      model_access_denied: {title: '当前模型不可访问', message: '供应商拒绝访问 ' + model + '。', action: '请检查模型权限，或切换基础模型。', retryable: false},
+      model_request_timeout: {title: '模型响应超时', message: '本次正式生成没有在时间限制内完成。', action: '旧草稿不受影响，可以稍后重试。', retryable: true},
+      model_rate_limited: {title: '模型请求过于频繁', message: '供应商暂时限制了新的模型请求。', action: '请稍等片刻后重试。', retryable: true},
+      model_connection_failed: {title: '模型连接中断', message: '生成期间未能持续连接模型接口。', action: '请检查网络或接口地址后重试。', retryable: true},
+      model_service_unavailable: {title: '模型服务暂时不可用', message: '供应商暂时无法处理这次正式生成请求。', action: '旧草稿不受影响，可以稍后重试。', retryable: true}
+    };
+    return Object.assign({title: '草稿生成失败', message: '本次生成未完成，已有草稿和原剧本没有被覆盖。', action: '可检查技术详情后重试，或打开模型设置。', retryable: detail.retryable !== false}, views[code] || {}, {code: code, technical: sanitizeModelError(job.error || (error && error.message) || '未知错误')});
+  }
+  function showGenerationFailure(view, restoredDraft) {
+    const panel = $('#generationFailure'); if (!panel) return;
+    panel.hidden = false; panel.dataset.errorCode = view.code || '';
+    $('#generationFailureTitle').textContent = view.title;
+    $('#generationFailureMessage').textContent = view.message;
+    $('#generationFailureAction').textContent = view.action + (restoredDraft ? ' 已自动恢复之前的审查草稿。' : '');
+    $('#generationFailureTechnical').textContent = view.technical;
+    const retry = $('#generationFailureRetry'); retry.disabled = !view.retryable;
+    retry.title = view.retryable ? '' : '解决模型配置或额度问题后再重试';
+    $('#generationFailureDraft').hidden = !restoredDraft;
+  }
   function annotationProgressDetail(item) {
     item = item || {};
     const activity = item.activity && typeof item.activity === 'object' ? item.activity : item;
@@ -130,7 +168,7 @@
       const waited = Number.isFinite(elapsed) && elapsed >= 1000 ? ' · 已等待 ' + Math.max(1, Math.floor(elapsed / 1000)) + ' 秒' : '';
       return suffix(received + waited);
     }
-    if (activityState === 'retrying') return suffix('正在纠正返回格式');
+    if (activityState === 'retrying') return suffix(activity.reason === 'reasoning_capacity' ? '推理占满预算，正在增加预算并保留推理' : '正在纠正返回格式');
     if (activityState === 'subdividing') return suffix('正在拆分当前场景块');
     if (!detail || !item.updated_at || item.state !== 'running') return detail;
     const age = Date.now() - Date.parse(item.updated_at);
@@ -155,7 +193,7 @@
     }
     if (Number.isFinite(Number(metrics.input_tokens))) parts.push('输入 ' + count(metrics.input_tokens));
     if (Number.isFinite(Number(metrics.output_tokens))) parts.push('输出 ' + count(metrics.output_tokens));
-    if (Number.isFinite(Number(metrics.reasoning_tokens))) parts.push('思考 ' + count(metrics.reasoning_tokens));
+    if (Number.isFinite(Number(metrics.reasoning_tokens))) parts.push('累计思考 ' + count(metrics.reasoning_tokens));
     if (Number.isFinite(Number(metrics.content_chars))) parts.push('正文 ' + count(metrics.content_chars) + ' 字符');
     if (metrics.cache_reported === true && Number.isFinite(Number(metrics.cache_hit_rate))) {
       parts.push('缓存命中 ' + Math.round(Number(metrics.cache_hit_rate) * 100) + '%');
@@ -229,14 +267,14 @@
 
   function clearStoryRuntime() {
     state.viewEpoch += 1;
-    state.analysis = null; state.mapping = {}; state.preflight = null; state.preflightApproved = false; state.preflightStale = false; state.background = null; state.backgroundJob = null; state.buildActive = false; state.fileToken = null; state.sourcePath = null; state.reviewAssets = null; state.bgReplaceCard = null;
+    state.analysis = null; state.mapping = {}; state.preflight = null; state.preflightApproved = false; state.preflightStale = false; state.background = null; state.backgroundJob = null; state.preflightBackgroundChoice = null; state.buildActive = false; state.fileToken = null; state.sourcePath = null; state.reviewAssets = null; state.bgReplaceCard = null;
     state.generationPrompt = null; state.generationPromptTarget = null; state.generationPromptStoryToken = null;
     if ($('#preflightScenePlan')) clearElement($('#preflightScenePlan'));
     const promptModal = $('#mGenerationPrompt');
     if (promptModal && promptModal.classList && promptModal.classList.contains && promptModal.classList.contains('on')) closeModal('#mGenerationPrompt');
     const installModal = $('#mInstall');
     if (installModal && installModal.classList && installModal.classList.contains && installModal.classList.contains('on')) closeModal('#mInstall');
-    clearElement($('#bggrid')); clearElement($('#storyPlayer')); clearElement($('#preflightCast')); clearElement($('#preflightAssets')); clearElement($('#preflightIssues')); clearElement($('#preflightSummary')); $('#bgTimeline').textContent = ''; $('#preflightStatus').textContent = '等待分析'; $('#preflightHint').textContent = ''; $('#s1info').textContent = ''; $('#log').textContent = ''; resetScriptScanProgress(); visible('#log', false); ['#s2preflight', '#s4'].forEach(function (id) { $(id).classList.add('off'); }); $('#preflightApprove').disabled = true;
+    clearElement($('#bggrid')); clearElement($('#storyPlayer')); clearElement($('#preflightCast')); clearElement($('#preflightAssets')); clearElement($('#preflightIssues')); clearElement($('#preflightSummary')); $('#bgTimeline').textContent = ''; $('#preflightStatus').textContent = '等待分析'; $('#preflightHint').textContent = ''; $('#s1info').textContent = ''; $('#log').textContent = ''; hideGenerationFailure(); resetScriptScanProgress(); visible('#log', false); ['#s2preflight', '#s4'].forEach(function (id) { $(id).classList.add('off'); }); $('#preflightApprove').disabled = true;
     const backgroundPicker = $('#mBackgroundPicker');
     if (backgroundPicker && backgroundPicker.classList && backgroundPicker.classList.contains && backgroundPicker.classList.contains('on')) closeModal('#mBackgroundPicker');
     $('#backgroundRequestsPanel').classList.remove('open'); clearElement($('#backgroundRequestList')); $('#continueBackgroundBuild').disabled = true; $('#backgroundContinueHint').textContent = ''; $('#goAnnotate').disabled = false; $('#rvCompile').disabled = true; $('#rvInstall').disabled = true;
@@ -261,9 +299,29 @@
     card.querySelector('.readiness-state').textContent = ok ? '可用' : '需要处理';
     card.querySelector('.readiness-detail').textContent = detail;
   }
+  function applyAAReadiness(aa) {
+    aa = aa || {};
+    state.aaConnected = Boolean(
+      aa.connected && aa.program && aa.program.status === 'recognized'
+    );
+    const gate = $('#aaSetupGate');
+    if (gate) gate.hidden = state.aaConnected;
+    const choose = $('#chooseStoryButton');
+    const analyzeButton = $('#analyzeStoryButton');
+    const contextButton = $('#storyContextAction');
+    if (choose) choose.disabled = !state.aaConnected;
+    if (analyzeButton) analyzeButton.disabled = !state.aaConnected;
+    if (contextButton) contextButton.disabled = !state.aaConnected;
+    const message = $('#aaSetupGateMessage');
+    if (message) message.textContent = state.aaConnected
+      ? 'AA 主程序已连接。'
+      : '请选择 AzureArchive.exe，HaloCue 会自动识别项目和存档位置。';
+    return state.aaConnected;
+  }
   async function loadSetupStatus() {
     try {
       const result = await request('/api/setup/status');
+      applyAAReadiness(result.aa);
       readiness('#readyAA', result.aa.connected, result.aa.connected ? result.aa.path : '请检查 AA 工作区');
       readiness('#readyDatabase', result.database.ready, result.database.ready ? '素材索引已准备好' : '缺少素材数据库');
       const modelDetail = window.ModelSettings && window.ModelSettings.modelReadinessLabel
@@ -288,6 +346,11 @@
     return story;
   }
   async function openScript(trigger) {
+    if (!state.aaConnected) {
+      setDrawer('settings', true);
+      await loadAAData();
+      return null;
+    }
     state.browseMode = 'script'; $('#browseTitle').textContent = '选择剧情文本';
     if (storyFilePicker) { activeFilePicker = storyFilePicker; storyFilePicker.open(trigger); return; }
     openModal('#mBrowse', trigger); await browse($('#path').value.trim());
@@ -383,17 +446,55 @@
     } else {
       const placeholder = document.createElement('span'); placeholder.className = 'ph'; placeholder.textContent = '暂无预览'; card.appendChild(placeholder);
     }
-    const label = document.createElement('span'); label.className = 'cap'; label.textContent = item.label || item.name;
-    card.appendChild(label); card.addEventListener('click', function () { selectBackground(item.name); }); return card;
+    const label = document.createElement('span'); label.className = 'cap';
+    const title = document.createElement('b'); title.textContent = item.label || item.name; label.appendChild(title);
+    if (item.disambiguate && item.label && item.label !== item.name) {
+      const key = document.createElement('small'); key.textContent = item.name; label.appendChild(key);
+      card.title = (item.label || item.name) + ' · ' + item.name;
+    }
+    card.appendChild(label); card.addEventListener('click', function () { selectBackground(item.name, item.label); }); return card;
   }
-  async function loadBackgrounds() {
+  async function loadBackgrounds(options) {
+    options = options || {};
+    const append = Boolean(options.append);
+    if (append && backgroundBrowser.loading) return;
     const view = captureView();
     const loadId = ++backgroundLoadId;
     const query = encodeURIComponent($('#bgq').value); const ready = $('#bgready').checked ? '1' : '0';
-    try { const items = await request('/api/backgrounds?q=' + query + '&ready=' + ready); if (!isCurrentView(view) || loadId !== backgroundLoadId) return; const root = $('#bggrid'); clearElement(root); items.forEach(function (item) { root.appendChild(backgroundCard(item)); }); }
-    catch (_) { if (isCurrentView(view) && loadId === backgroundLoadId) $('#bggrid').textContent = '背景列表加载失败'; }
+    const official = state.preflightBackgroundChoice ? '&official=1' : '';
+    const offset = append ? backgroundBrowser.offset : 0;
+    const status = $('#backgroundBrowserStatus'); const more = $('#backgroundLoadMore');
+    backgroundBrowser.loading = true; more.disabled = true;
+    status.textContent = append ? '正在加载更多背景…' : '正在读取背景…';
+    try {
+      const result = await request('/api/backgrounds?q=' + query + '&ready=' + ready + official + '&paged=1&offset=' + offset + '&limit=' + BACKGROUND_PAGE_SIZE);
+      if (!isCurrentView(view) || loadId !== backgroundLoadId) return;
+      const items = Array.isArray(result) ? result : (result.items || []);
+      const root = $('#bggrid'); if (!append) clearElement(root);
+      items.forEach(function (item) { root.appendChild(backgroundCard(item)); });
+      backgroundBrowser.offset = offset + items.length;
+      backgroundBrowser.total = Array.isArray(result) ? backgroundBrowser.offset : Number(result.total || 0);
+      if (!root.children.length) root.textContent = '没有找到可用背景，请换一个关键词。';
+      status.textContent = '已显示 ' + backgroundBrowser.offset + ' / ' + backgroundBrowser.total;
+      more.hidden = Array.isArray(result) ? true : !result.has_more;
+    } catch (_) {
+      if (!isCurrentView(view) || loadId !== backgroundLoadId) return;
+      if (!append) $('#bggrid').textContent = '背景列表加载失败';
+      status.textContent = append ? '加载更多失败，请重试。' : '背景列表加载失败';
+      more.hidden = !append;
+    } finally {
+      if (loadId === backgroundLoadId) { backgroundBrowser.loading = false; more.disabled = false; }
+    }
   }
   function selectBackground(name, label) {
+    if (state.preflightBackgroundChoice) {
+      const choice = state.preflightBackgroundChoice;
+      state.preflightBackgroundChoice = null;
+      closeModal('#mBackgroundPicker');
+      return applyUsageBackgroundCandidate(choice.segment, choice.need, {
+        aa_key: name, label: label || name
+      }, choice.trigger);
+    }
     if (state.reviewBackgroundRequest) {
       const card = state.reviewBackgroundRequest;
       state.reviewBackgroundRequest = null;
@@ -435,7 +536,7 @@
     (result.characters || []).forEach(function (item) {
       if (!item || !item.speaker) return;
       const kind = item.kind || 'unset';
-      state.mapping[item.speaker] = kind === 'unset' ? {kind: 'unset'} : {kind: kind, id: item.id || '', name: item.name || item.speaker, spine: item.spine || '', source: item.source || '', avatar: item.avatar || '', custom: Boolean(item.custom)};
+      state.mapping[item.speaker] = kind === 'unset' ? {kind: 'unset'} : {kind: kind, id: item.id || '', name: item.name || item.speaker, club: item.club || '', spine: item.spine || '', source: item.source || '', avatar: item.avatar || '', custom: Boolean(item.custom)};
     });
   }
   function preflightKindLabel(kind) { return kind === 'background' ? '背景' : kind === 'sound' ? '音效' : kind === 'character' ? '骨骼' : kind === 'bgm' ? 'BGM' : kind; }
@@ -471,8 +572,10 @@
   }
   function usageBackgroundTarget(segment, need) {
     if (!segment || !need) return null;
+    const inherited = need.inherits_from && typeof need.inherits_from === 'object'
+      ? need.inherits_from : null;
     return {
-      selector: {
+      selector: inherited || {
         segment: String(segment.segment || ''),
         location: String(need.location || ''),
         requested_name: String(need.name || '')
@@ -501,7 +604,7 @@
   }
   function usageStatusLabel(status, kind) {
     if (['sound', 'bgm'].includes(kind) && !['registered', 'builtin'].includes(status)) return '可选';
-    return status === 'registered' ? (kind === 'background' ? '已采用' : '本剧情已登记') : status === 'builtin' ? 'AA 内置可用' : status === 'recommended' ? '推荐可用' : status === 'approximate' ? '近似可用' : status === 'unsupported' ? '待验证' : status === 'missing' ? '待补充' : '待确认';
+    return status === 'inherited' ? '沿用上一场景' : status === 'registered' ? (kind === 'background' ? '已采用' : '本剧情已登记') : status === 'builtin' ? 'AA 内置可用' : status === 'recommended' ? '候选需确认' : status === 'approximate' ? '仅供参考' : status === 'unsupported' ? '待验证' : status === 'missing' ? '待补充' : '待确认';
   }
   function usageKindLabel(kind) {
     return kind === 'background' ? '背景' : kind === 'bgm' ? 'BGM' : kind === 'sound' ? '音效' : kind;
@@ -559,6 +662,24 @@
     if (status) status.textContent = '';
     resetGenerationImportResult();
     openModal('#mGenerationPrompt', trigger);
+  }
+  function openCustomBackgroundPicker(segment, need, trigger) {
+    const story = currentStory();
+    if (!story) return null;
+    state.generationPrompt = need || null;
+    state.generationPromptTarget = usageBackgroundTarget(segment, need);
+    state.generationPromptStoryToken = story.story_token;
+    resetGenerationImportResult();
+    return openGeneratedBackgroundPicker(trigger, '添加自定义背景图片');
+  }
+  function openPreflightBackgroundPicker(segment, need, trigger) {
+    if (!currentStory()) return null;
+    state.preflightBackgroundChoice = {segment: segment, need: need, trigger: trigger || null};
+    $('#backgroundPickerTitle').textContent = '查找 AA 官方背景';
+    $('#bgq').value = '';
+    $('#bgready').checked = true;
+    openModal('#mBackgroundPicker', trigger);
+    return loadBackgrounds();
   }
   async function copyGenerationPrompt() {
     const text = $('#generationPromptText');
@@ -658,7 +779,7 @@
     const confidence = Number(need.confidence);
     meta.textContent = [need.location, Number.isFinite(confidence) ? '置信度 ' + Math.round(confidence * 100) + '%' : ''].filter(Boolean).join(' · ');
     card.appendChild(meta);
-    if (need.kind === 'background' && need.status === 'registered' && need.aa_key) {
+    if (need.kind === 'background' && ['registered', 'inherited'].includes(need.status) && need.aa_key) {
       const selected = document.createElement('div'); selected.className = 'usage-bound-background';
       if (need.preview_available) {
         const preview = document.createElement('img');
@@ -681,13 +802,18 @@
       selectedMeta.textContent = need.aa_key + ' · ' + (need.source === 'official' ? 'AA 官方背景' : '本剧情自定义背景');
       selectedBody.append(selectedLabel, selectedMeta); selected.append(selectedBody); card.appendChild(selected);
     }
+    if (need.kind === 'background' && need.status === 'inherited') {
+      const continuity = document.createElement('p'); continuity.className = 'usage-background-continuity';
+      continuity.textContent = need.continuity_reason || '与上一段处于同一物理空间，沿用同一背景。';
+      card.appendChild(continuity);
+    }
     if (need.reason) { const reason = document.createElement('p'); reason.className = 'usage-need-reason'; reason.textContent = need.reason; card.appendChild(reason); }
     if (need.evidence && need.evidence !== segment.evidence) { const source = document.createElement('p'); source.className = 'usage-need-evidence dim'; source.textContent = '证据：' + need.evidence; card.appendChild(source); }
     const candidates = Array.isArray(need.candidates) ? need.candidates : [];
     if (need.kind === 'background' && ['recommended', 'approximate'].includes(need.status) && candidates.length) {
       const candidateList = document.createElement('div'); candidateList.className = 'usage-candidates';
-      candidates.forEach(function (candidate) {
-        const option = document.createElement('div'); option.className = 'usage-candidate';
+      const renderCandidate = function (candidate, primary) {
+        const option = document.createElement('div'); option.className = 'usage-candidate' + (primary ? ' is-primary' : '');
         let preview;
         if (candidate.preview_available) {
           preview = document.createElement('img'); preview.className = 'usage-candidate-preview'; preview.loading = 'lazy'; preview.alt = (candidate.label || candidate.aa_key || '背景') + ' 预览'; preview.src = candidate.preview_source === 'story' ? '/api/story/assets/preview?story_token=' + encodeURIComponent((currentStory() || {}).story_token || '') + '&kind=background&key=' + encodeURIComponent(candidate.aa_key) : '/thumb/bg/' + encodeURIComponent(candidate.aa_key) + '?px=240';
@@ -695,17 +821,35 @@
           preview = document.createElement('span'); preview.className = 'usage-candidate-placeholder'; preview.textContent = '暂无预览';
         }
         const body = document.createElement('div'); body.className = 'usage-candidate-body';
+        if (primary) { const marker = document.createElement('span'); marker.className = 'usage-candidate-marker'; marker.textContent = '当前建议'; body.appendChild(marker); }
         const label = document.createElement('b'); label.textContent = candidate.label || candidate.aa_key;
         const candidateConfidence = Number(candidate.confidence);
         const key = document.createElement('small'); key.className = 'dim'; key.textContent = candidate.aa_key + (Number.isFinite(candidateConfidence) ? ' · 匹配 ' + Math.round(candidateConfidence * 100) + '%' : '');
         const difference = document.createElement('p'); difference.textContent = candidate.reason || '与当前场景语义接近。';
         const apply = document.createElement('button'); apply.type = 'button'; apply.className = 'ghost'; apply.dataset.usageAction = 'apply-candidate'; apply.textContent = '采用此背景'; apply.addEventListener('click', function () { return applyUsageBackgroundCandidate(segment, need, candidate, apply); });
-        body.append(label, key, difference, apply); option.append(preview, body); candidateList.appendChild(option);
-      });
+        body.append(label, key, difference, apply); option.append(preview, body); return option;
+      };
+      candidateList.appendChild(renderCandidate(candidates[0], true));
+      if (candidates.length > 1) {
+        const other = document.createElement('details'); other.className = 'usage-other-candidates';
+        const otherSummary = document.createElement('summary'); otherSummary.textContent = '其他候选（' + (candidates.length - 1) + '）';
+        const otherList = document.createElement('div'); otherList.className = 'usage-other-candidate-list';
+        candidates.slice(1).forEach(function (candidate) { otherList.appendChild(renderCandidate(candidate, false)); });
+        other.append(otherSummary, otherList); candidateList.appendChild(other);
+      }
       card.appendChild(candidateList);
     }
     if (shouldOfferCustomBackground(need)) card.appendChild(customBackgroundWorkflow(segment, need));
     const actions = document.createElement('div'); actions.className = 'usage-need-actions';
+    if (need.kind === 'background') {
+      const official = document.createElement('button'); official.type = 'button'; official.className = 'ghost'; official.dataset.usageAction = 'find-official-background';
+      official.textContent = ['registered', 'inherited', 'builtin'].includes(need.status) ? '更换官方背景' : '查找官方背景';
+      official.addEventListener('click', function () { return openPreflightBackgroundPicker(segment, need, official); }); actions.appendChild(official);
+      if (window.StoryAssets && window.StoryAssets.importLocal) {
+        const custom = document.createElement('button'); custom.type = 'button'; custom.className = 'ghost'; custom.dataset.usageAction = 'add-custom-background'; custom.textContent = '添加自定义背景';
+        custom.addEventListener('click', function () { return openCustomBackgroundPicker(segment, need, custom); }); actions.appendChild(custom);
+      }
+    }
     if (need.status === 'missing' && need.kind === 'sound' && window.openAssetWorkbench) {
       const workbench = document.createElement('button'); workbench.type = 'button'; workbench.className = 'ghost'; workbench.textContent = '可选补充';
       workbench.addEventListener('click', function () { openPreflightAssetWorkbench(need.kind, workbench); }); actions.appendChild(workbench);
@@ -975,9 +1119,9 @@
         const job = await window.Api.poll('/api/jobs/' + response.job_id, function (item) { return ['succeeded', 'failed', 'cancelled'].includes(item.state); }, {isCurrent: function () { return isCurrentOperation('analyze', op) && currentStory() && currentStory().story_token === storyToken; }, onRetry: function () { if (isCurrentOperation('analyze', op)) { $('#preflightStatus').textContent = '连接中断，正在重试'; setScriptScanProgress('ai', 'AI 初审连接中断，正在重试…'); } }});
         if (!job || job.state !== 'succeeded') throw new Error((job && job.error) || (job && job.state === 'cancelled' ? '初审任务已取消' : '初审任务未完成'));
         const result = job.result || {};
-        applyPreflightMapping(result); await hydratePreflightCharacters(result); renderPreflight(result); return result;
+        await hydratePreflightCharacters(result); applyPreflightMapping(result); renderPreflight(result); return result;
       }
-      if (response && Array.isArray(response.characters)) { applyPreflightMapping(response); await hydratePreflightCharacters(response); renderPreflight(response); return response; }
+      if (response && Array.isArray(response.characters)) { await hydratePreflightCharacters(response); applyPreflightMapping(response); renderPreflight(response); return response; }
       // 兼容尚未实现初审端点的旧后端；新版后端始终返回 job_id。
       state.preflightApproved = true;
       return null;
@@ -1098,7 +1242,7 @@
   function pickCharacter(item) {
     const who = castPickerSpeaker;
     if (!who) return;
-    state.mapping[who] = {kind: 'portrait', id: item.ident, name: item.name || item.ident, spine: item.spine || '', source: item.source || '', avatar: item.avatar || ''};
+    state.mapping[who] = {kind: 'portrait', id: item.ident, name: item.name || item.ident, club: item.club || '', spine: item.spine || '', source: item.source || '', avatar: item.avatar || ''};
     if (state.preflight) {
       const target = (state.preflight.characters || []).find(function (row) { return row.speaker === who; });
       if (target) { target.kind = 'portrait'; target.id = item.ident; target.name = item.name || item.ident; target.spine = item.spine || ''; target.source = item.source || ''; target.avatar = item.avatar || ''; target.club = item.club || ''; target.faces = item.faces || 0; target.custom = isCustomCharacter(item); target.reason = '用户已手动修改映射。'; }
@@ -1106,14 +1250,30 @@
     }
     closeModal('#mCast');
   }
-  function castSetKind(kind) {
+  async function castSetKind(kind) {
     const who = castPickerSpeaker;
     if (!who) return;
-    if (kind === 'narrator') state.mapping[who] = {kind: 'narrator'};
-    else delete state.mapping[who];
+    let mapping;
+    if (kind === 'voice') {
+      try {
+        mapping = await request('/api/voice-character?speaker=' + encodeURIComponent(who));
+      } catch (error) {
+        status(error.message || '无法创建无立绘角色');
+        return;
+      }
+    } else if (kind === 'narrator') mapping = {kind: 'narrator'};
+    else mapping = {kind: 'unset'};
+    state.mapping[who] = mapping;
     if (state.preflight) {
       const target = (state.preflight.characters || []).find(function (row) { return row.speaker === who; });
-      if (target) { target.kind = kind === 'narrator' ? 'narrator' : 'unset'; target.id = ''; target.name = kind === 'narrator' ? '旁白' : ''; target.custom = false; target.reason = '用户已手动修改映射。'; }
+      if (target) {
+        target.kind = mapping.kind;
+        target.id = mapping.id || '';
+        target.name = mapping.kind === 'narrator' ? '旁白' : mapping.kind === 'voice' ? who : '';
+        target.spine = '';
+        target.custom = false;
+        target.reason = '用户已手动修改映射。';
+      }
       renderPreflight(state.preflight);
     }
     closeModal('#mCast');
@@ -1656,6 +1816,7 @@
       const result = await request('/api/setup/status');
       loadToolSettings(result);
       renderAAStatus(result && result.aa);
+      applyAAReadiness(result && result.aa);
       const aa = result && result.aa || {};
       const path = aa.program && aa.program.path || aa.path || '';
       if (path && $('#aaInstallInput')) $('#aaInstallInput').value = path;
@@ -1711,11 +1872,12 @@
     try {
       const result = await post('/api/settings/aa-install', payload);
       if (result.aa) renderAAStatus(result.aa);
+      if (result.aa) applyAAReadiness(result.aa);
       if (result.aa && result.aa.program && result.aa.program.path) $('#aaInstallInput').value = result.aa.program.path;
       $('#aaWorkspaceConflict').hidden = true;
       $('#aaInstallStatus').textContent = result.restart_required
         ? '路径已保存，重启后使用新的 AA 工作区'
-        : 'AA 路径已保存';
+        : 'AA 主程序已连接，可以开始选择剧情。';
       state.aaInstallRequest = null;
       return result;
     } catch (error) {
@@ -1746,7 +1908,7 @@
         ? await post('/api/llm/models/test', {id: modelId, mode: mode})
         : await post('/api/llm/test', {id: $('#modelProfileId').value, profile: modelPayload(), mode: mode});
       await loadModelWorkbench();
-      $('#modelStatus').textContent = (mode === 'vision' ? '图片识别可用：' : '文字连接可用：') + result.model;
+      $('#modelStatus').textContent = (mode === 'vision' ? '图片连通通过：' : '基础连通通过：') + result.model + '。此结果不代表正式剧本额度充足。';
     } catch (error) { $('#modelStatus').textContent = error.message; }
   }
 
@@ -1774,12 +1936,13 @@
     finally { activeFilePicker = storyFilePicker; }
   }
 
-  function openGeneratedBackgroundPicker(trigger) {
+  function openGeneratedBackgroundPicker(trigger, title) {
     if (!state.generationPrompt || !assetFilePicker) {
       $('#generationPromptStatus').textContent = '当前剧情的图片选择功能暂不可用。';
       return null;
     }
     $('#generationPromptStatus').textContent = '请选择生成好的 PNG 或 JPG 背景图。';
+    assetFilePicker.options.title = title || '选择生成的背景图片';
     closeModal('#mGenerationPrompt');
     activeFilePicker = assetFilePicker;
     return assetFilePicker.open(trigger || $('#generationImportButton'));
@@ -1856,7 +2019,7 @@
     const option = Array.prototype.find.call($('#rvDraftSelect').children, function (item) { return item.value === token; });
     return Number(option && option.dataset.generationVersion || fallback || 1);
   }
-  async function refreshDrafts() {
+  async function refreshDrafts(preferredDraftToken) {
     const story = currentStory();
     if (!story) { resetReview('请先打开剧情'); return; }
     const view = captureView(story);
@@ -1869,7 +2032,8 @@
     });
     if (!scoped.length) { resetReview('当前剧情没有草稿'); return; }
     scoped.forEach(function (draft, index) { const option = document.createElement('option'); const generation = Number(draft.generation_version || index + 1); option.value = draft.draft_token; option.dataset.generationVersion = String(generation); option.textContent = (draft.project || '未命名工程') + ' · v' + generation; select.appendChild(option); });
-    select.value = story.latest_draft_token || scoped[0].draft_token;
+    const preferred = scoped.some(function (draft) { return draft.draft_token === preferredDraftToken; }) ? preferredDraftToken : '';
+    select.value = preferred || story.latest_draft_token || scoped[0].draft_token;
     $('#rvOpen').disabled = false;
     showReviewPhase(true);
     setWorkflowStage('review');
@@ -1896,10 +2060,13 @@
     const selectedCard = selectedId ? cards.find(function (card) { return card.card_id === selectedId; }) || null : null;
     const selectedIndex = selectedCard ? cards.indexOf(selectedCard) : -1;
     const baseCardLimit = sameDraft ? previousReview.cardLimit || 80 : 80;
-    state.review = {token: token, revision: draft.draft_version, buildId: draft.last_compiled_build_id || null, cards: cards, selected: selectedCard, filter: sameDraft ? previousReview.filter || 'all' : 'all', cardLimit: Math.max(baseCardLimit, selectedIndex + 1)}; const counts = draft.counts || {};
+    const annotationStatus = draft.annotation_status || {status: 'complete', completed_targets: 0, total_targets: 0, pending_targets: 0};
+    const annotationIncomplete = annotationStatus.status !== 'complete' || Number(annotationStatus.pending_targets || 0) > 0;
+    state.review = {token: token, revision: draft.draft_version, buildId: draft.last_compiled_build_id || null, annotationIncomplete: annotationIncomplete, cards: cards, selected: selectedCard, filter: sameDraft ? previousReview.filter || 'all' : 'all', cardLimit: Math.max(baseCardLimit, selectedIndex + 1)}; const counts = draft.counts || {};
     showReviewPhase(true); setWorkflowStage('review'); $('#rvOpen').disabled = false;
-    contextStatus({draft: '草稿：v' + displayedDraftVersion(token, draft.draft_version), save: '保存：未修改', review: '审查：待审 ' + (counts.pending || 0) + ' · 待处理 ' + (counts.blocking_errors || 0), compile: state.review.buildId ? '编译：已完成' : '编译：未编译', install: draft.last_installed_build_id ? ('安装：已安装' + (draft.last_installed_project ? ' · ' + draft.last_installed_project : '')) : '安装：未安装'});
-    status('待审 ' + (counts.pending || 0) + ' · 待处理 ' + (counts.blocking_errors || 0) + ' · v' + displayedDraftVersion(token, draft.draft_version)); $('#rvApproveAll').disabled = false; $('#rvValidate').disabled = false; $('#rvCompile').disabled = Boolean(counts.pending || counts.blocking_errors); $('#rvInstall').disabled = !state.review.buildId; setReviewActions(Boolean(state.review.selected), Boolean(state.review.selected && state.review.selected.kind === 'line'));
+    contextStatus({draft: '草稿：v' + displayedDraftVersion(token, draft.draft_version), save: '保存：未修改', review: annotationIncomplete ? ('审查：AI 标注 ' + Number(annotationStatus.completed_targets || 0) + '/' + Number(annotationStatus.total_targets || 0) + ' · 剩余 ' + Number(annotationStatus.pending_targets || 0)) : ('审查：待审 ' + (counts.pending || 0) + ' · 待处理 ' + (counts.blocking_errors || 0)), compile: state.review.buildId ? '编译：已完成' : '编译：未编译', install: draft.last_installed_build_id ? ('安装：已安装' + (draft.last_installed_project ? ' · ' + draft.last_installed_project : '')) : '安装：未安装'});
+    const annotationText = annotationIncomplete ? ('AI 标注 ' + Number(annotationStatus.completed_targets || 0) + '/' + Number(annotationStatus.total_targets || 0) + ' · 剩余 ' + Number(annotationStatus.pending_targets || 0) + ' · ') : '';
+    status(annotationText + '待审 ' + (counts.pending || 0) + ' · 待处理 ' + (counts.blocking_errors || 0) + ' · v' + displayedDraftVersion(token, draft.draft_version)); $('#rvApproveAll').disabled = false; $('#rvValidate').disabled = false; $('#rvCompile').disabled = Boolean(annotationIncomplete || counts.pending || counts.blocking_errors); $('#rvInstall').disabled = Boolean(annotationIncomplete || !state.review.buildId); setReviewActions(Boolean(state.review.selected), Boolean(state.review.selected && state.review.selected.kind === 'line'));
     if (state.review.selected) $('#rvSelectionLabel').textContent = '已选 #' + state.review.selected.line_no;
     rememberActiveReview({story_token: story.story_token, draft_token: token, card_id: state.review.selected && state.review.selected.card_id});
     renderReviewCards();
@@ -2159,13 +2326,22 @@
   }
   async function reviewPost(path, payload, method) { const review = state.review; const view = captureView(); if (!review.token || !isCurrentView(view)) return null; const body = Object.assign({token: review.token, expected_draft_version: review.revision}, payload); const result = await request(path, window.Api.json(method || 'POST', body)); if (!isCurrentView(view) || state.review !== review) return null; if (!result.ok) throw new Error(result.e || result.code); review.revision = result.draft_version || review.revision; contextStatus({save: '保存：已保存'}); return result; }
   function setBusyButton(id, busy, busyText, idleText) { const button = $(id); button.disabled = Boolean(busy); button.textContent = busy ? busyText : idleText; button.setAttribute('aria-busy', String(Boolean(busy))); }
+  let approveAllPending = false;
+  function requestApproveAll(trigger) {
+    if (approveAllPending) return;
+    $('#approveAllStatus').textContent = '';
+    openModal('#mApproveAll', trigger);
+  }
   async function approveAll() {
+    if (approveAllPending) return;
+    approveAllPending = true;
     const view = captureView();
-    if (window.confirm && !window.confirm('把当前草稿的全部卡片标记为已审？')) return;
+    $('#approveAllStatus').textContent = '';
+    setBusyButton('#approveAllConfirm', true, '正在处理…', '确定');
     setBusyButton('#rvApproveAll', true, '正在处理…', '全部标记已审'); status('正在标记全部卡片…');
-    try { const result = await reviewPost('/api/review/approve', {}); if (!result || !isCurrentView(view)) return; await loadReview(); }
-    catch (error) { if (isCurrentView(view)) status('操作失败：' + error.message); }
-    finally { if (isCurrentView(view)) setBusyButton('#rvApproveAll', false, '', '全部标记已审'); }
+    try { const result = await reviewPost('/api/review/approve', {}); if (!result || !isCurrentView(view)) return; await loadReview(); closeModal('#mApproveAll'); }
+    catch (error) { if (isCurrentView(view)) { const message = '操作失败：' + error.message; status(message); $('#approveAllStatus').textContent = message; } }
+    finally { approveAllPending = false; setBusyButton('#approveAllConfirm', false, '', '确定'); if (isCurrentView(view)) setBusyButton('#rvApproveAll', false, '', '全部标记已审'); }
   }
   async function validateReview() {
     const view = captureView(); setBusyButton('#rvValidate', true, '检查中…', '检查问题'); status('正在检查草稿…');
@@ -2288,22 +2464,53 @@
   async function deleteCard() { if (!state.review.selected || !window.confirm('删除该卡片？')) return; try { await reviewPost('/api/cards/' + encodeURIComponent(state.review.selected.card_id), {}, 'DELETE'); await loadReview(); } catch (error) { status(error.message); } }
   async function bindCast() { const card = state.review.selected; if (!card || card.kind !== 'line') return; const ident = window.prompt('输入 AA 角色 ident；留空设为旁白', ''); if (ident === null) return; try { await reviewPost('/api/draft/cast/update', {speaker: card.current.who, mapping: ident ? {id: ident, name: card.current.who, portrait: true} : {narrator: true}}); await loadReview(); } catch (error) { status(error.message); } }
 
+  async function restoreReviewAfterAnnotationFailure(draftToken, cardId) {
+    try {
+      await refreshDrafts(draftToken);
+      const selected = $('#rvDraftSelect').value;
+      if (!selected) return false;
+      await loadReview(selected === draftToken ? cardId : null);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   async function annotate() {
     const op = beginOperation('annotate'); const useAI = $('input[name=anno]:checked').value === 'ai';
+    const previousDraftToken = state.review.token || $('#rvDraftSelect').value || '';
+    const previousCardId = state.review.selected && state.review.selected.card_id || null;
+    let job = null;
     try {
       const story = requireStory(); if (!state.analysis) throw new Error('请先读取剧本');
+      hideGenerationFailure();
       setBusyButton('#goAnnotate', true, useAI ? 'AI 生成中…' : '正在转换…', '生成审查草稿');
       log(useAI ? 'AI 正在安排演出并生成草稿…' : '正在按原文生成审查草稿…');
       const result = await post('/api/annotate', {story_token: story.story_token, mapping: state.mapping, bg: state.background || 'BG_Black', usage_chain: state.preflight && Array.isArray(state.preflight.usage_chain) ? state.preflight.usage_chain : [], annotate: useAI, model_profile_id: legacyModelProfileId()});
       if (!isCurrentOperation('annotate', op)) return;
       let lastAnnotationDetail = '';
-      const job = await window.Api.poll('/api/jobs/' + result.job_id, function (item) { return ['succeeded', 'failed', 'cancelled'].includes(item.state); }, {isCurrent: function () { return isCurrentOperation('annotate', op); }, onProgress: function (item) { const detail = annotationProgressDetail(item); if (isCurrentOperation('annotate', op) && detail && detail !== lastAnnotationDetail) { lastAnnotationDetail = detail; log(detail); } }, onRetry: function () { if (isCurrentOperation('annotate', op)) log('连接中断，正在重试'); }});
+      job = await window.Api.poll('/api/jobs/' + result.job_id, function (item) { return ['succeeded', 'failed', 'cancelled'].includes(item.state); }, {isCurrent: function () { return isCurrentOperation('annotate', op); }, onProgress: function (item) { const detail = annotationProgressDetail(item); if (isCurrentOperation('annotate', op) && detail && detail !== lastAnnotationDetail) { lastAnnotationDetail = detail; log(detail); } }, onRetry: function () { if (isCurrentOperation('annotate', op)) log('连接中断，正在重试'); }});
       if (!isCurrentOperation('annotate', op) || !job) return;
-      if (job.state !== 'succeeded') throw new Error(job.error || '草稿生成失败');
+      if (job.state !== 'succeeded') {
+        const error = new Error(job.error || (job.state === 'cancelled' ? '草稿生成已取消' : '草稿生成失败'));
+        const failure = annotationFailureView(job, error);
+        const restored = await restoreReviewAfterAnnotationFailure(previousDraftToken, previousCardId);
+        if (!isCurrentOperation('annotate', op)) return;
+        showGenerationFailure(failure, restored);
+        log('草稿生成失败：' + error.message + (restored ? '；已恢复之前的审查草稿' : ''));
+        return;
+      }
       await refreshDrafts(); if (!isCurrentOperation('annotate', op)) return;
       $('#rvDraftSelect').value = job.result.draft_token; await loadReview();
-      if (isCurrentOperation('annotate', op)) { const resumed = Number(job.result && job.result.resumed_chunks || 0); const metrics = job.result && job.result.agent_metrics; const timedOut = Boolean(job.result && job.result.timed_out); log((timedOut ? '部分草稿已保存，当前块超时；再次生成会从检查点继续' : '草稿已生成') + (metrics ? ' · ' + formatAnnotationCompletion(metrics) : '') + (resumed ? ' · 复用 ' + resumed + ' 段' : '') + '，请完成审查后再编译安装'); if ($('#reviewPhase').scrollIntoView) $('#reviewPhase').scrollIntoView({behavior: 'smooth', block: 'start'}); }
-    } catch (error) { if (isCurrentOperation('annotate', op)) log('草稿生成失败：' + error.message); }
+      if (isCurrentOperation('annotate', op)) { const resumed = Number(job.result && job.result.resumed_chunks || 0); const metrics = job.result && job.result.agent_metrics; const timedOut = Boolean(job.result && job.result.timed_out); const reusedDraft = Boolean(job.result && job.result.reused_draft); const prefix = timedOut ? '部分草稿已保存，当前块超时；再次生成会缩小当前块并从检查点继续' : reusedDraft ? '标注已经完整，已打开现有草稿；本次未调用模型' : '草稿已生成'; log(prefix + (!reusedDraft && metrics ? ' · ' + formatAnnotationCompletion(metrics) : '') + (timedOut ? ' · 当前超时请求用量未返回' : '') + (resumed ? ' · 复用 ' + resumed + ' 段' : '') + '，请完成审查后再编译安装'); if ($('#reviewPhase').scrollIntoView) $('#reviewPhase').scrollIntoView({behavior: 'smooth', block: 'start'}); }
+    } catch (error) {
+      if (!isCurrentOperation('annotate', op)) return;
+      const failure = annotationFailureView(job, error);
+      const restored = await restoreReviewAfterAnnotationFailure(previousDraftToken, previousCardId);
+      if (!isCurrentOperation('annotate', op)) return;
+      showGenerationFailure(failure, restored);
+      log('草稿生成失败：' + error.message + (restored ? '；已恢复之前的审查草稿' : ''));
+    }
     finally { if (isCurrentOperation('annotate', op)) setBusyButton('#goAnnotate', false, '', '生成审查草稿'); }
   }
   function renderBackgroundRequests(job) {
@@ -2342,7 +2549,7 @@
 
   const recentStories = new window.StoryUI.RecentStories($('#recentStories'), openRecent);
   const storyFilePicker = window.StoryUI && window.StoryUI.StoryFilePicker ? new window.StoryUI.StoryFilePicker($('#mBrowse'), {title: '选择剧情文本', onChoose: openSelectedStory}) : null;
-  const settingsFilePicker = window.StoryUI && window.StoryUI.StoryFilePicker ? new window.StoryUI.StoryFilePicker($('#mBrowse'), {hostEndpoint: '/api/settings/host', selectEndpoint: '/api/settings/entry', title: '选择设置路径', searchPlaceholder: '搜索文件或文件夹', emptyStatus: '这个文件夹中没有可选择的设置路径', onChoose: saveSettingsEntryAndReset}) : null;
+  const settingsFilePicker = window.StoryUI && window.StoryUI.StoryFilePicker ? new window.StoryUI.StoryFilePicker($('#mBrowse'), {hostEndpoint: '/api/settings/host', selectEndpoint: '/api/settings/entry', filesOnly: true, allowedSuffixes: ['.exe'], title: '选择 AzureArchive.exe', openLabel: '连接 AA', searchPlaceholder: '搜索 AzureArchive.exe', emptyStatus: '这个文件夹中没有 AzureArchive.exe', onChoose: saveSettingsEntryAndReset}) : null;
   const assetFilePicker = window.StoryUI && window.StoryUI.StoryFilePicker ? new window.StoryUI.StoryFilePicker($('#mBrowse'), {hostEndpoint: '/api/assets/host', selectEndpoint: '/api/assets/select', allowedSuffixes: ['.png', '.jpg', '.jpeg'], title: '选择生成的背景图片', searchPlaceholder: '搜索背景图片', emptyStatus: '这个文件夹中没有可选择的 PNG 或 JPG 图片', openingStatus: '正在导入所选背景图片…', onChoose: importGeneratedBackgroundSelection}) : null;
   if (settingsFilePicker) {
     const closeSettingsPicker = settingsFilePicker.close.bind(settingsFilePicker);
@@ -2401,10 +2608,12 @@
     'close-model-editor': function () { $('#modelConnectionEditor').hidden = true; $('#modelProviderLayer').hidden = true; $('#modelRoleOverview').hidden = false; },
     'confirm-aa-workspace': confirmAAWorkspace,
     'build-aa-index': function () { return buildAAIndex(); },
-    'browse-aa-install': function (trigger) { if (settingsFilePicker) { settingsPickerMode = 'aa'; activeFilePicker = settingsFilePicker; settingsFilePicker.openPath(trigger); } },
-    'browse-spine-cli': function (trigger) { if (settingsFilePicker) { settingsPickerMode = 'spine'; activeFilePicker = settingsFilePicker; settingsFilePicker.openPath(trigger); } },
-    'show-create': function () { $('#view-create').scrollIntoView({behavior: 'smooth'}); }, 'open-script': openScript, analyze: analyze, 'retry-story-load': function () { if (state.loadFailure) replaceStory(state.loadFailure.story, state.loadFailure.options); }, 'dismiss-welcome': function () { $('#welcomePanel').hidden = true; localStorage.setItem('aa-welcome-dismissed-v1', '1'); }, 'show-welcome': function () { $('#welcomePanel').hidden = false; localStorage.removeItem('aa-welcome-dismissed-v1'); }, 'open-settings': function () { setDrawer('settings', true); loadAAData(); }, 'close-settings': function () { setDrawer('settings', false); }, 'save-aa-install': function () { return saveAAInstall(); }, 'open-help': function () { setDrawer('help', true); }, 'close-help': function () { setDrawer('help', false); }, 'close-browse': function () { if (storyFilePicker) storyFilePicker.close(); else closeModal('#mBrowse'); }, 'story-picker-device': function () { if (storyFilePicker) storyFilePicker.chooseDevice(); }, 'story-picker-host': function () { if (storyFilePicker) storyFilePicker.openHost(); }, 'story-picker-refresh': function () { if (storyFilePicker) storyFilePicker.load(storyFilePicker.locationToken, false); }, 'story-picker-source': function () { if (storyFilePicker) storyFilePicker.open(storyFilePicker.trigger); }, 'choose-current-dir': chooseCurrentDirectory, 'close-cast': function () { closeModal('#mCast'); }, 'close-bg-replace': function () { closeModal('#mBgReplace'); state.bgReplaceCard = null; }, 'bg-replace-history': openBgHistory, 'approve-preflight': approvePreflight, 'rerun-preflight': rerunPreflight, 'cast-narrator': function () { castSetKind('narrator'); }, 'cast-unset': function () { castSetKind('unset'); }, 'resolve-background': function (target) { state.backgroundJob = Object.assign({}, state.backgroundJob, {resolveRequestId: target.dataset.requestId}); openModal('#mBackgroundPicker', target); loadBackgrounds(); }, 'continue-background': continueBackground, 'refresh-drafts': refreshDrafts, 'load-review': loadReview, 'approve-all': approveAll, validate: validateReview, compile: compile, install: openInstallDialog, 'confirm-install': confirmInstall, 'close-install': function () { closeModal('#mInstall'); }, 'edit-card': editCard, 'save-edit': saveEdit, 'close-edit': function () { closeModal('#mEdit'); }, 'insert-line': function () { insertCard('line'); }, 'insert-dir': function () { insertCard('dir'); }, 'move-up': function () { moveCard('up'); }, 'move-down': function () { moveCard('down'); }, 'delete-card': deleteCard, 'bind-cast': bindCast, annotate: annotate, build: build, 'new-profile': function () { renderProfile(null); }, 'activate-profile': async function () { try { await post('/api/llm/profiles/activate', {id: $('#modelProfileId').value}); await loadProfiles($('#modelProfileId').value); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'delete-profile': async function () { try { await post('/api/llm/profiles/delete', {id: $('#modelProfileId').value, delete_credential: true}); await loadProfiles(); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'save-profile': saveProfile, 'clear-profile-key': clearProfileKey, 'discover-models': async function () { $('#modelStatus').textContent = '正在读取可用模型…'; try { const result = await post('/api/llm/models', {id: $('#modelProfileId').value}); const list = $('#modelOptions'); clearElement(list); result.models.forEach(function (name) { const option = document.createElement('option'); option.value = name; list.appendChild(option); }); $('#modelStatus').textContent = '已读取 ' + result.models.length + ' 个模型，可在模型输入框中选择。'; } catch (error) { $('#modelStatus').textContent = error.message; } }, 'test-text': function () { testProfile('text'); }, 'test-vision': function () { testProfile('vision'); }, 'preset-openai': function () { applyModelPreset(presetByKey('openai')); }, 'preset-anthropic': function () { applyModelPreset(presetByKey('anthropic')); }, 'preset-deepseek': function () { applyModelPreset(presetByKey('deepseek')); }, 'preset-ollama': function () { applyModelPreset(presetByKey('ollama')); }, 'preset-silicon': function () { applyModelPreset(presetByKey('siliconflow')); }, 'preset-openrouter': function () { applyModelPreset(presetByKey('openrouter')); }
+    'browse-aa-install': function (trigger) { if (settingsFilePicker) { settingsPickerMode = 'aa'; settingsFilePicker.allowedSuffixes = new Set(['.exe']); settingsFilePicker.options.title = '选择 AzureArchive.exe'; settingsFilePicker.options.openLabel = '连接 AA'; settingsFilePicker.searchPlaceholder = '搜索 AzureArchive.exe'; activeFilePicker = settingsFilePicker; settingsFilePicker.openPath(trigger); } },
+    'browse-spine-cli': function (trigger) { if (settingsFilePicker) { settingsPickerMode = 'spine'; settingsFilePicker.allowedSuffixes = null; settingsFilePicker.options.title = '选择 Spine.com'; settingsFilePicker.options.openLabel = '选择'; settingsFilePicker.searchPlaceholder = '搜索 Spine.com'; activeFilePicker = settingsFilePicker; settingsFilePicker.openPath(trigger); } },
+    'configure-aa': function (trigger) { setDrawer('settings', true); return actions['browse-aa-install'](trigger); },
+    'show-create': function () { $('#view-create').scrollIntoView({behavior: 'smooth'}); }, 'open-script': openScript, analyze: analyze, 'retry-story-load': function () { if (state.loadFailure) replaceStory(state.loadFailure.story, state.loadFailure.options); }, 'dismiss-welcome': function () { $('#welcomePanel').hidden = true; localStorage.setItem('aa-welcome-dismissed-v1', '1'); }, 'show-welcome': function () { $('#welcomePanel').hidden = false; localStorage.removeItem('aa-welcome-dismissed-v1'); }, 'open-settings': function () { setDrawer('settings', true); loadAAData(); }, 'close-settings': function () { setDrawer('settings', false); }, 'save-aa-install': function () { return saveAAInstall(); }, 'open-help': function () { setDrawer('help', true); }, 'close-help': function () { setDrawer('help', false); }, 'close-browse': function () { if (storyFilePicker) storyFilePicker.close(); else closeModal('#mBrowse'); }, 'story-picker-device': function () { if (storyFilePicker) storyFilePicker.chooseDevice(); }, 'story-picker-host': function () { if (storyFilePicker) storyFilePicker.openHost(); }, 'story-picker-refresh': function () { if (storyFilePicker) storyFilePicker.load(storyFilePicker.locationToken, false); }, 'story-picker-source': function () { if (storyFilePicker) storyFilePicker.open(storyFilePicker.trigger); }, 'choose-current-dir': chooseCurrentDirectory, 'close-cast': function () { closeModal('#mCast'); }, 'close-bg-replace': function () { closeModal('#mBgReplace'); state.bgReplaceCard = null; }, 'bg-replace-history': openBgHistory, 'approve-preflight': approvePreflight, 'rerun-preflight': rerunPreflight, 'cast-narrator': function () { castSetKind('narrator'); }, 'cast-unset': function () { castSetKind('unset'); }, 'resolve-background': function (target) { state.backgroundJob = Object.assign({}, state.backgroundJob, {resolveRequestId: target.dataset.requestId}); openModal('#mBackgroundPicker', target); loadBackgrounds(); }, 'continue-background': continueBackground, 'refresh-drafts': refreshDrafts, 'load-review': loadReview, 'approve-all': requestApproveAll, 'confirm-approve-all': approveAll, 'cancel-approve-all': function () { closeModal('#mApproveAll'); }, validate: validateReview, compile: compile, install: openInstallDialog, 'confirm-install': confirmInstall, 'close-install': function () { closeModal('#mInstall'); }, 'edit-card': editCard, 'save-edit': saveEdit, 'close-edit': function () { closeModal('#mEdit'); }, 'insert-line': function () { insertCard('line'); }, 'insert-dir': function () { insertCard('dir'); }, 'move-up': function () { moveCard('up'); }, 'move-down': function () { moveCard('down'); }, 'delete-card': deleteCard, 'bind-cast': bindCast, annotate: annotate, build: build, 'new-profile': function () { renderProfile(null); }, 'activate-profile': async function () { try { await post('/api/llm/profiles/activate', {id: $('#modelProfileId').value}); await loadProfiles($('#modelProfileId').value); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'delete-profile': async function () { try { await post('/api/llm/profiles/delete', {id: $('#modelProfileId').value, delete_credential: true}); await loadProfiles(); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'save-profile': saveProfile, 'clear-profile-key': clearProfileKey, 'discover-models': async function () { $('#modelStatus').textContent = '正在读取可用模型…'; try { const result = await post('/api/llm/models', {id: $('#modelProfileId').value}); const list = $('#modelOptions'); clearElement(list); result.models.forEach(function (name) { const option = document.createElement('option'); option.value = name; list.appendChild(option); }); $('#modelStatus').textContent = '已读取 ' + result.models.length + ' 个模型，可在模型输入框中选择。'; } catch (error) { $('#modelStatus').textContent = error.message; } }, 'test-text': function () { testProfile('text'); }, 'test-vision': function () { testProfile('vision'); }, 'preset-openai': function () { applyModelPreset(presetByKey('openai')); }, 'preset-anthropic': function () { applyModelPreset(presetByKey('anthropic')); }, 'preset-deepseek': function () { applyModelPreset(presetByKey('deepseek')); }, 'preset-ollama': function () { applyModelPreset(presetByKey('ollama')); }, 'preset-silicon': function () { applyModelPreset(presetByKey('siliconflow')); }, 'preset-openrouter': function () { applyModelPreset(presetByKey('openrouter')); }
   };
+  actions['cast-voice'] = function () { return castSetKind('voice'); };
   actions['close-browse'] = function () { if (activeFilePicker) activeFilePicker.close(); else closeModal('#mBrowse'); activeFilePicker = storyFilePicker; };
   actions['new-profile'] = openProviderLayer;
   actions['discover-models'] = async function () {
@@ -2433,7 +2642,8 @@
         : '已读取 ' + result.models.length + ' 个模型。';
     } catch (error) { $('#modelStatus').textContent = error.message; }
   };
-  actions['close-background-picker'] = function () { closeModal('#mBackgroundPicker'); state.reviewBackgroundRequest = null; if (state.backgroundJob) state.backgroundJob.resolveRequestId = null; };
+  actions['close-background-picker'] = function () { closeModal('#mBackgroundPicker'); state.reviewBackgroundRequest = null; state.preflightBackgroundChoice = null; $('#backgroundPickerTitle').textContent = '选择已登记背景'; if (state.backgroundJob) state.backgroundJob.resolveRequestId = null; };
+  actions['load-more-backgrounds'] = function () { return loadBackgrounds({append: true}); };
   actions['show-history'] = showRecentStories;
   actions['close-generation-prompt'] = function () { closeModal('#mGenerationPrompt'); state.generationPrompt = null; state.generationPromptTarget = null; state.generationPromptStoryToken = null; };
   actions['copy-install-aap'] = function () { return copyInstallAapPath(); };
@@ -2445,9 +2655,13 @@
     }
     return openGeneratedBackgroundPicker(trigger);
   };
+  actions['story-picker-device'] = function () { if (activeFilePicker) activeFilePicker.chooseDevice(); };
   actions['story-picker-refresh'] = function () { if (activeFilePicker) activeFilePicker.load(activeFilePicker.locationToken, false); };
   actions['review-filter'] = function (target) { return setReviewFilter(target.dataset.filter); };
   actions['jump-review-card'] = jumpToReviewCard;
+  actions['open-model-settings'] = function () { setDrawer('settings', true); return Promise.all([loadModelWorkbench(), loadAAData()]); };
+  actions['retry-annotation'] = function () { if (!$('#generationFailureRetry').disabled) return annotate(); };
+  actions['open-existing-draft'] = async function () { if ($('#rvDraftSelect').value) await loadReview(); if ($('#reviewPhase').scrollIntoView) $('#reviewPhase').scrollIntoView({behavior: 'smooth', block: 'start'}); };
   document.addEventListener('click', function (event) { const sortTarget = event.target.closest('[data-story-sort]'); if (sortTarget && activeFilePicker) { activeFilePicker.sortBy(sortTarget.dataset.storySort); return; } const target = event.target.closest('[data-action]'); if (target && actions[target.dataset.action]) actions[target.dataset.action](target); });
   $('#bgq').addEventListener('input', loadBackgrounds); $('#bgready').addEventListener('change', loadBackgrounds); $('#rvDraftSelect').addEventListener('change', loadReview); $('#installCategory').addEventListener('input', updateInstallProjectPreview); $('#installStoryName').addEventListener('input', updateInstallProjectPreview);
   $('#rvCardJump').addEventListener('keydown', function (event) { if (event.key === 'Enter') jumpToReviewCard(); });
@@ -2483,7 +2697,7 @@
     renderReasoningCapability();
   });
   $('#modelReasoningMode').addEventListener('input', function () { renderReasoningCapability(state.activeReasoningCapability); });
-  const castSearchInput = $('#castSearch'); if (castSearchInput) castSearchInput.addEventListener('input', function () { clearTimeout(castSearchTimer); const value = this.value; castSearchTimer = setTimeout(function () { searchCharacters(value); }, 180); }); document.addEventListener('keydown', function (event) { if (event.key === 'Escape') { setDrawer('settings', false); setDrawer('help', false); if ($('#mInstall').classList.contains('on')) closeModal('#mInstall'); else if ($('#mBackgroundPicker').classList.contains('on')) actions['close-background-picker'](); else if ($('#mBgReplace').classList.contains('on')) { closeModal('#mBgReplace'); state.bgReplaceCard = null; } else if ($('#mCast').classList.contains('on')) closeModal('#mCast'); else if ($('#mEdit').classList.contains('on')) closeModal('#mEdit'); else if (activeFilePicker && !$('#mBrowse').hidden) { activeFilePicker.close(); activeFilePicker = storyFilePicker; } else closeModal('#mBrowse'); } });
+  const castSearchInput = $('#castSearch'); if (castSearchInput) castSearchInput.addEventListener('input', function () { clearTimeout(castSearchTimer); const value = this.value; castSearchTimer = setTimeout(function () { searchCharacters(value); }, 180); }); document.addEventListener('keydown', function (event) { if (event.key === 'Escape') { setDrawer('settings', false); setDrawer('help', false); if ($('#mApproveAll').classList.contains('on')) closeModal('#mApproveAll'); else if ($('#mInstall').classList.contains('on')) closeModal('#mInstall'); else if ($('#mBackgroundPicker').classList.contains('on')) actions['close-background-picker'](); else if ($('#mBgReplace').classList.contains('on')) { closeModal('#mBgReplace'); state.bgReplaceCard = null; } else if ($('#mCast').classList.contains('on')) closeModal('#mCast'); else if ($('#mEdit').classList.contains('on')) closeModal('#mEdit'); else if (activeFilePicker && !$('#mBrowse').hidden) { activeFilePicker.close(); activeFilePicker = storyFilePicker; } else closeModal('#mBrowse'); } });
   // 记住工作台偏好（生成方式 / 是否安装），同一浏览器内持续生效。
   function restoreWorkbenchPreferences() {
     try {
@@ -2528,6 +2742,7 @@
   });
   window.AppRuntime = {analyze: analyze, annotate: annotate, build: build, compile: compile, beginOperation: beginOperation, loadBackgrounds: loadBackgrounds, loadReview: loadReview, refreshDrafts: refreshDrafts, reviewPost: reviewPost, renderBackgroundRequests: renderBackgroundRequests, resolveBackground: resolveBackground, pollBuild: pollBuild, continueBackground: continueBackground, replaceStory: replaceStory, restoreActiveReview: restoreActiveReview, fillBackgroundFromHistory: fillBackgroundFromHistory, openDraftBackgroundPicker: openDraftBackgroundPicker, resolveDraftBackgroundRequest: resolveDraftBackgroundRequest, setReviewFilter: setReviewFilter, jumpToReviewCard: jumpToReviewCard, searchCharacters: searchCharacters, pickCharacter: pickCharacter, castSetKind: castSetKind, openCastPicker: openCastPicker, renderReviewCards: renderReviewCards, renderReviewAssets: renderReviewAssets, renderPreflight: renderPreflight, buildPreflightAssetTasks: buildPreflightAssetTasks, refreshAfterAssetWorkbench: refreshAfterAssetWorkbench, applyWorkbenchBackground: applyWorkbenchBackground, approvePreflight: approvePreflight, rerunPreflight: rerunPreflight, renderBackgroundTimeline: renderBackgroundTimeline, openBgReplace: openBgReplace, applyBgReplace: applyBgReplace, renderAAStatus: renderAAStatus, openInstallDialog: openInstallDialog, confirmInstall: confirmInstall, updateInstallProjectPreview: updateInstallProjectPreview, annotationProgressDetail: annotationProgressDetail, formatAnnotationCompletion: formatAnnotationCompletion};
   window.AppRuntime.buildAAIndex = buildAAIndex;
+  window.AppRuntime.applyAAReadiness = applyAAReadiness;
   window.AppRuntime.pollAAIndex = pollAAIndex;
   window.addEventListener('load', function () {
     if (localStorage.getItem('aa-welcome-dismissed-v1') === '1') $('#welcomePanel').hidden = true;

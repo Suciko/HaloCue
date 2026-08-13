@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+import shutil
+import subprocess
 import unicodedata
-import wave
 from pathlib import Path
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Iterable
 
 from PIL import Image
@@ -98,6 +101,17 @@ def validate_background(
     return ValidationResult(candidate, tuple(issues))
 
 
+def _find_ffprobe(explicit: str | Path | None) -> str | None:
+    if explicit:
+        p = Path(explicit)
+        return str(p) if p.is_file() else None
+    found = shutil.which("ffprobe")
+    if found:
+        return found
+    bundled = Path(r"E:\ffmpeg\bin\ffprobe.exe")
+    return str(bundled) if bundled.is_file() else None
+
+
 def validate_sound(
     source_path: str | Path,
     *,
@@ -113,33 +127,48 @@ def validate_sound(
         issues.append(ValidationIssue("file_missing", f"音效文件不存在：{path}"))
         return ValidationResult(None, tuple(issues))
 
-    # Kept for source compatibility with callers from development builds. WAV
-    # validation is deliberately self-contained and never executes this path.
-    _ = ffprobe_path
-    if path.suffix.casefold() != ".wav":
-        issues.append(
-            ValidationIssue(
-                "transcode_required",
-                "首版安装只接受 PCM signed 16-bit WAV；请先转码",
-            )
-        )
+    probe = _find_ffprobe(ffprobe_path)
+    if not probe:
+        issues.append(ValidationIssue("probe_unavailable", "找不到 ffprobe，无法验证音频"))
         return ValidationResult(None, tuple(issues))
+    command = [
+        probe,
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=codec_name,sample_rate,channels,sample_fmt,bits_per_sample:format=duration",
+        "-of",
+        "json",
+        str(path),
+    ]
     try:
-        with wave.open(str(path), "rb") as stream:
-            channels = stream.getnchannels()
-            sample_rate = stream.getframerate()
-            sample_width = stream.getsampwidth()
-            frame_count = stream.getnframes()
-            compression = stream.getcomptype()
+        proc = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        payload = json.loads(proc.stdout)
+        stream = payload["streams"][0]
     except Exception as exc:
-        issues.append(ValidationIssue("audio_unreadable", f"无法读取 WAV 音频：{exc}"))
+        issues.append(ValidationIssue("audio_unreadable", f"ffprobe 无法读取音频：{exc}"))
         return ValidationResult(None, tuple(issues))
 
-    bits = sample_width * 8
-    codec = "pcm_s16le" if compression == "NONE" and bits == 16 else ""
-    sample_fmt = "s16" if codec == "pcm_s16le" else ""
-    duration = frame_count / sample_rate if sample_rate else 0.0
-    if codec != "pcm_s16le":
+    codec = str(stream.get("codec_name") or "")
+    sample_rate = int(stream.get("sample_rate") or 0)
+    channels = int(stream.get("channels") or 0)
+    bits = int(stream.get("bits_per_sample") or 0)
+    sample_fmt = str(stream.get("sample_fmt") or "")
+    duration = float(payload.get("format", {}).get("duration") or 0)
+    if (
+        path.suffix.casefold() != ".wav"
+        or codec != "pcm_s16le"
+        or bits != 16
+        or sample_fmt != "s16"
+    ):
         issues.append(
             ValidationIssue(
                 "transcode_required",
@@ -185,8 +214,10 @@ def _spine_base(source: Path) -> tuple[Path | None, list[ValidationIssue]]:
 
 def _atlas_pages(lines: list[str]) -> list[str]:
     pages: list[str] = []
+    page_properties = ("size:", "format:", "filter:", "repeat:", "pma:")
     for index, line in enumerate(lines):
-        if not line or line[0].isspace() or ":" in line:
+        stripped = line.strip()
+        if not stripped or line[0].isspace() or stripped.casefold().startswith(page_properties):
             continue
         following = ""
         for other in lines[index + 1 :]:
@@ -207,6 +238,36 @@ def _read_atlas_lines(path: Path) -> list[str]:
         except UnicodeDecodeError:
             continue
     raise ValueError("unsupported atlas text encoding")
+
+
+def _atlas_page_path(root: Path, page: str) -> Path | None:
+    """Resolve one atlas page while keeping it inside the character bundle."""
+    normalized = str(page).replace("\\", "/").strip()
+    relative = PurePosixPath(normalized)
+    windows_path = PureWindowsPath(normalized)
+    if (
+        not normalized
+        or relative.is_absolute()
+        or windows_path.is_absolute()
+        or windows_path.drive
+        or any(part in {"", ".", ".."} or ":" in part for part in relative.parts)
+    ):
+        return None
+    current = root.resolve()
+    for part in relative.parts:
+        try:
+            exact = next((entry for entry in current.iterdir() if entry.name == part), None)
+        except OSError:
+            return None
+        if exact is None:
+            return None
+        current = exact
+    candidate = current.resolve()
+    try:
+        candidate.relative_to(root.resolve())
+    except ValueError:
+        return None
+    return candidate
 
 
 _PART_KIND_KEYWORDS = (
@@ -305,7 +366,6 @@ def validate_spine(
     required = [
         ("skel_missing", skel),
         ("atlas_missing", atlas),
-        ("texture_missing", texture),
         ("avatar_missing", avatar),
     ]
     for code, path in required:
@@ -319,15 +379,29 @@ def validate_spine(
         except Exception as exc:
             issues.append(ValidationIssue("atlas_unreadable", f"无法读取 atlas：{exc}"))
     pages = _atlas_pages(lines)
-    directory_names = {p.name for p in base.parent.iterdir()} if base.parent.is_dir() else set()
+    bundle_root = base.parent.resolve()
+    atlas_page_files: dict[str, str] = {}
+    resolved_pages: list[Path | None] = []
     for page in pages:
-        if page not in directory_names:
+        page_path = _atlas_page_path(bundle_root, page)
+        resolved_pages.append(page_path)
+        if page_path is None or not page_path.is_file():
             issues.append(
                 ValidationIssue(
                     "atlas_page_missing",
-                    f"atlas 引用的贴图不存在或大小写不一致：{page}",
+                    f"atlas 引用的贴图不存在、路径无效或大小写不一致：{page}",
                 )
             )
+        else:
+            atlas_page_files[f"atlas_page_{len(atlas_page_files)}"] = str(page_path)
+    if pages:
+        if resolved_pages[0] is None or not resolved_pages[0].is_file():
+            if texture.name in pages:
+                issues.append(ValidationIssue("texture_missing", f"缺少 Spine 文件：{texture.name}"))
+        else:
+            texture = resolved_pages[0]
+    elif not texture.is_file():
+        issues.append(ValidationIssue("texture_missing", f"缺少 Spine 文件：{texture.name}"))
 
     expression = extract_expression_capabilities(lines)
     faces = expression["faces"]
@@ -354,10 +428,18 @@ def validate_spine(
         "texture": str(texture.resolve()),
         "avatar": str(avatar.resolve()),
     }
+    all_files = {
+        "skel": files["skel"],
+        "atlas": files["atlas"],
+        **atlas_page_files,
+        "avatar": files["avatar"],
+    }
     digest = hashlib.sha256()
-    for path in (skel, atlas, texture, avatar):
+    digest_paths = [Path(value) for value in all_files.values()]
+    for path in digest_paths:
         if path.is_file():
-            digest.update(path.name.encode("utf-8"))
+            relative_name = path.resolve().relative_to(bundle_root).as_posix()
+            digest.update(relative_name.encode("utf-8"))
             digest.update(bytes.fromhex(_sha256(path)))
     candidate = AssetCandidate(
         kind="character",
@@ -368,6 +450,7 @@ def validate_spine(
         metadata={
             "identifier": identifier,
             "files": files,
+            "all_files": all_files,
             "atlas_pages": pages,
             "faces": faces,
             "expression_parts": expression["parts"],

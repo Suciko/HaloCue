@@ -4,7 +4,6 @@
 import base64
 import io
 import json
-import os
 import socket
 import subprocess
 import sys
@@ -15,9 +14,10 @@ from pathlib import Path
 
 import pytest
 
+sync_playwright = pytest.importorskip("playwright.sync_api").sync_playwright
+
 
 HERE = Path(__file__).resolve().parents[1]
-pytestmark = pytest.mark.browser
 CHROMIUM_UNSAFE_PORTS = {
     1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53,
     69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115,
@@ -38,22 +38,15 @@ def _free_port():
 
 
 @pytest.fixture(scope="module")
-def app_url(tmp_path_factory):
+def app_url():
     port = _free_port()
-    aa_data = tmp_path_factory.mktemp("asset-workbench-aa") / "data"
-    for name in ("projects", "saves", "overrides", "settings"):
-        (aa_data / name).mkdir(parents=True)
     process = subprocess.Popen(
-        [
-            sys.executable, "webui.py", "--no-browser", "--port", str(port),
-            "--aa-data", str(aa_data),
-        ],
+        [sys.executable, "webui.py", "--no-browser", "--port", str(port)],
         cwd=HERE,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
-        env={**os.environ, "PYTHONUTF8": "1"},
     )
     deadline = time.time() + 20
     while time.time() < deadline:
@@ -66,11 +59,17 @@ def app_url(tmp_path_factory):
     else:
         process.terminate()
         raise RuntimeError("webui.py did not start")
-    try:
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        process.terminate()
-        process.wait(timeout=10)
+    yield f"http://127.0.0.1:{port}"
+    process.terminate()
+    process.wait(timeout=10)
+
+
+@pytest.fixture(scope="module")
+def browser():
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        yield browser
+        browser.close()
 
 
 ASSETS = {

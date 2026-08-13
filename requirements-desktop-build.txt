@@ -1,0 +1,7 @@
+pytest==8.4.2
+pywebview==6.2.1
+pyinstaller==6.22.0
+pillow==12.3.0
+UnityPy==1.25.3
+anthropic==0.121.0
+pywin32==312

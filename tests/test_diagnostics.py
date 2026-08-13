@@ -55,6 +55,19 @@ def test_blank_node_is_reported_but_separator_is_not():
     assert not any(item["line_no"] == 3 for item in diagnostics)
 
 
+def test_camera_and_command_aliases_are_known_to_document_diagnostics():
+    commands = ("camera", "camera_hold", "music", "sound")
+    nodes = [
+        DocNode(kind="dir", raw=f"@{command} value", line_no=index,
+                fields={"cmd": command, "arg": "value"})
+        for index, command in enumerate(commands, 1)
+    ]
+
+    diagnostics = validate_script_diagnostics(nodes, {}, {})
+
+    assert not any(item["code"] == "dir.unknown" for item in diagnostics)
+
+
 def test_all_diagnostic_codes_triggered():
     cast = {"凯伊": {"id": "kei"}}
     assets = {

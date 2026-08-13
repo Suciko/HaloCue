@@ -7,8 +7,8 @@
 | 发布物 | 固定名称 | 可否上传 GitHub |
 |---|---|---|
 | 公开源码 | GitHub 仓库 | 可以，先通过公开导出和扫描 |
-| 公开 Windows ZIP | `HaloCue-0.9.0-beta.1-windows.zip` | 可以，作为 GitHub Release 附件 |
-| 私发覆盖包 | `HaloCue-0.9.0-beta.1-private-windows.zip` | 不公开；仅在授权明确时定向交付 |
+| 公开 Windows ZIP | `HaloCue-0.9.2-windows-x64.zip` | 可以，作为 GitHub Release 附件 |
+| 私发包 | `HaloCue-0.9.2-private-windows-x64.zip` | 不公开；仅在授权明确时定向交付 |
 
 公开版不包含 Spine。私发覆盖包也绝不能包含个人骨骼、图集、纹理、音频、游戏资源、作品、密钥、激活信息、个人配置或日志；这些内容在任何版本都不得包含。
 
@@ -62,6 +62,6 @@ python tools/verify_clean_source.py --source build/public-source/HaloCue
 - [ ] `git status` 中没有意外文件。
 - [ ] Release 附件的 SHA-256 已重新计算并核对。
 - [ ] 仓库与 Release 里都没有私人素材或 Spine。
-- [ ] 发布说明明确这是 `0.9.0-beta.1` 测试版。
+- [ ] 发布说明明确这是 `0.9.2` 测试版。
 
 远程仓库目标是 `https://github.com/Suciko/HaloCue`。创建仓库、推送分支和发布 Release 都属于外部写入；执行前需由仓库所有者最终确认。

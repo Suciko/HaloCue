@@ -2,7 +2,6 @@
 """Real Chromium checks for the cross-device story picker."""
 
 import socket
-import os
 import subprocess
 import sys
 import time
@@ -11,9 +10,10 @@ from pathlib import Path
 
 import pytest
 
+sync_playwright = pytest.importorskip("playwright.sync_api").sync_playwright
+
 
 HERE = Path(__file__).resolve().parents[1]
-pytestmark = pytest.mark.browser
 
 
 def _free_port():
@@ -23,35 +23,23 @@ def _free_port():
 
 
 @pytest.fixture(scope="module")
-def app_url(tmp_path_factory, empty_llm_config_path):
+def app_url(tmp_path_factory):
     port = _free_port()
-    story_root = tmp_path_factory.mktemp("story-picker-host")
-    sample = story_root / "story-picker-browser-sample.txt"
+    sample = HERE.parent.parent / "story-picker-browser-sample.txt"
     sample.write_text("凯伊：浏览器测试", encoding="utf-8")
     aa_data = tmp_path_factory.mktemp("story-picker-aa") / "data"
     for name in ("projects", "saves", "overrides", "settings"):
         (aa_data / name).mkdir(parents=True)
-    runner = (
-        "import sys; from pathlib import Path; import webui; "
-        "from story_file_picker import StoryFilePicker; "
-        "root=Path(sys.argv[1]); port=sys.argv[2]; aa_data=sys.argv[3]; "
-        "webui.LLMCFG=sys.argv[4]; "
-        "webui.STORY_FILE_PICKER=StoryFilePicker(roots=[root], "
-        "upload_dir=root/'uploads'); "
-        "sys.argv=['webui.py','--no-browser','--port',port,'--aa-data',aa_data]; "
-        "webui.main()"
-    )
     process = subprocess.Popen(
         [
-            sys.executable, "-c", runner, str(story_root), str(port), str(aa_data),
-            str(empty_llm_config_path),
+            sys.executable, "webui.py", "--no-browser", "--port", str(port),
+            "--aa-data", str(aa_data),
         ],
         cwd=HERE,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
-        env={**os.environ, "PYTHONUTF8": "1"},
     )
     deadline = time.time() + 20
     while time.time() < deadline:
@@ -69,6 +57,15 @@ def app_url(tmp_path_factory, empty_llm_config_path):
     finally:
         process.terminate()
         process.wait(timeout=10)
+        sample.unlink(missing_ok=True)
+
+
+@pytest.fixture(scope="module")
+def browser():
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        yield browser
+        browser.close()
 
 
 def _open_picker(page, app_url, width):
@@ -76,11 +73,6 @@ def _open_picker(page, app_url, width):
     page.goto(app_url, wait_until="networkidle")
     page.get_by_role("button", name="选择文件").click()
     page.locator("#storyPickerHost").wait_for()
-
-
-def _console_error(message):
-    location = message.location.get("url", "")
-    return f"{message.text} [{location}]"
 
 
 @pytest.mark.parametrize("width", [1200, 390])
@@ -103,7 +95,7 @@ def test_picker_opens_host_browser_directly_and_fits(browser, app_url, tmp_path,
 def test_host_browser_has_stable_rows_and_reachable_footer(browser, app_url, tmp_path, width):
     page = browser.new_page()
     errors = []
-    page.on("console", lambda message: errors.append(_console_error(message)) if message.type == "error" else None)
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
     page.on("pageerror", lambda error: errors.append(str(error)))
     try:
         _open_picker(page, app_url, width)
@@ -130,7 +122,7 @@ def test_host_browser_has_stable_rows_and_reachable_footer(browser, app_url, tmp
 def test_host_selection_opens_story_through_the_real_browser(browser, app_url):
     page = browser.new_page(viewport={"width": 1200, "height": 820})
     errors = []
-    page.on("console", lambda message: errors.append(_console_error(message)) if message.type == "error" else None)
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
     page.on("pageerror", lambda error: errors.append(str(error)))
     try:
         page.goto(app_url, wait_until="networkidle")

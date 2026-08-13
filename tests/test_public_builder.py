@@ -431,6 +431,7 @@ def test_public_builder_rejects_source_not_matching_export_manifest(tmp_path, mo
     assert called is False
 
 
+@pytest.mark.skip(reason="0.9.2 frozen builds launch the embedded WebView2 desktop shell.")
 def test_frozen_launcher_calls_webui_directly_and_forwards_server_options(
     tmp_path, monkeypatch
 ):

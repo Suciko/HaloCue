@@ -1,35 +1,27 @@
+# -*- mode: python ; coding: utf-8 -*-
 import os
 from pathlib import Path
-import sys
 
-from PyInstaller.utils.hooks import copy_metadata
+ROOT = Path(SPECPATH).resolve()
+SEED = Path(os.environ["HALOCUE_BUILD_SEED_DIR"]).resolve()
 
-ROOT = Path(SPECPATH)
-sys.path.insert(0, str(ROOT))
-from release_tools.build_public import pyinstaller_policy
-
-
-policy = pyinstaller_policy()
-hiddenimports = list(policy["hidden_imports"])
 datas = [
     (str(ROOT / "ui.html"), "."),
     (str(ROOT / "js"), "js"),
     (str(ROOT / "css"), "css"),
-    (str(ROOT / "branding" / "halocue-icon.png"), "branding"),
-    (str(ROOT / "branding" / "halocue-favicon.png"), "branding"),
-    (str(ROOT / "data" / "halocue_labels.db"), "data"),
-    (str(ROOT / "README.md"), "."),
-    (str(ROOT / "LICENSE"), "."),
-    (str(ROOT / "THIRD_PARTY_NOTICES.md"), "."),
+    (str(ROOT / "branding"), "branding"),
+    (str(SEED / "aa_assets.db"), "."),
+    (str(SEED / "aa_resources.json"), "."),
 ]
-for distribution in policy["metadata_distributions"]:
-    try:
-        datas += copy_metadata(distribution, recursive=policy["metadata_recursive"])
-    except Exception:
-        pass
+
+hiddenimports = [
+    "desktop_app",
+    "webview",
+    "webview.platforms.edgechromium",
+]
 
 a = Analysis(
-    [str(ROOT / "halocue_app.py")],
+    [str(ROOT / "launcher.py")],
     pathex=[str(ROOT)],
     binaries=[],
     datas=datas,
@@ -37,17 +29,12 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=list(policy["excludes"]),
+    excludes=["pytest", "playwright"],
     noarchive=False,
     optimize=0,
 )
-a.datas = [
-    entry
-    for entry in a.datas
-    if not entry[0].casefold().endswith(".gif")
-    and not entry[0].casefold().endswith("direct_url.json")
-]
 pyz = PYZ(a.pure)
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -58,10 +45,15 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
     icon=str(ROOT / "branding" / "halocue.ico"),
-    version=os.environ[policy["version_file_environment"]],
 )
+
 coll = COLLECT(
     exe,
     a.binaries,

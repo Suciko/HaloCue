@@ -1,6 +1,6 @@
 # HaloCue｜AA 剧本自动演出工具
 
-**HaloCue 0.9 Beta**（版本 `0.9.0-beta.1`）是一款面向
+**HaloCue 0.9.2** 是一款面向
 [AzureArchive](https://github.com/foxxlight/AzureArchive) 的 AA 剧本自动演出工具。它读取用户已经写好的中文剧本，安排表情、动作、站位、镜头、背景与声音，经过人工审查后编译为 AA 工程，同时帮助管理演员和素材。
 
 现版本的 AI 用于提出演出标注，不负责创作或改写剧本正文；用户始终可以在编译前逐项审查和修改结果。
@@ -10,13 +10,13 @@ Esoteric Software 均无隶属关系。HaloCue 不提供游戏资源，也不授
 
 ## 下载与开始
 
-普通 Windows 用户下载 `HaloCue-0.9.0-beta.1-windows.zip`：
+普通 Windows 用户下载 `HaloCue-0.9.2-windows-x64.zip`：
 
 1. 完整解压 ZIP，不要直接在压缩包里运行。
 2. 双击 `HaloCue.exe`。
-3. 首次启动选择你自己的 `AzureArchive.exe`。
-4. 如果程序没能自动找到工作区，再选择 AA 的工作区或 `data` 文件夹。
-5. 浏览器打开后，按“导入剧本 → 确认演员 → 审查 → 编译”完成一章。
+3. 双击 `HaloCue.exe`，程序会直接打开独立应用窗口，不会启动系统浏览器。
+4. 首次使用时，在应用内选择你自己的 `AzureArchive.exe`；HaloCue 会读取 AA 设置并自动识别项目和存档位置。
+5. 按“导入剧本 → 确认演员 → 审查 → 编译”完成一章。
 
 **Windows ZIP 不需要安装 Python。** 更完整的非技术说明见
 [使用说明-从这里开始.md](使用说明-从这里开始.md)。
@@ -52,6 +52,7 @@ HaloCue 不会向解压目录写入个人状态。配置、数据库、缓存、
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt
+.\.venv\Scripts\python -m pip install pywebview
 .\.venv\Scripts\python launcher.py
 ```
 

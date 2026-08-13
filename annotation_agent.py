@@ -10,6 +10,8 @@ from collections import deque
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
+from director_state import SCENE_FUNCTIONS, SCENE_TYPES, apply_continuity
+
 from annotation_chunks import (
     RunChunkController, assign_annotation_ids, build_chunks, build_scene_map,
     estimate_initial_chunk_limits, subdivide_chunk,
@@ -19,6 +21,7 @@ from annotation_memory import (
     apply_state_delta,
     assemble_chunk_context,
     build_story_plan,
+    complete_scene,
     initial_memory,
     merge_memory_events,
     retrieve_events,
@@ -28,6 +31,7 @@ from annotation_protocol import (
     expand_compact_chunk_response, validate_chunk_response,
     validate_review_patches,
 )
+from annotation_safety import project_effective_annotation_row
 from annotation_telemetry import (
     ReasoningTelemetryWriter, RequestTelemetryWriter, build_request_prompt_hashes,
 )
@@ -84,6 +88,48 @@ def _temporary_reasoning_mode(provider: Any, mode: Optional[str]):
             config["reasoning_mode"] = previous
 
 
+def estimate_chunk_output_budget(
+    target_lines: int, *, compact: bool, reasoning_mode: Optional[str], maximum: Optional[int],
+) -> int:
+    """Reserve room for both hidden reasoning and the visible annotation JSON."""
+    mode = str(reasoning_mode or "balanced").strip().lower()
+    per_line = 75 if compact else 200
+    visible_allowance = 1500 + max(1, int(target_lines)) * per_line
+    reasoning_reserve = {
+        "speed": 0,
+        "minimal": 8_000,
+        "low": 16_000,
+        "balanced": 64_000,
+        "medium": 64_000,
+        "deep": 96_000,
+        "high": 96_000,
+        "xhigh": 128_000,
+        "max": 128_000,
+    }.get(mode, 64_000)
+    estimate = visible_allowance + reasoning_reserve
+    cap = max(1, int(maximum or estimate))
+    return max(1, min(cap, max(1200, estimate)))
+
+
+def grow_chunk_output_budget(current: int, maximum: Optional[int]) -> Optional[int]:
+    """Double a capacity-bound request without exceeding its configured ceiling."""
+    current = max(1, int(current))
+    cap = max(1, int(maximum or current))
+    if current >= cap:
+        return None
+    return min(cap, max(current + 1, current * 2))
+
+
+@contextmanager
+def _temporary_output_budget(provider: Any, maximum: int):
+    override = getattr(provider, "temporary_output_budget", None)
+    if callable(override):
+        with override(maximum):
+            yield
+        return
+    yield
+
+
 class AnnotationAgentError(RuntimeError):
     def __init__(self, stage: str, scene_id: str, chunk_id: str, detail: str):
         super().__init__(f"{stage} {scene_id}/{chunk_id}: {detail}")
@@ -103,12 +149,106 @@ def _run_key(fingerprint: Mapping[str, Any]) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
 
 
-def _checkpoint(memory: Mapping[str, Any], fingerprint: Mapping[str, Any], plan: Mapping[str, Any], rows: Mapping[str, Any], beats: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+def _checkpoint(
+    memory: Mapping[str, Any], fingerprint: Mapping[str, Any], plan: Mapping[str, Any],
+    rows: Mapping[str, Any], beats: Sequence[Mapping[str, Any]], *,
+    director_plan: Mapping[str, Any],
+) -> Dict[str, Any]:
     return {
-        "schema_version": 1, "fingerprint": dict(fingerprint), "story_plan": dict(plan),
+        "schema_version": 2, "fingerprint": dict(fingerprint), "story_plan": dict(plan),
+        "director_plan": copy.deepcopy(dict(director_plan)),
         "memory": copy.deepcopy(dict(memory)), "rows_by_id": copy.deepcopy(dict(rows)),
         "beats": copy.deepcopy(list(beats)),
     }
+
+
+def _merge_director_rows(
+    memory: Mapping[str, Any], rows: Sequence[Mapping[str, Any]],
+    speakers_by_id: Optional[Mapping[str, str]] = None,
+) -> Dict[str, Any]:
+    updated = copy.deepcopy(dict(memory))
+    state = updated.setdefault("direction", {})
+    continuity = dict(state.get("continuity") or {})
+    for row in rows:
+        director = row.get("direction") if isinstance(row, Mapping) else None
+        intent = row.get("direction_intent") if isinstance(row, Mapping) else None
+        source_id = str(row.get("source_id") or "")
+        speaker = str((speakers_by_id or {}).get(source_id) or "")
+        if speaker and row.get("face"):
+            state.setdefault("last_faces", {})[speaker] = str(row["face"])[:32]
+        for field, state_field in (
+            ("emo", "recent_emoticons"),
+            ("act", "recent_actions"),
+            ("se", "recent_sounds"),
+        ):
+            value = str(row.get(field) or "")
+            if value:
+                recent = list(state.get(state_field) or [])
+                state[state_field] = (recent + [value[:160]])[-12:]
+        for field in ("background", "place", "bgfx"):
+            row_field = "bg" if field == "background" else field
+            value = str(row.get(row_field) or "")
+            if value:
+                state[field] = value[:160]
+        if not isinstance(director, Mapping) or not isinstance(intent, Mapping) or not intent:
+            continue
+        focus = dict(state.get("focus") or {})
+        if "focus_kind" in intent:
+            focus["kind"] = str(director.get("focus_kind") or "speaker")[:32]
+        if "focus_character" in intent:
+            focus["character"] = str(director.get("focus_character") or "")[:160]
+        state["focus"] = focus
+        if "relation_distance" in intent:
+            state["relation_distance"] = str(director.get("relation_distance") or "normal")[:32]
+        if "emotion_phase" in intent:
+            state["emotion_phase"] = str(director.get("emotion_phase") or "")[:160]
+        if "scene_type" in intent:
+            scene_type = str(director.get("scene_type") or "other")[:32]
+            if scene_type != "other":
+                updated.setdefault("scene", {})["scene_type"] = scene_type
+        if "scene_function" in intent:
+            updated.setdefault("scene", {})["scene_function"] = str(
+                director.get("scene_function") or "dialogue"
+            )[:32]
+        if "subtext" in intent:
+            state["subtext"] = str(director.get("subtext") or "")[:160]
+        if "reaction_target" in intent:
+            state["reaction_target"] = str(director.get("reaction_target") or "")[:160]
+        if "visible_characters" in intent:
+            state["shot_visible_characters"] = list(
+                director.get("visible_characters") or []
+            )[:8]
+        commands = dict(intent.get("continuity") or {})
+        values = {name: str(row.get(name) or "")[:160] for name in commands}
+        changes = apply_continuity(continuity, values, commands)
+        for name, command in commands.items():
+            if command != "none" and name in changes:
+                continuity[name] = changes[name]
+    state["continuity"] = continuity
+    return updated
+
+
+def _effective_director_rows(
+    rows_by_id: Mapping[str, Mapping[str, Any]],
+    targets: Sequence[Mapping[str, Any]],
+    cast: Mapping[str, Any],
+    constraints: Mapping[str, Any],
+) -> List[Dict[str, Any]]:
+    """Project model rows to the values that can actually reach the script."""
+    effective_rows = []
+    for item in targets:
+        source_id = str(item.get("annotation_id") or "")
+        row = rows_by_id.get(source_id)
+        if not isinstance(row, Mapping):
+            continue
+        character = cast.get(item.get("who")) if isinstance(cast, Mapping) else None
+        if not isinstance(character, Mapping):
+            continue
+        effective, _clean, _dropped, _details = project_effective_annotation_row(
+            row, item, character, constraints,
+        )
+        effective_rows.append(effective)
+    return effective_rows
 
 
 def _visible_items(items: Sequence[Mapping[str, Any]], chunk: Mapping[str, Any], before: int, after: int) -> List[Mapping[str, Any]]:
@@ -150,6 +290,7 @@ def run_annotation_agent(
     before: int = 15, after: int = 10,
     reasoning_mode: Optional[str] = None, annotation_max_tokens: Optional[int] = None,
     context_window_tokens: Optional[int] = None,
+    story_type: str = "auto",
 ) -> Dict[str, Any]:
     started_at = time.perf_counter()
     stats_before = dict(getattr(provider, "stats", {}) or {})
@@ -160,6 +301,29 @@ def run_annotation_agent(
     _emit(progress, "planning", 0, 1, "正在分析场景")
     scenes = build_scene_map(items, usage_chain)
     story_plan = build_story_plan(items, scenes, usage_chain)
+    normalized_story_type = str(story_type or "auto").strip().lower()
+    if normalized_story_type not in {"auto", "main", "event", "bond"}:
+        normalized_story_type = "auto"
+
+    def planned_scene_type(scene):
+        value = str(scene.get("scene_type") or "").strip().lower()
+        if value in SCENE_TYPES and value != "other":
+            return value
+        return normalized_story_type if normalized_story_type != "auto" else "other"
+
+    def planned_scene_function(scene):
+        value = str(scene.get("scene_function") or "").strip().lower()
+        return value if value in SCENE_FUNCTIONS else "dialogue"
+
+    director_plan = {
+        "story_type": normalized_story_type,
+        "director_version": str(run_fingerprint.get("director_version") or ""),
+        "scenes": [{
+            "scene_id": str(scene.get("scene_id") or "")[:160],
+            "scene_type": planned_scene_type(scene),
+            "scene_function": planned_scene_function(scene),
+        } for scene in story_plan["scenes"][:200]],
+    }
     dialogue_items = [item for item in items if item.get("kind") == "line"]
     task_profile = {
         "target_lines": len(dialogue_items),
@@ -201,14 +365,19 @@ def run_annotation_agent(
     reasoning_writer = ReasoningTelemetryWriter(telemetry_root, run_key)
     request_writer = RequestTelemetryWriter(telemetry_root, run_key)
     saved = checkpoint_store.load(run_key)
-    if saved and saved.get("fingerprint") == dict(run_fingerprint):
-        memory = copy.deepcopy(saved.get("memory") or initial_memory(story_plan["summary"]))
+    saved_schema_version = saved.get("schema_version") if isinstance(saved, Mapping) else None
+    if (
+        saved and isinstance(saved_schema_version, int) and not isinstance(saved_schema_version, bool)
+        and saved_schema_version >= 2
+        and saved.get("fingerprint") == dict(run_fingerprint)
+    ):
+        memory = copy.deepcopy(saved.get("memory") or initial_memory(story_plan["summary"], normalized_story_type))
         rows_by_id = copy.deepcopy(saved.get("rows_by_id") or {})
         beats = copy.deepcopy(saved.get("beats") or [])
         completed = set((memory.get("progress") or {}).get("completed_chunks") or [])
         resumed_chunks = len(completed)
     else:
-        memory = initial_memory(story_plan["summary"])
+        memory = initial_memory(story_plan["summary"], normalized_story_type)
         rows_by_id = {}
         beats = []
         completed = set()
@@ -223,6 +392,29 @@ def run_annotation_agent(
         {str(items[index].get("annotation_id") or "") for index in chunk["target_indices"]}
         for chunk in chunks
     ]
+    all_target_ids = {
+        target_id for target_ids in base_chunk_targets for target_id in target_ids
+    }
+
+    def completion_status() -> Dict[str, Any]:
+        pending_items = [
+            item for item in items
+            if str(item.get("annotation_id") or "") in all_target_ids
+            and str(item.get("annotation_id") or "") not in completed_target_ids
+        ]
+        total_targets = len(all_target_ids)
+        completed_targets = total_targets - len(pending_items)
+        return {
+            "total_targets": total_targets,
+            "completed_targets": completed_targets,
+            "pending_targets": len(pending_items),
+            "pending_start_line": (
+                pending_items[0].get("line_no") if pending_items else None
+            ),
+            "pending_end_line": (
+                pending_items[-1].get("line_no") if pending_items else None
+            ),
+        }
 
     def user_progress(include_current: bool = True) -> tuple[int, int]:
         total = len(base_chunk_targets)
@@ -242,7 +434,13 @@ def run_annotation_agent(
         "hard_limit": estimated_limits.hard_limit, "task_profile": task_profile,
     }]
     chunk_adaptations: List[Dict[str, Any]] = []
-    safe_target_limit: Optional[int] = None
+    saved_resume_limit = (memory.get("progress") or {}).get("resume_target_limit")
+    safe_target_limit: Optional[int] = (
+        int(saved_resume_limit)
+        if isinstance(saved_resume_limit, int) and not isinstance(saved_resume_limit, bool)
+        and saved_resume_limit > 0
+        else None
+    )
     prepared_scenes: set[str] = set()
 
     def emit_model_activity(
@@ -331,18 +529,22 @@ def run_annotation_agent(
         )
         return response
 
-    def lower_reasoning_for_empty_retry(exc: EmptyModelResponseError) -> Optional[str]:
-        if (
-            str(getattr(exc, "finish_reason", "") or "").lower() != "stop"
-            or int(getattr(exc, "reasoning_chars", 0) or 0) <= 0
-            or int(getattr(exc, "content_chars", 0) or 0) != 0
-        ):
-            return None
-        config = getattr(provider, "cfg", None)
-        if not isinstance(config, dict):
-            return None
-        current_mode = str(config.get("reasoning_mode") or "").strip().lower()
-        return {"deep": "balanced", "high": "balanced", "balanced": "low", "medium": "low", "low": "speed"}.get(current_mode)
+    def is_reasoning_only_empty(exc: Exception) -> bool:
+        return bool(
+            isinstance(exc, EmptyModelResponseError)
+            and int(getattr(exc, "reasoning_chars", 0) or 0) > 0
+            and int(getattr(exc, "content_chars", 0) or 0) == 0
+        )
+
+    def is_reasoning_only_capacity(exc: Exception) -> bool:
+        if not isinstance(exc, OutputCapacityError):
+            return False
+        records = list(getattr(provider, "request_records", []) or [])
+        record = records[-1] if records else {}
+        if int(record.get("content_chars") or 0) != 0:
+            return False
+        reasoning_used = int(record.get("reasoning_tokens") or record.get("reasoning_chars") or 0)
+        return reasoning_used > 0
 
     def build_metrics() -> Dict[str, Any]:
         stats = getattr(provider, "stats", {}) or {}
@@ -470,7 +672,9 @@ def run_annotation_agent(
             return None
         current = record[0]
         reasoning = current.get("reasoning_chars")
-        content = current.get("content_chars")
+        content = current.get("effective_content_chars")
+        if content is None:
+            content = current.get("content_chars")
         if reasoning is None or content is None:
             return None
         return float(reasoning or 0) / max(1, float(content or 0))
@@ -553,11 +757,24 @@ def run_annotation_agent(
                 )
             continue
         targets = [items[index] for index in chunk["target_indices"]]
+        current_scene = next(
+            (entry for entry in story_plan["scenes"] if str(entry.get("scene_id") or "") == scene_id),
+            None,
+        )
+        if current_scene and str((memory.get("scene") or {}).get("id") or "") != scene_id:
+            scene_context = dict(current_scene)
+            scene_context["scene_type"] = planned_scene_type(current_scene)
+            scene_context["scene_function"] = planned_scene_function(current_scene)
+            memory = complete_scene(
+                memory, scene_context,
+                str(current_scene.get("evidence") or current_scene.get("opening_text") or ""),
+            )
         relevant_events = retrieve_events(memory.get("events") or [], targets, chunk["scene_id"], limit=8)
         volatile, user = assemble_chunk_context(
             items, chunk, memory, relevant_events, usage_chain,
             before=before, after=after, max_events=8,
             compact=bool(getattr(provider, "supports_compact_annotation", False)),
+            story_type=normalized_story_type,
         )
         compact_protocol = bool(getattr(provider, "supports_compact_annotation", False))
         schema = (
@@ -572,7 +789,13 @@ def run_annotation_agent(
         last_error = None
         protocol_attempts = 0
         empty_retry_attempted = False
-        empty_retry_mode = None
+        reasoning_retry_mode = None
+        output_budget = estimate_chunk_output_budget(
+            len(targets), compact=compact_protocol,
+            reasoning_mode=reasoning_mode,
+            maximum=annotation_max_tokens,
+        )
+        reasoning_capacity_retries = 0
         while True:
             call_user = user
             if protocol_attempts:
@@ -581,7 +804,9 @@ def run_annotation_agent(
                     "请修正内容，保持相同 TARGET，并且只返回 TARGET。"
                 )
             if empty_retry_attempted:
-                call_user += "\n\n上一次模型只输出了思考而没有正文。不要继续分析或复述规则，立即返回最终 JSON。"
+                call_user += "\n\n上一次模型只输出了思考而没有正文。请完成当前分析并提交最终 JSON，不要复述规则。"
+            if reasoning_capacity_retries:
+                call_user += "\n\n上一次推理占满了输出预算。预算已增加，请完成当前分析并返回最终 JSON。"
             previous_records = list(getattr(provider, "request_records", []) or [])
             previous_reasoning_records = list(getattr(provider, "reasoning_records", []) or [])
             prompt_hashes = build_request_prompt_hashes(
@@ -589,17 +814,18 @@ def run_annotation_agent(
             )
             try:
                 request_count += 1
-                with _temporary_reasoning_mode(provider, empty_retry_mode):
-                    response = complete_chunk(
-                        call_user,
-                        schema,
-                        scene_id=str(chunk["scene_id"]),
-                        chunk_id=chunk_id,
-                        current=current,
-                        total=total,
-                        retry_count=retries,
-                        subdivision_count=subdivisions,
-                    )
+                with _temporary_reasoning_mode(provider, reasoning_retry_mode):
+                    with _temporary_output_budget(provider, output_budget):
+                        response = complete_chunk(
+                            call_user,
+                            schema,
+                            scene_id=str(chunk["scene_id"]),
+                            chunk_id=chunk_id,
+                            current=current,
+                            total=total,
+                            retry_count=retries,
+                            subdivision_count=subdivisions,
+                        )
                 visible = _visible_items(items, chunk, before, after)
                 if compact_protocol:
                     response = expand_compact_chunk_response(response, targets)
@@ -608,12 +834,38 @@ def run_annotation_agent(
                     visible_ids=[item["annotation_id"] for item in visible],
                     cast=cast, constraints=constraints,
                 )
+                if current_scene:
+                    for validated_row in validated["lines_by_id"].values():
+                        direction = validated_row.get("direction")
+                        intent = validated_row.get("direction_intent")
+                        if not isinstance(direction, dict) or not isinstance(intent, Mapping):
+                            continue
+                        if "scene_type" not in intent:
+                            direction["scene_type"] = planned_scene_type(current_scene)
+                        if "scene_function" not in intent:
+                            direction["scene_function"] = planned_scene_function(current_scene)
                 break
             except Exception as exc:
                 kind = _classify_chunk_error(exc)
                 last_error = exc
                 if _is_request_deadline(exc):
                     observe_chunk({"success": False, "reason": "deadline"}, scene_id=str(chunk["scene_id"]), chunk_id=chunk_id)
+                    timeout_memory = copy.deepcopy(memory)
+                    timeout_progress = timeout_memory.setdefault("progress", {})
+                    smaller_limit = (
+                        max(5, len(targets) // 2)
+                        if len(targets) > 5
+                        else max(1, len(targets) - 1)
+                    )
+                    previous_limit = timeout_progress.get("resume_target_limit")
+                    if isinstance(previous_limit, int) and previous_limit > 0:
+                        smaller_limit = min(previous_limit, smaller_limit)
+                    timeout_progress["resume_target_limit"] = smaller_limit
+                    checkpoint_store.commit(run_key, _checkpoint(
+                        timeout_memory, run_fingerprint, story_plan, rows_by_id, beats,
+                        director_plan=director_plan,
+                    ))
+                    memory = timeout_memory
                     diagnostics.append({
                         "code": "request_deadline", "level": "warning",
                         "scene_id": str(chunk["scene_id"]), "chunk_id": chunk_id,
@@ -633,7 +885,26 @@ def run_annotation_agent(
                         "diagnostics": diagnostics,
                         "completed_chunks": len(completed), "resumed_chunks": resumed_chunks,
                         "cancelled": False, "timed_out": True,
+                        **completion_status(),
                     }
+                if is_reasoning_only_capacity(exc) and reasoning_capacity_retries < 3:
+                    larger_budget = grow_chunk_output_budget(output_budget, annotation_max_tokens)
+                    if larger_budget is not None:
+                        output_budget = larger_budget
+                        reasoning_capacity_retries += 1
+                        retries += 1
+                        _emit(progress, "recovery", current, total, f"推理占满输出预算，已增加到 {output_budget:,} tokens 后重试")
+                        if model_activity:
+                            emit_model_activity(
+                                {
+                                    "state": "retrying", "reason": "reasoning_capacity",
+                                    "next_output_budget": output_budget,
+                                },
+                                scene_id=str(chunk["scene_id"]), chunk_id=chunk_id,
+                                current=current, total=total, request_index=request_count,
+                                retry_count=retries, subdivision_count=subdivisions,
+                            )
+                        continue
                 if kind == "capacity":
                     observe_chunk({"success": False, "reason": "capacity"}, scene_id=str(chunk["scene_id"]), chunk_id=chunk_id)
                     break
@@ -643,8 +914,7 @@ def run_annotation_agent(
                     ) from exc
                 if isinstance(exc, EmptyModelResponseError):
                     observe_chunk({"success": False, "reason": "empty_response"}, scene_id=str(chunk["scene_id"]), chunk_id=chunk_id)
-                    empty_retry_mode = lower_reasoning_for_empty_retry(exc)
-                    if empty_retry_mode:
+                    if is_reasoning_only_empty(exc):
                         empty_retry_attempted = True
                         retries += 1
                         continue
@@ -737,6 +1007,17 @@ def run_annotation_agent(
         next_beats = copy.deepcopy(beats)
         next_beats.extend(validated["beats"])
         next_memory = apply_state_delta(memory, validated["state_delta"], cast=cast, constraints=constraints)
+        next_memory = _merge_director_rows(
+            next_memory,
+            _effective_director_rows(
+                validated["lines_by_id"], targets, cast, constraints,
+            ),
+            {
+                str(item.get("annotation_id") or ""): str(item.get("who") or "")
+                for item in targets
+            },
+        )
+        diagnostics.extend(validated.get("diagnostics") or [])
         visible = _visible_items(items, chunk, before, after)
         next_memory["events"] = merge_memory_events(next_memory.get("events") or [], validated["memory_events"], visible)
         next_progress = next_memory.setdefault("progress", {})
@@ -745,7 +1026,12 @@ def run_annotation_agent(
         next_progress["completed_target_ids"] = list(dict.fromkeys(
             list(next_progress.get("completed_target_ids") or []) + target_ids
         ))
-        checkpoint_store.commit(run_key, _checkpoint(next_memory, run_fingerprint, story_plan, next_rows, next_beats))
+        if all_target_ids <= set(next_progress["completed_target_ids"]):
+            next_progress.pop("resume_target_limit", None)
+        checkpoint_store.commit(run_key, _checkpoint(
+            next_memory, run_fingerprint, story_plan, next_rows, next_beats,
+            director_plan=director_plan,
+        ))
         rows_by_id = next_rows
         beats = next_beats
         memory = next_memory
@@ -761,6 +1047,7 @@ def run_annotation_agent(
         "metrics": build_metrics(),
         "diagnostics": diagnostics, "completed_chunks": len(completed),
         "resumed_chunks": resumed_chunks, "cancelled": False, "timed_out": False,
+        **completion_status(),
     }
 
 

@@ -68,9 +68,10 @@ class RunChunkController:
             return self._limits
         ratio = float(ratio_value)
         if ratio > 6:
+            # A large reasoning/content ratio is a model-effort signal, not
+            # evidence that the request exceeded context or output capacity.
+            # Keep the chunk size stable; capacity failures are handled above.
             self._successes = 0
-            target = max(5, self._limits.target - 5)
-            self._limits = ChunkLimits(target, min(self._limits.soft_limit, target + 4), min(self._limits.hard_limit, target + 8))
             self.last_reason = "high_reasoning_ratio"
             return self._limits
         self._successes += 1
@@ -107,13 +108,17 @@ def assign_annotation_ids(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def _is_boundary_item(item: Dict[str, Any]) -> bool:
     if item.get("kind") == "other":
         raw = str(item.get("raw") or "").strip()
-        return raw == "---" or bool(_HEADING_RE.match(raw))
+        return (
+            raw == "---"
+            or bool(_HEADING_RE.match(raw))
+            or bool(re.match(r"^@(bg|place)\b", raw, re.IGNORECASE))
+        )
     return False
 
 
-def _usage_chain_ranges(usage_chain: Optional[Sequence[Dict[str, Any]]]) -> List[Tuple[int, int, str, str]]:
+def _usage_chain_ranges(usage_chain: Optional[Sequence[Dict[str, Any]]]) -> List[Dict[str, Any]]:
     ranges = []
-    for entry in usage_chain or []:
+    for chain_index, entry in enumerate(usage_chain or []):
         if not isinstance(entry, dict):
             continue
         def line_value(value: Any) -> Optional[int]:
@@ -123,7 +128,11 @@ def _usage_chain_ranges(usage_chain: Optional[Sequence[Dict[str, Any]]]) -> List
         end = line_value(entry.get("end")) or start
         if start is None:
             continue
-        ranges.append((start, max(start, end or start), str(entry.get("segment") or ""), str(entry.get("location") or "")))
+        ranges.append({
+            **dict(entry), "_chain_index": chain_index,
+            "start_line": start, "end_line": max(start, end or start),
+        })
+    ranges.sort(key=lambda row: (row["start_line"], row["end_line"], row["_chain_index"]))
     return ranges
 
 
@@ -144,9 +153,9 @@ def build_scene_map(items: List[Dict[str, Any]], usage_chain: Optional[Sequence[
         if item.get("kind") != "line":
             continue
         line_no = int(item.get("line_no") or index + 1)
-        matching = next((r for r in ranges if r[0] <= line_no <= r[1]), None)
-        scene_key = matching[2] if matching else None
-        if current and scene_key is not None and previous_scene_key is not None and scene_key != previous_scene_key:
+        matching = next((r for r in ranges if r["start_line"] <= line_no <= r["end_line"]), None)
+        scene_key = matching["_chain_index"] if matching else None
+        if current and scene_key != previous_scene_key and (scene_key is not None or previous_scene_key is not None):
             groups.append(current)
             current = []
         current.append(index)
@@ -158,15 +167,24 @@ def build_scene_map(items: List[Dict[str, Any]], usage_chain: Optional[Sequence[
     for scene_number, indices in enumerate(groups, 1):
         first = items[indices[0]]
         line_numbers = [int(items[i].get("line_no") or i + 1) for i in indices]
-        matching = next((r for r in ranges if r[0] <= line_numbers[0] <= r[1]), None)
+        matching = next((
+            r for r in ranges
+            if r["start_line"] <= line_numbers[0] <= r["end_line"]
+        ), None)
         scenes.append({
             "scene_id": f"scene-{scene_number}",
             "scene_index": scene_number,
             "target_indices": indices,
             "start_line": min(line_numbers),
             "end_line": max(line_numbers),
-            "location": matching[3] if matching else "",
-            "segment": matching[2] if matching else "",
+            "location": str(matching.get("location") or "") if matching else "",
+            "segment": str(matching.get("segment") or "") if matching else "",
+            "time": str(matching.get("time") or "") if matching else "",
+            "scene_type": str(matching.get("scene_type") or "other") if matching else "other",
+            "scene_function": str(matching.get("scene_function") or "dialogue") if matching else "dialogue",
+            "purpose": str(matching.get("reason") or "") if matching else "",
+            "evidence": str(matching.get("evidence") or "") if matching else "",
+            "usage_chain_index": matching.get("_chain_index") if matching else None,
             "speakers": sorted({str(items[i].get("who") or "") for i in indices if items[i].get("who")}),
             "opening_text": str(first.get("text") or ""),
         })

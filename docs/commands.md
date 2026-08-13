@@ -1,22 +1,5 @@
 # 指令速查
 
-本文是 HaloCue 的高级语法参考。普通用户请先阅读根目录的
-`使用说明-从这里开始.md`。Windows ZIP 不需要安装 Python；下面出现的 Python
-命令仅用于源码版，源码支持 Python 3.10–3.13。
-
-源码版启动：
-
-```powershell
-python launcher.py
-python launcher.py --check
-python launcher.py --aa-install "AzureArchive.exe 所在路径"
-python launcher.py --aa-data "AA 工作区或 data 路径"
-python launcher.py --port 8766
-```
-
-所有可写状态默认位于 `%LOCALAPPDATA%\HaloCue`，不要在程序目录里寻找或搬运
-个人数据库、配置和编译输出。
-
 三类东西写在三个不同的地方，别搞混：
 
 | 写在哪 | 是什么 | 剧本里怎么写 |

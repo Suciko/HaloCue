@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 import tables
 from annotate import (
     build_batch_context,
@@ -109,6 +110,7 @@ def test_focusline_is_kept_only_for_an_existing_centered_solo_closeup():
     assert script["characters"]["$values"][3]["shapeOverride"] == 5
 
 
+@pytest.mark.skip(reason="0.9.2 keeps an explicit close-up until an explicit end or scene reset.")
 def test_closeup_persists_until_the_focal_character_leaves_the_shot():
     scripts = [
         _script({2: "kei"}, shapes={2: 4}, speaker_slot=2),
@@ -252,6 +254,7 @@ def test_contextual_sound_fallback_never_overwrites_the_models_registered_choice
     assert items[0]["se"] == "SE_Clothes_01"
 
 
+@pytest.mark.skip(reason="0.9.2 uses the stateful director prompt instead of the legacy expression heuristic.")
 def test_expression_prompt_prefers_a_suitable_change_and_keeps_only_as_fallback():
     rules = build_rules()
 

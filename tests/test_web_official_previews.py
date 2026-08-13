@@ -191,6 +191,36 @@ def test_character_list_uses_registered_custom_avatar_when_catalog_row_has_no_av
     assert str(tmp_path) not in repr(row)
 
 
+def test_official_background_picker_excludes_story_registered_custom_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    con = assetdb.connect(webui.DB)
+    import asset_catalog
+    asset_catalog.migrate(con)
+    con.executemany(
+        "INSERT INTO bg(name,hash,label) VALUES(?,?,?)",
+        [
+            ("BG_GameCenter", 101, "Game Center"),
+            ("3040691084", 3040691084, "自定义游戏中心"),
+        ],
+    )
+    con.execute(
+        """INSERT INTO asset_install
+        (scope,kind,aa_key,display_name,source_path,sha256,status,install_path,metadata_json)
+        VALUES (?,?,?,?,?,?,?,?,?)""",
+        (
+            str(tmp_path / "project"), "background", "3040691084", "自定义游戏中心",
+            str(tmp_path / "custom.png"), "digest", "registered",
+            str(tmp_path / "project" / "bgs" / "custom.png"), "{}",
+        ),
+    )
+    con.commit()
+    con.close()
+
+    rows = webui.list_backgrounds(only_ready=True, only_official=True)
+
+    assert [row["name"] for row in rows] == ["BG_GameCenter"]
+
+
 def test_character_list_uses_catalog_avatar_when_database_row_lacks_it(
     tmp_path,
     monkeypatch,

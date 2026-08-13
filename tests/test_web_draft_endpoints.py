@@ -60,6 +60,17 @@ def make_draft(drafts_dir, text, token="draft-http-1"):
 SAMPLE = "## 场景1\n凯伊: 第一句。\n老师: 第二句。\n"
 
 
+@pytest.mark.parametrize("value", ["auto", "main", "event", "bond"])
+def test_normalize_story_type_accepts_supported_values(value):
+    assert webui.normalize_story_type(value) == value
+
+
+def test_normalize_story_type_defaults_and_rejects_unknown_values():
+    assert webui.normalize_story_type(None) == "auto"
+    with pytest.raises(ValueError, match="invalid_story_type"):
+        webui.normalize_story_type("unknown")
+
+
 def test_strict_csp_is_applied_to_the_external_runtime(tmp_path, monkeypatch):
     """The markup-only shell is served with the strict CSP contract."""
     with draft_server(tmp_path, monkeypatch) as (base, _):
@@ -191,56 +202,6 @@ def test_validate_endpoint(tmp_path, monkeypatch):
         assert status == 200
         assert isinstance(res["blocking_errors"], int)
         assert isinstance(res["diagnostics"], list)
-
-
-def test_compile_missing_runtime_index_returns_structured_error_with_user_paths(
-    tmp_path, monkeypatch
-):
-    from runtime_paths import resolve_runtime_layout
-
-    layout = resolve_runtime_layout(
-        module_file=tmp_path / "bundle" / "runtime_paths.py",
-        environ={"HALOCUE_USER_DATA_DIR": str(tmp_path / "user-state")},
-    )
-    captured = {}
-
-    class MissingRuntimeIndex:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
-
-        def create_compile_snapshot(self, **_kwargs):
-            raise FileNotFoundError("Draft resource index missing: release-draft")
-
-    monkeypatch.setattr(webui, "RUNTIME_LAYOUT", layout)
-    monkeypatch.setattr(webui, "BuildBundleManager", MissingRuntimeIndex)
-    with draft_server(tmp_path, monkeypatch) as (base, drafts_dir):
-        store = DraftStore(base_dir=drafts_dir)
-        token = make_draft(drafts_dir, "旁白: 发布验收。\n", token="release-draft")
-        store.update_cast(
-            token=token,
-            speaker="旁白",
-            mapping={"narrator": True},
-            expected_draft_version=1,
-        )
-        reviewed = store.batch_approve_reviews(
-            token=token,
-            card_ids=None,
-            expected_draft_version=2,
-        )
-
-        status, result = req(base, "/api/compile", {
-            "token": token,
-            "expected_draft_version": reviewed["session"]["draft_version"],
-        })
-
-    assert status == 409
-    assert result == {
-        "ok": False,
-        "code": "compile_resources_missing",
-        "e": "Draft resource index missing: release-draft",
-    }
-    assert captured["output_root"] == layout.output_root
-    assert captured["resource_index_path"] == layout.resource_index_path
 
 
 def test_background_request_resolve_route_replaces_the_card(tmp_path, monkeypatch):
@@ -378,6 +339,59 @@ def test_annotate_endpoint_rejects_missing_script(tmp_path, monkeypatch):
         assert status == 400
 
 
+def test_annotate_endpoint_rejects_unknown_story_type_before_submitting_job(
+    tmp_path, monkeypatch,
+):
+    with draft_server(tmp_path, monkeypatch) as (base, _):
+        script = tmp_path / "剧本.txt"
+        script.write_text("凯伊: 你好。\n", encoding="utf-8")
+
+        status, res = req(base, "/api/annotate", {
+            "script": str(script),
+            "mapping": {"凯伊": {"kind": "portrait", "id": "kai"}},
+            "story_type": "side-story",
+        })
+
+        assert status == 400
+        assert res["code"] == "invalid_story_type"
+
+
+def test_legacy_build_endpoint_rejects_unknown_story_type(tmp_path, monkeypatch):
+    with draft_server(tmp_path, monkeypatch) as (base, _):
+        status, res = req(base, "/api/build", {"story_type": "side-story"})
+
+        assert status == 400
+        assert res["code"] == "invalid_story_type"
+
+
+def test_legacy_build_worker_forwards_story_type_to_annotator(tmp_path, monkeypatch):
+    source = tmp_path / "原稿.txt"
+    source.write_text("旁白: 保留原文\n", encoding="utf-8")
+    captured = {}
+
+    monkeypatch.setattr(webui, "HERE", str(tmp_path))
+    monkeypatch.setitem(webui.CFG, "aa_data", str(tmp_path / "aa-data"))
+    monkeypatch.setattr(webui, "db", lambda: object())
+    monkeypatch.setattr(webui, "prepare_project_index", lambda *args, **kwargs: None)
+    monkeypatch.setattr(webui, "attach_registered_variants", lambda *args, **kwargs: None)
+    monkeypatch.setattr(webui, "annotation_provider", lambda *_: object())
+    monkeypatch.setattr(webui, "pause_for_backgrounds", lambda *_: False)
+    monkeypatch.setattr(webui, "_compile_saved_context", lambda *_: None)
+
+    def fake_annotate(options, provider_instance=None):
+        captured["options"] = options
+        return {"text": "旁白: 保留原文\n"}
+
+    monkeypatch.setattr("annotate.annotate_script", fake_annotate)
+
+    webui.run_build({
+        "script": str(source), "project": "旧入口测试", "mapping": {},
+        "annotate": True, "story_type": "event",
+    })
+
+    assert captured["options"]["story_type"] == "event"
+
+
 def test_annotate_worker_can_create_review_draft_without_calling_model(tmp_path, monkeypatch):
     source = tmp_path / "原稿.txt"
     source.write_text("旁白: 保留原文\n@bg BG_Black\n", encoding="utf-8")
@@ -450,6 +464,52 @@ def test_annotate_worker_exposes_agent_checkpoint_reuse(tmp_path, monkeypatch):
     assert result["proposals"] == 0
 
 
+def test_completed_checkpoint_reuses_identical_draft_without_creating_duplicate(tmp_path, monkeypatch):
+    source = tmp_path / "原稿.txt"
+    source.write_text("旁白: 保留原文\n", encoding="utf-8")
+    drafts_dir = tmp_path / "drafts"
+    existing = DraftStore(base_dir=drafts_dir)
+    existing.create_draft(
+        token="draft-existing",
+        text="@camera -\n旁白: 保留原文\n",
+        source_text=source.read_text(encoding="utf-8"),
+        project="复用测试",
+        story_token="story-reuse",
+        annotation_status={
+            "status": "complete", "completed_targets": 1,
+            "total_targets": 1, "pending_targets": 0,
+        },
+    )
+
+    monkeypatch.setattr(webui, "HERE", str(tmp_path))
+    monkeypatch.setitem(webui.CFG, "aa_data", str(tmp_path / "aa-data"))
+    monkeypatch.setattr(webui, "db", lambda: object())
+    monkeypatch.setattr(webui, "prepare_project_index", lambda *args, **kwargs: None)
+    monkeypatch.setattr(webui, "attach_registered_variants", lambda *args, **kwargs: None)
+    monkeypatch.setattr(webui, "DraftStore", lambda: DraftStore(base_dir=drafts_dir))
+    monkeypatch.setattr(webui, "annotation_provider", lambda *_: object())
+    monkeypatch.setattr("annotate.annotate_script", lambda *_args, **_kwargs: {
+        "text": "@camera -\n旁白: 保留原文\n",
+        "agent": {
+            "resumed_chunks": 8,
+            "completed_targets": 1,
+            "total_targets": 1,
+            "pending_targets": 0,
+            "metrics": {"requests": 0},
+        },
+        "proposals": [],
+    })
+
+    result = webui.annotate_draft_worker({
+        "script": str(source), "project": "复用测试", "mapping": {},
+        "annotate": True, "story_token": "story-reuse",
+    })
+
+    assert result["draft_token"] == "draft-existing"
+    assert result["reused_draft"] is True
+    assert len(DraftStore(base_dir=drafts_dir).list_sessions()) == 1
+
+
 def test_annotate_worker_forwards_model_activity_and_returns_agent_metrics(tmp_path, monkeypatch):
     source = tmp_path / "原稿.txt"
     source.write_text("旁白: 保留原文\n", encoding="utf-8")
@@ -495,6 +555,12 @@ def test_annotate_worker_forwards_model_activity_and_returns_agent_metrics(tmp_p
             "text": "旁白: 保留原文\n",
             "agent": {
                 "resumed_chunks": 3,
+                "timed_out": True,
+                "completed_targets": 213,
+                "total_targets": 240,
+                "pending_targets": 27,
+                "pending_start_line": 434,
+                "pending_end_line": 486,
                 "metrics": {
                     "actual_model": "deepseek-v4-flash",
                     "requests": 7,
@@ -510,9 +576,11 @@ def test_annotate_worker_forwards_model_activity_and_returns_agent_metrics(tmp_p
     monkeypatch.setattr("annotate.annotate_script", fake_annotate)
     result = webui.annotate_draft_worker({
         "script": str(source), "project": "活动测试", "mapping": {}, "annotate": True,
+        "story_type": "event",
     }, job=job)
 
     assert captured["options"]["model_activity"] is not None
+    assert captured["options"]["story_type"] == "event"
     assert job.activities[-1] == {
         "state": "receiving",
         "model": "deepseek-v4-flash",
@@ -526,6 +594,53 @@ def test_annotate_worker_forwards_model_activity_and_returns_agent_metrics(tmp_p
         "uncached_input_tokens": 58682,
         "cache_hit_rate": pytest.approx(0.69, abs=0.01),
     }
+    assert result["story_type"] == "event"
+    assert captured["draft"]["annotation_status"] == {
+        "status": "partial",
+        "completed_targets": 213,
+        "total_targets": 240,
+        "pending_targets": 27,
+        "pending_start_line": 434,
+        "pending_end_line": 486,
+    }
+
+
+def test_partial_annotation_draft_is_visible_and_blocked_from_compile(tmp_path, monkeypatch):
+    with draft_server(tmp_path, monkeypatch) as (base, drafts_dir):
+        store = DraftStore(base_dir=drafts_dir)
+        token = "partial-http"
+        store.create_draft(
+            token=token,
+            text="旁白: 已标注\n旁白: 尚未标注\n",
+            project="部分草稿",
+            annotation_status={
+                "status": "partial",
+                "completed_targets": 1,
+                "total_targets": 2,
+                "pending_targets": 1,
+                "pending_start_line": 2,
+                "pending_end_line": 2,
+            },
+        )
+        draft = store.load_draft(token)
+        store.batch_approve_reviews(
+            token=token,
+            card_ids=None,
+            expected_draft_version=draft["session"]["draft_version"],
+        )
+
+        status, detail = req(base, "/api/draft?token=" + token, method="GET")
+        assert status == 200
+        assert detail["annotation_status"]["status"] == "partial"
+        assert detail["counts"]["blocking_errors"] >= 1
+        assert any(item["code"] == "annotation_incomplete" for item in detail["diagnostics"])
+
+        status, result = req(base, "/api/compile", {
+            "token": token,
+            "expected_draft_version": detail["draft_version"],
+        })
+        assert status == 409
+        assert result["code"] == "annotation_incomplete"
 
 
 def test_install_options_and_confirmed_name_are_forwarded_through_http(

@@ -343,3 +343,39 @@ def test_balanced_direction_reaches_the_correct_aap_character_fields(tmp_path):
     assert speaker_character(4)["emoticon"] == 3
     assert speaker_character(6)["action"] == 6
     assert speaker_character(6)["emoticon"] == -1
+
+
+def test_explicit_comedy_escalation_keeps_adjacent_emoticons():
+    items = [
+        {
+            "kind": "line", "who": "A", "text": "什么？", "emo": "疑问",
+            "_director": {"continuity": {"emo": "start"}, "reason": "new_stimulus"},
+        },
+        {
+            "kind": "line", "who": "A", "text": "真的？", "emo": "惊叹",
+            "_director": {"continuity": {"emo": "escalate"}, "reason": "comedy_escalation"},
+        },
+        {
+            "kind": "line", "who": "A", "text": "你骗我！", "emo": "怒筋",
+            "_director": {"continuity": {"emo": "escalate"}, "reason": "comedy_escalation"},
+        },
+    ]
+
+    normalize_direction_density(items)
+
+    assert [item["emo"] for item in items] == ["疑问", "惊叹", "怒筋"]
+
+
+def test_transient_hold_without_new_stimulus_does_not_bypass_cooldown():
+    items = [
+        {"kind": "line", "who": "A", "emo": "惊叹"},
+        {
+            "kind": "line", "who": "A", "emo": "惊叹",
+            "_director": {"continuity": {"emo": "hold"}, "reason": "continuity_hold"},
+        },
+    ]
+
+    normalize_direction_density(items)
+
+    assert items[0]["emo"] == "惊叹"
+    assert "emo" not in items[1]

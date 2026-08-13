@@ -3,6 +3,8 @@
 
 import re
 
+from director_policy import normalize_direction_plan
+
 
 DIRECTION_FIELDS = frozenset({"face", "emo", "act", "fx"})
 STRONG_ACTIONS = frozenset({"jump", "shake", "hophop"})
@@ -30,20 +32,46 @@ def apply_model_directions(item, clean):
     explicit = set(item.get("_explicit_direction_fields", ()))
     applied = {}
     for field, value in clean.items():
-        if field in DIRECTION_FIELDS and field in explicit:
+        if field in explicit:
             continue
         item[field] = value
         applied[field] = value
-        if field in DIRECTION_FIELDS:
-            item.setdefault("_direction_origins", {})[field] = "model"
+        item.setdefault("_direction_origins", {})[field] = "model"
     return applied
 
 
-def _remove_automatic_field(item, field):
-    item.pop(field, None)
+def _remove_automatic_field(item, field, reason="density_cooldown"):
+    value = item.pop(field, None)
     origins = item.get("_direction_origins")
     if isinstance(origins, dict):
         origins.pop(field, None)
+    if value is not None:
+        item.setdefault("_direction_drops", []).append({
+            "field": field, "value": value, "reason": reason,
+        })
+
+
+def _director_value(item, field, default=""):
+    director = item.get("_director")
+    return director.get(field, default) if isinstance(director, dict) else default
+
+
+def _continuity_command(item, layer):
+    continuity = _director_value(item, "continuity", {})
+    return continuity.get(layer, "none") if isinstance(continuity, dict) else "none"
+
+
+def _allows_transient_repeat(item, layer, previous_target):
+    if _continuity_command(item, layer) == "escalate":
+        return True
+    reason = _director_value(item, "reason", "none")
+    if reason in {
+        "new_stimulus", "listener_reaction", "group_sync",
+        "comedy_escalation", "action_impact", "emotional_shift",
+    }:
+        return True
+    target = str(_director_value(item, "reaction_target", "") or "")
+    return bool(target and target != previous_target)
 
 
 def normalize_emoticon_density(items):
@@ -51,6 +79,7 @@ def normalize_emoticon_density(items):
     dialogue_no = -1
     previous_had_emoticon = False
     previous_emoticon = None
+    previous_target = ""
     last_emoticon = {}
     for item in items:
         if item.get("kind") != "line":
@@ -67,19 +96,22 @@ def normalize_emoticon_density(items):
                 and previous_had_emoticon
             )
             semantic_escalation = (previous_emoticon, emoticon) in COMEDY_EMOTICON_ESCALATIONS
+            directed_repeat = _allows_transient_repeat(item, "emo", previous_target)
             if (
                 "emo" not in explicit
                 and (previous_had_emoticon or too_soon)
                 and not semantic_escalation
                 and not escalating_steam
+                and not directed_repeat
             ):
-                _remove_automatic_field(item, "emo")
+                _remove_automatic_field(item, "emo", "unsupported_transient_repeat")
                 previous_had_emoticon = False
                 previous_emoticon = None
             else:
                 last_emoticon[emoticon] = dialogue_no
                 previous_had_emoticon = True
                 previous_emoticon = emoticon
+                previous_target = str(_director_value(item, "reaction_target", "") or "")
         else:
             previous_had_emoticon = False
             previous_emoticon = None
@@ -90,6 +122,7 @@ def normalize_action_density(items):
     previous_had_strong_action = False
     speaker_turns = {}
     last_speaker_action = {}
+    previous_target = ""
     for item in items:
         if item.get("kind") != "line":
             continue
@@ -104,16 +137,25 @@ def normalize_action_density(items):
         last_turn = last_speaker_action.get((who, action), -10_000)
         repeated_too_soon = speaker_turn - last_turn <= 3
         adjacent_strong = action in STRONG_ACTIONS and previous_had_strong_action
-        if "act" not in explicit and (repeated_too_soon or adjacent_strong):
-            _remove_automatic_field(item, "act")
+        directed_repeat = _allows_transient_repeat(item, "act", previous_target)
+        if (
+            "act" not in explicit
+            and (repeated_too_soon or adjacent_strong)
+            and not directed_repeat
+        ):
+            _remove_automatic_field(item, "act", "unsupported_transient_repeat")
             previous_had_strong_action = False
             continue
         last_speaker_action[(who, action)] = speaker_turn
         previous_had_strong_action = action in STRONG_ACTIONS
+        previous_target = str(_director_value(item, "reaction_target", "") or "")
 
 
 def normalize_direction_density(items):
-    """Apply all balanced cooldowns while preserving authored direction."""
+    """Apply the stateful scene policy, with the legacy fallback kept for old callers."""
+    if any(isinstance(item.get("_director_intent"), dict) for item in items):
+        normalize_direction_plan(items)
+        return
     normalize_emoticon_density(items)
     normalize_action_density(items)
 

@@ -35,6 +35,47 @@ vm.runInNewContext(source,{window,document,encodeURIComponent,URLSearchParams,Pr
     ]
 
 
+def test_story_picker_can_open_a_local_device_file_directly():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+function node(){const listeners={};return {value:'',files:[],hidden:false,disabled:false,dataset:{},children:[],classList:{add(){},remove(){},toggle(){}},appendChild(x){this.children.push(x);return x},append(){for(const x of arguments)this.appendChild(x)},removeChild(){return this.children.shift()},get firstChild(){return this.children[0]},addEventListener(k,f){listeners[k]=f},fire(k,e){return listeners[k]&&listeners[k](e||{target:this})},setAttribute(){},focus(){},click(){return this.fire('click')},set textContent(v){this._text=String(v||'');this.children=[]},get textContent(){return this._text||''}}}
+const nodes={};['storyPicker','storyPickerHost','storyPickerStatus','storyPickerEntries','storyPickerBreadcrumbs','storyPickerRoots','storyPickerSearch','storyPickerSelected','storyPickerOpen','storyPickerBack','storyPickerForward','storyPickerUp','storyPickerDeviceAction','storyPickerDeviceInput'].forEach(id=>nodes[id]=node());
+const chosen=[],requests=[];const listing={entries:[],breadcrumbs:[],roots:[],parent_token:'',location_token:'root'};
+const window={Api:{request:async(p,o)=>{requests.push({p,o});return p==='/api/story-files/upload'?{file_token:'ft-local',name:'本机剧本.txt',size:12}:listing}},StoryUI:{}};const document={getElementById:id=>nodes[id],createElement:node,activeElement:node()};
+vm.runInNewContext(source,{window,document,encodeURIComponent,URLSearchParams,Promise,Error,console});
+(async()=>{const picker=new window.StoryUI.StoryFilePicker(nodes.storyPicker,{onChoose:x=>chosen.push(x)});await picker.open();const file={name:'本机剧本.txt',size:12};await nodes.storyPickerDeviceInput.fire('change',{target:{files:[file]}});const upload=requests.find(x=>x.p==='/api/story-files/upload');console.log(JSON.stringify({chosen,path:upload.p,name:upload.o.headers['X-AA-Filename'],body:upload.o.body.name,closed:nodes.storyPicker.hidden}));})();
+'''
+    result = _run_picker(script)
+    assert result == {
+        "chosen": [{"file_token": "ft-local", "name": "本机剧本.txt", "size": 12}],
+        "path": "/api/story-files/upload",
+        "name": "%E6%9C%AC%E6%9C%BA%E5%89%A7%E6%9C%AC.txt",
+        "body": "本机剧本.txt",
+        "closed": True,
+    }
+
+
+def test_folder_single_click_selects_and_enter_navigates():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');
+function node(){const listeners={};return {value:'',hidden:false,disabled:false,dataset:{},children:[],classList:{add(){},remove(){},toggle(){}},appendChild(x){this.children.push(x);return x},append(){for(const x of arguments)this.appendChild(x)},removeChild(){return this.children.shift()},get firstChild(){return this.children[0]},addEventListener(k,f){listeners[k]=f},fire(k,e){return listeners[k]&&listeners[k](e||{target:this,preventDefault(){}})},setAttribute(){},focus(){},set textContent(v){this._text=String(v||'');this.children=[]},get textContent(){return this._text||''}}}
+const nodes={};['storyPicker','storyPickerHost','storyPickerStatus','storyPickerEntries','storyPickerBreadcrumbs','storyPickerRoots','storyPickerSearch','storyPickerSelected','storyPickerOpen','storyPickerBack','storyPickerForward','storyPickerUp'].forEach(id=>nodes[id]=node());
+const calls=[];const root={entries:[{entry_token:'folder',name:'章节',kind:'directory',size:0,type:'文件夹'}],breadcrumbs:[],roots:[],parent_token:'',location_token:'root'};const child={entries:[],breadcrumbs:[],roots:[],parent_token:'root',location_token:'folder'};
+const window={Api:{request:async p=>{calls.push(p);return p.includes('entry_token=folder')?child:root}},StoryUI:{}};const document={getElementById:id=>nodes[id],createElement:node,activeElement:node()};
+vm.runInNewContext(source,{window,document,encodeURIComponent,URLSearchParams,Promise,Error,console});
+(async()=>{const picker=new window.StoryUI.StoryFilePicker(nodes.storyPicker,{});await picker.open();await nodes.storyPickerEntries.children[0].fire('click');const afterClick={calls:calls.length,label:nodes.storyPickerOpen.textContent,selected:nodes.storyPickerSelected.textContent};await picker.handleKey({key:'Enter',preventDefault(){}});console.log(JSON.stringify({afterClick,calls,location:picker.locationToken}));})();
+'''
+    result = _run_picker(script)
+    assert result["afterClick"] == {
+        "calls": 1,
+        "label": "进入文件夹",
+        "selected": "章节",
+    }
+    assert len(result["calls"]) == 2
+    assert "entry_token=folder" in result["calls"][-1]
+    assert result["location"] == "folder"
+
+
 def test_picker_filters_shared_asset_listing_by_allowed_suffixes():
     script = r'''
 const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');

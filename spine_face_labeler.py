@@ -48,6 +48,10 @@ _EMOTION_FAMILIES = frozenset({
 })
 _EXPRESSION_CLASSES = frozenset({"base", "accent", "peak", "special"})
 _HOLD_POLICIES = frozenset({"hold", "short", "flash"})
+_VISUAL_USAGE_MARKERS = (
+    "眼睛", "眼神", "睁眼", "闭眼", "眉毛", "眉头", "嘴巴", "嘴角",
+    "脸红", "泛红", "泪水", "流泪", "冷汗", "画面中", "图中",
+)
 
 
 VISION_SCHEMA = {
@@ -168,7 +172,23 @@ primary_emotion 使用简洁自然的中文，例如“轻微微笑”“不满�
 usage_hint_cn 写成一句简短的使用语境，例如适合怎样的台词、语气、反应或情绪阶段。
 使用语境不是关键词触发规则，不得用是否脸红、是否流泪等视觉现象决定是否使用。
 不同 face_id 可以拥有完全相同的情绪和使用语境，不要为了区分编号强行制造差异。
+如果输出结构允许，还要填写：emotion_family（七类情绪族）、intensity（0-3）、
+expression_class（base/accent/peak/special）、beat_fit（适合的剧情节拍）、
+hold_policy（hold/short/flash）、special_tags 和 avoid_when_cn。
+这些字段描述剧情使用方式，不得改写成眉眼嘴等视觉零件清单。
 置信度范围为 0 到 1；确实模糊时降低置信度，不要硬猜。"""
+
+
+def _needs_single_face_review(record: Mapping, confidence_threshold: float) -> bool:
+    if record.get("failed"):
+        return True
+    if float(record.get("confidence") or 0.0) < confidence_threshold:
+        return True
+    emotion = str(record.get("primary_emotion") or "").strip()
+    usage = usage_hint_cn(record)
+    if not emotion or len(usage) < 4:
+        return True
+    return any(marker in usage for marker in _VISUAL_USAGE_MARKERS)
 
 
 def make_vision_sheet(
@@ -365,10 +385,7 @@ def label_face_images(
         face_id = str(record["face_id"])
         if record.get("failed") and face_id in initial_singletons:
             continue
-        if (
-            not record.get("failed")
-            and float(record.get("confidence") or 0.0) >= confidence_threshold
-        ):
+        if not _needs_single_face_review(record, confidence_threshold):
             continue
         reviewed_record = request_batch([face_by_id[face_id]])[0]
         if record.get("failed") or not reviewed_record.get("failed"):

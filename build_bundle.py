@@ -16,8 +16,9 @@ from typing import Any, Dict, List, Optional
 from draft_store import DraftStore, calc_sha256
 from document import parse_document_lossless
 from script2aap import compile_script
+from runtime_layout import LAYOUT
 
-HERE = Path(__file__).resolve().parent
+HERE = LAYOUT.user_data_root if LAYOUT.frozen else Path(__file__).resolve().parent
 
 
 class CompileInputStaleError(ValueError):
@@ -49,6 +50,7 @@ class BuildBundleManager:
 
     def create_compile_snapshot(self, token: str, expected_draft_version: int) -> str:
         """202 响应前在事务锁内验证版本并复制不可变快照"""
+        self.store.assert_annotation_complete(token)
         draft_dir = self.store.get_draft_path(token)
 
         with self.store.draft_lock(token):

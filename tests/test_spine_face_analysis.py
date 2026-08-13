@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from PIL import Image
 
@@ -69,27 +70,23 @@ def test_resolve_spine_cli_prefers_explicit_then_environment_then_config(
     assert spine_face_analysis.resolve_spine_cli(config_path=config) == configured
 
 
-def test_resolve_spine_cli_does_not_probe_ambient_personal_installations(
-    tmp_path, monkeypatch
-):
-    """A clean user profile must not inherit a developer-machine Spine path."""
-    config = tmp_path / "missing-user-config.json"
-    ambient_paths = {
-        Path(r"E:\Spine3.8.75\Spine.com"),
-        Path(r"C:\Spine3.8.75\Spine.com"),
-        Path(r"C:\Program Files\Spine\Spine.com"),
-    }
-    original_is_file = Path.is_file
-
-    def simulated_is_file(path):
-        if path in ambient_paths:
-            return True
-        return original_is_file(path)
-
+def test_resolve_spine_cli_finds_private_portable_runtime(tmp_path, monkeypatch):
+    internal = tmp_path / "HaloCue private" / "_internal"
+    bundled = tmp_path / "HaloCue private" / "tools" / "spine" / "Spine.com"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_bytes(b"spine")
+    monkeypatch.setattr(
+        spine_face_analysis,
+        "LAYOUT",
+        SimpleNamespace(
+            frozen=True,
+            resource_root=internal,
+            config_path=tmp_path / "missing-config.json",
+        ),
+    )
     monkeypatch.delenv("SPINE_CLI", raising=False)
-    monkeypatch.setattr(Path, "is_file", simulated_is_file)
 
-    assert spine_face_analysis.resolve_spine_cli(config_path=config) is None
+    assert spine_face_analysis.resolve_spine_cli() == bundled.resolve()
 
 
 def test_analysis_keeps_contact_sheet_out_of_normal_results_without_model_key(

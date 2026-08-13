@@ -203,9 +203,9 @@ def _resource_cache(
     issues: list[DiscoveryIssue],
     saved_cache: str | os.PathLike | None = None,
 ) -> Path | None:
-    configured = _string_value(settings, "cachePath")
-    if configured is None and saved_cache is not None:
-        configured = str(saved_cache).strip() or None
+    configured = _string_value(settings, "cachePath") or (
+        str(saved_cache) if saved_cache else None
+    )
     if configured is not None:
         path = _resolved(configured)
         if path is not None and path.is_dir():

@@ -48,6 +48,20 @@ def test_explicit_separator_closes_scene_and_chunk():
     assert [chunk["target_indices"] for chunk in chunks] == [[0, 1], [3, 4]]
 
 
+def test_background_and_place_commands_close_annotation_scenes():
+    items = assign_annotation_ids([
+        {"kind": "line", "line_no": 1, "who": "凯伊", "text": "第一句。"},
+        {"kind": "other", "raw": "@bg BG_Second"},
+        {"kind": "line", "line_no": 3, "who": "老师", "text": "第二句。"},
+        {"kind": "other", "raw": "@place 天台"},
+        {"kind": "line", "line_no": 5, "who": "凯伊", "text": "第三句。"},
+    ])
+
+    scenes = build_scene_map(items)
+
+    assert [scene["target_indices"] for scene in scenes] == [[0], [2], [4]]
+
+
 def test_blank_lines_do_not_split_a_scene():
     items = assign_annotation_ids([
         {"kind": "line", "line_no": 1, "who": "凯伊", "text": "第一句。"},
@@ -108,3 +122,12 @@ def test_chunk_controller_requires_two_successes_before_growth_and_shrinks_on_fa
     assert controller.next_limits().target > 20
     controller.observe({"success": False, "reason": "empty_response"})
     assert controller.next_limits().target < 24
+
+
+def test_chunk_controller_does_not_treat_high_reasoning_ratio_as_capacity_failure():
+    controller = RunChunkController(target=20, soft_limit=24, hard_limit=30)
+
+    controller.observe({"success": True, "reasoning_content_ratio": 12.0})
+
+    assert controller.next_limits().target == 20
+    assert controller.last_reason == "high_reasoning_ratio"

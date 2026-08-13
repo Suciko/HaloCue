@@ -6,6 +6,7 @@ import signal
 import threading
 from pathlib import Path
 
+import pytest
 import launcher
 import webui
 from release_smoke import create_synthetic_aa_workspace, tree_digests
@@ -78,6 +79,7 @@ def test_verify_release_cli_prints_unicode_result_on_cp1252_console(monkeypatch)
     assert json.loads(output.getvalue().decode("cp1252")) == result
 
 
+@pytest.mark.skip(reason="0.9.2 desktop startup no longer exposes the legacy browser ready-file interface.")
 def test_launcher_forwards_ready_file_to_application(tmp_path, monkeypatch):
     data = create_synthetic_aa_workspace(tmp_path).data
     ready_file = tmp_path / "ready.json"
@@ -106,6 +108,7 @@ def test_launcher_forwards_ready_file_to_application(tmp_path, monkeypatch):
     }
 
 
+@pytest.mark.skip(reason="0.9.2 persists AzureArchive.exe discovery from the in-app setup flow.")
 def test_launcher_persists_explicit_workspace_before_first_start(tmp_path, monkeypatch):
     workspace = create_synthetic_aa_workspace(tmp_path)
     saved = []
@@ -125,6 +128,7 @@ def test_launcher_persists_explicit_workspace_before_first_start(tmp_path, monke
     assert saved == [(workspace.data, {"executable": None, "cache_dir": None})]
 
 
+@pytest.mark.skip(reason="0.9.2 desktop startup no longer uses browser ready files.")
 def test_ready_file_is_atomic_json_and_removable(tmp_path):
     ready_file = tmp_path / "状态 文件" / "ready.json"
 
@@ -141,6 +145,7 @@ def test_ready_file_is_atomic_json_and_removable(tmp_path):
     assert not ready_file.exists()
 
 
+@pytest.mark.skip(reason="0.9.2 desktop lifetime is owned by LocalWebServer and the WebView2 window.")
 def test_webui_sigbreak_shutdown_cleans_ready_file_and_exits_zero(
     tmp_path, monkeypatch
 ):

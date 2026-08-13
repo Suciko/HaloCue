@@ -27,8 +27,9 @@ from aa_registry import (
 from build_bundle import calc_file_sha256
 from draft_store import DraftStore
 from script2aap import install_transaction
+from runtime_layout import LAYOUT
 
-HERE = Path(__file__).resolve().parent
+HERE = LAYOUT.user_data_root if LAYOUT.frozen else Path(__file__).resolve().parent
 
 
 class AARunningError(RuntimeError):
@@ -677,6 +678,8 @@ class InstallManager:
         category: str = "",
         story_name: Optional[str] = None,
     ) -> Dict[str, Any]:
+        self.store.assert_annotation_complete(token)
+
         # 1. 查找 Bundle
         bundle_dir = self.find_bundle_dir(token, build_id)
 

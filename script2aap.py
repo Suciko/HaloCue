@@ -141,6 +141,10 @@ SYNTAX = """
   @move 桃井 1                    走位到位置1
   @stage 桃井@1 绿@3 柚子@5        钉死站位，关掉自动排布
   @auto                          恢复自动排布
+  @camera 绿,柚子                 下一行只显示这些角色；@camera - 表示单行空镜
+  @camera_hold 绿,柚子            持续保持镜头；- 连续空镜；auto 恢复自动镜头
+                                 连续空镜在首个有立绘角色开口时自动恢复
+                                 （以上都是 HaloCue 编译期标注，不会原样写进 AA）
   @fx 绿 特写                     立绘效果：特写 / 剪影 / 变暗 / 无
   @hl 桃井,柚子                   本行高亮谁；@hl - 表示都不高亮
                                  默认是台上除说话者外全部高亮
@@ -243,6 +247,21 @@ def parse_bg_argument(arg):
     filenames containing spaces impossible to reference.
     """
     return arg.strip()
+
+
+def resolve_background_reference(value, background_map):
+    """Resolve either a registered name or its registered numeric AA key."""
+    selected = str(value or "").strip()
+    if not selected or selected in background_map:
+        return selected
+    if not selected.isdigit():
+        return selected
+    matches = [
+        str(name)
+        for name, background_id in background_map.items()
+        if str(background_id) == selected
+    ]
+    return matches[0] if len(matches) == 1 else selected
 
 
 def merge_project_registered_assets(index, project_dir):
@@ -407,6 +426,8 @@ class Pending:
         self.exit = []           # (ident, appear值)
         self.move = {}           # ident -> 目标位置
         self.fx = {}             # ident -> shapeOverride
+        self.fx_ends = set()     # 显式清除持久 shapeOverride 的角色
+        self.camera = None       # None=自动；[]=空镜；[ident...]=下一行明确镜头
         self.hl = None           # None=自动；[]=都不高亮；[ident...]=指定
 
     def prompt(self):
@@ -441,7 +462,6 @@ def build(events, cfg, cast, idx, project):
     vseq = itertools.count()          # 全工程连续的配音槽编号
     bg = cfg.get("default_bg", "BG_Black")
     bgm = cfg.get("default_bgm", 999)
-    face_state = {}
     scene_bg = cfg.get("scene_bg", {}) or {}
 
     def ident_of(nm, no, need_portrait=True):
@@ -460,6 +480,8 @@ def build(events, cfg, cast, idx, project):
     appearance = AppearanceState()
     for sc in scenes:
         scripts = []
+        face_state = {}
+        held_camera = None
         appearance.reset_scene()
         if sc["title"] in scene_bg:
             bg = scene_bg[sc["title"]]
@@ -492,6 +514,7 @@ def build(events, cfg, cast, idx, project):
         trans = 0
         bgfx = 0
         pending_place = ""
+        pending_fx_scene_reset = False
         # 本场登场顺序（决定自动排布的左右次序）
         seen_order = []
         ever = set()          # 曾经进过画面的（用来区分"首次登场"和"再次入镜"）
@@ -502,10 +525,14 @@ def build(events, cfg, cast, idx, project):
                 cmd, arg, no = e["cmd"], e["arg"], e["no"]
                 if cmd in ("bg", "place"):
                     appearance.reset_scene()
+                    face_state.clear()
+                    held_camera = None
+                    bgfx = 0
+                    pending_fx_scene_reset = True
                 if cmd == "bg":
                     selected_bg = parse_bg_argument(arg)
                     if selected_bg:
-                        bg = selected_bg
+                        bg = resolve_background_reference(selected_bg, bgmap)
                     if bg not in bgmap:
                         warn(no, f"背景「{bg}」没在你的素材库里出现过，ID 已按 xxh32 算出；"
                                  f"名字写错的话 AA 里会显示不出来")
@@ -609,6 +636,49 @@ def build(events, cfg, cast, idx, project):
                 elif cmd == "auto":
                     st.auto = True
                     st.pinned.clear()
+                elif cmd == "camera":
+                    value = arg.strip()
+                    if value in ("-", "无", "none"):
+                        pend.camera = []
+                    else:
+                        names = [
+                            name for name in re.split(r"[,，、\s]+", value) if name
+                        ]
+                        if not names:
+                            warn(no, "@camera 要跟角色名，或使用 - 表示空镜")
+                        else:
+                            resolved = []
+                            valid = True
+                            for name in names:
+                                ident = ident_of(name, no)
+                                if ident is None:
+                                    valid = False
+                                elif ident not in resolved:
+                                    resolved.append(ident)
+                            if valid:
+                                if len(resolved) > 5:
+                                    warn(no, "@camera 最多显示 5 个立绘，已保留前 5 个")
+                                pend.camera = resolved[:5]
+                elif cmd == "camera_hold":
+                    value = arg.strip()
+                    if value.lower() in ("auto", "自动"):
+                        held_camera = None
+                    elif value in ("-", "无", "none"):
+                        held_camera = []
+                    else:
+                        names = [name for name in re.split(r"[,，、\s]+", value) if name]
+                        resolved = []
+                        valid = bool(names)
+                        for name in names:
+                            ident = ident_of(name, no)
+                            if ident is None:
+                                valid = False
+                            elif ident not in resolved:
+                                resolved.append(ident)
+                        if valid:
+                            if len(resolved) > 5:
+                                warn(no, "@camera_hold 最多显示 5 个立绘，已保留前 5 个")
+                            held_camera = resolved[:5]
                 elif cmd == "fx":
                     p = arg.split(None, 1)
                     if len(p) < 2:
@@ -616,7 +686,14 @@ def build(events, cfg, cast, idx, project):
                     else:
                         i = ident_of(p[0], no)
                         if i:
-                            pend.fx[i] = resolve_shape(p[1], no)
+                            shape = resolve_shape(p[1], no)
+                            pend.fx[i] = shape
+                            token = p[1].strip()
+                            if shape == 0 and (
+                                token in ("", "无")
+                                or (token.lstrip("-").isdigit() and int(token) == 0)
+                            ):
+                                pend.fx_ends.add(i)
                 elif cmd == "hl":
                     if arg.strip() in ("-", "无", "none"):
                         pend.hl = []
@@ -658,8 +735,15 @@ def build(events, cfg, cast, idx, project):
             #    不在镜的人**直接不写进数组**，编译器会发 #N;hide 让他消失 ——
             #    这就是剪辑。跟 @exit 的进出场动画是两回事：那个表示人离开了房间。
             want = None
+            planned_want = None
             if cam_plan is not None and cam_i < len(cam_plan):
-                want = [w for w in cam_plan[cam_i] if w not in leaving]
+                planned_want = [w for w in cam_plan[cam_i] if w not in leaving]
+            if pend.camera is not None:
+                want = [w for w in pend.camera if w not in leaving]
+            elif held_camera is not None:
+                want = [w for w in held_camera if w not in leaving]
+            elif planned_want is not None:
+                want = planned_want
             cam_i += 1
 
             # 4. 说话者：立绘角色若还没上台，自动登场
@@ -671,6 +755,12 @@ def build(events, cfg, cast, idx, project):
                 chars[0]["name"] = c["id"]
             else:
                 speaker_ident = c["id"]
+                if held_camera == [] and pend.camera is None:
+                    # Official empty narration shots persist across narration
+                    # and slot-0 voices, then the next portrait declaration
+                    # restores the speaker. Mirror that state transition here.
+                    held_camera = None
+                    want = planned_want
                 if speaker_ident not in st.pos and speaker_ident not in entering:
                     # 首次出现、换场重现和长时间离镜重现都在首句同节点渐变，
                     # 不额外生成空节点或显式等待。
@@ -734,6 +824,13 @@ def build(events, cfg, cast, idx, project):
                 if i in pend.fx:
                     ch["shapeOverride"] = pend.fx[i]
 
+            # AA 的 0 号槽就是无立绘说话位：名字为空时是旁白；具名时是
+            # 老师、店员等画外音角色。把这类角色塞进 1..5 会触发 AA 的
+            # Spine 加载，并在没有立绘资源时留下 "Portrait not found" 报错。
+            if not c.get("narrator") and not c.get("portrait"):
+                chars[0]["name"] = str(c.get("id") or e["who"])
+                speaker = 0
+
             # 6. 说话者自己的标注
             if speaker_ident and speaker > 0:
                 f = resolve_face(e["face"], speaker_ident, faces, no)
@@ -774,7 +871,10 @@ def build(events, cfg, cast, idx, project):
                 "speakerSlotNum": speaker,
                 "highlightedSlotNums": {"$type": T_ILIST, "$values": hl},
                 "isDialogScript": True, "placeText": pend.place,
+                "_explicitFxEnds": sorted(pend.fx_ends),
+                "_sceneReset": pending_fx_scene_reset,
             })
+            pending_fx_scene_reset = False
 
             for i in leaving:
                 st.leave(i)
@@ -782,8 +882,8 @@ def build(events, cfg, cast, idx, project):
             pend.reset()
 
         if scripts:
-            enforce_focusline_shots(scripts)
             enforce_persistent_closeups(scripts)
+            enforce_focusline_shots(scripts)
             out.append((sc["title"], scripts))
 
     return out
@@ -1186,7 +1286,6 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
     index_path = options.get("index") or os.path.join(HERE, "aa_resources.json")
     aa_data = options.get("aa_data")
     install = options.get("install", False)
-    output_root = options.get("output_root")
     voices = options.get("voices")
     dry_run = options.get("dry_run", False)
 
@@ -1207,11 +1306,7 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
     )
     story_root = os.path.dirname(os.path.dirname(HERE))
     install_target = None
-    outdir = (
-        os.path.join(aa_data, "projects")
-        if install
-        else str(output_root or os.path.join(HERE, "out"))
-    )
+    outdir = os.path.join(aa_data, "projects") if install else os.path.join(HERE, "out")
     proj_res = os.path.join(outdir, project)
     if install:
         install_target = resolve_project_target(
@@ -1326,7 +1421,6 @@ def main(argv=None, *, running_probe=None):
     ap.add_argument("--cast", default=os.path.join(HERE, "cast.json"))
     ap.add_argument("--index", default=os.path.join(HERE, "aa_resources.json"))
     ap.add_argument("--aa-data", help="AA 存储目录（不给就自动探测）")
-    ap.add_argument("--output-root", help="非安装模式生成文件的输出目录")
     ap.add_argument("--install", action="store_true")
     ap.add_argument("--voices", help="配音音频目录，会拷进工程并登记")
     ap.add_argument("--dry-run", action="store_true")
@@ -1345,7 +1439,6 @@ def main(argv=None, *, running_probe=None):
         "cast": a.cast,
         "index": a.index,
         "aa_data": a.aa_data,
-        "output_root": a.output_root,
         "install": a.install,
         "voices": a.voices,
         "dry_run": a.dry_run,

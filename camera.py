@@ -6,11 +6,12 @@
 在 AA 里，一行的立绘名单换了，上一行有本行没有的人会被编译器自动隐藏
 （#N;hide，1752/1756 实测），所以换名单就是剪辑，不需要进出场动画。
 
-规则从 131 个人手工程、18089 行反推。金标准分布：
+规则最初从 131 个 AA 人工工程、18089 行反推。以下是 AA 人工工程基线，
+不是官方游戏命令流的分布：
     同屏 0人 23.4%  1人 38.0%  2人 24.7%  3人 12.1%  4人 1.3%  5人 0.6%
     镜头长度中位数约 3 行，平均 6.1 行，共 2963 次切
 
-三条规则（在金标准序列上逐条对过）：
+四条规则（在 AA 人工工程基线序列上逐条对过）：
 
   R1 新面孔第一次开口，且当前镜头已经端了一阵子 -> 硬切成单人镜头
      让观众看清是谁。第 15 行柚子（镜头端了 9 行）切了，第 21 行爱丽丝
@@ -23,14 +24,14 @@
      4 人以上在真实用法里只占 1.9%。
 
   R4 连续旁白就退空镜
-     金标准里"同屏 0 人"占 23.4%，而且**只出现在旁白/无立绘行**
+     AA 人工工程基线里"同屏 0 人"占 23.4%，而且**只出现在旁白/无立绘行**
      （立绘角色说话时同屏必有人，8036/8036 零例外）。
      旁白行里 42.1% 是空镜。单独一行旁白不清（那是对话中间的插叙），
      连着两行以上就说明镜头离开人物了，退到只剩背景。
 """
 
 DEFAULTS = {
-    "max_on_cam": 4,      # 同屏上限（硬上限 5）。参数扫描出来 4 最贴近金标准
+    "max_on_cam": 4,      # 同屏上限（硬上限 5）。参数扫描出来 4 最贴近 AA 人工基线
     "new_face_hold": 3,   # 新面孔触发硬切所需的"当前镜头已保持行数"
     "stale_after": 6,     # 多少行没说话就下镜
     "min_solo": 1,        # 镜头里至少留几个人（旁白行除外）
@@ -72,6 +73,19 @@ def plan_camera(lines, opts=None):
             held = 0
         sp = ln.get("speaker")
 
+        if "visible_characters" in ln and isinstance(ln["visible_characters"], (list, tuple)):
+            before = list(cam)
+            cam = list(dict.fromkeys(
+                str(name) for name in ln["visible_characters"] if str(name)
+            ))[:5]
+            seen.update(cam)
+            if sp:
+                seen.add(sp)
+                last_spoke[sp] = i
+            held = 1 if cam != before else held + 1
+            out.append(list(cam))
+            continue
+
         # 旁白 / 无立绘角色
         if not sp:
             # 连着两行以上旁白 = 镜头离开人物，退空镜。
@@ -95,7 +109,7 @@ def plan_camera(lines, opts=None):
             # 说话者已经在镜：镜头基本不动，只做**渐进收缩** ——
             # 超过 2 人时，每行最多请走一个太久没说话的。
             # 完全不收缩的话镜头会一路填满再也不下来（4 人占比会飙到 24%，
-            # 金标准只有 1.3%）；每行全清的话平均镜头长会掉到 3 行（金标准 6.1）。
+            # AA 人工基线只有 1.3%）；每行全清会让平均镜头长掉到 3 行（基线 6.1）。
             # 两害相权，一次一个。
             if len(cam) > 2:
                 stale = [c for c in cam
@@ -123,7 +137,7 @@ def plan_camera(lines, opts=None):
 
 # ---------------------------------------------------------------- 自测
 def profile(shots):
-    """算出同屏人数分布与镜头长度分布，用来跟金标准比。"""
+    """算出同屏人数分布与镜头长度分布，用来跟 AA 人工工程基线比。"""
     from collections import Counter
     size = Counter(len(s) for s in shots)
     lens, cuts = Counter(), 0
@@ -166,20 +180,20 @@ GOLD = {
 
 
 def compare(p):
-    out = ["            本算法    金标准"]
+    out = ["            本算法    AA人工基线"]
     for k in range(6):
         a = p["size_pct"].get(k, 0.0)
         b = GOLD["size_pct"].get(k, 0.0)
         flag = "  " if abs(a - b) <= 8 else " ←"
         out.append(f"  同屏 {k} 人   {a:5.1f}%   {b:5.1f}%{flag}")
-    out.append(f"  平均镜头长  {p['avg_shot']:5.1f} 行 {GOLD['avg_shot']:5.1f} 行")
+    out.append(f"  平均镜头长  {p['avg_shot']:5.1f} 行 {GOLD['avg_shot']:5.1f} 行（AA人工基线）")
     out.append(f"  切换次数    {p['cuts']}  ({p['lines']} 行)")
     out.append("  镜头长度累计分布：")
     for k in (1, 2, 3, 4, 6):
         a = p["len_cum"].get(k)
         near = min((x for x in p["len_cum"] if x >= k), default=None)
         a = p["len_cum"].get(k, p["len_cum"].get(near, 0)) if a is None else a
-        out.append(f"    {k} 行以内 {a:5.1f}%   金标准 {GOLD['len_cum'].get(k, 0):5.1f}%")
+        out.append(f"    {k} 行以内 {a:5.1f}%   AA人工基线 {GOLD['len_cum'].get(k, 0):5.1f}%")
     return "\n".join(out)
 
 

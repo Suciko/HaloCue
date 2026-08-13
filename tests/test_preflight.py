@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import json
+import re
 
 import assetdb
 import webui
@@ -201,6 +202,14 @@ def test_ai_cannot_mark_a_missing_asset_as_registered(tmp_path, monkeypatch):
     }
 
 
+def test_preflight_accepts_generated_and_authored_camera_commands():
+    issues = webui._preflight_directive_issues(
+        "@camera 凯伊,老师\n@camera_hold 凯伊\n@camera_hold auto\n"
+    )
+
+    assert issues == []
+
+
 def test_nonstandard_script_blocks_when_full_text_ai_review_did_not_run(tmp_path, monkeypatch):
     monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
     monkeypatch.setattr(webui, "annotation_provider", lambda _profile=None: None)
@@ -259,6 +268,41 @@ def test_ai_can_discover_roles_and_assets_in_nonstandard_full_text(tmp_path, mon
     assert "nonstandard_format_requires_ai" not in codes
     assert codes >= {"speaker_unmapped", "background_asset_suggestion", "optional_asset_suggestion"}
     assert "missing_custom_asset" not in codes
+
+
+def test_ai_can_confirm_a_discovered_named_role_as_voice_without_library_candidate(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+
+    class Provider:
+        def complete_json(self, *_args):
+            return {
+                "characters": [{
+                    "speaker": "广播员", "kind": "voice", "id": "",
+                    "name": "广播员", "custom": False, "confidence": 0.91,
+                    "reason": "正文明确由广播员说话，但人物不在画面中",
+                }],
+                "assets": [], "usage_chain": [], "issues": [],
+            }
+
+    monkeypatch.setattr(webui, "annotation_provider", lambda _profile=None: Provider())
+    script = tmp_path / "freeform.md"
+    script.write_text(
+        "广播里传来一个陌生声音。\n广播员说道：请各位尽快离场。\n",
+        encoding="utf-8",
+    )
+
+    result = webui._preflight_result(str(script), scope=str(tmp_path / "project"))
+    speaker = next(item for item in result["characters"] if item["speaker"] == "广播员")
+
+    assert speaker["kind"] == "voice"
+    assert speaker["name"] == "广播员"
+    assert speaker["id"] == webui.voice_character_mapping("广播员")["id"]
+    assert not [
+        issue for issue in result["issues"]
+        if issue.get("code") == "speaker_unmapped" and issue.get("speaker") == "广播员"
+    ]
 
 
 def test_ai_builds_a_natural_language_scene_usage_chain_and_background_prompt(tmp_path, monkeypatch):
@@ -322,7 +366,7 @@ def test_ai_builds_a_natural_language_scene_usage_chain_and_background_prompt(tm
     assert str(tmp_path) not in by_key[("background", "夜间天台")]["generation_prompt"]
 
 
-def test_usage_chain_compacts_long_start_and_end_but_keeps_full_evidence(tmp_path):
+def test_usage_chain_compacts_boundaries_and_long_evidence(tmp_path):
     con = assetdb.connect(tmp_path / "assets.db")
     evidence = "休息日下午，商店街入口的钟塔下。凯伊催促大家尽快出发。"
     start = "旁白：休息日下午，商店街入口的钟塔下。\n远处传来钟声，来往的人群渐渐多了起来。"
@@ -347,7 +391,42 @@ def test_usage_chain_compacts_long_start_and_end_but_keeps_full_evidence(tmp_pat
     assert chain[0]["start"].endswith("…")
     assert chain[0]["end"].endswith("…")
     assert "\n" not in chain[0]["start"]
-    assert chain[0]["evidence"] == evidence
+    assert chain[0]["evidence"] == "休息日下午，商店街入口的钟塔下。…"
+    assert len(chain[0]["evidence"]) < len(evidence)
+
+
+def test_compact_preflight_uses_one_relevant_source_line_as_evidence():
+    source = "\n".join([
+        "凯伊：大家都到了吗？",
+        "旁白：休息日下午，商店街入口的钟塔下。",
+        "老师：还没到两点呢。",
+        "凯伊：我们再等一会儿。",
+        "老师：天气预报说不会下雨。",
+    ])
+    result = webui._compact_preflight_to_internal({
+        "extra_speakers": [],
+        "ambiguities": [],
+        "scenes": [{
+            "label": "钟塔集合",
+            "start_line": 1,
+            "end_line": 5,
+            "location": "商店街入口钟塔下",
+            "time": "休息日下午",
+            "story_type": "event",
+            "scene_function": "setup",
+            "needs": [{
+                "kind": "background",
+                "name": "商店街入口钟塔",
+                "required": True,
+            }],
+        }],
+    }, source)
+
+    scene = result["usage_chain"][0]
+    assert scene["start"] == "第1行"
+    assert scene["end"] == "第5行"
+    assert scene["evidence"] == "旁白：休息日下午，商店街入口的钟塔下。"
+    assert "天气预报" not in scene["evidence"]
 
 
 def test_usage_chain_keeps_only_verified_official_background_candidates(tmp_path, monkeypatch):
@@ -392,8 +471,8 @@ def test_usage_chain_keeps_only_verified_official_background_candidates(tmp_path
     assert refs[0]["status"] == "approximate"
 
 
-def test_usage_chain_suggests_catalog_background_when_ai_returns_no_candidate(tmp_path):
-    """A missing AI candidate must not hide a close official scene from review."""
+def test_usage_chain_does_not_guess_a_place_from_time_or_generic_indoor_words(tmp_path):
+    """Time, indoors, or a speaker role must not invent a concrete location."""
     con = assetdb.connect(tmp_path / "assets.db")
     con.executemany(
         "INSERT INTO bg(name,hash,label,time,tags) VALUES(?,?,?,?,?)",
@@ -418,9 +497,184 @@ def test_usage_chain_suggests_catalog_background_when_ai_returns_no_candidate(tm
         con.close()
 
     need = chain[0]["needs"][0]
+    assert need["status"] == "missing"
+    assert need["candidates"] == []
+
+
+def test_catalog_background_fallback_requires_place_and_ignores_speaker_roles(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    webui.asset_catalog.migrate(con)
+    con.executemany(
+        "INSERT INTO bg(name,hash,label,time,tags) VALUES(?,?,?,?,?)",
+        [
+            ("BG_MainOffice", 101, "Main Office", "", "main,office"),
+            ("BG_MainOffice_Night", 102, "Main Office", "夜晚", "main,office"),
+            ("BG_ShoppingDistrict", 103, "Shopping District", "", "shopping,district"),
+            ("BG_ShoppingDistrict_Night", 104, "Shopping District", "夜晚", "shopping,district"),
+            ("BG_ShoppingMallInside", 105, "Shopping Mall Inside", "", "shopping,mall,inside"),
+        ],
+    )
+    con.commit()
+    try:
+        candidates = webui._catalog_background_candidates(
+            con,
+            "商店街入口钟塔",
+            "场景地点与时间需要稳定的空间背景。",
+            "休息日下午，老师与凯伊在商店街入口的钟塔下集合。",
+            "第6行",
+        )
+    finally:
+        con.close()
+
+    assert [item["aa_key"] for item in candidates] == ["BG_ShoppingDistrict"]
+    assert all("MainOffice" not in item["aa_key"] for item in candidates)
+
+
+def test_custom_background_candidates_require_a_specific_place_match(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    custom_assets = {
+        "backgrounds": [
+            {
+                "aa_key": "3436394231", "name": "crepe-stand.png",
+                "preview_available": True,
+                "labels": {
+                    "label": "可丽饼摊前", "place": "商店街可丽饼摊前",
+                    "indoor_outdoor": "室外", "time": "下午", "mood": "热闹",
+                    "tags": "可丽饼摊, 商店街, 街边摊位",
+                },
+            },
+            {
+                "aa_key": "3040691084", "name": "game-center.png",
+                "preview_available": True,
+                "labels": {
+                    "label": "游戏中心", "place": "室内游戏中心",
+                    "indoor_outdoor": "室内", "time": "下午", "mood": "热闹",
+                    "tags": "街机, 游戏中心, 商店街, 室内",
+                },
+            },
+            {
+                "aa_key": "4096062938", "name": "riverbank.png",
+                "preview_available": True,
+                "labels": {
+                    "label": "河堤黄昏", "place": "河堤",
+                    "indoor_outdoor": "室外", "time": "黄昏", "mood": "安静",
+                    "tags": "河堤, 黄昏, 夕阳, 街道",
+                },
+            },
+        ],
+        "sounds": [], "bgms": [],
+    }
+    try:
+        chain, _refs = webui._normalize_usage_chain([{
+            "segment": "共吃可丽饼", "location": "商店街可丽饼摊前及附近街道",
+            "start": "第82行", "end": "第168行",
+            "evidence": "旁白：十五点过十分，可丽饼摊前。",
+            "time": "下午",
+            "needs": [{
+                "kind": "background", "name": "商店街可丽饼摊前",
+                "location": "第82行", "reason": "稳定表现可丽饼摊前的空间",
+                "confidence": 0.90,
+            }],
+        }], custom_assets, con)
+    finally:
+        con.close()
+
+    candidates = chain[0]["needs"][0]["candidates"]
+    assert [item["aa_key"] for item in candidates] == ["3436394231"]
+
+
+def test_adjacent_segments_in_the_same_physical_space_inherit_one_background(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    custom_assets = {
+        "backgrounds": [{
+            "aa_key": "3040691084", "name": "game-center.png",
+            "preview_available": True,
+            "labels": {
+                "label": "游戏中心", "place": "室内游戏中心",
+                "indoor_outdoor": "室内", "time": "下午", "mood": "热闹",
+                "tags": "街机, 游戏中心, 室内",
+            },
+        }],
+        "sounds": [], "bgms": [],
+    }
+    raw_chain = [{
+        "segment": "游戏中心协力射击", "location": "游戏中心双人协力射击筐体前",
+        "start": "第172行", "end": "第238行", "time": "十五点四十",
+        "evidence": "旁白：双人协力射击筐体前。",
+        "needs": [{
+            "kind": "background", "name": "游戏中心双人协力射击区",
+            "location": "第172行", "reason": "表现机台区域", "confidence": 0.90,
+        }],
+    }, {
+        "segment": "游戏中心内的跟踪曝光", "location": "游戏中心内",
+        "start": "第240行", "end": "第362行", "time": "白天",
+        "evidence": "旁白：凯伊一把抓住老师的手腕，冲出游戏中心。",
+        "needs": [{
+            "kind": "background", "name": "游戏中心",
+            "location": "第240行", "reason": "表现追逐情节", "confidence": 0.90,
+        }],
+    }]
+    try:
+        chain, refs = webui._normalize_usage_chain(raw_chain, custom_assets, con)
+    finally:
+        con.close()
+
+    first = chain[0]["needs"][0]
+    continued = chain[1]["needs"][0]
+    assert first["status"] in {"recommended", "approximate"}
+    assert continued["status"] == "inherited"
+    assert continued["candidates"] == []
+    assert continued["inherits_from"] == {
+        "segment": "游戏中心协力射击",
+        "location": "第172行",
+        "requested_name": "游戏中心双人协力射击区",
+    }
+    assert [item["name"] for item in refs if item["kind"] == "background"] == [
+        "游戏中心双人协力射击区"
+    ]
+
+
+def test_shop_clock_tower_preflight_keeps_short_evidence_and_relevant_backgrounds(tmp_path):
+    con = assetdb.connect(tmp_path / "assets.db")
+    webui.asset_catalog.migrate(con)
+    con.executemany(
+        "INSERT INTO bg(name,hash,label,time,tags) VALUES(?,?,?,?,?)",
+        [
+            ("BG_MainOffice", 201, "Main Office", "", "main,office"),
+            ("BG_ShoppingDistrict", 202, "Shopping District", "", "shopping,district"),
+            ("BG_ShoppingMallInside", 203, "Shopping Mall Inside", "", "shopping,mall,inside"),
+        ],
+    )
+    con.commit()
+    source = "\n".join([
+        "旁白：休息日下午，商店街入口的钟塔下。",
+        "旁白：凯伊已经站在钟塔阴影里，手里捏着折得整整齐齐的打印纸。",
+        "老师：还没到两点呢。",
+        "凯伊：所以我才想问，你为什么已经到了！？",
+        "老师：集合地点在等我。",
+    ])
+    compact = webui._compact_preflight_to_internal({
+        "extra_speakers": [], "ambiguities": [],
+        "scenes": [{
+            "label": "钟塔下的约会集合", "start_line": 1, "end_line": 5,
+            "location": "商店街入口钟塔下", "time": "休息日下午",
+            "story_type": "bond", "scene_function": "setup",
+            "needs": [{"kind": "background", "name": "商店街入口钟塔", "required": True}],
+        }],
+    }, source)
+    try:
+        chain, _refs = webui._normalize_usage_chain(
+            compact["usage_chain"], {"backgrounds": [], "sounds": [], "bgms": []}, con,
+        )
+    finally:
+        con.close()
+
+    scene = chain[0]
+    need = scene["needs"][0]
+    assert scene["evidence"] == "旁白：休息日下午，商店街入口的钟塔下。"
+    assert "凯伊已经站在" not in scene["evidence"]
+    assert [item["aa_key"] for item in need["candidates"]] == ["BG_ShoppingDistrict"]
     assert need["status"] == "approximate"
-    assert need["candidates"][0]["aa_key"] == "BG_MainOffice_Night"
-    assert need["candidates"][0]["source"] == "official"
 
 
 def test_usage_chain_hides_custom_background_workflow_at_or_above_ninety_percent(tmp_path):
@@ -481,7 +735,9 @@ def test_usage_chain_does_not_hide_missing_background_with_weak_candidate(tmp_pa
     assert "钟塔机械室" in need["generation_prompt"]
 
 
-def test_preflight_exposes_official_background_catalog_to_model(tmp_path, monkeypatch):
+def test_preflight_keeps_background_catalog_local_instead_of_sending_it_to_model(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
     con = assetdb.connect(tmp_path / "assets.db")
     con.execute(
@@ -493,9 +749,10 @@ def test_preflight_exposes_official_background_catalog_to_model(tmp_path, monkey
     captured = {}
 
     class Provider:
-        def complete_json(self, _static, volatile, _user, _schema):
+        def complete_json(self, _static, volatile, _user, schema):
             captured.update(json.loads(volatile))
-            return {"characters": [], "assets": [], "usage_chain": [], "issues": []}
+            captured["schema"] = schema
+            return {"extra_speakers": [], "scenes": [], "ambiguities": []}
 
     monkeypatch.setattr(webui, "annotation_provider", lambda _profile=None: Provider())
     script = tmp_path / "story.txt"
@@ -503,10 +760,141 @@ def test_preflight_exposes_official_background_catalog_to_model(tmp_path, monkey
 
     webui._preflight_result(str(script), scope=str(tmp_path / "project"))
 
-    assert captured["official_backgrounds"] == [{
-        "aa_key": "BG_ShoppingDistrict", "label": "Shopping District",
-        "place": "", "time": "", "mood": "", "tags": "shopping,district",
-    }]
+    assert set(captured) == {"speakers", "scene_headers", "schema"}
+    assert "official_backgrounds" not in captured
+    assert captured["schema"]["required"] == ["extra_speakers", "scenes", "ambiguities"]
+
+
+def test_compact_preflight_expands_line_ranges_and_scene_direction_locally(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    con = assetdb.connect(tmp_path / "assets.db")
+    con.execute(
+        "INSERT INTO bg(name,hash,label,tags) VALUES(?,?,?,?)",
+        ("BG_ShoppingDistrict", 101, "Shopping District", "shopping,district"),
+    )
+    con.commit()
+    con.close()
+    captured = {}
+
+    class Provider:
+        def complete_json(self, static, volatile, user, _schema):
+            captured["static"] = static
+            captured["volatile"] = json.loads(volatile)
+            captured["user"] = user
+            return {
+                "extra_speakers": ["店员"],
+                "scenes": [{
+                    "label": "集合",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "location": "商店街入口",
+                    "time": "傍晚",
+                    "story_type": "event",
+                    "scene_function": "entrance",
+                    "needs": [{
+                        "kind": "background",
+                        "name": "商店街入口",
+                        "required": True,
+                    }],
+                }],
+                "ambiguities": [],
+            }
+
+    monkeypatch.setattr(webui, "annotation_provider", lambda _profile=None: Provider())
+    script = tmp_path / "story.txt"
+    script.write_text(
+        "旁白：傍晚，众人在商店街入口集合。\n店员从门口探出头。\n",
+        encoding="utf-8",
+    )
+
+    result = webui._preflight_result(str(script), scope=str(tmp_path / "project"))
+
+    assert set(captured["volatile"]) == {"speakers", "scene_headers"}
+    assert "动作升级、对话阶段、人物进出" in captured["static"]
+    assert "都不算背景变化" in captured["static"]
+    assert "L1\t旁白：傍晚，众人在商店街入口集合。" in captured["user"]
+    assert "店员" in {item["speaker"] for item in result["characters"]}
+    scene = result["usage_chain"][0]
+    assert (scene["start"], scene["end"]) == ("第1行", "第2行")
+    assert scene["evidence"] == "旁白：傍晚，众人在商店街入口集合。"
+    assert scene["time"] == "傍晚"
+    assert scene["scene_type"] == "event"
+    assert scene["scene_function"] == "entrance"
+    need = scene["needs"][0]
+    assert need["name"] == "商店街入口"
+    assert need["required"] is True
+    assert need["suggested_aa_key"] == "BG_ShoppingDistrict"
+
+
+def test_preflight_uses_a_small_task_budget_and_restores_provider_settings(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    observed = {}
+
+    class Provider(webui.llm.Provider):
+        def complete_json(self, _static, _volatile, _user, _schema):
+            observed["budget"] = self.cfg.get("_output_budget_override")
+            observed["reasoning_mode"] = self.cfg.get("reasoning_mode")
+            return {"extra_speakers": [], "scenes": [], "ambiguities": []}
+
+    provider = Provider({
+        "model": "test", "max_tokens": 128000,
+        "annotation_max_tokens": 64000, "reasoning_mode": "deep",
+    })
+    monkeypatch.setattr(webui, "annotation_provider", lambda _profile=None: provider)
+    script = tmp_path / "story.txt"
+    script.write_text("旁白：教室里很安静。\n", encoding="utf-8")
+
+    result = webui._preflight_result(str(script), scope=str(tmp_path / "project"))
+
+    assert 2048 <= observed["budget"] <= 8192
+    assert observed["budget"] < provider.cfg["annotation_max_tokens"]
+    assert observed["reasoning_mode"] == "speed"
+    assert "_output_budget_override" not in provider.cfg
+    assert provider.cfg["reasoning_mode"] == "deep"
+    assert result["ai_usage"]["output_budget"] == observed["budget"]
+
+
+def test_long_preflight_uses_bounded_windows_and_merges_duplicate_findings(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    calls = []
+
+    class Provider:
+        def complete_json(self, _static, volatile, user, _schema):
+            calls.append({"volatile": json.loads(volatile), "user": user})
+            line_numbers = [int(value) for value in re.findall(r"L(\d+)\t", user)]
+            return {
+                "extra_speakers": ["店员"],
+                "scenes": [{
+                    "label": "连续场景",
+                    "start_line": line_numbers[0], "end_line": line_numbers[-1],
+                    "location": "商店街", "time": "傍晚",
+                    "story_type": "event", "scene_function": "dialogue", "needs": [],
+                }],
+                "ambiguities": [],
+            }
+
+    monkeypatch.setattr(webui, "annotation_provider", lambda _profile=None: Provider())
+    script = tmp_path / "long.txt"
+    script.write_text("\n".join(f"旁白：第{i}行。" for i in range(1, 501)), encoding="utf-8")
+
+    result = webui._preflight_result(str(script), scope=str(tmp_path / "project"))
+
+    assert len(calls) == 3
+    assert all(len(call["user"]) < 8_000 for call in calls)
+    assert calls[0]["volatile"]["window"] == {
+        "index": 1, "count": 3, "start_line": 1, "end_line": 240,
+    }
+    assert [item["speaker"] for item in result["characters"]].count("店员") == 1
+    assert len(result["usage_chain"]) == 3
+    assert result["usage_chain"][0]["start"] == "第1行"
+    assert result["usage_chain"][-1]["end"] == "第500行"
+    assert result["ai_usage"]["window_count"] == 3
 
 
 def test_background_library_collapses_duplicate_variants_before_limit(tmp_path):
@@ -866,12 +1254,8 @@ def test_custom_background_candidate_model_input_excludes_unlabeled_and_other_sc
 
     webui._preflight_result(str(script), scope=current_scope)
 
-    assert captured["custom_backgrounds"] == [{
-        "aa_key": "current-labeled", "label": "雨夜车站", "name": "current-labeled",
-        "description": "", "place": "车站", "indoor_outdoor": "", "time": "",
-        "weather": "", "season": "", "mood": "", "tags": "",
-        "source": "custom", "preview_available": True,
-    }]
-    assert "current-unlabeled" not in json.dumps(captured["custom_backgrounds"])
+    assert set(captured) == {"speakers", "scene_headers"}
+    assert "custom_backgrounds" not in captured
+    assert "current-unlabeled" not in json.dumps(captured)
     assert "other-labeled" not in json.dumps(captured)
     assert str(tmp_path) not in json.dumps(captured, ensure_ascii=False)

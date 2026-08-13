@@ -10,7 +10,7 @@ script2aap.py。任何超出资源表的标注都会被丢弃并告警——模�
   python annotate.py 剧本.txt --range 1-80          只标注前 80 行（先试水）
 """
 import argparse, hashlib, json, os, re, sys, uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 
 sys.stdout.reconfigure(encoding="utf-8")
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -19,6 +19,7 @@ from llm import make_provider, LLMError                       # noqa: E402
 from script2aap import HEAD_RE, split_head, load_cast          # noqa: E402
 from build_index import faces_of                               # noqa: E402
 from asset_validation import extract_expression_capabilities   # noqa: E402
+from asset_catalog import face_visual_evidence                  # noqa: E402
 from dialogue_pacing import split_strong_dialogue_items         # noqa: E402
 from annotation_chunks import assign_annotation_ids             # noqa: E402
 from annotation_memory import (                                 # noqa: E402
@@ -26,6 +27,14 @@ from annotation_memory import (                                 # noqa: E402
     build_run_fingerprint,
 )
 from annotation_agent import run_annotation_agent               # noqa: E402
+from annotation_safety import (                                 # noqa: E402
+    FX_PARTS as _FX_PARTS,
+    filter_annotation_row,
+    is_face_allowed,
+    is_fx_allowed,
+    project_effective_annotation_row,
+)
+from director_state import normalize_director                   # noqa: E402
 from direction_rules import (                                  # noqa: E402
     apply_model_directions,
     mark_explicit_directions,
@@ -33,22 +42,24 @@ from direction_rules import (                                  # noqa: E402
     normalize_emoticon_density as _normalize_emoticon_density,
     supplement_directions,
 )
+from director_policy import normalize_direction_plan                 # noqa: E402
 import prompt as PROMPT                                        # noqa: E402
 import tables                                                  # noqa: E402
 
 
-def is_face_allowed(allow, face):
-    """表情表未知时拒绝模型猜测；只有明确存在的 faceId 才能写入。"""
-    return bool(allow) and face in allow
+_STORY_TYPES = frozenset({"auto", "main", "event", "bond"})
+_DIRECTIVE_FIELDS = {
+    "bg": "bg", "trans": "trans", "place": "place", "move": "move",
+    "bgshake": "shake", "bgfx": "bgfx", "se": "se", "sound": "se",
+    "shot": "shot", "fx": "fx", "camera": "camera", "camera_hold": "camera_hold",
+}
 
 
-_FX_PARTS = frozenset({"通讯", "黑屏剪影", "特写"})
-
-
-def is_fx_allowed(value):
-    """Only accept one or more documented, non-duplicated shape bit names."""
-    parts = [part.strip() for part in re.split(r"[+＋、,，/]", str(value)) if part.strip()]
-    return bool(parts) and len(parts) == len(set(parts)) and set(parts) <= _FX_PARTS
+def normalize_story_type(value):
+    normalized = str(value or "auto").strip().lower()
+    if normalized not in _STORY_TYPES:
+        raise ValueError("invalid_story_type")
+    return normalized
 
 
 def _selected_variants(capabilities, identifier, spine_signature="", outfit_key=""):
@@ -126,8 +137,23 @@ def _allowed_face_records(
     # but must not be offered to the model as something it can safely choose.
     return [
         face for face in result
-        if face.get("semantic_cn") or face.get("cn") or face.get("label")
+        if face_visual_evidence(face) in {"visual_confirmed", "asset_semantic"}
+        and (face.get("semantic_cn") or face.get("cn") or face.get("label"))
     ]
+
+
+def _scoped_face_evidence(
+    capabilities, identifier, allowed, *, spine_signature="", outfit_key=""
+):
+    evidence = {}
+    for variant in _selected_variants(
+        capabilities, identifier, spine_signature, outfit_key
+    ):
+        for face in variant.get("faces", []):
+            face_id = face.get("id")
+            if face_id in allowed:
+                evidence[face_id] = face_visual_evidence(face)
+    return evidence
 
 
 def annotation_constraints(idx, cast, *, usage_chain=None):
@@ -148,6 +174,7 @@ def annotation_constraints(idx, cast, *, usage_chain=None):
         if character.get("_expression_mode") == "semantic_modular"
     }
     faces_by_id = {}
+    face_evidence_by_id = {}
     if capabilities:
         for character in cast.values():
             ident = character.get("id")
@@ -167,13 +194,27 @@ def annotation_constraints(idx, cast, *, usage_chain=None):
                     if official
                     else face_allowlist(capabilities, ident, **selector)
                 )
+                face_evidence_by_id[ident] = _scoped_face_evidence(
+                    capabilities, ident, faces_by_id[ident], **selector
+                )
     else:
         faces_by_id = {
             character["identifier"]: {face["id"] for face in character["faces"]}
             for character in idx.get("characters", []) if character.get("faces")
         }
+        # Legacy character catalogs predate evidence metadata, but their face
+        # table is still asset-derived. Historical project usage is not enough
+        # to add another model-selectable face.
+        face_evidence_by_id = {
+            ident: {face_id: "asset_semantic" for face_id in face_ids}
+            for ident, face_ids in faces_by_id.items()
+        }
         for ident, faces in (idx.get("faces_used") or {}).items():
             faces_by_id.setdefault(ident, {face["id"] for face in faces})
+            if ident not in face_evidence_by_id:
+                face_evidence_by_id[ident] = {
+                    face["id"]: "context_inferred" for face in faces
+                }
     sym2cn = {
         value["sym"]: value["cn"]
         for value in idx["enums"]["emoticon"].values()
@@ -191,91 +232,20 @@ def annotation_constraints(idx, cast, *, usage_chain=None):
     }
     return {
         "faces_by_id": faces_by_id,
+        "face_evidence_by_id": face_evidence_by_id,
         "sym2cn": sym2cn,
         "ok_emo": set(sym2cn) | set(sym2cn.values()),
         "ok_act": {value["verb"] for value in idx["enums"]["action"].values()},
         "ok_fx": _FX_PARTS,
         "ok_se": set(idx.get("sounds", [])),
         "ok_bg": set(idx.get("bg", {})) | confirmed_backgrounds,
+        "ok_bgfx": set(tables.BGEFFECT) | set(tables.BGFX_CN),
         "confirmed_bg": confirmed_backgrounds,
         "ok_shot": {
             name for name, character in cast.items()
             if character.get("portrait") and not character.get("narrator")
         },
     }
-
-
-def filter_annotation_row(row, item, character, constraints, *, include_details=False):
-    """Return legal model fields and exact reasons for every rejected field."""
-    clean, dropped, rejected_details = {}, [], []
-    who = item["who"]
-    portrait = character.get("portrait") and not character.get("narrator")
-    for field in ("face", "emo", "act", "fx"):
-        value = row.get(field)
-        if not value:
-            continue
-        if not portrait:
-            msg = f"{who}无立绘，不能使用 {field}"
-            dropped.append(msg)
-            rejected_details.append({"field": field, "value": value, "reason": msg})
-            continue
-        if field == "face":
-            allowed = constraints["faces_by_id"].get(character.get("id"), set())
-            if is_face_allowed(allowed, value):
-                clean[field] = value
-            else:
-                msg = f"{who} 没有已验证表情 {value}"
-                dropped.append(msg)
-                rejected_details.append({"field": field, "value": value, "reason": msg})
-        elif field == "emo":
-            if value in constraints["ok_emo"]:
-                clean[field] = constraints["sym2cn"].get(value, value)
-            else:
-                msg = f"未知气泡 {value}"
-                dropped.append(msg)
-                rejected_details.append({"field": field, "value": value, "reason": msg})
-        elif field == "act":
-            if value in constraints["ok_act"]:
-                clean[field] = value
-            else:
-                msg = f"未知动作 {value}"
-                dropped.append(msg)
-                rejected_details.append({"field": field, "value": value, "reason": msg})
-        elif field == "fx" and is_fx_allowed(value):
-            clean[field] = value
-        else:
-            msg = f"未知效果 {value}"
-            dropped.append(msg)
-            rejected_details.append({"field": field, "value": value, "reason": msg})
-    for field, message in (("se", "未知音效"), ("bg", "未知背景")):
-        value = row.get(field)
-        if not value:
-            continue
-        if value in constraints[f"ok_{field}"]:
-            clean[field] = value
-        else:
-            msg = f"{message} {value}"
-            dropped.append(msg)
-            rejected_details.append({"field": field, "value": value, "reason": msg})
-    bg_request = str(row.get("bg_request") or "").strip()
-    if bg_request:
-        confirmed_bg = set(constraints.get("confirmed_bg") or set())
-        if clean.get("bg") and clean["bg"] in confirmed_bg:
-            dropped.append("已确认背景不再生成背景请求")
-        else:
-            clean.pop("bg", None)
-            clean["bg_request"] = bg_request[:320]
-    shot = row.get("shot")
-    if shot:
-        if shot in constraints["ok_shot"]:
-            clean["shot"] = shot
-        else:
-            msg = f"射击目标‘{shot}’不是可显示角色"
-            dropped.append(msg)
-            rejected_details.append({"field": "shot", "value": shot, "reason": msg})
-    if include_details:
-        return clean, dropped, rejected_details
-    return clean, dropped
 
 
 def annotation_rows(response):
@@ -306,19 +276,47 @@ def normalize_bgfx_lifetime(items):
     remain active until the model or the source script writes ``无``.
     """
     reset_next_line = False
+    active = False
+    reset_at_next_line = False
     for item in items:
         if item.get("kind") != "line":
+            raw = str(item.get("raw") or "").strip()
+            if raw.startswith("##") and active:
+                reset_at_next_line = True
+                reset_next_line = False
+                active = False
             continue
+        director = item.get("_director")
+        continuity = director.get("continuity") if isinstance(director, Mapping) else None
+        command = continuity.get("bgfx", "none") if isinstance(continuity, Mapping) else "none"
         current = item.get("bgfx")
-        if reset_next_line and not current:
+        if command == "end" or (reset_at_next_line and not current):
             item["bgfx"] = "无"
             current = "无"
+            active = False
+            reset_next_line = False
+            reset_at_next_line = False
+        elif reset_next_line and not current and command != "hold":
+            item["bgfx"] = "无"
+            current = "无"
+            active = False
+            reset_next_line = False
+        elif reset_at_next_line and current:
+            reset_at_next_line = False
+        pending_transient_reset = reset_next_line
         reset_next_line = False
         if not current:
+            if command == "hold" and pending_transient_reset:
+                reset_next_line = True
             continue
         value, error = tables.resolve_bgeffect(current)
-        if error or not value:
+        if error:
             continue
+        if not value:
+            active = False
+            reset_next_line = False
+            continue
+        active = True
         if value in _TRANSIENT_BGFX_IDS:
             reset_next_line = True
 
@@ -439,7 +437,42 @@ def annotation_directives(item):
         directives.append(f"# 待生成自定义背景：{item['bg_request']}")
     if item.get("shot"):
         directives.append(f"@shot {item['shot']}")
+    director = item.get("_director")
+    if not isinstance(director, Mapping):
+        return directives
+    intent = item.get("_director_intent")
+    visibility_is_explicit = (
+        "visible_characters" in intent
+        if isinstance(intent, Mapping)
+        else "visible_characters" in director
+    )
+    if visibility_is_explicit:
+        visible = list(dict.fromkeys(
+            str(name) for name in director.get("visible_characters", []) if str(name)
+        ))[:5]
+        directives.append(f"@camera_hold {','.join(visible)}" if visible else "@camera_hold -")
+    elif item.get("_camera_reset"):
+        directives.append("@camera_hold auto")
+    continuity = director.get("continuity")
+    fx_command = continuity.get("fx") if isinstance(continuity, Mapping) else "none"
+    target = str(director.get("focus_character") or "")
+    if not target and item.get("_speaker_has_portrait"):
+        target = str(item.get("who") or "")
+    if target and fx_command == "end":
+        directives.append(f"@fx {target} 无")
+    elif target and fx_command in {"start", "escalate"} and item.get("fx"):
+        directives.append(f"@fx {target} {item['fx']}")
     return directives
+
+
+def _has_explicit_fx_lifecycle(item):
+    director = item.get("_director")
+    continuity = director.get("continuity") if isinstance(director, Mapping) else None
+    return (
+        isinstance(continuity, Mapping)
+        and continuity.get("fx") in {"start", "escalate"}
+        and bool(item.get("fx"))
+    )
 
 
 def bind_registered_custom_variants(cast, idx):
@@ -527,7 +560,7 @@ SCHEMA = {
     "additionalProperties": False,
 }
 
-def build_static(idx, cast, cast_names):
+def build_static(idx, cast, cast_names, *, story_type="auto"):
     """跨请求不变的系统提示词 —— 这部分会被缓存。规则正文在 prompt.py。"""
     capabilities = idx.get("face_capabilities") or {}
     if capabilities:
@@ -560,11 +593,15 @@ def build_static(idx, cast, cast_names):
                     "_expression_parts", record.get("expression_parts", [])
                 ),
             }
-        return PROMPT.build_system(idx, cast, cast_names, faces_by_id)
+        return PROMPT.build_system(
+            idx, cast, cast_names, faces_by_id, story_type=story_type
+        )
     faces_by_id = {c["identifier"]: c["faces"] for c in idx["characters"] if c["faces"]}
     for ident, fs in (idx.get("faces_used") or {}).items():
         faces_by_id.setdefault(ident, fs)
-    return PROMPT.build_system(idx, cast, cast_names, faces_by_id)
+    return PROMPT.build_system(
+        idx, cast, cast_names, faces_by_id, story_type=story_type
+    )
 
 
 def build_annotation_static_system(static_rules, source_text, *, source_context_strategy="preserve"):
@@ -594,6 +631,42 @@ def parse_lines(path, cast):
                 "face": face, "emo": emo, "act": act, "fx": fx}
         mark_explicit_directions(item)
         out.append(item)
+    pending_directives = set()
+    authored_camera_hold = False
+    for item in out:
+        if item.get("kind") != "line":
+            raw = str(item.get("raw") or "")
+            structural_boundary = (
+                raw.strip() == "---"
+                or bool(re.match(r"^\s*#{1,6}\s+", raw))
+            )
+            scene_directive = bool(re.match(r"^\s*@(bg|place)\b", raw, re.IGNORECASE))
+            if structural_boundary:
+                pending_directives.clear()
+                authored_camera_hold = False
+            elif scene_directive:
+                authored_camera_hold = False
+            match = re.match(r"^\s*@([A-Za-z_]+)\b\s*(.*)$", raw)
+            if match and match.group(1).lower() in _DIRECTIVE_FIELDS:
+                command = match.group(1).lower()
+                pending_directives.add(_DIRECTIVE_FIELDS[command])
+                if command == "camera_hold":
+                    authored_camera_hold = match.group(2).strip().lower() not in {"auto", "自动"}
+                elif command == "camera":
+                    authored_camera_hold = False
+            continue
+        effective_directives = set(pending_directives)
+        if authored_camera_hold:
+            effective_directives.add("camera_hold")
+        if effective_directives:
+            item["_explicit_directives"] = tuple(sorted(effective_directives))
+            if pending_directives:
+                item["_explicit_directive_starts"] = tuple(sorted(pending_directives))
+            item["_explicit_direction_fields"] = tuple(sorted(
+                set(item.get("_explicit_direction_fields", ()))
+                | (effective_directives - {"camera", "camera_hold"})
+            ))
+        pending_directives.clear()
     return out
 
 
@@ -616,7 +689,7 @@ def render(item):
         anno += f"[{item['emo']}]"
     if item.get("act"):
         anno += "{" + item["act"] + "}"
-    if item.get("fx"):
+    if item.get("fx") and not _has_explicit_fx_lifecycle(item):
         anno += f"<{item['fx']}>"
     return f"{item['who']}{anno}: {item['text']}"
 
@@ -710,20 +783,44 @@ def build_proposal(
     }
 
 
-def apply_annotation_response_row(item, row, cast, constraints, proposals, dropped):
+def apply_annotation_response_row(
+    item, row, cast, constraints, proposals, dropped, diagnostics=None,
+):
     """Apply one validated model row through the existing resource guards."""
+    diagnostic_sink = diagnostics if diagnostics is not None else []
     character = cast[item["who"]]
     portrait = character.get("portrait") and not character.get("narrator")
-    clean, rejected, rejected_details = filter_annotation_row(
-        row, item, character, constraints, include_details=True
+    item["_speaker_has_portrait"] = bool(portrait)
+    effective_row, clean, rejected, rejected_details = project_effective_annotation_row(
+        row, item, character, constraints,
     )
+    if "direction" in row:
+        cast_names = set(cast)
+        displayable_names = {
+            name for name, candidate in cast.items()
+            if candidate.get("portrait") and not candidate.get("narrator")
+        }
+        director, director_diagnostics = normalize_director(
+            effective_row.get("direction"),
+            cast_names=cast_names,
+            displayable_names=displayable_names,
+        )
+        item["_director"] = director
+        if isinstance(effective_row.get("direction_intent"), Mapping):
+            item["_director_intent"] = dict(effective_row["direction_intent"])
+        source_id = str(item.get("annotation_id") or "")
+        diagnostic_sink.extend({**entry, "source_id": source_id} for entry in director_diagnostics)
     card_id = item.get("card_id") or str(uuid.uuid4())
+    before_values = {
+        field_name: item.get(field_name)
+        for field_name in clean
+    }
     applied_clean = apply_model_directions(item, clean)
     for field_name, field_value in applied_clean.items():
         proposals.append(build_proposal(
             card_id=card_id, p_type="applied_pending", origin="model",
             rule="llm_annotation", field_name=field_name,
-            before=item.get(field_name), after=field_value,
+            before=before_values.get(field_name), after=field_value,
         ))
     for rejected_item in rejected_details:
         proposals.append(build_proposal(
@@ -731,6 +828,25 @@ def apply_annotation_response_row(item, row, cast, constraints, proposals, dropp
             rule="llm_rejected_annotation", field_name=rejected_item["field"],
             before=None, after=rejected_item["value"],
         ))
+        diagnostic_sink.append({
+            "code": rejected_item.get("code") or (
+                "director_unverified_face"
+                if rejected_item["field"] == "face"
+                else "director_resource_downgraded"
+            ),
+            "level": "warning",
+            "source_id": str(item.get("annotation_id") or ""),
+            "field": rejected_item["field"],
+            "message": rejected_item["reason"],
+            **{
+                key: rejected_item[key]
+                for key in (
+                    "character", "character_id", "outfit_key",
+                    "spine_signature", "face_id", "evidence_level",
+                )
+                if key in rejected_item
+            },
+        })
     dropped.extend(rejected)
     if row.get("place"):
         item["place"] = str(row["place"])[:40]
@@ -769,6 +885,17 @@ def build_postprocessor_proposals(items: List[Dict[str, Any]], rule: str = "emot
                     after=it["emo"],
                 )
             )
+        elif rule == "continuity_density":
+            for drop in it.get("_direction_drops", []):
+                proposals.append(build_proposal(
+                    card_id=card_id,
+                    p_type="applied_pending",
+                    origin="deterministic_postprocessor",
+                    rule=str(drop.get("reason") or rule),
+                    field_name=str(drop.get("field") or ""),
+                    before=drop.get("value"),
+                    after=None,
+                ))
     return proposals
 
 
@@ -794,6 +921,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     provider_name = options.get("provider")
     range_str = options.get("range")
     dry_run = options.get("dry_run", False)
+    story_type = normalize_story_type(options.get("story_type"))
     raw_usage_chain = options.get("usage_chain")
     usage_chain = raw_usage_chain[:80] if isinstance(raw_usage_chain, list) else []
     usage_chain_context = ""
@@ -806,7 +934,10 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
 
     cfg, cast, _ = load_cast(cast_path)
     idx = json.load(open(index_path, encoding="utf-8"))
-    llmcfg = json.load(open(llm_path, encoding="utf-8"))
+    llmcfg = (
+        json.load(open(llm_path, encoding="utf-8"))
+        if os.path.isfile(llm_path) else {}
+    )
     load_custom_faces(cast, os.path.dirname(os.path.dirname(HERE)), idx)
     items = assign_annotation_ids(
         split_strong_dialogue_items(parse_lines(script_path, cast), cast)
@@ -834,7 +965,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     prompt_idx["bg"] = dict(idx.get("bg", {}))
     for background in constraints.get("confirmed_bg") or set():
         prompt_idx["bg"].setdefault(background, 0)
-    static = build_static(prompt_idx, cast, used)
+    static = build_static(prompt_idx, cast, used, story_type=story_type)
 
     print(f"剧本      {script_path}")
     print(f"待标注    {len(todo)} 行台词（全文 {len(dialog)} 行）")
@@ -845,7 +976,10 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         print("\n" + "=" * 60)
         print(static[:3000])
         print("…（截断）")
-        return {"text": "", "proposals": [], "diagnostics": [], "out": out_path}
+        return {
+            "text": "", "proposals": [], "diagnostics": [], "out": out_path,
+            "story_type": story_type,
+        }
 
     prov = provider_instance or make_provider(llm_path, provider_name)
     print(f"模型      {prov.name} / {prov.model}\n")
@@ -877,8 +1011,9 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         }
         fingerprint = build_run_fingerprint(
             script_text, cast, idx,
-            hashlib.sha256(static.encode("utf-8")).hexdigest()[:16], 2, "scene-v2",
+            hashlib.sha256(static.encode("utf-8")).hexdigest()[:16], 3, "scene-v3",
             model_config,
+            story_type=story_type, director_version="stateful-v1",
         )
         checkpoint_dir = options.get("checkpoint_dir") or os.path.join(HERE, "out", "annotation-checkpoints")
         agent_result = run_annotation_agent(
@@ -896,6 +1031,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             reasoning_mode=str(getattr(prov, "cfg", {}).get("reasoning_mode") or "balanced"),
             annotation_max_tokens=int(getattr(prov, "cfg", {}).get("annotation_max_tokens") or getattr(prov, "cfg", {}).get("max_tokens", 16000)),
             context_window_tokens=int(getattr(prov, "cfg", {}).get("context_window_tokens") or 0) or None,
+            story_type=story_type,
         )
         diagnostics.extend(agent_result.get("diagnostics") or [])
         agent_meta = {
@@ -904,17 +1040,25 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             "resumed_chunks": agent_result.get("resumed_chunks", 0),
             "cancelled": bool(agent_result.get("cancelled")),
             "timed_out": bool(agent_result.get("timed_out")),
+            "total_targets": int(agent_result.get("total_targets") or 0),
+            "completed_targets": int(agent_result.get("completed_targets") or 0),
+            "pending_targets": int(agent_result.get("pending_targets") or 0),
+            "pending_start_line": agent_result.get("pending_start_line"),
+            "pending_end_line": agent_result.get("pending_end_line"),
             "metrics": agent_result.get("metrics") or {},
         }
         if agent_meta["cancelled"]:
             return {"text": "", "proposals": [], "diagnostics": diagnostics,
-                    "out": out_path, "agent": agent_meta, "cancelled": True}
+                    "out": out_path, "agent": agent_meta, "cancelled": True,
+                    "story_type": story_type}
         rows_by_id = agent_result["rows_by_id"]
         annotation_beats = agent_result.get("beats") or []
         for item_index in todo:
             item = items[item_index]
             row = rows_by_id.get(item.get("annotation_id"))
-            if row and apply_annotation_response_row(item, row, cast, constraints, proposals, dropped):
+            if row and apply_annotation_response_row(
+                item, row, cast, constraints, proposals, dropped, diagnostics,
+            ):
                 applied += 1
         print(f"  已标注 {applied}/{len(todo)} 行（Agent）")
     else:
@@ -942,13 +1086,22 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
                 row_index = row.get("i")
                 if not isinstance(row_index, int) or not 0 <= row_index < len(batch):
                     continue
-                if apply_annotation_response_row(items[batch[row_index]], row, cast, constraints, proposals, dropped):
+                if apply_annotation_response_row(
+                    items[batch[row_index]], row, cast, constraints,
+                    proposals, dropped, diagnostics,
+                ):
                     applied += 1
             done = min(start + n, len(todo))
             print(f"  已标注 {done}/{len(todo)} 行")
 
-    normalize_contextual_sounds(items, idx)
-    supplements, supplement_diagnostics = apply_direction_supplements(items, cast)
+    if not agent_enabled:
+        normalize_contextual_sounds(items, idx)
+    # The Agent already made the semantic decision. Keyword supplementation is
+    # retained only for the legacy stateless path and must not refill an
+    # intentional blank in a stateful run.
+    supplements, supplement_diagnostics = (
+        ([], []) if agent_enabled else apply_direction_supplements(items, cast)
+    )
     diagnostics.extend(supplement_diagnostics)
     for change in supplements:
         item = items[change["item_index"]]
@@ -963,7 +1116,12 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
                 after=change["after"],
             )
         )
-    normalize_direction_density(items)
+    if agent_enabled:
+        annotation_beats, policy_diagnostics = normalize_direction_plan(items, annotation_beats)
+        diagnostics.extend(policy_diagnostics)
+    else:
+        normalize_direction_density(items)
+    proposals.extend(build_postprocessor_proposals(items, rule="continuity_density"))
     normalize_bgfx_lifetime(items)
 
     final_text = render_annotated_items(insert_annotation_beats(items, annotation_beats))
@@ -992,6 +1150,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         "diagnostics": diagnostics,
         "out": out_path,
         "agent": agent_meta,
+        "story_type": story_type,
     }
 
 
@@ -1003,6 +1162,7 @@ def main(provider_instance=None):
     ap.add_argument("--index", default=os.path.join(HERE, "aa_resources.json"))
     ap.add_argument("--llm", default=os.path.join(HERE, "llm.json"))
     ap.add_argument("--provider", help="覆盖 llm.json 里的 provider")
+    ap.add_argument("--story-type", choices=sorted(_STORY_TYPES), default="auto")
     ap.add_argument("--range", help="只处理这些台词行，如 1-80")
     ap.add_argument("--dry-run", action="store_true", help="只打印将要发送的提示词，不调 API")
     a = ap.parse_args()
@@ -1014,6 +1174,7 @@ def main(provider_instance=None):
         "index": a.index,
         "llm": a.llm,
         "provider": a.provider,
+        "story_type": a.story_type,
         "range": a.range,
         "dry_run": a.dry_run,
     }

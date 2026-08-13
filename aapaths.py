@@ -15,13 +15,16 @@ from pathlib import Path
 from typing import Sequence
 
 from aa_install_discovery import discover_aa, normalize_aa_data_path
-from runtime_paths import resolve_runtime_layout
+from runtime_layout import LAYOUT
 
 APPDATA_LOW = os.path.join(os.path.expanduser("~"), "AppData", "LocalLow")
 VENDOR = os.path.join(APPDATA_LOW, "foxxlight", "AzureArchive")
 CONF_NAME = "aa_config.json"
-RUNTIME_LAYOUT = resolve_runtime_layout(module_file=__file__, executable=sys.executable)
-HERE = str(RUNTIME_LAYOUT.resource_root)
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def config_path():
+    return str(LAYOUT.config_path) if LAYOUT.frozen else os.path.join(HERE, CONF_NAME)
 
 
 def _read_settings(data_dir):
@@ -54,8 +57,7 @@ def detect(explicit=None, *, aa_install=None):
     selection = selection or explicit or aa_install
     result = discover_aa(
         selection,
-        config_path=RUNTIME_LAYOUT.config_path,
-        fallback_config_paths=(RUNTIME_LAYOUT.legacy_config_path,),
+        config_path=config_path(),
     )
     return {
         "data": _path_string(result.data),
@@ -85,7 +87,7 @@ def require(explicit=None, what="AA 存储目录"):
         msg += [
             "",
             "解决办法（任选其一）：",
-            f"  1. 在 {RUNTIME_LAYOUT.config_path.parent} 下建 {CONF_NAME}，内容：",
+            f"  1. 在 {HERE} 下建 {CONF_NAME}，内容：",
             '     { "aa_data": "你的路径\\\\data" }',
             "  2. 设环境变量 AA_DATA",
             "  3. 命令行加 --aa-data 你的路径",
@@ -105,7 +107,7 @@ def save_config(
     config_path=None,
     fallback_config_paths: Sequence[str | os.PathLike] = (),
 ):
-    conf = Path(config_path) if config_path is not None else RUNTIME_LAYOUT.config_path
+    conf = Path(config_path) if config_path is not None else Path(globals()["config_path"]())
     old = {}
     if conf.is_file():
         try:
@@ -119,11 +121,10 @@ def save_config(
             fallback = json.loads(Path(fallback_path).read_text(encoding="utf-8-sig"))
         except (OSError, UnicodeError, ValueError, TypeError):
             continue
-        if not isinstance(fallback, dict):
-            continue
-        for key, value in fallback.items():
-            if key not in old:
-                old[key] = value
+        if isinstance(fallback, dict):
+            for key, value in fallback.items():
+                if key not in old:
+                    old[key] = value
     updates = {
         "aa_data": str(data_dir) if data_dir else None,
         "aa_executable": str(executable) if executable else None,
@@ -135,12 +136,8 @@ def save_config(
     temporary_path = None
     try:
         with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            delete=False,
-            dir=conf.parent,
-            prefix=f".{conf.name}.",
-            suffix=".tmp",
+            "w", encoding="utf-8", delete=False, dir=conf.parent,
+            prefix=f".{conf.name}.", suffix=".tmp",
         ) as fh:
             temporary_path = Path(fh.name)
             json.dump(old, fh, ensure_ascii=False, indent=1)

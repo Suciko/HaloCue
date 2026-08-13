@@ -54,6 +54,29 @@ h.window.AppRuntime.renderPreflight({ai_status:'completed',characters:[{speaker:
     }
 
 
+def test_cast_picker_can_restore_a_named_speaker_as_voice_character():
+    script = r'''
+const {createHarness}=require(process.argv[1]);const calls=[];
+const voice={kind:'voice',id:'45145456',name:'老师',spine:''};
+const h=createHarness({request:async p=>{calls.push(p);if(p.startsWith('/api/voice-character'))return voice;if(p.startsWith('/api/characters'))return [];return {profiles:[]};}});
+const result={ai_status:'completed',characters:[{speaker:'老师',kind:'narrator',id:'',name:'旁白',custom:false,reason:'旧映射'}],assets:[],available_assets:{characters:[],backgrounds:[],sounds:[],bgms:[]},issues:[]};
+(async()=>{h.window.AppRuntime.renderPreflight(result);h.window.AppRuntime.openCastPicker('老师');await h.drain();h.clickAction('cast-voice');await h.drain();const row=result.characters[0];console.log(JSON.stringify({row,text:h.get('#preflightCast').textContent,request:calls.find(p=>p.startsWith('/api/voice-character'))||''}));})();
+'''
+    result = run_runtime(script)
+    assert result["row"]["kind"] == "voice"
+    assert result["row"]["id"] == "45145456"
+    assert result["row"]["name"] == "老师"
+    assert "老师 · 语音角色" in result["text"]
+    assert result["request"] == "/api/voice-character?speaker=%E8%80%81%E5%B8%88"
+
+
+def test_cast_picker_exposes_distinct_voice_and_narrator_actions():
+    html = (HERE / "ui.html").read_text(encoding="utf-8")
+
+    assert 'data-action="cast-voice"' in html
+    assert 'data-action="cast-narrator"' in html
+
+
 def test_preflight_cast_picker_shows_avatars_and_custom_group_first():
     script = r'''
 const {createHarness}=require(process.argv[1]);
@@ -325,12 +348,12 @@ h.window.AppRuntime.renderPreflight({ai_status:'completed',usage_chain_status:'c
     {kind:'bgm',name:'轻松日常BGM',status:'unsupported',location:'场景一',reason:'增强轻松氛围',confidence:.80,candidates:[]}
   ]
 }]});
-  const plan=h.get('#preflightScenePlan');const optional=find(plan,node=>node.className==='usage-optional');const custom=find(plan,node=>node.className==='usage-custom-background');const apply=find(plan,node=>node.dataset&&node.dataset.usageAction==='apply-candidate');const image=find(plan,node=>node.className==='usage-candidate-preview');const placeholder=find(plan,node=>node.className==='usage-candidate-placeholder');
-  const before={text:plan.textContent,flatAssets:h.get('#preflightAssets').textContent,optionalPresent:Boolean(optional),optionalOpen:optional&&optional.open,customPresent:Boolean(custom),customOpen:custom&&custom.open,applyPresent:Boolean(apply),approveDisabled:h.get('#preflightApprove').disabled,image:image&&image.src,placeholder:placeholder&&placeholder.textContent,button:apply&&apply.textContent};
+  const plan=h.get('#preflightScenePlan');const optional=find(plan,node=>node.className==='usage-optional');const custom=find(plan,node=>node.className==='usage-custom-background');const apply=find(plan,node=>node.dataset&&node.dataset.usageAction==='apply-candidate');const image=find(plan,node=>node.className==='usage-candidate-preview');const placeholder=find(plan,node=>node.className==='usage-candidate-placeholder');const marker=find(plan,node=>node.className==='usage-candidate-marker');const others=find(plan,node=>node.className==='usage-other-candidates');
+  const before={text:plan.textContent,flatAssets:h.get('#preflightAssets').textContent,optionalPresent:Boolean(optional),optionalOpen:optional&&optional.open,customPresent:Boolean(custom),customOpen:custom&&custom.open,applyPresent:Boolean(apply),approveDisabled:h.get('#preflightApprove').disabled,image:image&&image.src,placeholder:placeholder&&placeholder.textContent,button:apply&&apply.textContent,marker:marker&&marker.textContent,othersOpen:Boolean(others&&others.open)};
     (async()=>{if(apply)await apply.click();await h.drain();console.log(JSON.stringify({before,after:h.get('#preflightScenePlan').textContent,issues:h.get('#preflightIssues').textContent}));})();
 '''
     result = run_runtime(script)
-    assert "近似可用" in result["before"]["text"]
+    assert "仅供参考" in result["before"]["text"]
     assert "可选演出增强（2）" in result["before"]["text"]
     assert "近似候选" in result["before"]["flatAssets"]
     assert "环境人声喧嚣" not in result["before"]["flatAssets"]
@@ -345,6 +368,9 @@ h.window.AppRuntime.renderPreflight({ai_status:'completed',usage_chain_status:'c
     assert result["before"]["image"].endswith("/thumb/bg/BG_CityTown?px=240")
     assert result["before"]["placeholder"] == "暂无预览"
     assert result["before"]["button"] == "采用此背景"
+    assert result["before"]["marker"] == "当前建议"
+    assert result["before"]["othersOpen"] is False
+    assert "其他候选（1）" in result["before"]["text"]
     assert "已采用" in result["after"]
     assert "已采用 Shopping District（BG_ShoppingDistrict）" in result["after"]
     assert "生成提示词" not in result["after"]
@@ -377,6 +403,45 @@ const apply=find(h.get('#preflightScenePlan'),node=>node.dataset&&node.dataset.u
     }
     assert "已采用" in result["plan"]
     assert result["preview"].endswith("/thumb/bg/BG_ShoppingDistrict?px=480")
+
+
+def test_bound_background_can_be_replaced_from_official_search_or_custom_import():
+    script = r'''
+const {createHarness}=require(process.argv[1]);const calls=[];
+function find(node,predicate){if(predicate(node))return node;for(const child of node.children||[]){const found=find(child,predicate);if(found)return found;}return null;}
+const source={ai_status:'completed',usage_chain_status:'completed',characters:[],assets:[],issues:[],usage_chain:[{segment:'场景一',location:'游戏中心',needs:[{kind:'background',name:'游戏中心',status:'registered',location:'第10行',reason:'表现游戏中心',confidence:.9,aa_key:'BG_GameCenter',selected_label:'Game Center',source:'official',preview_source:'official',preview_available:true,candidates:[]}]}]};
+const h=createHarness({storyAssets:{importLocal:async()=>({ok:true,aa_key:'9001'})},request:async(p,o)=>{calls.push({path:p,payload:o&&o.payload});if(p.startsWith('/api/backgrounds?'))return [{name:'BG_GameCenter_Night',label:'Game Center Night',img:true}];if(p==='/api/preflight/background-binding')return {ok:true,preflight_snapshot:{state:'fresh',approved:false,result:source}};return {profiles:[]};}});
+h.window.StoryStore.set({story_token:'story-1',project:'测试'});h.window.AppRuntime.renderPreflight(source);
+const plan=h.get('#preflightScenePlan');const official=find(plan,node=>node.dataset&&node.dataset.usageAction==='find-official-background');const custom=find(plan,node=>node.dataset&&node.dataset.usageAction==='add-custom-background');
+(async()=>{const buttons={official:official&&official.textContent,custom:custom&&custom.textContent};official.click();await h.drain();const pickerOpen=h.get('#mBackgroundPicker').classList.contains('on');const title=h.get('#backgroundPickerTitle').textContent;const option=h.get('#bggrid').children[0];if(option)option.click();await h.drain();console.log(JSON.stringify({buttons,pickerOpen,title,paths:calls.map(x=>x.path),binding:calls.find(x=>x.path==='/api/preflight/background-binding')&&calls.find(x=>x.path==='/api/preflight/background-binding').payload}));})();
+'''
+    result = run_runtime(script)
+    assert result["buttons"] == {
+        "official": "更换官方背景",
+        "custom": "添加自定义背景",
+    }
+    assert result["pickerOpen"] is True
+    assert result["title"] == "查找 AA 官方背景"
+    assert any("official=1" in path for path in result["paths"])
+    assert result["binding"]["binding"]["aa_key"] == "BG_GameCenter_Night"
+
+
+def test_continued_scene_shows_one_background_choice_and_an_inheritance_state():
+    script = r'''
+const {createHarness}=require(process.argv[1]);
+function findAll(node,predicate,found=[]){if(predicate(node))found.push(node);for(const child of node.children||[])findAll(child,predicate,found);return found;}
+const h=createHarness();h.window.StoryStore.set({story_token:'story-1',project:'测试'});
+h.window.AppRuntime.renderPreflight({ai_status:'completed',usage_chain_status:'completed',characters:[],assets:[],issues:[],usage_chain:[
+  {segment:'协力射击',location:'游戏中心双人协力射击筐体前',needs:[{kind:'background',name:'游戏中心双人协力射击区',status:'recommended',location:'第172行',reason:'表现机台区',confidence:.9,candidates:[{aa_key:'3040691084',label:'游戏中心',confidence:.89,reason:'具体地点匹配'}]}]},
+  {segment:'跟踪曝光',location:'游戏中心',needs:[{kind:'background',name:'游戏中心',status:'inherited',location:'第240行',reason:'表现追逐',confidence:.9,continuity_reason:'与上一段处于同一物理空间，沿用同一背景。',inherits_from:{segment:'协力射击',location:'第172行',requested_name:'游戏中心双人协力射击区'},candidates:[]}]}
+]});
+const plan=h.get('#preflightScenePlan');console.log(JSON.stringify({text:plan.textContent,applyCount:findAll(plan,node=>node.dataset&&node.dataset.usageAction==='apply-candidate').length,continued:findAll(plan,node=>node.className==='usage-need usage-need-inherited').length}));
+'''
+    result = run_runtime(script)
+    assert "沿用上一场景" in result["text"]
+    assert "与上一段处于同一物理空间，沿用同一背景。" in result["text"]
+    assert result["applyCount"] == 1
+    assert result["continued"] == 1
 
 
 def test_adopted_official_and_custom_backgrounds_show_the_same_asset_identity_ui():

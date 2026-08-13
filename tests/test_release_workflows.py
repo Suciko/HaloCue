@@ -63,17 +63,17 @@ def test_ci_package_job_installs_browser_before_release_verification():
     assert package_job.index(browser_install) < package_job.index(release_verification)
 
 
-def test_release_workflow_is_exact_tag_gated_and_public_only():
+def test_release_workflow_is_manual_and_public_only():
     workflow = _workflow("release.yml")
     combined = workflow + "\n" + _workflow("ci.yml")
     lowered = combined.casefold()
 
-    assert "tags:" in workflow and "'v*'" in workflow
+    assert "workflow_dispatch:" in workflow
     assert "contents: write" in workflow
     assert "actions/checkout@v4" in workflow
     assert "actions/setup-python@v5" in workflow
     assert "tools/check_release_version.py --tag" in workflow
-    assert "GITHUB_REF_NAME" in workflow
+    assert "inputs.release_tag" in workflow
     assert "gh release create" in workflow
     assert "--draft" in workflow and "--prerelease" in workflow
     assert PUBLIC_ARCHIVE_NAME in workflow
@@ -85,13 +85,13 @@ def test_release_workflow_is_exact_tag_gated_and_public_only():
     assert "secrets." not in lowered
 
 
-def test_version_gate_accepts_only_exact_beta_tag_and_metadata():
+def test_version_gate_accepts_only_exact_stable_tag_and_metadata():
     from tools.check_release_version import ReleaseVersionError, check_release_version
 
     # Public-source exports intentionally have no .git directory. Keep tag and
     # metadata validation hermetic; Git cleanliness is covered separately below.
     check_release_version(f"v{VERSION}", ROOT, verify_database=False)
-    for tag in (VERSION, "v0.9.0", "v0.9.0-beta.2", "release-0.9.0-beta.1"):
+    for tag in (VERSION, "v0.9.1", "v0.9.2-beta.1", "release-0.9.2"):
         with pytest.raises(ReleaseVersionError):
             check_release_version(tag, ROOT, verify_database=False)
 

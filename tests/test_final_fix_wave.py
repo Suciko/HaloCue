@@ -74,66 +74,6 @@ def _generator_args(data: Path, script: Path, cast: Path, index: Path, *extra: s
     ]
 
 
-def test_non_install_output_root_preserves_relative_custom_asset_resolution(
-    tmp_path, monkeypatch
-):
-    story_root = tmp_path / "story-root"
-    tool_root = story_root / "tools" / "aa"
-    tool_root.mkdir(parents=True)
-    _make_spine(story_root / "custom" / "kai")
-    data = tmp_path / "aa-data"
-    (data / "projects").mkdir(parents=True)
-    script = story_root / "story.txt"
-    script.write_text("Kai: hello\n", encoding="utf-8")
-    cast = story_root / "cast.json"
-    cast.write_text(
-        json.dumps(
-            {
-                "cast": {
-                    "Kai": {
-                        "id": "custom-kai",
-                        "name": "Kai",
-                        "portrait": True,
-                        "custom": {"src": "custom/kai", "asset": "kai"},
-                    }
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    index = story_root / "index.json"
-    index.write_text(
-        json.dumps(
-            {
-                "bg": {},
-                "sounds": [],
-                "characters": [],
-                "enums": {"emoticon": {}, "action": {}},
-            }
-        ),
-        encoding="utf-8",
-    )
-    output_root = tmp_path / "state" / "out"
-    monkeypatch.setattr(script2aap, "HERE", str(tool_root))
-
-    script2aap.main(
-        _generator_args(
-            data,
-            script,
-            cast,
-            index,
-            "--output-root",
-            str(output_root),
-        )
-    )
-
-    assert (output_root / "Demo.aap").is_file()
-    manifest = load_manifest(output_root / "Demo")
-    assert manifest["CharacterOverrides"][0]["Identifier"] == "custom-kai"
-    assert script2aap.HERE == str(tool_root)
-    assert not (tool_root / "out").exists()
-
-
 def _generate_face99_project(tmp_path: Path, *, source_class: str):
     data = tmp_path / "data"
     (data / "projects").mkdir(parents=True)

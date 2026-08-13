@@ -4,6 +4,18 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
+from director_state import (
+    BEAT_REASONS,
+    CONTINUITY_STATES,
+    DIRECTION_REASONS,
+    FOCUS_KINDS,
+    RELATION_DISTANCES,
+    SCENE_FUNCTIONS,
+    SCENE_TYPES,
+    default_director,
+    normalize_director,
+)
+
 
 ANNOTATION_FIELDS = (
     "face", "emo", "act", "fx", "se", "bg", "bg_request", "place",
@@ -13,7 +25,8 @@ ANNOTATION_FIELD_TYPES = {
     name: bool if name == "shake" else int if name == "move" else str
     for name in ANNOTATION_FIELDS
 }
-LINE_FIELDS = set(ANNOTATION_FIELDS) | {"source_id", "text_fingerprint"}
+LINE_REQUIRED_FIELDS = set(ANNOTATION_FIELDS) | {"source_id", "text_fingerprint"}
+LINE_FIELDS = LINE_REQUIRED_FIELDS | {"direction"}
 STATE_FIELDS = {
     "background", "place", "bgfx", "visible_characters", "positions",
     "last_faces", "recent_emoticons", "recent_actions", "recent_sounds",
@@ -31,13 +44,21 @@ STATE_FIELD_TYPES = {
     "recent_sounds": list,
     "open_threads": list,
 }
-STATE_SCHEMA_TYPES = {str: "string", list: "array", dict: "object"}
 EVENT_FIELDS = {
     "kind", "participants", "keywords", "summary", "source_ids",
     "evidence", "importance", "status",
 }
-BEAT_FIELDS = {"anchor_id", "position", "who", "face", "emo", "act", "wait_ms"}
+BEAT_FIELDS = {"anchor_id", "position", "who", "face", "emo", "act", "wait_ms", "reason"}
 MAX_BEAT_WAIT_MS = 10_000
+MAX_BEATS_PER_CHUNK = 4
+MAX_MEMORY_EVENTS_PER_CHUNK = 6
+CONTINUITY_LAYERS = {"face", "emo", "act", "fx", "bgfx"}
+DIRECTION_STRING_FIELDS = {
+    "scene_type", "scene_function", "emotion_phase", "subtext",
+    "relation_distance", "focus_kind", "focus_character",
+    "reaction_target", "reason",
+}
+DIRECTION_FIELDS = DIRECTION_STRING_FIELDS | {"visible_characters", "continuity"}
 
 
 class ChunkProtocolError(ValueError):
@@ -48,11 +69,115 @@ class ChunkProtocolError(ValueError):
         self.retryable = retryable
 
 
+class _ExpandedChunkResponse(dict):
+    def __init__(self, *args: Any, director_intents: Mapping[str, Any], **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self.director_intents = dict(director_intents)
+
+
 def _field(name: str, description: str, field_type: str = "string") -> Dict[str, Any]:
     value: Dict[str, Any] = {"type": field_type, "description": description}
     if field_type == "integer":
         value["minimum"] = 0
     return value
+
+
+def _state_properties() -> Dict[str, Any]:
+    """Bound state_delta to the same sizes used by the memory reducer."""
+    bounded_string = {"type": "string", "maxLength": 160}
+    return {
+        "background": {"type": ["string", "null"], "maxLength": 160},
+        "place": {"type": ["string", "null"], "maxLength": 80},
+        "bgfx": {"type": ["string", "null"], "maxLength": 80},
+        "visible_characters": {
+            "type": ["array", "null"], "maxItems": 5,
+            "items": {"type": "string", "maxLength": 80},
+        },
+        "positions": {
+            "type": ["object", "null"], "maxProperties": 5,
+            "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 5},
+        },
+        "last_faces": {
+            "type": ["object", "null"], "maxProperties": 12,
+            "additionalProperties": {"type": "string", "maxLength": 32},
+        },
+        "recent_emoticons": {
+            "type": ["array", "null"], "maxItems": 12, "items": bounded_string,
+        },
+        "recent_actions": {
+            "type": ["array", "null"], "maxItems": 12, "items": bounded_string,
+        },
+        "recent_sounds": {
+            "type": ["array", "null"], "maxItems": 12, "items": bounded_string,
+        },
+        "open_threads": {
+            "type": ["array", "null"], "maxItems": 20, "items": bounded_string,
+        },
+    }
+
+
+def _direction_schema(*, annotation_aliases: bool = False) -> Dict[str, Any]:
+    properties: Dict[str, Any] = {
+        "scene_type": {"type": "string", "enum": list(SCENE_TYPES)},
+        "scene_function": {"type": "string", "enum": list(SCENE_FUNCTIONS)},
+        "emotion_phase": {"type": "string", "maxLength": 160},
+        "subtext": {"type": "string", "maxLength": 160},
+        "relation_distance": {"type": "string", "enum": list(RELATION_DISTANCES)},
+        "focus_kind": {"type": "string", "enum": list(FOCUS_KINDS)},
+        "focus_character": {"type": "string"},
+        "reaction_target": {"type": "string", "maxLength": 160},
+        "visible_characters": {"type": "array", "items": {"type": "string"}},
+        "continuity": {
+            "type": "object",
+            "properties": {
+                layer: {"type": "string", "enum": list(CONTINUITY_STATES)}
+                for layer in sorted(CONTINUITY_LAYERS)
+            },
+            "additionalProperties": False,
+        },
+        "reason": {"type": "string", "enum": list(DIRECTION_REASONS)},
+    }
+    if annotation_aliases:
+        for name in ANNOTATION_FIELDS:
+            field_type = "boolean" if name == "shake" else "integer" if name == "move" else "string"
+            properties[name] = {"type": field_type}
+    return {"type": "object", "properties": properties, "additionalProperties": False}
+
+
+def _validate_direction_wire(value: Any, field: str) -> Mapping[str, Any]:
+    direction = _require_dict(value, "invalid_line", f"{field} must be an object")
+    if not set(direction) <= DIRECTION_FIELDS:
+        raise ChunkProtocolError("invalid_line", f"{field} contains unknown fields")
+    for name in DIRECTION_STRING_FIELDS:
+        if name in direction and not isinstance(direction[name], str):
+            raise ChunkProtocolError("invalid_line", f"{field}.{name} must be a string")
+    visible = direction.get("visible_characters", [])
+    if not isinstance(visible, list) or any(not isinstance(name, str) for name in visible):
+        raise ChunkProtocolError("invalid_line", f"{field}.visible_characters must be a string array")
+    continuity = direction.get("continuity", {})
+    if not isinstance(continuity, dict) or not set(continuity) <= CONTINUITY_LAYERS:
+        raise ChunkProtocolError("invalid_line", f"{field}.continuity has an invalid shape")
+    if any(not isinstance(command, str) for command in continuity.values()):
+        raise ChunkProtocolError("invalid_line", f"{field}.continuity values must be strings")
+    return direction
+
+
+def _normalized_direction_intent(
+    raw: Mapping[str, Any], normalized: Mapping[str, Any],
+) -> Dict[str, Any]:
+    intent: Dict[str, Any] = {}
+    for name in raw:
+        if name == "visible_characters":
+            intent[name] = list(normalized[name])
+        elif name == "continuity":
+            intent[name] = {
+                layer: normalized[name][layer]
+                for layer in raw[name]
+                if layer in normalized[name]
+            }
+        else:
+            intent[name] = normalized[name]
+    return intent
 
 
 def build_chunk_schema(target_ids: Sequence[str]) -> Dict[str, Any]:
@@ -66,14 +191,12 @@ def build_chunk_schema(target_ids: Sequence[str]) -> Dict[str, Any]:
         field_type = "boolean" if name == "shake" else "integer" if name == "move" else "string"
         row_properties[name] = _field(name, "不使用时填空值", field_type)
         row_required.append(name)
+    row_properties["direction"] = _direction_schema()
     row_schema = {
         "type": "object", "properties": row_properties,
         "required": row_required, "additionalProperties": False,
     }
-    state_properties = {
-        name: {"type": [STATE_SCHEMA_TYPES[field_type], "null"]}
-        for name, field_type in STATE_FIELD_TYPES.items()
-    }
+    state_properties = _state_properties()
     event_properties = {
         "kind": {"type": "string"}, "participants": {"type": "array", "items": {"type": "string"}},
         "keywords": {"type": "array", "items": {"type": "string"}}, "summary": {"type": "string"},
@@ -92,14 +215,15 @@ def build_chunk_schema(target_ids: Sequence[str]) -> Dict[str, Any]:
             "type": "integer", "minimum": 0, "maximum": MAX_BEAT_WAIT_MS,
             "description": "独立无台词反应的显式等待毫秒数",
         },
+        "reason": {"type": "string", "enum": list(BEAT_REASONS)},
     }
     return {
         "type": "object",
         "properties": {
-            "lines": {"type": "array", "items": row_schema},
+            "lines": {"type": "array", "maxItems": len(target_ids), "items": row_schema},
             "state_delta": {"type": "object", "properties": state_properties, "additionalProperties": False},
-            "memory_events": {"type": "array", "items": {"type": "object", "properties": event_properties, "required": sorted(EVENT_FIELDS), "additionalProperties": False}},
-            "beats": {"type": "array", "items": {
+            "memory_events": {"type": "array", "maxItems": MAX_MEMORY_EVENTS_PER_CHUNK, "items": {"type": "object", "properties": event_properties, "required": sorted(EVENT_FIELDS), "additionalProperties": False}},
+            "beats": {"type": "array", "maxItems": MAX_BEATS_PER_CHUNK, "items": {
                 "type": "object", "properties": beat_properties,
                 "required": sorted(BEAT_FIELDS), "additionalProperties": False,
             }},
@@ -123,14 +247,25 @@ def build_compact_chunk_schema(target_count: int, target_ids: Sequence[str] = ()
     for name in ANNOTATION_FIELDS:
         field_type = "boolean" if name == "shake" else "integer" if name == "move" else "string"
         row_properties[name] = {"type": field_type}
+    direction_properties = _direction_schema()["properties"]
+    for name in DIRECTION_FIELDS:
+        row_properties[name] = direction_properties[name]
+    # Some schema-capable providers occasionally put the global state patch
+    # beside the first compact line. Root state_delta is the canonical final
+    # memory snapshot; the misplaced line copy only fills fields it omits.
+    row_properties["state_delta"] = {
+        "type": "object", "properties": _state_properties(),
+        "additionalProperties": False,
+    }
+    # Some schema-capable models occasionally nest a valid line annotation in
+    # compact `d`. Accept only known annotation names here; expansion below
+    # restores their canonical row-level location before protocol validation.
+    row_properties["d"] = _direction_schema(annotation_aliases=True)
     row_schema = {
         "type": "object", "properties": row_properties,
         "required": ["i"], "additionalProperties": False,
     }
-    state_properties = {
-        name: {"type": [STATE_SCHEMA_TYPES[field_type], "null"]}
-        for name, field_type in STATE_FIELD_TYPES.items()
-    }
+    state_properties = _state_properties()
     event_properties = {
         "kind": {"type": "string"}, "participants": {"type": "array", "items": {"type": "string"}},
         "keywords": {"type": "array", "items": {"type": "string"}}, "summary": {"type": "string"},
@@ -146,27 +281,33 @@ def build_compact_chunk_schema(target_count: int, target_ids: Sequence[str] = ()
         "emo": _field("emo", "气泡中文名，不使用时省略"),
         "act": _field("act", "动作英文名，不使用时省略"),
         "wait_ms": {"type": "integer", "minimum": 0, "maximum": MAX_BEAT_WAIT_MS},
+        "reason": {"type": "string", "enum": list(BEAT_REASONS)},
     }
     return {
         "type": "object", "properties": {
-            "lines": {"type": "array", "items": row_schema},
+            "lines": {"type": "array", "maxItems": int(target_count), "items": row_schema},
             "state_delta": {"type": "object", "properties": state_properties, "additionalProperties": False},
-            "memory_events": {"type": "array", "items": {"type": "object", "properties": event_properties, "required": sorted(EVENT_FIELDS), "additionalProperties": False}},
-            "beats": {"type": "array", "items": {"type": "object", "properties": beat_properties, "required": ["anchor_id", "position", "who", "face", "emo", "act", "wait_ms"], "additionalProperties": False}},
+            "memory_events": {"type": "array", "maxItems": MAX_MEMORY_EVENTS_PER_CHUNK, "items": {"type": "object", "properties": event_properties, "required": sorted(EVENT_FIELDS), "additionalProperties": False}},
+            "beats": {"type": "array", "maxItems": MAX_BEATS_PER_CHUNK, "items": {"type": "object", "properties": beat_properties, "required": sorted(BEAT_FIELDS), "additionalProperties": False}},
         }, "required": ["lines", "state_delta", "memory_events"], "additionalProperties": False,
     }
 
 
 def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
-    """Restore complete line identities/defaults before normal validation."""
+    """Restore omitted no-op rows, identities and defaults before validation."""
     response = _require_dict(response, "invalid_response", "模型响应必须是对象")
     lines = response.get("lines")
     if not isinstance(lines, list):
         raise ChunkProtocolError("invalid_lines", "lines 必须是数组")
-    expanded = []
+    root_state = dict(_require_dict(
+        response.get("state_delta", {}), "invalid_state_delta", "state_delta 必须是对象",
+    ))
+    expanded_by_index: Dict[int, Dict[str, Any]] = {}
     seen = set()
+    director_intents: Dict[str, Dict[str, Any]] = {}
     for compact in lines:
         compact = _require_dict(compact, "invalid_line", "compact line 必须是对象")
+        compact = dict(compact)
         index = compact.get("i")
         if isinstance(index, bool) or not isinstance(index, int):
             raise ChunkProtocolError("invalid_line", "compact line.i 必须是整数")
@@ -175,23 +316,79 @@ def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, 
         if index in seen:
             raise ChunkProtocolError("duplicate_target", f"目标行重复: {index}")
         seen.add(index)
-        unknown = set(compact) - ({"i"} | set(ANNOTATION_FIELDS))
+        line_state = compact.pop("state_delta", None)
+        if line_state is not None:
+            line_state = _require_dict(
+                line_state, "invalid_state_delta", "compact line.state_delta 必须是对象",
+            )
+            for name, value in line_state.items():
+                if name not in root_state:
+                    root_state[name] = value
+        unknown = set(compact) - ({"i", "d"} | set(ANNOTATION_FIELDS) | DIRECTION_FIELDS)
         if unknown:
             raise ChunkProtocolError("invalid_line", f"compact line 包含未知字段: {sorted(unknown)}")
+        raw_direction = _require_dict(
+            compact.get("d", {}), "invalid_line", "compact line.d must be an object",
+        )
+        raw_direction = dict(raw_direction)
+        for name in DIRECTION_FIELDS:
+            if name not in compact:
+                continue
+            value = compact[name]
+            if name in raw_direction and raw_direction[name] != value:
+                raise ChunkProtocolError(
+                    "invalid_line",
+                    f"compact line.{name} 与 compact line.d.{name} 冲突",
+                )
+            raw_direction[name] = value
+        direction_aliases = {
+            name: raw_direction[name]
+            for name in ANNOTATION_FIELDS
+            if name in raw_direction
+        }
+        for name, value in direction_aliases.items():
+            if name in compact and compact[name] != value:
+                raise ChunkProtocolError(
+                    "invalid_line",
+                    f"compact line.{name} 与 compact line.d.{name} 冲突",
+                )
+            compact[name] = value
+        direction_patch = _validate_direction_wire(
+            {name: value for name, value in raw_direction.items() if name not in ANNOTATION_FIELDS},
+            "compact line.d",
+        )
         target = targets[index - 1]
         row = {
             "source_id": str(target.get("annotation_id") or ""),
             "text_fingerprint": str(target.get("text_fingerprint") or ""),
             **{name: (False if name == "shake" else 0 if name == "move" else "") for name in ANNOTATION_FIELDS},
+            "direction": default_director(),
         }
+        continuity_patch = direction_patch.get("continuity", {})
+        row["direction"].update({
+            name: value for name, value in direction_patch.items()
+            if name != "continuity"
+        })
+        row["direction"]["continuity"].update(continuity_patch)
+        if "d" in compact:
+            director_intents[row["source_id"]] = dict(direction_patch)
         for name in ANNOTATION_FIELDS:
             if name in compact:
                 row[name] = compact[name]
-        expanded.append(row)
-    expected = set(range(1, len(targets) + 1))
-    missing = expected - seen
-    if missing:
-        raise ChunkProtocolError("missing_target", f"响应缺少目标行: {sorted(missing)}")
+        expanded_by_index[index] = row
+    for index, target in enumerate(targets, 1):
+        if index in expanded_by_index:
+            continue
+        expanded_by_index[index] = {
+            "source_id": str(target.get("annotation_id") or ""),
+            "text_fingerprint": str(target.get("text_fingerprint") or ""),
+            **{
+                name: (False if name == "shake" else 0 if name == "move" else "")
+                for name in ANNOTATION_FIELDS
+            },
+            "direction": default_director(),
+        }
+    expanded = [expanded_by_index[index] for index in range(1, len(targets) + 1)]
     expanded_beats = []
     for beat in response.get("beats", []):
         expanded_beat = dict(_require_dict(beat, "invalid_beat", "compact beat 必须是对象"))
@@ -217,12 +414,12 @@ def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, 
             mapped_ids.append(str(targets[source_index - 1].get("annotation_id") or ""))
         expanded_event["source_ids"] = mapped_ids
         expanded_events.append(expanded_event)
-    return {
+    return _ExpandedChunkResponse({
         "lines": expanded,
-        "state_delta": response.get("state_delta", {}),
+        "state_delta": root_state,
         "memory_events": expanded_events,
         **({"beats": expanded_beats} if "beats" in response else {}),
-    }
+    }, director_intents=director_intents)
 
 
 def _validate_beats(
@@ -233,11 +430,14 @@ def _validate_beats(
         raise ChunkProtocolError("invalid_beats", "beats 必须是数组")
     expected = set(expected_ids)
     result = []
+    seen_anchors = set()
     for beat in value:
+        if len(result) >= MAX_BEATS_PER_CHUNK:
+            raise ChunkProtocolError("too_many_beats", f"每个场景块最多 {MAX_BEATS_PER_CHUNK} 个 beat")
         beat = _require_dict(beat, "invalid_beat", "beats 每项必须是对象")
         if set(beat) != BEAT_FIELDS:
             raise ChunkProtocolError("invalid_beat", "beat 字段不完整或包含未知字段")
-        for name in ("anchor_id", "position", "who", "face", "emo", "act"):
+        for name in ("anchor_id", "position", "who", "face", "emo", "act", "reason"):
             if not isinstance(beat.get(name), str):
                 raise ChunkProtocolError("invalid_beat", f"beat.{name} 必须是字符串")
         anchor_id = beat["anchor_id"]
@@ -245,6 +445,12 @@ def _validate_beats(
             raise ChunkProtocolError("unknown_beat_anchor", f"beat 引用了未知目标行: {anchor_id}")
         if beat.get("position") not in {"before", "after"}:
             raise ChunkProtocolError("invalid_beat_position", "beat position 只能是 before 或 after")
+        anchor_key = (anchor_id, beat.get("position"), beat.get("who"))
+        if anchor_key in seen_anchors:
+            raise ChunkProtocolError("duplicate_beat", "同一角色不能在同一锚点重复输出 beat")
+        seen_anchors.add(anchor_key)
+        if beat["reason"] not in BEAT_REASONS:
+            raise ChunkProtocolError("invalid_beat_reason", f"beat reason 无效: {beat['reason']}")
         who = beat["who"]
         character = cast.get(who) if isinstance(cast, Mapping) else None
         if not character or not character.get("portrait") or character.get("narrator"):
@@ -266,7 +472,7 @@ def _validate_beats(
             "anchor_id": anchor_id, "position": beat["position"], "who": who,
             "face": face.zfill(2) if face else "",
             "emo": constraints.get("sym2cn", {}).get(emo, emo), "act": act,
-            "wait_ms": wait_ms,
+            "wait_ms": wait_ms, "reason": beat["reason"],
         })
     return result
 
@@ -298,6 +504,11 @@ def _validate_events(value: Any, visible_ids: Iterable[str]) -> List[Dict[str, A
     visible = set(visible_ids)
     result = []
     for event in value:
+        if len(result) >= MAX_MEMORY_EVENTS_PER_CHUNK:
+            raise ChunkProtocolError(
+                "too_many_memory_events",
+                f"每个场景块最多 {MAX_MEMORY_EVENTS_PER_CHUNK} 条长期记忆",
+            )
         event = _require_dict(event, "invalid_memory_event", "memory_events 每项必须是对象")
         if set(event) != EVENT_FIELDS:
             raise ChunkProtocolError("invalid_memory_event", "memory event 字段不完整或包含未知字段")
@@ -328,8 +539,10 @@ def _validate_events(value: Any, visible_ids: Iterable[str]) -> List[Dict[str, A
 
 def _validate_annotation_row(value: Any) -> Mapping[str, Any]:
     row = _require_dict(value, "invalid_line", "lines 每项必须是对象")
-    if set(row) != LINE_FIELDS:
+    if not LINE_REQUIRED_FIELDS <= set(row) or not set(row) <= LINE_FIELDS:
         raise ChunkProtocolError("invalid_line", "line 字段不完整或包含未知字段")
+    if "direction" in row:
+        _validate_direction_wire(row["direction"], "line.direction")
     if not isinstance(row.get("source_id"), str) or not isinstance(row.get("text_fingerprint"), str):
         raise ChunkProtocolError("invalid_line", "source_id 和 text_fingerprint 必须是字符串")
     for name, expected_type in ANNOTATION_FIELD_TYPES.items():
@@ -347,6 +560,8 @@ def validate_chunk_response(
     response: Any, targets: Sequence[Mapping[str, Any]], visible_ids: Iterable[str] = (),
     *, cast: Mapping[str, Any] = {}, constraints: Mapping[str, Any] = {},
 ) -> Dict[str, Any]:
+    expanded_compact = isinstance(response, _ExpandedChunkResponse)
+    director_intents = getattr(response, "director_intents", {})
     response = _require_dict(response, "invalid_response", "模型响应必须是对象")
     lines = response.get("lines")
     if not isinstance(lines, list):
@@ -354,6 +569,12 @@ def validate_chunk_response(
     expected = {str(item.get("annotation_id")): str(item.get("text_fingerprint") or "") for item in targets}
     seen = set()
     rows_by_id: Dict[str, Dict[str, Any]] = {}
+    diagnostics: List[Dict[str, str]] = []
+    cast_names = set(cast) if isinstance(cast, Mapping) else set()
+    displayable_names = {
+        name for name, character in cast.items()
+        if isinstance(character, Mapping) and character.get("portrait") and not character.get("narrator")
+    } if isinstance(cast, Mapping) else set()
     for row in lines:
         row = _validate_annotation_row(row)
         source_id = row["source_id"]
@@ -364,7 +585,30 @@ def validate_chunk_response(
         seen.add(source_id)
         if row["text_fingerprint"] != expected[source_id]:
             raise ChunkProtocolError("fingerprint_mismatch", f"原文指纹不匹配: {source_id}")
-        rows_by_id[source_id] = dict(row)
+        direction, row_diagnostics = normalize_director(
+            row.get("direction"),
+            cast_names=cast_names,
+            displayable_names=displayable_names,
+        )
+        normalized_row = dict(row)
+        normalized_row["direction"] = direction
+        for layer, command in list(direction.get("continuity", {}).items()):
+            if command in {"start", "escalate"} and not normalized_row.get(layer):
+                direction["continuity"][layer] = "none"
+                row_diagnostics.append({
+                    "code": "director_continuity_without_value", "level": "warning",
+                    "field": f"continuity.{layer}",
+                    "message": f"continuity.{layer}={command} requires a {layer} value",
+                })
+        raw_intent = (
+            director_intents.get(source_id, {})
+            if expanded_compact else row.get("direction", {})
+        )
+        normalized_row["direction_intent"] = _normalized_direction_intent(
+            raw_intent if isinstance(raw_intent, Mapping) else {}, direction,
+        )
+        rows_by_id[source_id] = normalized_row
+        diagnostics.extend(row_diagnostics)
     missing = set(expected) - seen
     if missing:
         raise ChunkProtocolError("missing_target", f"响应缺少目标行: {sorted(missing)}")
@@ -373,7 +617,7 @@ def validate_chunk_response(
     beats = _validate_beats(response.get("beats", []), expected, cast, constraints)
     return {
         "lines_by_id": rows_by_id, "state_delta": state,
-        "memory_events": events, "beats": beats,
+        "memory_events": events, "beats": beats, "diagnostics": diagnostics,
     }
 
 

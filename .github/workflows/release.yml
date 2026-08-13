@@ -1,9 +1,12 @@
 name: Public prerelease
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing Git tag to publish
+        required: true
+        default: v0.9.2
 
 permissions:
   contents: write
@@ -25,7 +28,7 @@ jobs:
       - name: Install Playwright Chromium
         run: python -m playwright install chromium
       - name: Validate exact tag and public seed
-        run: python tools/check_release_version.py --tag "$env:GITHUB_REF_NAME"
+        run: python tools/check_release_version.py --tag "${{ inputs.release_tag }}"
       - name: Run full test suite
         run: python -m pytest -q
       - name: Rebuild public database twice
@@ -43,11 +46,11 @@ jobs:
           python tools/verify_clean_source.py --source build/public-source/HaloCue
           python tools/build_public_release.py --source build/public-source/HaloCue --output build/releases
           python tools/scan_release.py build/releases/HaloCue --mode public
-          python tools/verify_release.py build/releases/HaloCue-0.9.0-beta.1-windows.zip
+          python tools/verify_release.py build/releases/HaloCue-0.9.2-windows-x64.zip
       - name: Create draft public prerelease
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$env:GITHUB_REF_NAME" --verify-tag --draft --prerelease --title "HaloCue 0.9 Beta" --notes-file CHANGELOG.md
-          gh release upload "$env:GITHUB_REF_NAME" "build/releases/HaloCue-0.9.0-beta.1-windows.zip" "build/releases/HaloCue-0.9.0-beta.1-windows.zip.sha256"
+          gh release create "${{ inputs.release_tag }}" --verify-tag --draft --prerelease --title "HaloCue 0.9.2" --notes-file CHANGELOG.md
+          gh release upload "${{ inputs.release_tag }}" "build/releases/HaloCue-0.9.2-windows-x64.zip" "build/releases/HaloCue-0.9.2-windows-x64.zip.sha256"

@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Callable, Sequence
-
-from runtime_paths import resolve_runtime_layout
+from runtime_layout import LAYOUT
 
 from spine_face_labeler import (
     label_face_images,
@@ -20,7 +20,6 @@ from spine_semantic_faces import extract_semantic_face_combinations
 
 
 ProgressCallback = Callable[[str, str, int | None, int | None], None]
-RUNTIME_LAYOUT = resolve_runtime_layout(module_file=__file__)
 
 
 def make_variant_key(ident: str, spine_signature: str, outfit_key: str, face_id: str) -> str:
@@ -45,7 +44,11 @@ def resolve_spine_cli(
     config = (
         Path(config_path)
         if config_path is not None
-        else RUNTIME_LAYOUT.config_path
+        else (
+            LAYOUT.config_path
+            if LAYOUT.frozen
+            else Path(__file__).with_name("aa_config.json")
+        )
     )
     configurations: dict = {}
     for candidate_config in (config, *map(Path, fallback_config_paths)):
@@ -62,6 +65,19 @@ def resolve_spine_cli(
     configured = str(configurations.get("spine_cli") or "").strip()
     if configured:
         candidates.append(Path(configured).expanduser())
+
+    # Private portable builds keep the separately licensed Spine runtime next
+    # to HaloCue.exe.  Check both the executable directory and the parent of
+    # PyInstaller's ``_internal`` resource directory so one-dir and one-file
+    # layouts both work without writing a machine-specific config path.
+    if LAYOUT.frozen:
+        candidates.extend(
+            [
+                Path(sys.executable).resolve().parent / "tools" / "spine" / "Spine.com",
+                LAYOUT.resource_root.parent / "tools" / "spine" / "Spine.com",
+                LAYOUT.resource_root / "tools" / "spine" / "Spine.com",
+            ]
+        )
 
     for candidate in candidates:
         try:

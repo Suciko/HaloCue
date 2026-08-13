@@ -130,7 +130,7 @@
 
   function statusLabel(role, status) {
     const kind = role === 'vision' ? '图片' : '文字';
-    if (status === 'passed') return kind + '已通过';
+    if (status === 'passed') return role === 'vision' ? '图片连通通过' : '基础连通通过';
     if (status === 'failed') return kind + '测试失败';
     if (status === 'unsupported') return '不支持' + kind;
     return kind + '未测试';

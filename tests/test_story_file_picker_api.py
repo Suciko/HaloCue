@@ -285,7 +285,7 @@ def _aa_discovery(tmp_path):
     )
 
 
-def test_aa_install_settings_accept_file_and_directory_tokens(
+def test_aa_install_settings_accepts_only_exe_and_applies_it_immediately(
     tmp_path,
     monkeypatch,
 ):
@@ -296,15 +296,9 @@ def test_aa_install_settings_accept_file_and_directory_tokens(
         allowed_suffixes=None,
     )
     monkeypatch.setattr(webui, "SETTINGS_FILE_PICKER", picker)
-    from runtime_paths import resolve_runtime_layout
-
-    layout = resolve_runtime_layout(
-        module_file=tmp_path / "program" / "runtime_paths.py",
-        environ={"HALOCUE_USER_DATA_DIR": str(tmp_path / "state")},
-    )
-    monkeypatch.setattr(webui, "RUNTIME_LAYOUT", layout)
-    layout.config_path.parent.mkdir(parents=True)
-    layout.config_path.write_text(
+    monkeypatch.setattr(webui, "HERE", str(tmp_path / "program"))
+    Path(webui.HERE).mkdir()
+    (Path(webui.HERE) / "aa_config.json").write_text(
         json.dumps({"spine_cli": "keep-spine"}), encoding="utf-8"
     )
     monkeypatch.setattr(
@@ -330,22 +324,35 @@ def test_aa_install_settings_accept_file_and_directory_tokens(
         row for row in app_listing["entries"] if row["name"] == "AzureArchive.exe"
     )
 
+    monkeypatch.setitem(webui.CFG, "aa_data", None)
     with _server(picker, monkeypatch) as base:
-        for token in (exe_entry["entry_token"], install_entry["entry_token"]):
-            status, payload = _request(
-                base,
-                "/api/settings/aa-install",
-                method="POST",
-                data=json.dumps({"entry_token": token}).encode(),
-                headers={"Content-Type": "application/json"},
-            )
-            assert status == 200
-            assert payload["restart_required"] is True
-            assert payload["aa"]["program"]["status"] == "recognized"
-            assert payload["aa"]["projects"]["path"] == str(discovery.projects)
-            assert payload["aa"]["resource"]["status"] == "installed"
+        directory_status, directory_payload = _request(
+            base,
+            "/api/settings/aa-install",
+            method="POST",
+            data=json.dumps({"entry_token": install_entry["entry_token"]}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        status, payload = _request(
+            base,
+            "/api/settings/aa-install",
+            method="POST",
+            data=json.dumps({"entry_token": exe_entry["entry_token"]}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
 
-    saved = json.loads(layout.config_path.read_text(encoding="utf-8"))
+    assert directory_status == 400
+    assert directory_payload["code"] == "aa_executable_required"
+    assert status == 200
+    assert payload["restart_required"] is False
+    assert payload["aa"]["program"]["status"] == "recognized"
+    assert payload["aa"]["projects"]["path"] == str(discovery.projects)
+    assert payload["aa"]["resource"]["status"] == "installed"
+    assert webui.CFG["aa_data"] == str(discovery.data)
+
+    saved = json.loads(
+        (Path(webui.HERE) / "aa_config.json").read_text(encoding="utf-8")
+    )
     assert saved == {
         "spine_cli": "keep-spine",
         "aa_executable": str(discovery.executable),
@@ -381,16 +388,8 @@ def test_aa_install_settings_requires_explicit_workspace_selection(
         roots=[tmp_path], upload_dir=tmp_path / "uploads", allowed_suffixes=None
     )
     monkeypatch.setattr(webui, "SETTINGS_FILE_PICKER", picker)
-    from runtime_paths import resolve_runtime_layout
-
-    monkeypatch.setattr(
-        webui,
-        "RUNTIME_LAYOUT",
-        resolve_runtime_layout(
-            module_file=tmp_path / "program" / "runtime_paths.py",
-            environ={"HALOCUE_USER_DATA_DIR": str(tmp_path / "state")},
-        ),
-    )
+    monkeypatch.setattr(webui, "HERE", str(tmp_path / "program"))
+    Path(webui.HERE).mkdir()
 
     def discover(selection=None, **kwargs):
         if selection and Path(selection).resolve() == base_result.data:
@@ -402,13 +401,21 @@ def test_aa_install_settings_requires_explicit_workspace_selection(
         row for row in picker.list_directory()["entries"]
         if row["name"] == "AzureArchive"
     )
+    app_entry = next(
+        row for row in picker.list_directory(install_entry["entry_token"])["entries"]
+        if row["name"] == "App"
+    )
+    exe_entry = next(
+        row for row in picker.list_directory(app_entry["entry_token"])["entries"]
+        if row["name"] == "AzureArchive.exe"
+    )
 
     with _server(picker, monkeypatch) as server:
         status, conflict = _request(
             server,
             "/api/settings/aa-install",
             method="POST",
-            data=json.dumps({"entry_token": install_entry["entry_token"]}).encode(),
+                data=json.dumps({"entry_token": exe_entry["entry_token"]}).encode(),
             headers={"Content-Type": "application/json"},
         )
         assert status == 409
@@ -423,7 +430,7 @@ def test_aa_install_settings_requires_explicit_workspace_selection(
             "/api/settings/aa-install",
             method="POST",
             data=json.dumps({
-                "entry_token": install_entry["entry_token"],
+                "entry_token": exe_entry["entry_token"],
                 "aa_data": str(base_result.data),
             }).encode(),
             headers={"Content-Type": "application/json"},

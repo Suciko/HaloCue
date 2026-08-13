@@ -1,12 +1,10 @@
 import json
-import os
 import subprocess
 import sys
 import urllib.error
 from pathlib import Path
 
 import aapaths
-import assetdb
 import launcher
 from aa_install_discovery import AADiscoveryResult, UnityIdentity
 
@@ -40,21 +38,10 @@ def test_existing_server_must_support_model_workbench(monkeypatch):
     assert launcher.is_existing_server("http://127.0.0.1:8770") is False
 
 
-def test_existing_server_must_identify_as_halocue(monkeypatch):
-    def old_server(request_url, timeout):
-        if request_url.endswith("/api/setup/status"):
-            return _JsonResponse({"entry_file": launcher.ENTRY_FILE})
-        raise AssertionError(request_url)
-
-    monkeypatch.setattr(launcher.urllib.request, "urlopen", old_server)
-
-    assert launcher.is_existing_server("http://127.0.0.1:8770") is False
-
-
 def test_existing_server_accepts_current_model_workbench(monkeypatch):
     def current_server(request_url, timeout):
         if request_url.endswith("/api/setup/status"):
-            return _JsonResponse({"app_id": "halocue-local-server-v1"})
+            return _JsonResponse({"entry_file": launcher.ENTRY_FILE})
         if request_url.endswith("/api/llm/workbench"):
             return _JsonResponse({"schema_version": 2})
         raise AssertionError(request_url)
@@ -123,15 +110,8 @@ def test_normalize_aa_data_rejects_unrelated_directory(tmp_path):
     assert launcher.normalize_aa_data_path(unrelated) is None
 
 
-def test_environment_report_explains_missing_program_files(tmp_path, monkeypatch):
-    from runtime_paths import resolve_runtime_layout
-
+def test_environment_report_explains_missing_program_files(tmp_path):
     data = _make_aa_data(tmp_path / "workspace")
-    layout = resolve_runtime_layout(
-        module_file=tmp_path / "empty-program" / "runtime_paths.py",
-        environ={"HALOCUE_USER_DATA_DIR": str(tmp_path / "state")},
-    )
-    monkeypatch.setattr(launcher, "RUNTIME_LAYOUT", layout)
 
     report = launcher.build_environment_report(
         tmp_path / "empty-program",
@@ -169,16 +149,16 @@ def test_aapaths_legacy_dict_includes_new_resolved_fields(
 
 def test_aapaths_save_config_merges_valid_json_and_replaces_invalid_json(
     tmp_path,
+    monkeypatch,
 ):
+    monkeypatch.setattr(aapaths, "HERE", str(tmp_path))
     config_path = tmp_path / aapaths.CONF_NAME
     config_path.write_text(
         json.dumps({"spine_cli": "spine", "aa_data": "old"}),
         encoding="utf-8",
     )
 
-    aapaths.save_config(
-        executable="new.exe", cache_dir="cache", config_path=config_path
-    )
+    aapaths.save_config(executable="new.exe", cache_dir="cache")
 
     assert json.loads(config_path.read_text(encoding="utf-8")) == {
         "spine_cli": "spine",
@@ -188,58 +168,10 @@ def test_aapaths_save_config_merges_valid_json_and_replaces_invalid_json(
     }
 
     config_path.write_text("not json", encoding="utf-8")
-    aapaths.save_config(data_dir="new-data", config_path=config_path)
+    aapaths.save_config(data_dir="new-data")
 
     assert json.loads(config_path.read_text(encoding="utf-8")) == {
         "aa_data": "new-data",
-    }
-
-
-def test_launcher_uses_user_config_before_read_only_legacy_config(
-    tmp_path, monkeypatch
-):
-    from runtime_paths import resolve_runtime_layout
-
-    layout = resolve_runtime_layout(
-        module_file=tmp_path / "program" / "runtime_paths.py",
-        environ={"HALOCUE_USER_DATA_DIR": str(tmp_path / "state")},
-    )
-    captured = {}
-    monkeypatch.setattr(launcher, "RUNTIME_LAYOUT", layout)
-    monkeypatch.setattr(
-        launcher,
-        "discover_aa",
-        lambda *args, **kwargs: captured.update(kwargs) or fake_discovery_result(tmp_path),
-    )
-
-    launcher._discover_aa(None, None)
-
-    assert captured["config_path"] == layout.config_path
-    assert captured["fallback_config_paths"] == (layout.legacy_config_path,)
-
-
-def test_launcher_saves_only_to_user_config(tmp_path, monkeypatch):
-    from runtime_paths import resolve_runtime_layout
-
-    resource_root = tmp_path / "program"
-    resource_root.mkdir()
-    legacy = resource_root / "aa_config.json"
-    legacy.write_text(json.dumps({"spine_cli": "legacy"}), encoding="utf-8")
-    layout = resolve_runtime_layout(
-        module_file=resource_root / "runtime_paths.py",
-        environ={"HALOCUE_USER_DATA_DIR": str(tmp_path / "state")},
-    )
-    data = _make_aa_data(tmp_path / "workspace")
-    monkeypatch.setattr(launcher, "RUNTIME_LAYOUT", layout)
-
-    launcher._save_aa_path(data)
-
-    assert json.loads(layout.config_path.read_text(encoding="utf-8")) == {
-        "spine_cli": "legacy",
-        "aa_data": str(data),
-    }
-    assert json.loads(legacy.read_text(encoding="utf-8")) == {
-        "spine_cli": "legacy"
     }
 
 
@@ -264,59 +196,27 @@ def test_environment_report_accepts_aa_install(tmp_path, monkeypatch):
     assert report["aa"]["saves"] == str(result.saves)
 
 
-def test_launcher_persists_all_paths_discovered_from_executable(
-    tmp_path,
-    monkeypatch,
-):
-    result = fake_discovery_result(tmp_path)
-    disconnected = {
+def test_launcher_opens_the_app_without_forcing_an_aa_picker(monkeypatch):
+    report = {
         "ok": False,
+        "startup_ready": True,
         "aa": {"connected": False, "path": ""},
     }
-    connected = {
-        "ok": True,
-        "aa": {
-            "connected": True,
-            "path": str(result.data),
-            "executable": str(result.executable),
-            "resource_cache": str(result.resource_cache),
-        },
-    }
-    reports = iter((disconnected, connected))
-    saved = []
-    monkeypatch.setattr(
-        launcher,
-        "build_environment_report",
-        lambda *args, **kwargs: next(reports),
-    )
+    opened = []
+    monkeypatch.setattr(launcher, "build_environment_report", lambda *a, **k: report)
     monkeypatch.setattr(
         launcher,
         "_choose_aa_install",
-        lambda: result.executable,
+        lambda: (_ for _ in ()).throw(AssertionError("startup must not open a picker")),
     )
-    monkeypatch.setattr(
-        launcher,
-        "_save_aa_path",
-        lambda data, **kwargs: saved.append((data, kwargs)),
-    )
-    monkeypatch.setattr(launcher, "_start_application", lambda data: 0)
+    monkeypatch.setattr(launcher, "_start_application", lambda data: opened.append(data) or 0)
 
     assert launcher.main([]) == 0
-    assert saved == [
-        (
-            result.data,
-            {
-                "executable": result.executable,
-                "cache_dir": result.resource_cache,
-            },
-        )
-    ]
+    assert opened == [None]
 
 
 def test_check_json_works_from_another_current_directory(tmp_path):
     data = _make_aa_data(tmp_path / "workspace")
-    user_data = tmp_path / "halocue-state"
-    assetdb.connect(user_data / "aa_assets.db").close()
 
     result = subprocess.run(
         [
@@ -328,10 +228,6 @@ def test_check_json_works_from_another_current_directory(tmp_path):
             str(data),
         ],
         cwd=tmp_path,
-        env={
-            **os.environ,
-            "HALOCUE_USER_DATA_DIR": str(user_data),
-        },
         capture_output=True,
         text=True,
         encoding="utf-8",

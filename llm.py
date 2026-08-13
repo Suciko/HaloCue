@@ -19,7 +19,45 @@ from model_capabilities import normalize_remote_model_record
 
 
 class LLMError(RuntimeError):
-    pass
+    code = "llm_error"
+    retryable = True
+
+    def __init__(self, message: str, *, model: str = "", http_status=None):
+        super().__init__(message)
+        self.model = str(model or "")
+        self.http_status = int(http_status) if http_status is not None else None
+
+
+class InsufficientQuotaError(LLMError):
+    """The provider account cannot pay for another model request."""
+
+    code = "insufficient_quota"
+    retryable = False
+
+
+class ModelAuthenticationError(LLMError):
+    code = "model_authentication_failed"
+    retryable = False
+
+
+class ModelAccessError(LLMError):
+    code = "model_access_denied"
+    retryable = False
+
+
+class ModelRateLimitError(LLMError):
+    code = "model_rate_limited"
+    retryable = True
+
+
+class ModelConnectionError(LLMError):
+    code = "model_connection_failed"
+    retryable = True
+
+
+class ModelServiceUnavailableError(LLMError):
+    code = "model_service_unavailable"
+    retryable = True
 
 
 class EmptyModelResponseError(LLMError):
@@ -37,17 +75,54 @@ class EmptyModelResponseError(LLMError):
 class StructuredOutputError(LLMError):
     """The provider response is not the JSON shape requested by the caller."""
 
+    code = "structured_output_invalid"
+
 
 class OutputCapacityError(StructuredOutputError):
     """The provider stopped because the configured output budget was exhausted."""
+
+    code = "output_capacity"
 
 
 class UnsupportedResponseFormatError(LLMError):
     """The OpenAI-compatible endpoint rejected the response_format field."""
 
+    code = "response_format_unsupported"
+
 
 class RequestDeadlineError(LLMError):
     """The provider kept streaming past the product-level request wall clock."""
+
+    code = "model_request_timeout"
+    retryable = True
+
+
+_QUOTA_ERROR_MARKERS = (
+    "insufficient account balance",
+    "insufficient balance",
+    "insufficient quota",
+    "用户额度不足",
+    "额度不足",
+    "余额不足",
+)
+
+
+def _provider_http_error(model: str, status: int, message: str, formatted: str) -> LLMError:
+    normalized = str(message or "").casefold()
+    kwargs = {"model": model, "http_status": status}
+    if any(marker in normalized for marker in _QUOTA_ERROR_MARKERS):
+        return InsufficientQuotaError(formatted, **kwargs)
+    if status == 401:
+        return ModelAuthenticationError(formatted, **kwargs)
+    if status == 403:
+        return ModelAccessError(formatted, **kwargs)
+    if status == 429:
+        return ModelRateLimitError(formatted, **kwargs)
+    if status in {408, 504, 524}:
+        return RequestDeadlineError(formatted, **kwargs)
+    if status in {500, 502, 503}:
+        return ModelServiceUnavailableError(formatted, **kwargs)
+    return LLMError(formatted, **kwargs)
 
 
 def _emit_activity(callback, state, **fields):
@@ -139,6 +214,15 @@ def parse_and_validate_json_response(text, schema, prefix="调用"):
     return validate_json_schema(value, schema)
 
 
+def recover_reasoning_json_response(text, schema, prefix="调用"):
+    """Recover final JSON misplaced in a reasoning channel without accepting drafts."""
+    try:
+        value = parse_json_response(text)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return validate_json_schema(value, schema)
+
+
 def parse_json_response(text):
     """Parse a structured-model response, accepting one complete JSON fence.
 
@@ -201,6 +285,18 @@ class Provider:
                 self.cfg.pop("reasoning_mode", None)
             else:
                 self.cfg["reasoning_mode"] = previous
+
+    @contextmanager
+    def temporary_output_budget(self, max_tokens):
+        previous = self.cfg.get("_output_budget_override")
+        self.cfg["_output_budget_override"] = max(1, int(max_tokens))
+        try:
+            yield
+        finally:
+            if previous is None:
+                self.cfg.pop("_output_budget_override", None)
+            else:
+                self.cfg["_output_budget_override"] = previous
 
     def complete_json_stream(
         self, static_system, volatile_system, user, schema, *, on_activity=None,
@@ -269,6 +365,7 @@ class Provider:
 # ---------------------------------------------------------------- Anthropic
 class AnthropicProvider(Provider):
     name = "anthropic"
+    supports_compact_annotation = True
 
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -329,7 +426,12 @@ class AnthropicProvider(Provider):
         return reasoning_text
 
     def _output_budget(self) -> int:
-        return max(1, int(self.cfg.get("annotation_max_tokens") or self.cfg.get("max_tokens") or 16000))
+        return max(1, int(
+            self.cfg.get("_output_budget_override")
+            or self.cfg.get("annotation_max_tokens")
+            or self.cfg.get("max_tokens")
+            or 16000
+        ))
 
     def _reasoning_effort(self):
         if str(self.cfg.get("reasoning_wire_protocol") or "").strip().lower() != "anthropic_thinking":
@@ -362,7 +464,8 @@ class AnthropicProvider(Provider):
             with self.client.messages.stream(**kw) as stream:
                 msg = stream.get_final_message()
         except self._sdk.APIStatusError as e:
-            raise LLMError(f"Anthropic 返回 {e.status_code}: {e.message}") from e
+            formatted = f"Anthropic 返回 {e.status_code}: {e.message}"
+            raise _provider_http_error(self.model, e.status_code, str(e.message), formatted) from e
 
         u = msg.usage
         self._record_anthropic_usage(u)
@@ -398,7 +501,8 @@ class AnthropicProvider(Provider):
             with self.client.messages.stream(**kw) as stream:
                 msg = stream.get_final_message()
         except self._sdk.APIStatusError as e:
-            raise LLMError(f"Anthropic 返回 {e.status_code}: {e.message}") from e
+            formatted = f"Anthropic 返回 {e.status_code}: {e.message}"
+            raise _provider_http_error(self.model, e.status_code, str(e.message), formatted) from e
 
         u = msg.usage
         self._record_anthropic_usage(u)
@@ -468,7 +572,8 @@ class AnthropicProvider(Provider):
         except Exception as exc:
             api_error = getattr(self._sdk, "APIStatusError", None)
             if api_error is not None and isinstance(exc, api_error):
-                raise LLMError(f"Anthropic 返回 {exc.status_code}: {exc.message}") from exc
+                formatted = f"Anthropic 返回 {exc.status_code}: {exc.message}"
+                raise _provider_http_error(self.model, exc.status_code, str(exc.message), formatted) from exc
             raise
 
         self._record_anthropic_usage(msg.usage)
@@ -562,7 +667,12 @@ class OpenAIProvider(Provider):
             payload["reasoning_effort"] = effort
 
     def _output_budget(self) -> int:
-        return max(1, int(self.cfg.get("annotation_max_tokens") or self.cfg.get("max_tokens") or 16000))
+        return max(1, int(
+            self.cfg.get("_output_budget_override")
+            or self.cfg.get("annotation_max_tokens")
+            or self.cfg.get("max_tokens")
+            or 16000
+        ))
 
     def _capacity_error_message(self, prefix: str) -> str:
         record = self.request_records[-1] if self.request_records else {}
@@ -598,6 +708,7 @@ class OpenAIProvider(Provider):
             method="GET" if payload is None else "POST",
             headers={
                 "Accept": "application/json",
+                "User-Agent": "AA-AutoWriter/1.0",
                 "Authorization": "Bearer " + self.api_key,
                 **({"Content-Type": "application/json; charset=utf-8"} if body is not None else {}),
             },
@@ -614,10 +725,12 @@ class OpenAIProvider(Provider):
             formatted = f"{self.model} 接口返回 HTTP {exc.code}: {message}"
             if exc.code == 400 and "response_format" in message.lower():
                 raise UnsupportedResponseFormatError(formatted) from exc
-            raise LLMError(formatted) from exc
+            raise _provider_http_error(self.model, exc.code, message, formatted) from exc
         except (URLError, TimeoutError, OSError) as exc:
             reason = getattr(exc, "reason", None) or str(exc)
-            raise LLMError(f"{self.model} 无法连接模型接口: {reason}") from exc
+            raise ModelConnectionError(
+                f"{self.model} 无法连接模型接口: {reason}", model=self.model,
+            ) from exc
         try:
             result = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -659,7 +772,7 @@ class OpenAIProvider(Provider):
             })
             self._append_request_record(record)
 
-    def _completion_text(self, messages, response_format, *, vision=False):
+    def _completion_text(self, messages, response_format, *, vision=False, schema=None):
         payload = {
             "model": self.model,
             "messages": messages,
@@ -682,6 +795,7 @@ class OpenAIProvider(Provider):
             )
         text = str(text or "")
         reasoning = message.get("reasoning_content") if isinstance(message, dict) else ""
+        recovered_from_reasoning = False
         self._record_usage(
             response,
             request_record={
@@ -705,15 +819,31 @@ class OpenAIProvider(Provider):
             prefix = "视觉调用" if vision else "调用"
             if finish_reason == "length":
                 raise OutputCapacityError(self._capacity_error_message(prefix))
-            raise EmptyModelResponseError(
-                f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）",
-                finish_reason=finish_reason,
-                reasoning_chars=len(str(reasoning or "")),
-                content_chars=len(text),
-            )
+            if str(reasoning or "").strip() and schema is not None:
+                try:
+                    # Some OpenAI-compatible DeepSeek endpoints put the final JSON
+                    # in reasoning_content while leaving message.content empty.
+                    recovered = recover_reasoning_json_response(str(reasoning), schema)
+                    if recovered is not None:
+                        text = str(reasoning)
+                        recovered_from_reasoning = True
+                except StructuredOutputError as exc:
+                    raise StructuredOutputError(
+                        f"{self.model} {prefix} reasoning 通道中的 JSON 无法通过 schema：{exc}"
+                    ) from exc
+            if not recovered_from_reasoning:
+                raise EmptyModelResponseError(
+                    f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）",
+                    finish_reason=finish_reason,
+                    reasoning_chars=len(str(reasoning or "")),
+                    content_chars=len(text),
+                )
+        if recovered_from_reasoning:
+            self.request_records[-1]["recovered_from_reasoning"] = True
+            self.request_records[-1]["effective_content_chars"] = len(text)
         return text
 
-    def _stream_completion_text(self, messages, response_format, *, activity, started_ms):
+    def _stream_completion_text(self, messages, response_format, *, activity, started_ms, schema=None):
         payload = {
             "model": self.model,
             "messages": messages,
@@ -731,6 +861,7 @@ class OpenAIProvider(Provider):
             method="POST",
             headers={
                 "Accept": "text/event-stream",
+                "User-Agent": "AA-AutoWriter/1.0",
                 "Authorization": "Bearer " + self.api_key,
                 "Content-Type": "application/json; charset=utf-8",
             },
@@ -770,7 +901,8 @@ class OpenAIProvider(Provider):
                     delta = choice.get("delta") or {}
                     if time.monotonic() - started_monotonic > self.wall_timeout:
                         raise RequestDeadlineError(
-                            f"{self.model} 请求超过 {self.wall_timeout} 秒截止时间"
+                            f"{self.model} 请求超过 {self.wall_timeout} 秒截止时间",
+                            model=self.model,
                         )
                     reasoning = delta.get("reasoning_content") if isinstance(delta, dict) else ""
                     reasoning = str(reasoning or "")
@@ -834,10 +966,12 @@ class OpenAIProvider(Provider):
             formatted = f"{self.model} 接口返回 HTTP {exc.code}: {message}"
             if exc.code == 400 and "response_format" in message.lower():
                 raise UnsupportedResponseFormatError(formatted) from exc
-            raise LLMError(formatted) from exc
+            raise _provider_http_error(self.model, exc.code, message, formatted) from exc
         except (URLError, TimeoutError, OSError) as exc:
             reason = getattr(exc, "reason", None) or str(exc)
-            raise LLMError(f"{self.model} 无法连接模型接口: {reason}") from exc
+            raise ModelConnectionError(
+                f"{self.model} 无法连接模型接口: {reason}", model=self.model,
+            ) from exc
 
         self._last_finish_reason = finish_reason
         text = "".join(chunks)
@@ -862,16 +996,34 @@ class OpenAIProvider(Provider):
                 "content_chars": activity["received_chars"],
                 "finish_reason": finish_reason,
             })
+        recovered_from_reasoning = False
         if not text.strip():
             prefix = "调用"
             if finish_reason == "length":
                 raise OutputCapacityError(self._capacity_error_message(prefix))
-            raise EmptyModelResponseError(
-                f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）",
-                finish_reason=finish_reason,
-                reasoning_chars=reasoning_chars,
-                content_chars=len(text),
-            )
+            reasoning_text = "".join(reasoning_chunks)
+            if reasoning_text.strip() and schema is not None:
+                try:
+                    # See _completion_text: recover only a complete, schema-valid
+                    # object, never arbitrary chain-of-thought prose.
+                    recovered = recover_reasoning_json_response(reasoning_text, schema)
+                    if recovered is not None:
+                        text = reasoning_text
+                        recovered_from_reasoning = True
+                except StructuredOutputError as exc:
+                    raise StructuredOutputError(
+                        f"{self.model} {prefix} reasoning 通道中的 JSON 无法通过 schema：{exc}"
+                    ) from exc
+            if not recovered_from_reasoning:
+                raise EmptyModelResponseError(
+                    f"{self.model} {prefix}返回了空文本（finish_reason={finish_reason}）",
+                    finish_reason=finish_reason,
+                    reasoning_chars=reasoning_chars,
+                    content_chars=len(text),
+                )
+        if recovered_from_reasoning and self.request_records:
+            self.request_records[-1]["recovered_from_reasoning"] = True
+            self.request_records[-1]["effective_content_chars"] = len(text)
         return text
 
     @staticmethod
@@ -901,6 +1053,7 @@ class OpenAIProvider(Provider):
                 compatible_messages,
                 response_format,
                 vision=vision,
+                schema=schema,
             )
         except UnsupportedResponseFormatError:
             self._response_format_unavailable = True
@@ -908,6 +1061,7 @@ class OpenAIProvider(Provider):
                 compatible_messages,
                 None,
                 vision=vision,
+                schema=schema,
             )
         try:
             return parse_and_validate_json_response(
@@ -929,6 +1083,7 @@ class OpenAIProvider(Provider):
                 response_format,
                 activity=activity,
                 started_ms=started_ms,
+                schema=schema,
             )
         except UnsupportedResponseFormatError:
             self._response_format_unavailable = True
@@ -937,6 +1092,7 @@ class OpenAIProvider(Provider):
                 None,
                 activity=activity,
                 started_ms=started_ms,
+                schema=schema,
             )
         try:
             return parse_and_validate_json_response(
@@ -988,6 +1144,7 @@ class OpenAIProvider(Provider):
                     strict_format,
                     activity=activity,
                     started_ms=started_ms,
+                    schema=schema,
                 )
             except UnsupportedResponseFormatError:
                 self._strict_response_format_unavailable = True
@@ -1030,7 +1187,7 @@ class OpenAIProvider(Provider):
             "json_schema": {"name": schema_name, "schema": schema, "strict": True},
         }
         try:
-            text = self._completion_text(messages, strict_format, vision=vision)
+            text = self._completion_text(messages, strict_format, vision=vision, schema=schema)
         except UnsupportedResponseFormatError:
             self._strict_response_format_unavailable = True
             return self._complete_compatible(messages, schema, prefix, vision=vision)

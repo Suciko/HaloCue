@@ -37,6 +37,7 @@ _PUBLIC_ROOT_FILES = {
     "pyproject.toml",
     "pytest.ini",
     "requirements-dev.txt",
+    "requirements-desktop-build.txt",
     "requirements.txt",
     "ui.html",
     "使用说明-从这里开始.md",

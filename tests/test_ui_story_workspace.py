@@ -1,5 +1,4 @@
 from pathlib import Path
-from datetime import datetime, timedelta, timezone
 import json
 import re
 import subprocess
@@ -73,16 +72,13 @@ def test_startup_and_recent_story_resume_render_only_one_current_workspace():
 const {createHarness}=require(process.argv[1]);const calls=[];
 const recent={story_token:'story-b',source_name:'第二章.txt',project:'第二章工程',last_opened_at:'2026-08-01T09:30:00Z'};
 const h=createHarness({recent:[recent],request:async(p)=>{calls.push(p);if(p==='/api/stories/recent')return [recent];if(p==='/api/story/current?story_token=story-b')return Object.assign({},recent);if(p==='/api/drafts')return [];if(p.startsWith('/api/story/assets'))return {characters:[],backgrounds:[],sounds:[],bgms:[]};return {profiles:[]};}});
-(async()=>{await h.load();const startup={cta:h.get('#storyContextAction').textContent,assetEmpty:h.get('#storyAssetStrip').classList.contains('is-empty')};const list=h.get('#recentStories').children[1];const entry=list.children[0];await entry.click();await h.drain();console.log(JSON.stringify({startup,entry:{source:entry.children[0].children[0].textContent,project:entry.children[0].children[1].textContent,time:entry.children[0].children[2].textContent,resume:entry.children[1].textContent},timezoneOffset:new Date(recent.last_opened_at).getTimezoneOffset(),story:h.window.StoryStore.get(),currentCalls:calls.filter(x=>x.startsWith('/api/story/current?'))}));})();
+(async()=>{await h.load();const startup={cta:h.get('#storyContextAction').textContent,assetEmpty:h.get('#storyAssetStrip').classList.contains('is-empty')};const list=h.get('#recentStories').children[1];const entry=list.children[0];await entry.click();await h.drain();console.log(JSON.stringify({startup,entry:{source:entry.children[0].children[0].textContent,project:entry.children[0].children[1].textContent,time:entry.children[0].children[2].textContent,resume:entry.children[1].textContent},story:h.window.StoryStore.get(),currentCalls:calls.filter(x=>x.startsWith('/api/story/current?'))}));})();
 '''
     result = run_runtime(script)
-    local_time = datetime(2026, 8, 1, 9, 30, tzinfo=timezone.utc) - timedelta(
-        minutes=result["timezoneOffset"]
-    )
     assert result["startup"] == {"cta": "打开剧情文件", "assetEmpty": True}
     assert result["entry"] == {
         "source": "第二章.txt", "project": "AA 工程：第二章工程",
-        "time": f"最近打开：{local_time:%m/%d %H:%M}", "resume": "继续",
+        "time": "最近打开：08/01 17:30", "resume": "继续",
     }
     assert result["story"]["story_token"] == "story-b"
     assert result["currentCalls"] == ["/api/story/current?story_token=story-b"]
@@ -372,6 +368,33 @@ const h=createHarness({request:async(p)=>{if(p.includes('q=old'))return new Prom
 (async()=>{h.window.StoryStore.set({story_token:'S',project:'S'});h.get('#bgq').value='old';const oldSearch=h.window.AppRuntime.loadBackgrounds();await h.drain();h.get('#bgq').value='new';await h.window.AppRuntime.loadBackgrounds();releaseOld([{name:'BG_Old',label:'旧结果'}]);await oldSearch;console.log(JSON.stringify({count:h.get('#bggrid').children.length,text:h.get('#bggrid').textContent}));})();
 '''
     assert run_runtime(script) == {"count": 1, "text": "暂无预览新结果"}
+
+
+def test_background_picker_appends_the_next_page_and_updates_progress():
+    script = r'''
+const {createHarness}=require(process.argv[1]);const calls=[];
+const h=createHarness({request:async(p)=>{if(!p.startsWith('/api/backgrounds'))return {profiles:[]};calls.push(p);if(p.includes('offset=80'))return {items:[{name:'BG_081',label:'背景 81'}],total:81,offset:80,limit:80,has_more:false};return {items:Array.from({length:80},(_,i)=>({name:'BG_'+String(i+1).padStart(3,'0'),label:'背景 '+(i+1)})),total:81,offset:0,limit:80,has_more:true};}});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'S'});await h.window.AppRuntime.loadBackgrounds();const first={count:h.get('#bggrid').children.length,status:h.get('#backgroundBrowserStatus').textContent,moreHidden:h.get('#backgroundLoadMore').hidden};await h.window.AppRuntime.loadBackgrounds({append:true});console.log(JSON.stringify({first,final:{count:h.get('#bggrid').children.length,status:h.get('#backgroundBrowserStatus').textContent,moreHidden:h.get('#backgroundLoadMore').hidden},calls}));})();
+'''
+    result = run_runtime(script)
+    assert result["first"] == {"count": 80, "status": "已显示 80 / 81", "moreHidden": False}
+    assert result["final"] == {"count": 81, "status": "已显示 81 / 81", "moreHidden": True}
+    assert "offset=0" in result["calls"][0]
+    assert "offset=80" in result["calls"][1]
+
+
+def test_new_background_search_restarts_from_the_first_page():
+    script = r'''
+const {createHarness}=require(process.argv[1]);const calls=[];
+const h=createHarness({request:async(p)=>{if(!p.startsWith('/api/backgrounds'))return {profiles:[]};calls.push(p);return {items:[{name:p.includes('q=roof')?'BG_Roof':'BG_First'}],total:1,offset:0,limit:80,has_more:false};}});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'S'});await h.window.AppRuntime.loadBackgrounds();h.get('#bgq').value='roof';await h.window.AppRuntime.loadBackgrounds();console.log(JSON.stringify({count:h.get('#bggrid').children.length,name:h.get('#bggrid').children[0].dataset.name,calls}));})();
+'''
+    result = run_runtime(script)
+    assert result["count"] == 1
+    assert result["name"] == "BG_Roof"
+    assert "offset=0" in result["calls"][0]
+    assert "q=roof" in result["calls"][1]
+    assert "offset=0" in result["calls"][1]
 
 
 def test_same_token_old_draft_list_cannot_overwrite_a_newer_view_epoch():

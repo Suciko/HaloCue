@@ -2,6 +2,7 @@
 import sys
 import time
 from pathlib import Path
+from urllib.error import HTTPError
 
 HERE = Path(__file__).resolve().parent.parent
 if str(HERE) not in sys.path:
@@ -9,6 +10,7 @@ if str(HERE) not in sys.path:
 
 import pytest
 from jobs import JobManager
+from llm import InsufficientQuotaError
 
 
 def test_jobmanager_submit_and_get():
@@ -105,4 +107,32 @@ def test_job_activity_is_snapshot_and_does_not_pollute_progress_detail():
         "model": "deepseek-v4-flash",
         "received_chars": 2048,
         "elapsed_ms": 7300,
+    }
+
+
+def test_job_failure_exposes_stable_model_error_metadata_from_cause_chain():
+    jm = JobManager()
+
+    def failing_task(_job):
+        try:
+            try:
+                raise HTTPError("https://example.invalid", 403, "Forbidden", {}, None)
+            except HTTPError as http_error:
+                raise InsufficientQuotaError(
+                    "quota-model 接口返回 HTTP 403: 用户额度不足",
+                    model="quota-model", http_status=403,
+                ) from http_error
+        except InsufficientQuotaError as exc:
+            raise RuntimeError(f"模型调用失败: {exc}") from exc
+
+    job_id = jm.submit(failing_task, label="额度失败")
+    for _ in range(20):
+        info = jm.get(job_id)
+        if info["state"] == "failed":
+            break
+        time.sleep(0.05)
+
+    assert info["error_code"] == "insufficient_quota"
+    assert info["error_detail"] == {
+        "model": "quota-model", "retryable": False, "http_status": 403,
     }
