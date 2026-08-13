@@ -17,6 +17,7 @@ SYNCED_FILES = (
     "aa_project_assets.py",
     "asset_validation.py",
     "asset_models.py",
+    "spine_semantic_faces.py",
     "document.py",
     "diagnostics.py",
     "cast.json",
@@ -64,4 +65,5 @@ def test_sync_injects_android_alias_boundary_with_mixed_line_endings(tmp_path):
     assert "def apply_identifier_aliases(scenes, aliases):" in synced
     assert "def identifier_aliases_for_cast(index, cast_config):" in synced
     assert "apply_identifier_aliases(scenes, identifier_aliases_for_cast(idx, cfg))" in synced
+    assert (destination / "spine_semantic_faces.py").is_file()
     compile(synced, str(destination / "script2aap.py"), "exec")
