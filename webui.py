@@ -1601,15 +1601,25 @@ def _ensure_resource_index() -> None:
 def _trigger_resource_index_if_missing(discovery: AADiscoveryResult | None = None) -> None:
     """连接 AA 后自动触发：缺索引时后台重建（幂等，已存在则跳过）。
 
-    传入调用方已得到的 discovery 可避免二次发现；缺省时自动发现。
+    同时把 AA 官方 catalog 里的背景名并入素材库（幂等，快速），保证
+    官方背景名单完整可搜（如 BG_Hangar）。
     """
-    if os.path.isfile(INDEX):
-        return
     if discovery is None:
         try:
             discovery = _current_aa_discovery()
         except Exception:
             return
+    if discovery.catalog is not None:
+        try:
+            con = db()
+            try:
+                assetdb.merge_catalog_backgrounds(con, discovery.catalog)
+            finally:
+                con.close()
+        except Exception:
+            pass
+    if os.path.isfile(INDEX):
+        return
     if discovery.data is None:
         return
     threading.Thread(target=_build_resource_index_from, args=(discovery,), daemon=True).start()
