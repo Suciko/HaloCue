@@ -62,7 +62,7 @@ import spine_face_analysis                                      # noqa: E402
 import spine_face_labeler                                       # noqa: E402
 from aa_project_assets import assert_aa_closed, validate_windows_path_component  # noqa: E402
 from aa_registry import AssetRegistrationError, RegistrationConflictError  # noqa: E402
-from build_index import faces_of                                # noqa: E402
+from build_index import build_resource_index, faces_of              # noqa: E402
 from build_bundle import BuildBundleManager, CompileInputStaleError  # noqa: E402
 from document import normalize_draft_nodes, parse_document_lossless  # noqa: E402
 from draft_store import (                                       # noqa: E402
@@ -1121,6 +1121,10 @@ def _public_aa_status(
         resource = {"status": probe.status, "path": str(discovery.resource_cache)}
     index = _preview_public_state(preview_state or _preview_state_for_discovery(discovery))
     data = discovery.data or (Path(str(CFG.get("aa_data"))) if CFG.get("aa_data") else None)
+    try:
+        resource_index = {"exists": True, "stamp": os.stat(INDEX).st_mtime_ns}
+    except OSError:
+        resource_index = {"exists": False, "stamp": 0}
     return {
         "connected": bool(discovery.projects),
         "path": str(data or ""),
@@ -1128,6 +1132,7 @@ def _public_aa_status(
         "projects": projects,
         "saves": saves,
         "resource": resource,
+        "resource_index": resource_index,
         "preview_index": index,
     }
 
@@ -1525,6 +1530,58 @@ def _start_resource_index() -> tuple[int, dict]:
         daemon=True,
     ).start()
     return 202, {"ok": True, "preview_index": snapshot}
+
+
+RESOURCE_REBUILD_LOCK = threading.RLock()
+
+
+def _build_resource_index_from(discovery: AADiscoveryResult) -> None:
+    """用给定的发现结果重建 aa_resources.json（带锁防并发，已存在则跳过）。
+
+    与「图片预览」解耦：不要求 resource_cache（资源文件）存在。
+    失败时抛出带指引的 RuntimeError，由调用方转成业务错误。
+    """
+    if discovery.data is None:
+        raise RuntimeError(
+            "缺少资源索引文件（aa_resources.json），且未找到 AA 工作区。"
+            "请先在设置中选择 AzureArchive.exe。"
+        )
+    try:
+        with RESOURCE_REBUILD_LOCK:
+            if os.path.isfile(INDEX):
+                return
+            build_resource_index(
+                str(discovery.data),
+                cache=str(discovery.resource_cache) if discovery.resource_cache else None,
+                aa_install=str(discovery.install_root) if discovery.install_root else None,
+                out=INDEX,
+            )
+    except Exception as exc:
+        raise RuntimeError(f"资源索引自动建立失败：{exc}") from exc
+
+
+def _ensure_resource_index() -> None:
+    """缺索引时自动重建 aa_resources.json（先发现工作区）。失败抛带指引错误。"""
+    if os.path.isfile(INDEX):
+        return
+    _build_resource_index_from(_current_aa_discovery())
+
+
+def _trigger_resource_index_if_missing(discovery: AADiscoveryResult | None = None) -> None:
+    """连接 AA 后自动触发：缺索引时后台重建（幂等，已存在则跳过）。
+
+    传入调用方已得到的 discovery 可避免二次发现；缺省时自动发现。
+    """
+    if os.path.isfile(INDEX):
+        return
+    if discovery is None:
+        try:
+            discovery = _current_aa_discovery()
+        except Exception:
+            return
+    if discovery.data is None:
+        return
+    threading.Thread(target=_build_resource_index_from, args=(discovery,), daemon=True).start()
 
 
 def registered_character_avatar_path(con, ident: str) -> Path | None:
@@ -3544,8 +3601,16 @@ def preflight_story_worker(payload: dict) -> dict:
 # ---------------------------------------------------------------- 生成
 def prepare_project_index(index_path, project_dir, output_path, *, con=None):
     """Build the exact official+registered allowlist used by AI and generator."""
-    with open(index_path, encoding="utf-8") as source:
-        index = json.load(source)
+    if not os.path.isfile(index_path) and os.path.abspath(index_path) == os.path.abspath(INDEX):
+        _ensure_resource_index()
+    try:
+        with open(index_path, encoding="utf-8") as source:
+            index = json.load(source)
+    except FileNotFoundError:
+        raise RuntimeError(
+            "缺少资源索引文件（aa_resources.json）。请确认已在设置中选择 "
+            "AzureArchive.exe 后重试（也可运行 build_index.py）。"
+        ) from None
     merged = S2A.merge_project_registered_assets(index, project_dir)
     if con is not None:
         merged = asset_catalog.merge_model_constraints(
@@ -4820,6 +4885,7 @@ class H(BaseHTTPRequestHandler):
                     )
                     CFG["aa_data"] = str(discovery.data)
                     CFG["overrides"] = str(discovery.overrides or "") or None
+                    _trigger_resource_index_if_missing(discovery)
                     return self._send(200, {
                         "ok": True,
                         "restart_required": False,

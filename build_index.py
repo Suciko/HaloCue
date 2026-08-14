@@ -296,33 +296,31 @@ def harvest_sounds(data):
     return sorted(out)
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--data", help="AA 存储目录（不给就自动探测）")
-    ap.add_argument("--cache", help="AA 官方资源缓存目录（默认从工作区探测）")
-    ap.add_argument("--aa-install", help="AA 安装目录；用于读取 Addressables catalog.json")
-    ap.add_argument("--out", default=os.path.join(HERE, "aa_resources.json"))
-    a = ap.parse_args()
+def build_resource_index(data, *, cache=None, aa_install=None, out=None):
+    """从 AA 工作区构建 ``aa_resources.json`` 索引内容。
 
-    P = aapaths.require(a.data)
-    a.data = P["data"]
-    print(f"AA 存储目录  {a.data}   （来源：{P['source']}）")
+    CLI（main）与 Web UI 共用同一实现，保证产出一致。
+    返回 ``(index_dict, stats_dict)``；给出 *out* 时同时写入该路径。
+    """
+    P = aapaths.require(data)
+    data = P["data"]
 
-    bg, conflict = harvest_bg(a.data)
-    chars = harvest_characters(a.data)
-    sounds = harvest_sounds(a.data)
-    faces_used = harvest_faces_used(a.data)
-    face_capabilities = harvest_face_capabilities(a.data)
+    bg, conflict = harvest_bg(data)
+    chars = harvest_characters(data)
+    sounds = harvest_sounds(data)
+    faces_used = harvest_faces_used(data)
+    face_capabilities = harvest_face_capabilities(data)
 
     official = []
-    cache_root = a.cache or P.get("cache")
+    warnings = []
+    cache_root = cache or P.get("cache")
     catalog_path = None
-    if a.aa_install:
-        candidate = os.path.join(a.aa_install, "AzureArchive_Data", "StreamingAssets", "aa", "catalog.json")
+    if aa_install:
+        candidate = os.path.join(aa_install, "AzureArchive_Data", "StreamingAssets", "aa", "catalog.json")
         if os.path.isfile(candidate):
             catalog_path = candidate
         else:
-            print(f"警告：AA 安装目录中没有 catalog.json，跳过官方角色表：{candidate}")
+            warnings.append(f"AA 安装目录中没有 catalog.json，跳过官方角色表：{candidate}")
     if cache_root and catalog_path:
         try:
             official = harvest_official_characters(
@@ -334,7 +332,7 @@ def main():
                 row["spine_signature"] = ""
                 row["outfit_key"] = os.path.basename(row["spine"])
         except (FileNotFoundError, LookupError, ValueError, KeyError) as exc:
-            print(f"警告：官方角色表未导入：{exc}")
+            warnings.append(f"官方角色表未导入：{exc}")
 
     # A custom override intentionally takes precedence over a native row with
     # the same opaque identifier.
@@ -342,7 +340,7 @@ def main():
     chars.extend(row for row in official if str(row["identifier"]) not in custom_ids)
 
     idx = {
-        "_source": a.data,
+        "_source": data,
         "bg": bg,
         "bg_conflict": conflict,
         "sounds": sounds,
@@ -356,14 +354,44 @@ def main():
             "shape": {str(k): {"verb": SHAPE[k], "cn": SHAPE_CN.get(k, "")} for k in SHAPE if k},
         },
     }
-    with open(a.out, "w", encoding="utf-8") as fh:
-        json.dump(idx, fh, ensure_ascii=False, indent=1)
+    if out:
+        os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+        with open(out, "w", encoding="utf-8") as fh:
+            json.dump(idx, fh, ensure_ascii=False, indent=1)
 
-    withface = sum(1 for c in chars if c["faces"])
-    print(f"背景  {len(bg)} 个" + (f"（{len(conflict)} 个同名冲突已剔除）" if conflict else ""))
-    print(f"音效  {len(sounds)} 个")
-    print(f"角色  {len(chars)} 个（自定义 {len(chars)-len(official)} / 官方 {len(official)}），其中 {withface} 个成功读出表情表")
-    print(f"实测  另有 {len(faces_used)} 个标识从历史工程反查出可用表情（覆盖内置角色）")
+    stats = {
+        "data": data,
+        "source": P.get("source"),
+        "backgrounds": len(bg),
+        "bg_conflicts": len(conflict),
+        "sounds": len(sounds),
+        "characters": len(chars),
+        "custom": len(chars) - len(official),
+        "official": len(official),
+        "withface": sum(1 for c in chars if c["faces"]),
+        "faces_used": len(faces_used),
+        "warnings": warnings,
+    }
+    return idx, stats
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data", help="AA 存储目录（不给就自动探测）")
+    ap.add_argument("--cache", help="AA 官方资源缓存目录（默认从工作区探测）")
+    ap.add_argument("--aa-install", help="AA 安装目录；用于读取 Addressables catalog.json")
+    ap.add_argument("--out", default=os.path.join(HERE, "aa_resources.json"))
+    a = ap.parse_args()
+
+    idx, stats = build_resource_index(
+        a.data, cache=a.cache, aa_install=a.aa_install, out=a.out)
+    print(f"AA 存储目录  {stats['data']}   （来源：{stats['source']}）")
+    for warning in stats["warnings"]:
+        print("警告：" + warning)
+    print(f"背景  {stats['backgrounds']} 个" + (f"（{stats['bg_conflicts']} 个同名冲突已剔除）" if stats["bg_conflicts"] else ""))
+    print(f"音效  {stats['sounds']} 个")
+    print(f"角色  {stats['characters']} 个（自定义 {stats['custom']} / 官方 {stats['official']}），其中 {stats['withface']} 个成功读出表情表")
+    print(f"实测  另有 {stats['faces_used']} 个标识从历史工程反查出可用表情（覆盖内置角色）")
     print(f"枚举  emoticon {len(EMOTICON)} / action {len(ACTION)-1} / appear {len(APPEAR)-1} / shape 4")
     print(f"\n已写入 {a.out}")
 
