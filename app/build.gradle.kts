@@ -42,8 +42,8 @@ android {
         applicationId = "com.halocue.android"
         minSdk = 24
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.4.0-beta.1"
+        versionCode = 7
+        versionName = "0.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

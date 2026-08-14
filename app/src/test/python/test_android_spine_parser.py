@@ -81,3 +81,25 @@ def test_spine_validation_publishes_binary_semantic_results(tmp_path):
     assert metadata["expression_status"] == "known"
     assert metadata["semantic_face_count"] == 4
     assert set(metadata["semantic_face_combinations"]) == {"00", "01", "42", "99"}
+
+
+def test_unsupported_spine_binary_falls_back_to_numbered_atlas_faces(tmp_path):
+    base = tmp_path / "CH0335_spr"
+    # This is the actual version family used by the reported custom skeleton.
+    # The minimal binary intentionally has no 4.2 body: Android must fall back
+    # to the atlas rather than parse it as an invalid 3.8 skeleton.
+    base.with_suffix(".skel").write_bytes(b"\x00spine\x004.2.33\x00")
+    base.with_suffix(".atlas").write_text(
+        "CH0335_spr.png\nsize:8,8\n\n"
+        "00_default\nbounds:0,0,1,1\n\n"
+        "01_normal\nbounds:0,0,1,1\n\n"
+        "03_smile\nbounds:0,0,1,1\n\n"
+        "05_serious\nbounds:0,0,1,1\n",
+        encoding="utf-8",
+    )
+
+    combinations = extract_semantic_face_combinations(base.with_suffix(".skel"))
+
+    assert set(combinations) == {"00", "01", "03", "05"}
+    assert combinations["03"]["primary_emotion"] == "joy"
+    assert all(item["source"] == "spine_atlas_fallback" for item in combinations.values())

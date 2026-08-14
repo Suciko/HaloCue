@@ -163,12 +163,12 @@
                       {
                           "path":  "spine_face_analysis.py",
                           "source":  "android-runtime-overrides/spine_face_analysis.py",
-                          "sha256":  "FAC2ACCCF7BF196329F0AA719FDB08AAA23E1431E6D83ED7AE9518B7BAE1F74A"
+                          "sha256":  "9489E839FA2404C41CAAF3D5F5859A11866D552CF0696041F4D3C66A2C075585"
                       },
                       {
                           "path":  "spine_face_renderer.py",
                           "source":  "android-runtime-overrides/spine_face_renderer.py",
-                          "sha256":  "99D2CEA4C730C9E728A362BB86F8830D2C0984FB5311353158AF80DA1472FFA7"
+                          "sha256":  "345109B366D5D9A9D25E2BA320AC1F16F69DED88E0EC7A41A4463552F7F1F40E"
                       }
                   ],
     "directories":  [

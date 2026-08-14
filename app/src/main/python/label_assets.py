@@ -126,9 +126,13 @@ def label_images(con, prov, table, sysmsg, files, todo, batch, px, dry):
             print(f"  ! 读图失败，跳过这批: {e}")
             continue
         kb = sum(len(b) for _, b in images) // 1024
+        sysmsg_with_filename_context = sysmsg + "\nFilename hints (auxiliary only; judge the actual pixels first):\n" + "\n".join(
+            f"- key={key}; original_filename={os.path.basename(files[key])}"
+            for key in chunk
+        )
         try:
             res = prov.complete_json_vision(
-                sysmsg, images,
+                sysmsg_with_filename_context, images,
                 f"以上 {len(images)} 张，逐一标注。key 用方括号里的文件名原样填回。",
                 SCHEMA)
         except LLMError as e:
@@ -194,6 +198,7 @@ def main():
     ap.add_argument("--overrides", help="AA overrides 目录（不给就自动探测）")
     ap.add_argument("--llm", default=os.path.join(HERE, "llm.json"))
     ap.add_argument("--provider")
+    ap.add_argument("--model", help="Vision model ID used for this run only")
     ap.add_argument("--init", action="store_true")
     ap.add_argument("--bg", action="store_true")
     ap.add_argument("--popup", action="store_true")
@@ -224,6 +229,10 @@ def main():
 
     if do_bg or do_pop or do_snd:
         prov = make_provider(a.llm, a.provider)
+        if a.model:
+            prov.model = str(a.model)
+        if hasattr(prov, "_strict_response_format_unavailable") or prov.name == "openai":
+            prov._strict_response_format_unavailable = True
         print(f"模型  {prov.name} / {prov.model}\n")
 
         if do_bg:

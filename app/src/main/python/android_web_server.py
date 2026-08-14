@@ -340,6 +340,20 @@ class AndroidHandler(webui.H):
             return self._send(200, _android_setup_status())
         if path == "/api/install/options":
             return self._capability_unavailable("direct_aa_install")
+        if path == "/js/spine-webgl-3.8.95.js":
+            runtime = Path(webui.HERE) / "js" / "spine-webgl-3.8.95.js"
+            if not runtime.is_file():
+                return self._send(404, {"ok": False, "code": "spine_runtime_missing"})
+            return self._send(
+                200,
+                runtime.read_text(encoding="utf-8"),
+                "application/javascript; charset=utf-8",
+            )
+        if path == "/js/spine-webgl-4.2.119.min.js":
+            runtime = Path(webui.HERE) / "js" / "spine-webgl-4.2.119.min.js"
+            if not runtime.is_file():
+                return self._send(404, {"ok": False, "code": "spine_runtime_missing"})
+            return self._send(200, runtime.read_text(encoding="utf-8"), "application/javascript; charset=utf-8")
         return super().do_GET()
 
     def do_POST(self):

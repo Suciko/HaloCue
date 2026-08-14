@@ -1,13 +1,19 @@
+import io
 import json
 import socket
+import time
 import urllib.error
 import urllib.request
 from urllib.parse import quote
 
 import pytest
+from PIL import Image
 
 import assetdb
+import asset_catalog
 import android_web_server
+import webui
+from test_android_spine_parser import _spine_bundle
 
 
 @pytest.fixture(autouse=True)
@@ -253,6 +259,213 @@ def test_android_runtime_serves_extra_package_avatar_for_existing_pc_character(t
     avatar = urllib.request.urlopen(_session_request(origin + character["avatar"]))
     assert avatar.headers["Content-Type"] == "image/png"
     assert len(avatar.read()) > 100
+
+
+def test_face_workspace_avatar_url_serves_the_registered_character_avatar(tmp_path):
+    server = android_web_server.start(str(tmp_path), "test-session")
+    origin = _origin(server)
+    installed = tmp_path / "workspace" / "characters" / "626652156"
+    installed.mkdir(parents=True)
+    avatar = installed / "Kei_Date_Outfit-avatar.png"
+    avatar.write_bytes(b"kei-avatar-preview")
+    database = tmp_path / "workspace" / "databases" / "aa_assets.db"
+    with assetdb.connect(str(database)) as con:
+        asset_catalog.migrate(con)
+        con.execute(
+            """
+            INSERT INTO asset_install
+              (kind,aa_key,display_name,source_path,sha256,scope,install_path,
+               status,error,metadata_json,registered_at)
+            VALUES ('character',?,?,?,?,?,?,?,NULL,?,CURRENT_TIMESTAMP)
+            """,
+            (
+                "626652156", "凯伊", str(installed), "kei-http-digest",
+                "story:test", str(installed), asset_catalog.STORY_ASSET_STATUS,
+                json.dumps({
+                    "catalog_source": "custom",
+                    "spine_signature": "kei-http-signature",
+                    "outfit_key": "Kei_Date_Outfit",
+                    "files": {"avatar": str(avatar)},
+                }, ensure_ascii=False),
+            ),
+        )
+        con.commit()
+
+    labels = json.load(urllib.request.urlopen(_session_request(
+        origin + "/api/assets/faces/labels?aa_key=626652156&sha256=kei-http-digest"
+    )))
+    assert labels["avatar_url"].endswith(
+        "aa_key=626652156&sha256=kei-http-digest"
+    )
+
+    response = urllib.request.urlopen(_session_request(origin + labels["avatar_url"]))
+    assert response.headers["Content-Type"] == "image/png"
+    assert response.read() == b"kei-avatar-preview"
+
+
+def test_face_spine_bundle_routes_are_scoped_to_registered_asset(tmp_path):
+    server = android_web_server.start(str(tmp_path), "test-session")
+    origin = _origin(server)
+    installed = tmp_path / "workspace" / "characters" / "626652156"
+    installed.parent.mkdir(parents=True)
+    base = _spine_bundle(installed)
+    atlas = base.with_suffix(".atlas")
+    texture = base.with_suffix(".png")
+    (installed / "Kei-avatar.png").write_bytes(b"avatar")
+    database = tmp_path / "workspace" / "databases" / "aa_assets.db"
+    with assetdb.connect(str(database)) as con:
+        asset_catalog.migrate(con)
+        con.execute(
+            """
+            INSERT INTO asset_install
+              (kind,aa_key,display_name,source_path,sha256,scope,install_path,
+               status,error,metadata_json,registered_at)
+            VALUES ('character',?,?,?,?,?,?,?,NULL,?,CURRENT_TIMESTAMP)
+            """,
+            (
+                "626652156", "Kei", str(installed), "kei-bundle-digest",
+                "story:test", str(installed), asset_catalog.STORY_ASSET_STATUS,
+                json.dumps({
+                    "catalog_source": "custom", "spine_signature": "kei-bundle",
+                    "outfit_key": "Kei", "files": {},
+                }),
+            ),
+        )
+        con.commit()
+
+    query = "?aa_key=626652156&sha256=kei-bundle-digest"
+    bundle = json.load(urllib.request.urlopen(_session_request(
+        origin + "/api/assets/faces/spine/bundle" + query
+    )))
+    assert bundle["texture_name"] == texture.name
+    assert bundle["atlas_url"].endswith(query)
+    atlas_response = urllib.request.urlopen(_session_request(origin + bundle["atlas_url"]))
+    assert atlas_response.headers["Content-Type"] == "text/plain; charset=utf-8"
+    assert atlas_response.read() == atlas.read_bytes()
+    texture_response = urllib.request.urlopen(_session_request(origin + bundle["texture_url"]))
+    assert texture_response.read() == texture.read_bytes()
+
+
+def test_rendered_face_upload_accepts_a_percent_encoded_chinese_character_key(tmp_path):
+    server = android_web_server.start(str(tmp_path), "test-session")
+    origin = _origin(server)
+    installed = tmp_path / "workspace" / "characters" / "凯伊约会服"
+    installed.parent.mkdir(parents=True)
+    _spine_bundle(installed)
+    database = tmp_path / "workspace" / "databases" / "aa_assets.db"
+    with assetdb.connect(str(database)) as con:
+        asset_catalog.migrate(con)
+        con.execute(
+            """
+            INSERT INTO asset_install
+              (kind,aa_key,display_name,source_path,sha256,scope,install_path,
+               status,error,metadata_json,registered_at)
+            VALUES ('character',?,?,?,?,?,?,?,NULL,?,CURRENT_TIMESTAMP)
+            """,
+            (
+                "凯伊约会服", "凯伊约会服", str(installed), "kei-render-digest",
+                "story:test", str(installed), asset_catalog.STORY_ASSET_STATUS,
+                json.dumps({
+                    "catalog_source": "custom", "spine_signature": "kei-render",
+                    "outfit_key": "Kei_Date_Outfit", "files": {},
+                }, ensure_ascii=False),
+            ),
+        )
+        con.commit()
+
+    png = io.BytesIO()
+    Image.new("RGBA", (512, 512), (30, 90, 140, 255)).save(png, format="PNG")
+    query = (
+        "?aa_key=" + quote("凯伊约会服", safe="")
+        + "&sha256=kei-render-digest&face_id=00"
+    )
+    response = json.load(urllib.request.urlopen(_session_request(
+        origin + "/api/assets/faces/rendered" + query,
+        method="POST",
+        body=png.getvalue(),
+        **{"Content-Type": "image/png"},
+    )))
+
+    assert response == {"ok": True, "complete": False, "received": 1, "total": 4}
+
+
+def test_last_rendered_face_queues_real_vision_labeling(tmp_path, monkeypatch):
+    server = android_web_server.start(str(tmp_path), "test-session")
+    origin = _origin(server)
+    installed = tmp_path / "workspace" / "characters" / "凯伊约会服"
+    installed.parent.mkdir(parents=True)
+    _spine_bundle(installed)
+    database = tmp_path / "workspace" / "databases" / "aa_assets.db"
+    with assetdb.connect(str(database)) as con:
+        asset_catalog.migrate(con)
+        con.execute(
+            """
+            INSERT INTO asset_install
+              (kind,aa_key,display_name,source_path,sha256,scope,install_path,
+               status,error,metadata_json,registered_at)
+            VALUES ('character',?,?,?,?,?,?,?,NULL,?,CURRENT_TIMESTAMP)
+            """,
+            (
+                "凯伊约会服", "凯伊约会服", str(installed), "kei-vision-digest",
+                "story:test", str(installed), asset_catalog.STORY_ASSET_STATUS,
+                json.dumps({
+                    "catalog_source": "custom", "spine_signature": "kei-vision",
+                    "outfit_key": "Kei_Date_Outfit", "files": {},
+                }, ensure_ascii=False),
+            ),
+        )
+        con.commit()
+
+    class Provider:
+        model = "vision-test-model"
+
+    captured = {}
+
+    def label(_con, **kwargs):
+        captured.update(kwargs)
+        return {
+            "ok": True, "status": "complete", "vision_status": "labeled",
+            "labeled_count": 4, "saved_count": 4, "failed_count": 0,
+            "completed_at": "2026-08-13T16:00:00+00:00", "model": "vision-test-model",
+        }
+
+    monkeypatch.setattr(webui, "_optional_vision_provider", lambda: (Provider(), None))
+    monkeypatch.setattr(webui.spine_face_analysis, "label_browser_rendered_faces", label)
+    with webui.FACE_JOB_LOCK:
+        webui.FACE_JOB.update(
+            running=False, done=True, ok=True, ident="凯伊约会服",
+            sha256="kei-vision-digest", outfit_key="Kei_Date_Outfit",
+            result={"semantic_face_count": 4, "vision_status": "awaiting_android_render"},
+            log=[],
+        )
+
+    png = io.BytesIO()
+    Image.new("RGBA", (512, 512), (30, 90, 140, 255)).save(png, format="PNG")
+    final = None
+    for face_id in ("00", "01", "42", "99"):
+        query = (
+            "?aa_key=" + quote("凯伊约会服", safe="")
+            + "&sha256=kei-vision-digest&face_id=" + face_id
+        )
+        final = json.load(urllib.request.urlopen(_session_request(
+            origin + "/api/assets/faces/rendered" + query,
+            method="POST", body=png.getvalue(), **{"Content-Type": "image/png"},
+        )))
+
+    assert final["complete"] is True
+    assert final["vision_status"] == "queued"
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        job = json.load(urllib.request.urlopen(_session_request(
+            origin + "/api/assets/faces/job"
+        )))
+        if job["done"]:
+            break
+        time.sleep(0.02)
+    assert job["ok"] is True
+    assert job["result"]["vision_status"] == "labeled"
+    assert captured["provider"].model == "vision-test-model"
+    assert captured["ident"] == "凯伊约会服"
 
 
 def test_character_picker_filters_placeholders_and_inherits_variant_club(tmp_path):

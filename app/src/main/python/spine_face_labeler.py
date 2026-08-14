@@ -175,13 +175,14 @@ def make_vision_sheet(
     faces: Sequence[RenderedFace],
     *,
     cell_size: int = 384,
-    columns: int = 3,
+    columns: int = 2,
 ) -> tuple[bytes, list[str]]:
     """Build one fixed 3x3 comparison sheet with readable face IDs."""
-    if columns != 3:
-        raise ValueError("vision sheets must use exactly three columns")
-    if not 1 <= len(faces) <= 9:
-        raise ValueError("vision sheets must contain between 1 and 9 faces")
+    if columns not in (2, 3):
+        raise ValueError("vision sheets must use two or three columns")
+    max_faces = 4 if columns == 2 else 9
+    if not 1 <= len(faces) <= max_faces:
+        raise ValueError(f"vision sheets must contain between 1 and {max_faces} faces")
     if cell_size < 120:
         raise ValueError("vision sheet cells must be at least 120 pixels")
     ordered = sorted(faces, key=lambda face: face.face_id)
@@ -232,7 +233,7 @@ def label_face_images(
     provider,
     faces: Sequence[RenderedFace],
     *,
-    batch_size: int = 9,
+    batch_size: int = 4,
     batch_workers: int = 2,
     confidence_threshold: float = 0.6,
     semantic_hints: dict[str, dict] | None = None,
@@ -262,7 +263,7 @@ def label_face_images(
     required = set(VISION_SCHEMA["properties"]["items"]["items"]["required"])
 
     def request_batch(batch: Sequence[RenderedFace]) -> list[dict]:
-        sheet, expected = make_vision_sheet(batch)
+        sheet, expected = make_vision_sheet(batch, columns=2 if len(batch) <= 4 else 3)
         images = [("编号九宫格:" + ",".join(expected), sheet)]
         hint_lines = []
         for face in batch:

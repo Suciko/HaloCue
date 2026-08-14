@@ -111,8 +111,13 @@ def _vision_jpeg(image_path: Path) -> bytes:
 
 
 def label_background(provider, image_path: Path) -> dict:
+    image_path = Path(image_path)
+    filename = image_path.name
+    stem = image_path.stem
     labels = provider.complete_json_vision(
         (
+            f"Original filename: {filename}; filename stem: {stem}. "
+            "Filename is auxiliary context only; judge the pixels first. "
             "你是剧情游戏背景素材标注器。只描述画面中能直接观察到的环境，"
             "不要猜测作品名、角色、剧情或文件来源。严格返回符合 schema 的 JSON。"
         ),

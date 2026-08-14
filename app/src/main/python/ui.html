@@ -169,6 +169,7 @@
       <section class="face-workspace-overview"><div><span>当前阶段</span><b id="faceWorkspacePhase">等待开始</b></div><div><span>进度</span><b id="faceWorkspaceProgress">—</b></div><div><span>结果</span><b id="faceWorkspaceResult">尚未生成</b></div></section>
       <div class="face-workspace-actions"><details id="faceWorkspaceMore" class="face-workspace-more" hidden><summary>更多操作</summary><button id="faceWorkspaceForceButton" class="ghost" type="button" data-face-action="force-vision">强制重新请求 AI</button></details><button id="faceWorkspaceStart" type="button" data-face-action="start">开始表情解析</button></div>
       <p class="face-workspace-status" id="faceWorkspaceStatus" aria-live="polite"></p>
+      <section class="face-workspace-reference" id="faceWorkspaceReference" hidden><img id="faceWorkspaceAvatar" alt="" loading="eager"><div><h3>角色参考头像</h3><p>这是素材包内的角色头像，用于确认导入人物；下方编号是骨骼表情组合，不会用同一张头像冒充表情差分。</p></div></section>
       <section class="face-workspace-results"><header><h3>表情标注</h3><span>图片、编号和识别结果一一对应</span></header><div id="faceWorkspaceLabels" class="face-workspace-cards"></div></section>
       <details class="face-workspace-log"><summary>处理记录</summary><pre id="faceWorkspaceLog"></pre></details>
     </div>
@@ -197,6 +198,8 @@
   <script src="/js/library_preview.js"></script>
   <script src="/js/library_transfer.js"></script>
   <script src="/js/library_copies.js"></script>
+  <canvas id="faceWebglCanvas" width="2048" height="2048" aria-hidden="true" hidden></canvas>
+  <script src="/js/spine_face_webgl.js"></script>
   <script src="/js/library_faces.js"></script>
   <script src="/js/library_import.js"></script>
   <script src="/js/library.js"></script>

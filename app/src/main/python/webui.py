@@ -41,6 +41,7 @@ from official_preview_index import (                             # noqa: E402
 import script2aap as S2A                                        # noqa: E402
 import spine_face_analysis                                      # noqa: E402
 import spine_face_labeler                                       # noqa: E402
+import spine_semantic_faces                                     # noqa: E402
 from aa_project_assets import assert_aa_closed, validate_windows_path_component  # noqa: E402
 from aa_registry import AssetRegistrationError, RegistrationConflictError  # noqa: E402
 from build_index import faces_of                                # noqa: E402
@@ -579,7 +580,7 @@ def face_job_snapshot() -> dict:
         name: result[name]
         for name in (
             "rendered_count", "refreshed_preview_count", "render_cached",
-            "vision_status", "labeled_count",
+            "vision_status", "labeled_count", "semantic_face_count", "semantic_source",
             "saved_count", "failed_count", "completed_at", "model",
         )
         if name in result
@@ -620,6 +621,12 @@ def face_job_snapshot() -> dict:
         public_result["calibration"] = calibration[:100]
     if semantic_faces:
         public_result["semantic_faces"] = semantic_faces
+    avatar_path = str(raw.get("avatar_path") or "")
+    if avatar_path:
+        public_result["avatar_url"] = "/api/assets/faces/avatar?" + urlencode({
+            "aa_key": public_text(raw.get("ident"), 120),
+            "sha256": public_text(raw.get("sha256"), 120),
+        })
     return {
         "running": bool(raw.get("running")),
         "done": bool(raw.get("done")),
@@ -629,6 +636,7 @@ def face_job_snapshot() -> dict:
         "current": raw.get("current"),
         "total": raw.get("total"),
         "ident": public_text(raw.get("ident"), 120),
+        "sha256": public_text(raw.get("sha256"), 120),
         "outfit_key": public_text(raw.get("outfit_key"), 120),
         "log": [public_text(line) for line in (raw.get("log") or [])[-30:]],
         "result": public_result,
@@ -669,6 +677,12 @@ def face_labels_payload(con, *, aa_key: str, sha256: str) -> dict:
         "ok": True,
         "ident": target["ident"],
         "name": target["name"],
+        "avatar_url": (
+            "/api/assets/faces/avatar?" + urlencode({
+                "aa_key": str(aa_key), "sha256": str(sha256),
+            })
+            if target.get("avatar_path") else ""
+        ),
         "saved_count": len(records),
         "faces": [
             _public_visual_face(record, aa_key=str(aa_key), sha256=str(sha256))
@@ -940,7 +954,10 @@ def reserve_face_job(payload: dict) -> bool:
             total=None,
             log=["已加入表情解析队列"],
             ident=str(payload.get("ident") or ""),
+            sha256=str(payload.get("sha256") or ""),
             outfit_key=str(payload.get("outfit_key") or ""),
+            avatar_path=str(payload.get("avatar_path") or ""),
+            force_vision=bool(payload.get("force_vision")),
             result=None,
             error=None,
         )
@@ -983,7 +1000,7 @@ def run_face_job(payload: dict):
                 ok=True,
                 phase=(
                     result.get("status")
-                    if result.get("status") in {"complete", "partial"}
+                    if result.get("status") in {"complete", "partial", "awaiting_render"}
                     else "complete"
                 ),
                 result=result,
@@ -1004,17 +1021,91 @@ def run_face_job(payload: dict):
             FACE_JOB.update(running=False, done=True)
 
 
+def run_browser_face_vision_job(payload: dict, provider):
+    con = None
+    try:
+        con = db()
+        result = spine_face_analysis.label_browser_rendered_faces(
+            con,
+            source_dir=payload["source"],
+            ident=payload["ident"],
+            spine_signature=payload.get("spine_signature") or "",
+            outfit_key=payload.get("outfit_key") or "",
+            cache_root=str(_runtime_output_path("spine-face-cache")),
+            provider=provider,
+            force_vision=bool(payload.get("force_vision")),
+            progress=_face_progress,
+        )
+        with FACE_JOB_LOCK:
+            merged = dict(FACE_JOB.get("result") or {})
+            merged.update(result)
+            FACE_JOB.update(
+                ok=True,
+                phase=str(result.get("status") or "complete"),
+                message=f"AI 已完成 {int(result.get('labeled_count') or 0)} 个表情的看图识别",
+                result=merged,
+            )
+    except Exception as exc:
+        traceback.print_exc()
+        with FACE_JOB_LOCK:
+            FACE_JOB.update(
+                phase="failed",
+                message=f"视觉 AI 表情识别失败：{exc}",
+                error=str(exc),
+            )
+            FACE_JOB["log"].append(FACE_JOB["message"])
+    finally:
+        if con is not None:
+            con.close()
+        with FACE_JOB_LOCK:
+            FACE_JOB.update(running=False, done=True)
+
+
+def queue_browser_face_vision(payload: dict, provider) -> bool:
+    with FACE_JOB_LOCK:
+        if FACE_JOB.get("running"):
+            return False
+        merged = dict(FACE_JOB.get("result") or {})
+        merged.update(
+            rendered_count=int(payload.get("rendered_count") or 0),
+            saved_count=int(payload.get("saved_count") or 0),
+            vision_status="queued",
+        )
+        FACE_JOB.update(
+            running=True,
+            done=False,
+            ok=False,
+            phase="labeling",
+            message="高清差分已保存，正在交给视觉 AI 按九宫格识别",
+            current=0,
+            total=int(payload.get("rendered_count") or 0),
+            ident=str(payload.get("ident") or ""),
+            sha256=str(payload.get("sha256") or ""),
+            outfit_key=str(payload.get("outfit_key") or ""),
+            result=merged,
+            error=None,
+        )
+        FACE_JOB["log"].append(FACE_JOB["message"])
+    threading.Thread(
+        target=run_browser_face_vision_job,
+        args=(dict(payload), provider),
+        daemon=True,
+        name="face-vision-label",
+    ).start()
+    return True
+
+
 def queue_face_analysis(payload: dict) -> dict:
     cli = spine_face_analysis.resolve_spine_cli(
         payload.get("spine_cli") or CFG.get("spine_cli")
     )
-    if cli is None:
+    if cli is None and not aapaths.is_android_runtime():
         return {
             "started": False,
             "status": "spine_cli_missing",
             "message": "人物已导入，但未找到 Spine 3.8 命令行程序；填写路径后可重新导入触发表情渲染",
         }
-    task = {**payload, "spine_cli": str(cli)}
+    task = {**payload, "spine_cli": str(cli or "")}
     if not reserve_face_job(task):
         return {
             "started": False,
@@ -1728,6 +1819,52 @@ def list_backgrounds(
         "limit": page_limit,
         "has_more": page_offset + len(items) < total,
     }
+
+
+def face_spine_bundle_payload(con, *, aa_key: str, sha256: str) -> dict:
+    """Expose only the exact registered bundle files required by local WebGL."""
+    target = asset_catalog.library_character_analysis_target(
+        con, aa_key=aa_key, sha256=sha256
+    )
+    source = Path(str(target["source"])).resolve()
+    root, skeleton, atlas = spine_face_analysis.bundle_files(source)
+    texture_pages = spine_face_analysis.atlas_texture_files(root, atlas)
+    query = urlencode({"aa_key": str(aa_key), "sha256": str(sha256)})
+    version = spine_face_analysis.detect_spine_version(skeleton)
+    return {
+        "ok": True,
+        "spine_version": version,
+        "face_ids": sorted(
+            spine_semantic_faces.extract_semantic_face_combinations(skeleton)
+        ),
+        "skel_url": "/api/assets/faces/spine/skel?" + query,
+        "atlas_url": "/api/assets/faces/spine/atlas?" + query,
+        "texture_url": "/api/assets/faces/spine/texture?" + query + "&name=" + quote(texture_pages[0][0]),
+        "texture_name": texture_pages[0][0],
+        "texture_pages": [
+            {"name": name, "url": "/api/assets/faces/spine/texture?" + query + "&name=" + quote(name)}
+            for name, _path in texture_pages
+        ],
+    }
+
+
+def face_spine_bundle_file(con, *, aa_key: str, sha256: str, part: str, name: str = "") -> tuple[Path, str]:
+    target = asset_catalog.library_character_analysis_target(
+        con, aa_key=aa_key, sha256=sha256
+    )
+    source = Path(str(target["source"])).resolve()
+    root, skeleton, atlas = spine_face_analysis.bundle_files(source)
+    if part == "skel":
+        return skeleton, "application/octet-stream"
+    if part == "atlas":
+        return atlas, "text/plain; charset=utf-8"
+    if part == "texture":
+        requested = str(name or "")
+        pages = dict(spine_face_analysis.atlas_texture_files(root, atlas))
+        if requested not in pages:
+            raise KeyError("Spine atlas texture page not found")
+        return pages[requested], "image/png"
+    raise KeyError("Spine bundle file not found")
 
 
 _BGF = {}
@@ -4617,6 +4754,45 @@ class H(BaseHTTPRequestHandler):
                     return self._send(404, {"ok": False, "code": "face_preview_not_found", "e": "表情预览不存在"})
                 finally:
                     con.close()
+            if p == "/api/assets/faces/avatar":
+                con = db()
+                try:
+                    target = asset_catalog.library_character_analysis_target(
+                        con,
+                        aa_key=q.get("aa_key", ""),
+                        sha256=q.get("sha256", ""),
+                    )
+                    avatar = Path(str(target.get("avatar_path") or ""))
+                    if not avatar.is_file():
+                        raise KeyError("character avatar not found")
+                    return self._send_preview_file(avatar, "image/png")
+                except (KeyError, ValueError):
+                    return self._send(404, {"ok": False, "code": "character_avatar_not_found", "e": "角色头像不存在"})
+                finally:
+                    con.close()
+            if p == "/api/assets/faces/spine/bundle":
+                con = db()
+                try:
+                    return self._send(200, face_spine_bundle_payload(
+                        con, aa_key=q.get("aa_key", ""), sha256=q.get("sha256", "")
+                    ))
+                except (KeyError, ValueError) as exc:
+                    return self._send(404, {"ok": False, "code": "spine_bundle_not_found", "e": str(exc)})
+                finally:
+                    con.close()
+            if p.startswith("/api/assets/faces/spine/"):
+                con = db()
+                try:
+                    part = p.rsplit("/", 1)[-1]
+                    source, ctype = face_spine_bundle_file(
+                        con, aa_key=q.get("aa_key", ""), sha256=q.get("sha256", ""),
+                        part=part, name=q.get("name", "")
+                    )
+                    return self._send_preview_file(source, ctype)
+                except (KeyError, ValueError):
+                    return self._send(404, {"ok": False, "code": "spine_bundle_not_found"})
+                finally:
+                    con.close()
             if p == "/api/llm/profiles":
                 return self._send(200, MODEL_PROFILES.public_state())
             if p == "/api/llm/workbench":
@@ -4710,8 +4886,80 @@ class H(BaseHTTPRequestHandler):
             con.close()
 
     def do_POST(self):
-        p = urlparse(self.path).path
+        u = urlparse(self.path)
+        p = u.path
+        q = {key: values[0] for key, values in parse_qs(u.query).items()}
         n = int(self.headers.get("Content-Length") or 0)
+        if p == "/api/assets/faces/rendered":
+            if n <= 0 or n > 6 * 1024 * 1024:
+                return self._send(413, {"ok": False, "code": "rendered_face_too_large"})
+            try:
+                aa_key = q.get("aa_key", "")
+                sha256 = q.get("sha256", "")
+                face_id = q.get("face_id", "")
+                payload = self.rfile.read(n)
+                con = db()
+                try:
+                    target = asset_catalog.library_character_analysis_target(
+                        con, aa_key=aa_key, sha256=sha256
+                    )
+                    result = spine_face_analysis.store_browser_rendered_face(
+                        con,
+                        source_dir=target["source"],
+                        ident=target["ident"],
+                        spine_signature=target["spine_signature"],
+                        outfit_key=target["outfit_key"],
+                        cache_root=str(_runtime_output_path("spine-face-cache")),
+                        face_id=face_id,
+                        png_bytes=payload,
+                    )
+                    if result.get("complete"):
+                        with FACE_JOB_LOCK:
+                            force_vision = bool(FACE_JOB.get("force_vision"))
+                        vision_payload = {
+                            **target,
+                            "sha256": str(sha256),
+                            "rendered_count": int(result.get("rendered_count") or 0),
+                            "saved_count": int(result.get("saved_count") or 0),
+                            "force_vision": force_vision,
+                        }
+                        provider, provider_issue = _optional_vision_provider()
+                        if provider is not None and queue_browser_face_vision(
+                            vision_payload, provider
+                        ):
+                            result = {**result, "vision_status": "queued"}
+                        else:
+                            result = {
+                                **result,
+                                "vision_status": "skipped_missing_key",
+                                "provider_issue": str(provider_issue or "视觉模型当前不可用"),
+                            }
+                            with FACE_JOB_LOCK:
+                                merged = dict(FACE_JOB.get("result") or {})
+                                merged.update(
+                                    status="complete",
+                                    vision_status=result["vision_status"],
+                                    rendered_count=int(result.get("rendered_count") or 0),
+                                    labeled_count=0,
+                                    saved_count=int(result.get("saved_count") or 0),
+                                    provider_issue=result["provider_issue"],
+                                    completed_at=str(result.get("completed_at") or ""),
+                                )
+                                FACE_JOB.update(
+                                    phase="complete",
+                                    message=(
+                                        f"已生成 {merged['rendered_count']} 张高清表情差分图；"
+                                        "视觉 AI 未运行，请检查图片模型与 API Key"
+                                    ),
+                                    result=merged,
+                                )
+                    return self._send(200, result)
+                finally:
+                    con.close()
+            except KeyError:
+                return self._send(404, {"ok": False, "code": "face_render_target_not_found"})
+            except ValueError as exc:
+                return self._send(400, {"ok": False, "code": "invalid_rendered_face", "e": str(exc)})
         if p == "/api/story-files/upload":
             if n > 10 * 1024 * 1024:
                 return self._send(413, {

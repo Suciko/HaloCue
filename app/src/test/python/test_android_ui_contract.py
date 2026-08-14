@@ -116,3 +116,36 @@ def test_android_asset_import_routes_files_and_directories_to_native_picker():
     assert "file_token" in assets
     assert "选择角色目录" in html
     assert "选择素材文件夹批量导入" in html
+
+
+def test_face_workspace_displays_imported_avatar_as_reference_not_face_preview():
+    html = (ROOT / "ui.html").read_text(encoding="utf-8")
+    css = (ROOT / "css" / "layout.css").read_text(encoding="utf-8")
+    javascript = (ROOT / "js" / "library_faces.js").read_text(encoding="utf-8")
+
+    assert 'id="faceWorkspaceReference"' in html
+    assert 'id="faceWorkspaceAvatar"' in html
+    assert "角色参考头像" in html
+    assert "不会用同一张头像冒充表情差分" in html
+    assert ".face-workspace-reference[hidden]{display:none}" in css
+    assert "this.renderAvatar(payload.avatar_url || ''" in javascript
+    assert "if (result.avatar_url) this.renderAvatar" in javascript
+
+
+def test_face_workspace_bundles_local_webgl_renderer_for_real_spine_previews():
+    html = (ROOT / "ui.html").read_text(encoding="utf-8")
+    faces = (ROOT / "js" / "library_faces.js").read_text(encoding="utf-8")
+    renderer = (ROOT / "js" / "spine_face_webgl.js").read_text(encoding="utf-8")
+
+    assert 'src="/js/spine-webgl-3.8.95.js"' not in html
+    assert 'src="/js/spine_face_webgl.js"' in html
+    assert 'id="faceWebglCanvas" width="2048" height="2048"' in html
+    assert "this.renderMissingPreviews();" in faces
+    assert "this.renderer.render" in faces
+    assert "face_ids" in renderer
+    assert "faceId !== '00'" in renderer
+    assert "SPINE_38_RUNTIME = '/js/spine-webgl-3.8.95.js'" in renderer
+    assert "SPINE_42_RUNTIME = '/js/spine-webgl-4.2.119.min.js'" in renderer
+    assert "gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, pma)" in renderer
+    assert "renderer.premultipliedAlpha = pma" in renderer
+    assert "/api/assets/faces/rendered" in renderer

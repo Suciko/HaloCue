@@ -963,9 +963,13 @@ def library_character_analysis_target(con, *, aa_key: str | int, sha256: str) ->
         return {
             "source": str(installed),
             "ident": str(row["aa_key"]),
+            "sha256": digest,
             "name": _safe_catalog_text(row["display_name"], fallback=key),
             "spine_signature": str(metadata.get("spine_signature") or ""),
             "outfit_key": str(metadata.get("outfit_key") or ""),
+            "avatar_path": str(
+                _preview_path("character", str(row["install_path"] or ""), metadata) or ""
+            ),
         }
     raise KeyError("没有可用于表情标注的已登记骨骼副本")
 

@@ -101,21 +101,26 @@ class SecureCredentialStoreTest {
     }
 
     @Test
-    fun concurrent_first_use_creates_one_usable_keystore_key() {
+    fun concurrent_first_use_uses_an_isolated_key_and_preserves_production_credentials() {
         val context = ApplicationProvider.getApplicationContext<Context>()
+        val productionStore = SecureCredentialStore(context)
+        val productionName = testName()
+        val productionSecret = "sk-production-${UUID.randomUUID()}"
+        val testKeyAlias = "halocue_credentials_test_${UUID.randomUUID()}"
         val names = List(16) { testName() }
-        deleteCredentialKey()
+        deleteCredentialKey(testKeyAlias)
         val start = CountDownLatch(1)
         val complete = CountDownLatch(names.size)
         val executor = Executors.newFixedThreadPool(names.size)
         val failures = ConcurrentLinkedQueue<Throwable>()
 
         try {
+            productionStore.put(productionName, productionSecret)
             names.forEachIndexed { index, name ->
                 executor.execute {
                     try {
                         start.await()
-                        SecureCredentialStore(context).put(name, "concurrent-$index")
+                        SecureCredentialStore(context, testKeyAlias).put(name, "concurrent-$index")
                     } catch (error: Throwable) {
                         failures.add(error)
                     } finally {
@@ -128,11 +133,17 @@ class SecureCredentialStoreTest {
             assertTrue("Concurrent first use timed out", complete.await(10, TimeUnit.SECONDS))
             assertTrue("Concurrent first use failed: $failures", failures.isEmpty())
             names.forEachIndexed { index, name ->
-                assertEquals("concurrent-$index", SecureCredentialStore(context).get(name))
+                assertEquals(
+                    "concurrent-$index",
+                    SecureCredentialStore(context, testKeyAlias).get(name),
+                )
             }
+            assertEquals(productionSecret, SecureCredentialStore(context).get(productionName))
         } finally {
             executor.shutdownNow()
-            names.forEach { SecureCredentialStore(context).delete(it) }
+            names.forEach { SecureCredentialStore(context, testKeyAlias).delete(it) }
+            deleteCredentialKey(testKeyAlias)
+            productionStore.delete(productionName)
         }
     }
 
@@ -167,11 +178,11 @@ class SecureCredentialStoreTest {
         }
     }
 
-    private fun deleteCredentialKey() {
+    private fun deleteCredentialKey(alias: String) {
         KeyStore.getInstance("AndroidKeyStore").apply {
             load(null)
-            if (containsAlias("halocue_credentials_v1")) {
-                deleteEntry("halocue_credentials_v1")
+            if (containsAlias(alias)) {
+                deleteEntry(alias)
             }
         }
     }

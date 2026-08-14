@@ -549,7 +549,7 @@ def _read_animation(data: _Input, *, event_has_audio: list[bool]) -> tuple[str |
     return name, paths
 
 
-def extract_semantic_face_combinations(source: str | Path) -> dict[str, dict]:
+def _extract_binary_semantic_face_combinations(source: str | Path) -> dict[str, dict]:
     """Return numbered Spine skin combinations with their named semantic parts.
 
     The output is only a semantic candidate table.  It does not mean a `faceId`
@@ -606,3 +606,74 @@ def extract_semantic_face_combinations(source: str | Path) -> dict[str, dict]:
             "source": "spine_binary_semantic",
         }
     return dict(sorted(result.items()))
+
+
+def _atlas_text(source: str | Path) -> list[str]:
+    raw = Path(source).read_bytes()
+    for encoding in ("utf-8-sig", "gb18030"):
+        try:
+            return raw.decode(encoding).splitlines()
+        except UnicodeDecodeError:
+            continue
+    raise ValueError("Unsupported Spine atlas text encoding")
+
+
+def extract_atlas_face_combinations(source: str | Path) -> dict[str, dict]:
+    """Build a conservative face table from numbered atlas regions.
+
+    This is the Android fallback for Spine versions whose binary layout is not
+    supported by the read-only 3.8 parser.  It preserves IDs and obvious names
+    without claiming that atlas naming proves a complete AA face mapping.
+    """
+    from asset_validation import extract_expression_capabilities
+
+    lines = _atlas_text(source)
+    capabilities = extract_expression_capabilities(lines)
+    names: dict[str, str] = {}
+    for line in lines:
+        raw = line.strip()
+        if not raw or line[:1].isspace() or ":" in raw:
+            continue
+        match = re.fullmatch(r"(\d{2})(?:_(.*))?", raw)
+        if match:
+            names.setdefault(match.group(1), raw)
+    names.update({face_id: names.get(face_id, face_id) for face_id in capabilities["faces"]})
+    aliases = {
+        "default": "neutral",
+        "normal": "neutral",
+        "eyeclose": "neutral",
+        "respond": "respond",
+        "smile": "joy",
+        "embarrassed": "embarrassment",
+        "serious": "serious",
+        "depressed": "sadness",
+    }
+    result = {}
+    for face_id, raw in sorted(names.items()):
+        suffix = raw.partition("_")[2].strip().casefold()
+        primary = aliases.get(suffix, suffix or "neutral")
+        labels = [primary]
+        if suffix and suffix != primary:
+            labels.append(suffix)
+        result[face_id] = {
+            "face_id": face_id,
+            "raw_parts": [raw],
+            "parts": [],
+            "labels": labels,
+            "primary_emotion": primary,
+            "semantic_labels": labels,
+            "special": face_id == "99",
+            "source": "spine_atlas_fallback",
+        }
+    return result
+
+
+def extract_semantic_face_combinations(source: str | Path) -> dict[str, dict]:
+    """Read binary semantics, falling back to atlas IDs for unsupported Spine versions."""
+    try:
+        return _extract_binary_semantic_face_combinations(source)
+    except (UnicodeDecodeError, ValueError, IndexError, struct.error):
+        atlas = Path(source).with_suffix(".atlas")
+        if not atlas.is_file():
+            raise
+        return extract_atlas_face_combinations(atlas)
