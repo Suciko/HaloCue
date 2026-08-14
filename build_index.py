@@ -321,6 +321,8 @@ def build_resource_index(data, *, cache=None, aa_install=None, out=None):
             catalog_path = candidate
         else:
             warnings.append(f"AA 安装目录中没有 catalog.json，跳过官方角色表：{candidate}")
+    if catalog_path and not cache_root:
+        warnings.append("未找到 AA 官方资源缓存（Unity Addressables 下载缓存），跳过官方角色表。")
     if cache_root and catalog_path:
         try:
             official = harvest_official_characters(
