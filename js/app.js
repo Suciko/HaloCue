@@ -1762,6 +1762,8 @@
       indexButton.disabled = resource.status !== 'installed' || building;
       indexButton.textContent = ['ready', 'partial', 'stale', 'failed'].includes(preview.status) ? '重新建立图片预览' : '建立图片预览';
     }
+    const resourceIndex = aa.resource_index || {exists: false};
+    setAAStatusValue('#aaResourceIndexState', resourceIndex.exists ? '已生成（缺失时自动重建）' : '未生成（连接 AA 后自动建立）', resourceIndex.exists ? 'ready' : 'attention');
   }
   function settingsDrawerOpen() {
     const drawer = $('#settingsDrawer');

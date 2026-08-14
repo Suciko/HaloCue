@@ -5,7 +5,7 @@
 打标是一次性成本：谁跑过一次，把 aa_assets.db 拷给别人就行，不用再让 AI 看一遍图。
 所有写入都是幂等的，重复跑只补空缺、不覆盖已有标注（除非 --force）。
 """
-import json, os, sqlite3, threading
+import json, os, re, sqlite3, threading
 
 from tables import bg_id
 
@@ -577,6 +577,36 @@ def import_bg_files(con, bgs_dir):
             n += 1
     con.commit()
     return n
+
+
+def merge_catalog_backgrounds(con, catalog_path):
+    """从 AA 官方 Addressables catalog.json 提取全部背景友好名并入 bg 表（幂等）。
+
+    catalog 记录了 AA 全部官方背景名（BG_*）；bgName 哈希可用 xxHash32 直接计算
+    （tables.bg_id），不必等待历史工程收割。已有行不覆盖；新增行标记
+    labeled_by='catalog'。返回新增条数。
+    """
+    if not catalog_path or not os.path.isfile(str(catalog_path)):
+        return 0
+    try:
+        with open(catalog_path, encoding="utf-8-sig") as fh:
+            text = fh.read()
+    except (OSError, UnicodeDecodeError):
+        return 0
+    names = sorted(set(re.findall(r"\bBG_[A-Za-z0-9_]+\b", text)))
+    added = 0
+    for name in names:
+        cur = con.execute("SELECT 1 FROM bg WHERE name=?", (name,)).fetchone()
+        if cur:
+            continue
+        con.execute(
+            "INSERT INTO bg(name,hash,labeled_by) VALUES(?,?,?)",
+            (name, int(bg_id(name)), "catalog"),
+        )
+        added += 1
+    if added:
+        con.commit()
+    return added
 
 
 def label_bg_from_name(con, force=False):

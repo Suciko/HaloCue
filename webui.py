@@ -43,6 +43,37 @@ import aapaths                                                  # noqa: E402
 import asset_catalog                                            # noqa: E402
 import asset_import                                             # noqa: E402
 import assetdb                                                  # noqa: E402
+
+
+# ---------------------------------------------------------------- 繁转简（搜索用）
+_ZH_T2S_CONV = None
+
+
+def _zh_t2s(text: str) -> str:
+    """繁体转简体。opencc 不可用时原样返回（搜索降级但不报错）。"""
+    global _ZH_T2S_CONV
+    if _ZH_T2S_CONV is None:
+        try:
+            from opencc import OpenCC
+        except Exception:
+            _ZH_T2S_CONV = False
+        else:
+            _ZH_T2S_CONV = OpenCC("t2s")
+    if _ZH_T2S_CONV:
+        try:
+            return _ZH_T2S_CONV.convert(text)
+        except Exception:
+            return text
+    return text
+
+
+def _zh_search_match(query_raw: str, query_s: str, *fields: str) -> bool:
+    """子串匹配：原始内容（大小写不敏感）或繁转简后内容（简体查询可命中繁体名）。"""
+    for field in fields:
+        value = str(field or "")
+        if query_raw in value.casefold() or query_s in _zh_t2s(value).casefold():
+            return True
+    return False
 import background_labeler                                      # noqa: E402
 from aa_install_discovery import AADiscoveryResult, discover_aa  # noqa: E402
 from aa_resource_cache import probe_resource_cache               # noqa: E402
@@ -62,7 +93,7 @@ import spine_face_analysis                                      # noqa: E402
 import spine_face_labeler                                       # noqa: E402
 from aa_project_assets import assert_aa_closed, validate_windows_path_component  # noqa: E402
 from aa_registry import AssetRegistrationError, RegistrationConflictError  # noqa: E402
-from build_index import faces_of                                # noqa: E402
+from build_index import build_resource_index, faces_of              # noqa: E402
 from build_bundle import BuildBundleManager, CompileInputStaleError  # noqa: E402
 from document import normalize_draft_nodes, parse_document_lossless  # noqa: E402
 from draft_store import (                                       # noqa: E402
@@ -1121,6 +1152,10 @@ def _public_aa_status(
         resource = {"status": probe.status, "path": str(discovery.resource_cache)}
     index = _preview_public_state(preview_state or _preview_state_for_discovery(discovery))
     data = discovery.data or (Path(str(CFG.get("aa_data"))) if CFG.get("aa_data") else None)
+    try:
+        resource_index = {"exists": True, "stamp": os.stat(INDEX).st_mtime_ns}
+    except OSError:
+        resource_index = {"exists": False, "stamp": 0}
     return {
         "connected": bool(discovery.projects),
         "path": str(data or ""),
@@ -1128,6 +1163,7 @@ def _public_aa_status(
         "projects": projects,
         "saves": saves,
         "resource": resource,
+        "resource_index": resource_index,
         "preview_index": index,
     }
 
@@ -1527,6 +1563,68 @@ def _start_resource_index() -> tuple[int, dict]:
     return 202, {"ok": True, "preview_index": snapshot}
 
 
+RESOURCE_REBUILD_LOCK = threading.RLock()
+
+
+def _build_resource_index_from(discovery: AADiscoveryResult) -> None:
+    """用给定的发现结果重建 aa_resources.json（带锁防并发，已存在则跳过）。
+
+    与「图片预览」解耦：不要求 resource_cache（资源文件）存在。
+    失败时抛出带指引的 RuntimeError，由调用方转成业务错误。
+    """
+    if discovery.data is None:
+        raise RuntimeError(
+            "缺少资源索引文件（aa_resources.json），且未找到 AA 工作区。"
+            "请先在设置中选择 AzureArchive.exe。"
+        )
+    try:
+        with RESOURCE_REBUILD_LOCK:
+            if os.path.isfile(INDEX):
+                return
+            build_resource_index(
+                str(discovery.data),
+                cache=str(discovery.resource_cache) if discovery.resource_cache else None,
+                aa_install=str(discovery.install_root) if discovery.install_root else None,
+                out=INDEX,
+            )
+    except Exception as exc:
+        raise RuntimeError(f"资源索引自动建立失败：{exc}") from exc
+
+
+def _ensure_resource_index() -> None:
+    """缺索引时自动重建 aa_resources.json（先发现工作区）。失败抛带指引错误。"""
+    if os.path.isfile(INDEX):
+        return
+    _build_resource_index_from(_current_aa_discovery())
+
+
+def _trigger_resource_index_if_missing(discovery: AADiscoveryResult | None = None) -> None:
+    """连接 AA 后自动触发：缺索引时后台重建（幂等，已存在则跳过）。
+
+    同时把 AA 官方 catalog 里的背景名并入素材库（幂等，快速），保证
+    官方背景名单完整可搜（如 BG_Hangar）。
+    """
+    if discovery is None:
+        try:
+            discovery = _current_aa_discovery()
+        except Exception:
+            return
+    if discovery.catalog is not None:
+        try:
+            con = db()
+            try:
+                assetdb.merge_catalog_backgrounds(con, discovery.catalog)
+            finally:
+                con.close()
+        except Exception:
+            pass
+    if os.path.isfile(INDEX):
+        return
+    if discovery.data is None:
+        return
+    threading.Thread(target=_build_resource_index_from, args=(discovery,), daemon=True).start()
+
+
 def registered_character_avatar_path(con, ident: str) -> Path | None:
     """Resolve one imported character avatar without exposing its source path."""
     if not ident:
@@ -1578,50 +1676,70 @@ def list_characters(q="", limit=400):
     sql = ("SELECT c.ident, c.name, c.club, c.spine, c.avatar, c.source, "
            "  (SELECT COUNT(*) FROM face f WHERE f.ident=c.ident) AS nface "
            "FROM character c ")
-    args = []
     if q:
-        conditions = [
-            "c.ident LIKE ?", "c.name LIKE ?", "c.club LIKE ?",
-            "EXISTS (SELECT 1 FROM name_alias a WHERE a.ident=c.ident AND a.script_name LIKE ?)",
-            "EXISTS (SELECT 1 FROM name_alias a JOIN character target ON target.ident=a.ident "
-            "WHERE a.script_name LIKE ? AND target.name=c.name)",
-        ]
-        args = [f"%{q}%"] * len(conditions)
+        # 带搜索词时全量拉取 + Python 统一过滤（原始匹配 ∪ 繁转简匹配），
+        # 否则 SQL 先截断 400 行，繁体名（如“響”）永远进不了结果集。
+        q_raw = str(q).casefold()
+        q_s = _zh_t2s(q).casefold()
+        alias_map = {}
+        for row in con.execute("SELECT ident, script_name FROM name_alias"):
+            alias_map.setdefault(row["ident"], []).append(row["script_name"])
         builtin_ids = [
             ident for script_name, ident, kind in assetdb.SEED_ALIAS
-            if ident and kind == "portrait" and str(q).casefold() in script_name.casefold()
+            if ident and kind == "portrait" and q_raw in script_name.casefold()
         ]
+        builtin_names = set()
         if builtin_ids:
             placeholders = ",".join("?" for _ in builtin_ids)
-            conditions.append("c.ident IN (" + placeholders + ")")
-            conditions.append(
-                "c.name IN (SELECT name FROM character WHERE ident IN (" + placeholders + "))"
-            )
-            args.extend(builtin_ids)
-            args.extend(builtin_ids)
-        sql += "WHERE (" + " OR ".join(conditions) + ") "
-    sql += "ORDER BY (c.name IS NULL), nface DESC, c.ident LIMIT ?"
-    args.append(limit)
-    out = []
-    for r in con.execute(sql, args):
-        catalog = character_catalog_metadata(r["ident"])
-        avatar_value = str(r["avatar"] or catalog.get("avatar") or "")
-        spine_value = str(r["spine"] or catalog.get("spine") or "")
-        avatar_key = Path(
-            avatar_value.replace("\\", "/")
-        ).name or spine_value
-        avatar = character_avatar_path(avatar_value, spine_value)
-        if not avatar:
-            avatar = registered_character_avatar_path(con, r["ident"])
-        if avatar and not avatar_key:
-            avatar_key = str(r["ident"])
-        out.append({"ident": r["ident"], "name": r["name"] or r["ident"],
-                    "club": r["club"] or "", "spine": spine_value,
-                    "faces": r["nface"], "source": r["source"],
-                    "avatar": (
-                        "/thumb/av/" + quote(avatar_key, safe="")
-                        if avatar and avatar_key else ""
-                    )})
+            for row in con.execute(
+                "SELECT name FROM character WHERE ident IN (" + placeholders + ")",
+                builtin_ids,
+            ):
+                if row["name"]:
+                    builtin_names.add(row["name"])
+        rows = [dict(row) for row in con.execute(sql)]
+        keep = []
+        for r in rows:
+            if _zh_search_match(
+                q_raw, q_s, r["ident"], r["name"], r["club"],
+                " ".join(alias_map.get(r["ident"], [])),
+            ):
+                keep.append(r)
+            elif r["ident"] in builtin_ids or r["name"] in builtin_names:
+                keep.append(r)
+        # 与原 SQL 排序一致：(c.name IS NULL) ASC, nface DESC, c.ident ASC
+        keep.sort(key=lambda r: (
+            1 if r["name"] is None else 0,
+            -(r["nface"] or 0),
+            str(r["ident"]).casefold(),
+        ))
+        rows = keep[:limit]
+    else:
+        sql += "ORDER BY (c.name IS NULL), nface DESC, c.ident LIMIT ?"
+        rows = [dict(row) for row in con.execute(sql, (limit,))]
+    return [character_item(con, r) for r in rows]
+
+
+def character_item(con, r) -> dict:
+    """把 character 行转成 API 输出项（含目录元数据与头像路径）。"""
+    catalog = character_catalog_metadata(r["ident"])
+    avatar_value = str(r["avatar"] or catalog.get("avatar") or "")
+    spine_value = str(r["spine"] or catalog.get("spine") or "")
+    avatar_key = Path(
+        avatar_value.replace("\\", "/")
+    ).name or spine_value
+    avatar = character_avatar_path(avatar_value, spine_value)
+    if not avatar:
+        avatar = registered_character_avatar_path(con, r["ident"])
+    if avatar and not avatar_key:
+        avatar_key = str(r["ident"])
+    return {"ident": r["ident"], "name": r["name"] or r["ident"],
+            "club": r["club"] or "", "spine": spine_value,
+            "faces": r["nface"], "source": r["source"],
+            "avatar": (
+                "/thumb/av/" + quote(avatar_key, safe="")
+                if avatar and avatar_key else ""
+            )}
     def variant_rank(item):
         stem = str(item.get("spine") or "").replace("\\", "/").rsplit("/", 1)[-1].casefold()
         suffix = stem[len("characterspine_"):] if stem.startswith("characterspine_") else ""
@@ -1652,11 +1770,9 @@ def list_backgrounds(
     sql = "SELECT name,hash,label,place,time,mood,tags FROM bg "
     where, args = [], []
     if q:
-        where.append(
-            "(name LIKE ? OR label LIKE ? OR place LIKE ? OR time LIKE ? "
-            "OR mood LIKE ? OR tags LIKE ?)"
-        )
-        args += [f"%{q}%"] * 6
+        # 搜索词留到 Python 层过滤（含繁转简），SQL 只保留非文本条件
+        q_raw = str(q).casefold()
+        q_s = _zh_t2s(q).casefold()
     if only_ready:
         where.append("hash IS NOT NULL")
     if only_official:
@@ -1672,6 +1788,11 @@ def list_backgrounds(
     sql += "ORDER BY (hash IS NULL), name"
     out = []
     for r in con.execute(sql, args):
+        if q and not _zh_search_match(
+            q_raw, q_s, r["name"], r["label"], r["place"],
+            r["time"], r["mood"], r["tags"],
+        ):
+            continue
         out.append({"name": r["name"], "ready": r["hash"] is not None,
                     "label": r["label"] or "", "place": r["place"] or "",
                     "time": r["time"] or "", "mood": r["mood"] or "",
@@ -1929,6 +2050,20 @@ def guess_mapping(speakers):
             "ORDER BY (ident<>?), (spine IS NULL), LENGTH(ident) LIMIT 1",
             (w, w, w)).fetchone()
         exact_valid = row is not None and not assetdb._looks_placeholder(row["name"])
+        if not exact_valid:
+            # 1b. 繁转简匹配：官方繁体名（如「沙織」「陽葵」）对简体说话者（「沙织」「日鞠」）
+            folded_s = _zh_t2s(w).casefold()
+            if folded_s:
+                for r in con.execute(
+                    "SELECT ident,name,club,spine,source FROM character "
+                    "WHERE name IS NOT NULL AND name != '' "
+                    "ORDER BY (spine IS NULL), LENGTH(ident)"
+                ):
+                    if folded_s == _zh_t2s(r["name"]).casefold() or \
+                       folded_s == _zh_t2s(r["ident"]).casefold():
+                        row = r
+                        exact_valid = not assetdb._looks_placeholder(r["name"])
+                        break
         if exact_valid and row["source"] != "overrides":
             row = _preferred_variant(con, row)
             out[w] = {"kind": "portrait", "id": row["ident"],
@@ -3544,8 +3679,16 @@ def preflight_story_worker(payload: dict) -> dict:
 # ---------------------------------------------------------------- 生成
 def prepare_project_index(index_path, project_dir, output_path, *, con=None):
     """Build the exact official+registered allowlist used by AI and generator."""
-    with open(index_path, encoding="utf-8") as source:
-        index = json.load(source)
+    if not os.path.isfile(index_path) and os.path.abspath(index_path) == os.path.abspath(INDEX):
+        _ensure_resource_index()
+    try:
+        with open(index_path, encoding="utf-8") as source:
+            index = json.load(source)
+    except FileNotFoundError:
+        raise RuntimeError(
+            "缺少资源索引文件（aa_resources.json）。请确认已在设置中选择 "
+            "AzureArchive.exe 后重试（也可运行 build_index.py）。"
+        ) from None
     merged = S2A.merge_project_registered_assets(index, project_dir)
     if con is not None:
         merged = asset_catalog.merge_model_constraints(
@@ -4115,7 +4258,7 @@ def build_csp_headers() -> Dict[str, str]:
 
 
 def search_sounds(q: str = "") -> List[Dict[str, Any]]:
-    """搜索已登记音效的标签列表。"""
+    """搜索已登记音效的标签列表（含繁转简匹配）。"""
     try:
         con = db()
         rows = con.execute(
@@ -4123,14 +4266,24 @@ def search_sounds(q: str = "") -> List[Dict[str, Any]]:
             (f"%{q}%", f"%{q}%"),
         ).fetchall()
         results = [{"name": r[0], "label_cn": r[1] or "", "category": r[2] or "SE"} for r in rows]
+        if q and not results:
+            q_raw = str(q).casefold()
+            q_s = _zh_t2s(q).casefold()
+            results = [
+                {"name": r[0], "label_cn": r[1] or "", "category": r[2] or "SE"}
+                for r in con.execute("SELECT name, label_cn, category FROM sound")
+                if _zh_search_match(q_raw, q_s, r[0], r[1])
+            ]
     except Exception:
         results = []
 
     if not results:
         try:
             idx = json.load(open(INDEX, encoding="utf-8"))
+            q_raw = str(q).casefold()
+            q_s = _zh_t2s(q).casefold()
             for s in idx.get("sounds", []):
-                if not q or q.lower() in s.lower():
+                if not q or q_raw in s.casefold() or q_s in _zh_t2s(s).casefold():
                     results.append({"name": s, "label_cn": "", "category": "SE"})
         except Exception:
             pass
@@ -4820,6 +4973,7 @@ class H(BaseHTTPRequestHandler):
                     )
                     CFG["aa_data"] = str(discovery.data)
                     CFG["overrides"] = str(discovery.overrides or "") or None
+                    _trigger_resource_index_if_missing(discovery)
                     return self._send(200, {
                         "ok": True,
                         "restart_required": False,

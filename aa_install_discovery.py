@@ -202,6 +202,7 @@ def _resource_cache(
     settings: Mapping,
     issues: list[DiscoveryIssue],
     saved_cache: str | os.PathLike | None = None,
+    local_low: Path | None = None,
 ) -> Path | None:
     configured = _string_value(settings, "cachePath") or (
         str(saved_cache) if saved_cache else None
@@ -212,6 +213,39 @@ def _resource_cache(
             return path
         issues.append(DiscoveryIssue("resource_cache_missing", "Configured resource cache is unavailable.", path))
         return None
+    # Unity Addressables 下载缓存：<home>\AppData\LocalLow\Unity\<company>_<product>\<hash>\<hash>\__data
+    if local_low is not None:
+        unity_root = local_low.parent.parent / "Unity"
+        if unity_root.is_dir():
+            try:
+                children = sorted(unity_root.iterdir(), key=lambda p: str(p.name).casefold())
+            except OSError:
+                children = []
+            for child in children:
+                if not child.is_dir() or "azurearchive" not in child.name.casefold():
+                    continue
+                has_bundle = False
+                try:
+                    for outer in child.iterdir():
+                        if not outer.is_dir():
+                            continue
+                        for content in outer.iterdir():
+                            if not content.is_dir():
+                                continue
+                            if (content / "__data").is_file():
+                                has_bundle = True
+                                break
+                        if has_bundle:
+                            break
+                except OSError:
+                    continue
+                if has_bundle:
+                    return child.resolve()
+                issues.append(DiscoveryIssue(
+                    "resource_cache_missing",
+                    "Unity 资源缓存目录中没有可用的 bundle（__data）。",
+                    child,
+                ))
     sibling = data.parent.parent / "资源文件"
     return sibling.resolve() if sibling.is_dir() else None
 
@@ -247,7 +281,7 @@ def _result_for_data(
         saves=optional_paths["saves"],
         overrides=optional_paths["overrides"],
         settings=optional_paths["settings"],
-        resource_cache=_resource_cache(data, settings_json, issues, saved_cache),
+        resource_cache=_resource_cache(data, settings_json, issues, saved_cache, local_low),
         catalog=_catalog_path(executable),
         recent_project_files=_read_recent_project_files(settings_json),
         data_candidates=data_candidates or (candidate,),
@@ -310,10 +344,6 @@ def discover_aa(
 ) -> AADiscoveryResult:
     """Discover AA paths without creating or modifying any filesystem entries."""
     issues: list[DiscoveryIssue] = []
-    explicit_data = normalize_aa_data_path(selection)
-    if explicit_data is not None:
-        return _result_for_data(explicit_data, source="explicit data")
-
     config_file = _resolved(config_path) if config_path is not None else Path(__file__).with_name("aa_config.json")
     config = _read_json_object(config_file, issues, "config_invalid")
     for fallback_path in fallback_config_paths:
@@ -327,6 +357,25 @@ def discover_aa(
     saved_data = _string_value(config, "aa_data")
     saved_cache = _string_value(config, "aa_cache")
     environment = environ if environ is not None else os.environ
+
+    explicit_data = normalize_aa_data_path(selection)
+    if explicit_data is not None:
+        # selection 是 data 路径，不能当可执行文件解析；executable 只从配置解析。
+        executable = resolve_aa_executable(saved_executable)
+        identity = read_unity_identity(executable) if executable else None
+        local_low = _local_low_root(identity, home)
+        settings_path = local_low / "data" / "settings" / "user_settings.json" if local_low else None
+        settings = _read_json_object(settings_path, issues, "settings_invalid")
+        return _result_for_data(
+            explicit_data,
+            source="explicit data",
+            executable=executable,
+            identity=identity,
+            local_low=local_low,
+            configuration=settings,
+            saved_cache=saved_cache,
+            issues=issues,
+        )
 
     executable = resolve_aa_executable(selection or saved_executable)
     identity = read_unity_identity(executable) if executable else None
