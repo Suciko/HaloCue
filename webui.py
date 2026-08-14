@@ -2040,6 +2040,20 @@ def guess_mapping(speakers):
             "ORDER BY (ident<>?), (spine IS NULL), LENGTH(ident) LIMIT 1",
             (w, w, w)).fetchone()
         exact_valid = row is not None and not assetdb._looks_placeholder(row["name"])
+        if not exact_valid:
+            # 1b. 繁转简匹配：官方繁体名（如「沙織」「陽葵」）对简体说话者（「沙织」「日鞠」）
+            folded_s = _zh_t2s(w).casefold()
+            if folded_s:
+                for r in con.execute(
+                    "SELECT ident,name,club,spine,source FROM character "
+                    "WHERE name IS NOT NULL AND name != '' "
+                    "ORDER BY (spine IS NULL), LENGTH(ident)"
+                ):
+                    if folded_s == _zh_t2s(r["name"]).casefold() or \
+                       folded_s == _zh_t2s(r["ident"]).casefold():
+                        row = r
+                        exact_valid = not assetdb._looks_placeholder(r["name"])
+                        break
         if exact_valid and row["source"] != "overrides":
             row = _preferred_variant(con, row)
             out[w] = {"kind": "portrait", "id": row["ident"],
