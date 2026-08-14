@@ -91,13 +91,33 @@ def _temporary_reasoning_mode(provider: Any, mode: Optional[str]):
 def estimate_chunk_output_budget(
     target_lines: int, *, compact: bool, reasoning_mode: Optional[str], maximum: Optional[int],
 ) -> int:
-    """Bound model output to the actual wire shape instead of always requesting 16K."""
+    """Reserve room for both hidden reasoning and the visible annotation JSON."""
     mode = str(reasoning_mode or "balanced").strip().lower()
-    multiplier = 0.8 if mode == "speed" else 1.8 if mode in {"deep", "high", "xhigh", "max"} else 1.0
     per_line = 75 if compact else 200
-    estimate = int((1500 + max(1, int(target_lines)) * per_line) * multiplier)
+    visible_allowance = 1500 + max(1, int(target_lines)) * per_line
+    reasoning_reserve = {
+        "speed": 0,
+        "minimal": 8_000,
+        "low": 16_000,
+        "balanced": 64_000,
+        "medium": 64_000,
+        "deep": 96_000,
+        "high": 96_000,
+        "xhigh": 128_000,
+        "max": 128_000,
+    }.get(mode, 64_000)
+    estimate = visible_allowance + reasoning_reserve
     cap = max(1, int(maximum or estimate))
     return max(1, min(cap, max(1200, estimate)))
+
+
+def grow_chunk_output_budget(current: int, maximum: Optional[int]) -> Optional[int]:
+    """Double a capacity-bound request without exceeding its configured ceiling."""
+    current = max(1, int(current))
+    cap = max(1, int(maximum or current))
+    if current >= cap:
+        return None
+    return min(cap, max(current + 1, current * 2))
 
 
 @contextmanager
@@ -372,6 +392,29 @@ def run_annotation_agent(
         {str(items[index].get("annotation_id") or "") for index in chunk["target_indices"]}
         for chunk in chunks
     ]
+    all_target_ids = {
+        target_id for target_ids in base_chunk_targets for target_id in target_ids
+    }
+
+    def completion_status() -> Dict[str, Any]:
+        pending_items = [
+            item for item in items
+            if str(item.get("annotation_id") or "") in all_target_ids
+            and str(item.get("annotation_id") or "") not in completed_target_ids
+        ]
+        total_targets = len(all_target_ids)
+        completed_targets = total_targets - len(pending_items)
+        return {
+            "total_targets": total_targets,
+            "completed_targets": completed_targets,
+            "pending_targets": len(pending_items),
+            "pending_start_line": (
+                pending_items[0].get("line_no") if pending_items else None
+            ),
+            "pending_end_line": (
+                pending_items[-1].get("line_no") if pending_items else None
+            ),
+        }
 
     def user_progress(include_current: bool = True) -> tuple[int, int]:
         total = len(base_chunk_targets)
@@ -391,7 +434,13 @@ def run_annotation_agent(
         "hard_limit": estimated_limits.hard_limit, "task_profile": task_profile,
     }]
     chunk_adaptations: List[Dict[str, Any]] = []
-    safe_target_limit: Optional[int] = None
+    saved_resume_limit = (memory.get("progress") or {}).get("resume_target_limit")
+    safe_target_limit: Optional[int] = (
+        int(saved_resume_limit)
+        if isinstance(saved_resume_limit, int) and not isinstance(saved_resume_limit, bool)
+        and saved_resume_limit > 0
+        else None
+    )
     prepared_scenes: set[str] = set()
 
     def emit_model_activity(
@@ -480,18 +529,22 @@ def run_annotation_agent(
         )
         return response
 
-    def lower_reasoning_for_empty_retry(exc: EmptyModelResponseError) -> Optional[str]:
-        if (
-            str(getattr(exc, "finish_reason", "") or "").lower() != "stop"
-            or int(getattr(exc, "reasoning_chars", 0) or 0) <= 0
-            or int(getattr(exc, "content_chars", 0) or 0) != 0
-        ):
-            return None
-        config = getattr(provider, "cfg", None)
-        if not isinstance(config, dict):
-            return None
-        current_mode = str(config.get("reasoning_mode") or "").strip().lower()
-        return {"deep": "balanced", "high": "balanced", "balanced": "low", "medium": "low", "low": "speed"}.get(current_mode)
+    def is_reasoning_only_empty(exc: Exception) -> bool:
+        return bool(
+            isinstance(exc, EmptyModelResponseError)
+            and int(getattr(exc, "reasoning_chars", 0) or 0) > 0
+            and int(getattr(exc, "content_chars", 0) or 0) == 0
+        )
+
+    def is_reasoning_only_capacity(exc: Exception) -> bool:
+        if not isinstance(exc, OutputCapacityError):
+            return False
+        records = list(getattr(provider, "request_records", []) or [])
+        record = records[-1] if records else {}
+        if int(record.get("content_chars") or 0) != 0:
+            return False
+        reasoning_used = int(record.get("reasoning_tokens") or record.get("reasoning_chars") or 0)
+        return reasoning_used > 0
 
     def build_metrics() -> Dict[str, Any]:
         stats = getattr(provider, "stats", {}) or {}
@@ -619,7 +672,9 @@ def run_annotation_agent(
             return None
         current = record[0]
         reasoning = current.get("reasoning_chars")
-        content = current.get("content_chars")
+        content = current.get("effective_content_chars")
+        if content is None:
+            content = current.get("content_chars")
         if reasoning is None or content is None:
             return None
         return float(reasoning or 0) / max(1, float(content or 0))
@@ -734,7 +789,13 @@ def run_annotation_agent(
         last_error = None
         protocol_attempts = 0
         empty_retry_attempted = False
-        empty_retry_mode = None
+        reasoning_retry_mode = None
+        output_budget = estimate_chunk_output_budget(
+            len(targets), compact=compact_protocol,
+            reasoning_mode=reasoning_mode,
+            maximum=annotation_max_tokens,
+        )
+        reasoning_capacity_retries = 0
         while True:
             call_user = user
             if protocol_attempts:
@@ -743,7 +804,9 @@ def run_annotation_agent(
                     "请修正内容，保持相同 TARGET，并且只返回 TARGET。"
                 )
             if empty_retry_attempted:
-                call_user += "\n\n上一次模型只输出了思考而没有正文。不要继续分析或复述规则，立即返回最终 JSON。"
+                call_user += "\n\n上一次模型只输出了思考而没有正文。请完成当前分析并提交最终 JSON，不要复述规则。"
+            if reasoning_capacity_retries:
+                call_user += "\n\n上一次推理占满了输出预算。预算已增加，请完成当前分析并返回最终 JSON。"
             previous_records = list(getattr(provider, "request_records", []) or [])
             previous_reasoning_records = list(getattr(provider, "reasoning_records", []) or [])
             prompt_hashes = build_request_prompt_hashes(
@@ -751,12 +814,7 @@ def run_annotation_agent(
             )
             try:
                 request_count += 1
-                output_budget = estimate_chunk_output_budget(
-                    len(targets), compact=compact_protocol,
-                    reasoning_mode=empty_retry_mode or reasoning_mode,
-                    maximum=annotation_max_tokens,
-                )
-                with _temporary_reasoning_mode(provider, empty_retry_mode):
+                with _temporary_reasoning_mode(provider, reasoning_retry_mode):
                     with _temporary_output_budget(provider, output_budget):
                         response = complete_chunk(
                             call_user,
@@ -792,6 +850,22 @@ def run_annotation_agent(
                 last_error = exc
                 if _is_request_deadline(exc):
                     observe_chunk({"success": False, "reason": "deadline"}, scene_id=str(chunk["scene_id"]), chunk_id=chunk_id)
+                    timeout_memory = copy.deepcopy(memory)
+                    timeout_progress = timeout_memory.setdefault("progress", {})
+                    smaller_limit = (
+                        max(5, len(targets) // 2)
+                        if len(targets) > 5
+                        else max(1, len(targets) - 1)
+                    )
+                    previous_limit = timeout_progress.get("resume_target_limit")
+                    if isinstance(previous_limit, int) and previous_limit > 0:
+                        smaller_limit = min(previous_limit, smaller_limit)
+                    timeout_progress["resume_target_limit"] = smaller_limit
+                    checkpoint_store.commit(run_key, _checkpoint(
+                        timeout_memory, run_fingerprint, story_plan, rows_by_id, beats,
+                        director_plan=director_plan,
+                    ))
+                    memory = timeout_memory
                     diagnostics.append({
                         "code": "request_deadline", "level": "warning",
                         "scene_id": str(chunk["scene_id"]), "chunk_id": chunk_id,
@@ -811,7 +885,26 @@ def run_annotation_agent(
                         "diagnostics": diagnostics,
                         "completed_chunks": len(completed), "resumed_chunks": resumed_chunks,
                         "cancelled": False, "timed_out": True,
+                        **completion_status(),
                     }
+                if is_reasoning_only_capacity(exc) and reasoning_capacity_retries < 3:
+                    larger_budget = grow_chunk_output_budget(output_budget, annotation_max_tokens)
+                    if larger_budget is not None:
+                        output_budget = larger_budget
+                        reasoning_capacity_retries += 1
+                        retries += 1
+                        _emit(progress, "recovery", current, total, f"推理占满输出预算，已增加到 {output_budget:,} tokens 后重试")
+                        if model_activity:
+                            emit_model_activity(
+                                {
+                                    "state": "retrying", "reason": "reasoning_capacity",
+                                    "next_output_budget": output_budget,
+                                },
+                                scene_id=str(chunk["scene_id"]), chunk_id=chunk_id,
+                                current=current, total=total, request_index=request_count,
+                                retry_count=retries, subdivision_count=subdivisions,
+                            )
+                        continue
                 if kind == "capacity":
                     observe_chunk({"success": False, "reason": "capacity"}, scene_id=str(chunk["scene_id"]), chunk_id=chunk_id)
                     break
@@ -821,8 +914,7 @@ def run_annotation_agent(
                     ) from exc
                 if isinstance(exc, EmptyModelResponseError):
                     observe_chunk({"success": False, "reason": "empty_response"}, scene_id=str(chunk["scene_id"]), chunk_id=chunk_id)
-                    empty_retry_mode = lower_reasoning_for_empty_retry(exc)
-                    if empty_retry_mode:
+                    if is_reasoning_only_empty(exc):
                         empty_retry_attempted = True
                         retries += 1
                         continue
@@ -934,6 +1026,8 @@ def run_annotation_agent(
         next_progress["completed_target_ids"] = list(dict.fromkeys(
             list(next_progress.get("completed_target_ids") or []) + target_ids
         ))
+        if all_target_ids <= set(next_progress["completed_target_ids"]):
+            next_progress.pop("resume_target_limit", None)
         checkpoint_store.commit(run_key, _checkpoint(
             next_memory, run_fingerprint, story_plan, next_rows, next_beats,
             director_plan=director_plan,
@@ -953,6 +1047,7 @@ def run_annotation_agent(
         "metrics": build_metrics(),
         "diagnostics": diagnostics, "completed_chunks": len(completed),
         "resumed_chunks": resumed_chunks, "cancelled": False, "timed_out": False,
+        **completion_status(),
     }
 
 

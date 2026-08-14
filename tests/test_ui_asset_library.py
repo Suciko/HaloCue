@@ -104,6 +104,13 @@ def test_face_workspace_uses_database_backed_editable_cards():
     assert "grid-template-columns:repeat(4" in css
 
 
+def test_asset_workbench_header_keeps_all_actions_on_one_row():
+    css = (HERE / "css" / "layout.css").read_text(encoding="utf-8")
+
+    assert ".asset-workbench-header{" in css
+    assert "grid-template-columns:minmax(0,1fr) auto auto auto" in css
+
+
 def test_face_workspace_keeps_force_relabel_out_of_the_primary_action():
     html = (HERE / "ui.html").read_text(encoding="utf-8")
 

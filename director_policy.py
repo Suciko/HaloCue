@@ -3,72 +3,8 @@
 
 from __future__ import annotations
 
-import math
 import re
-from collections import defaultdict
 from typing import Any, Dict, Mapping, MutableMapping, Sequence
-
-
-WINDOW_LINES = 12
-HEAVY_FIELDS = frozenset({"fx", "bgfx", "shake"})
-
-# Caps are automatic annotations per 12 dialogue lines. Authored annotations are
-# never removed, but still consume the budget so automation does not pile on top.
-FUNCTION_BUDGETS: Dict[str, Dict[str, int]] = {
-    "establishing": dict(face=2, emo=1, act=1, fx=1, se=2, bg=1, bg_request=1,
-                         place=1, shake=0, bgfx=1, trans=1, move=1, shot=0,
-                         camera=2, beat=0, heavy=1),
-    "entrance": dict(face=3, emo=2, act=2, fx=1, se=2, bg=0, bg_request=0,
-                     place=0, shake=0, bgfx=1, trans=0, move=2, shot=0,
-                     camera=3, beat=1, heavy=1),
-    "exposition": dict(face=3, emo=1, act=1, fx=1, se=1, bg=0, bg_request=0,
-                       place=0, shake=0, bgfx=0, trans=0, move=1, shot=0,
-                       camera=3, beat=1, heavy=1),
-    "dialogue": dict(face=3, emo=1, act=1, fx=0, se=1, bg=0, bg_request=0,
-                     place=0, shake=0, bgfx=0, trans=0, move=1, shot=0,
-                     camera=2, beat=1, heavy=0),
-    "comedy_escalation": dict(face=5, emo=4, act=3, fx=1, se=2, bg=0,
-                              bg_request=0, place=0, shake=1, bgfx=1, trans=0,
-                              move=1, shot=0, camera=4, beat=2, heavy=2),
-    "conflict": dict(face=4, emo=3, act=2, fx=1, se=2, bg=0, bg_request=0,
-                     place=0, shake=1, bgfx=1, trans=0, move=2, shot=0,
-                     camera=4, beat=1, heavy=2),
-    "emotional_turn": dict(face=4, emo=1, act=1, fx=1, se=1, bg=0,
-                           bg_request=0, place=0, shake=0, bgfx=0, trans=0,
-                           move=1, shot=0, camera=3, beat=1, heavy=1),
-    "action": dict(face=4, emo=2, act=4, fx=2, se=4, bg=1, bg_request=1,
-                   place=1, shake=2, bgfx=2, trans=1, move=3, shot=2,
-                   camera=5, beat=1, heavy=3),
-    "closing": dict(face=2, emo=1, act=1, fx=0, se=1, bg=1, bg_request=1,
-                    place=1, shake=0, bgfx=0, trans=1, move=1, shot=0,
-                    camera=2, beat=1, heavy=0),
-}
-
-STORY_MULTIPLIERS = {
-    "main": {"se": 1.25, "bgfx": 1.25, "shake": 1.25, "shot": 1.25},
-    "event": {"emo": 1.25, "act": 1.25, "beat": 1.25},
-    "bond": {"face": 1.25, "camera": 1.25, "emo": 0.75, "act": 0.75,
-             "heavy": 0.6, "bgfx": 0.5, "shake": 0.5},
-}
-
-FIELD_REASONS = {
-    "emo": {"new_stimulus", "emotional_shift", "listener_reaction", "group_sync",
-            "comedy_escalation", "action_impact"},
-    "act": {"new_stimulus", "relation_shift", "emotional_shift", "group_sync",
-            "comedy_escalation", "action_impact"},
-    "fx": {"new_stimulus", "relation_shift", "emotional_shift", "action_impact",
-           "scene_transition"},
-    "bgfx": {"new_stimulus", "comedy_escalation", "action_impact", "scene_transition"},
-    "shake": {"comedy_escalation", "action_impact"},
-    "move": {"new_stimulus", "relation_shift", "action_impact", "scene_transition"},
-    "shot": {"action_impact"},
-    "bg": {"scene_transition", "new_stimulus"},
-    "bg_request": {"scene_transition", "new_stimulus"},
-    "place": {"scene_transition", "new_stimulus"},
-    "trans": {"scene_transition"},
-    "camera": {"new_stimulus", "relation_shift", "emotional_shift", "listener_reaction",
-               "group_sync", "comedy_escalation", "action_impact", "scene_transition"},
-}
 
 
 def _normalized_story_type(value: Any) -> str:
@@ -76,40 +12,17 @@ def _normalized_story_type(value: Any) -> str:
     return value if value in {"main", "event", "bond"} else "other"
 
 
-def _normalized_function(value: Any) -> str:
-    value = str(value or "dialogue").strip().lower()
-    return value if value in FUNCTION_BUDGETS else "dialogue"
-
-
-def direction_budget(scene_type: Any, scene_function: Any) -> Dict[str, int]:
-    """Return the canonical automatic budget for one 12-line window."""
-    function = _normalized_function(scene_function)
-    result = dict(FUNCTION_BUDGETS[function])
-    for field, multiplier in STORY_MULTIPLIERS.get(_normalized_story_type(scene_type), {}).items():
-        result[field] = max(0, int(math.ceil(result.get(field, 0) * multiplier)))
-    return result
-
-
 def prompt_policy(story_type: Any = "auto") -> str:
-    """Render the same policy data as a compact instruction for the model."""
+    """Describe semantic density guidance without numeric directing quotas."""
     story = _normalized_story_type(story_type)
-    rows = []
-    for name in (
-        "establishing", "entrance", "exposition", "dialogue",
-        "comedy_escalation", "conflict", "emotional_turn", "action", "closing",
-    ):
-        budget = direction_budget(story, name)
-        rows.append(
-            f"- {name}: face变化<={budget['face']}, emo<={budget['emo']}, act<={budget['act']}, "
-            f"heavy(fx/bgfx/shake)<={budget['heavy']}, camera<={budget['camera']}, "
-            f"beat<={budget['beat']}"
-        )
     return (
-        "# 最小充分演出预算\n\n"
-        f"以下是每 12 行对白的自动标注上限（当前剧情类型 {story}）；它是上限，不是配额，"
-        "没有证据时应为 0。用户原文已有标注不计入模型任务。\n"
-        + "\n".join(rows)
-        + "\n普通 dialogue 默认安静：大多数行不加 emo/act/fx/bgfx/shake，不逐行换镜头或重复 face。"
+        "# 分层演出密度\n\n"
+        f"当前剧情类型为 {story}。不要按固定次数、比例或每 N 行配额安排演出；"
+        "根据整段反应链决定每个变化，并让安静段、推进段、爆点和余波形成强弱对比。"
+        "用户原文已有标注优先，不要覆盖。\n"
+        "face 是人物持续表演层，必须在每次立绘角色发言时重新判断；它不与 emo/act/fx 等瞬时强调共用稀疏原则。"
+          "普通 dialogue 默认安静，是指大多数行不加 emo/act/fx/bgfx/shake，也不逐行换镜头；不是让人物长时间保持一张脸。"
+          "同一 face 不重复输出；换 face 必须与语气、态度、潜台词或反应阶段相符。"
           "瞬时层必须由 direction.reason 说明新刺激、关系/情绪变化、听者反应、喜剧升级或动作冲击；"
           "continuity=hold 表示保持状态，不能把同一素材再输出一次。"
     )
@@ -140,25 +53,6 @@ def _drop_field(item: MutableMapping[str, Any], field: str, reason: str) -> None
         _record_drop(item, field, value, reason)
 
 
-def _has_evidence(item: Mapping[str, Any], field: str) -> bool:
-    raw_intent = item.get("_director_intent")
-    if not isinstance(raw_intent, Mapping):
-        return True  # compatibility path for the older stateless annotator
-    intent = raw_intent
-    director = _director(item)
-    function = _normalized_function(director.get("scene_function"))
-    reason = str(director.get("reason") or "none")
-    continuity = director.get("continuity")
-    command = continuity.get(field, "none") if isinstance(continuity, Mapping) else "none"
-    if command in {"start", "escalate", "end"}:
-        return True
-    if reason in FIELD_REASONS.get(field, set()):
-        return True
-    if field in {"bg", "bg_request", "place", "trans"} and function in {"establishing", "closing"}:
-        return True
-    return False
-
-
 def _boundary(raw: Any) -> bool:
     value = str(raw or "").strip()
     return (
@@ -172,47 +66,30 @@ def normalize_direction_plan(
     items: Sequence[MutableMapping[str, Any]],
     beats: Sequence[Mapping[str, Any]] = (),
 ) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
-    """Enforce evidence, continuity and budgets across the final direction plan."""
-    counts: Dict[str, int] = defaultdict(int)
+    """Enforce resource-independent evidence and continuity invariants."""
     last_face: Dict[str, str] = {}
+    last_scene_state: Dict[str, str] = {}
+    established_scene_fields: set[str] = set()
     last_camera: tuple[str, ...] | None = None
-    line_in_window = 0
-    window_id = 0
     diagnostics: list[Dict[str, Any]] = []
 
-    def reset_window(*, reset_state: bool = False) -> None:
-        nonlocal counts, last_camera, line_in_window, window_id
-        counts = defaultdict(int)
-        line_in_window = 0
-        window_id += 1
-        if reset_state:
-            last_face.clear()
-            last_camera = None
+    def reset_scene() -> None:
+        nonlocal last_camera
+        last_face.clear()
+        last_camera = None
+        established_scene_fields.clear()
 
     for item in items:
         if item.get("kind") != "line":
             if _boundary(item.get("raw")):
-                reset_window(reset_state=True)
+                reset_scene()
             continue
         director = _director(item)
-        if line_in_window and str(director.get("reason") or "") == "scene_transition":
-            reset_window(reset_state=True)
+        if str(director.get("reason") or "") == "scene_transition":
+            reset_scene()
             item["_camera_reset"] = True
-        if line_in_window >= WINDOW_LINES:
-            reset_window()
-        item["_direction_policy_window"] = window_id
-        line_in_window += 1
-        scene_type = director.get("scene_type") or "other"
-        scene_function = _normalized_function(director.get("scene_function"))
-        budget = direction_budget(scene_type, scene_function)
         explicit = set(item.get("_explicit_direction_fields", ()))
         explicit_directives = set(item.get("_explicit_directives", ()))
-        for directive in set(item.get("_explicit_directive_starts", ())):
-            field = "camera" if directive in {"camera", "camera_hold"} else directive
-            if field in budget:
-                counts[field] += 1
-                if field in HEAVY_FIELDS:
-                    counts["heavy"] += 1
 
         for field in (
             "face", "emo", "act", "fx", "se", "bg", "bg_request", "place",
@@ -228,34 +105,31 @@ def normalize_direction_plan(
                 if not authored and not changed:
                     _drop_field(item, field, "redundant_state_restatement")
                     continue
-                if not authored and last_face.get(who) and not _has_evidence(item, field):
-                    _drop_field(item, field, "missing_direction_evidence")
-                    continue
-                if not authored and counts["face"] >= budget[field]:
-                    _drop_field(item, field, "scene_function_budget")
-                    continue
                 last_face[who] = str(value)
-                if changed:
-                    counts["face"] += 1
                 continue
 
+            if field in {"bg", "place"} and not authored:
+                normalized_value = str(value)
+                if last_scene_state.get(field) == normalized_value:
+                    _drop_field(item, field, "redundant_state_restatement")
+                    continue
+                if field not in established_scene_fields:
+                    # A scene boundary creates a fresh establishing slot. The
+                    # first valid background/place is structural scene state,
+                    # so it must not be discarded merely because the model's
+                    # per-line reason was sparse or inherited.
+                    established_scene_fields.add(field)
+                    last_scene_state[field] = normalized_value
+                    continue
+
             if authored:
-                counts[field] += 1
-                if field in HEAVY_FIELDS:
-                    counts["heavy"] += 1
+                if field in {"bg", "place"}:
+                    established_scene_fields.add(field)
+                    last_scene_state[field] = str(value)
                 continue
-            if field in FIELD_REASONS and not _has_evidence(item, field):
-                _drop_field(item, field, "missing_direction_evidence")
-                continue
-            if counts[field] >= budget.get(field, 0):
-                _drop_field(item, field, "scene_function_budget")
-                continue
-            if field in HEAVY_FIELDS and counts["heavy"] >= budget["heavy"]:
-                _drop_field(item, field, "heavy_effect_budget")
-                continue
-            counts[field] += 1
-            if field in HEAVY_FIELDS:
-                counts["heavy"] += 1
+            if field in {"bg", "place"}:
+                established_scene_fields.add(field)
+                last_scene_state[field] = str(value)
 
         intent = item.get("_director_intent")
         if isinstance(intent, MutableMapping) and explicit_directives & {"camera", "camera_hold"}:
@@ -270,22 +144,27 @@ def normalize_direction_plan(
             if camera == last_camera:
                 intent.pop("visible_characters", None)
                 _record_drop(item, "camera", list(camera), "redundant_camera_restatement")
-            elif not _has_evidence(item, "camera"):
-                intent.pop("visible_characters", None)
-                _record_drop(item, "camera", list(camera), "missing_direction_evidence")
-            elif counts["camera"] >= budget["camera"]:
-                intent.pop("visible_characters", None)
-                _record_drop(item, "camera", list(camera), "scene_function_budget")
             else:
-                counts["camera"] += 1
                 last_camera = camera
                 item.pop("_camera_reset", None)
+        if (
+            last_camera is not None
+            and item.get("_speaker_has_portrait")
+            and str(item.get("who") or "") not in last_camera
+        ):
+            # Official portrait dialogue keeps the speaker visible. A listener
+            # focus may use a two-shot, but it must not turn ordinary portrait
+            # dialogue into an off-screen voice merely because the next row
+            # omitted a new camera decision.
+            if isinstance(intent, MutableMapping):
+                intent.pop("visible_characters", None)
+            item["_camera_reset"] = True
+            last_camera = None
 
     by_id = {
         str(item.get("annotation_id") or ""): item
         for item in items if item.get("kind") == "line"
     }
-    beat_counts: Dict[tuple[int, str], int] = defaultdict(int)
     seen_anchors: set[tuple[str, str, str]] = set()
     kept_beats: list[Dict[str, Any]] = []
     for beat in beats or ():
@@ -293,22 +172,17 @@ def normalize_direction_plan(
         anchor = by_id.get(anchor_id)
         if not anchor:
             continue
-        director = _director(anchor)
-        budget = direction_budget(director.get("scene_type"), director.get("scene_function"))
-        key = (int(anchor.get("_direction_policy_window") or 0), _normalized_function(director.get("scene_function")))
         signature = (anchor_id, str(beat.get("position") or ""), str(beat.get("who") or ""))
-        if signature in seen_anchors or beat_counts[key] >= budget["beat"]:
+        if signature in seen_anchors:
             diagnostics.append({
                 "code": "director_policy_drop", "level": "info", "field": "beat",
-                "source_id": anchor_id, "reason": "scene_function_budget",
+                "source_id": anchor_id, "reason": "duplicate_reaction_beat",
             })
             continue
         seen_anchors.add(signature)
-        beat_counts[key] += 1
         kept_beats.append(dict(beat))
 
     for item in items:
-        item.pop("_direction_policy_window", None)
         for drop in item.get("_direction_drops", []):
             diagnostics.append({
                 "code": "director_policy_drop", "level": "info",

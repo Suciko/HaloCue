@@ -37,6 +37,7 @@ BEAT_REASONS = (
     "listener_reaction",
     "comedy_hold",
     "decision_pause",
+    "physical_reaction",
 )
 
 _CONTINUITY_LAYERS = ("face", "emo", "act", "fx", "bgfx")

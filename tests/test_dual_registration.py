@@ -151,6 +151,27 @@ def test_character_is_registered_in_both_mirrors_with_user_identity(tmp_path):
             assert (directory / "characters" / "92707271" / filename).is_file()
 
 
+def test_character_registration_mirrors_atlas_subdirectory_pages(tmp_path):
+    target = _target(tmp_path)
+    source = _spine(tmp_path / "source", stem="kai_multi")
+    page = source / "pages" / "effects.png"
+    page.parent.mkdir()
+    Image.new("RGBA", (4, 4), "red").save(page)
+    (source / "kai_multi.atlas").write_text(
+        "kai_multi.png\nsize:8,8\n"
+        "pages/effects.png\nsize:4,4\n",
+        encoding="utf-8",
+    )
+
+    result = validate_spine(source, identifier="92707272")
+    assert result.ok
+    register_character(result, target, display_name="Multi", running_probe=lambda: False)
+
+    for directory in (target.project_dir, target.save_dir):
+        installed_page = directory / "characters" / "92707272" / "pages" / "effects.png"
+        assert installed_page.read_bytes() == page.read_bytes()
+
+
 def test_character_same_identifier_rejects_changed_name_before_writing_either_mirror(tmp_path):
     target = _target(tmp_path)
     source = _spine(tmp_path / "source")

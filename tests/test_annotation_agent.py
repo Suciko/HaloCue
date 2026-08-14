@@ -1,5 +1,6 @@
 import copy
 import re
+from contextlib import contextmanager
 
 import pytest
 
@@ -10,6 +11,7 @@ from annotation_agent import (
     apply_review_patches,
     build_review_windows,
     estimate_chunk_output_budget,
+    grow_chunk_output_budget,
     run_annotation_agent,
 )
 from annotation_protocol import validate_review_patches
@@ -22,17 +24,26 @@ FIELDS = ("face", "emo", "act", "fx", "se", "bg", "bg_request", "place", "bgfx",
 
 def test_chunk_output_budget_scales_with_wire_shape_and_reasoning_mode():
     compact = estimate_chunk_output_budget(
-        20, compact=True, reasoning_mode="balanced", maximum=16000,
+        20, compact=True, reasoning_mode="balanced", maximum=384_000,
     )
     full = estimate_chunk_output_budget(
-        20, compact=False, reasoning_mode="balanced", maximum=16000,
+        20, compact=False, reasoning_mode="balanced", maximum=384_000,
     )
     deep = estimate_chunk_output_budget(
-        20, compact=True, reasoning_mode="deep", maximum=16000,
+        20, compact=True, reasoning_mode="deep", maximum=384_000,
     )
 
-    assert 1200 <= compact < full < 16000
-    assert compact < deep <= 16000
+    assert 64_000 < compact < full
+    assert full < deep < 160_000
+
+
+def test_chunk_output_budget_respects_ceiling_and_can_grow_to_auto_ceiling():
+    assert estimate_chunk_output_budget(
+        20, compact=False, reasoning_mode="balanced", maximum=16_000,
+    ) == 16_000
+    assert grow_chunk_output_budget(16_000, 384_000) == 32_000
+    assert grow_chunk_output_budget(256_000, 384_000) == 384_000
+    assert grow_chunk_output_budget(384_000, 384_000) is None
 
 
 def make_items(count, separator_at=None):
@@ -396,7 +407,7 @@ def test_empty_stop_response_retries_once_without_partial_commit(tmp_path):
     assert result["metrics"]["retries"] == 1
 
 
-def test_reasoning_only_empty_response_retries_at_lower_effort_then_restores_mode(tmp_path):
+def test_reasoning_only_empty_response_retries_without_lowering_effort(tmp_path):
     class ReasoningEmptyProvider(RecordingProvider):
         supports_compact_annotation = False
 
@@ -417,9 +428,83 @@ def test_reasoning_only_empty_response_retries_at_lower_effort_then_restores_mod
     provider = ReasoningEmptyProvider()
     result = fixture(tmp_path, provider, count=10)
 
-    assert provider.modes == ["deep", "balanced"]
+    assert provider.modes == ["deep", "deep"]
     assert provider.cfg["reasoning_mode"] == "deep"
     assert result["metrics"]["retries"] == 1
+
+
+def test_reasoning_capacity_increases_budget_without_disabling_thinking(tmp_path):
+    class ReasoningCapacityProvider(RecordingProvider):
+        supports_compact_annotation = False
+
+        def __init__(self):
+            super().__init__()
+            self.cfg = {"reasoning_mode": "balanced"}
+            self.modes = []
+            self.budgets = []
+            self.request_records = []
+
+        @contextmanager
+        def temporary_output_budget(self, maximum):
+            self.budgets.append(maximum)
+            yield
+
+        def complete_json(self, static, volatile, user, schema):
+            self.modes.append(self.cfg["reasoning_mode"])
+            if self.calls == 0:
+                self.calls += 1
+                self.request_records.append({
+                    "finish_reason": "length", "reasoning_tokens": 1875,
+                    "reasoning_chars": 7000, "content_chars": 0,
+                })
+                raise llm.OutputCapacityError("reasoning exhausted output budget")
+            return super().complete_json(static, volatile, user, schema)
+
+    provider = ReasoningCapacityProvider()
+    result = fixture(
+        tmp_path, provider, count=10,
+        reasoning_mode="balanced", annotation_max_tokens=384_000,
+    )
+
+    assert provider.modes == ["balanced", "balanced"]
+    assert provider.budgets == [67_500, 135_000]
+    assert provider.cfg["reasoning_mode"] == "balanced"
+    assert result["metrics"]["retries"] == 1
+    assert result["metrics"]["subdivisions"] == 0
+    assert result["metrics"]["chunk_adaptations"] == []
+
+
+def test_reasoning_capacity_at_ceiling_subdivides_without_disabling_thinking(tmp_path):
+    class ReasoningCapacityProvider(RecordingProvider):
+        supports_compact_annotation = False
+
+        def __init__(self):
+            super().__init__()
+            self.cfg = {"reasoning_mode": "balanced"}
+            self.modes = []
+            self.request_records = []
+
+        def complete_json(self, static, volatile, user, schema):
+            self.modes.append(self.cfg["reasoning_mode"])
+            ids = re.findall(r"\[TARGET ([^\]]+)\]", user)
+            if len(ids) > 5:
+                self.calls += 1
+                self.request_records.append({
+                    "finish_reason": "length", "reasoning_tokens": 16_000,
+                    "reasoning_chars": 40_000, "content_chars": 0,
+                })
+                raise llm.OutputCapacityError("reasoning exhausted output budget")
+            return super().complete_json(static, volatile, user, schema)
+
+    provider = ReasoningCapacityProvider()
+    result = fixture(
+        tmp_path, provider, count=10,
+        reasoning_mode="balanced", annotation_max_tokens=16_000,
+    )
+
+    assert all(mode == "balanced" for mode in provider.modes)
+    assert result["metrics"]["retries"] == 0
+    assert result["metrics"]["subdivisions"] == 1
 
 
 def test_reasoning_mode_is_restored_when_empty_retry_exhausts(tmp_path):
@@ -441,7 +526,7 @@ def test_reasoning_mode_is_restored_when_empty_retry_exhausts(tmp_path):
     with pytest.raises(AnnotationAgentError):
         fixture(tmp_path, provider, count=10)
 
-    assert provider.modes == ["deep", "balanced"]
+    assert provider.modes == ["deep", "deep"]
     assert provider.cfg["reasoning_mode"] == "deep"
 
 
@@ -714,7 +799,39 @@ def test_request_deadline_returns_checkpointed_partial_result(tmp_path):
     assert result["timed_out"] is True
     assert result["completed_chunks"] == 0
     assert result["rows_by_id"] == {}
+    assert result["total_targets"] == 25
+    assert result["completed_targets"] == 0
+    assert result["pending_targets"] == 25
+    assert result["pending_start_line"] == 1
+    assert result["pending_end_line"] == 25
     assert any(item["code"] == "request_deadline" for item in result["diagnostics"])
+
+    checkpoint_path = next(tmp_path.rglob("checkpoint.json"))
+    checkpoint = AnnotationCheckpointStore(tmp_path).load(checkpoint_path.parent.name)
+    assert checkpoint["memory"]["progress"]["resume_target_limit"] == 12
+
+
+def test_resume_after_deadline_uses_smaller_target_batches(tmp_path):
+    class DeadlineProvider(RecordingProvider):
+        def complete_json(self, static, volatile, user, schema):
+            self.requests.append({
+                "target_ids": re.findall(r"\[TARGET ([^\]]+)\]", user),
+            })
+            raise llm.RequestDeadlineError("deadline")
+
+    first_provider = DeadlineProvider()
+    first = fixture(tmp_path, first_provider, count=25)
+    assert first["timed_out"] is True
+    assert len(first_provider.requests[0]["target_ids"]) == 25
+
+    resumed_provider = RecordingProvider()
+    resumed = fixture(tmp_path, resumed_provider, count=25)
+
+    assert resumed["timed_out"] is False
+    assert resumed["completed_targets"] == 25
+    assert resumed["pending_targets"] == 0
+    assert resumed_provider.requests
+    assert max(len(call["target_ids"]) for call in resumed_provider.requests) <= 12
 
 
 def test_model_activity_adds_chunk_context_to_provider_events(tmp_path):

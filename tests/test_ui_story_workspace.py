@@ -370,6 +370,33 @@ const h=createHarness({request:async(p)=>{if(p.includes('q=old'))return new Prom
     assert run_runtime(script) == {"count": 1, "text": "暂无预览新结果"}
 
 
+def test_background_picker_appends_the_next_page_and_updates_progress():
+    script = r'''
+const {createHarness}=require(process.argv[1]);const calls=[];
+const h=createHarness({request:async(p)=>{if(!p.startsWith('/api/backgrounds'))return {profiles:[]};calls.push(p);if(p.includes('offset=80'))return {items:[{name:'BG_081',label:'背景 81'}],total:81,offset:80,limit:80,has_more:false};return {items:Array.from({length:80},(_,i)=>({name:'BG_'+String(i+1).padStart(3,'0'),label:'背景 '+(i+1)})),total:81,offset:0,limit:80,has_more:true};}});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'S'});await h.window.AppRuntime.loadBackgrounds();const first={count:h.get('#bggrid').children.length,status:h.get('#backgroundBrowserStatus').textContent,moreHidden:h.get('#backgroundLoadMore').hidden};await h.window.AppRuntime.loadBackgrounds({append:true});console.log(JSON.stringify({first,final:{count:h.get('#bggrid').children.length,status:h.get('#backgroundBrowserStatus').textContent,moreHidden:h.get('#backgroundLoadMore').hidden},calls}));})();
+'''
+    result = run_runtime(script)
+    assert result["first"] == {"count": 80, "status": "已显示 80 / 81", "moreHidden": False}
+    assert result["final"] == {"count": 81, "status": "已显示 81 / 81", "moreHidden": True}
+    assert "offset=0" in result["calls"][0]
+    assert "offset=80" in result["calls"][1]
+
+
+def test_new_background_search_restarts_from_the_first_page():
+    script = r'''
+const {createHarness}=require(process.argv[1]);const calls=[];
+const h=createHarness({request:async(p)=>{if(!p.startsWith('/api/backgrounds'))return {profiles:[]};calls.push(p);return {items:[{name:p.includes('q=roof')?'BG_Roof':'BG_First'}],total:1,offset:0,limit:80,has_more:false};}});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'S'});await h.window.AppRuntime.loadBackgrounds();h.get('#bgq').value='roof';await h.window.AppRuntime.loadBackgrounds();console.log(JSON.stringify({count:h.get('#bggrid').children.length,name:h.get('#bggrid').children[0].dataset.name,calls}));})();
+'''
+    result = run_runtime(script)
+    assert result["count"] == 1
+    assert result["name"] == "BG_Roof"
+    assert "offset=0" in result["calls"][0]
+    assert "q=roof" in result["calls"][1]
+    assert "offset=0" in result["calls"][1]
+
+
 def test_same_token_old_draft_list_cannot_overwrite_a_newer_view_epoch():
     """A v1 response from a previous same-token attempt must not replace v2."""
     script = r'''

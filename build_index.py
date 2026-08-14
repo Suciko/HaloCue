@@ -153,6 +153,23 @@ def harvest_official_characters(*, cache_root, catalog_path, observed_identifier
     return select_native_characters(rows, observed_identifiers)
 
 
+def keep_known_character_observations(
+    observations: dict,
+    characters: list[dict],
+) -> dict:
+    """Keep AAP face evidence only for characters with a real catalog row."""
+    known = {
+        str(row.get("identifier") or "").strip()
+        for row in characters
+    }
+    known.discard("")
+    return {
+        str(identifier): value
+        for identifier, value in observations.items()
+        if str(identifier).strip() in known
+    }
+
+
 # AA 内置角色（韩文名那批）的立绘在 Addressables 包里，磁盘上没有 .atlas 可读。
 # 退而求其次：从历史工程里统计每个标识实际用过哪些 faceId —— 用过的必然存在。
 # 0~6 是蔚蓝档案标准表情位，语义固定；7 以上是各角色自己的追加差分，无法命名。
@@ -340,6 +357,10 @@ def main():
     # the same opaque identifier.
     custom_ids = {str(row.get("identifier")) for row in chars}
     chars.extend(row for row in official if str(row["identifier"]) not in custom_ids)
+    faces_used = keep_known_character_observations(faces_used, chars)
+    face_capabilities = keep_known_character_observations(
+        face_capabilities, chars
+    )
 
     idx = {
         "_source": a.data,

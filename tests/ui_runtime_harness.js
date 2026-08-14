@@ -49,6 +49,7 @@ function createHarness(config) {
       querySelector() {
         if (this.selector === '#mBrowse') return get('#closeBrowse');
         if (this.selector === '#mEdit') return get('#closeEdit');
+        if (this.selector === '#mApproveAll') return get('#approveAllConfirm');
         return node();
       },
       insertRow() { return node(); },
@@ -67,21 +68,25 @@ function createHarness(config) {
   function get(selector) { return nodes[selector] || (nodes[selector] = node(selector)); }
   [
     '#path', '#proj', '#s1info', '#s2', '#s3', '#s4', '#cast', '#s2sum', '#bgq', '#bgready',
-    '#bggrid', '#go', '#hint', '#backgroundRequestsPanel', '#backgroundRequestList',
+    '#bggrid', '#backgroundBrowserStatus', '#backgroundLoadMore', '#go', '#hint', '#backgroundRequestsPanel', '#backgroundRequestList',
     '#continueBackgroundBuild', '#backgroundContinueHint', '#rvDraftSelect', '#rvStatus',
     '#rvInstall', '#rvCompile', '#rvApproveAll', '#rvValidate', '#rvCards', '#storyPlayer',
     '#rvReviewFilters', '#rvFilterAll', '#rvFilterPending', '#rvFilterBlocking', '#rvFilterDirection',
     '#rvCardJump', '#rvJump', '#rvFilterStatus', '#rvSelectionLabel', '#rvCardToolbar', '#reviewPhase',
-    '#log', '#goAnnotate', '#bgsel', '#modelProfileSelect', '#modelProfileId', '#modelProfileName',
+    '#log', '#goAnnotate', '#generationFailure', '#generationFailureTitle', '#generationFailureMessage',
+    '#generationFailureAction', '#generationFailureTechnical', '#generationFailureRetry', '#generationFailureDraft',
+    '#bgsel', '#modelProfileSelect', '#modelProfileId', '#modelProfileName',
     '#modelProvider', '#modelBaseUrl', '#modelName', '#modelMaxTokens', '#modelMaxTokensHint', '#modelRestoreMaxTokens', '#modelVision',
     '#modelApiKey', '#modelSaveKey', '#modelStatus', '#modelOptions', '#modelDiscoveryList', '#welcomePanel', '#recentStories',
     '#storyContextBar', '#storyContextName', '#storyContextMeta', '#storyContextAction', '#storyHistoryAction', '#storyContextStatus',
     '#storyDraftStatus', '#storySaveStatus', '#storyReviewStatus', '#storyCompileStatus', '#storyInstallStatus',
     '#storyLoadRetry', '#storyAssetStrip', '#stat',
-    '#readyAA', '#readyDatabase', '#readyModel', '#mBrowse', '#mEdit', '#closeBrowse', '#closeEdit',
+    '#aaSetupGate', '#aaSetupGateMessage', '#chooseStoryButton', '#analyzeStoryButton',
+    '#readyAA', '#readyDatabase', '#readyModel', '#mBrowse', '#mEdit', '#mApproveAll', '#closeBrowse', '#closeEdit',
+    '#approveAllConfirm', '#approveAllCancel', '#approveAllStatus',
     '#browseTitle', '#bdir', '#chooseCurrentDir', '#blist', '#editTitle', '#editWho', '#editText',
     '#editFace', '#editEmo', '#editAct', '#editFx', '#install', '#settingsDrawer', '#settingsBackdrop',
-    '#helpDrawer', '#helpBackdrop', '#view-create'
+    '#helpDrawer', '#helpBackdrop', '#view-create', '#modelSettings'
   ].forEach(get);
   get('input[name=anno]:checked').value = 'no';
 
@@ -148,9 +153,13 @@ function createHarness(config) {
   if (!window.ModelSettings) vm.runInNewContext(fs.readFileSync(path.join(root, 'model.js'), 'utf8'), sandbox);
   if (config.storyPicker) vm.runInNewContext(fs.readFileSync(path.join(root, 'story_picker.js'), 'utf8'), sandbox);
   vm.runInNewContext(fs.readFileSync(path.join(root, 'app.js'), 'utf8'), sandbox);
+  if (config.aaReady !== false && window.AppRuntime && window.AppRuntime.applyAAReadiness) {
+    window.AppRuntime.applyAAReadiness({connected: true, program: {status: 'recognized'}});
+  }
 
   return {
     window: window, document: document, nodes: nodes, storage: storage, get: get,
+    getActiveElement() { return activeElement; },
     clickAction(action, trigger) {
       const target = trigger || node(); target.dataset.action = action;
       return document.dispatch('click', {target: target});

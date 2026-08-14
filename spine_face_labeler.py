@@ -14,6 +14,12 @@ from typing import Callable, Iterable, Mapping, Sequence
 
 from PIL import Image, ImageDraw, ImageFont
 
+import assetdb
+from face_semantics import (
+    CONTROLLED_BEAT_FIT,
+    compact_label_cache,
+    normalize_semantic_payload,
+)
 from spine_face_renderer import RenderedFace
 
 
@@ -35,12 +41,15 @@ _EDITABLE_FACE_FIELDS = frozenset({
     "beat_fit",
     "hold_policy",
     "special_tags",
+    "search_terms_cn",
+    "near_duplicate_of",
     "avoid_when_cn",
 })
 
 _SEMANTIC_FIELDS = frozenset({
     "emotion_family", "intensity", "expression_class", "beat_fit",
-    "hold_policy", "special_tags", "avoid_when_cn",
+    "hold_policy", "special_tags", "search_terms_cn", "near_duplicate_of",
+    "avoid_when_cn",
 })
 _EMOTION_FAMILIES = frozenset({
     "neutral", "joy", "surprise_fear", "embarrassment",
@@ -48,6 +57,10 @@ _EMOTION_FAMILIES = frozenset({
 })
 _EXPRESSION_CLASSES = frozenset({"base", "accent", "peak", "special"})
 _HOLD_POLICIES = frozenset({"hold", "short", "flash"})
+_VISUAL_USAGE_MARKERS = (
+    "眼睛", "眼神", "睁眼", "闭眼", "眉毛", "眉头", "嘴巴", "嘴角",
+    "脸红", "泛红", "泪水", "流泪", "冷汗", "画面中", "图中",
+)
 
 
 VISION_SCHEMA = {
@@ -65,9 +78,12 @@ VISION_SCHEMA = {
                     "emotion_family": {"type": "string", "enum": sorted(_EMOTION_FAMILIES)},
                     "intensity": {"type": "integer", "minimum": 0, "maximum": 3},
                     "expression_class": {"type": "string", "enum": sorted(_EXPRESSION_CLASSES)},
-                    "beat_fit": {"type": "array", "items": {"type": "string"}},
+                    "beat_fit": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": sorted(CONTROLLED_BEAT_FIT)},
+                    },
                     "hold_policy": {"type": "string", "enum": sorted(_HOLD_POLICIES)},
-                    "special_tags": {"type": "array", "items": {"type": "string"}},
+                    "search_terms_cn": {"type": "array", "items": {"type": "string"}},
                     "avoid_when_cn": {"type": "string"},
                 },
                 "required": [
@@ -149,12 +165,14 @@ def _valid_vision_item(item: dict, required: set[str]) -> bool:
     hold_policy = item.get("hold_policy")
     if hold_policy is not None and hold_policy not in _HOLD_POLICIES:
         return False
-    for field in ("beat_fit", "special_tags"):
+    for field in ("beat_fit", "search_terms_cn"):
         value = item.get(field)
         if value is not None and (
             not isinstance(value, list) or any(not isinstance(entry, str) for entry in value)
         ):
             return False
+    if any(value not in CONTROLLED_BEAT_FIT for value in item.get("beat_fit") or []):
+        return False
     if "avoid_when_cn" in item and not isinstance(item["avoid_when_cn"], str):
         return False
     return True
@@ -168,20 +186,45 @@ primary_emotion 使用简洁自然的中文，例如“轻微微笑”“不满�
 usage_hint_cn 写成一句简短的使用语境，例如适合怎样的台词、语气、反应或情绪阶段。
 使用语境不是关键词触发规则，不得用是否脸红、是否流泪等视觉现象决定是否使用。
 不同 face_id 可以拥有完全相同的情绪和使用语境，不要为了区分编号强行制造差异。
+如果输出结构允许，还要填写：emotion_family（七类情绪族）、intensity（0-3）、
+expression_class（base/accent/peak/special）、beat_fit（适合的剧情节拍）、
+hold_policy（hold/short/flash）、special_tags 和 avoid_when_cn。
+这些字段描述剧情使用方式，不得改写成眉眼嘴等视觉零件清单。
 置信度范围为 0 到 1；确实模糊时降低置信度，不要硬猜。"""
+
+
+_SYSTEM += """
+跨批次标注同一角色时，CHARACTER_LABEL_CACHE 是已经确认的同角色表情摘要。
+必须比较缓存与当前图片，找出当前表情可见的最小语义差异，并让使用语境足以区分实际用途；不得仅换同义词制造区别。
+如果画面确实等价，可以保持相同语义，但不得根据编号臆造差别。
+beat_fit 只能使用给定枚举；自由中文检索词只能写入 search_terms_cn。
+"""
+
+
+def _needs_single_face_review(record: Mapping, confidence_threshold: float) -> bool:
+    if record.get("failed"):
+        return True
+    if float(record.get("confidence") or 0.0) < confidence_threshold:
+        return True
+    emotion = str(record.get("primary_emotion") or "").strip()
+    usage = usage_hint_cn(record)
+    if not emotion or len(usage) < 4:
+        return True
+    return any(marker in usage for marker in _VISUAL_USAGE_MARKERS)
 
 
 def make_vision_sheet(
     faces: Sequence[RenderedFace],
     *,
     cell_size: int = 384,
-    columns: int = 3,
+    columns: int = 2,
 ) -> tuple[bytes, list[str]]:
     """Build one fixed 3x3 comparison sheet with readable face IDs."""
-    if columns != 3:
-        raise ValueError("vision sheets must use exactly three columns")
-    if not 1 <= len(faces) <= 9:
-        raise ValueError("vision sheets must contain between 1 and 9 faces")
+    if columns not in (2, 3):
+        raise ValueError("vision sheets must use two or three columns")
+    max_faces = 4 if columns == 2 else 9
+    if not 1 <= len(faces) <= max_faces:
+        raise ValueError(f"vision sheets must contain between 1 and {max_faces} faces")
     if cell_size < 120:
         raise ValueError("vision sheet cells must be at least 120 pixels")
     ordered = sorted(faces, key=lambda face: face.face_id)
@@ -232,10 +275,11 @@ def label_face_images(
     provider,
     faces: Sequence[RenderedFace],
     *,
-    batch_size: int = 9,
+    batch_size: int = 4,
     batch_workers: int = 2,
     confidence_threshold: float = 0.6,
     semantic_hints: dict[str, dict] | None = None,
+    comparison_memory: bool = False,
     max_attempts: int = 3,
     progress: Callable[[int, int, int, int], None] | None = None,
 ) -> list[dict]:
@@ -261,8 +305,10 @@ def label_face_images(
     }
     required = set(VISION_SCHEMA["properties"]["items"]["items"]["required"])
 
-    def request_batch(batch: Sequence[RenderedFace]) -> list[dict]:
-        sheet, expected = make_vision_sheet(batch)
+    def request_batch(
+        batch: Sequence[RenderedFace], prior_records: Sequence[Mapping] = ()
+    ) -> list[dict]:
+        sheet, expected = make_vision_sheet(batch, columns=2 if len(batch) <= 4 else 3)
         images = [("编号九宫格:" + ",".join(expected), sheet)]
         hint_lines = []
         for face in batch:
@@ -284,6 +330,13 @@ def label_face_images(
             user += (
                 "\n以下只是制作者命名提供的弱提示；与画面冲突时必须以画面为准：\n"
                 + "\n".join(hint_lines)
+            )
+        cache = compact_label_cache(prior_records)
+        if comparison_memory and cache:
+            user += (
+                "\n\nCHARACTER_LABEL_CACHE（同一角色此前已完成的表情，仅用于比较和避免语义重复）：\n"
+                + cache
+                + "\n请明确区分当前图片与缓存中最接近的表情；不得只改同义词，也不得编造画面中不存在的差异。"
             )
         last_error: Exception | None = None
         items: list[dict] | None = None
@@ -339,40 +392,82 @@ def label_face_images(
     completed_batches = 0
     reviewed = 0
     state_lock = threading.Lock()
-    batch_results: dict[int, list[dict]] = {}
-    with ThreadPoolExecutor(max_workers=min(2, batch_workers, len(batches))) as executor:
-        future_to_index = {
-            executor.submit(request_batch, batch): index
-            for index, batch in enumerate(batches)
-        }
-        for future in as_completed(future_to_index):
-            index = future_to_index[future]
-            records = future.result()
-            batch_results[index] = records
-            with state_lock:
-                completed += len(records)
-                completed_batches += 1
-                if progress:
-                    progress(completed, len(ordered), completed_batches, reviewed)
+    if comparison_memory:
+        results = []
+        for batch in batches:
+            records = request_batch(batch, results)
+            results.extend(records)
+            completed += len(records)
+            completed_batches += 1
+            if progress:
+                progress(completed, len(ordered), completed_batches, reviewed)
+    else:
+        batch_results: dict[int, list[dict]] = {}
+        with ThreadPoolExecutor(max_workers=min(2, batch_workers, len(batches))) as executor:
+            future_to_index = {
+                executor.submit(request_batch, batch): index
+                for index, batch in enumerate(batches)
+            }
+            for future in as_completed(future_to_index):
+                index = future_to_index[future]
+                records = future.result()
+                batch_results[index] = records
+                with state_lock:
+                    completed += len(records)
+                    completed_batches += 1
+                    if progress:
+                        progress(completed, len(ordered), completed_batches, reviewed)
+        results = [
+            record
+            for index in range(len(batches))
+            for record in batch_results[index]
+        ]
 
-    results = [
-        record
-        for index in range(len(batches))
-        for record in batch_results[index]
-    ]
+    duplicate_of = {}
+    if comparison_memory:
+        seen_semantics = {}
+        for record in results:
+            if record.get("failed"):
+                continue
+            key = (
+                str(record.get("primary_emotion") or "").strip().casefold(),
+                usage_hint_cn(record).casefold(),
+            )
+            if key in seen_semantics:
+                duplicate_of[str(record["face_id"])] = seen_semantics[key]
+            else:
+                seen_semantics[key] = str(record["face_id"])
     face_by_id = {face.face_id: face for face in ordered}
     for index, record in enumerate(list(results)):
         face_id = str(record["face_id"])
         if record.get("failed") and face_id in initial_singletons:
             continue
         if (
-            not record.get("failed")
-            and float(record.get("confidence") or 0.0) >= confidence_threshold
+            not _needs_single_face_review(record, confidence_threshold)
+            and face_id not in duplicate_of
         ):
             continue
-        reviewed_record = request_batch([face_by_id[face_id]])[0]
+        comparison = [
+            other for other in results if str(other.get("face_id")) != face_id
+        ] if comparison_memory else []
+        reviewed_record = request_batch([face_by_id[face_id]], comparison)[0]
         if record.get("failed") or not reviewed_record.get("failed"):
             results[index] = reviewed_record
+        if face_id in duplicate_of and not reviewed_record.get("failed"):
+            reference = duplicate_of[face_id]
+            reference_record = next(
+                (item for item in results if str(item.get("face_id")) == reference), {}
+            )
+            reviewed_key = (
+                str(reviewed_record.get("primary_emotion") or "").strip().casefold(),
+                usage_hint_cn(reviewed_record).casefold(),
+            )
+            reference_key = (
+                str(reference_record.get("primary_emotion") or "").strip().casefold(),
+                usage_hint_cn(reference_record).casefold(),
+            )
+            if reviewed_key == reference_key:
+                results[index]["near_duplicate_of"] = reference
         reviewed += 1
         if progress:
             progress(completed, len(ordered), completed_batches, reviewed)
@@ -394,7 +489,7 @@ def persist_visual_face_labels(
     outfit = str(outfit_key or "")
     model = str(model)
     source = f"vision:{model}"
-    records = list(labels)
+    records = [normalize_semantic_payload(item) for item in labels]
     con.execute(
         """
         INSERT OR IGNORE INTO character_variant(ident,spine_signature,outfit_key,spine)
@@ -582,7 +677,7 @@ def _visual_label_record(row) -> dict:
         secondary = []
     hint = str(row["description_cn"] or "")
     try:
-        semantic = _safe_json_object(row["semantic_json"])
+        semantic = normalize_semantic_payload(_safe_json_object(row["semantic_json"]))
     except (KeyError, TypeError):
         semantic = {}
     ai = {
@@ -612,7 +707,7 @@ def _visual_label_record(row) -> dict:
     if has_manual_hint:
         manual["usage_hint_cn"] = manual_hint
         manual["description_cn"] = manual_hint
-    effective = {**ai, **manual}
+    effective = normalize_semantic_payload({**ai, **manual})
     effective_hint = manual_hint if has_manual_hint else hint
     effective["usage_hint_cn"] = effective_hint
     effective["description_cn"] = effective_hint
@@ -640,13 +735,11 @@ def list_visual_face_labels(
     outfit_key: str,
 ) -> list[dict]:
     """Return one current, editable visual record for every face ID."""
-    rows = con.execute(
-        """
-        SELECT * FROM face_visual_label
-        WHERE ident=? AND spine_signature=? AND outfit_key=?
-        ORDER BY face_id, updated_at DESC, confidence DESC, model
-        """,
-        (str(ident), str(spine_signature or ""), str(outfit_key or "")),
+    rows = assetdb.effective_visual_label_rows(
+        con,
+        ident=str(ident),
+        spine_signature=str(spine_signature or ""),
+        outfit_key=str(outfit_key or ""),
     )
     records: dict[str, dict] = {}
     for row in rows:
@@ -678,12 +771,18 @@ def _validate_manual_patch(patch: dict) -> dict:
             if not isinstance(value, bool):
                 raise ValueError(f"标注字段 {key} 必须是布尔值")
             clean[key] = value
-        elif key == "secondary_emotions":
+        elif key in {"secondary_emotions", "beat_fit", "special_tags", "search_terms_cn"}:
             if not isinstance(value, list):
-                raise ValueError("标注字段 secondary_emotions 必须是数组")
+                raise ValueError(f"标注字段 {key} 必须是数组")
             clean[key] = [str(item).strip() for item in value if str(item).strip()]
         else:
             clean[key] = str(value).strip()
+    if any(
+        value not in CONTROLLED_BEAT_FIT
+        for value in clean.get("beat_fit") or []
+        if value is not None
+    ):
+        raise ValueError("标注字段 beat_fit 包含未受控的节拍值")
     return clean
 
 

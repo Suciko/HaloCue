@@ -111,10 +111,42 @@ def _catalog_entries(encoded: str) -> dict[int, tuple[int, ...]]:
     return _catalog_entries_raw(base64.b64decode(encoded))
 
 
+def _catalog_entry_rows_raw(raw: bytes) -> tuple[tuple[int, ...], ...]:
+    count = _u32(raw, 0)
+    expected = 4 + count * 28
+    if len(raw) < expected:
+        raise ValueError("truncated Addressables entry table")
+    return tuple(
+        struct.unpack_from("<7i", raw, 4 + index * 28)
+        for index in range(count)
+    )
+
+
 def _catalog_entries_raw(raw: bytes) -> dict[int, tuple[int, ...]]:
-    count = (len(raw) - 4) // 28
-    rows = (struct.unpack_from("<7i", raw, 4 + index * 28) for index in range(count))
-    return {row[0]: row for row in rows}
+    return {row[0]: row for row in _catalog_entry_rows_raw(raw)}
+
+
+def _catalog_buckets_raw(raw: bytes) -> tuple[tuple[int, ...], ...]:
+    """Decode key buckets whose entries are ResourceLocation row indexes."""
+    count = _u32(raw, 0)
+    offset = 4
+    buckets: list[tuple[int, ...]] = []
+    for _ in range(count):
+        if offset + 8 > len(raw):
+            raise ValueError("truncated Addressables bucket table")
+        # The first value points into m_KeyDataString. It is not needed when
+        # resolving a ResourceLocation's already-known dependency key index.
+        _key_data_offset = _i32(raw, offset)
+        entry_count = _i32(raw, offset + 4)
+        offset += 8
+        if entry_count < 0 or offset + entry_count * 4 > len(raw):
+            raise ValueError("invalid Addressables bucket entry count")
+        buckets.append(tuple(
+            _i32(raw, offset + index * 4)
+            for index in range(entry_count)
+        ))
+        offset += entry_count * 4
+    return tuple(buckets)
 
 
 def _bundle_options(encoded: str, offset: int) -> dict:
@@ -149,22 +181,45 @@ def catalog_bundle_locations(
     """Map selected Addressables internal IDs to local cache bundles."""
     catalog = json.loads(Path(catalog_path).read_text(encoding="utf-8-sig"))
     internal_ids = catalog["m_InternalIds"]
-    entries = _catalog_entries_raw(
+    entry_rows = _catalog_entry_rows_raw(
         base64.b64decode(catalog["m_EntryDataString"])
     )
+    entries = {row[0]: row for row in entry_rows}
     extra_data = base64.b64decode(catalog["m_ExtraDataString"])
+    bucket_data = catalog.get("m_BucketDataString")
+    buckets = (
+        _catalog_buckets_raw(base64.b64decode(bucket_data))
+        if bucket_data else ()
+    )
     selected: list[CatalogBundleLocation] = []
     seen: set[tuple[str, str]] = set()
     for internal_index, internal_id in enumerate(internal_ids):
         if not internal_predicate(internal_id):
             continue
-        entry = entries[internal_index]
-        bundle_index = entry[2]
-        if bundle_index >= 0:
-            bundle_entry = entries[bundle_index]
+        entry = entries.get(internal_index)
+        if entry is None:
+            continue
+        dependency_key_index = entry[2]
+        bundle_candidates: list[tuple[int, ...]] = []
+        if 0 <= dependency_key_index < len(buckets):
+            for location_index in buckets[dependency_key_index]:
+                if 0 <= location_index < len(entry_rows):
+                    candidate = entry_rows[location_index]
+                    candidate_id = str(internal_ids[candidate[0]])
+                    if candidate_id.casefold().endswith(".bundle"):
+                        bundle_candidates.append(candidate)
+        elif dependency_key_index >= 0:
+            # Compatibility with early local fixtures and catalogs where the
+            # dependency field directly referenced an internal ID.
+            candidate = entries.get(dependency_key_index)
+            if candidate is not None:
+                bundle_candidates.append(candidate)
         elif internal_id.casefold().endswith(".bundle"):
-            bundle_entry = entry
-        else:
+            bundle_candidates.append(entry)
+        if not bundle_candidates:
+            continue
+        bundle_entry = bundle_candidates[0]
+        if bundle_entry[4] < 0:
             continue
         options = _bundle_options_raw(extra_data, bundle_entry[4])
         bundle_name = str(options["m_BundleName"])

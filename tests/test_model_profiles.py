@@ -1,6 +1,7 @@
 import json
 
 import pytest
+import model_profiles
 
 from model_profiles import (
     ModelProfileError,
@@ -61,6 +62,20 @@ def test_windows_credentials_round_trip_without_returning_encoded_bytes():
     )
     store.delete("AA-AutoWriter/profile-1")
     assert store.read("AA-AutoWriter/profile-1") is None
+
+
+def test_windows_credentials_use_ctypes_backend_by_default(monkeypatch):
+    api = FakeWinCred()
+    monkeypatch.setattr(model_profiles.os, "name", "nt")
+    monkeypatch.setattr(
+        model_profiles,
+        "_CtypesWindowsCredentials",
+        lambda: api,
+    )
+
+    store = WindowsCredentialStore()
+
+    assert store._api is api
 
 
 def test_saved_profile_keeps_secret_only_in_credential_store(tmp_path):

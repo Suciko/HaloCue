@@ -116,7 +116,7 @@ def _state_properties() -> Dict[str, Any]:
     }
 
 
-def _direction_schema() -> Dict[str, Any]:
+def _direction_schema(*, annotation_aliases: bool = False) -> Dict[str, Any]:
     properties: Dict[str, Any] = {
         "scene_type": {"type": "string", "enum": list(SCENE_TYPES)},
         "scene_function": {"type": "string", "enum": list(SCENE_FUNCTIONS)},
@@ -137,6 +137,10 @@ def _direction_schema() -> Dict[str, Any]:
         },
         "reason": {"type": "string", "enum": list(DIRECTION_REASONS)},
     }
+    if annotation_aliases:
+        for name in ANNOTATION_FIELDS:
+            field_type = "boolean" if name == "shake" else "integer" if name == "move" else "string"
+            properties[name] = {"type": field_type}
     return {"type": "object", "properties": properties, "additionalProperties": False}
 
 
@@ -243,7 +247,20 @@ def build_compact_chunk_schema(target_count: int, target_ids: Sequence[str] = ()
     for name in ANNOTATION_FIELDS:
         field_type = "boolean" if name == "shake" else "integer" if name == "move" else "string"
         row_properties[name] = {"type": field_type}
-    row_properties["d"] = _direction_schema()
+    direction_properties = _direction_schema()["properties"]
+    for name in DIRECTION_FIELDS:
+        row_properties[name] = direction_properties[name]
+    # Some schema-capable providers occasionally put the global state patch
+    # beside the first compact line. Root state_delta is the canonical final
+    # memory snapshot; the misplaced line copy only fills fields it omits.
+    row_properties["state_delta"] = {
+        "type": "object", "properties": _state_properties(),
+        "additionalProperties": False,
+    }
+    # Some schema-capable models occasionally nest a valid line annotation in
+    # compact `d`. Accept only known annotation names here; expansion below
+    # restores their canonical row-level location before protocol validation.
+    row_properties["d"] = _direction_schema(annotation_aliases=True)
     row_schema = {
         "type": "object", "properties": row_properties,
         "required": ["i"], "additionalProperties": False,
@@ -282,11 +299,15 @@ def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, 
     lines = response.get("lines")
     if not isinstance(lines, list):
         raise ChunkProtocolError("invalid_lines", "lines 必须是数组")
+    root_state = dict(_require_dict(
+        response.get("state_delta", {}), "invalid_state_delta", "state_delta 必须是对象",
+    ))
     expanded_by_index: Dict[int, Dict[str, Any]] = {}
     seen = set()
     director_intents: Dict[str, Dict[str, Any]] = {}
     for compact in lines:
         compact = _require_dict(compact, "invalid_line", "compact line 必须是对象")
+        compact = dict(compact)
         index = compact.get("i")
         if isinstance(index, bool) or not isinstance(index, int):
             raise ChunkProtocolError("invalid_line", "compact line.i 必须是整数")
@@ -295,10 +316,47 @@ def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, 
         if index in seen:
             raise ChunkProtocolError("duplicate_target", f"目标行重复: {index}")
         seen.add(index)
-        unknown = set(compact) - ({"i", "d"} | set(ANNOTATION_FIELDS))
+        line_state = compact.pop("state_delta", None)
+        if line_state is not None:
+            line_state = _require_dict(
+                line_state, "invalid_state_delta", "compact line.state_delta 必须是对象",
+            )
+            for name, value in line_state.items():
+                if name not in root_state:
+                    root_state[name] = value
+        unknown = set(compact) - ({"i", "d"} | set(ANNOTATION_FIELDS) | DIRECTION_FIELDS)
         if unknown:
             raise ChunkProtocolError("invalid_line", f"compact line 包含未知字段: {sorted(unknown)}")
-        direction_patch = _validate_direction_wire(compact.get("d", {}), "compact line.d")
+        raw_direction = _require_dict(
+            compact.get("d", {}), "invalid_line", "compact line.d must be an object",
+        )
+        raw_direction = dict(raw_direction)
+        for name in DIRECTION_FIELDS:
+            if name not in compact:
+                continue
+            value = compact[name]
+            if name in raw_direction and raw_direction[name] != value:
+                raise ChunkProtocolError(
+                    "invalid_line",
+                    f"compact line.{name} 与 compact line.d.{name} 冲突",
+                )
+            raw_direction[name] = value
+        direction_aliases = {
+            name: raw_direction[name]
+            for name in ANNOTATION_FIELDS
+            if name in raw_direction
+        }
+        for name, value in direction_aliases.items():
+            if name in compact and compact[name] != value:
+                raise ChunkProtocolError(
+                    "invalid_line",
+                    f"compact line.{name} 与 compact line.d.{name} 冲突",
+                )
+            compact[name] = value
+        direction_patch = _validate_direction_wire(
+            {name: value for name, value in raw_direction.items() if name not in ANNOTATION_FIELDS},
+            "compact line.d",
+        )
         target = targets[index - 1]
         row = {
             "source_id": str(target.get("annotation_id") or ""),
@@ -358,7 +416,7 @@ def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, 
         expanded_events.append(expanded_event)
     return _ExpandedChunkResponse({
         "lines": expanded,
-        "state_delta": response.get("state_delta", {}),
+        "state_delta": root_state,
         "memory_events": expanded_events,
         **({"beats": expanded_beats} if "beats" in response else {}),
     }, director_intents=director_intents)

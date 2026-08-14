@@ -196,53 +196,23 @@ def test_environment_report_accepts_aa_install(tmp_path, monkeypatch):
     assert report["aa"]["saves"] == str(result.saves)
 
 
-def test_launcher_persists_all_paths_discovered_from_executable(
-    tmp_path,
-    monkeypatch,
-):
-    result = fake_discovery_result(tmp_path)
-    disconnected = {
+def test_launcher_opens_the_app_without_forcing_an_aa_picker(monkeypatch):
+    report = {
         "ok": False,
+        "startup_ready": True,
         "aa": {"connected": False, "path": ""},
     }
-    connected = {
-        "ok": True,
-        "aa": {
-            "connected": True,
-            "path": str(result.data),
-            "executable": str(result.executable),
-            "resource_cache": str(result.resource_cache),
-        },
-    }
-    reports = iter((disconnected, connected))
-    saved = []
-    monkeypatch.setattr(
-        launcher,
-        "build_environment_report",
-        lambda *args, **kwargs: next(reports),
-    )
+    opened = []
+    monkeypatch.setattr(launcher, "build_environment_report", lambda *a, **k: report)
     monkeypatch.setattr(
         launcher,
         "_choose_aa_install",
-        lambda: result.executable,
+        lambda: (_ for _ in ()).throw(AssertionError("startup must not open a picker")),
     )
-    monkeypatch.setattr(
-        launcher,
-        "_save_aa_path",
-        lambda data, **kwargs: saved.append((data, kwargs)),
-    )
-    monkeypatch.setattr(launcher, "_start_application", lambda data: 0)
+    monkeypatch.setattr(launcher, "_start_application", lambda data: opened.append(data) or 0)
 
     assert launcher.main([]) == 0
-    assert saved == [
-        (
-            result.data,
-            {
-                "executable": result.executable,
-                "cache_dir": result.resource_cache,
-            },
-        )
-    ]
+    assert opened == [None]
 
 
 def test_check_json_works_from_another_current_directory(tmp_path):

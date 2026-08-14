@@ -68,9 +68,10 @@ class RunChunkController:
             return self._limits
         ratio = float(ratio_value)
         if ratio > 6:
+            # A large reasoning/content ratio is a model-effort signal, not
+            # evidence that the request exceeded context or output capacity.
+            # Keep the chunk size stable; capacity failures are handled above.
             self._successes = 0
-            target = max(5, self._limits.target - 5)
-            self._limits = ChunkLimits(target, min(self._limits.soft_limit, target + 4), min(self._limits.hard_limit, target + 8))
             self.last_reason = "high_reasoning_ratio"
             return self._limits
         self._successes += 1

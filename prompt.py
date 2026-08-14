@@ -34,17 +34,23 @@ shot 不是开枪特效，也不是战斗气氛。**只有当前画面中某个�
 一律填空串。宁可漏掉，绝不能误标。
 """
 
-WAIT_POLICY = """# 等待 wait —— 只用于独立无台词反应
+WAIT_POLICY = """# 独立无台词反应与动作拍
 
 普通对白行没有 wait 字段，不要在普通对白前生成 `#wait`，也不要用它替代气泡、动作或镜头的默认节奏。
 只有本轮输出 Schema 包含 beats 时，才可为确实需要留白的独立无台词反应输出 beat；用 `wait_ms` 控制停顿。
 例如角色被荒唐发言噎住时，可在对应 anchor 后生成空文本的 Dot / 沉默反应并等待 2500ms。
+旁白明确写出某个有立绘角色僵住、受惊、点头、发抖或爆发，而旁白本身不能承载角色 act 时，
+可在该旁白 anchor 前后生成该角色的无文字动作 beat，reason=physical_reaction；动作已有 AA 默认节奏时 wait_ms=0。
+不要把普通走路、递东西、抬手等 AA 动作库无法准确表达的行为硬套成 jump / stiff / greeting。
 不要为角色登场渐变生成 beat 或 wait_ms，也不要把每个气泡、动作已有的默认节奏再重复写成显式等待。
 """
 
 BACKGROUND_REQUEST = """# 背景选择与待生成背景 bg_request
 
 背景只在地点、时段或叙事空间真实改变时切换；不要用错误的已有背景凑数。
+预审场景规划若标明 inherited / inherits_from，表示沿用上一场景背景：不要再次输出 bg，
+也不要因为段落分块、角色进出或镜头变化重复输出同一个背景。每个真实新场景只在首个合适锚点输出一次 bg；
+place 也只在该场景首次建立地点时输出一次。
 若资源表没有准确背景，bg 留空，并在 bg_request 写一条可直接交给图片模型的中文提示词：
 包含地点、时段、光线、关键物件、氛围，并写明“蔚蓝档案剧情背景，无人物，无文字”。
 bg_request 不为空时绝不能同时填 bg。
@@ -81,7 +87,9 @@ CAMERA = """# 镜头：先决定观众此刻应该看谁
 余波再回到承受后果的人。群像镜头要有共同动作或共同反应作为理由，不能只是凑人数。
 
 切镜头前先问：信息是谁给出的、情绪是谁承受的、下一拍观众要等待谁的回应？
-说话者不自动等于镜头焦点。台词的力量落在听者身上时，让说话者留在画外或退为陪衬。
+说话者不自动等于情绪焦点，但官方有立绘对白几乎始终让说话者留在画面中：台词力量落在
+听者身上时，优先使用“说话者+听者”的关系镜头，把听者作为 focus_character；不要把正常
+有立绘对白拍成画外音。只有演员表明确标为无立绘/通讯，或原文明确来自画外时才让说话者不入镜。
 
 站位和进出场由程序自动排布，你**不需要**管。你只在台词明确写了移动
 （走过去、后退、凑近、转身离开）时才填走位。
@@ -90,9 +98,9 @@ CAMERA = """# 镜头：先决定观众此刻应该看谁
 # ---------------------------------------------------------------- 状态化导演模型
 STORY_PRIORITIES = {
     "auto": """当前剧情类型：auto。先根据整场冲突规模、人物数量和关系重心，判断更接近 main / event / bond；不确定时使用通用优先级，不要擅自补写设定。""",
-    "main": """当前剧情类型：main。优先保证因果、威胁与信息揭示清楚；善用画外动作、空镜和余波表现更大的叙事空间，重效果只落在不可逆转的节点。""",
-    "event": """当前剧情类型：event。优先保证群像节拍与喜剧接力；群体同步只用于确有共同动作或共同反应的拍点，并在爆点后切回单人承接反差。""",
-    "bond": """当前剧情类型：bond。优先表现关系距离、没说出口的潜台词和听者反应；少用群像与重效果，用停顿、视线焦点和接近/疏远推进亲密度。""",
+    "main": """当前剧情类型：main。官方主线常以单人/双人镜头推进因果、威胁与信息揭示，并在连续叙事或空间转移时保持空镜；重效果只落在不可逆转的节点。""",
+    "event": """当前剧情类型：event。官方活动剧情以单人和双人接力为主，切换通常比羁绊剧情更快；群体同步只用于确有共同动作或共同反应的拍点，并在爆点后切回单人承接反差。""",
+    "bond": """当前剧情类型：bond。官方羁绊剧情以持续单人镜头为主，镜头保持时间明显长于主线和活动；优先表现关系距离、没说出口的潜台词和听者反应，少用群像与重效果。""",
 }
 
 DIRECTOR_CONTRACT = """# 状态化导演合同
@@ -103,6 +111,11 @@ DIRECTOR_CONTRACT = """# 状态化导演合同
 
 当 Schema 提供 direction 或紧凑字段 d 时，填写内部导演状态：
 
+注意字段层级：face / emo / act / fx / se / bg / bg_request / place / shake / bgfx / trans / move / shot
+都是行级演出字段，必须与 i 同级；绝对不要放进 d。d 只保存下面列出的内部导演状态。
+反过来，scene_type / scene_function / emotion_phase / subtext / relation_distance / focus_kind /
+focus_character / reaction_target / visible_characters / continuity / reason 必须放在 d 内，不能与 i 平级。
+
 - scene_type 只使用：main / event / bond / other。
 - scene_function 只使用：establishing / entrance / exposition / dialogue / comedy_escalation / conflict / emotional_turn / action / closing。
 - emotion_phase：当前人物处在情绪链哪一拍；subtext：这句实际在试探、回避、掩饰、确认或拒绝什么。
@@ -111,12 +124,13 @@ DIRECTOR_CONTRACT = """# 状态化导演合同
 - focus_character 与 reaction_target 必须是本章演员表里的精确名字；无法验证就留空。
 - relation_distance 只使用：distant / normal / approaching / intimate / remote。它描述关系变化，不是物理坐标；
   distant 是同场但疏离，remote 是通过通讯、回忆或其他不共处空间建立联系。
-- visible_characters 只列这一镜确实应该出现的人；明确需要空镜时输出空数组，字段没写则表示不改变既有画面意图。
+- visible_characters 只列这一镜确实应该出现的人；明确需要持续空镜时输出空数组，字段没写则表示不改变既有画面意图。
+  有立绘角色正常开口时必须把说话者列入画面；若焦点在听者，使用说话者与听者同框并把 focus_character 指向听者。
 - continuity 对 face / emo / act / fx / bgfx 分层使用 start / hold / escalate / end；none 表示本行不发命令。
   start 开始一个有文本证据的状态，hold 保持而不机械换素材，escalate 只在强度确实升级时换更强层，
   end 在状态已被回应、打断、转移或场景退出时收束。不要把每行都当作全新状态。
 - direction.reason 只使用：new_stimulus / relation_shift / emotional_shift / listener_reaction / group_sync / comedy_escalation / action_impact / scene_transition / continuity_hold / none。
-- beat.reason 只使用：await_response / relationship_turn / listener_reaction / comedy_hold / decision_pause。
+- beat.reason 只使用：await_response / relationship_turn / listener_reaction / comedy_hold / decision_pause / physical_reaction。
   两种 reason 都只写短枚举值；不要写分析过程、长解释或官方剧情原句。
 
 ## 九种场景功能：触发、序列、禁用与退出
@@ -139,7 +153,7 @@ DIRECTOR_CONTRACT = """# 状态化导演合同
 4. 日常对话（dialogue）
    触发：人物围绕同一话题交换信息，情绪强度稳定。
    序列：speaker 发起 → listener 承接 → 必要时双人关系镜头保持。
-   禁用：每句切镜、每句换 face、用气泡制造不存在的峰值。
+   禁用：每句切镜、无视语义机械轮换 face、用气泡制造不存在的峰值。
    退出：出现误解、决定、揭示、动作打断或明确情绪跃迁。
 5. 喜剧升级（comedy_escalation）
    触发：误解、重复、抢话、一本正经的荒唐逻辑开始逐拍加码。
@@ -197,17 +211,30 @@ face 是持续在脸上的情绪，emo 是头顶瞬时心理反应，act 是身�
 fx / bgfx 是更重的镜头强调。一个强层通常已经足够；只有真正的情绪峰值才组合多个相互一致的层。
 不要为了让画面热闹而把气泡、动作、走位和重效果全部堆在同一句。
 
-## 表情 face —— 按状态保持，按证据改变
+把整场戏组织成连续的“反应拍”，而不是逐字段独立填空：
+- face 是最常用的细表演层，负责语气、态度和潜台词的逐拍推进；
+- emo / act 是较少的瞬时强调，同脸时可以承接一个明确动作或心理反应，但不能拿来掩盖长期不换脸；
+- 镜头通常覆盖一组问答、一次关系变化或一个笑点，不跟着每句 speaker 机械来回切；
+- fx / bgfx / shake 只落在真正峰值，音效只跟可听见的事件，背景只跟真实空间变化。
+每一拍至少要有一个清楚的画面重点，但不等于每句都要加多层指令；同一行通常由 face 或一个瞬时层承担主要变化。
+
+## 表情 face —— 每次重判，形成连续表情拍
 角色资源表中的逐编号语义优先，优先级高于下面的通用编号说明。自定义骨骼不一定遵循 00-06 通用含义；
 例如资源表明确写了 `05=轻微微笑`，就绝不能再把该角色的 05 当成“认真”。
 只有角色资源表没有更具体的逐编号语义时，才参考蔚蓝档案常见的通用七表情：
     00 默认  01 平常  02 回应  03 微笑  04 困窘  05 认真  06 低落
 07 以上是各角色自己的追加差分，语义看资源表。
-先读取 DIRECTOR_CONTEXT 的 emotion_phase、subtext 和 continuity.face。相同情绪阶段内默认 hold；
-只有出现可引用的态度变化、情绪转折、被打断后的反应或强度升级，才 start/escalate 到另一个 face。
-不要为了画面变化而换 face，也不要按编号、轮次、标点或关键词机械轮换。
-人物连续说同一意图时，保持正确表情比制造变化更重要；真正的 listener reaction 则应标在听者的无台词 beat
-或下一次可见反应上，不能强行改说话者的表情来代替。
+先读取 DIRECTOR_CONTEXT 的 emotion_phase、subtext 和 continuity.face。每次有立绘角色发言，都要重新比较本句与该角色
+上一次发言：语气、态度、潜台词、注意对象或反应阶段只要发生可见变化，就 start/escalate 到更合适的 face。
+相同细分反应拍内默认 hold，保持正确表情比制造变化更重要；这里的“细分反应拍”不是笼统的开心、生气或同一话题，
+而是同一态度、潜台词和强度仍在连续完成的短拍。
+一次表情拍通常覆盖该角色 1～2 次发言；连续第 3 次仍保持同一 face 时，必须能指出这是刻意维持同一态度，
+或本拍已由 emo、act、镜头、听者无台词反应等其他可见变化承接。不能让“hold”成为跳过判断的默认答案。
+惊讶后的掩饰、质问后的嘴硬、强势后的动摇、玩笑后的观察、害羞后的否认、爆发后的疲惫，
+即使仍属于同一大情绪，也属于不同反应阶段，应优先使用资源表中相应差分。
+不要为了画面变化而换 face，也不要按编号、轮次、标点或关键词机械轮换；但也不能因为话题没变，
+就让人物跨过多次反问、否认、停顿和强度变化仍保持一张脸。
+真正的 listener reaction 应标在听者的无台词 beat 或下一次可见反应上，不能强行改说话者的表情来代替。
 资源表中“情绪｜使用语境”的使用语境是候选提示，不是关键词触发规则；结合台词、角色态度、情绪阶段和前后连续性自由判断。
 不能仅凭脸红、泪水等视觉现象决定表情；这些现象可能有程度差异，也可能只是素材制作限制。
 没有完美差分时，选择整体情绪和语气最接近的可用表情；多个编号语义相同时可按连续性任选，不必强行区分。
@@ -221,31 +248,42 @@ face 的证据门槛：只能选择资源表提供了语义、或已被项目明
 并让符号随“疑惑 → 惊叹”“冒烟 → 怒筋”等反应变化或强度升级，不能只为了提高密度而堆叠。
 “脸红”尤其稀少，只留给真正的害羞峰值，不能反复提醒观众。
 
-几个容易误解的符号：
-    Dot / 沉默       犹豫、思考、尴尬停顿、无语或一时不知道怎么回答。普通省略号不自动成立
-    Exclaim / 惊叹   突然震惊、警觉或无词的强烈反应；`……！`、意外反问的 `！？` 是典型，普通感叹句不是
-    Steam / 冒烟     恼火、急躁、气得冒烟；需要明确的不耐烦或训斥峰值，普通命令句不用
-    悲伤（Sad）    无语、心情差、失望、沮丧
-    冷汗（Sweat）  无语、尴尬、无奈、被弄得没办法
-    音符（Music）  活泼、轻快、兴致很高地说话
-    灵光一闪       只用于真的突然想到办法或恍然大悟；活泼说话优先考虑音符
-    怒筋            瞬间爆发的怒意；冒烟更偏持续压着火气后的急躁，不要机械互换
-    疑问 / 惊疑     分别用于明确疑惑和意外加疑惑；反应只用于突然注意到变化
-    爱心 / 闪亮     分别用于明确爱意和眼前一亮；不能只因为语气友好就使用
-    叹气 / 落泪     需要文本支持的叹息或哭泣；难过、悲伤、落泪不是同一个强度
+按官方演出语义区分全部可用符号，不要总退回怒筋、惊叹、沉默、冷汗：
+    Reaction / 反应  突然注意、被点名、听到新信息后的轻量“有反应了”；比惊叹轻，比疑问更偏注意转移
+    沉默             犹豫、思考、尴尬停顿、无语或一时答不上来；普通省略号不自动成立
+    疑问             单纯不理解、追问或确认；惊疑是“意外 + 疑惑”，不能互换
+    Exclaim / 惊叹   突然警觉、强烈注意或无词的明确反应；普通感叹句不是惊叹
+    冷汗             卡壳、尴尬、为难、担心或被弄得没办法；常与 stiff 同拍，但不表示普通无奈
+    闪亮             发现值得期待、赞叹或积极介绍的对象；不是泛化的开心，常与 greeting / hophop 同拍
+    惊疑             预期被打破并产生疑问；强刺激可与 shake 同拍，普通问句只用疑问或不加
+    音符             从容、调侃、轻快或兴致很高地说话；不是所有微笑台词都使用
+    叽喳             连续外放地说个不停、兴奋讲述或热闹附和；比音符更喧闹，常与 hophop 同拍
+    难过             受挫、担忧、委屈或低落的一拍；比悲伤轻，官方常与 stiff 表现压住情绪
+    脸红             被戳穿、害羞或关系靠近的峰值；不能只因赞美或好感反复提醒
+    怒筋             明确被惹恼、尖锐不满或怒意冒头；不等于所有反驳，常与 stiff / hophop 分别表现压抑或外放
+    爱心             明确爱意、迷恋或对某物强烈喜爱；友好、温柔和普通高兴不够
+    走神             思绪飘远、幻想或暂时脱离眼前话题；不是普通思考
+    灵光一闪         真正突然想到办法或恍然大悟；活泼说话优先考虑音符
+    悲伤             比难过更深的失落、沮丧或悲痛；不要把无语当悲伤
+    叹气             文本或语气中有明确叹息、泄气、认命；不能只因句末省略号使用
+    Steam / 冒烟     持续急躁、压着火气后爆发或气得冒烟；普通命令和轻微不满不用
+    落泪             已经哭泣或泪水成为当前演出重点；难过不等于落泪
+    瞌睡             困倦、打盹或睡着；安静和闭眼不等于瞌睡
 
 ## 动作 act 与走位 move —— 先区分身体反应和位置变化
 动作 act 是原地身体反应；走位 move 是人物真实位置变化。基础站位和因镜头人数变化产生的移动由程序安排，
 不要为了情绪变化填写 move。只有文本明确写了走近、后退、走到某人身边等位置变化时才填 move 1-5。
 
-动作要克制，并按真实强度选择：
-    greeting   短促向下点动，只用于明确的点头、低头确认等身体反应
+官方常把动作直接挂在有台词的同一节点上：台词本身就是身体反应的证据，不要求原文先写出“跳了一下”。
+不要按标点机械触发，也不要因为原文没写动作描写就全部留空。先判断人物是否真的产生了可见的外显反应：
+    greeting   短促向下点动；点头、致意、接受命令、认真确认、柔和肯定或正式自我介绍
     falldownl / falldownr  向左 / 向右倒下，只在文本明确发生倒下时使用
-    stiff      小颤抖，用于受惊、压抑紧张或克制的身体僵动
-    shake      大颤抖，需要明确的剧烈发抖，不能代替背景物理抖动
-    jump       单次跳动，用于突然震惊、强烈反驳或短促情绪爆发
-    hophop     连续蹦跳，用于持续而外显的兴奋或愤怒爆发，不用于普通单句强调
-普通感叹号不能单独触发 jump；双感叹号也必须同时有短促表达和明显情绪跃迁。
+    stiff      小颤抖/僵动；卡壳、紧张、羞涩、被戳中、压住怒意、用力思考或克制痛苦
+    shake      大颤抖；强烈惊愕、慌乱、痛苦、恐惧或用力挣扎，角色 shake 不是背景物理抖动
+    jump       单次跳动；突然震惊、强烈反驳、突然自信、坚定宣告、发现突破或短促情绪跃升
+    hophop     连续蹦跳；持续而外显的兴奋或愤怒爆发，也可表现热情招呼、连珠炮抗议和得意讲述
+普通感叹号不能单独触发 jump；“！？”或双感叹号也必须同时有明确态度跃迁。短促爆点用 jump，持续外放的一整句用 hophop；
+克制的卡壳/羞涩用 stiff，已经升级到剧烈失控才用 shake。它们经常可以与贴合的 emo 同拍，而不是互相替代。
 心理活动本身不要配动作，真实走位不要拿 jump 或 shake 冒充。
 
 ## 立绘效果 fx —— 三种位标记，可以组合，全都很重
@@ -287,7 +325,7 @@ face 的证据门槛：只能选择资源表提供了语义、或已被项目明
 # ---------------------------------------------------------------- 示范
 FEWSHOT = """# 自写示范（不来自官方剧情文本）
 
-下面这段演示“只在状态变化点输出”的稀疏标注；真正输出还要同时维护 direction 中的
+下面这段演示“表情随反应阶段推进、瞬时层保持克制”的分层标注；真正输出还要同时维护 direction 中的
 scene_function、focus 和 continuity。未列标注的行在紧凑协议中应从 lines 完全省略。
 
     [0] 旁白: 哒哒哒哒哒。
@@ -299,12 +337,12 @@ scene_function、focus 和 continuity。未列标注的行在紧凑协议中应�
     [3] 桃井: 告白演出就再加一段！真的只要一段！
         face=03，continuity.face=start，reason=new_stimulus   （建立笑着耍赖的状态）
     [4] 桃井: 难得这次千年游戏展把"角色互动"列成重点展示项目……
-        （完全省略。人物仍在同一意图中，保持上一表情，不重复 face）
+        face=01，continuity.face=start，reason=emotional_shift   （从笑着耍赖转为认真解释，进入新表情拍）
     [5] 绿: 今天上传的只是内部选拔用原型。
         face=05，continuity.face=start，reason=new_stimulus   （首次建立绿的认真状态）
     [6] 桃井: 正因为是原型，第一印象才更重要嘛！
-        emo=怒筋，continuity.emo=start，reason=comedy_escalation
-        （只加瞬时尖峰；桃井继续保持 03，不再输出 face；气泡已自动带 2.5 秒停顿）
+        face=03 emo=怒筋，continuity.face=start / emo=start，reason=comedy_escalation
+        （回到强势辩解，同时用气泡标出瞬时尖峰；气泡已自动带 2.5 秒停顿）
     [7] 绿: 我们本来就在赶工。
         （完全省略。平淡拆台的力量来自不加气泡、动作和重效果）
     [8] 凯伊: 都停一下。
@@ -367,6 +405,40 @@ def _labeled_asset(name, labels):
     return f"{name}={text}" if text else name
 
 
+def _face_option(face):
+    """Format one generator-safe face without exposing label provenance."""
+    if face.get("near_duplicate_of"):
+        return ""
+    semantic = str(
+        face.get("semantic_cn") or face.get("cn") or face.get("label") or ""
+    ).strip()
+    if not semantic:
+        return ""
+    text = f"{face['id']}={semantic}"
+    if face.get("semantic_level") == "rich":
+        fields = []
+        family = str(face.get("emotion_family") or "").strip()
+        if family:
+            fields.append(family)
+        if face.get("intensity") is not None:
+            fields.append(f"I{face['intensity']}")
+        expression_class = str(face.get("expression_class") or "").strip()
+        if expression_class:
+            fields.append(expression_class)
+        beats = [str(value) for value in face.get("beat_fit") or [] if str(value)]
+        if beats:
+            fields.append("|".join(beats))
+        hold = str(face.get("hold_policy") or "").strip()
+        if hold:
+            fields.append(hold)
+        if fields:
+            text += "[" + ",".join(fields) + "]"
+        avoid = str(face.get("avoid_when_cn") or "").strip()
+        if avoid:
+            text += f" 避免：{avoid}"
+    return text
+
+
 def build_resources(idx, cast, cast_names, faces_by_id):
     """按本章演员表裁剪过的资源清单。模型只看得到用得上的东西。"""
     import tables
@@ -386,22 +458,13 @@ def build_resources(idx, cast, cast_names, faces_by_id):
         else:
             faces = capability
             expression_parts = []
-        if faces:
-            tbl = "  ".join(
-                (
-                    f"{f['id']}={f.get('semantic_cn') or f.get('cn') or f.get('label')}"
-                    + (
-                        f"[{f.get('emotion_family')},I{f['intensity']},{f.get('expression_class')}]"
-                        if f.get("semantic_level") == "rich" and f.get("intensity") is not None
-                        else ""
-                    )
-                )
-                if (f.get("semantic_cn") or f.get("cn") or f.get("label")) else f["id"]
-                for f in faces
-            )
+        options = [_face_option(face) for face in faces]
+        options = [option for option in options if option]
+        if options:
+            tbl = "  ".join(options)
             p.append(f"- {who} —— {tbl}\n")
         else:
-            p.append(f"- {who} —— 表情表未知，face 一律留空串\n")
+            p.append(f"- {who} —— 没有可靠语义标注，face 一律留空串；禁止猜测 face_id\n")
         if expression_parts:
             semantic = "；".join(
                 f"{part.get('kind', 'unknown')}（{'、'.join(part.get('labels') or [])}）"

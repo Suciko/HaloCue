@@ -237,6 +237,16 @@ def test_vision_sheet_has_stable_three_by_three_dimensions(tmp_path):
     assert image.format == "JPEG"
 
 
+def test_visual_labeler_defaults_to_four_face_comparison(tmp_path):
+    provider = FakeVisionProvider()
+    faces = [_face(tmp_path, f"{index:02d}", (index * 30, 80, 120)) for index in range(5)]
+    label_face_images(provider, faces, max_attempts=1)
+    assert len(provider.calls) == 2
+    labels = sorted(call[1][0][0] for call in provider.calls)
+    assert labels[0].endswith("00,01,02,03")
+    assert labels[1].endswith("04")
+
+
 @pytest.mark.parametrize(("count", "expected_calls"), [(1, 1), (9, 1), (10, 2)])
 def test_visual_labeler_batches_at_nine_faces(tmp_path, count, expected_calls):
     provider = FakeVisionProvider()
@@ -471,6 +481,30 @@ def test_visual_labeler_keeps_valid_low_confidence_result_when_review_fails(tmp_
 
     assert [item["primary_emotion"] for item in labels] == ["可用结果", "可用结果"]
     assert all(not item.get("failed") for item in labels)
+
+
+def test_visual_labeler_reviews_usage_hint_that_describes_face_parts(tmp_path):
+    class VisualDescriptionProvider(FakeVisionProvider):
+        def complete_json_vision(self, system, images, user, schema):
+            self.calls.append((system, images, user, schema))
+            face_id = images[0][0].split(":", 1)[1].split(",")[0]
+            if len(self.calls) == 1:
+                return {"items": [_compact_label(
+                    face_id, usage="眉毛下垂、眼睛含泪，嘴角向下"
+                )]}
+            return {"items": [_compact_label(
+                face_id, usage="适合受到打击后低声回应或寻求安慰"
+            )]}
+
+    provider = VisualDescriptionProvider()
+    labels = label_face_images(
+        provider,
+        [_face(tmp_path, "07", (120, 160, 200))],
+        max_attempts=1,
+    )
+
+    assert len(provider.calls) == 2
+    assert labels[0]["usage_hint_cn"] == "适合受到打击后低声回应或寻求安慰"
 
 
 def test_failed_rerun_preserves_last_saved_label_and_effective_evidence(tmp_path):

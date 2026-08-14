@@ -29,6 +29,9 @@ _FRAME_SUFFIX = re.compile(r"_(\d+)\.png$", re.IGNORECASE)
 _CACHE_VERSION = "v7"
 _RENDER_PROFILE = "first-frame-snapshot-v8"
 _HEAD_PREVIEW_SIZE = 768
+# Keep the label frame about the face, not the widest prop or weapon.
+_FACE_ZONE_RATIO = 0.25
+_FACE_CHANGE_ZONE_RATIO = 0.48
 _FINAL_RENDER_FRAME = 8
 _EMPTY_TIMELINE = object()
 
@@ -288,14 +291,12 @@ def crop_head_preview(
     if not alpha_bbox:
         raise ValueError(f"Rendered portrait is empty: {source}")
 
-    left, top, right, bottom = alpha_bbox
-    visible_width = right - left
-    visible_height = bottom - top
-    head_height = max(1, round(visible_height * 0.34))
-    crop_side = max(visible_width, head_height)
+    left, top, right, bottom = _face_alpha_bbox(image, alpha_bbox)
+    crop_side = max(right - left, bottom - top)
+    crop_side = max(crop_side, round((right - left) * 1.12))
     center_x = (left + right) / 2
+    crop_top = top - round(crop_side * 0.04)
     crop_left = round(center_x - crop_side / 2)
-    crop_top = top
     crop_right = crop_left + crop_side
     crop_bottom = crop_top + crop_side
 
@@ -304,7 +305,7 @@ def crop_head_preview(
         max(0, crop_left),
         max(0, crop_top),
         min(image.width, crop_right),
-        min(image.height, crop_top + head_height),
+        min(image.height, crop_bottom),
     )
     piece = image.crop(source_box)
     canvas.alpha_composite(
@@ -319,6 +320,26 @@ def crop_head_preview(
     destination.parent.mkdir(parents=True, exist_ok=True)
     preview.save(destination, format="PNG", optimize=True)
     return destination
+
+
+def _face_alpha_bbox(
+    image: Image.Image,
+    alpha_bbox: tuple[int, int, int, int] | None = None,
+) -> tuple[int, int, int, int]:
+    """Estimate the head zone from the upper portrait, ignoring lower props."""
+    alpha_bbox = alpha_bbox or image.getchannel("A").point(
+        lambda value: 255 if value >= 8 else 0
+    ).getbbox()
+    if not alpha_bbox:
+        raise ValueError("Rendered portrait is empty")
+    _, top, _, bottom = alpha_bbox
+    zone_bottom = top + max(1, round((bottom - top) * _FACE_ZONE_RATIO))
+    mask = image.getchannel("A").point(lambda value: 255 if value >= 8 else 0)
+    zone = mask.crop((0, top, image.width, min(image.height, zone_bottom)))
+    zone_bbox = zone.getbbox()
+    if not zone_bbox:
+        return alpha_bbox
+    return (zone_bbox[0], top + zone_bbox[1], zone_bbox[2], top + zone_bbox[3])
 
 
 def _square_box(
@@ -339,10 +360,34 @@ def _upper_alpha_crop(image: Image.Image) -> tuple[int, int, int, int]:
     if not alpha_bbox:
         raise ValueError("Rendered portrait is empty")
     left, top, right, bottom = alpha_bbox
-    visible_width = right - left
-    head_height = max(1, round((bottom - top) * 0.34))
-    side = max(visible_width, head_height)
-    return _square_box((left + right) / 2, top + side / 2, side)
+    body_width = right - left
+    body_height = bottom - top
+    side = max(body_height * 0.24, body_width * 0.50)
+    side = min(max(side, body_height * 0.18), body_height * 0.32)
+
+    # The weighted median of opaque pixels in the upper portrait is much less
+    # sensitive to a one-sided weapon or hand than the complete alpha bbox.
+    mask = image.getchannel("A").point(lambda value: 255 if value >= 8 else 0)
+    band_top = top + round(body_height * 0.08)
+    band_bottom = min(bottom, top + round(body_height * 0.30))
+    band = mask.crop((left, band_top, right, band_bottom))
+    projection = list(
+        band.resize((band.width, 1), Image.Resampling.BOX).tobytes()
+    )
+    total = sum(projection)
+    if total:
+        midpoint = total / 2
+        running = 0
+        center_x = (left + right) / 2
+        for offset, weight in enumerate(projection):
+            running += weight
+            if running >= midpoint:
+                center_x = left + offset
+                break
+    else:
+        center_x = (left + right) / 2
+    center_y = top + body_height * 0.16
+    return _square_box(center_x, center_y, side)
 
 
 def derive_shared_face_crop(
@@ -397,16 +442,45 @@ def derive_shared_face_crop(
         change_bbox[2] * scale_x,
         change_bbox[3] * scale_y,
     )
+    # Expression timelines can move hair, weapons, or the body.  Only use
+    # differences in the upper face zone to enlarge the stable face crop.
+    first_alpha = images[0].getchannel("A").point(
+        lambda value: 255 if value >= 8 else 0
+    ).getbbox()
+    if first_alpha:
+        zone_bottom = first_alpha[1] + round(
+            (first_alpha[3] - first_alpha[1]) * _FACE_CHANGE_ZONE_RATIO
+        )
+        top = max(top, first_alpha[1])
+        bottom = min(bottom, zone_bottom)
+    if bottom <= top:
+        return fallback
     change_width = right - left
     change_height = bottom - top
     fallback_side = fallback[2] - fallback[0]
+    body_height = (first_alpha[3] - first_alpha[1]) if first_alpha else height
+    # Eye and mouth timelines reveal the actual face more reliably than the
+    # upper alpha silhouette, which often includes halos, hands and weapons.
+    # Two feature widths leave enough hair and chin context while making the
+    # face the dominant evidence in every 2x2 comparison tile.
     side = max(
-        change_width * 1.8,
-        change_height * 1.5,
-        fallback_side * 0.75,
+        change_width * 2.0,
+        change_height * 2.0,
+        body_height * 0.16,
     )
+    side = min(side, fallback_side * 1.20)
+    fallback_center_x = (fallback[0] + fallback[2]) / 2
+    fallback_center_y = (fallback[1] + fallback[3]) / 2
     center_x = (left + right) / 2
-    center_y = (top + bottom) / 2 + side * 0.03
+    center_y = (top + bottom) / 2
+    center_x = min(
+        max(center_x, fallback_center_x - side * 0.25),
+        fallback_center_x + side * 0.25,
+    )
+    center_y = min(
+        max(center_y, fallback_center_y - side * 0.25),
+        fallback_center_y + side * 0.25,
+    )
     return _square_box(center_x, center_y, side)
 
 

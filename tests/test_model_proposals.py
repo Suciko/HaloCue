@@ -79,6 +79,9 @@ def test_annotate_script_generates_model_and_postprocessor_proposals(tmp_path):
     applied_props = [p for p in proposals if p["type"] == "applied_pending"]
     assert len(applied_props) > 0
     assert any(p["field"] == "face" for p in applied_props)
+    face_proposal = next(p for p in applied_props if p["field"] == "face")
+    assert face_proposal["before"] is None
+    assert face_proposal["after"] == "00"
 
     # 2. 验证包含 suggested_fix 类型的越界/拒绝提案
     suggested_props = [p for p in proposals if p["type"] == "suggested_fix"]

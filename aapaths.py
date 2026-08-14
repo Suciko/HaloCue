@@ -13,11 +13,16 @@ AA 的存储目录默认在 %USERPROFILE%\\AppData\\LocalLow\\foxxlight\\AzureAr
 import json, os, sys
 
 from aa_install_discovery import discover_aa, normalize_aa_data_path
+from runtime_layout import LAYOUT
 
 APPDATA_LOW = os.path.join(os.path.expanduser("~"), "AppData", "LocalLow")
 VENDOR = os.path.join(APPDATA_LOW, "foxxlight", "AzureArchive")
 CONF_NAME = "aa_config.json"
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def config_path():
+    return str(LAYOUT.config_path) if LAYOUT.frozen else os.path.join(HERE, CONF_NAME)
 
 
 def _read_settings(data_dir):
@@ -50,7 +55,7 @@ def detect(explicit=None, *, aa_install=None):
     selection = selection or explicit or aa_install
     result = discover_aa(
         selection,
-        config_path=os.path.join(HERE, CONF_NAME),
+        config_path=config_path(),
     )
     return {
         "data": _path_string(result.data),
@@ -92,7 +97,7 @@ def require(explicit=None, what="AA 存储目录"):
 
 
 def save_config(data_dir=None, *, executable=None, cache_dir=None):
-    conf = os.path.join(HERE, CONF_NAME)
+    conf = config_path()
     old = {}
     if os.path.exists(conf):
         try:

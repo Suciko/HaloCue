@@ -127,6 +127,27 @@ def test_create_draft_does_not_create_blank_cards(temp_draft_dir):
     )
 
 
+def test_partial_annotation_status_is_persisted_and_blocks_review_gate(temp_draft_dir):
+    status = {
+        "status": "partial",
+        "completed_targets": 2,
+        "total_targets": 4,
+        "pending_targets": 2,
+        "pending_start_line": 3,
+        "pending_end_line": 4,
+    }
+    created = temp_draft_dir.create_draft(
+        token="partial-annotation",
+        text="旁白: 一\n旁白: 二\n",
+        annotation_status=status,
+    )
+
+    assert created["session"]["annotation_status"] == status
+    with pytest.raises(Exception) as exc_info:
+        temp_draft_dir.assert_annotation_complete("partial-annotation")
+    assert getattr(exc_info.value, "code", None) == "annotation_incomplete"
+
+
 def test_list_sessions_derives_generation_from_project_and_source_without_writes(temp_draft_dir):
     """Same-source generations are v1/v2; a changed source starts a new lineage."""
     store = temp_draft_dir

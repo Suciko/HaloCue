@@ -39,7 +39,7 @@ def test_settings_explain_install_workspace_resource_and_preview_separately():
     ):
         assert f'id="{element_id}"' in HTML
     assert "AA 数据目录（内含 projects / overrides）" not in HTML
-    assert "选择 AA 程序或安装目录" in HTML
+    assert "选择 AzureArchive.exe" in HTML
 
 
 def test_aa_status_renderer_keeps_resource_and_preview_states_distinct():
@@ -105,7 +105,7 @@ const window={Api:{request:async()=>({profiles:[]}),json:()=>({})},StoryStore:{g
     }
 
 
-def test_aa_install_picker_saves_files_and_directories_then_reclaims_shared_modal():
+def test_aa_install_picker_saves_the_executable_then_reclaims_shared_modal():
     script = r'''
 const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(process.argv[1],'utf8');const nodes={},listeners={},requests=[];
 function node(){const classes=new Set();return {value:'',checked:false,disabled:false,hidden:false,textContent:'',dataset:{},children:[],classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),toggle:(x,v)=>v?classes.add(x):classes.delete(x),contains:x=>classes.has(x)},appendChild(x){this.children.push(x);return x},removeChild(){this.children.shift()},get firstChild(){return this.children[0]},addEventListener(){},setAttribute(k,v){this[k]=v},closest(sel){return sel==='[data-story-sort]'?null:this},insertRow(){return node()},insertCell(){return node()},scrollIntoView(){}}}
@@ -113,20 +113,19 @@ function $(s){return nodes[s]||(nodes[s]=node())}
 ['#settingsDrawer','#settingsBackdrop','#helpDrawer','#helpBackdrop','#mBrowse','#browseTitle','#recentStories','#storyContextBar','#storyAssetStrip','#rvDraftSelect','#rvStatus','#rvInstall','#rvCompile','#rvApproveAll','#rvValidate','#rvCards','#storyPlayer','#log','#go','#goAnnotate','#path','#proj','#bgq','#bgready','#backgroundRequestsPanel','#backgroundRequestList','#continueBackgroundBuild','#backgroundContinueHint','#hint','#s1info','#s2','#s3','#s4','#bggrid','#bgsel','#modelProfileSelect','#welcomePanel','#cast','#s2sum','#aaInstallInput','#aaProgramState','#aaProjectsState','#aaSavesState','#aaResourceState','#aaPreviewState','#aaIndexProgress','#buildAAIndex','#aaInstallStatus','#aaWorkspaceConflict','#aaWorkspaceCandidates','#aaWorkspaceConfirm'].forEach($);$('input[name=anno]:checked').value='no';
 const pickers=[];function Picker(root,options){this.options=options;this.openCalls=0;this.openPathCalls=0;this.hostCalls=0;this.closeCalls=0;pickers.push(this)}
 Picker.prototype.open=function(){this.openCalls++};Picker.prototype.openHost=function(){this.hostCalls++};Picker.prototype.openDirectory=function(){};Picker.prototype.openPath=function(){this.openPathCalls++};Picker.prototype.close=function(){this.closeCalls++};Picker.prototype.chooseDevice=function(){};Picker.prototype.load=function(){};Picker.prototype.sortBy=function(){};
-const aa={program:{status:'recognized',path:'E:/AzureArchive/App/AzureArchive.exe'},projects:{status:'ready',path:'E:/AzureArchive/data/projects'},saves:{status:'ready',path:'E:/AzureArchive/data/saves'},resource:{status:'installed'},preview_index:{status:'not_built'}};
-const window={Api:{request:async(path,options)=>{requests.push({path,payload:options&&options.payload});return path==='/api/settings/aa-install'?{ok:true,restart_required:true,aa}:{ok:true}},json:(method,payload)=>({method,payload})},StoryStore:{get:()=>null,subscribe(){}},StoryUI:{StoryContextBar:function(){},StoryAssetStrip:function(){},RecentStories:function(){this.refresh=async()=>{}},StoryFilePicker:Picker},ModelSettings:{profilePayload:()=>({})},CardList:{renderCardList(){}},Player:function(){},addEventListener(){}};const body=node();const document={body,documentElement:node(),querySelector:$,querySelectorAll:()=>[],createElement:node,createDocumentFragment:node,addEventListener:(k,f)=>listeners[k]=f};vm.runInNewContext(source,{window,document,localStorage:{getItem(){},setItem(){},removeItem(){}},setTimeout(){},console});
+const aa={connected:true,program:{status:'recognized',path:'E:/AzureArchive/App/AzureArchive.exe'},projects:{status:'ready',path:'E:/AzureArchive/data/projects'},saves:{status:'ready',path:'E:/AzureArchive/data/saves'},resource:{status:'installed'},preview_index:{status:'not_built'}};
+const window={Api:{request:async(path,options)=>{requests.push({path,payload:options&&options.payload});return path==='/api/settings/aa-install'?{ok:true,restart_required:false,aa}:{ok:true}},json:(method,payload)=>({method,payload})},StoryStore:{get:()=>null,subscribe(){}},StoryUI:{StoryContextBar:function(){},StoryAssetStrip:function(){},RecentStories:function(){this.refresh=async()=>{}},StoryFilePicker:Picker},ModelSettings:{profilePayload:()=>({})},CardList:{renderCardList(){}},Player:function(){},addEventListener(){}};const body=node();const document={body,documentElement:node(),querySelector:$,querySelectorAll:()=>[],createElement:node,createDocumentFragment:node,addEventListener:(k,f)=>listeners[k]=f};vm.runInNewContext(source,{window,document,localStorage:{getItem(){},setItem(){},removeItem(){}},setTimeout(){},console});
 function click(action){const target=node();target.dataset.action=action;listeners.click({target})}
-(async()=>{click('browse-aa-install');await pickers[1].options.onChoose({entry_token:'exe-1',kind:'file',name:'AzureArchive.exe'});click('browse-aa-install');await pickers[1].options.onChoose({entry_token:'dir-1',kind:'directory',name:'AzureArchive'});pickers[1].close();click('open-script');click('story-picker-host');console.log(JSON.stringify({aaRequests:requests.filter(x=>x.path==='/api/settings/aa-install'),message:nodes['#aaInstallStatus'].textContent,openPath:pickers[1].openPathCalls,storyOpen:pickers[0].openCalls,storyHost:pickers[0].hostCalls,settingsHost:pickers[1].hostCalls}));})();
+(async()=>{click('browse-aa-install');await pickers[1].options.onChoose({entry_token:'exe-1',kind:'file',name:'AzureArchive.exe'});pickers[1].close();click('open-script');click('story-picker-host');console.log(JSON.stringify({aaRequests:requests.filter(x=>x.path==='/api/settings/aa-install'),message:nodes['#aaInstallStatus'].textContent,openPath:pickers[1].openPathCalls,storyOpen:pickers[0].openCalls,storyHost:pickers[0].hostCalls,settingsHost:pickers[1].hostCalls}));})();
 '''
     result = json.loads(subprocess.check_output(
         ["node", "-e", script, str(HERE / "js" / "app.js")], text=True, encoding="utf-8"
     ))
     assert result["aaRequests"] == [
         {"path": "/api/settings/aa-install", "payload": {"entry_token": "exe-1"}},
-        {"path": "/api/settings/aa-install", "payload": {"entry_token": "dir-1"}},
     ]
-    assert result["message"] == "路径已保存，重启后使用新的 AA 工作区"
-    assert result["openPath"] == 2
+    assert result["message"] == "AA 主程序已连接，可以开始选择剧情。"
+    assert result["openPath"] == 1
     assert result["storyOpen"] == result["storyHost"] == 1
     assert result["settingsHost"] == 0
 

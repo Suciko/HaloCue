@@ -13,6 +13,7 @@ from pathlib import Path
 
 import assetdb
 from asset_models import AssetCandidate
+from face_semantics import normalize_semantic_payload
 
 
 ASSET_SCHEMA = """
@@ -110,6 +111,13 @@ def _stronger_face_visual_evidence(current: str, candidate: str) -> str:
 
 def _face_capabilities(con) -> dict[str, list[dict]]:
     variants: dict[tuple[str, str, str], dict] = {}
+    selected_visual = {
+        (
+            str(row["ident"]), str(row["spine_signature"]),
+            str(row["outfit_key"]), str(row["face_id"]),
+        ): str(row["model"])
+        for row in assetdb.effective_visual_label_rows(con)
+    }
     for row in con.execute(
         "SELECT ident,spine_signature,outfit_key,spine FROM character_variant"
     ):
@@ -141,7 +149,10 @@ def _face_capabilities(con) -> dict[str, list[dict]]:
             "observed_count": 0, "verified": False, "semantic_level": "unknown",
             "visual_evidence": "unknown",
         })
-        face["sources"].append(row["source"])
+        source = str(row["source"])
+        selected_model = selected_visual.get((*key, str(row["face_id"])))
+        active_vision = not source.startswith("vision:") or source == f"vision:{selected_model}"
+        face["sources"].append(source)
         face["observed_count"] += row["observed_count"] or 0
         face["verified"] = face["verified"] or row["source"] == "aa_verified"
         row_evidence = face_visual_evidence({
@@ -152,23 +163,29 @@ def _face_capabilities(con) -> dict[str, list[dict]]:
         face["visual_evidence"] = _stronger_face_visual_evidence(
             face["visual_evidence"], row_evidence
         )
-        if row["source"].startswith("vision:"):
+        if source.startswith("vision:") and active_vision:
             try:
                 rich = json.loads(row["raw"] or "{}")
             except (TypeError, ValueError):
                 rich = {}
             if isinstance(rich, dict):
+                rich = normalize_semantic_payload(rich)
                 fields = (
                     "emotion_family", "intensity", "expression_class", "beat_fit",
-                    "hold_policy", "special_tags", "avoid_when_cn",
+                    "hold_policy", "search_terms_cn", "near_duplicate_of",
+                    "avoid_when_cn",
                 )
                 for field in fields:
                     if field in rich:
                         face[field] = rich[field]
                 if any(field in rich for field in fields):
                     face["semantic_level"] = "rich"
+                for field in ("primary_emotion", "usage_hint_cn", "confidence"):
+                    if field in rich:
+                        face[field] = rich[field]
+                face["active_label_model"] = selected_model
         if (
-            (row["source"] == "spine_semantic" or row["source"].startswith("vision:"))
+            (source == "spine_semantic" or (source.startswith("vision:") and active_vision))
             and row["label_cn"]
             and not face["semantic_cn"]
         ):
@@ -502,7 +519,9 @@ def list_story_assets(con, *, scope: str) -> dict:
     migrate(con)
     rows = con.execute(
         """
-        SELECT kind, aa_key, display_name, status, metadata_json, install_path
+        SELECT kind, aa_key, display_name, status, metadata_json, install_path,
+               (SELECT club FROM character
+                WHERE character.ident=asset_install.aa_key LIMIT 1) AS club
         FROM asset_install
         WHERE scope=? AND status=? AND kind IN ('background', 'sound', 'character')
         ORDER BY kind, display_name, aa_key
@@ -543,6 +562,7 @@ def list_story_assets(con, *, scope: str) -> dict:
         elif row["kind"] == "character":
             files = metadata.get("files") or {}
             item.update({
+                "club": str(row["club"] or ""),
                 "faces": metadata.get("faces") or [],
                 "expression_status": metadata.get("expression_status") or "待检测",
                 "file_completeness": "完整" if all(files.get(name) for name in ("skel", "atlas", "texture", "avatar")) else "待检测",

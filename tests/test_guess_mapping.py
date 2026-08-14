@@ -38,17 +38,38 @@ def test_guess_skips_placeholder_alias_and_prefers_exact_name(tmp_path, monkeypa
     assert out["桃井"]["kind"] == "portrait"
 
 
-def test_guess_treats_teacher_as_non_character_even_with_voice_alias(tmp_path, monkeypatch):
-    """A teacher narration label must not be rebound through historical voice data."""
+def test_guess_treats_teacher_as_builtin_voice_character(tmp_path, monkeypatch):
+    """Teacher dialogue must keep the AA voice slot instead of becoming narration."""
     monkeypatch.setattr(webui, "db", lambda: _make_con(tmp_path))
     out = webui.guess_mapping([{"who": "老师"}])
-    assert out["老师"] == {"kind": "narrator"}
+    assert out["老师"] == {
+        "kind": "voice", "id": "45145456", "name": "老师", "spine": "",
+    }
+    assert webui.is_non_character_speaker("老师") is False
 
 
-def test_guess_marks_unknown_speaker_unset(tmp_path, monkeypatch):
-    monkeypatch.setattr(webui, "db", lambda: _make_con(tmp_path))
-    out = webui.guess_mapping([{"who": "神秘人"}])
-    assert out["神秘人"] == {"kind": "unset"}
+def test_guess_teacher_voice_does_not_depend_on_learned_alias(tmp_path, monkeypatch):
+    con = _make_con(tmp_path)
+    con.execute("DELETE FROM name_alias WHERE script_name='老师'")
+    con.commit()
+    monkeypatch.setattr(webui, "db", lambda: con)
+
+    assert webui.guess_mapping([{"who": "老师"}])["老师"] == {
+        "kind": "voice", "id": "45145456", "name": "老师", "spine": "",
+    }
+
+
+def test_guess_preserves_unknown_named_speaker_as_stable_voice_character(tmp_path, monkeypatch):
+    con = _make_con(tmp_path)
+    monkeypatch.setattr(webui, "db", lambda: con)
+    first = webui.guess_mapping([{"who": "神秘人"}])["神秘人"]
+    second = webui.guess_mapping([{"who": "神秘人"}])["神秘人"]
+
+    assert first == second
+    assert first["kind"] == "voice"
+    assert first["name"] == "神秘人"
+    assert first["id"]
+    assert first["spine"] == ""
 
 
 def test_guess_prefers_base_variant_over_learned_different_identity(tmp_path, monkeypatch):

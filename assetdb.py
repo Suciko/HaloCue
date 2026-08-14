@@ -454,12 +454,78 @@ def expression_parts_by_variant(con):
 def set_meta(con, **kw):
     con.executemany("INSERT INTO meta(key,value) VALUES(?,?) "
                     "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                    [(k, str(v)) for k, v in kw.items()])
+                     [(k, str(v)) for k, v in kw.items()])
+
+
+def set_active_face_label_model(con, model):
+    """Select the visual-label version exposed to catalogs and generators."""
+    set_meta(con, active_face_label_model=str(model or "").strip())
+    con.commit()
+
+
+def active_face_label_model(con):
+    row = con.execute(
+        "SELECT value FROM meta WHERE key='active_face_label_model'"
+    ).fetchone()
+    return str(row[0] or "").strip() if row else ""
+
+
+def effective_visual_label_rows(
+    con, *, ident=None, spine_signature=None, outfit_key=None
+):
+    """Select one effective model row per real variant/face identity.
+
+    Model is provenance, not part of the consumer-facing face identity. Manual
+    overrides win first, followed by the explicitly active model, recency,
+    confidence, and finally a deterministic model-name tie break.
+    """
+    clauses = []
+    values = []
+    for column, value in (
+        ("ident", ident),
+        ("spine_signature", spine_signature),
+        ("outfit_key", outfit_key),
+    ):
+        if value is not None:
+            clauses.append(f"{column}=?")
+            values.append(str(value or ""))
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    preferred = active_face_label_model(con)
+    rows = con.execute(
+        f"""
+        SELECT * FROM face_visual_label
+        {where}
+        ORDER BY ident,spine_signature,outfit_key,face_id,
+          CASE
+            WHEN TRIM(COALESCE(manual_json,'')) NOT IN ('','{{}}','null') THEN 0
+            WHEN model=? THEN 1
+            ELSE 2
+          END,
+          updated_at DESC, confidence DESC, model DESC
+        """,
+        (*values, preferred),
+    )
+    selected = {}
+    for row in rows:
+        key = (
+            str(row["ident"]), str(row["spine_signature"]),
+            str(row["outfit_key"]), str(row["face_id"]),
+        )
+        selected.setdefault(key, row)
+    return list(selected.values())
 
 
 def import_index(con, idx):
     """把 aa_resources.json 里已有的确定信息灌进库（不含需要看图的部分）。"""
     n = {"bg": 0, "sound": 0, "character": 0, "face": 0, "enum": 0}
+
+    # Older scans could mistake arbitrary numeric AAP fields for character
+    # identifiers. They have no native label and are only generated data, so
+    # discard them before importing the current authoritative index.
+    con.execute(
+        "DELETE FROM character WHERE source='observed' "
+        "AND (name IS NULL OR TRIM(name)='')"
+    )
 
     for name, h in idx.get("bg", {}).items():
         con.execute("INSERT INTO bg(name,hash) VALUES(?,?) "
@@ -471,11 +537,14 @@ def import_index(con, idx):
         n["sound"] += 1
 
     for c in idx.get("characters", []):
-        con.execute("INSERT INTO character(ident,name,club,spine,avatar,source) VALUES(?,?,?,?,?,'overrides') "
+        source = str(c.get("source") or "overrides")
+        con.execute("INSERT INTO character(ident,name,club,spine,avatar,source) VALUES(?,?,?,?,?,?) "
                     "ON CONFLICT(ident) DO UPDATE SET name=excluded.name, club=excluded.club, "
-                    "spine=excluded.spine, avatar=excluded.avatar", (
+                    "spine=excluded.spine, avatar=excluded.avatar, "
+                    "source=CASE WHEN character.source IN ('overrides','custom') "
+                    "THEN character.source ELSE excluded.source END", (
                         c["identifier"], c.get("name"), c.get("club"),
-                        c.get("spine"), c.get("avatar") or "",
+                        c.get("spine"), c.get("avatar") or "", source,
                     ))
         n["character"] += 1
         for f in c.get("faces", []):

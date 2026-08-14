@@ -182,10 +182,12 @@ def _staged_validation_result(result: ValidationResult):
             files = _character_files(candidate)
             if not files:
                 raise AssetRegistrationError("character staging has no files")
-            for source in files:
+            for relative, source in files:
                 if not source.is_file():
                     raise AssetRegistrationError("validated source disappeared before staging")
-                shutil.copy2(source, stage / source.name)
+                destination = stage / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
             from asset_validation import validate_spine
             staged = validate_spine(stage / candidate.stem, identifier=str(candidate.aa_key))
         else:
@@ -326,8 +328,21 @@ def register_sound(result: ValidationResult, project_dir: AAProjectTarget | str 
     return _register_simple(result, project_dir, kind="sound", folder="sounds", manifest_key="SoundOverrides", running_probe=running_probe, after_register=after_register)
 
 
-def _character_files(candidate) -> list[Path]:
-    return [Path(value) for value in candidate.metadata.get("files", {}).values()]
+def _character_files(candidate) -> list[tuple[Path, Path]]:
+    metadata = candidate.metadata
+    raw_files = metadata.get("all_files") or metadata.get("files") or {}
+    source_root = Path(candidate.source_path)
+    files: list[tuple[Path, Path]] = []
+    for key, value in raw_files.items():
+        source = Path(value)
+        try:
+            relative = source.resolve().relative_to(source_root.resolve())
+        except ValueError as exc:
+            raise AssetRegistrationError("character file escapes source bundle") from exc
+        if not relative.parts or any(part in {".", ".."} for part in relative.parts):
+            raise AssetRegistrationError("character file has invalid relative path")
+        files.append((relative, source))
+    return files
 
 
 def _validate_character_identity(result: ValidationResult):
@@ -360,16 +375,16 @@ def _register_character_unlocked(result: ValidationResult, directories: tuple[Pa
             continue
         if existing and any(existing.get(key) != entry[key] for key in ("Identifier", "Name", "Nickname", "SpinePortraitPath", "SmallPortraitPath")):
             raise RegistrationConflictError(f"Identifier {identifier!r} 已用于不同身份或内容")
-    sources = _character_files(candidate)
+    files = _character_files(candidate)
     try:
         destinations = [
-            destination_within(directory, "characters", identifier, source.name)
+            destination_within(directory, "characters", identifier, *relative.parts)
             for directory in directories
-            for source in sources
+            for relative, _source in files
         ]
     except ValueError as exc:
         raise AssetRegistrationError(str(exc)) from exc
-    source_list = sources * len(directories)
+    source_list = [source for _relative, source in files] * len(directories)
     _preflight_files(source_list, destinations)
     changed = any(not destination.exists() for destination in destinations)
     for manifest in manifests:

@@ -190,23 +190,54 @@ def _install_root(executable: Path | None) -> Path | None:
     return executable.parent.parent if executable.parent.name.casefold() == "app" else executable.parent
 
 
-def _catalog_path(executable: Path | None) -> Path | None:
+def _catalog_path(executable: Path | None, local_low: Path | None) -> Path | None:
+    if local_low is not None:
+        downloaded = local_low / "com.unity.addressables"
+        try:
+            catalogs = tuple(
+                path
+                for path in downloaded.glob("catalog_*.json")
+                if path.is_file()
+            )
+        except OSError:
+            catalogs = ()
+        if catalogs:
+            def catalog_sort_key(path: Path) -> tuple[int, str]:
+                try:
+                    modified = path.stat().st_mtime_ns
+                except OSError:
+                    modified = 0
+                return modified, path.name.casefold()
+
+            return max(catalogs, key=catalog_sort_key).resolve()
     if executable is None:
         return None
     catalog = executable.parent / "AzureArchive_Data" / "StreamingAssets" / "aa" / "catalog.json"
     return catalog.resolve() if catalog.is_file() else None
 
 
-def _resource_cache(data: Path, settings: Mapping, issues: list[DiscoveryIssue]) -> Path | None:
+def _resource_cache(
+    data: Path,
+    settings: Mapping,
+    issues: list[DiscoveryIssue],
+    *,
+    local_low: Path | None,
+    identity: UnityIdentity | None,
+) -> Path | None:
     configured = _string_value(settings, "cachePath")
     if configured is not None:
         path = _resolved(configured)
         if path is not None and path.is_dir():
             return path
         issues.append(DiscoveryIssue("resource_cache_missing", "Configured resource cache is unavailable.", path))
-        return None
     sibling = data.parent.parent / "资源文件"
-    return sibling.resolve() if sibling.is_dir() else None
+    if sibling.is_dir():
+        return sibling.resolve()
+    if local_low is not None and identity is not None:
+        unity_cache = local_low.parent.parent / "Unity" / f"{identity.vendor}_{identity.product}"
+        if unity_cache.is_dir():
+            return unity_cache.resolve()
+    return None
 
 
 def _result_for_data(
@@ -239,8 +270,14 @@ def _result_for_data(
         saves=optional_paths["saves"],
         overrides=optional_paths["overrides"],
         settings=optional_paths["settings"],
-        resource_cache=_resource_cache(data, settings_json, issues),
-        catalog=_catalog_path(executable),
+        resource_cache=_resource_cache(
+            data,
+            settings_json,
+            issues,
+            local_low=local_low,
+            identity=identity,
+        ),
+        catalog=_catalog_path(executable, local_low),
         recent_project_files=_read_recent_project_files(settings_json),
         data_candidates=data_candidates or (candidate,),
         requires_selection=False,
@@ -270,7 +307,7 @@ def _empty_result(
         overrides=None,
         settings=None,
         resource_cache=None,
-        catalog=_catalog_path(executable),
+        catalog=_catalog_path(executable, local_low),
         recent_project_files=_read_recent_project_files(configuration or {}),
         data_candidates=candidates,
         requires_selection=requires_selection,

@@ -119,6 +119,61 @@ class FakeSseResponse:
         return iter(self.lines)
 
 
+@pytest.mark.parametrize("message", [
+    "Insufficient account balance",
+    "用户额度不足, 剩余额度: $-0.062636",
+    "余额不足，请充值后重试",
+])
+def test_openai_quota_errors_have_a_stable_non_retryable_code(monkeypatch, message):
+    payload = json.dumps({"error": {"message": message}}, ensure_ascii=False).encode("utf-8")
+
+    def fake_urlopen(_request, timeout):
+        raise HTTPError("https://example.invalid/v1/chat/completions", 403, "Forbidden", {}, io.BytesIO(payload))
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen, raising=False)
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "quota-model"})
+
+    with pytest.raises(llm.InsufficientQuotaError) as raised:
+        provider._request_json("/chat/completions", {"model": "quota-model"})
+
+    assert raised.value.code == "insufficient_quota"
+    assert raised.value.retryable is False
+    assert raised.value.model == "quota-model"
+    assert raised.value.http_status == 403
+
+
+def test_openai_plain_403_is_not_misclassified_as_quota(monkeypatch):
+    payload = json.dumps({"error": {"message": "Model access is forbidden"}}).encode("utf-8")
+
+    def fake_urlopen(_request, timeout):
+        raise HTTPError("https://example.invalid/v1/chat/completions", 403, "Forbidden", {}, io.BytesIO(payload))
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen, raising=False)
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "private-model"})
+
+    with pytest.raises(llm.ModelAccessError) as raised:
+        provider._request_json("/chat/completions", {"model": "private-model"})
+
+    assert raised.value.code == "model_access_denied"
+    assert raised.value.retryable is False
+
+
+def test_openai_503_is_a_retryable_service_failure(monkeypatch):
+    payload = json.dumps({"error": {"message": "Service temporarily unavailable"}}).encode("utf-8")
+
+    def fake_urlopen(_request, timeout):
+        raise HTTPError("https://example.invalid/v1/chat/completions", 503, "Unavailable", {}, io.BytesIO(payload))
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen, raising=False)
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "busy-model"})
+
+    with pytest.raises(llm.ModelServiceUnavailableError) as raised:
+        provider._request_json("/chat/completions", {"model": "busy-model"})
+
+    assert raised.value.code == "model_service_unavailable"
+    assert raised.value.retryable is True
+
+
 def test_openai_model_discovery_uses_builtin_http(monkeypatch):
     requests = []
 
@@ -161,6 +216,21 @@ def test_openai_model_discovery_preserves_safe_output_metadata(monkeypatch):
         {"id": "unknown", "context_length": 128_000, "max_output_tokens": None},
     ]
     assert provider.list_models() == ["deepseek-v4-flash", "unknown"]
+
+
+def test_openai_requests_identify_the_client_for_compatibility_gateways(monkeypatch):
+    captured = []
+
+    def fake_urlopen(request, timeout):
+        captured.append(dict(request.header_items()))
+        return FakeHttpResponse({"data": []})
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen, raising=False)
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "chosen"})
+
+    provider.list_model_records()
+
+    assert captured[0]["User-agent"] == "AA-AutoWriter/1.0"
 
 
 def test_make_provider_from_settings_uses_selected_provider(monkeypatch):
@@ -647,6 +717,74 @@ def test_openai_stream_empty_visible_text_records_reasoning_before_failure(monke
     assert record["reasoning_chars"] == 8
     assert record["content_chars"] == 0
     assert record["finish_reason"] == "stop"
+
+
+def test_openai_stream_recovers_valid_json_from_reasoning_channel(monkeypatch):
+    lines = [
+        b'data: {"choices":[{"delta":{"reasoning_content":"{\\"ok\\":true}"},"finish_reason":null}]}\n',
+        b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n',
+        b'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":4,"completion_tokens_details":{"reasoning_tokens":4}}}\n',
+        b'data: [DONE]\n',
+    ]
+    monkeypatch.setattr(llm, "urlopen", lambda request, timeout: FakeSseResponse(lines), raising=False)
+    provider = llm.OpenAIProvider({
+        "api_key": "secret", "model": "deepseek-v4-flash",
+        "reasoning_wire_protocol": "deepseek_thinking",
+    })
+    schema = {
+        "type": "object",
+        "properties": {"ok": {"type": "boolean"}},
+        "required": ["ok"],
+        "additionalProperties": False,
+    }
+
+    assert provider.complete_json_stream("stable", "volatile", "user", schema) == {"ok": True}
+    assert provider.request_records[0]["content_chars"] == 0
+    assert provider.request_records[0]["recovered_from_reasoning"] is True
+    assert provider.request_records[0]["effective_content_chars"] > 0
+
+
+def test_openai_does_not_recover_plain_reasoning_as_json(monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "urlopen",
+        lambda request, timeout: FakeHttpResponse({
+            "choices": [{
+                "message": {"content": "", "reasoning_content": "I am still thinking"},
+                "finish_reason": "stop",
+            }],
+        }),
+        raising=False,
+    )
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "deepseek-v4-flash"})
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    with pytest.raises(llm.EmptyModelResponseError):
+        provider.complete_json("stable", "volatile", "user", schema)
+
+
+def test_openai_reports_invalid_json_misplaced_in_reasoning_channel(monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "urlopen",
+        lambda request, timeout: FakeHttpResponse({
+            "choices": [{
+                "message": {"content": "", "reasoning_content": '{"ok":"wrong"}'},
+                "finish_reason": "stop",
+            }],
+        }),
+        raising=False,
+    )
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "deepseek-v4-flash"})
+    schema = {
+        "type": "object",
+        "properties": {"ok": {"type": "boolean"}},
+        "required": ["ok"],
+        "additionalProperties": False,
+    }
+
+    with pytest.raises(llm.StructuredOutputError, match="reasoning 通道中的 JSON"):
+        provider.complete_json("stable", "volatile", "user", schema)
 
 
 def test_openai_stream_wall_timeout_applies_during_reasoning(monkeypatch):

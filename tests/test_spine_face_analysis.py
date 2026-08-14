@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from PIL import Image
 
@@ -67,6 +68,25 @@ def test_resolve_spine_cli_prefers_explicit_then_environment_then_config(
     assert spine_face_analysis.resolve_spine_cli(config_path=config) == environment
     monkeypatch.delenv("SPINE_CLI")
     assert spine_face_analysis.resolve_spine_cli(config_path=config) == configured
+
+
+def test_resolve_spine_cli_finds_private_portable_runtime(tmp_path, monkeypatch):
+    internal = tmp_path / "HaloCue private" / "_internal"
+    bundled = tmp_path / "HaloCue private" / "tools" / "spine" / "Spine.com"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_bytes(b"spine")
+    monkeypatch.setattr(
+        spine_face_analysis,
+        "LAYOUT",
+        SimpleNamespace(
+            frozen=True,
+            resource_root=internal,
+            config_path=tmp_path / "missing-config.json",
+        ),
+    )
+    monkeypatch.delenv("SPINE_CLI", raising=False)
+
+    assert spine_face_analysis.resolve_spine_cli() == bundled.resolve()
 
 
 def test_analysis_keeps_contact_sheet_out_of_normal_results_without_model_key(

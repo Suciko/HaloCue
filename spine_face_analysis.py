@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Callable
+from runtime_layout import LAYOUT
 
 from spine_face_labeler import (
     label_face_images,
@@ -14,6 +16,7 @@ from spine_face_labeler import (
     refresh_visual_face_preview_paths,
 )
 from spine_face_renderer import render_face_variations
+from spine_face_web_renderer import SpineWebRenderer, detect_spine_version
 from spine_semantic_faces import extract_semantic_face_combinations
 
 
@@ -41,7 +44,11 @@ def resolve_spine_cli(
     config = (
         Path(config_path)
         if config_path is not None
-        else Path(__file__).with_name("aa_config.json")
+        else (
+            LAYOUT.config_path
+            if LAYOUT.frozen
+            else Path(__file__).with_name("aa_config.json")
+        )
     )
     if config.is_file():
         try:
@@ -52,6 +59,19 @@ def resolve_spine_cli(
                     candidates.append(Path(configured).expanduser())
         except (OSError, ValueError, TypeError):
             pass
+
+    # Private portable builds keep the separately licensed Spine runtime next
+    # to HaloCue.exe.  Check both the executable directory and the parent of
+    # PyInstaller's ``_internal`` resource directory so one-dir and one-file
+    # layouts both work without writing a machine-specific config path.
+    if LAYOUT.frozen:
+        candidates.extend(
+            [
+                Path(sys.executable).resolve().parent / "tools" / "spine" / "Spine.com",
+                LAYOUT.resource_root.parent / "tools" / "spine" / "Spine.com",
+                LAYOUT.resource_root / "tools" / "spine" / "Spine.com",
+            ]
+        )
 
     # Common portable and installed locations. These are discovery candidates,
     # not a required hard-coded location.
@@ -138,7 +158,22 @@ def analyze_character_faces(
             total,
         )
 
-    report = render_face_variations(
+    skeletons = sorted(source.glob("*.skel"))
+    web_report = None
+    if len(skeletons) == 1 and detect_spine_version(skeletons[0]).startswith("4.2"):
+        with SpineWebRenderer() as renderer:
+            requested_ids = sorted(
+                name for name in renderer.animation_names(source)
+                if re.fullmatch(r"\d{2}", name)
+            )
+            if requested_ids:
+                web_report = renderer.render(
+                    source,
+                    face_ids=requested_ids,
+                    cache_root=cache_root,
+                    progress=report_render_progress,
+                )
+    report = web_report or render_face_variations(
         source,
         spine_cli=spine_cli,
         cache_root=cache_root,
@@ -186,7 +221,7 @@ def analyze_character_faces(
             if any(
                 isinstance(item, dict)
                 and item.get("status") == "needs_manual_calibration"
-                for item in report.calibration
+                for item in getattr(report, "calibration", ())
             )
             else "complete"
         ),
@@ -194,10 +229,10 @@ def analyze_character_faces(
         "refreshed_preview_count": refreshed_preview_count,
         "render_cache": str(report.cache_dir),
         "render_cached": bool(report.cached),
-        "actual_workers": report.actual_workers,
-        "retried_faces": list(report.retried_faces),
-        "fallback_workers": report.fallback_workers,
-        "calibration": list(report.calibration),
+        "actual_workers": getattr(report, "actual_workers", 1),
+        "retried_faces": list(getattr(report, "retried_faces", ())),
+        "fallback_workers": getattr(report, "fallback_workers", None),
+        "calibration": list(getattr(report, "calibration", ())),
         "vision_status": "skipped_missing_key",
         "labeled_count": 0,
         "semantic_faces": semantic_faces,

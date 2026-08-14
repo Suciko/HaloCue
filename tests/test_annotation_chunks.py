@@ -122,3 +122,12 @@ def test_chunk_controller_requires_two_successes_before_growth_and_shrinks_on_fa
     assert controller.next_limits().target > 20
     controller.observe({"success": False, "reason": "empty_response"})
     assert controller.next_limits().target < 24
+
+
+def test_chunk_controller_does_not_treat_high_reasoning_ratio_as_capacity_failure():
+    controller = RunChunkController(target=20, soft_limit=24, hard_limit=30)
+
+    controller.observe({"success": True, "reasoning_content_ratio": 12.0})
+
+    assert controller.next_limits().target == 20
+    assert controller.last_reason == "high_reasoning_ratio"

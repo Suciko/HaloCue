@@ -9,7 +9,7 @@ if str(HERE) not in sys.path:
 
 import pytest
 from build_bundle import BuildBundleManager, calc_file_sha256
-from draft_store import DraftStore
+from draft_store import AnnotationIncompleteError, DraftStore
 from install_manager import (
     InstallManager,
     AACorruptBundleError,
@@ -76,6 +76,27 @@ def test_corrupted_bundle_refuses_install(temp_environment):
 
     with pytest.raises(AACorruptBundleError):
         install_mgr.install_build(token=token, build_id=build_id)
+
+
+def test_install_rechecks_annotation_completion(temp_environment, monkeypatch):
+    env = temp_environment
+    store = env["store"]
+    token = "partial-install"
+    store.create_draft(
+        token=token,
+        text="旁白: 部分结果\n",
+        annotation_status={
+            "status": "partial", "completed_targets": 1,
+            "total_targets": 2, "pending_targets": 1,
+        },
+    )
+    monkeypatch.setattr(
+        env["install_mgr"], "find_bundle_dir",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("不应读取构建包")),
+    )
+
+    with pytest.raises(AnnotationIncompleteError):
+        env["install_mgr"].install_build(token=token, build_id="stale-build")
 
 
 def test_aa_running_refuses_install(temp_environment):

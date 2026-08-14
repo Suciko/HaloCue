@@ -455,7 +455,9 @@ def annotation_directives(item):
         directives.append("@camera_hold auto")
     continuity = director.get("continuity")
     fx_command = continuity.get("fx") if isinstance(continuity, Mapping) else "none"
-    target = str(director.get("focus_character") or item.get("who") or "")
+    target = str(director.get("focus_character") or "")
+    if not target and item.get("_speaker_has_portrait"):
+        target = str(item.get("who") or "")
     if target and fx_command == "end":
         directives.append(f"@fx {target} 无")
     elif target and fx_command in {"start", "escalate"} and item.get("fx"):
@@ -788,6 +790,7 @@ def apply_annotation_response_row(
     diagnostic_sink = diagnostics if diagnostics is not None else []
     character = cast[item["who"]]
     portrait = character.get("portrait") and not character.get("narrator")
+    item["_speaker_has_portrait"] = bool(portrait)
     effective_row, clean, rejected, rejected_details = project_effective_annotation_row(
         row, item, character, constraints,
     )
@@ -808,12 +811,16 @@ def apply_annotation_response_row(
         source_id = str(item.get("annotation_id") or "")
         diagnostic_sink.extend({**entry, "source_id": source_id} for entry in director_diagnostics)
     card_id = item.get("card_id") or str(uuid.uuid4())
+    before_values = {
+        field_name: item.get(field_name)
+        for field_name in clean
+    }
     applied_clean = apply_model_directions(item, clean)
     for field_name, field_value in applied_clean.items():
         proposals.append(build_proposal(
             card_id=card_id, p_type="applied_pending", origin="model",
             rule="llm_annotation", field_name=field_name,
-            before=item.get(field_name), after=field_value,
+            before=before_values.get(field_name), after=field_value,
         ))
     for rejected_item in rejected_details:
         proposals.append(build_proposal(
@@ -1033,6 +1040,11 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             "resumed_chunks": agent_result.get("resumed_chunks", 0),
             "cancelled": bool(agent_result.get("cancelled")),
             "timed_out": bool(agent_result.get("timed_out")),
+            "total_targets": int(agent_result.get("total_targets") or 0),
+            "completed_targets": int(agent_result.get("completed_targets") or 0),
+            "pending_targets": int(agent_result.get("pending_targets") or 0),
+            "pending_start_line": agent_result.get("pending_start_line"),
+            "pending_end_line": agent_result.get("pending_end_line"),
             "metrics": agent_result.get("metrics") or {},
         }
         if agent_meta["cancelled"]:

@@ -130,6 +130,47 @@ def test_discovers_relocated_workspace_cache_and_recent_files(tmp_path):
     assert result.source == "user_settings.workspacePath"
 
 
+def test_prefers_downloaded_addressables_catalog_over_bundled_catalog(tmp_path):
+    home = tmp_path / "home"
+    exe = make_install(tmp_path / "AzureArchive")
+    make_data(home / "AppData" / "LocalLow" / "foxxlight" / "AzureArchive")
+    cached_catalog = (
+        home
+        / "AppData"
+        / "LocalLow"
+        / "foxxlight"
+        / "AzureArchive"
+        / "com.unity.addressables"
+        / "catalog_2024.08.17.15.07.45.json"
+    )
+    cached_catalog.parent.mkdir(parents=True)
+    cached_catalog.write_text('{"source":"downloaded"}', encoding="utf-8")
+
+    result = discover_aa(exe, home=home)
+
+    assert result.catalog == cached_catalog.resolve()
+
+
+def test_discovers_unity_default_resource_cache_when_cache_path_is_empty(tmp_path):
+    home = tmp_path / "home"
+    exe = make_install(tmp_path / "AzureArchive")
+    local_low = home / "AppData" / "LocalLow" / "foxxlight" / "AzureArchive"
+    make_data(local_low)
+    write_local_settings(home, {"workspacePath": "", "cachePath": ""})
+    unity_cache = (
+        home
+        / "AppData"
+        / "LocalLow"
+        / "Unity"
+        / "foxxlight_AzureArchive"
+    )
+    unity_cache.mkdir(parents=True)
+
+    result = discover_aa(exe, home=home)
+
+    assert result.resource_cache == unity_cache.resolve()
+
+
 def test_explicit_data_selection_precedes_install_settings_and_legacy_config(tmp_path):
     home = tmp_path / "home"
     exe = make_install(tmp_path / "AzureArchive")

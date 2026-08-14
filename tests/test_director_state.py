@@ -25,6 +25,7 @@ def test_canonical_vocabularies_are_immutable_and_exact():
         "listener_reaction",
         "comedy_hold",
         "decision_pause",
+        "physical_reaction",
     )
 
 

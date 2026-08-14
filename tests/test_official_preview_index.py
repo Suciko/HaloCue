@@ -1,13 +1,58 @@
 import json
+import sys
 from pathlib import Path
 
 from PIL import Image
+import pytest
 
 from official_catalog import CatalogBundleLocation
 from official_preview_index import (
     BundleImage,
     OfficialPreviewIndex,
 )
+
+
+def test_default_bundle_loader_surfaces_texture_decode_failure(monkeypatch, tmp_path):
+    import types
+    from official_preview_index import _default_bundle_loader
+
+    class BrokenAsset:
+        m_Name = "BG_Broken"
+
+        @property
+        def image(self):
+            raise RuntimeError("decoder unavailable")
+
+    class Object:
+        type = types.SimpleNamespace(name="Texture2D")
+
+        @staticmethod
+        def read():
+            return BrokenAsset()
+
+    fake_unitypy = types.SimpleNamespace(
+        load=lambda _path: types.SimpleNamespace(objects=[Object()])
+    )
+    monkeypatch.setitem(sys.modules, "UnityPy", fake_unitypy)
+
+    with pytest.raises(RuntimeError, match="decoder unavailable"):
+        list(_default_bundle_loader(tmp_path / "bundle"))
+
+
+def test_default_bundle_loader_reports_bundle_object_types(monkeypatch, tmp_path):
+    import types
+    from official_preview_index import _default_bundle_loader
+
+    class Object:
+        type = types.SimpleNamespace(name="MonoBehaviour")
+
+    fake_unitypy = types.SimpleNamespace(
+        load=lambda _path: types.SimpleNamespace(objects=[Object()])
+    )
+    monkeypatch.setitem(sys.modules, "UnityPy", fake_unitypy)
+
+    with pytest.raises(RuntimeError, match="MonoBehaviour"):
+        list(_default_bundle_loader(tmp_path / "bundle"))
 
 
 def _catalog_and_cache(tmp_path):
@@ -170,7 +215,7 @@ def test_resolve_reuses_manifest_parse_until_manifest_changes(
     output = root / "one.webp"
     Image.new("RGB", (20, 20)).save(output)
     manifest = {
-        "schema_version": 1,
+        "schema_version": 3,
         "status": "ready",
         "fingerprint": "one",
         "counts": {"backgrounds": 1, "avatars": 0, "failed": 0},
@@ -233,7 +278,7 @@ def test_failed_bundle_produces_partial_and_preserves_successes(
     manifest = json.loads(
         (store.root / "manifest.json").read_text(encoding="utf-8")
     )
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 3
     assert manifest["counts"] == {
         "backgrounds": 1,
         "avatars": 1,

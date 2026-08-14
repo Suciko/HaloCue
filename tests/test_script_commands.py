@@ -1,7 +1,7 @@
 from build_index import ACTION, EMOTICON
 from annotate import insert_annotation_beats, render_annotated_items
 import script2aap
-from script2aap import AppearanceState, build, parse_bg_argument, parse_script, resolve_act, resolve_emo, warn
+from script2aap import AppearanceState, build, parse_bg_argument, parse_script, resolve_act, resolve_background_reference, resolve_emo, warn
 
 
 def test_background_command_preserves_spaces_in_custom_filename():
@@ -12,6 +12,18 @@ def test_background_command_preserves_spaces_in_custom_filename():
 
 def test_background_command_trims_only_outer_whitespace():
     assert parse_bg_argument("  夜晚的 活动室  ") == "夜晚的 活动室"
+
+
+def test_registered_numeric_background_key_resolves_to_its_resource_name():
+    backgrounds = {
+        "ChatGPT Image 2026年8月5日 18_28_00": 3040691084,
+        "BG_Black": 1047754314,
+    }
+
+    assert resolve_background_reference("3040691084", backgrounds) == (
+        "ChatGPT Image 2026年8月5日 18_28_00"
+    )
+    assert resolve_background_reference("999999", backgrounds) == "999999"
 
 
 def test_first_background_transition_is_ignored_but_later_switch_is_kept(tmp_path):
@@ -137,6 +149,33 @@ def test_persistent_camera_holds_until_auto_without_changing_authored_one_shot(t
     ]
     assert visible[:2] == [["alice"], ["alice"]]
     assert "bob" in visible[2]
+
+
+def test_empty_camera_hold_persists_through_narration_and_restores_portrait(tmp_path):
+    script = tmp_path / "empty-camera-hold.txt"
+    script.write_text(
+        "@camera_hold -\n旁白: establishing\n旁白: still establishing\n"
+        "Alice: automatic again\n",
+        encoding="utf-8",
+    )
+    cast = {
+        "旁白": {"narrator": True},
+        "Alice": {"id": "alice", "portrait": True},
+    }
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+
+    scripts = build(
+        parse_script(script, cast),
+        {"camera": {"enabled": False}}, cast, index, "empty-camera-hold",
+    )[0][1]
+    visible = [
+        [character["name"] for character in row["characters"]["$values"][1:] if character["name"]]
+        for row in scripts
+    ]
+
+    assert visible[0] == []
+    assert visible[1] == []
+    assert "alice" in visible[2]
 
 
 def test_thematic_separator_is_a_real_compiler_scene_boundary(tmp_path):
@@ -384,6 +423,33 @@ def test_camera_dash_compiles_an_empty_shot(tmp_path):
 
     assert row["speakerSlotNum"] == 0
     assert not any(character["name"] for character in row["characters"]["$values"][1:])
+
+
+def test_slot_zero_distinguishes_narration_from_named_voice_characters(tmp_path):
+    script = tmp_path / "slot-zero-speakers.txt"
+    script.write_text(
+        "旁白: 场景开始。\n老师: 听得见吗？\n神秘店员: 欢迎光临。\n",
+        encoding="utf-8",
+    )
+    cast = {
+        "旁白": {"narrator": True},
+        "老师": {"id": "45145456", "name": "老师", "portrait": False},
+        "神秘店员": {"id": "voice-clerk", "name": "神秘店员", "portrait": False},
+    }
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+
+    rows = build(
+        parse_script(script, cast), {"camera": {"enabled": False}},
+        cast, index, "slot-zero-speakers",
+    )[0][1]
+
+    assert rows[0]["speakerSlotNum"] == 0
+    assert rows[0]["characters"]["$values"][0]["name"] == ""
+    assert [row["speakerSlotNum"] for row in rows[1:]] == [0, 0]
+    assert [
+        row["characters"]["$values"][0]["name"]
+        for row in rows[1:]
+    ] == ["45145456", "voice-clerk"]
 
 
 def test_explicit_camera_is_one_shot_and_deduplicates_names(tmp_path):

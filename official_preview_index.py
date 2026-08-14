@@ -74,21 +74,38 @@ def _default_bundle_loader(data_path: Path) -> Iterable[BundleImage]:
     import UnityPy
 
     environment = UnityPy.load(str(data_path))
+    image_errors: list[str] = []
+    object_types: list[str] = []
+    yielded = False
     for obj in environment.objects:
-        if obj.type.name not in {"Texture2D", "Sprite"}:
+        object_type = str(obj.type.name)
+        if object_type not in object_types:
+            object_types.append(object_type)
+        if object_type not in {"Texture2D", "Sprite"}:
             continue
         try:
             asset = obj.read()
             image = asset.image
-        except Exception:
+        except Exception as exc:
+            image_errors.append(f"{type(exc).__name__}: {exc}")
             continue
         name = str(getattr(asset, "m_Name", "") or "")
         if name and image is not None:
+            yielded = True
             yield BundleImage(name, image, obj.type.name)
+    if not yielded and image_errors:
+        raise RuntimeError(
+            "UnityPy could not decode bundle images: " + image_errors[0]
+        )
+    if not yielded:
+        raise RuntimeError(
+            "UnityPy found no Texture2D or Sprite objects; types: "
+            + ", ".join(object_types[:12])
+        )
 
 
 class OfficialPreviewIndex:
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 3
 
     def __init__(self, root: str | Path):
         self.root = Path(root)

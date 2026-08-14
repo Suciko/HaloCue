@@ -81,7 +81,7 @@ console.log(JSON.stringify({
         "text": ["text", "vision"],
         "vision": ["vision"],
         "provider": ["vision"],
-        "label": "图片已通过",
+        "label": "图片连通通过",
         "untested": "文字未测试",
         "failed": "图片测试失败",
         "readiness": "DeepSeek 官方 · deepseek-v4-flash；图片：Gemini 视觉 · gemini-3.6-flash",

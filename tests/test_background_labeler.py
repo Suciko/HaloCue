@@ -86,7 +86,33 @@ def test_label_background_sends_a_bounded_jpeg_without_a_local_path(tmp_path):
     with Image.open(io.BytesIO(blob)) as image:
         assert image.format == "JPEG"
         assert image.mode == "RGB"
-        assert image.width <= 1280 and image.height <= 1280
+    assert image.width <= 1280 and image.height <= 1280
+
+
+def test_label_background_includes_filename_as_auxiliary_context(tmp_path):
+    source = tmp_path / "BG_SchoolRooftop_Dawn.png"
+    _image(source)
+
+    class Provider:
+        def complete_json_vision(self, system, images, user, schema):
+            self.system = system
+            return {
+                "label": "",
+                "description": "",
+                "place": "",
+                "indoor_outdoor": "",
+                "time": "",
+                "weather": "",
+                "season": "",
+                "mood": "",
+                "tags": [],
+            }
+
+    provider = Provider()
+    label_background(provider, source)
+
+    assert source.name in provider.system
+    assert "auxiliary context" in provider.system
 
 
 def test_background_label_update_is_shared_by_identical_custom_copies(tmp_path):

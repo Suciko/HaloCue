@@ -15,6 +15,7 @@ from model_capabilities import resolve_reasoning_capability
 
 _TARGET_PREFIX = "AA-AutoWriter/"
 _PROVIDERS = {"openai", "anthropic"}
+_AUTO_WINDOWS_CREDENTIALS = object()
 MODEL_PRESETS = {
     "openai": {"label": "OpenAI", "provider": "openai", "base_url": "https://api.openai.com/v1", "model": "gpt-4o", "vision": True, "official_url": "https://openai.com/api/", "api_key_url": "https://platform.openai.com/api-keys"},
     "anthropic": {"label": "Anthropic", "provider": "anthropic", "base_url": "https://api.anthropic.com", "model": "claude-sonnet-4-5", "vision": True, "official_url": "https://www.anthropic.com/api", "api_key_url": "https://console.anthropic.com/settings/keys"},
@@ -159,17 +160,14 @@ class _CtypesWindowsCredentials:
 class WindowsCredentialStore:
     """Store generic credentials encrypted by the current Windows account."""
 
-    def __init__(self, *, win32cred_module=None):
-        if win32cred_module is None:
-            try:
-                import win32cred as win32cred_module
-            except ImportError:
-                win32cred_module = None
-        if win32cred_module is None and os.name == "nt":
+    def __init__(self, *, win32cred_module=_AUTO_WINDOWS_CREDENTIALS):
+        if win32cred_module is _AUTO_WINDOWS_CREDENTIALS and os.name == "nt":
             try:
                 win32cred_module = _CtypesWindowsCredentials()
             except (AttributeError, OSError):
                 win32cred_module = None
+        elif win32cred_module is _AUTO_WINDOWS_CREDENTIALS:
+            win32cred_module = None
         self._api = win32cred_module
         self.available = self._api is not None
 

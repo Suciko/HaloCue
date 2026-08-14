@@ -13,6 +13,22 @@ def run_harness(script):
     ))
 
 
+def test_aa_executable_is_a_non_modal_gate_for_the_first_workflow_step():
+    script = r'''
+const {createHarness}=require(process.argv[1]);const h=createHarness();
+const missing={connected:false,program:{status:'missing',path:''}};
+const ready={connected:true,program:{status:'recognized',path:'E:/AA/AzureArchive.exe'}};
+h.window.AppRuntime.applyAAReadiness(missing);
+const before={gate:h.get('#aaSetupGate').hidden,choose:h.get('#chooseStoryButton').disabled,analyze:h.get('#analyzeStoryButton').disabled};
+h.window.AppRuntime.applyAAReadiness(ready);
+console.log(JSON.stringify({before,after:{gate:h.get('#aaSetupGate').hidden,choose:h.get('#chooseStoryButton').disabled,analyze:h.get('#analyzeStoryButton').disabled}}));
+'''
+    assert run_harness(script) == {
+        "before": {"gate": False, "choose": True, "analyze": True},
+        "after": {"gate": True, "choose": False, "analyze": False},
+    }
+
+
 def test_startup_does_not_reopen_the_previous_story_from_browser_storage():
     """Reintroducing automatic story restoration must fail this startup contract."""
     script = r'''
@@ -80,6 +96,44 @@ def test_review_navigation_controls_are_present_and_concise():
     assert ">全部<" in html and ">待审<" in html and ">待处理<" in html and ">演出<" in html
 
 
+def test_review_all_waits_for_in_app_confirmation_and_cancel_sends_nothing():
+    script = r'''
+const {createHarness}=require(process.argv[1]);const approvals=[];
+const h=createHarness({request:async(p,o)=>{if(p==='/api/draft?token=d')return {story_token:'S',draft_version:1,counts:{pending:1,blocking_errors:0},cards:[{card_id:'c1',kind:'line',line_no:1,review_state:'pending',issues:[],current:{who:'凯伊',text:'待审'}}]};if(p.startsWith('/api/story/assets'))return {characters:[],backgrounds:[],sounds:[],bgms:[]};if(p==='/api/review/approve'){approvals.push(o);return {ok:true,draft_version:2};}return {};}});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'S'});h.get('#rvDraftSelect').value='d';await h.window.AppRuntime.loadReview();const trigger=h.get('#rvApproveAll');h.clickAction('approve-all',trigger);await h.drain();const opened=h.get('#mApproveAll').classList.contains('on');h.clickAction('cancel-approve-all',h.get('#approveAllCancel'));await h.drain();console.log(JSON.stringify({opened,closed:!h.get('#mApproveAll').classList.contains('on'),approvals:approvals.length}));})();
+'''
+    assert run_harness(script) == {"opened": True, "closed": True, "approvals": 0}
+
+
+def test_review_all_focuses_the_dialog_and_double_confirm_submits_once():
+    script = r'''
+const {createHarness}=require(process.argv[1]);let approvals=0,release;
+const pending=new Promise(resolve=>{release=resolve});
+const h=createHarness({request:async(p)=>{if(p==='/api/draft?token=d')return {story_token:'S',draft_version:1,counts:{pending:1,blocking_errors:0},cards:[{card_id:'c1',kind:'line',line_no:1,review_state:'pending',issues:[],current:{who:'凯伊',text:'待审'}}]};if(p.startsWith('/api/story/assets'))return {characters:[],backgrounds:[],sounds:[],bgms:[]};if(p==='/api/review/approve'){approvals+=1;await pending;return {ok:true,draft_version:2};}return {};}});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'S'});h.get('#rvDraftSelect').value='d';await h.window.AppRuntime.loadReview();const trigger=h.get('#rvApproveAll');trigger.focus();h.clickAction('approve-all',trigger);const dialogFocused=h.getActiveElement()===h.get('#approveAllConfirm');h.clickAction('confirm-approve-all',h.get('#approveAllConfirm'));h.clickAction('confirm-approve-all',h.get('#approveAllConfirm'));await h.drain();const whileBusy=approvals;release();await h.drain();console.log(JSON.stringify({dialogFocused,whileBusy,total:approvals,focusReturned:h.getActiveElement()===trigger}));})();
+'''
+    assert run_harness(script) == {
+        "dialogFocused": True,
+        "whileBusy": 1,
+        "total": 1,
+        "focusReturned": True,
+    }
+
+
+def test_review_all_failure_stays_in_the_dialog_and_can_be_retried():
+    script = r'''
+const {createHarness}=require(process.argv[1]);let approvals=0;
+const h=createHarness({request:async(p)=>{if(p==='/api/draft?token=d')return {story_token:'S',draft_version:1,counts:{pending:1,blocking_errors:0},cards:[{card_id:'c1',kind:'line',line_no:1,review_state:'pending',issues:[],current:{who:'凯伊',text:'待审'}}]};if(p.startsWith('/api/story/assets'))return {characters:[],backgrounds:[],sounds:[],bgms:[]};if(p==='/api/review/approve'){approvals+=1;throw new Error('草稿版本已变化');}return {};}});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'S'});h.get('#rvDraftSelect').value='d';await h.window.AppRuntime.loadReview();h.clickAction('approve-all',h.get('#rvApproveAll'));h.clickAction('confirm-approve-all',h.get('#approveAllConfirm'));await h.drain();console.log(JSON.stringify({open:h.get('#mApproveAll').classList.contains('on'),message:h.get('#approveAllStatus').textContent,confirmDisabled:h.get('#approveAllConfirm').disabled,approvals}));})();
+'''
+    assert run_harness(script) == {
+        "open": True,
+        "message": "操作失败：草稿版本已变化",
+        "confirmDisabled": False,
+        "approvals": 1,
+    }
+
+
 def test_short_feedback_exposes_background_decision_cache_reuse_and_build_id():
     script = r'''
 const {createHarness}=require(process.argv[1]);
@@ -103,6 +157,48 @@ const h=createHarness({poll:async()=>({state:'succeeded',result:{draft_token:'d'
     assert "复用 3 段" in run_harness(script)["log"]
 
 
+def test_completed_checkpoint_log_explains_that_no_model_was_called():
+    script = r'''
+const {createHarness}=require(process.argv[1]);
+const story={story_token:'S',project:'S',preflight_snapshot:{state:'fresh',approved:true,result:{ai_status:'completed',analysis:{lines:1,speakers:[],scenes:[]},characters:[],assets:[],issues:[]}}};
+const h=createHarness({poll:async()=>({state:'succeeded',result:{draft_token:'d',resumed_chunks:8,reused_draft:true,agent_metrics:{requests:0,input_tokens:0,output_tokens:0}}}),request:async(p)=>{if(p==='/api/annotate')return {job_id:'annotate-1'};if(p==='/api/drafts')return [{draft_token:'d',story_token:'S',project:'S',draft_version:1}];if(p==='/api/draft?token=d')return {story_token:'S',draft_version:1,counts:{pending:0,blocking_errors:0},cards:[]};if(p.startsWith('/api/story/assets'))return {characters:[],backgrounds:[],sounds:[],bgms:[]};return {profiles:[]};}});
+(async()=>{await h.window.replaceStory(story);await h.window.AppRuntime.annotate();console.log(JSON.stringify({log:h.get('#log').textContent}));})();
+'''
+    message = run_harness(script)["log"]
+    assert "本次未调用模型" in message
+    assert "请求 0 次" not in message
+    assert "复用 8 段" in message
+
+
+def test_quota_failure_restores_the_open_draft_and_offers_model_settings():
+    script = r'''
+const {createHarness}=require(process.argv[1]);let shown=[];
+const cards=Array.from({length:269},(_,i)=>({card_id:'card-'+(i+1),kind:'line',line_no:i+1,review_state:'approved',issues:[],current:{who:'凯伊',text:'台词'}}));
+const story={story_token:'S',project:'S',latest_draft_token:'old',preflight_snapshot:{state:'fresh',approved:true,result:{ai_status:'completed',analysis:{path:'story.txt',lines:269,speakers:[],scenes:[]},characters:[],assets:[],issues:[]}}};
+const h=createHarness({cardList:{renderCardList(_root,value){shown=value.map(x=>x.card_id);}},poll:async()=>({state:'failed',error:'quota-model 接口返回 HTTP 403: 用户额度不足 request_id=req_secret',error_code:'insufficient_quota',error_detail:{model:'quota-model',retryable:false,http_status:403}}),request:async(p)=>{if(p==='/api/annotate')return {job_id:'annotate-1'};if(p==='/api/drafts')return [{draft_token:'old',story_token:'S',project:'S',generation_version:5}];if(p==='/api/draft?token=old')return {story_token:'S',draft_version:5,counts:{pending:0,blocking_errors:0},cards};if(p.startsWith('/api/story/assets'))return {characters:[],backgrounds:[],sounds:[],bgms:[]};if(p==='/api/llm/workbench')return {connections:[],models:[],assignments:{},presets:[]};return {profiles:[]};}});
+(async()=>{await h.window.replaceStory(story);h.get('#rvDraftSelect').value='old';await h.window.AppRuntime.loadReview('card-7');await h.window.AppRuntime.annotate();const before={hidden:h.get('#generationFailure').hidden,title:h.get('#generationFailureTitle').textContent,message:h.get('#generationFailureMessage').textContent,action:h.get('#generationFailureAction').textContent,technical:h.get('#generationFailureTechnical').textContent,retryDisabled:h.get('#generationFailureRetry').disabled,draftHidden:h.get('#generationFailureDraft').hidden,selected:h.get('#rvDraftSelect').value,reviewHidden:h.get('#reviewPhase').classList.contains('is-hidden'),shown:shown.length};await h.clickAction('open-model-settings');await h.drain();console.log(JSON.stringify({before,settings:h.get('#settingsDrawer').classList.contains('open')}));})();
+'''
+    result = run_harness(script)
+    assert result["before"]["hidden"] is False
+    assert result["before"]["title"] == "当前模型额度不足"
+    assert "正式剧本生成" in result["before"]["message"]
+    assert "切换基础模型" in result["before"]["action"]
+    assert "req_secret" not in result["before"]["technical"]
+    assert result["before"]["retryDisabled"] is True
+    assert result["before"]["draftHidden"] is False
+    assert result["before"]["selected"] == "old"
+    assert result["before"]["reviewHidden"] is False
+    assert result["before"]["shown"] == 80
+    assert result["settings"] is True
+
+
+def test_connection_test_copy_states_that_it_is_only_a_basic_check():
+    app = (HERE / "js" / "app.js").read_text(encoding="utf-8")
+    html = (HERE / "ui.html").read_text(encoding="utf-8")
+    assert "基础连通通过" in app
+    assert "不验证正式剧本所需额度" in html
+
+
 def test_annotation_progress_formatter_describes_live_model_activity():
     script = r'''
 const {createHarness}=require(process.argv[1]);
@@ -112,6 +208,7 @@ console.log(JSON.stringify({
   receiving:h.window.AppRuntime.annotationProgressDetail({state:'receiving',detail:'正在标注第 1/4 个场景块',received_chars:8192,elapsed_ms:7300,model:'deepseek-v4-flash'}),
   reasoning:h.window.AppRuntime.annotationProgressDetail({state:'reasoning',detail:'正在标注第 1/4 个场景块',reasoning_chars:4096,elapsed_ms:7300,model:'deepseek-v4-flash'}),
   retrying:h.window.AppRuntime.annotationProgressDetail({state:'retrying',detail:'正在标注第 1/4 个场景块',retry_count:1,model:'deepseek-v4-flash'}),
+  reasoningCapacity:h.window.AppRuntime.annotationProgressDetail({state:'retrying',reason:'reasoning_capacity',detail:'正在标注第 1/4 个场景块',retry_count:1,model:'deepseek-v4-flash'}),
   subdividing:h.window.AppRuntime.annotationProgressDetail({state:'subdividing',detail:'正在标注第 1/4 个场景块',subdivision_count:2,model:'deepseek-v4-flash'})
 }));
 '''
@@ -120,6 +217,7 @@ console.log(JSON.stringify({
     assert "已接收 8,192 字符" in result["receiving"]
     assert "已思考 4,096 字符" in result["reasoning"]
     assert "正在纠正返回格式" in result["retrying"]
+    assert "增加预算并保留推理" in result["reasoningCapacity"]
     assert "正在拆分当前场景块" in result["subdividing"]
 
 
@@ -137,7 +235,29 @@ console.log(JSON.stringify({
     assert "360,075" in result["hit"]
     assert "118,591" in result["hit"]
     assert "80,000" in result["hit"]
+    assert "累计思考 80,000" in result["hit"]
     assert "缓存未报告" in result["unknown"]
+
+
+def test_partial_annotation_is_visible_and_disables_compile_and_install():
+    script = r'''
+const {createHarness}=require(process.argv[1]);
+const h=createHarness({request:async p=>{
+  if(p==='/api/draft?token=d') return {
+    story_token:'S',draft_version:1,last_compiled_build_id:'stale-build',
+    annotation_status:{status:'partial',completed_targets:213,total_targets:240,pending_targets:27,pending_start_line:434,pending_end_line:486},
+    counts:{pending:0,blocking_errors:1},cards:[]
+  };
+  if(p.startsWith('/api/story/assets')) return {characters:[],backgrounds:[],sounds:[],bgms:[]};
+  return {profiles:[]};
+}});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'S'});h.get('#rvDraftSelect').value='d';await h.window.AppRuntime.loadReview();console.log(JSON.stringify({status:h.get('#rvStatus').textContent,compile:h.get('#rvCompile').disabled,install:h.get('#rvInstall').disabled}));})();
+'''
+    result = run_harness(script)
+    assert "AI 标注 213/240" in result["status"]
+    assert "剩余 27" in result["status"]
+    assert result["compile"] is True
+    assert result["install"] is True
 
 
 def test_story_runtime_scopes_drafts_and_handles_build_terminal_states():

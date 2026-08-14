@@ -10,10 +10,23 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from PIL import Image
+import pytest
 
 import assetdb
 import webui
 from official_preview_index import OfficialPreviewIndex, PreviewIndexState
+
+
+@pytest.fixture(autouse=True)
+def _isolate_local_aa_discovery(monkeypatch):
+    monkeypatch.setattr(
+        webui,
+        "_current_aa_discovery",
+        lambda: type("Discovery", (), {
+            "catalog": None,
+            "resource_cache": None,
+        })(),
+    )
 
 
 def _make_image(path: Path, color: str):
@@ -30,7 +43,7 @@ def _configure_preview_store(tmp_path, monkeypatch):
     _make_image(avatar, "green")
     store.root.mkdir(parents=True, exist_ok=True)
     (store.root / "manifest.json").write_text(
-        '{"schema_version":1,"status":"ready",'
+        '{"schema_version":3,"status":"ready",'
         '"fingerprint":"test","counts":{"backgrounds":1,"avatars":0,"failed":0},'
         '"records":[{"kind":"background","key":"bg_classroom",'
         '"normalized_key":"bg_classroom","path":"official.webp",'
@@ -139,6 +152,61 @@ def test_character_list_exposes_avatar_route_only_when_preview_exists(
     assert rows["missing"]["avatar"] == ""
 
 
+def test_character_list_hides_unnamed_observed_aap_noise(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    con = assetdb.connect(webui.DB)
+    con.execute(
+        "INSERT INTO character(ident, name, source) VALUES(?, NULL, 'observed')",
+        ("1113",),
+    )
+    con.execute(
+        "INSERT INTO face(ident, face_id, raw, label, label_cn, source) "
+        "VALUES(?, '00', '00', '', '', 'observed')",
+        ("1113",),
+    )
+    assetdb.import_index(con, {"characters": [{
+        "identifier": "hifumi", "name": "Hifumi", "avatar": "",
+        "spine": "", "faces": [],
+    }]})
+    con.close()
+
+    rows = webui.list_characters()
+
+    assert [row["ident"] for row in rows] == ["hifumi"]
+
+
+def test_character_list_imports_official_catalog_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text("{}", encoding="utf-8")
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    discovery = type("Discovery", (), {
+        "catalog": catalog,
+        "resource_cache": cache,
+    })()
+    monkeypatch.setattr(webui, "_current_aa_discovery", lambda: discovery)
+    calls = []
+
+    def load_official(*, cache_root, catalog_path):
+        calls.append((cache_root, catalog_path))
+        return [{
+            "identifier": "official-hifumi", "name": "Hifumi",
+            "club": "Trinity", "spine": "official/spine",
+            "avatar": "Student_Portrait_Hifumi",
+            "source": "official_flatdata", "faces": [],
+        }]
+
+    monkeypatch.setattr(webui, "harvest_official_characters", load_official)
+
+    first = webui.list_characters()
+    second = webui.list_characters()
+
+    assert [row["ident"] for row in first] == ["official-hifumi"]
+    assert [row["ident"] for row in second] == ["official-hifumi"]
+    assert calls == [(cache, catalog)]
+
+
 def test_character_list_orders_official_default_before_outfit_variant(
     tmp_path, monkeypatch
 ):
@@ -189,6 +257,36 @@ def test_character_list_uses_registered_custom_avatar_when_catalog_row_has_no_av
 
     assert row["avatar"] == "/thumb/av/custom-kei"
     assert str(tmp_path) not in repr(row)
+
+
+def test_official_background_picker_excludes_story_registered_custom_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    con = assetdb.connect(webui.DB)
+    import asset_catalog
+    asset_catalog.migrate(con)
+    con.executemany(
+        "INSERT INTO bg(name,hash,label) VALUES(?,?,?)",
+        [
+            ("BG_GameCenter", 101, "Game Center"),
+            ("3040691084", 3040691084, "自定义游戏中心"),
+        ],
+    )
+    con.execute(
+        """INSERT INTO asset_install
+        (scope,kind,aa_key,display_name,source_path,sha256,status,install_path,metadata_json)
+        VALUES (?,?,?,?,?,?,?,?,?)""",
+        (
+            str(tmp_path / "project"), "background", "3040691084", "自定义游戏中心",
+            str(tmp_path / "custom.png"), "digest", "registered",
+            str(tmp_path / "project" / "bgs" / "custom.png"), "{}",
+        ),
+    )
+    con.commit()
+    con.close()
+
+    rows = webui.list_backgrounds(only_ready=True, only_official=True)
+
+    assert [row["name"] for row in rows] == ["BG_GameCenter"]
 
 
 def test_character_list_uses_catalog_avatar_when_database_row_lacks_it(

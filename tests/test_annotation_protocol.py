@@ -1,5 +1,6 @@
 import pytest
 
+import llm
 from director_state import default_director
 
 from annotation_protocol import (
@@ -401,9 +402,29 @@ def test_chunk_schema_offers_optional_bounded_beats():
     assert beat["properties"]["wait_ms"]["maximum"] == 10000
     assert beat["properties"]["reason"]["enum"] == [
         "await_response", "relationship_turn", "listener_reaction",
-        "comedy_hold", "decision_pause",
+        "comedy_hold", "decision_pause", "physical_reaction",
     ]
     assert "reason" in beat["required"]
+
+
+def test_narrated_physical_reaction_can_anchor_a_dialogue_free_action_beat():
+    response = complete_response()
+    response["beats"] = [{
+        "anchor_id": "src-1-0-a", "position": "after", "who": "凯伊",
+        "face": "", "emo": "", "act": "stiff", "wait_ms": 0,
+        "reason": "physical_reaction",
+    }]
+
+    validated = validate_chunk_response(
+        response, TARGETS, cast={"凯伊": {"id": "kei", "portrait": True}},
+        constraints={"faces_by_id": {}, "sym2cn": {}, "ok_emo": set(), "ok_act": {"stiff"}},
+    )
+
+    assert validated["beats"][0] == {
+        "anchor_id": "src-1-0-a", "position": "after", "who": "凯伊",
+        "face": "", "emo": "", "act": "stiff", "wait_ms": 0,
+        "reason": "physical_reaction",
+    }
 
 
 def test_complete_and_compact_schemas_expose_strict_optional_direction_objects():
@@ -426,6 +447,109 @@ def test_compact_schema_uses_one_based_index_and_optional_annotation_fields():
     assert "text_fingerprint" not in row["properties"]
     assert row["additionalProperties"] is False
     assert schema["properties"]["lines"]["maxItems"] == 2
+
+
+def test_compact_protocol_recovers_line_emo_accidentally_nested_in_direction():
+    response = {
+        "lines": [{
+            "i": 1,
+            "d": {"emo": "惊叹", "continuity": {"emo": "start"}},
+        }],
+        "state_delta": {},
+        "memory_events": [],
+    }
+    schema = build_compact_chunk_schema(2)
+
+    llm.validate_json_schema(response, schema)
+    expanded = expand_compact_chunk_response(response, TARGETS)
+
+    assert expanded["lines"][0]["emo"] == "惊叹"
+    assert expanded["lines"][0]["direction"]["continuity"]["emo"] == "start"
+    assert expanded.director_intents["src-1-0-a"] == {
+        "continuity": {"emo": "start"},
+    }
+
+
+def test_compact_protocol_rejects_conflicting_nested_annotation_alias():
+    response = {
+        "lines": [{"i": 1, "emo": "疑问", "d": {"emo": "惊叹"}}],
+        "state_delta": {},
+        "memory_events": [],
+    }
+
+    with pytest.raises(ChunkProtocolError, match="冲突"):
+        expand_compact_chunk_response(response, TARGETS)
+
+
+def test_compact_protocol_recovers_direction_fields_accidentally_flattened_on_line():
+    response = {
+        "lines": [{
+            "i": 1,
+            "visible_characters": ["凯伊", "老师"],
+            "focus_kind": "listener",
+            "d": {"reason": "listener_reaction"},
+        }],
+        "state_delta": {},
+        "memory_events": [],
+    }
+    schema = build_compact_chunk_schema(2)
+
+    llm.validate_json_schema(response, schema)
+    expanded = expand_compact_chunk_response(response, TARGETS)
+
+    assert expanded["lines"][0]["direction"]["visible_characters"] == ["凯伊", "老师"]
+    assert expanded["lines"][0]["direction"]["focus_kind"] == "listener"
+    assert expanded.director_intents["src-1-0-a"] == {
+        "visible_characters": ["凯伊", "老师"],
+        "focus_kind": "listener",
+        "reason": "listener_reaction",
+    }
+
+
+def test_compact_protocol_recovers_state_delta_accidentally_nested_in_line():
+    response = {
+        "lines": [{
+            "i": 1,
+            "state_delta": {"background": "BG_Riverside", "place": "河堤"},
+        }],
+        "state_delta": {"visible_characters": ["凯伊"]},
+        "memory_events": [],
+    }
+    schema = build_compact_chunk_schema(2)
+
+    llm.validate_json_schema(response, schema)
+    expanded = expand_compact_chunk_response(response, TARGETS)
+
+    assert expanded["state_delta"] == {
+        "background": "BG_Riverside", "place": "河堤",
+        "visible_characters": ["凯伊"],
+    }
+
+
+def test_compact_protocol_keeps_canonical_root_state_over_nested_snapshot():
+    response = {
+        "lines": [{"i": 1, "state_delta": {"background": "BG_A"}}],
+        "state_delta": {"background": "BG_B"}, "memory_events": [],
+    }
+
+    expanded = expand_compact_chunk_response(response, TARGETS)
+
+    assert expanded["state_delta"] == {"background": "BG_B"}
+
+
+def test_compact_protocol_rejects_conflicting_flattened_direction_alias():
+    response = {
+        "lines": [{
+            "i": 1,
+            "focus_kind": "speaker",
+            "d": {"focus_kind": "listener"},
+        }],
+        "state_delta": {},
+        "memory_events": [],
+    }
+
+    with pytest.raises(ChunkProtocolError, match="冲突"):
+        expand_compact_chunk_response(response, TARGETS)
 
 
 def test_state_delta_schema_matches_memory_bounds():

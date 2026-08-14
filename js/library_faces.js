@@ -36,6 +36,8 @@
     this.labelRequestKey = '';
     this.labelRequestSequence = 0;
     this.saveRequests = Object.create(null);
+    this.renderer = null;
+    this.renderPromise = null;
     this.bind();
   }
 
@@ -288,14 +290,19 @@
     this.progress.textContent = total > 0 ? current + ' / ' + total : (job.running ? '处理中' : '—');
     const result = job.result || {};
     if (job.done && job.ok) {
-      const rendered = Number(result.rendered_count || 0), labeled = Number(result.labeled_count || 0), saved = Number(result.saved_count || 0);
-      this.result.textContent = rendered + ' 个差分' + (labeled ? ' · ' + labeled + ' 个 AI 标注' : '') + (saved ? ' · ' + saved + ' 个已保存' : '');
+      const rendered = Number(result.rendered_count || 0), semantic = Number(result.semantic_face_count || 0), labeled = Number(result.labeled_count || 0), saved = Number(result.saved_count || 0);
+      this.result.textContent = result.vision_status === 'awaiting_browser_render'
+        ? '已识别 ' + semantic + ' 个表情组合，正在生成差分图'
+        : rendered + ' 个差分' + (labeled ? ' · ' + labeled + ' 个 AI 标注' : '') + (saved ? ' · ' + saved + ' 个已保存' : '');
     } else if (job.done && !job.ok) this.result.textContent = '处理失败';
     else this.result.textContent = '处理中';
-    this.status.textContent = job.message || (job.error ? '表情标注失败，请检查 Spine 配置与骨骼完整性。' : '');
+    this.status.textContent = job.message || (job.error ? '表情标注失败，请检查骨骼文件完整性后重试。' : '');
     this.log.textContent = (job.log || []).join('\n');
     if (!this.faces.length) this.renderLabels(result.semantic_faces || []);
-    const refreshEvidence = Number(result.refreshed_preview_count || result.rendered_count || result.saved_count || result.labeled_count || 0);
+    if (job.done && job.ok && result.vision_status === 'awaiting_browser_render') {
+      this.renderMissingPreviews();
+    }
+    const refreshEvidence = Number(result.refreshed_preview_count || result.rendered_count || result.semantic_face_count || result.saved_count || result.labeled_count || 0);
     if (job.done && job.ok && refreshEvidence) {
       const key = [job.ident, result.completed_at || '', result.refreshed_preview_count || 0, result.rendered_count || 0, result.saved_count || 0, result.labeled_count || 0].join(':');
       if (this.labelsLoadedKey !== key) { this.labelsLoadedKey = key; this.loadLabels(true); }
@@ -342,7 +349,7 @@
         force_vision: Boolean(forceVision)
       }));
       if (response.ok) {
-        this.phase.textContent = 'AI 正在识别表情';
+        this.phase.textContent = '正在解析表情';
         this.status.textContent = response.message || '已加入表情标注队列。'; this.refresh();
       } else {
         if (this.startButton) this.startButton.disabled = false;
@@ -352,6 +359,40 @@
       if (this.startButton) this.startButton.disabled = false;
       this.status.textContent = '表情标注无法开始，请检查骨骼文件后重试。';
     }
+  };
+
+  FaceWorkspace.prototype.renderMissingPreviews = function () {
+    if (this.renderPromise || !this.selected) return this.renderPromise;
+    if (!this.renderer) {
+      if (typeof exports.FaceWebGlRenderer !== 'function') {
+        this.status.textContent = '当前页面未加载 Spine WebGL 渲染器，请刷新后重试。';
+        return null;
+      }
+      this.renderer = new exports.FaceWebGlRenderer();
+    }
+    const item = this.selected, generation = this.generation;
+    this.renderPromise = this.renderer.render(item, function (current, total, faceId) {
+      if (!this.isOpen() || generation !== this.generation) return;
+      this.phase.textContent = '正在渲染表情差分';
+      this.progress.textContent = current + ' / ' + total;
+      this.result.textContent = faceId === 'complete'
+        ? '正在保存头像预览'
+        : '正在渲染表情 ' + faceId;
+    }.bind(this)).then(function (result) {
+      if (this.isOpen() && generation === this.generation) {
+        this.progress.textContent = Number(result.rendered_count || 0) + ' / ' + Number(result.total || 0);
+        this.result.textContent = '已生成 ' + Number(result.rendered_count || 0) + ' 张高清表情差分图';
+        this.phase.textContent = 'complete';
+        this.status.textContent = '每个表情组合均已渲染并保存，可逐张审阅。';
+        this.loadLabels(true);
+      }
+    }.bind(this)).catch(function (error) {
+      if (this.isOpen() && generation === this.generation) {
+        this.phase.textContent = 'failed';
+        this.status.textContent = '表情差分渲染失败：' + String(error && error.message || error);
+      }
+    }.bind(this)).finally(function () { this.renderPromise = null; }.bind(this));
+    return this.renderPromise;
   };
 
   exports.StoryUI = exports.StoryUI || {};

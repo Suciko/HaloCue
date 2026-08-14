@@ -15,16 +15,23 @@ import webbrowser
 from pathlib import Path
 
 from aa_install_discovery import discover_aa, normalize_aa_data_path
+from runtime_layout import LAYOUT, prepare_user_state
 
 
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-PROGRAM_DIR = Path(__file__).resolve().parent
+if LAYOUT.frozen:
+    prepare_user_state(LAYOUT)
+PROGRAM_DIR = LAYOUT.resource_root
 ENTRY_FILE = "启动AA自动写剧本.cmd"
-ERROR_LOG = PROGRAM_DIR / "启动失败日志.txt"
+ERROR_LOG = LAYOUT.user_data_root / "启动失败日志.txt"
 MIN_PYTHON = (3, 9)
 CORE_FILES = ("webui.py", "ui.html")
 
@@ -36,7 +43,11 @@ def _discover_aa(
     selection = explicit_aa_data or explicit_aa_install
     return discover_aa(
         selection,
-        config_path=PROGRAM_DIR / "aa_config.json",
+        config_path=(
+            LAYOUT.config_path
+            if LAYOUT.frozen
+            else PROGRAM_DIR / "aa_config.json"
+        ),
     )
 
 
@@ -48,10 +59,23 @@ def build_environment_report(
 ) -> dict:
     """Return a redacted, serializable startup-readiness report."""
     root = Path(program_dir).resolve()
-    missing_files = [
-        name for name in CORE_FILES if not (root / name).is_file()
-    ]
-    database_ready = (root / "aa_assets.db").is_file()
+    missing_files = []
+    for name in CORE_FILES:
+        if (root / name).is_file():
+            continue
+        if (
+            LAYOUT.frozen
+            and name.endswith(".py")
+            and importlib.util.find_spec(name[:-3]) is not None
+        ):
+            continue
+        missing_files.append(name)
+    database_path = (
+        LAYOUT.database_path
+        if LAYOUT.frozen and root == PROGRAM_DIR
+        else root / "aa_assets.db"
+    )
+    database_ready = database_path.is_file()
     pillow_ready = importlib.util.find_spec("PIL") is not None
     python_ready = sys.version_info >= MIN_PYTHON
     discovery = _discover_aa(explicit_aa_data, explicit_aa_install)
@@ -73,10 +97,12 @@ def build_environment_report(
         )
     if aa_data is None:
         issues.append(
-            "没有找到 AA 工作区；请选择包含 projects 文件夹的 data 目录。"
+            "尚未连接 AA；请在应用内选择 AzureArchive.exe。"
         )
+    startup_ready = python_ready and not missing_files and pillow_ready and database_ready
     return {
         "ok": not issues,
+        "startup_ready": startup_ready,
         "python": {
             "ready": python_ready,
             "version": (
@@ -93,7 +119,7 @@ def build_environment_report(
         },
         "database": {
             "ready": database_ready,
-            "path": str(root / "aa_assets.db"),
+            "path": str(database_path),
         },
         "pillow": {"ready": pillow_ready},
         "aa": {
@@ -276,7 +302,20 @@ def _show_error(message: str) -> None:
         pass
 
 
-def _start_application(aa_data: Path) -> int:
+def _start_application(aa_data: Path | None) -> int:
+    if getattr(sys, "frozen", False):
+        try:
+            from desktop_app import run_desktop
+
+            return run_desktop(str(aa_data) if aa_data else None)
+        except Exception as exc:
+            message = f"HaloCue 桌面窗口启动失败：{exc}"
+            try:
+                ERROR_LOG.write_text(message + "\n", encoding="utf-8")
+            except OSError:
+                pass
+            _show_error(message)
+            return 1
     url = "http://127.0.0.1:8770"
     if is_existing_server(url):
         print("程序已经在运行，正在打开现有页面……")
@@ -286,7 +325,7 @@ def _start_application(aa_data: Path) -> int:
         sys.executable,
         str(PROGRAM_DIR / "webui.py"),
         "--aa-data",
-        str(aa_data),
+        str(aa_data or ""),
     ]
     print("环境检查通过，正在打开网页……")
     print("程序运行期间请保留这个窗口；关闭窗口即可停止程序。")
@@ -318,37 +357,7 @@ def main(argv: list[str] | None = None) -> int:
             print(_human_report(report))
         return 0 if report["ok"] else 1
 
-    if not report["aa"]["connected"]:
-        chosen_install = (
-            _choose_aa_install() if os.name == "nt" else None
-        )
-        if chosen_install is not None:
-            report = build_environment_report(
-                PROGRAM_DIR,
-                explicit_aa_install=str(chosen_install),
-            )
-            if report["aa"]["connected"]:
-                _save_aa_path(
-                    Path(report["aa"]["path"]),
-                    executable=(
-                        Path(report["aa"]["executable"])
-                        if report["aa"]["executable"] else None
-                    ),
-                    cache_dir=(
-                        Path(report["aa"]["resource_cache"])
-                        if report["aa"]["resource_cache"] else None
-                    ),
-                )
-        if not report["aa"]["connected"]:
-            chosen_data = _choose_aa_data()
-            if chosen_data is not None:
-                _save_aa_path(chosen_data)
-                report = build_environment_report(
-                    PROGRAM_DIR,
-                    explicit_aa_data=str(chosen_data),
-                )
-
-    if not report["ok"]:
+    if not report.get("startup_ready", report["ok"]):
         _write_failure_log(report)
         message = (
             _human_report(report)
@@ -359,7 +368,8 @@ def main(argv: list[str] | None = None) -> int:
         _show_error(message)
         return 1
 
-    return _start_application(Path(report["aa"]["path"]))
+    aa_path = str(report["aa"].get("path") or "").strip()
+    return _start_application(Path(aa_path) if aa_path else None)
 
 
 if __name__ == "__main__":

@@ -285,7 +285,7 @@ def _aa_discovery(tmp_path):
     )
 
 
-def test_aa_install_settings_accept_file_and_directory_tokens(
+def test_aa_install_settings_accepts_only_exe_and_applies_it_immediately(
     tmp_path,
     monkeypatch,
 ):
@@ -324,20 +324,31 @@ def test_aa_install_settings_accept_file_and_directory_tokens(
         row for row in app_listing["entries"] if row["name"] == "AzureArchive.exe"
     )
 
+    monkeypatch.setitem(webui.CFG, "aa_data", None)
     with _server(picker, monkeypatch) as base:
-        for token in (exe_entry["entry_token"], install_entry["entry_token"]):
-            status, payload = _request(
-                base,
-                "/api/settings/aa-install",
-                method="POST",
-                data=json.dumps({"entry_token": token}).encode(),
-                headers={"Content-Type": "application/json"},
-            )
-            assert status == 200
-            assert payload["restart_required"] is True
-            assert payload["aa"]["program"]["status"] == "recognized"
-            assert payload["aa"]["projects"]["path"] == str(discovery.projects)
-            assert payload["aa"]["resource"]["status"] == "installed"
+        directory_status, directory_payload = _request(
+            base,
+            "/api/settings/aa-install",
+            method="POST",
+            data=json.dumps({"entry_token": install_entry["entry_token"]}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        status, payload = _request(
+            base,
+            "/api/settings/aa-install",
+            method="POST",
+            data=json.dumps({"entry_token": exe_entry["entry_token"]}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert directory_status == 400
+    assert directory_payload["code"] == "aa_executable_required"
+    assert status == 200
+    assert payload["restart_required"] is False
+    assert payload["aa"]["program"]["status"] == "recognized"
+    assert payload["aa"]["projects"]["path"] == str(discovery.projects)
+    assert payload["aa"]["resource"]["status"] == "installed"
+    assert webui.CFG["aa_data"] == str(discovery.data)
 
     saved = json.loads(
         (Path(webui.HERE) / "aa_config.json").read_text(encoding="utf-8")
@@ -390,13 +401,21 @@ def test_aa_install_settings_requires_explicit_workspace_selection(
         row for row in picker.list_directory()["entries"]
         if row["name"] == "AzureArchive"
     )
+    app_entry = next(
+        row for row in picker.list_directory(install_entry["entry_token"])["entries"]
+        if row["name"] == "App"
+    )
+    exe_entry = next(
+        row for row in picker.list_directory(app_entry["entry_token"])["entries"]
+        if row["name"] == "AzureArchive.exe"
+    )
 
     with _server(picker, monkeypatch) as server:
         status, conflict = _request(
             server,
             "/api/settings/aa-install",
             method="POST",
-            data=json.dumps({"entry_token": install_entry["entry_token"]}).encode(),
+                data=json.dumps({"entry_token": exe_entry["entry_token"]}).encode(),
             headers={"Content-Type": "application/json"},
         )
         assert status == 409
@@ -411,7 +430,7 @@ def test_aa_install_settings_requires_explicit_workspace_selection(
             "/api/settings/aa-install",
             method="POST",
             data=json.dumps({
-                "entry_token": install_entry["entry_token"],
+                "entry_token": exe_entry["entry_token"],
                 "aa_data": str(base_result.data),
             }).encode(),
             headers={"Content-Type": "application/json"},

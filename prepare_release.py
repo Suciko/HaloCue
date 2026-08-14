@@ -74,7 +74,10 @@ def check():
     print("2. 疑似泄露的密钥")
     n = 0
     for dp, dns, fns in os.walk(HERE):
-        dns[:] = [d for d in dns if d not in ("__pycache__", ".thumbs", "out", ".git")]
+        dns[:] = [d for d in dns if d not in (
+            "__pycache__", ".thumbs", "out", "output", "build", "dist",
+            "release-output", ".git", ".worktrees", ".venv-desktop-build",
+        )]
         for fn in fns:
             if os.path.splitext(fn)[1] not in (".py", ".json", ".md", ".html", ".txt"):
                 continue
@@ -92,7 +95,7 @@ def check():
     print("3. 目录里的版权素材")
     big, cnt = 0, 0
     for dp, dns, fns in os.walk(HERE):
-        dns[:] = [d for d in dns if d not in ("__pycache__", ".git")]
+        dns[:] = [d for d in dns if d not in ("__pycache__", ".git", ".worktrees")]
         for fn in fns:
             ext = os.path.splitext(fn)[1].lower()
             if ext in BANNED_EXT or fn.endswith("-avatar.png"):

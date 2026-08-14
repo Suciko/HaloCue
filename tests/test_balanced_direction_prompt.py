@@ -45,6 +45,17 @@ def test_prompt_reserves_wait_for_schema_backed_dialogue_free_beats():
     assert "wait_ms" in rules
 
 
+def test_prompt_uses_official_style_dialogue_actions_as_character_performance():
+    rules = build_rules("bond")
+
+    assert "不要求原文先写出“跳了一下”" in rules
+    assert "强烈反驳" in rules
+    assert "突然自信" in rules
+    assert "卡壳、紧张、羞涩" in rules
+    assert "台词本身就是身体反应的证据" in rules
+    assert "physical_reaction" in rules
+
+
 def test_batch_context_includes_recent_emoticon_and_action_choices():
     items = [
         {
@@ -89,8 +100,10 @@ def test_prompt_contains_story_modes_scene_functions_and_continuity():
     assert "喜剧升级" in text and "情绪转折" in text
     assert "listener" in text and "offscreen_space" in text
     assert "start / hold / escalate / end" in text
-    assert "face变化<=" in text
-    assert "保持上一表情，不重复 face" in text
+    assert "不要按固定次数、比例或每 N 行配额" in text
+    assert "每次有立绘角色发言" in text
+    assert "一次表情拍通常覆盖该角色 1～2 次发言" in text
+    assert "同一 face 不重复输出" in text
     assert "authored=..." in text
 
 

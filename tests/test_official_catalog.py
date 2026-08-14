@@ -7,7 +7,7 @@ import pytest
 
 
 def _entry_data(*rows):
-    raw = bytearray(4)
+    raw = bytearray(struct.pack("<I", len(rows)))
     for row in rows:
         raw.extend(struct.pack("<7i", *row))
     return base64.b64encode(raw).decode("ascii")
@@ -22,6 +22,15 @@ def _extra_data(*options):
         raw.extend(struct.pack("<I", len(encoded)))
         raw.extend(encoded)
     return base64.b64encode(raw).decode("ascii"), offsets
+
+
+def _bucket_data(*buckets):
+    raw = bytearray(struct.pack("<I", len(buckets)))
+    for index, entries in enumerate(buckets):
+        raw.extend(struct.pack("<ii", index * 4, len(entries)))
+        for entry in entries:
+            raw.extend(struct.pack("<i", entry))
+    return base64.b64encode(raw).decode("ascii")
 
 
 def _write_catalog_fixture(path):
@@ -139,6 +148,40 @@ def test_catalog_uses_only_one_unambiguous_cached_version(tmp_path):
         ),
     )
     assert ambiguous[0].data_path is None
+
+
+def test_catalog_resolves_real_addressables_dependency_bucket(tmp_path):
+    from official_catalog import catalog_bundle_locations
+
+    asset_id = "Assets/Addressables/UIs/03_Scenario/02_Character/Hero.bytes"
+    bundle_id = "Assets/Bundles/hero_assets.bundle"
+    extra, offsets = _extra_data(
+        {"m_BundleName": "outer-hero", "m_Hash": "content-hero"}
+    )
+    catalog_path = tmp_path / "catalog.json"
+    catalog_path.write_text(json.dumps({
+        "m_InternalIds": [asset_id, bundle_id],
+        "m_EntryDataString": _entry_data(
+            (0, 0, 4, 0, -1, 0, 0),
+            (1, 0, -1, 0, offsets[0], 0, 0),
+        ),
+        "m_BucketDataString": _bucket_data((), (), (), (), (1,)),
+        "m_ExtraDataString": extra,
+    }), encoding="utf-8")
+    cache_root = tmp_path / "cache"
+    data = cache_root / "outer-hero" / "content-hero" / "__data"
+    data.parent.mkdir(parents=True)
+    data.write_bytes(b"UnityFS")
+
+    rows = catalog_bundle_locations(
+        catalog_path,
+        cache_root,
+        internal_predicate=lambda value: value.endswith("Hero.bytes"),
+    )
+
+    assert [(row.internal_id, row.bundle_name, row.data_path) for row in rows] == [
+        (asset_id, "outer-hero", data)
+    ]
 
 
 def test_catalog_decodes_large_binary_sections_once(tmp_path, monkeypatch):

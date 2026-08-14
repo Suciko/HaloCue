@@ -47,8 +47,10 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+.venv-desktop-build/
 build/
 dist/
+/release/
 *.egg-info/
 
 # 每章的演员表是作品相关的，只保留 example
@@ -68,6 +70,10 @@ aa_resources.json
 # 素材数据库：看情况。见 UPLOAD.md 里的说明。
 # 想随仓库分发打标成果的话，把下面这行注释掉。
 aa_assets.db
+
+# Spine 官方网页运行时受其单独许可证约束。公开仓库只提交安装器和许可证说明，
+# 运行时由使用者从官方 npm 包安装到本机，不把压缩后的第三方代码再次提交。
+/tools/spine_web_runtime/spine-webgl-*.min.js
 
 # 编辑器
 .vscode/

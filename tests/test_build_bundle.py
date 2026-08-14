@@ -10,7 +10,7 @@ if str(HERE) not in sys.path:
 import pytest
 import build_bundle
 from build_bundle import BuildBundleManager, CompileInputStaleError
-from draft_store import DraftStore
+from draft_store import AnnotationIncompleteError, DraftStore
 
 
 @pytest.fixture
@@ -79,6 +79,24 @@ def test_stale_compile_snapshot_raises_409(temp_draft_store):
     # 传入过期的 expected_draft_version (例如 999) 抛出 CompileInputStaleError
     with pytest.raises(CompileInputStaleError):
         manager.create_compile_snapshot(token=token, expected_draft_version=999)
+
+
+def test_compile_snapshot_rejects_partial_annotation(temp_draft_store):
+    store = temp_draft_store
+    token = "partial-build"
+    store.create_draft(
+        token=token,
+        text="旁白: 部分结果\n",
+        annotation_status={
+            "status": "partial", "completed_targets": 1,
+            "total_targets": 2, "pending_targets": 1,
+        },
+    )
+
+    with pytest.raises(AnnotationIncompleteError):
+        BuildBundleManager(store=store).create_compile_snapshot(
+            token=token, expected_draft_version=1,
+        )
 
 
 def test_compile_snapshot_captures_the_draft_cast_and_resource_index(

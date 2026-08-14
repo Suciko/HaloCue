@@ -169,6 +169,106 @@ def test_spine_rejects_missing_atlas_page(tmp_path):
     assert any(issue.code == "atlas_page_missing" for issue in result.issues)
 
 
+def test_spine_collects_all_atlas_pages_with_relative_subdirectories(tmp_path):
+    root = make_spine_bundle(tmp_path / "multipage")
+    stem = "CH0335_noweapon_spr"
+    extra = root / "pages" / "effects.png"
+    extra.parent.mkdir()
+    Image.new("RGBA", (4, 4)).save(extra)
+    (root / f"{stem}.atlas").write_text(
+        f"{stem}.png\n"
+        "size:2048,2048\n"
+        "format:RGBA8888\n"
+        "pages/effects.png\n"
+        "size:512,512\n"
+        "format:RGBA8888\n"
+        "00_default\n"
+        "bounds:0,0,1,1\n",
+        encoding="utf-8",
+    )
+
+    result = validate_spine(root, identifier="1516544")
+
+    assert result.ok
+    assert result.candidate.metadata["atlas_pages"] == [
+        f"{stem}.png",
+        "pages/effects.png",
+    ]
+    assert result.candidate.metadata["all_files"] == {
+        "skel": str((root / f"{stem}.skel").resolve()),
+        "atlas": str((root / f"{stem}.atlas").resolve()),
+        "atlas_page_0": str((root / f"{stem}.png").resolve()),
+        "atlas_page_1": str(extra.resolve()),
+        "avatar": str((root / f"{stem}-avatar.png").resolve()),
+    }
+
+
+def test_spine_digest_changes_when_an_atlas_page_changes(tmp_path):
+    root = make_spine_bundle(tmp_path / "multipage")
+    stem = "CH0335_noweapon_spr"
+    page = root / "effects.png"
+    Image.new("RGBA", (4, 4), "red").save(page)
+    atlas = root / f"{stem}.atlas"
+    atlas.write_text(
+        f"{stem}.png\nsize:2048,2048\n"
+        "effects.png\nsize:4,4\n",
+        encoding="utf-8",
+    )
+    before = validate_spine(root, identifier="1516544")
+
+    Image.new("RGBA", (4, 4), "blue").save(page)
+    after = validate_spine(root, identifier="1516544")
+
+    assert before.ok and after.ok
+    assert before.candidate.sha256 != after.candidate.sha256
+
+
+@pytest.mark.parametrize("page_name", ["../outside.png", "C:/outside.png"])
+def test_spine_rejects_atlas_pages_outside_the_bundle(tmp_path, page_name):
+    root = make_spine_bundle(tmp_path / "unsafe")
+    stem = "CH0335_noweapon_spr"
+    (root / f"{stem}.atlas").write_text(
+        f"{page_name}\nsize:8,8\n",
+        encoding="utf-8",
+    )
+
+    result = validate_spine(root, identifier="1516544")
+
+    assert not result.ok
+    assert any(issue.code == "atlas_page_missing" for issue in result.issues)
+
+
+def test_spine_rejects_atlas_page_case_mismatch(tmp_path):
+    root = make_spine_bundle(tmp_path / "case")
+    stem = "CH0335_noweapon_spr"
+    (root / f"{stem}.png").rename(root / "PAGE.PNG")
+    (root / f"{stem}.atlas").write_text(
+        "page.png\nsize:8,8\n",
+        encoding="utf-8",
+    )
+
+    result = validate_spine(root, identifier="1516544")
+
+    assert not result.ok
+    assert any(issue.code == "atlas_page_missing" for issue in result.issues)
+
+
+def test_spine_accepts_an_atlas_whose_first_page_has_a_custom_name(tmp_path):
+    root = make_spine_bundle(tmp_path / "custom-page")
+    stem = "CH0335_noweapon_spr"
+    custom_page = root / "body-page.png"
+    (root / f"{stem}.png").rename(custom_page)
+    (root / f"{stem}.atlas").write_text(
+        "body-page.png\nsize:8,8\n",
+        encoding="utf-8",
+    )
+
+    result = validate_spine(root, identifier="1516544")
+
+    assert result.ok
+    assert result.candidate.metadata["files"]["texture"] == str(custom_page.resolve())
+
+
 def test_spine_without_numbered_regions_marks_faces_unresolved(tmp_path):
     root = make_spine_bundle(tmp_path / "date", stem="Kei_Date_Outfit")
     (root / "Kei_Date_Outfit.atlas").write_text(
