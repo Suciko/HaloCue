@@ -502,6 +502,13 @@
       resolveDraftBackgroundRequest(card, name);
       return;
     }
+    if (state.bgReplaceCard) {
+      const card = state.bgReplaceCard;
+      state.bgReplaceCard = null;
+      closeModal('#mBackgroundPicker');
+      applyBgReplace(card, name);
+      return;
+    }
     if (state.backgroundJob && state.backgroundJob.resolveRequestId) {
       const requestId = state.backgroundJob.resolveRequestId;
       closeModal('#mBackgroundPicker'); resolveBackground(requestId, name); return;
@@ -2000,6 +2007,22 @@
       $('#generationImportName').textContent = need.name || result.stem || selection.name || result.aa_key;
       $('#generationImportMeta').textContent = '背景键：' + result.aa_key;
       $('#generationImportResult').hidden = false;
+      if (!target || !target.selector) {
+        // 第三阶段（草稿审查）：无预检绑定，直接登记到当前剧情并刷新更换列表
+        state.generationPrompt = null;
+        state.generationPromptTarget = null;
+        state.generationPromptStoryToken = null;
+        closeModal('#mGenerationPrompt');
+        status('背景已导入到当前剧情，可在下方列表中选用。');
+        try {
+          state.reviewAssets = null;
+          if (state.bgReplaceCard && state.review && state.review.token && isCurrentView(view)) {
+            const story2 = currentStory();
+            if (story2) await renderBgReplaceOptions(state.bgReplaceCard, story2);
+          }
+        } catch (_) { /* 列表刷新失败不影响导入结果 */ }
+        return result;
+      }
       let binding;
       try {
         binding = await post('/api/preflight/background-binding', {
@@ -2266,9 +2289,37 @@
     if (!card || !state.review.token) return;
     state.bgReplaceCard = card; const story = currentStory(); if (!story) return;
     openModal('#mBgReplace', trigger);
-    $('#bgReplaceHint').textContent = '选择当前剧情已登记的自定义背景；也可以从历史项目复制。';
+    $('#bgReplaceHint').textContent = '选择当前剧情已登记的自定义背景；也可以更换官方背景或从历史项目复制。';
+    return renderBgReplaceOptions(card, story);
+  }
+  async function renderBgReplaceOptions(card, story) {
     const root = $('#bgReplaceOptions'); clearElement(root); root.textContent = '正在读取本剧情背景…';
-    try { if (!state.reviewAssets) state.reviewAssets = await request('/api/story/assets?story_token=' + encodeURIComponent(story.story_token)); if (!state.bgReplaceCard || state.bgReplaceCard.card_id !== card.card_id) return; clearElement(root); const items = state.reviewAssets && state.reviewAssets.backgrounds || []; if (!items.length) { root.textContent = '当前剧情还没有自定义背景。'; return; } items.forEach(function (item) { const button = document.createElement('button'); button.type = 'button'; button.className = 'bg-replace-option'; if (item.preview_available) { const img = document.createElement('img'); img.loading = 'lazy'; img.alt = item.name || '背景'; img.src = '/api/story/assets/preview?story_token=' + encodeURIComponent(story.story_token) + '&kind=background&key=' + encodeURIComponent(item.aa_key || item.name || ''); button.appendChild(img); } const label = document.createElement('span'); label.textContent = item.name || item.aa_key || '未命名'; button.appendChild(label); button.addEventListener('click', function () { applyBgReplace(card, item.aa_key || item.name); }); root.appendChild(button); }); } catch (error) { root.textContent = '本剧情背景读取失败：' + error.message; }
+    story = story || currentStory();
+    try {
+      if (!state.reviewAssets) state.reviewAssets = await request('/api/story/assets?story_token=' + encodeURIComponent(story.story_token));
+      if (!state.bgReplaceCard || state.bgReplaceCard.card_id !== card.card_id) return;
+      clearElement(root);
+      const items = state.reviewAssets && state.reviewAssets.backgrounds || [];
+      if (!items.length) { root.textContent = '当前剧情还没有自定义背景。'; return; }
+      items.forEach(function (item) { const button = document.createElement('button'); button.type = 'button'; button.className = 'bg-replace-option'; if (item.preview_available) { const img = document.createElement('img'); img.loading = 'lazy'; img.alt = item.name || '背景'; img.src = '/api/story/assets/preview?story_token=' + encodeURIComponent(story.story_token) + '&kind=background&key=' + encodeURIComponent(item.aa_key || item.name || ''); button.appendChild(img); } const label = document.createElement('span'); label.textContent = item.name || item.aa_key || '未命名'; button.appendChild(label); button.addEventListener('click', function () { applyBgReplace(card, item.aa_key || item.name); }); root.appendChild(button); });
+    } catch (error) { root.textContent = '本剧情背景读取失败：' + error.message; }
+  }
+  function bgReplaceOpenOfficial(trigger) {
+    if (!state.bgReplaceCard || !state.review.token) return;
+    $('#backgroundPickerTitle').textContent = '查找 AA 官方背景';
+    $('#bgq').value = '';
+    $('#bgready').checked = true;
+    openModal('#mBackgroundPicker', trigger);
+    loadBackgrounds();
+  }
+  function bgReplaceOpenCustom(trigger) {
+    const card = state.bgReplaceCard; const story = currentStory();
+    if (!card || !story) return;
+    state.generationPrompt = {kind: 'background', name: String(card.current && (card.current.arg || card.current.description) || '自定义背景'), reason: '', status: 'missing', candidates: []};
+    state.generationPromptTarget = {place: ''};
+    state.generationPromptStoryToken = story.story_token;
+    resetGenerationImportResult();
+    openGeneratedBackgroundPicker(trigger, '添加自定义背景图片');
   }
   async function applyBgReplace(card, name) { try { await reviewPost('/api/cards/update', {card_id: card.card_id, patch: {cmd: 'bg', arg: String(name || '')}}); closeModal('#mBgReplace'); state.bgReplaceCard = null; await loadReview(); } catch (error) { $('#bgReplaceHint').textContent = '更换失败：' + error.message; } }
   function openBgHistory() { const card = state.bgReplaceCard; if (!card || !window.HistoryDrawer || !window.HistoryDrawer.open) return; closeModal('#mBgReplace'); window.HistoryDrawer.open({kind: 'background', trigger: document.activeElement, replaceCardId: card.card_id, draftToken: state.review.token, draftVersion: state.review.revision, onApplied: function () { state.bgReplaceCard = null; return loadReview(); }}); }
@@ -2633,7 +2684,7 @@
     'browse-spine-cli': function (trigger) { if (settingsFilePicker) { settingsPickerMode = 'spine'; settingsFilePicker.allowedSuffixes = null; settingsFilePicker.options.title = '选择 Spine.com'; settingsFilePicker.options.openLabel = '选择'; settingsFilePicker.searchPlaceholder = '搜索 Spine.com'; activeFilePicker = settingsFilePicker; settingsFilePicker.openPath(trigger); } },
     'copy-runtime-diagnostics': copyRuntimeDiagnostics,
     'configure-aa': function (trigger) { setDrawer('settings', true); return actions['browse-aa-install'](trigger); },
-    'show-create': function () { $('#view-create').scrollIntoView({behavior: 'smooth'}); }, 'open-script': openScript, analyze: analyze, 'retry-story-load': function () { if (state.loadFailure) replaceStory(state.loadFailure.story, state.loadFailure.options); }, 'dismiss-welcome': function () { $('#welcomePanel').hidden = true; localStorage.setItem('aa-welcome-dismissed-v1', '1'); }, 'show-welcome': function () { $('#welcomePanel').hidden = false; localStorage.removeItem('aa-welcome-dismissed-v1'); }, 'open-settings': function () { setDrawer('settings', true); loadAAData(); }, 'close-settings': function () { setDrawer('settings', false); }, 'save-aa-install': function () { return saveAAInstall(); }, 'open-help': function () { setDrawer('help', true); }, 'close-help': function () { setDrawer('help', false); }, 'close-browse': function () { if (storyFilePicker) storyFilePicker.close(); else closeModal('#mBrowse'); }, 'story-picker-device': function () { if (storyFilePicker) storyFilePicker.chooseDevice(); }, 'story-picker-host': function () { if (storyFilePicker) storyFilePicker.openHost(); }, 'story-picker-refresh': function () { if (storyFilePicker) storyFilePicker.load(storyFilePicker.locationToken, false); }, 'story-picker-source': function () { if (storyFilePicker) storyFilePicker.open(storyFilePicker.trigger); }, 'choose-current-dir': chooseCurrentDirectory, 'close-cast': function () { closeModal('#mCast'); }, 'close-bg-replace': function () { closeModal('#mBgReplace'); state.bgReplaceCard = null; }, 'bg-replace-history': openBgHistory, 'approve-preflight': approvePreflight, 'rerun-preflight': rerunPreflight, 'cast-narrator': function () { castSetKind('narrator'); }, 'cast-unset': function () { castSetKind('unset'); }, 'resolve-background': function (target) { state.backgroundJob = Object.assign({}, state.backgroundJob, {resolveRequestId: target.dataset.requestId}); openModal('#mBackgroundPicker', target); loadBackgrounds(); }, 'continue-background': continueBackground, 'refresh-drafts': refreshDrafts, 'load-review': loadReview, 'approve-all': requestApproveAll, 'confirm-approve-all': approveAll, 'cancel-approve-all': function () { closeModal('#mApproveAll'); }, validate: validateReview, compile: compile, install: openInstallDialog, 'confirm-install': confirmInstall, 'close-install': function () { closeModal('#mInstall'); }, 'edit-card': editCard, 'save-edit': saveEdit, 'close-edit': function () { closeModal('#mEdit'); }, 'insert-line': function () { insertCard('line'); }, 'insert-dir': function () { insertCard('dir'); }, 'move-up': function () { moveCard('up'); }, 'move-down': function () { moveCard('down'); }, 'delete-card': deleteCard, 'bind-cast': bindCast, annotate: annotate, build: build, 'new-profile': function () { renderProfile(null); }, 'activate-profile': async function () { try { await post('/api/llm/profiles/activate', {id: $('#modelProfileId').value}); await loadProfiles($('#modelProfileId').value); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'delete-profile': async function () { try { await post('/api/llm/profiles/delete', {id: $('#modelProfileId').value, delete_credential: true}); await loadProfiles(); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'save-profile': saveProfile, 'clear-profile-key': clearProfileKey, 'discover-models': async function () { $('#modelStatus').textContent = '正在读取可用模型…'; try { const result = await post('/api/llm/models', {id: $('#modelProfileId').value}); const list = $('#modelOptions'); clearElement(list); result.models.forEach(function (name) { const option = document.createElement('option'); option.value = name; list.appendChild(option); }); $('#modelStatus').textContent = '已读取 ' + result.models.length + ' 个模型，可在模型输入框中选择。'; } catch (error) { $('#modelStatus').textContent = error.message; } }, 'test-text': function () { testProfile('text'); }, 'test-vision': function () { testProfile('vision'); }, 'preset-openai': function () { applyModelPreset(presetByKey('openai')); }, 'preset-anthropic': function () { applyModelPreset(presetByKey('anthropic')); }, 'preset-deepseek': function () { applyModelPreset(presetByKey('deepseek')); }, 'preset-ollama': function () { applyModelPreset(presetByKey('ollama')); }, 'preset-silicon': function () { applyModelPreset(presetByKey('siliconflow')); }, 'preset-openrouter': function () { applyModelPreset(presetByKey('openrouter')); }
+    'show-create': function () { $('#view-create').scrollIntoView({behavior: 'smooth'}); }, 'open-script': openScript, analyze: analyze, 'retry-story-load': function () { if (state.loadFailure) replaceStory(state.loadFailure.story, state.loadFailure.options); }, 'dismiss-welcome': function () { $('#welcomePanel').hidden = true; localStorage.setItem('aa-welcome-dismissed-v1', '1'); }, 'show-welcome': function () { $('#welcomePanel').hidden = false; localStorage.removeItem('aa-welcome-dismissed-v1'); }, 'open-settings': function () { setDrawer('settings', true); loadAAData(); }, 'close-settings': function () { setDrawer('settings', false); }, 'save-aa-install': function () { return saveAAInstall(); }, 'open-help': function () { setDrawer('help', true); }, 'close-help': function () { setDrawer('help', false); }, 'close-browse': function () { if (storyFilePicker) storyFilePicker.close(); else closeModal('#mBrowse'); }, 'story-picker-device': function () { if (storyFilePicker) storyFilePicker.chooseDevice(); }, 'story-picker-host': function () { if (storyFilePicker) storyFilePicker.openHost(); }, 'story-picker-refresh': function () { if (storyFilePicker) storyFilePicker.load(storyFilePicker.locationToken, false); }, 'story-picker-source': function () { if (storyFilePicker) storyFilePicker.open(storyFilePicker.trigger); }, 'choose-current-dir': chooseCurrentDirectory, 'close-cast': function () { closeModal('#mCast'); }, 'close-bg-replace': function () { closeModal('#mBgReplace'); state.bgReplaceCard = null; }, 'bg-replace-official': function (target) { bgReplaceOpenOfficial(target); }, 'bg-replace-custom': function (target) { bgReplaceOpenCustom(target); }, 'bg-replace-history': openBgHistory, 'approve-preflight': approvePreflight, 'rerun-preflight': rerunPreflight, 'cast-narrator': function () { castSetKind('narrator'); }, 'cast-unset': function () { castSetKind('unset'); }, 'resolve-background': function (target) { state.backgroundJob = Object.assign({}, state.backgroundJob, {resolveRequestId: target.dataset.requestId}); openModal('#mBackgroundPicker', target); loadBackgrounds(); }, 'continue-background': continueBackground, 'refresh-drafts': refreshDrafts, 'load-review': loadReview, 'approve-all': requestApproveAll, 'confirm-approve-all': approveAll, 'cancel-approve-all': function () { closeModal('#mApproveAll'); }, validate: validateReview, compile: compile, install: openInstallDialog, 'confirm-install': confirmInstall, 'close-install': function () { closeModal('#mInstall'); }, 'edit-card': editCard, 'save-edit': saveEdit, 'close-edit': function () { closeModal('#mEdit'); }, 'insert-line': function () { insertCard('line'); }, 'insert-dir': function () { insertCard('dir'); }, 'move-up': function () { moveCard('up'); }, 'move-down': function () { moveCard('down'); }, 'delete-card': deleteCard, 'bind-cast': bindCast, annotate: annotate, build: build, 'new-profile': function () { renderProfile(null); }, 'activate-profile': async function () { try { await post('/api/llm/profiles/activate', {id: $('#modelProfileId').value}); await loadProfiles($('#modelProfileId').value); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'delete-profile': async function () { try { await post('/api/llm/profiles/delete', {id: $('#modelProfileId').value, delete_credential: true}); await loadProfiles(); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'save-profile': saveProfile, 'clear-profile-key': clearProfileKey, 'discover-models': async function () { $('#modelStatus').textContent = '正在读取可用模型…'; try { const result = await post('/api/llm/models', {id: $('#modelProfileId').value}); const list = $('#modelOptions'); clearElement(list); result.models.forEach(function (name) { const option = document.createElement('option'); option.value = name; list.appendChild(option); }); $('#modelStatus').textContent = '已读取 ' + result.models.length + ' 个模型，可在模型输入框中选择。'; } catch (error) { $('#modelStatus').textContent = error.message; } }, 'test-text': function () { testProfile('text'); }, 'test-vision': function () { testProfile('vision'); }, 'preset-openai': function () { applyModelPreset(presetByKey('openai')); }, 'preset-anthropic': function () { applyModelPreset(presetByKey('anthropic')); }, 'preset-deepseek': function () { applyModelPreset(presetByKey('deepseek')); }, 'preset-ollama': function () { applyModelPreset(presetByKey('ollama')); }, 'preset-silicon': function () { applyModelPreset(presetByKey('siliconflow')); }, 'preset-openrouter': function () { applyModelPreset(presetByKey('openrouter')); }
   };
   actions['cast-voice'] = function () { return castSetKind('voice'); };
   actions['close-browse'] = function () { if (activeFilePicker) activeFilePicker.close(); else closeModal('#mBrowse'); activeFilePicker = storyFilePicker; };
