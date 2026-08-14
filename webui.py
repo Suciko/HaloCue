@@ -43,6 +43,37 @@ import aapaths                                                  # noqa: E402
 import asset_catalog                                            # noqa: E402
 import asset_import                                             # noqa: E402
 import assetdb                                                  # noqa: E402
+
+
+# ---------------------------------------------------------------- 繁转简（搜索用）
+_ZH_T2S_CONV = None
+
+
+def _zh_t2s(text: str) -> str:
+    """繁体转简体。opencc 不可用时原样返回（搜索降级但不报错）。"""
+    global _ZH_T2S_CONV
+    if _ZH_T2S_CONV is None:
+        try:
+            from opencc import OpenCC
+        except Exception:
+            _ZH_T2S_CONV = False
+        else:
+            _ZH_T2S_CONV = OpenCC("t2s")
+    if _ZH_T2S_CONV:
+        try:
+            return _ZH_T2S_CONV.convert(text)
+        except Exception:
+            return text
+    return text
+
+
+def _zh_search_match(query_raw: str, query_s: str, *fields: str) -> bool:
+    """子串匹配：原始内容（大小写不敏感）或繁转简后内容（简体查询可命中繁体名）。"""
+    for field in fields:
+        value = str(field or "")
+        if query_raw in value.casefold() or query_s in _zh_t2s(value).casefold():
+            return True
+    return False
 import background_labeler                                      # noqa: E402
 from aa_install_discovery import AADiscoveryResult, discover_aa  # noqa: E402
 from aa_resource_cache import probe_resource_cache               # noqa: E402
@@ -1635,50 +1666,70 @@ def list_characters(q="", limit=400):
     sql = ("SELECT c.ident, c.name, c.club, c.spine, c.avatar, c.source, "
            "  (SELECT COUNT(*) FROM face f WHERE f.ident=c.ident) AS nface "
            "FROM character c ")
-    args = []
     if q:
-        conditions = [
-            "c.ident LIKE ?", "c.name LIKE ?", "c.club LIKE ?",
-            "EXISTS (SELECT 1 FROM name_alias a WHERE a.ident=c.ident AND a.script_name LIKE ?)",
-            "EXISTS (SELECT 1 FROM name_alias a JOIN character target ON target.ident=a.ident "
-            "WHERE a.script_name LIKE ? AND target.name=c.name)",
-        ]
-        args = [f"%{q}%"] * len(conditions)
+        # 带搜索词时全量拉取 + Python 统一过滤（原始匹配 ∪ 繁转简匹配），
+        # 否则 SQL 先截断 400 行，繁体名（如“響”）永远进不了结果集。
+        q_raw = str(q).casefold()
+        q_s = _zh_t2s(q).casefold()
+        alias_map = {}
+        for row in con.execute("SELECT ident, script_name FROM name_alias"):
+            alias_map.setdefault(row["ident"], []).append(row["script_name"])
         builtin_ids = [
             ident for script_name, ident, kind in assetdb.SEED_ALIAS
-            if ident and kind == "portrait" and str(q).casefold() in script_name.casefold()
+            if ident and kind == "portrait" and q_raw in script_name.casefold()
         ]
+        builtin_names = set()
         if builtin_ids:
             placeholders = ",".join("?" for _ in builtin_ids)
-            conditions.append("c.ident IN (" + placeholders + ")")
-            conditions.append(
-                "c.name IN (SELECT name FROM character WHERE ident IN (" + placeholders + "))"
-            )
-            args.extend(builtin_ids)
-            args.extend(builtin_ids)
-        sql += "WHERE (" + " OR ".join(conditions) + ") "
-    sql += "ORDER BY (c.name IS NULL), nface DESC, c.ident LIMIT ?"
-    args.append(limit)
-    out = []
-    for r in con.execute(sql, args):
-        catalog = character_catalog_metadata(r["ident"])
-        avatar_value = str(r["avatar"] or catalog.get("avatar") or "")
-        spine_value = str(r["spine"] or catalog.get("spine") or "")
-        avatar_key = Path(
-            avatar_value.replace("\\", "/")
-        ).name or spine_value
-        avatar = character_avatar_path(avatar_value, spine_value)
-        if not avatar:
-            avatar = registered_character_avatar_path(con, r["ident"])
-        if avatar and not avatar_key:
-            avatar_key = str(r["ident"])
-        out.append({"ident": r["ident"], "name": r["name"] or r["ident"],
-                    "club": r["club"] or "", "spine": spine_value,
-                    "faces": r["nface"], "source": r["source"],
-                    "avatar": (
-                        "/thumb/av/" + quote(avatar_key, safe="")
-                        if avatar and avatar_key else ""
-                    )})
+            for row in con.execute(
+                "SELECT name FROM character WHERE ident IN (" + placeholders + ")",
+                builtin_ids,
+            ):
+                if row["name"]:
+                    builtin_names.add(row["name"])
+        rows = [dict(row) for row in con.execute(sql)]
+        keep = []
+        for r in rows:
+            if _zh_search_match(
+                q_raw, q_s, r["ident"], r["name"], r["club"],
+                " ".join(alias_map.get(r["ident"], [])),
+            ):
+                keep.append(r)
+            elif r["ident"] in builtin_ids or r["name"] in builtin_names:
+                keep.append(r)
+        # 与原 SQL 排序一致：(c.name IS NULL) ASC, nface DESC, c.ident ASC
+        keep.sort(key=lambda r: (
+            1 if r["name"] is None else 0,
+            -(r["nface"] or 0),
+            str(r["ident"]).casefold(),
+        ))
+        rows = keep[:limit]
+    else:
+        sql += "ORDER BY (c.name IS NULL), nface DESC, c.ident LIMIT ?"
+        rows = [dict(row) for row in con.execute(sql, (limit,))]
+    return [character_item(con, r) for r in rows]
+
+
+def character_item(con, r) -> dict:
+    """把 character 行转成 API 输出项（含目录元数据与头像路径）。"""
+    catalog = character_catalog_metadata(r["ident"])
+    avatar_value = str(r["avatar"] or catalog.get("avatar") or "")
+    spine_value = str(r["spine"] or catalog.get("spine") or "")
+    avatar_key = Path(
+        avatar_value.replace("\\", "/")
+    ).name or spine_value
+    avatar = character_avatar_path(avatar_value, spine_value)
+    if not avatar:
+        avatar = registered_character_avatar_path(con, r["ident"])
+    if avatar and not avatar_key:
+        avatar_key = str(r["ident"])
+    return {"ident": r["ident"], "name": r["name"] or r["ident"],
+            "club": r["club"] or "", "spine": spine_value,
+            "faces": r["nface"], "source": r["source"],
+            "avatar": (
+                "/thumb/av/" + quote(avatar_key, safe="")
+                if avatar and avatar_key else ""
+            )}
     def variant_rank(item):
         stem = str(item.get("spine") or "").replace("\\", "/").rsplit("/", 1)[-1].casefold()
         suffix = stem[len("characterspine_"):] if stem.startswith("characterspine_") else ""
@@ -1709,11 +1760,9 @@ def list_backgrounds(
     sql = "SELECT name,hash,label,place,time,mood,tags FROM bg "
     where, args = [], []
     if q:
-        where.append(
-            "(name LIKE ? OR label LIKE ? OR place LIKE ? OR time LIKE ? "
-            "OR mood LIKE ? OR tags LIKE ?)"
-        )
-        args += [f"%{q}%"] * 6
+        # 搜索词留到 Python 层过滤（含繁转简），SQL 只保留非文本条件
+        q_raw = str(q).casefold()
+        q_s = _zh_t2s(q).casefold()
     if only_ready:
         where.append("hash IS NOT NULL")
     if only_official:
@@ -1729,6 +1778,11 @@ def list_backgrounds(
     sql += "ORDER BY (hash IS NULL), name"
     out = []
     for r in con.execute(sql, args):
+        if q and not _zh_search_match(
+            q_raw, q_s, r["name"], r["label"], r["place"],
+            r["time"], r["mood"], r["tags"],
+        ):
+            continue
         out.append({"name": r["name"], "ready": r["hash"] is not None,
                     "label": r["label"] or "", "place": r["place"] or "",
                     "time": r["time"] or "", "mood": r["mood"] or "",
@@ -4180,7 +4234,7 @@ def build_csp_headers() -> Dict[str, str]:
 
 
 def search_sounds(q: str = "") -> List[Dict[str, Any]]:
-    """搜索已登记音效的标签列表。"""
+    """搜索已登记音效的标签列表（含繁转简匹配）。"""
     try:
         con = db()
         rows = con.execute(
@@ -4188,14 +4242,24 @@ def search_sounds(q: str = "") -> List[Dict[str, Any]]:
             (f"%{q}%", f"%{q}%"),
         ).fetchall()
         results = [{"name": r[0], "label_cn": r[1] or "", "category": r[2] or "SE"} for r in rows]
+        if q and not results:
+            q_raw = str(q).casefold()
+            q_s = _zh_t2s(q).casefold()
+            results = [
+                {"name": r[0], "label_cn": r[1] or "", "category": r[2] or "SE"}
+                for r in con.execute("SELECT name, label_cn, category FROM sound")
+                if _zh_search_match(q_raw, q_s, r[0], r[1])
+            ]
     except Exception:
         results = []
 
     if not results:
         try:
             idx = json.load(open(INDEX, encoding="utf-8"))
+            q_raw = str(q).casefold()
+            q_s = _zh_t2s(q).casefold()
             for s in idx.get("sounds", []):
-                if not q or q.lower() in s.lower():
+                if not q or q_raw in s.casefold() or q_s in _zh_t2s(s).casefold():
                     results.append({"name": s, "label_cn": "", "category": "SE"})
         except Exception:
             pass
