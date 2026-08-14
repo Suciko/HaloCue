@@ -82,6 +82,7 @@ def build_environment_report(
     )
     database_ready = database_path.is_file()
     pillow_ready = importlib.util.find_spec("PIL") is not None
+    unitypy_ready = importlib.util.find_spec("UnityPy") is not None
     python_ready = sys.version_info >= MIN_PYTHON
     discovery = _discover_aa(explicit_aa_data, explicit_aa_install)
     aa_data = discovery.data
@@ -96,6 +97,10 @@ def build_environment_report(
         issues.append(
             "缺少图片组件 Pillow。请运行：python -m pip install pillow"
         )
+    if not unitypy_ready:
+        issues.append(
+            "缺少 UnityPy（官方角色索引与图片预览需要）。请运行：python -m pip install UnityPy"
+        )
     if not database_ready:
         issues.append(
             "缺少素材数据库 aa_assets.db；请先完成素材库初始化或使用带数据库的发布包。"
@@ -104,7 +109,7 @@ def build_environment_report(
         issues.append(
             "尚未连接 AA；请在应用内选择 AzureArchive.exe。"
         )
-    startup_ready = python_ready and not missing_files and pillow_ready and database_ready
+    startup_ready = python_ready and not missing_files and pillow_ready and unitypy_ready and database_ready
     return {
         "ok": not issues,
         "startup_ready": startup_ready,
