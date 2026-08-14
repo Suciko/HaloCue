@@ -745,6 +745,13 @@ class DraftStore:
             target_node = nodes[target_index]
             target_node.fields.update(patch)
             target_node.dirty = True
+            if patch.get("who"):
+                # 无冒号分段行（unknown）在编辑/绑定时指定说话者 → 转为台词行。
+                if target_node.kind == "unknown":
+                    target_node.kind = "line"
+                    if not str(target_node.fields.get("text") or "").strip():
+                        raw_body = str(target_node.raw or "").rstrip("\r\n")
+                        target_node.fields["text"] = raw_body
 
             is_directive = target_node.kind in ("dir", "background_request")
             if is_directive:
