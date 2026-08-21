@@ -42,7 +42,9 @@ class Job:
         "first_reasoning_ms", "first_content_ms", "reasoning_chars", "content_chars",
         "received_chars", "finish_reason", "scene_id", "chunk_id", "chunk_current",
         "chunk_total", "request_index", "retry_count", "subdivision_count",
-        "reason", "next_chunk_lines",
+        "reason", "next_chunk_lines", "stage", "reasoning_summary",
+        "input_tokens", "output_tokens", "reasoning_tokens",
+        "cache_read_tokens", "uncached_input_tokens", "reasoning_preview",
     })
 
     def __init__(self, job_id: str, label: str = "job"):
@@ -55,6 +57,7 @@ class Job:
         self.error = None
         self.error_code = None
         self.error_detail: Dict[str, Any] = {}
+        self.partial_result = None
         self.activity: Dict[str, Any] = {}
         self.cancel_requested = False
         self.created_at = datetime.datetime.now(datetime.timezone.utc)
@@ -109,6 +112,7 @@ class Job:
                 "error": self.error,
                 "error_code": self.error_code,
                 "error_detail": dict(self.error_detail),
+                "partial_result": self.partial_result,
                 "cancel_requested": self.cancel_requested,
                 "created_at": self.created_at.isoformat(),
                 "updated_at": self.updated_at.isoformat(),
@@ -155,6 +159,9 @@ class JobManager:
                         job.state = "failed"
                         job.error = str(e)
                         job.error_code, job.error_detail = _failure_metadata(e)
+                        partial = getattr(e, "partial_result", None)
+                        if isinstance(partial, Mapping):
+                            job.partial_result = dict(partial)
                         job.completed_at = datetime.datetime.now(datetime.timezone.utc)
             finally:
                 job.updated_at = datetime.datetime.now(datetime.timezone.utc)

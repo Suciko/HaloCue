@@ -15,7 +15,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 SHARD_NAMES = ("ScenarioScriptExcel_0.json", "ScenarioScriptExcel_1.json", "ScenarioScriptExcel_2.json")
 CHARACTER_RE = re.compile(r"^(\d+);([^;\r\n]*);([^;\r\n]*)(?:;(.*))?$", re.DOTALL)
 KNOWN_GLOBAL = {
@@ -69,6 +69,108 @@ def _event_base(index: int, raw_line: str, line_type: str, raw_command: str = ""
         "parse_status": status,
         "semantic_zh": None,
         "arguments_raw": [],
+    }
+
+
+def _ordered_unique(values: Iterable[Any]) -> list[Any]:
+    """Keep first-seen order while removing duplicate semantic values."""
+    result: list[Any] = []
+    seen: set[Any] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def _record_semantics(events: list[dict[str, Any]], localized_text: str = "") -> dict[str, Any]:
+    """Separate dialogue, staged characters, screen text, and flow commands.
+
+    A character declaration without dialogue is a staging operation, not a
+    speaker.  Keeping both views is important because the same row can place
+    one character silently while another character speaks.
+    """
+    character_events = [event for event in events if event.get("line_type") == "character"]
+    dialogue_speakers = _ordered_unique(
+        str(event.get("character_name_kr") or "")
+        for event in character_events
+        if str(event.get("dialogue_kr") or "").strip()
+    )
+    declared_names = _ordered_unique(
+        str(event.get("character_name_kr") or "")
+        for event in character_events
+        if str(event.get("character_name_kr") or "").strip()
+    )
+    staged_by_key: dict[tuple[Any, Any], dict[str, Any]] = {}
+    for event in character_events:
+        name = str(event.get("character_name_kr") or "").strip()
+        if not name:
+            continue
+        key = (event.get("slot"), name)
+        item = staged_by_key.setdefault(
+            key,
+            {
+                "slot": event.get("slot"),
+                "character_name_kr": name,
+                "face_id": event.get("face_id"),
+                "has_dialogue": False,
+            },
+        )
+        item["has_dialogue"] = bool(item["has_dialogue"] or str(event.get("dialogue_kr") or "").strip())
+        if event.get("face_id") not in (None, ""):
+            item["face_id"] = event.get("face_id")
+    screen_text_events = [
+        {
+            "event_index": event.get("event_index"),
+            "command_normalized": event.get("command_normalized"),
+            "screen_text_raw": event.get("screen_text_raw", ""),
+            "raw_line": event.get("raw_line", ""),
+        }
+        for event in events
+        if event.get("line_type") == "screen_text"
+        and str(event.get("screen_text_raw") or "").strip()
+    ]
+    localized_text = str(localized_text or "").strip()
+    has_narration = any(event.get("line_type") == "narration" and str(event.get("dialogue_kr") or "").strip() for event in events)
+    if localized_text and not dialogue_speakers and not has_narration and not any(item["screen_text_raw"] == localized_text for item in screen_text_events):
+        screen_text_events.append(
+            {
+                "event_index": None,
+                "command_normalized": None,
+                "screen_text_raw": localized_text,
+                "raw_line": "<localized text>",
+            }
+        )
+    commands = [str(event.get("command_normalized") or "") for event in events if event.get("command_normalized")]
+    transition_commands = [command for command in commands if command in {"all", "st", "stm", "str", "clearst", "zmc", "zmlt", "bgshake", "na", "title", "place"}]
+    has_screen_text = bool(screen_text_events)
+    has_wait = any(event.get("command_normalized") == "wait" for event in events)
+    has_flow = any(event.get("line_type") == "flow" for event in events)
+    has_staging = bool(character_events or commands)
+    if dialogue_speakers:
+        semantic_kind = "dialogue"
+    elif has_narration:
+        semantic_kind = "narration"
+    elif has_screen_text:
+        semantic_kind = "screen_text"
+    elif has_wait:
+        semantic_kind = "wait"
+    elif transition_commands:
+        semantic_kind = "transition"
+    elif has_flow:
+        semantic_kind = "flow"
+    elif has_staging:
+        semantic_kind = "staging"
+    else:
+        semantic_kind = "empty"
+    return {
+        "dialogue_speakers": dialogue_speakers,
+        "declared_character_names": declared_names,
+        "staged_characters": list(staged_by_key.values()),
+        "screen_text_events": screen_text_events,
+        "transition_commands": _ordered_unique(transition_commands),
+        "semantic_kind": semantic_kind,
     }
 
 
@@ -202,6 +304,7 @@ class OfficialStagingExtractor:
         events = parse_script_events(str(row.get("script_kr", "") or ""), str(row.get("text_tw", "") or ""))
         kr_texts = [e.get("dialogue_kr", "") for e in events if e.get("dialogue_kr")]
         dialogue = bool(kr_texts)
+        semantics = _record_semantics(events, str(row.get("text_tw", "") or ""))
         has_staging = bool(events) or any(row.get(k) not in (None, "", 0, False) for k in ("bgm_id", "sound", "transition", "bg_name", "bg_effect", "popup_file_name", "voice_id"))
         raw_known = {"group_id", "selection_group", "bgm_id", "sound", "transition", "bg_name", "bg_effect", "popup_file_name", "script_kr", "text_jp", "text_th", "text_tw", "text_en", "voice_id", "teen_mode"}
         raw = {key: row.get(key) for key in raw_known}
@@ -240,7 +343,14 @@ class OfficialStagingExtractor:
             "field_events": field_events,
             "script_events": events,
             "node_kind": sorted(set([e["line_type"] for e in events] + (["dialogue"] if dialogue else []) + (["staging"] if has_staging else []))),
-            "speakers": sorted({e["character_name_kr"] for e in events if e.get("character_name_kr")}),
+            # A silent character declaration is staging, not dialogue.
+            "speakers": semantics["dialogue_speakers"],
+            "dialogue_speakers": semantics["dialogue_speakers"],
+            "declared_character_names": semantics["declared_character_names"],
+            "staged_characters": semantics["staged_characters"],
+            "screen_text_events": semantics["screen_text_events"],
+            "transition_commands": semantics["transition_commands"],
+            "semantic_kind": semantics["semantic_kind"],
             "visible_character_declarations": [e["slot"] for e in events if e["line_type"] == "character"],
             "has_dialogue": dialogue, "has_official_zh": bool(row.get("text_tw")), "has_staging": has_staging,
             "command_families": sorted({e["command_normalized"] for e in events if e.get("command_normalized")}),

@@ -56,6 +56,21 @@
       : '';
   }
   function status(value) { $('#rvStatus').textContent = value; }
+  function reviewDiagnosticLabel(item) {
+    item = item || {};
+    const start = Number(item.line_no || item.pending_start_line || 0);
+    const end = Number(item.pending_end_line || start || 0);
+    const location = start ? ('第 ' + start + (end > start ? '-' + end : '') + ' 行') : '';
+    const severity = item.severity === 'warning' ? '警告' : item.severity === 'info' ? '提示' : '错误';
+    const message = String(item.message || item.code || '未说明的问题');
+    return severity + (location ? ' · ' + location : '') + ' · ' + message;
+  }
+  function reviewDiagnosticsSummary(items) {
+    const diagnostics = Array.isArray(items) ? items.filter(Boolean) : [];
+    if (!diagnostics.length) return '';
+    const first = reviewDiagnosticLabel(diagnostics[0]);
+    return diagnostics.length > 1 ? first + ' · 另有 ' + (diagnostics.length - 1) + ' 项' : first;
+  }
   function setWorkflowStage(name) {
     const names = ['script', 'preflight', 'prepare', 'review'];
     const currentIndex = Math.max(0, names.indexOf(name));
@@ -133,7 +148,8 @@
       model_request_timeout: {title: '模型响应超时', message: '本次正式生成没有在时间限制内完成。', action: '旧草稿不受影响，可以稍后重试。', retryable: true},
       model_rate_limited: {title: '模型请求过于频繁', message: '供应商暂时限制了新的模型请求。', action: '请稍等片刻后重试。', retryable: true},
       model_connection_failed: {title: '模型连接中断', message: '生成期间未能持续连接模型接口。', action: '请检查网络或接口地址后重试。', retryable: true},
-      model_service_unavailable: {title: '模型服务暂时不可用', message: '供应商暂时无法处理这次正式生成请求。', action: '旧草稿不受影响，可以稍后重试。', retryable: true}
+      model_service_unavailable: {title: '模型服务暂时不可用', message: '供应商暂时无法处理这次正式生成请求。', action: '旧草稿不受影响，可以稍后重试。', retryable: true},
+      partial_generation: {title: '结果已生成，但仍有一处需要确认', message: '已完成的内容已经保留，未完成部分按原文进入审查。你可以直接查看并保留当前结果，或修复后重新生成。', action: '当前结果标记为 partial/needs_review，不会自动安装到 AA。', retryable: true}
     };
     return Object.assign({title: '草稿生成失败', message: '本次生成未完成，已有草稿和原剧本没有被覆盖。', action: '可检查技术详情后重试，或打开模型设置。', retryable: detail.retryable !== false}, views[code] || {}, {code: code, technical: sanitizeModelError(job.error || (error && error.message) || '未知错误')});
   }
@@ -156,18 +172,26 @@
     const chars = Number(activity.received_chars);
     const reasoningChars = Number(activity.reasoning_chars);
     const elapsed = Number(activity.elapsed_ms);
+    const tokenText = function () {
+      const part = function (label, value) {
+        return Number.isFinite(Number(value)) ? label + ' ' + Number(value).toLocaleString('en-US') : '';
+      };
+      return [part('输入', activity.input_tokens), part('思考', activity.reasoning_tokens), part('输出', activity.output_tokens)].filter(Boolean).join(' · ');
+    };
     const suffix = function (value) { return detail ? detail + ' · ' + value : value; };
-    if (activityState === 'waiting') return suffix('等待模型首段响应');
+    const stage = activity.stage === 'G1' ? 'G1 场景事件链' : 'G2 演出标注';
+    if (activityState === 'waiting') return suffix(stage + ' · 等待模型首段响应' + (activity.reasoning_summary ? ' · ' + activity.reasoning_summary : ''));
     if (activityState === 'reasoning') {
       const count = Number.isFinite(reasoningChars) ? '已思考 ' + reasoningChars.toLocaleString('en-US') + ' 字符' : '模型思考中';
       const waited = Number.isFinite(elapsed) && elapsed >= 1000 ? ' · 已用时 ' + Math.max(1, Math.floor(elapsed / 1000)) + ' 秒' : '';
-      return suffix(count + waited);
+      return suffix(stage + ' · ' + count + waited + (activity.reasoning_summary ? ' · ' + activity.reasoning_summary : ''));
     }
     if (activityState === 'receiving') {
       const received = Number.isFinite(chars) ? '已接收 ' + chars.toLocaleString('en-US') + ' 字符' : '正在接收模型输出';
       const waited = Number.isFinite(elapsed) && elapsed >= 1000 ? ' · 已等待 ' + Math.max(1, Math.floor(elapsed / 1000)) + ' 秒' : '';
-      return suffix(received + waited);
+      return suffix(stage + ' · ' + received + waited);
     }
+    if (activityState === 'usage' || activityState === 'completed') return suffix(stage + ' · ' + (tokenText() || '模型已返回') + (activity.reasoning_summary ? ' · ' + activity.reasoning_summary : ''));
     if (activityState === 'retrying') return suffix(activity.reason === 'reasoning_capacity' ? '推理占满预算，正在增加预算并保留推理' : '正在纠正返回格式');
     if (activityState === 'subdividing') return suffix('正在拆分当前场景块');
     if (!detail || !item.updated_at || item.state !== 'running') return detail;
@@ -1187,20 +1211,31 @@
     try { return await refresh; }
     finally { if (state.workbenchRefresh && state.workbenchRefresh.promise === refresh) state.workbenchRefresh = null; }
   }
+  let analyzeFlight = null;
   async function analyze() {
-    const path = $('#path').value.trim(); let op; if (!path) return; const transition = beginTransition(); setScriptScanProgress('workspace', '正在建立当前章节工作区…');
-    try {
-      if (!currentStory() || state.sourcePath !== path || !state.fileToken) await openPath(path, null, transition);
-      if (!isCurrentTransition(transition) || state.sourcePath !== path) return; op = beginOperation('analyze'); const storyToken = currentStory() && currentStory().story_token; setScriptScanProgress('format', '正在识别写作格式与章节结构…');
-      const sourceQuery = state.fileToken ? ('token=' + encodeURIComponent(state.fileToken)) : ('path=' + encodeURIComponent(path));
-      const result = await request('/api/analyze?' + sourceQuery); if (!isCurrentOperation('analyze', op) || state.sourcePath !== path || !currentStory() || currentStory().story_token !== storyToken) return;
-      if (result.error) throw new Error(result.error);
-      state.analysis = result; state.preflightApproved = false; setScriptScanProgress('rules', '正在提取角色、AA 指令和素材线索…'); $('#s1info').textContent = (result.format && result.format.label ? ('识别为' + result.format.label + '。') : '') + '共 ' + result.lines + ' 行台词，' + result.speakers.length + ' 位说话者。正在进行 AI 初审…';
-      $('#s2preflight').classList.remove('off'); ['#s4'].forEach(function (id) { $(id).classList.add('off'); });
-      setWorkflowStage('preflight');
-      if ($('#s2preflight').scrollIntoView) $('#s2preflight').scrollIntoView({behavior: 'smooth', block: 'start'});
-      state.mapping = await request('/api/guess?' + sourceQuery); if (!isCurrentOperation('analyze', op) || !currentStory() || currentStory().story_token !== storyToken) return; setScriptScanProgress('ai', 'AI 正在通读全文，核对角色、骨骼和素材…', false, 3); const preflight = await runPreflight(op, storyToken); if (!isCurrentOperation('analyze', op)) return; if (!preflight) { state.preflightApproved = true; revealFormalSteps(); } finishPreflightProgress(preflight, result); checkReady();
-    } catch (error) { if (isCurrentTransition(transition) && (!op || isCurrentOperation('analyze', op))) { setScriptScanProgress('ai', '读取或初审失败：' + error.message, true); $('#s1info').textContent = error.message; } }
+    const path = $('#path').value.trim();
+    if (!path) return;
+    if (analyzeFlight && analyzeFlight.path === path) return analyzeFlight.promise;
+    const run = (async function () {
+      let op; const transition = beginTransition(); setScriptScanProgress('workspace', '正在建立当前章节工作区…');
+      const button = $('#analyzeStoryButton'); if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); }
+      try {
+        if (!currentStory() || state.sourcePath !== path || !state.fileToken) await openPath(path, null, transition);
+        if (!isCurrentTransition(transition) || state.sourcePath !== path) return; op = beginOperation('analyze'); const storyToken = currentStory() && currentStory().story_token; setScriptScanProgress('format', '正在识别写作格式与章节结构…');
+        const sourceQuery = state.fileToken ? ('token=' + encodeURIComponent(state.fileToken)) : ('path=' + encodeURIComponent(path));
+        const result = await request('/api/analyze?' + sourceQuery); if (!isCurrentOperation('analyze', op) || state.sourcePath !== path || !currentStory() || currentStory().story_token !== storyToken) return;
+        if (result.error) throw new Error(result.error);
+        state.analysis = result; state.preflightApproved = false; setScriptScanProgress('rules', '正在提取角色、AA 指令和素材线索…'); $('#s1info').textContent = (result.format && result.format.label ? ('识别为' + result.format.label + '。') : '') + '共 ' + result.lines + ' 行台词，' + result.speakers.length + ' 位说话者。正在进行 AI 初审…';
+        $('#s2preflight').classList.remove('off'); ['#s4'].forEach(function (id) { $(id).classList.add('off'); });
+        setWorkflowStage('preflight');
+        if ($('#s2preflight').scrollIntoView) $('#s2preflight').scrollIntoView({behavior: 'smooth', block: 'start'});
+        state.mapping = await request('/api/guess?' + sourceQuery); if (!isCurrentOperation('analyze', op) || !currentStory() || currentStory().story_token !== storyToken) return; setScriptScanProgress('ai', 'AI 正在通读全文，核对角色、骨骼和素材…', false, 3); const preflight = await runPreflight(op, storyToken); if (!isCurrentOperation('analyze', op)) return; if (!preflight) { state.preflightApproved = true; revealFormalSteps(); } finishPreflightProgress(preflight, result); checkReady();
+      } catch (error) { if (isCurrentTransition(transition) && (!op || isCurrentOperation('analyze', op))) { setScriptScanProgress('ai', '读取或初审失败：' + error.message, true); $('#s1info').textContent = error.message; } }
+      finally { if (button) { button.disabled = !state.aaConnected; button.setAttribute('aria-busy', 'false'); } }
+    })();
+    analyzeFlight = {path: path, promise: run};
+    try { return await run; }
+    finally { if (analyzeFlight && analyzeFlight.promise === run) analyzeFlight = null; }
   }
   let castPickerSpeaker = '';
   let castSearchTimer = null;
@@ -2058,11 +2093,14 @@
     const baseCardLimit = sameDraft ? previousReview.cardLimit || 80 : 80;
     const annotationStatus = draft.annotation_status || {status: 'complete', completed_targets: 0, total_targets: 0, pending_targets: 0};
     const annotationIncomplete = annotationStatus.status !== 'complete' || Number(annotationStatus.pending_targets || 0) > 0;
-    state.review = {token: token, revision: draft.draft_version, buildId: draft.last_compiled_build_id || null, annotationIncomplete: annotationIncomplete, cards: cards, selected: selectedCard, filter: sameDraft ? previousReview.filter || 'all' : 'all', cardLimit: Math.max(baseCardLimit, selectedIndex + 1)}; const counts = draft.counts || {};
+    const annotationOverrideAccepted = Boolean(draft.annotation_override_accepted);
+    state.review = {token: token, revision: draft.draft_version, buildId: draft.last_compiled_build_id || null, annotationIncomplete: annotationIncomplete, annotationOverrideAccepted: annotationOverrideAccepted, cards: cards, selected: selectedCard, filter: sameDraft ? previousReview.filter || 'all' : 'all', cardLimit: Math.max(baseCardLimit, selectedIndex + 1)}; const counts = draft.counts || {};
     showReviewPhase(true); setWorkflowStage('review'); $('#rvOpen').disabled = false;
     contextStatus({draft: '草稿：v' + displayedDraftVersion(token, draft.draft_version), save: '保存：未修改', review: annotationIncomplete ? ('审查：AI 标注 ' + Number(annotationStatus.completed_targets || 0) + '/' + Number(annotationStatus.total_targets || 0) + ' · 剩余 ' + Number(annotationStatus.pending_targets || 0)) : ('审查：待审 ' + (counts.pending || 0) + ' · 待处理 ' + (counts.blocking_errors || 0)), compile: state.review.buildId ? '编译：已完成' : '编译：未编译', install: draft.last_installed_build_id ? ('安装：已安装' + (draft.last_installed_project ? ' · ' + draft.last_installed_project : '')) : '安装：未安装'});
     const annotationText = annotationIncomplete ? ('AI 标注 ' + Number(annotationStatus.completed_targets || 0) + '/' + Number(annotationStatus.total_targets || 0) + ' · 剩余 ' + Number(annotationStatus.pending_targets || 0) + ' · ') : '';
-    status(annotationText + '待审 ' + (counts.pending || 0) + ' · 待处理 ' + (counts.blocking_errors || 0) + ' · v' + displayedDraftVersion(token, draft.draft_version)); $('#rvApproveAll').disabled = false; $('#rvValidate').disabled = false; $('#rvCompile').disabled = Boolean(annotationIncomplete || counts.pending || counts.blocking_errors); $('#rvInstall').disabled = Boolean(annotationIncomplete || !state.review.buildId); setReviewActions(Boolean(state.review.selected), Boolean(state.review.selected && state.review.selected.kind === 'line'));
+    const annotationGate = annotationIncomplete && !annotationOverrideAccepted;
+    const reviewStatus = annotationText + (annotationOverrideAccepted ? '已接受当前结果 · ' : '') + '待审 ' + (counts.pending || 0) + ' · 待处理 ' + (counts.blocking_errors || 0) + ' · v' + displayedDraftVersion(token, draft.draft_version);
+    status(reviewStatus); $('#rvStatus').title = reviewDiagnosticsSummary(draft.diagnostics); $('#rvApproveAll').disabled = false; $('#rvValidate').disabled = false; $('#rvCompile').disabled = Boolean(annotationGate || counts.pending || counts.blocking_errors); $('#rvInstall').disabled = Boolean(annotationGate || !state.review.buildId); setReviewActions(Boolean(state.review.selected), Boolean(state.review.selected && state.review.selected.kind === 'line'));
     if (state.review.selected) $('#rvSelectionLabel').textContent = '已选 #' + state.review.selected.line_no;
     rememberActiveReview({story_token: story.story_token, draft_token: token, card_id: state.review.selected && state.review.selected.card_id});
     renderReviewCards();
@@ -2219,7 +2257,21 @@
         const img = document.createElement('img'); img.loading = 'lazy'; img.alt = (card.current.arg || 'AA 背景') + ' 预览';
         const placeholder = document.createElement('span'); placeholder.className = 'bg-timeline-placeholder'; placeholder.textContent = '素材缺失'; placeholder.hidden = true;
         img.addEventListener('load', function () { meta.textContent = 'AA 官方背景'; node.classList.remove('is-missing'); });
-        img.addEventListener('error', function () { img.hidden = true; placeholder.hidden = false; meta.textContent = 'AA 资源中未找到此背景'; node.classList.add('is-missing'); });
+        img.addEventListener('error', async function () {
+          img.hidden = true; placeholder.hidden = false; placeholder.textContent = '正在确认'; meta.textContent = '正在确认 AA 背景登记状态';
+          try {
+            const key = String(card.current.arg || '');
+            const matches = await request('/api/backgrounds?q=' + encodeURIComponent(key) + '&ready=1&limit=20');
+            const registered = (matches || []).some(function (item) { return String(item.name || '').toLowerCase() === key.toLowerCase() && item.ready !== false; });
+            if (registered) {
+              placeholder.textContent = '预览未建立'; meta.textContent = 'AA 背景已登记 · 预览未建立'; node.classList.remove('is-missing');
+            } else {
+              placeholder.textContent = '素材缺失'; meta.textContent = 'AA 资源中未找到此背景'; node.classList.add('is-missing');
+            }
+          } catch (_error) {
+            placeholder.textContent = '暂无预览'; meta.textContent = 'AA 背景预览暂不可用'; node.classList.remove('is-missing');
+          }
+        });
         img.src = '/thumb/bg/' + encodeURIComponent(card.current.arg || '') + '?px=320';
         jump.appendChild(img); jump.appendChild(placeholder); meta.textContent = '正在检查 AA 背景预览';
       }
@@ -2341,7 +2393,7 @@
   }
   async function validateReview() {
     const view = captureView(); setBusyButton('#rvValidate', true, '检查中…', '检查问题'); status('正在检查草稿…');
-    try { const result = await reviewPost('/api/validate', {}); if (!result || !isCurrentView(view)) return; status(result.blocking_errors ? ('检查完成 · ' + result.blocking_errors + ' 项待处理') : '检查通过，可以编译'); contextStatus({review: result.blocking_errors ? ('审查：已校验 · 有 ' + result.blocking_errors + ' 项待处理') : '审查：校验通过'}); }
+    try { const result = await reviewPost('/api/validate', {}); if (!result || !isCurrentView(view)) return; const diagnosticSummary = reviewDiagnosticsSummary(result.diagnostics); const baseStatus = result.blocking_errors ? ('检查完成 · ' + result.blocking_errors + ' 项待处理') : '检查通过，可以编译'; status(diagnosticSummary ? baseStatus + ' · ' + diagnosticSummary : baseStatus); $('#rvStatus').title = diagnosticSummary; contextStatus({review: result.blocking_errors ? ('审查：已校验 · 有 ' + result.blocking_errors + ' 项待处理') : '审查：校验通过'}); }
     catch (error) { if (isCurrentView(view)) status('检查失败：' + error.message); }
     finally { if (isCurrentView(view)) setBusyButton('#rvValidate', false, '', '检查问题'); }
   }
@@ -2474,6 +2526,7 @@
 
   async function annotate() {
     const op = beginOperation('annotate'); const useAI = $('input[name=anno]:checked').value === 'ai';
+    const layoutModeRadio = $('input[name=layoutMode]:checked'); const layoutMode = layoutModeRadio ? layoutModeRadio.value : 'ai';
     const previousDraftToken = state.review.token || $('#rvDraftSelect').value || '';
     const previousCardId = state.review.selected && state.review.selected.card_id || null;
     let job = null;
@@ -2482,12 +2535,12 @@
       hideGenerationFailure();
       setBusyButton('#goAnnotate', true, useAI ? 'AI 生成中…' : '正在转换…', '生成审查草稿');
       log(useAI ? 'AI 正在安排演出并生成草稿…' : '正在按原文生成审查草稿…');
-      const result = await post('/api/annotate', {story_token: story.story_token, mapping: state.mapping, bg: state.background || 'BG_Black', usage_chain: state.preflight && Array.isArray(state.preflight.usage_chain) ? state.preflight.usage_chain : [], annotate: useAI, model_profile_id: legacyModelProfileId()});
+      const result = await post('/api/annotate', {story_token: story.story_token, mapping: state.mapping, bg: state.background || 'BG_Black', usage_chain: state.preflight && Array.isArray(state.preflight.usage_chain) ? state.preflight.usage_chain : [], annotate: useAI, layout_mode: layoutMode, model_profile_id: legacyModelProfileId()});
       if (!isCurrentOperation('annotate', op)) return;
       let lastAnnotationDetail = '';
       job = await window.Api.poll('/api/jobs/' + result.job_id, function (item) { return ['succeeded', 'failed', 'cancelled'].includes(item.state); }, {isCurrent: function () { return isCurrentOperation('annotate', op); }, onProgress: function (item) { const detail = annotationProgressDetail(item); if (isCurrentOperation('annotate', op) && detail && detail !== lastAnnotationDetail) { lastAnnotationDetail = detail; log(detail); } }, onRetry: function () { if (isCurrentOperation('annotate', op)) log('连接中断，正在重试'); }});
       if (!isCurrentOperation('annotate', op) || !job) return;
-      if (job.state !== 'succeeded') {
+       if (job.state !== 'succeeded') {
         const error = new Error(job.error || (job.state === 'cancelled' ? '草稿生成已取消' : '草稿生成失败'));
         const failure = annotationFailureView(job, error);
         const restored = await restoreReviewAfterAnnotationFailure(previousDraftToken, previousCardId);
@@ -2495,10 +2548,10 @@
         showGenerationFailure(failure, restored);
         log('草稿生成失败：' + error.message + (restored ? '；已恢复之前的审查草稿' : ''));
         return;
-      }
-      await refreshDrafts(); if (!isCurrentOperation('annotate', op)) return;
-      $('#rvDraftSelect').value = job.result.draft_token; await loadReview();
-      if (isCurrentOperation('annotate', op)) { const resumed = Number(job.result && job.result.resumed_chunks || 0); const metrics = job.result && job.result.agent_metrics; const timedOut = Boolean(job.result && job.result.timed_out); const reusedDraft = Boolean(job.result && job.result.reused_draft); const prefix = timedOut ? '部分草稿已保存，当前块超时；再次生成会缩小当前块并从检查点继续' : reusedDraft ? '标注已经完整，已打开现有草稿；本次未调用模型' : '草稿已生成'; log(prefix + (!reusedDraft && metrics ? ' · ' + formatAnnotationCompletion(metrics) : '') + (timedOut ? ' · 当前超时请求用量未返回' : '') + (resumed ? ' · 复用 ' + resumed + ' 段' : '') + '，请完成审查后再编译安装'); if ($('#reviewPhase').scrollIntoView) $('#reviewPhase').scrollIntoView({behavior: 'smooth', block: 'start'}); }
+       }
+       await refreshDrafts(); if (!isCurrentOperation('annotate', op)) return;
+       $('#rvDraftSelect').value = job.result.draft_token; await loadReview();
+       if (isCurrentOperation('annotate', op)) { const resumed = Number(job.result && job.result.resumed_chunks || 0); const metrics = job.result && job.result.agent_metrics; const timedOut = Boolean(job.result && job.result.timed_out); const reusedDraft = Boolean(job.result && job.result.reused_draft); const partial = Boolean(job.result && job.result.partial); const prefix = timedOut ? '部分草稿已保存，当前块超时；再次生成会缩小当前块并从检查点继续' : reusedDraft ? '标注已经完整，已打开现有草稿；本次未调用模型' : partial ? '已保留当前部分结果，等待你确认' : '草稿已生成'; log(prefix + (!reusedDraft && metrics ? ' · ' + formatAnnotationCompletion(metrics) : '') + (timedOut ? ' · 当前超时请求用量未返回' : '') + (resumed ? ' · 复用 ' + resumed + ' 段' : '') + '，请完成审查后再编译安装'); if (partial) { const failure = annotationFailureView({error_code: 'partial_generation', error: (job.result.generation_error || {}).detail || '部分结果已保留'}, new Error('partial_generation')); $('#generationFailureDraft').textContent = '查看当前结果'; showGenerationFailure(failure, true); } if ($('#reviewPhase').scrollIntoView) $('#reviewPhase').scrollIntoView({behavior: 'smooth', block: 'start'}); }
     } catch (error) {
       if (!isCurrentOperation('annotate', op)) return;
       const failure = annotationFailureView(job, error);
@@ -2541,7 +2594,7 @@
     else if (job.state === 'succeeded') { log('生成完成'); $('#backgroundRequestsPanel').classList.remove('open'); }
     checkReady(); return job;
   }
-  async function build() { if (state.buildActive || state.backgroundJob) return; const op = beginOperation('build'); try { const story = requireStory(); if (!state.analysis) throw new Error('请先读取剧本'); state.buildActive = true; log('启动中…'); checkReady(); await post('/api/build', {story_token: story.story_token, project: story.project, script: state.analysis.path, mapping: state.mapping, bg: state.background || 'BG_Black', annotate: $('input[name=anno]:checked').value === 'ai', model_profile_id: legacyModelProfileId(), install: $('#install').checked}); if (!isCurrentOperation('build', op)) return; return await pollBuild(op); } catch (error) { if (!isCurrentOperation('build', op)) return; state.buildActive = false; log(error.message); } finally { if (isCurrentOperation('build', op)) checkReady(); } }
+  async function build() { if (state.buildActive || state.backgroundJob) return; const op = beginOperation('build'); try { const story = requireStory(); if (!state.analysis) throw new Error('请先读取剧本'); const layoutModeRadio = $('input[name=layoutMode]:checked'); state.buildActive = true; log('启动中…'); checkReady(); await post('/api/build', {story_token: story.story_token, project: story.project, script: state.analysis.path, mapping: state.mapping, bg: state.background || 'BG_Black', annotate: $('input[name=anno]:checked').value === 'ai', layout_mode: layoutModeRadio ? layoutModeRadio.value : 'ai', model_profile_id: legacyModelProfileId(), install: $('#install').checked}); if (!isCurrentOperation('build', op)) return; return await pollBuild(op); } catch (error) { if (!isCurrentOperation('build', op)) return; state.buildActive = false; log(error.message); } finally { if (isCurrentOperation('build', op)) checkReady(); } }
 
   const recentStories = new window.StoryUI.RecentStories($('#recentStories'), openRecent);
   const storyFilePicker = window.StoryUI && window.StoryUI.StoryFilePicker ? new window.StoryUI.StoryFilePicker($('#mBrowse'), {title: '选择剧情文本', onChoose: openSelectedStory}) : null;
@@ -2699,8 +2752,11 @@
     try {
       const saved = JSON.parse(localStorage.getItem('aa-workbench-preferences-v1') || '{}');
       const anno = saved.anno === 'no' ? 'no' : 'ai';
+      const layoutMode = ['pure_ai', 'ai', 'rules'].includes(saved.layoutMode) ? saved.layoutMode : 'ai';
       const radios = document.querySelectorAll ? Array.from(document.querySelectorAll('input[name=anno]')) : [];
       radios.forEach(function (radio) { radio.checked = radio.value === anno; });
+      const layoutRadios = document.querySelectorAll ? Array.from(document.querySelectorAll('input[name=layoutMode]')) : [];
+      layoutRadios.forEach(function (radio) { radio.checked = radio.value === layoutMode; });
       const install = document.querySelector ? document.querySelector('#install') : null;
       if (install && typeof saved.install === 'boolean') install.checked = saved.install;
     } catch (_) { /* 首次使用，保持默认 */ }
@@ -2708,15 +2764,18 @@
   function persistWorkbenchPreferences() {
     try {
       const annoRadio = document.querySelector ? document.querySelector('input[name=anno]:checked') : null;
+      const layoutModeRadio = document.querySelector ? document.querySelector('input[name=layoutMode]:checked') : null;
       const install = document.querySelector ? document.querySelector('#install') : null;
       localStorage.setItem('aa-workbench-preferences-v1', JSON.stringify({
         anno: annoRadio ? annoRadio.value : 'ai',
+        layoutMode: layoutModeRadio ? layoutModeRadio.value : 'ai',
         install: install ? install.checked : true
       }));
     } catch (_) {}
   }
   restoreWorkbenchPreferences();
   if (document.querySelectorAll) Array.from(document.querySelectorAll('input[name=anno]')).forEach(function (radio) { radio.addEventListener('change', persistWorkbenchPreferences); });
+  if (document.querySelectorAll) Array.from(document.querySelectorAll('input[name=layoutMode]')).forEach(function (radio) { radio.addEventListener('change', persistWorkbenchPreferences); });
   const installBox = document.querySelector ? document.querySelector('#install') : null;
   if (installBox) installBox.addEventListener('change', persistWorkbenchPreferences);
   window.replaceStory = replaceStory;
@@ -2736,7 +2795,7 @@
     if (!story || detail.story_token !== story.story_token) return;
     if (detail.preflight_snapshot) restorePreflightSnapshot(detail.preflight_snapshot);
   });
-  window.AppRuntime = {analyze: analyze, annotate: annotate, build: build, compile: compile, beginOperation: beginOperation, loadBackgrounds: loadBackgrounds, loadReview: loadReview, refreshDrafts: refreshDrafts, reviewPost: reviewPost, renderBackgroundRequests: renderBackgroundRequests, resolveBackground: resolveBackground, pollBuild: pollBuild, continueBackground: continueBackground, replaceStory: replaceStory, restoreActiveReview: restoreActiveReview, fillBackgroundFromHistory: fillBackgroundFromHistory, openDraftBackgroundPicker: openDraftBackgroundPicker, resolveDraftBackgroundRequest: resolveDraftBackgroundRequest, setReviewFilter: setReviewFilter, jumpToReviewCard: jumpToReviewCard, searchCharacters: searchCharacters, pickCharacter: pickCharacter, castSetKind: castSetKind, openCastPicker: openCastPicker, renderReviewCards: renderReviewCards, renderReviewAssets: renderReviewAssets, renderPreflight: renderPreflight, buildPreflightAssetTasks: buildPreflightAssetTasks, refreshAfterAssetWorkbench: refreshAfterAssetWorkbench, applyWorkbenchBackground: applyWorkbenchBackground, approvePreflight: approvePreflight, rerunPreflight: rerunPreflight, renderBackgroundTimeline: renderBackgroundTimeline, openBgReplace: openBgReplace, applyBgReplace: applyBgReplace, renderAAStatus: renderAAStatus, openInstallDialog: openInstallDialog, confirmInstall: confirmInstall, updateInstallProjectPreview: updateInstallProjectPreview, annotationProgressDetail: annotationProgressDetail, formatAnnotationCompletion: formatAnnotationCompletion};
+  window.AppRuntime = {analyze: analyze, annotate: annotate, build: build, compile: compile, validateReview: validateReview, beginOperation: beginOperation, loadBackgrounds: loadBackgrounds, loadReview: loadReview, refreshDrafts: refreshDrafts, reviewPost: reviewPost, renderBackgroundRequests: renderBackgroundRequests, resolveBackground: resolveBackground, pollBuild: pollBuild, continueBackground: continueBackground, replaceStory: replaceStory, restoreActiveReview: restoreActiveReview, fillBackgroundFromHistory: fillBackgroundFromHistory, openDraftBackgroundPicker: openDraftBackgroundPicker, resolveDraftBackgroundRequest: resolveDraftBackgroundRequest, setReviewFilter: setReviewFilter, jumpToReviewCard: jumpToReviewCard, searchCharacters: searchCharacters, pickCharacter: pickCharacter, castSetKind: castSetKind, openCastPicker: openCastPicker, renderReviewCards: renderReviewCards, renderReviewAssets: renderReviewAssets, renderPreflight: renderPreflight, buildPreflightAssetTasks: buildPreflightAssetTasks, refreshAfterAssetWorkbench: refreshAfterAssetWorkbench, applyWorkbenchBackground: applyWorkbenchBackground, approvePreflight: approvePreflight, rerunPreflight: rerunPreflight, renderBackgroundTimeline: renderBackgroundTimeline, openBgReplace: openBgReplace, applyBgReplace: applyBgReplace, renderAAStatus: renderAAStatus, openInstallDialog: openInstallDialog, confirmInstall: confirmInstall, updateInstallProjectPreview: updateInstallProjectPreview, annotationProgressDetail: annotationProgressDetail, formatAnnotationCompletion: formatAnnotationCompletion};
   window.AppRuntime.buildAAIndex = buildAAIndex;
   window.AppRuntime.applyAAReadiness = applyAAReadiness;
   window.AppRuntime.pollAAIndex = pollAAIndex;

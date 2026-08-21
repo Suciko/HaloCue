@@ -10,7 +10,13 @@
 （这部分跨请求不变，会被缓存）。
 """
 
+import re
+
 from director_policy import prompt_policy
+
+# Named revision for the 0.95 integration.  This is metadata only; it does
+# not change the director's creative freedom or impose a resource quota.
+PROMPT_REVISION = "v10-canonical-emo-protocol"
 
 # ---------------------------------------------------------------- 角色与铁律
 ROLE = """你是蔚蓝档案（Blue Archive）同人剧情的**演出指导**。
@@ -23,31 +29,44 @@ ROLE = """你是蔚蓝档案（Blue Archive）同人剧情的**演出指导**。
 1. 绝不改动、增删、润色任何台词文本。你只输出标注。
 2. 只能填资源表里真实存在的值。不确定就留空串 —— 空串永远安全，编造必被丢弃。
 3. 表情只能用该角色资源表里列出的编号。每个角色的表情表都不一样。
-4. 旁白和无立绘角色（资源表里标了的）不能填表情/气泡/动作/效果，只能填音效、停顿、背景。
+4. 旁白和无立绘角色（资源表里标了的）是“有姓名的画外发言者”：可以正常拥有姓名、台词和剧情关系，
+   但不能进入 visible_characters / positions，不能 move / reveal / conceal / enter / exit，也不能填表情、气泡、动作或效果。
+   画面需要回应他们时，只演出当前真正有立绘的角色；不能为了双人关系镜头虚构画外发言者的立绘。
+   同拍需要回应时，用行级 `reactions` 写真实有立绘角色的 face/emo/act，不要把反应挂在画外说话人身上。
 """
 
 # ---------------------------------------------------------------- 停顿模型
-SHOT = """# 射击受击 shot —— 极严格
+SHOT = """# 行级 shot 字段：只表示受击目标，不表示景别
 
-shot 不是开枪特效，也不是战斗气氛。**只有当前画面中某个已显示角色实际遭受攻击、被命中时**，
-才填该受击角色的精确名字。开枪者开火、瞄准、威胁、枪声、未命中、画外受击、没有立绘的对象，
-一律填空串。宁可漏掉，绝不能误标。
+`shot` 是 AA 旧协议中的“射击/受击目标”字段，不是 camera shot、景别或构图字段。
+只有当前画面中某个已显示角色实际遭受攻击、被命中时，才填该受击角色的精确名字。
+开枪者开火、瞄准、威胁、枪声、未命中、画外受击、没有立绘的对象，一律填空串。
+不要把 `medium_close`、`close`、`relation`、`wide`、`group` 或任何景别词写进 `shot`；
+景别只在 G1 计划的 `shot_group.framing` 中表达，G2 执行用完整的 `visible_characters`、
+`positions`、`shot_transition`、`fx=特写` 等协议字段落地。宁可省略受击字段，绝不能把镜头语言误写成受击目标。
 """
 
-WAIT_POLICY = """# 独立无台词反应与动作拍
+WAIT_POLICY = """# 独立无对话框反应与动作拍
 
 普通对白行没有 wait 字段，不要在普通对白前生成 `#wait`，也不要用它替代气泡、动作或镜头的默认节奏。
-只有本轮输出 Schema 包含 beats 时，才可为确实需要留白的独立无台词反应输出 beat；用 `wait_ms` 控制停顿。
+只有本轮输出 Schema 包含 beats 时，才可为确实需要留白的独立无对话框反应输出 beat；用 `wait_ms` 控制展示时长。
+这里的“无对话框”表示这一拍没有任何角色真正发言，因此全体可见人物保持高光；它仍可同时包含
+face / emo / act / se / 镜头。同步反应可写在同一 beat 的 reactions，或写在对白/旁白行的行级 reactions；
+只有必须在下一句前单独被看见时才拆成 beat，不把反应挂在无立绘说话人身上。
 例如角色被荒唐发言噎住时，可在对应 anchor 后生成空文本的 Dot / 沉默反应并等待 2500ms。
 旁白明确写出某个有立绘角色僵住、受惊、点头、发抖或爆发，而旁白本身不能承载角色 act 时，
 可在该旁白 anchor 前后生成该角色的无文字动作 beat，reason=physical_reaction；动作已有 AA 默认节奏时 wait_ms=0。
 不要把普通走路、递东西、抬手等 AA 动作库无法准确表达的行为硬套成 jump / stiff / greeting。
-不要为角色登场渐变生成 beat 或 wait_ms，也不要把每个气泡、动作已有的默认节奏再重复写成显式等待。
+不要只为普通反打生成空 beat；普通切镜只改变 visible_characters，不附带入退场动画。
+纯 AI 模式若要表达“画外线索→有动机的再次显现/真实入场→被看见→他人反应→重新构图”的完整行动链，可以用多个 beat，
+但不要给每个已有默认节奏的动作重复添加显式等待。
 """
 
 BACKGROUND_REQUEST = """# 背景选择与待生成背景 bg_request
 
 背景只在地点、时段或叙事空间真实改变时切换；不要用错误的已有背景凑数。
+已知物理地点且资源表有对应背景时，必须优先选择该登记背景；`BG_Black` 只用于正文明确要求黑场、纯黑转场
+或没有可见空间的节点，不能因为不确定就把已知地点拍成黑屏。
 预审场景规划若标明 inherited / inherits_from，表示沿用上一场景背景：不要再次输出 bg，
 也不要因为段落分块、角色进出或镜头变化重复输出同一个背景。每个真实新场景只在首个合适锚点输出一次 bg；
 place 也只在该场景首次建立地点时输出一次。
@@ -74,25 +93,205 @@ PACING = """# 停顿：先搞清楚 AA 会自动做什么
 - 不要试图用气泡或动作冒充纯停顿。
 """
 
+PERFORMANCE_STATE_COMPARISON = """# 逐节点演出状态比较：先比较，再决定保持还是变化
+
+每个 TARGET 都必须先读取最近一个真正执行的演出节点，再决定本行的 face、emo、act、fx 和镜头。
+最近节点可以是对白或无对白 beat，包括 before/after 的无对白 beat；跨分块时以 CURRENT_DIRECTION_STATE.last_performance_node
+为准，同一分块内以按时间顺序最近的 PAST_CONTEXT/TARGET 或 beat 为准。它记录的是上一节点实际落地的表演状态，
+不是上一句台词的说话人。
+
+按下面的顺序做一次很小的比较：
+1. 找出当前台词触发的刺激、承受者、语气和情绪阶段；
+2. 对当前说话者比较“上一节点留下的 face/emo/act/fx、镜头焦点、关系状态”与本拍需要表达的状态；
+3. 如果态度、潜台词、注意对象、强度或反应阶段发生了可见变化，至少选择一个语义匹配的可见承载：新的 face、
+   瞬时 emo、身体 act、镜头/景别或一个有目的的独立无对白 beat。不能只在心里改变阶段然后让最终画面完全不变；
+4. 如果仍是同一个短反应拍，可以保持已有状态，但这是有语义依据的 hold，不是因为“为了安全所以留空”。若连续多次
+   hold，必须确认语气、潜台词和强度仍然相同；一旦出现反问、否认、确认、汇报落点、情绪释放或明显标点转折，重新评估；
+5. 无对白 beat 的表演也会改变下一句的起点。下一句要与这个 beat 的最终状态比较，而不是跳回更早的对白状态。
+
+这里没有“每句换脸”“每几句一个气泡”或“达到官方节点数”的配额。目标是避免无依据的机械轮换，也避免因为过度克制
+把本应有的表情、气泡、动作全部归零。官方的表演频率只作为生成后的质量参照：有语义机会就让变化可见，没有变化就保持。
+"""
+
 # ---------------------------------------------------------------- 镜头
 CAMERA = """# 镜头：先决定观众此刻应该看谁
 
 背景不变、画面里的人变 —— 这就是镜头切换，也是多人戏能不能看的关键。
 在 AA 里，一行的立绘名单换了，上一行有、这一行没有的人会自动消失（编译器发 #N;hide），
 所以"切镜头"就是换名单，不需要进出场动画。
+硬切是官方多人演出的常用基础语法，不是仅在极端情况下使用的特例；这只说明可以主动切，不是次数配额。
+新刺激、焦点承接、爆点、另一互动小组或单人余波出现时，可以直接 cut；同一问答或同一笑点仍在推进时省略 shot_transition 保持构图，
+确需镜内重排才使用 reframe。
+
+判断边界要看“互动轴”而不是名单是否完全相同：同一场争论里从 A 单人扩成 A+B、再让 C 加入共同反应，
+仍可属于一个连续镜头簇；不需要重新安排位置就保持，需要腾位或收缩构图才 reframe。反过来，即使某个角色
+在前后两镜都出现，只要他的对话对象、承受情绪的人或叙事焦点已经换成另一组，就要把整幅画面作为 cut
+重建。完整硬切允许保留者继续占据同一侧，再把另一侧换成新的对话对象；这属于新的镜头构图，不是镜内图层闪现。
+硬切的依据是完整拍摄小组和戏剧拍点改变，不是人数增减或“保留者是否换槽位”本身。
 
 默认用单人或双人表达清楚关系，不因“场上有这些人”就把所有人同时摆出来。
 镜头名单必须服务当前 scene_function：建立空间时可短暂展示群体；稳定对话锁住关系双方；
 听者反应切到 listener；爆点或决定切成单人；动作来自画外时允许 offscreen_space 空镜；
 余波再回到承受后果的人。群像镜头要有共同动作或共同反应作为理由，不能只是凑人数。
 
-切镜头前先问：信息是谁给出的、情绪是谁承受的、下一拍观众要等待谁的回应？
-说话者不自动等于情绪焦点，但官方有立绘对白几乎始终让说话者留在画面中：台词力量落在
-听者身上时，优先使用“说话者+听者”的关系镜头，把听者作为 focus_character；不要把正常
-有立绘对白拍成画外音。只有演员表明确标为无立绘/通讯，或原文明确来自画外时才让说话者不入镜。
+观察者是独立的镜头角色：已有 A/B 关系镜头继续推进时，C 的省略号、旁观反应或短句不自动触发
+“A/B 消失、C 居中”或槽位重排。若 C 只是看见、听见或在画外补充，优先保持 A/B 的互动组和物理槽位，
+再用 listener 单人、空槽 reveal 或关系镜头中的自然扩组表达 C 的承受；只有 C 成为新的互动轴、结果承受者
+或关系压力焦点，才切到包含 C 的新构图。说话人、可见人物、承受刺激者必须分别判断，不能把三者当成同一字段。
 
-站位和进出场由程序自动排布，你**不需要**管。你只在台词明确写了移动
-（走过去、后退、凑近、转身离开）时才填走位。
+切镜头前先问：信息是谁给出的、情绪是谁承受的、下一拍观众要等待谁的回应？
+说话者不自动等于情绪焦点，也不必与受话者同框。按当前拍点选择说话者单人、听者单人反应、或
+说话者与听者的关系镜头；问者单人说完后硬切到答者单人，是正常的正反打。台词力量真正落在
+听者身上时，也可以明确让说话者画外、镜头停在听者身上承接反应。只有在镜头决定已经明确时才
+写 visible_characters；后端不会自动把说话者塞回画面。
+
+每个 TARGET 按这个顺序思考，输出时不要解释思考过程：
+1. 找出本拍的新刺激、动作结果或尚未完成的反应链；
+2. 读取 CURRENT_DIRECTION_STATE 中的 shot_group 和 reaction_chain，判断仍是同一互动组，还是组内扩缩、焦点承接或换组；
+3. 先写 shot_operation（若确有变化），再判断镜头名单/站位；
+4. 只有完整拍摄小组、焦点域或戏剧功能改变时才写 cut，组内重排才写 reframe，其余省略；
+5. 最后才选择 face、emo、act、fx、beat 与音效。不要让“谁在说话”单独触发 cut。
+
+三人场景可以先建立稳定构图，但它不是逐句反打命令，也不是把下一位说话者自动塞进画面。先判断当前
+互动轴是否仍然相同：同一刺激下确实需要同时看见的角色才扩成三人；如果承受者、对话对象或戏剧功能
+换了，就允许用新的单人/双人组完整硬切。后端只检查三人上限与几何安全，不会因为“连续性”
+自动合并成三人或替你决定保留谁。下一位说话者不在当前镜头时，只有正文支持共同反应、真实走入或同一
+互动轴的镜内重排，才加入/扩组；否则输出新的拍摄小组。二人或三人同框必须通过后端的立绘宽度与防
+重叠校验。从 [A,B] 换成 [A,C] 可以是完整硬切：A 可以在新镜头继续同一侧，B 也不需要为切镜补一段物理退场。
+此时要声明完整 shot_operation=switch_group、cut 和新镜头的完整 visible_characters / positions（位置可以与上一镜相同）；
+不要把它误写成 hold、reframe 或 move。只有连续镜头里的真实走入才用 enter/reframe。
+单人镜头应真正只留情绪或信息的承载者；没有共同反应、关系压力或即将接话理由的沉默角色不要继续挂在镜头里。
+从多人镜头切到单人 close/特写属于新的完整镜头，必须使用 switch_group + cut；不能用 hold、reframe、
+shrink_group 或 move 模拟软推近。完整换搭档也必须 cut；硬切后的保留者可以继续同侧，但不能把这种换组误写为
+连续镜头里的 hold、reframe 或 move。
+
+被追问后的检查结果、调查结果、计划说明或正式确认，也要先判断它是不是一个独立的信息落点。若这一句第一次
+完整交代新事实、稳定住上一拍的担忧，或观众应先读清汇报者的态度，可以先完整 hard cut 到汇报者单人，等询问者
+确认、追问或情绪落点时再切回关系镜头；不要因为问题来自某人，就默认让提问者全程留在画面。这不是固定模板：
+若只是上一句的补充，或关系压力本身必须同时可见，保持双人镜头更合适。汇报也不等于静止念白；在确有语气承接且
+资源合法时，可选择平稳的回应/确认式 face、一个恰当的气泡，或轻微的确认动作来让观众读出“正在回答”。这是有
+台词的表演，不能额外添加 Wait；没有可读变化理由时也可以保持克制。
+
+任何单个镜头最多只允许三名可见角色，三人是硬上限而不是默认人数；通常仍优先一人或两人的清晰构图。
+绝对不要输出四人或更多人的 visible_characters / positions，也不要在 beat 中临时塞入第四人。第四位角色
+需要说话或反应时，先切到新的稳定小组，或明确让一人退出当前构图后再加入；不能把全体演员留在同一镜。
+
+数字槽位和进出场的职责由本轮“人物站位模式”决定。relation_distance 只服务当前镜头中恰好两名
+可见角色的双人构图；单人、三人及以上镜头一律不判断关系距离，也不判断画外人物与画面内人物的
+亲疏。普通双人对话默认 normal；后端以官方常见的 1/5 两侧构图作为建立镜头软先验，再结合立绘宽度、
+朝向和连续性调整。2/4 是更紧的可选构图，不是普通双人的固定默认。只有文本明确强调刻意隔开、对峙或强烈隔阂
+时才用 distant，不能把一般的不熟、客气或轻微尴尬拍成极端远距。只有台词明确写了移动（走过去、
+后退、凑近、转身离开）时才填走位；不要为了控制构图而猜数字位置。人物与镜头之间的远近不属于
+relation_distance，也不靠横向槽位表达：只有关键反应、爆点或需要观众看清细节时才用 fx=特写表示
+镜头推近；普通对白保持常规景别，不能为了“更有演出感”频繁特写。
+"""
+
+STAGING_GRAMMAR = """# 显现、入退场、过渡与连续事件链
+
+这七件事语义不同，不能混用：
+
+- 普通切镜：人物仍在当前叙事空间，只是暂时不在这一镜。普通切镜只改变 visible_characters，不使用入退场动画；
+  编译器只为场景内第一次出现提供默认渐入，不会因为离镜时间长就擅自再次渐入。
+- 镜头显现：原本就在房间里的人后来被镜头揭示，不属于真实入场，使用 cut/reframe 重建可见构图，
+  不能复用 enter 污染人物是否仍在房间里的状态。
+- 立绘显现 reveal：原本就在当前空间、但尚未出现在这个连续镜头里的人，可以在第一次正式接话、第一次与
+  镜中人物建立联系或从画外加入当前行动时显现。普通情况用 fade；只有正文明确从画面左/右侧运动加入时才用
+  left/right。它可附着在该角色开口的台词节点上。普通换说话人、刚离镜又返回或整镜硬切不用 reveal。
+- 立绘离镜 conceal：人物只从当前连续镜头淡出或横向出画、仍留在当前叙事空间时使用。普通情况用 fade；
+  只有明确的横向动作才用 left/right。它不等于真实离场，后续仍可用 reveal 或新镜头重新拍到该人物。
+- 真实入场：人物确实从当前叙事空间外进入。目标槽位在左侧 1/2 时从 left 进入，在右侧 4/5 时从 right
+  进入；中间槽位 3 才根据叙事来源选择。方向未知、正面进入或渐入才用 auto。
+- 有动机的退场：人物确实离开当前空间时才用 exit；只离开当前构图属于切镜，不是退场。说“我要走了”只是意图；
+  先完成临别停顿、告别或他人回应，在实际迈步的拍点输出 exit，随后用留下者或空镜承接余波。
+- 背景过渡：trans 只随 bg 的真实地点、时间、黑场或叙事层级变化发生。普通切镜、人物显现和横向移动都不用 trans。
+
+“让立绘动起来”指的是在正文有依据的拍点使用真实入退场、镜内位移、动作和反应，不是把普通切镜伪装成
+反复进场，也不是为了运动量给每句对白附加移动。
+
+复杂场面按事件因果组织，不按对白逐行贴标签。下面是需要检查的问题，不是固定事件链：
+
+1. 画外线索：先用空镜或当前观察者，加一次有来源的声音；不要提前把来源角色摆进画面。
+2. 登场揭示：切到被发现的人物或小组；原本已在空间中就用 cut/reframe，确实从场外进入才使用 enter。
+3. 群体反应：多人是否真的同时承受同一刺激？若反应可在对白节点读清，不额外拆静默拍；需要共同停住时才同框同步。
+4. 物件操作：正文实际提供了接触、反馈、验证、失败或成功中的哪些可见里程碑？AA 没有精细手部动画，
+   不要用 stiff/shake 冒充操作，也不要补正文没有的中间步骤。只有脱离对话框才能读清的新结果才单独成拍。
+5. 情绪邀请或决定：正文是否真的存在可读犹豫、软化或答复后的余波？没有停顿证据时直接在对白中完成关系变化。
+6. 蒙太奇与余波：只有正文存在时间跳跃或持续活动，且开始与结果之间需要声画桥接时才使用；不得因“大家开始活动”
+   自动补固定音效序列或空镜。只有 Schema 提供 beats 时才生成独立节点。
+
+上述范式来自离线官方演出研究的抽象结果；不要复述、模仿或输出任何官方台词。
+"""
+
+OFFICIAL_EVENT_PATTERNS = """# 经人工复核的通用反应拍语法（软先验）
+
+下面是从原始命令、视频观察和多段人工标注中抽象出的可选语法，不是官方节点答案，也不是质量门。
+早期自动文本解析可能把黑屏、渐变、控制槽迁移或画面重建拆错；任何与当前正文和真实视频证据冲突的
+抽象规则都必须让位。不要为了满足这些范式添加静默拍、固定镜头或入退场；先由因果决定是否需要它们。
+
+把一段戏当作连续的反应拍，而不是“每句台词换一次人”。下面的顺序是可选的电影语法，
+只在正文有证据时使用，不是固定模板，也不设置固定数量或字符预算：
+
+- **共同刺激 → 群体反应 → 焦点承接**：同一刺激确实同时影响两三人、而且对白不能独立展示共同停顿时，
+  可以用一个无对话框 beat 让小组同步反应，再切到最重要的单人或关系镜头；主要角色使用 who/face/emo/act，
+  其他同步反应者使用 reactions。反应已由当前对白读清时不额外拆拍，也不要把同一个气泡机械复制给全员。
+- **对话簇保持**：同一话题的来回先保持当前互动小组；说话者改变不等于替换镜头中的一个人。
+  若关注对象改变，整体重组为新的小组或单人镜头，不能让一个人坐标完全不动、只瞬间换掉另一人。
+- **交叠双人组先区分持镜还是硬切**：禁止的是持镜原位换人。`[A,B] → [A,C]` 若仍是假定同一连续镜头，不能只换 B 的图层；
+  应先收成 A 单人、让 A 腾位，或让 C 从对应侧 reveal，C 真正从场外进入时才用 enter。若对话对象、焦点或拍点
+  已改变，则可直接用有动机的 `anchor_match_cut` / `camera_cut` 完整重建；硬切中 A 可以仍在同一侧，不必为了过质量门假造 move。
+- **组内扩缩不是自动硬切**：同一互动轴内由单人扩成双人/三人，或由三人收回双人，先判断它是否只是
+  连续镜头中的加入、让位或收束；是则保持或 reframe。只有完整拍摄小组、焦点承受者或戏剧拍点换了，才 cut。
+- **移动必须真正播放**：`@move` 表示当前镜头内可见的位移，必须先让带 move 的节点落地，再进入后续镜头；
+  不要在 move 后、任何可见节点出现前立刻 cut/reframe。那会覆盖移动，成片仍是人物瞬间换位。
+- **镜头声明只写变化**：同一组人物、同一景别和同一焦点继续保持时，不要重复输出 `camera_hold`；只有构图建立、重组或明确切镜时声明新镜头。
+- **静默微节拍**：发现、犹豫、卡壳、确认或物件操作可以拆成“换脸/原地动作 → 短暂等待 → 下一反应”。
+  只有独立 beat 才表达无文字停顿；普通对白不额外写 wait，已有气泡或动作的默认停顿不要重复添加。
+- **高潮与余波**：爆点、关键推断或邀请接受时，单人特写、气泡、动作或字号最多承担一个明确重点；
+  重点落地后切回听者、双人关系镜头或小群像，不能让放大和重效果持续霸占后续对白。
+- **连续强句比较峰值**：同一角色连续强句时比较每句的叙事作用，把重点放在真正改变信息、关系或情绪阶段的一句；
+  它可能在前句、后句，也可能整组都不需要重效果。不要仅按句子顺序固定后置峰值。
+- **集中线门槛**：FocusLine 只属于单人居中的明确爆发、揭晓或决定，不得用于安静询问、礼貌回应、普通省略号或轻微困惑。
+- **镜头切换与入退场**：切到另一组人物是剪辑，不自动产生入退场；连续镜头中人物加入/离开画面优先用
+  reveal/conceal 的常规淡入淡出，只有真实进入/离开空间才使用 enter/exit。
+  淡入淡出的中间黑帧是过渡过程，不是可调用的“黑色剪影”素材。
+- **显现证据门槛**：画面里出现一个之前离镜的人，只能说明“这一镜看见了他”；除非正文或连续画面明确表现
+  从场外进入、走入或正式加入行动，否则按镜头显现/构图加入处理，不擅自填 enter。普通 fade-in 观察结果也不能自动升级为真实入场。
+- **频繁切镜的修正**：这条只阻止“每换说话者就机械反打”，不降低硬切本身的使用频率。若连续几句仍属于
+  同一互动，优先保持当前小组；一旦出现新刺激、焦点转移、爆点、揭晓、另一互动小组或单人余波，就主动
+  cut 到完整新构图。每个镜头仍最多三名可见角色。
+
+无对话框 beat 必须说明主体和 reason（group_reaction / listener_reaction / decision_pause / object_operation 等），
+并服务于下一拍；没有明确画面目的时不要生成空 beat。
+"""
+
+SHOT_GROUP_PROTOCOL = """# 镜头组与反应链的跨分块状态
+
+先区分三个不能混为一谈的空间层：
+- scene_presence：人物是否仍在这个物理场景；普通切镜不会让人物离场。
+- shot_group：摄影机当前拍摄的完整人物组与构图；cut 会整幅重建，因此允许新镜保留一侧锚点并替换另一侧关系对象；
+  未发生 cut 的连续镜头才禁止把这种替换伪装成图层更新。
+- interaction_axis：当前事件中谁向谁行动、谁承受刺激；同一轴持续时优先保持或组内 reframe，换轴才重建镜头。
+
+必须区分“硬切后的静态落位”和“观众看得见的镜内位移”：cut + positions 只定义新镜头第一帧的完整构图，
+不会播放人物走过去的过程。若画面意图是“已有角色先让出位置，另一人再加入”，保持同一互动轴并使用
+reframe/positions 让原角色真实移动，再用 reveal 让新人从对应侧加入；不能用 cut 把这一过程吞掉。反过来，
+若确实要硬切，新镜头必须有可读的关系、焦点或戏剧拍点变化；人物组变化本身可以构成这种重构，保留者不必机械换槽位。
+
+SCENE_EVENT_PLAN.active_events[].shot_groups 若提供 anchor_i / hold_until_i，它表示第一阶段给出的“首选连续镜头范围”，
+不是官方答案，也不是第二阶段不可推翻的硬边界。从 anchor_i 开始通常保持该 members 构图；anchor_i=0 表示区间在上一分块已经开始，
+本块从第一句继续保持。第二阶段仍必须重新根据当前台词、关系轴、结果承受者、峰值和可见状态判断：如果正文明确支持扩组、收组、
+完整硬切、爆点插入或换轴，可以在对应节点用完整 camera_cut + 新构图覆盖首选范围，并在审计中记录为对计划的显式偏离。
+没有新证据时，区间内部不要因 speaker 改变而输出 cut、重新声明同一镜头或另选 visible_characters；不能为了迎合 hold_until 挂住
+已经失效的关系镜头，也不能把连续镜头里的原位换人伪装成普通 hold/reframe。
+
+CURRENT_DIRECTION_STATE 可能带有两个很小的状态对象：
+- shot_group：当前互动镜头组的 group_id、members、anchor_stimulus、interaction_topic、focus_owner、spatial_mode、status；
+  members 是“这一组真正正在互动的人”，不是房间里所有在场角色。普通切镜只暂时离开画面，不要把角色误记为离场。
+- reaction_chain：当前刺激的 stimulus_id、phase（cue / group_reaction / focus_handoff / action / result / aftershock / resolved）、
+  participants、primary_responder、resolved。链未 resolved 时，优先用 hold/reframe 和无对白反应承接余波，除非正文明确进入另一互动轴。
+
+只有状态发生变化时才在 state_delta 提交对应对象；不要每行重复整个对象。group_id 可以沿用已有值，确实换组时再建立新的简短标识。
+这些状态用于跨场景块保持镜头语言，不是长期剧情记忆，也不需要写进最终台词。
 """
 
 # ---------------------------------------------------------------- 状态化导演模型
@@ -103,6 +302,51 @@ STORY_PRIORITIES = {
     "bond": """当前剧情类型：bond。官方羁绊剧情以持续单人镜头为主，镜头保持时间明显长于主线和活动；优先表现关系距离、没说出口的潜台词和听者反应，少用群像与重效果。""",
 }
 
+SCENE_MODE_ACTIVATION = """# 两阶段演出模式选择
+
+先完成“这个物理场景可以用哪些戏法”，再写任何 face、镜头、动作或 beat。模式不是逐行重新猜的标签：
+
+1. 用户指定 main / event / bond 时，它是预审缺失或 scene_type=other 时的全局默认。预审为物理场景给出的 active_modes
+   优先；它可同时包含 event、bond 等多个相关模式，第二阶段会一次携带这些模式，由你按当前拍点、台词和连续镜头自行选择。
+2. 写前预审只按物理场景切分：地点、时间或叙事空间变化才切场。剧情重心、人物进出、普通反打、单句情绪和短暂动作不会
+   强行切场，更不能为了换策略虚构转场。
+3. active_modes 之外的策略不可使用；场景未给有效模式且没有全局默认时，使用中性电影语法，不假装知道它属于哪一种；不得为了套用活动群像或羁绊双人规则
+   而改写画面。
+
+DIRECTOR_CONTEXT.scene_type 是本场主类型，DIRECTOR_CONTEXT.active_modes 是本轮已完成的第一阶段结论。当前请求只会额外携带
+active_modes 对应的 ACTIVE_MODE_POLICY；绝不把无关模式展开。若当前拍点需要在两个已允许模式间转换，可在 direction.scene_type
+写出其中之一，但不能因一句感叹或一位新 speaker 使用未允许模式。
+"""
+
+
+def scene_mode_policy(scene_type="other", active_modes=None):
+    """Return exactly the preflight-approved directing strategies for one scene."""
+    normalized = str(scene_type or "other").strip().lower()
+    policies = {
+        "main": """ACTIVE_MODE_POLICY=main
+本场按主线策略：优先因果、威胁、信息揭示与行动后果；强效果只留给不可逆节点，空镜可承接转场或压力。""",
+        "event": """ACTIVE_MODE_POLICY=event
+本场按活动策略：优先发现、接力反应、喜剧升级、物件操作与分组余波；多人同步必须有共同刺激，不能把全员长期塞进同一镜。""",
+        "bond": """ACTIVE_MODE_POLICY=bond
+本场按羁绊策略：优先一人或两人的停顿、听者反应、关系距离和没有说出口的变化；保持镜头比频繁切换更重要。""",
+    }
+    selected = []
+    for value in active_modes or []:
+        mode = str(value or "").strip().lower()
+        if mode in policies and mode not in selected:
+            selected.append(mode)
+    if not selected and normalized in policies:
+        selected.append(normalized)
+    if not selected:
+        return "ACTIVE_MODE_POLICY=neutral\n本场分类尚不确定：使用中性电影语法，只依据正文和当前场景状态，不套用群像或亲密关系模板。"
+    if len(selected) == 1:
+        return policies[selected[0]]
+    return (
+        "ACTIVE_MODE_POLICIES=" + ",".join(selected) + "\n"
+        "本场允许使用下列策略；按当前拍点选择一个主导策略，不要把多种策略机械叠加在同一句。\n"
+        + "\n\n".join(policies[mode] for mode in selected)
+    )
+
 DIRECTOR_CONTRACT = """# 状态化导演合同
 
 剧情模式只使用 main / event / bond；本轮模式由“当前剧情类型”给出。每行先判断场景功能和情绪阶段，
@@ -111,10 +355,11 @@ DIRECTOR_CONTRACT = """# 状态化导演合同
 
 当 Schema 提供 direction 或紧凑字段 d 时，填写内部导演状态：
 
-注意字段层级：face / emo / act / fx / se / bg / bg_request / place / shake / bgfx / trans / move / shot
-都是行级演出字段，必须与 i 同级；绝对不要放进 d。d 只保存下面列出的内部导演状态。
-反过来，scene_type / scene_function / emotion_phase / subtext / relation_distance / focus_kind /
-focus_character / reaction_target / visible_characters / continuity / reason 必须放在 d 内，不能与 i 平级。
+注意字段层级：face / emo / act / fx / se / bg / bg_request / place / shake / bgfx / trans / move / shot / reveal / reactions
+都是行级演出字段，必须与 i 同级；绝对不要放进 d。`reactions` 每项为 `{who, face, emo, act}`，只给当前镜头中
+其他真实有立绘角色；旁白反应写这里，必须先于下一句落地的反应才改用独立 beat。
+反过来，scene_type / scene_function / emotion_phase / subtext / relation_distance / shot_transition / focus_kind /
+focus_character / reaction_target / visible_characters / positions / continuity / reason 必须放在 d 内，不能与 i 平级。
 
 - scene_type 只使用：main / event / bond / other。
 - scene_function 只使用：establishing / entrance / exposition / dialogue / comedy_escalation / conflict / emotional_turn / action / closing。
@@ -122,16 +367,36 @@ focus_character / reaction_target / visible_characters / continuity / reason 必
 - focus_kind：speaker / listener / group / offscreen_space。speaker 看发出行动的人；listener 看承受信息的人；
   group 只看同步反应；offscreen_space 用于声音、威胁或动作来自画外而空间本身更重要的拍点。
 - focus_character 与 reaction_target 必须是本章演员表里的精确名字；无法验证就留空。
-- relation_distance 只使用：distant / normal / approaching / intimate / remote。它描述关系变化，不是物理坐标；
-  distant 是同场但疏离，remote 是通过通讯、回忆或其他不共处空间建立联系。
+- relation_distance 只使用：distant / normal / approaching / intimate / remote。仅当 visible_characters 恰好
+  包含两名可见角色时才可输出，并且只能描述这两人；画外人物、单人镜头、三人及以上镜头必须省略。
+  normal 是双人默认关系语义，建立镜头优先考虑官方常见的 1/5 两侧构图；2/4 用于画面确实需要更紧、
+  且立绘几何安全的关系构图。distant 是同场但文本明确要求刻意拉开或强对峙，门槛
+  很高；remote 是通讯、回忆或其他不共处空间。只在两人关系距离或调度含义确实改变时输出，不逐行重复。
+- focus_character 与 reaction_target 一起说明当前画面中“哪两人”的距离；两者若出现必须都属于
+  visible_characters。关系对象不明确时宁可省略 relation_distance，不要分析画外人物或虚构关系。
+- shot_transition 只使用 cut / reframe：同一连续镜头内重排是 reframe；切到另一完整拍摄小组是 cut。
+  字段缺失就是保持现有构图，不输出 hold。cut/reframe 必须同时给出完整 visible_characters 和完整 positions。
+- shot_operation 先于 shot_transition 判断，只使用：continue_group / expand_group / shrink_group /
+  replace_center_subject / switch_group / impact_insert。它描述“这一拍相对于当前互动镜头组发生了什么”，
+  不是角色名或固定镜头次数：同组继续用 continue_group；同一刺激下接入/让位用 expand_group 或 shrink_group；
+  只是把承受者换到中心用 replace_center_subject；完整互动轴或拍摄小组改变用 switch_group；关键爆点、揭晓、
+  决定或动作结果需要插入独立重点镜头才用 impact_insert。没有语义变化就省略。先填这个语义操作，最后才决定
+  是否需要 cut/reframe；不要先写 cut 再倒推理由。
 - visible_characters 只列这一镜确实应该出现的人；明确需要持续空镜时输出空数组，字段没写则表示不改变既有画面意图。
-  有立绘角色正常开口时必须把说话者列入画面；若焦点在听者，使用说话者与听者同框并把 focus_character 指向听者。
+  有立绘角色正常开口的对白节点可以给说话者单人、听者单人反应，或说话者与听者的关系镜头；镜头由
+  事件焦点决定，不因“谁在说话”被后端强行改成同框。听者的独立反应可落在对白镜头或可见的无对白 beat。
+- positions 是人物名到 AA 槽位 1..5 的映射，只在纯 AI 模式建立或重组构图时使用；同一事件槽位不可重复，
+  必须服从本轮提供的立绘宽度/最小间距。现 AI 和稳定规则模式省略该字段。
+- 行级 reveal 只使用空串 / left / right / fade，作用于本行说话者。它表示仍在场角色的立绘进入当前连续
+  镜头，不表示角色走进房间；不能与 cut 同行。无需强调方向时用 fade，普通持镜留空。
 - continuity 对 face / emo / act / fx / bgfx 分层使用 start / hold / escalate / end；none 表示本行不发命令。
   start 开始一个有文本证据的状态，hold 保持而不机械换素材，escalate 只在强度确实升级时换更强层，
   end 在状态已被回应、打断、转移或场景退出时收束。不要把每行都当作全新状态。
 - direction.reason 只使用：new_stimulus / relation_shift / emotional_shift / listener_reaction / group_sync / comedy_escalation / action_impact / scene_transition / continuity_hold / none。
-- beat.reason 只使用：await_response / relationship_turn / listener_reaction / comedy_hold / decision_pause / physical_reaction。
+- beat.reason 只使用：await_response / relationship_turn / listener_reaction / comedy_hold / decision_pause / physical_reaction / offscreen_cue / entrance_reveal / group_reaction / object_operation / montage / exit_aftershock。
   两种 reason 都只写短枚举值；不要写分析过程、长解释或官方剧情原句。
+- 纯 AI 模式的 beat 还可携带 visible_characters、positions、shot_transition、reactions、reveal、conceal、enter、exit、fx、se、bg、place、trans、bgfx、shake。
+  同一 anchor、同一角色可以按顺序输出多个内容不同的 beat，用于“入场→移动→反应→停顿”等多阶段演出；beat 的可见位移用 positions 表达，后端会编译为 move。整镜 cut 不能和 reveal / conceal / enter / exit 放在同一个 beat，必须拆成相邻 beat，或只选择符合该拍语义的一种空间操作。
 
 ## 九种场景功能：触发、序列、禁用与退出
 
@@ -208,14 +473,36 @@ DIMENSIONS = """# 各个维度怎么用
 先判断这一句的情绪阶段、身体反应和镜头重点，再联合选择 face / emo / act / move / fx / bgfx。
 先读完整语义和前后反应链：结巴、掩饰、反讽等语气证据优先于句末标点，不能见到感叹号就判成愤怒。
 face 是持续在脸上的情绪，emo 是头顶瞬时心理反应，act 是身体在原地的反应，move 才改变人物位置，
-fx / bgfx 是更重的镜头强调。一个强层通常已经足够；只有真正的情绪峰值才组合多个相互一致的层。
-不要为了让画面热闹而把气泡、动作、走位和重效果全部堆在同一句。
+fx / bgfx 是更重的镜头强调。各层可以组合，但要先确定主层和反应顺序；官方式的爆点经常是换脸、气泡、身体动作和镜头强调的联动。
+不要为了让画面热闹而无依据地把气泡、动作、走位和重效果全部堆在同一句，也不要为了“控制密度”删掉有明确身体反应证据的动作。
 
 把整场戏组织成连续的“反应拍”，而不是逐字段独立填空：
 - face 是最常用的细表演层，负责语气、态度和潜台词的逐拍推进；
+- face 留空的运行时含义只是“继承上一张脸”；角色第一次出现时还可能因此落到 00。留空绝不表示后端会替你
+  自动选择合适表情。只要本拍相对上一拍发生了可见的态度、潜台词、注意对象、强度或反应阶段变化，就必须
+  从本行 FACE_SHORTLIST_BY_TARGET 中明确选择一个语义合适的 candidate.choice；candidate.face_id 是真实物理表情，
+  candidate.semantic 是完整含义。不要把需要判断的工作藏进空串。
+- 角色从听者重新变成说话者时，必须重新判断一次 face；有多个语义合适候选时，优先选择一个与当前持有表情不同
+  的表情，让开口状态与此前沉默状态形成可见区别。相邻的同一角色连续发言不机械换脸；同一句拆开的连续气口，
+  或原有表情仍精准承接同一细分反应拍时，可以继续保持。语义正确始终优先于制造变化。
+- 无对白 beat 不是“重新生成一张默认立绘”：它必须继承上一拍的 face，除非 beat 明确写出新的反应阶段。
+  不要用 face=00 作为占位符；空 beat 至少要有一个可见目的（承接表情、气泡、动作、镜头/构图或有依据的等待）。
+  如果同一角色连续两句都在强烈表达，通常把单人居中特写、动作和重气泡留给后一句的峰值；前一句先建立或升级状态，
+  不要两句都在双人镜头里放大，也不要前一句放大后下一句无理由退回默认脸。
+- 不得把角色扮演式的“报告、指令、任务”等措辞当成人格切换证据。黑化、侵蚀、红眼、无机质人格等
+  特殊身份表情必须有明确剧情事实与对应角色资源，日常爱丽丝不能借用凯伊人格状态。
 - emo / act 是较少的瞬时强调，同脸时可以承接一个明确动作或心理反应，但不能拿来掩盖长期不换脸；
 - 镜头通常覆盖一组问答、一次关系变化或一个笑点，不跟着每句 speaker 机械来回切；
-- fx / bgfx / shake 只落在真正峰值，音效只跟可听见的事件，背景只跟真实空间变化。
+- 具有明确爆发、强烈惊讶、宣告或情绪峰值的单人拍，必须用单人居中构图承载；旁边保留一个无关角色会削弱重点。
+  若需要保留听者，先在上一拍完成听者反应，再切回或重建单人峰值镜头。
+  个人高声宣告、找回关键物后的尖叫、连续强句中后一句的升级、以及一人完成关键态度转折，都是必须优先检查
+  solo_emphasis 的语义场合；这不是按关键词或感叹号触发。只有听者也在同一时刻承担关系变化或共同刺激时，
+  才保留 relationship_peak / group_reaction，不能因为上一镜已有两人就偷懒维持双人。
+- fx / bgfx 仍然只在镜头重点或爆点使用；stiff / shake / jump / hophop 则按人物当下的可见身体反应判断，不设固定次数、冷却或相邻禁用规则。
+  角色特写是持续状态，普通 @camera_cut 不会自动解除；峰值结束、准备回到双人/三人镜头或切换主体之前，必须先用
+  `@fx 角色 无` 明确释放。不能让上一拍的放大状态泄漏到后续关系镜头和结尾。
+  shake 不是越少越好，也不是见到气泡就必须删掉；只要反应链确实升级到慌乱、失控、挣扎或强烈受击，就可以保留。
+  音效只跟可听见的事件，背景只跟真实空间变化。
 每一拍至少要有一个清楚的画面重点，但不等于每句都要加多层指令；同一行通常由 face 或一个瞬时层承担主要变化。
 
 ## 表情 face —— 每次重判，形成连续表情拍
@@ -276,14 +563,21 @@ face 的证据门槛：只能选择资源表提供了语义、或已被项目明
 
 官方常把动作直接挂在有台词的同一节点上：台词本身就是身体反应的证据，不要求原文先写出“跳了一下”。
 不要按标点机械触发，也不要因为原文没写动作描写就全部留空。先判断人物是否真的产生了可见的外显反应：
-    greeting   短促向下点动；点头、致意、接受命令、认真确认、柔和肯定或正式自我介绍
+    greeting   短促向下点动；用于画面上确实成立的点头、致意、接受命令、认真应允或正式自我介绍
     falldownl / falldownr  向左 / 向右倒下，只在文本明确发生倒下时使用
-    stiff      小颤抖/僵动；卡壳、紧张、羞涩、被戳中、压住怒意、用力思考或克制痛苦
-    shake      大颤抖；强烈惊愕、慌乱、痛苦、恐惧或用力挣扎，角色 shake 不是背景物理抖动
-    jump       单次跳动；突然震惊、强烈反驳、突然自信、坚定宣告、发现突破或短促情绪跃升
-    hophop     连续蹦跳；持续而外显的兴奋或愤怒爆发，也可表现热情招呼、连珠炮抗议和得意讲述
-普通感叹号不能单独触发 jump；“！？”或双感叹号也必须同时有明确态度跃迁。短促爆点用 jump，持续外放的一整句用 hophop；
-克制的卡壳/羞涩用 stiff，已经升级到剧烈失控才用 shake。它们经常可以与贴合的 emo 同拍，而不是互相替代。
+    stiff      小颤抖/僵动；只在身体真的僵住、发颤或克制痛苦成为画面重点时使用
+    shake      大颤抖；只在明显失去身体控制的慌乱、痛苦、恐惧或用力挣扎时使用，角色 shake 不是背景物理抖动
+    jump       单次跳动；通常承载较轻、较短的情绪重音，也可用于轻快位移中的一次跳动，例如突然震惊、反驳或突然自信
+    hophop     连续多次跳动；比 jump 多跳一下或形成连跳，主要表现更重、更强烈的兴奋、怒气、抗议或宣告
+普通感叹号不能单独触发 jump；“！？”或双感叹号也必须同时有明确态度跃迁。较轻、较短的情绪重音可用一次 jump；
+情感更重、需要连续多次跳动的一整拍用 hophop。主动请缨、由衷庆祝并继续行动若形成这种更重的积极情感，
+可以考虑“闪亮 + hophop”，不要因为同样是跳动就一律降成普通 jump；
+普通疑问、短暂卡壳、尴尬、思考或群体“？！”不自动触发动作，但不能用这条当成硬限制；如果上下文显示人物
+确实僵住、发颤、失控、挣扎或被冲击，就照实使用 stiff / shake，即使上一拍已经有动作或气泡。
+同一刺激可以形成“换脸 → 气泡 → 身体反应”的连续升级链；动作应承担新的身体信息，而不是被后端按冷却规则抹掉。
+选择 act 时先用一句话描述观众实际会看到的身体运动，再核对该资源是否真的表达它。台词在语义上完成了确认、
+汇报或验证，不等于角色做了点头动作；尤其不要用 greeting 冒充操作物件、检查结果或普通肯定句。若动作库没有
+准确的操作动作，宁可让 face、镜头或有依据的声音承载结果，也不要套一个功能相近但身体语义错误的 act。
 心理活动本身不要配动作，真实走位不要拿 jump 或 shake 冒充。
 
 ## 立绘效果 fx —— 三种位标记，可以组合，全都很重
@@ -313,19 +607,66 @@ face 的证据门槛：只能选择资源表提供了语义、或已被项目明
 同一个连续动作只配一次，不要每句重复。
 情绪不是声音，不要给"她愣住了"配音效。
 
-## 过渡 trans —— 只在换背景那一行
-换地点或换时间时配。主流是"淡入淡出"（1000/1500/2000ms 三档占了绝大多数）。
+## 过渡 trans —— 只随真实背景层变化
+换地点、换时间、进入黑场或离开黑场时配。主流是"淡入淡出"（1000/1500/2000ms 三档占了绝大多数）。
 "白淡入淡出"用于回忆进出、时间跳跃。"交叉渐变"用于同一地点的时间流逝。
-不换背景就不要填。
+普通反打、同一房间内改变可见人物、立绘普通显现或角色走位都不是背景过渡，不要填 trans。
 
 ## 地点卡 place —— 一场戏开头一次
 显示地点名的小卡片。只在场景开头写一次，其余行留空。
 """
 
-# ---------------------------------------------------------------- 示范
-FEWSHOT = """# 自写示范（不来自官方剧情文本）
 
-下面这段演示“表情随反应阶段推进、瞬时层保持克制”的分层标注；真正输出还要同时维护 direction 中的
+def _layout_mode_policy(layout_mode):
+    mode = str(layout_mode or "ai").strip().lower()
+    if mode == "rules":
+        return """# 人物站位模式
+
+当前使用稳定规则模式。后端按单人 3、双人 1/5、三人 1/3/5 等稳定构图安排横向槽位，
+并执行立绘防重叠校验。你仍需判断镜头中的人物、焦点和听者反应，但省略 relation_distance，
+不要输出数字槽位，也不要为了站位改变可见人物名单。
+"""
+    if mode == "pure_ai":
+        return """# 人物站位模式
+
+当前使用纯 AI 演出模式。你负责联合决定镜头名单、具体槽位、立绘显现、人物入场、退场、镜内位移和无对话框反应链；
+后端只校验演员身份、资源白名单、槽位范围、槽位唯一性、立绘几何防重叠及用户手写指令优先级，不会替你
+重写镜头、自动换脸或套用固定三人分组。
+
+槽位首先必须通过几何安全：没有明确的关系距离或镜内位移依据时，单人用 3、双人优先 1/5、三人用 1/3/5
+作为安全基线；不要提交 2/3/4 这类相邻三人槽位。只有当前资源给出的立绘几何约束允许且剧情确实需要靠近时，
+才使用 2/4 或更紧的组合。这是官方构图软先验与防重叠边界，不是镜头次数或审美配额。
+
+把一段演出理解为有目的的事件序列，而不是逐句标签：建立空间后保持关系镜头。镜头继续时省略 shot_transition；
+同一连续镜头内调整人物用 reframe；切到另一单人/双人/三人拍摄小组时用 cut，并同时给出新镜头的
+完整 visible_characters 和 positions。普通切镜不播放入退场；
+仍在场角色第一次从画外加入连续镜头时可在其台词行用 reveal；默认使用 fade，只有明确横向运动才用 left/right。
+角色只离开当前连续镜头而没有离开空间时用 conceal，同样默认 fade。reveal/conceal 与同一节点的 cut 互斥：要么在连续镜头中显隐，
+要么用 cut 直接建立包含该角色的完整新构图。真实从场外进入时用 enter；真实离开当前空间时用 exit。揭晓或关系重组使用 cut/reframe，
+不能用 enter/exit 冒充镜头变化；
+仍在镜内的逼近、退缩、包围、让位才用 positions 产生横向移动。建立或重组构图时输出当前镜头完整 positions，
+普通保持行省略。编译器只为场景内第一次出现提供默认渐入，不会因为离镜时间长就擅自再次渐入；
+因此需要强调的再次显现应由你明确安排 cut/reframe beat，不能依赖离镜时长碰运气。
+
+无对话框动作使用 beats。一个 anchor 可以有多个连续 beat，同一角色也可以连续执行不同 beat；多人在同一
+时刻共同反应时必须合成一个 beat，用 reactions 给其他人分别指定表情、气泡和动作。按数组顺序表达
+“画外线索→显现/进入→停住→换脸/气泡→移动→他人反应→重构图”，也可表达物件操作和音效蒙太奇。
+不要设置固定事件数量，也不要为了显得热闹而移动。enter 每项包含 who、slot（0 表示自动）和
+side（auto/left/right）；exit 包含 who 和 side。无对话框事件发生真实背景层变化时，beat 可携带 bg/place/trans；
+普通镜头切换不许使用 trans。
+每个事件仍只输出发生变化的字段，AA 已为气泡、动作、位移和进出场提供默认节奏，确需额外保持画面时才写 wait_ms。
+"""
+    return """# 人物站位模式
+
+当前使用 AI 精排模式。只为当前画面中恰好两名可见角色判断 relation_distance、焦点与左右关系意图；
+单人或三人以上不判断亲疏距离。后端会把意图转换为 AA 槽位，并否决立绘重叠、越界和身份冲突，
+因此不要输出数字槽位，也不要为了强行靠近而牺牲人物可读性。
+"""
+
+# ---------------------------------------------------------------- 示范
+FACE_ID_FEWSHOT = """# 编号表情示范（不来自官方剧情文本）
+
+下面这段演示“表情随反应阶段推进、瞬时层按反应链联动”的分层标注；真正输出还要同时维护 direction 中的
 scene_function、focus 和 continuity。未列标注的行在紧凑协议中应从 lines 完全省略。
 
     [0] 旁白: 哒哒哒哒哒。
@@ -351,14 +692,111 @@ scene_function、focus 和 continuity。未列标注的行在紧凑协议中应�
     [9] 旁白: 键盘声停了下来。
         （声音结果已经落地，不重复音效；必要留白由独立 beat 表达）
 
-反面例子（不要这样）：
+"""
 
-    不看语义只按编号轮换表情   -> 立绘在抽搐
-    没有情绪证据却逐句轮换表情 -> 人物状态断裂
-    连续五行都挂气泡          -> 每行自动停 2.5 秒，整段变成幻灯片
-    "她愣住了" 配 SE_Typing  -> 音效不是情绪
-    一段戏里三次特写          -> 特写不再是特写
-    心理描写配 shake         -> 抖动是物理的
+STAGING_FEWSHOT = """# 对照式导演示范（自写，不来自官方剧情文本）
+
+这些短例只说明如何根据证据做不同选择，不组成可复用的事件链：
+
+- `访客：打扰了，我来送资料。` 只说明来意，不单独证明观众需要看见入场。若上文已经在房间里，直接建立对白镜头；
+  若正文另写“推门走进来”，才考虑 enter 或独立显现拍。
+- `管理员：我按下开关。` / `管理员：灯亮了。` 已由两句对白分别表达操作与结果，可以在各自对白节点配动作、声音或换脸，
+  不必自动插入 feedback / verification 静默拍。只有中间确实存在需要观众等待、观察或误判的新信息时才拆拍。
+- `A：要一起去吗？` / `B：好。` 没有犹豫证据时直接完成问答；`B：……我吗？` 才需要复核是否给承受者单人停顿，
+  但停顿也可以由该对白本身承载，不必固定追加 Wait。
+- 三人同时被突发声响吓到、且下一句才有人开口时，可以用一个多人 silent reaction；若三人的反应已经依次写进对白，
+  按承受者顺序拍摄即可，不再复制一个群体反应。
+- 连续强句不固定把峰值放在后句。比较哪一句真正揭晓事实、改变关系或释放情绪；没有结构变化时保持普通镜头。
+
+写完后只复查可证明的因果和连续性：刺激不能晚于反应，真实位移不能被下一条 cut 覆盖，特写要在换组前释放，
+同一互动组不重复声明 camera。不要为了填满事件类型、phase 或资源层而补正文没有的内容。
+"""
+
+
+PERFORMANCE_GRAMMAR_FEWSHOT = """# 连续演出语法范例（根据官方事后研究归纳的自写例子）
+
+这些例子只教“如何从因果选择演出层”，不提供任何官方台词、节点号、角色答案或固定配方。
+它们不是资源配额，也不是关键词触发器；实际输出仍只能使用当前角色和装束的候选白名单。
+
+## 1. 先确定刺激、承受者和阶段，再组合资源
+
+- `A：你把我的东西弄丢了？` → `B：我、我会找到的！`：B 是被质问的承受者，若从平静变为心虚，
+  可用羞窘/困窘类 face 加 `stiff` 或冷汗气泡；不要因为问号就自动给 A 和 B 都加气泡。
+- `A：找到了！`：若确实是发现结果，优先让“发现者”承担 face 变化，再从
+  `emo=闪亮/惊叹`、`act=jump/hophop`、单人镜头中选择与强度相称的载体；普通确认不必升级成峰值。
+- `A：检查结果如下……没有异常。`：这是汇报/释然阶段，可能需要汇报者的回应类 face、轻动作或听者的
+  后续余波；不要把“报告”一词机械映射为某个动作，也不要让后端替 AI 补。
+
+## 2. 同一种情绪有强度和身体层级，不是固定一对一映射
+
+- 压住火气：愤怒或不满 face + `emo=怒筋`，必要时 `act=stiff`。这是“僵住、咬牙、低气压”，不是失控。
+- 短促爆发/强烈反驳：愤怒 face + `emo=怒筋` + `act=jump`，可切单人或关系峰值；`jump` 表示一次跃升。
+- 更重、更强烈的兴奋或怒气：愤怒/激动 face + `act=hophop`；它比 jump 多跳一下或形成连续跳动，不要把每个感叹号都变成 hophop。
+- 明显失控、恐惧、痛苦或挣扎：才升级为 `act=shake`；心理震撼而没有身体失控时不要用 shake。
+- “害羞/被戳穿”可表现为羞涩或羞恼 face + `emo=脸红` 或冷汗 + `act=stiff`；如果只是轻微难为情，
+  只选其中合适的层。只有慌乱已经成为画面重点时才用 `shake`。`SHY`、脸红、stiff 是语义候选，
+  不是每次出现“喜欢/谢谢”都必须触发。
+- `fire` 若在当前资源中表示真实火焰/燃烧音效，只能跟可听见或看得见的燃烧事件；它不是“愤怒”的通用替代。
+  愤怒的视觉层应优先在 face/emo/act/fx 中判断，音效必须另有事件证据。
+
+## 3. 对白和无对白拍的边界
+
+- `A：……` 后角色明显僵住、换脸、冒汗，且下一句才解释原因：可在两句之间建一个
+  `beat(reason=listener_reaction 或 decision_pause)`，让 face/emo/act 成为独立可读信息；若下一句已经完整承载，
+  就不要重复建 beat。
+- 共同受到一个画外刺激时，用一个 beat，主角写 `who/face/emo/act`，其他人写 `reactions`；若反应是先后接力，
+  按“先反应者成为后反应者的新刺激”分阶段，不复制一个全员同步拍。
+- 无对白 beat 不是空白 Wait：必须有新表情、动作、显现、操作反馈、声音、镜头或有语义的停顿。`wait_ms` 只写
+  在没有对话框且观众确实需要看见持续时间的 beat 上；有台词的行不额外添加 Wait。
+
+## 4. 镜头、站位和人物加入
+
+- 同一互动轴中加入第三人：如果观众需要看到让位，先用 `move/reframe` 更新旧角色的物理槽位，再 `reveal` 新人；
+  让位完成后跨 chunk 继续沿用新槽位。不要把 `[A,B] -> [A,C]` 写成原地换人。
+- 如果焦点从“B 质问 A”换成“C 单独承受结果”，这是新的完整拍，可 `cut` 到 C 单人居中，之后再 `cut` 回关系镜头；
+  不必为了让说话人与听者同框而保留旧镜头，也不要给普通切镜伪造 enter/exit。
+- 关系组稳定时，连续换说话人只更新必要的 face/高光；不要每句重写同一 camera。关系轴、承受者、揭晓或峰值改变时，
+  才给完整 `cut + visible_characters (+ positions)`。
+- `fx=特写` 是持续状态。峰值结束、回到双人/三人或切换主体前，用 `fx=无` 释放；不要让特写泄漏到后续镜头。
+
+## 5. 场景边界、声音和背景
+
+- 同一地点的普通反打、加人、显现和横向移动不使用 `trans`。只有地点、时间、黑场或叙事层真正改变时，才在合适锚点
+  同时考虑 `bg/place/trans`，并让上一场镜头状态清空或按新场景重新建立。
+- `#all;hide`/清镜表示当前镜头清空或硬切边界，不自动等于角色离开物理空间；只有正文有抵达、离开、冲入、退场证据时
+  才用 `enter/exit`。
+- `se` 只跟开门、脚步、按钮、键盘、燃烧等可听见事件，并在连续动作开始处使用一次；情绪本身不是音效。
+
+输出前复核整条链：`上文刺激 -> 承受者 -> 阶段变化 -> 可读 carrier -> 镜头时机 -> 下一节点继承状态`。
+若没有新证据就 hold；若有阶段变化但没有任何可见承载，说明当前选择不完整，而不是让后端猜补。
+"""
+
+SEMANTIC_FACE_FEWSHOT = """# 语义表情示范（不来自官方剧情文本）
+
+下面的 `[Emo:语义]` 只示范决策方式，不是全局资源。实际输出只能原样使用当前 TARGET 或 silent beat
+shortlist 提供的标签；后端会按当前角色与装束解析真实表情，不得填写或猜测编号。
+
+    [0] 桃井: 告白演出就再加一段！真的只要一段！
+        face=[Emo:笑着耍赖]，continuity.face=start，reason=new_stimulus
+    [1] 桃井: 难得这次把角色互动列成重点……
+        face=[Emo:认真解释]，continuity.face=start，reason=emotional_shift
+    [2] 绿: 我们本来就在赶工。
+        （完全省略；平淡拆台不需要强行换脸）
+    [3] 凯伊: 都停一下。
+        face=[Emo:严肃制止] fx=特写 bgfx=集中线，visible_characters=[凯伊]，reason=action_impact
+    [4] A: 啊！原来是这个！
+        face=[Emo:发现后的兴奋] emo=闪亮 act=hophop，reason=emotional_shift
+
+同一角色的连续阶段要比较，而不是逐句孤立选择：
+
+    狼狈发现异常 -> 认真确认原因 -> 开心宣布结果
+    认真追问线索 -> 无对话框短暂停顿 -> 灵光推断
+
+标点和音量只说明 delivery，不能单独把 face 推到 peak。结合当前候选的语义、强度、适用语境、避免语境和
+上一拍状态选择；阶段改变时才换脸，且换脸应产生观众能读出的差异。
+
+无对话框共同反应若有 SILENT_REACTION_SHORTLIST_BY_TARGET，用一个 beat 表达，主要角色和 reactions
+分别从各自候选选择 `[Emo:语义]`；不需要换脸时留空。没有 silent shortlist 时不得借用台词候选或猜表情。
 """
 
 OUTPUT = """# 输出
@@ -370,8 +808,17 @@ TARGET 若带 authored=...，这些字段已经由原作者写好，不要再次
 （数字字段填 0，布尔填 false），direction 也只写发生变化或为本行标注提供证据的字段。
 不要逐行复述 scene_type、scene_function、emotion_phase、subtext、visible_characters 或 continuity=hold；
 这些状态已由 DIRECTOR_CONTEXT 继承。state_delta 通常输出空对象，行级状态由后端从 direction 确定性归约。
-大多数普通对白行应没有 emo / act / fx / bgfx / shake；空标注是正确结果，不要为了“完成标注”制造变化。
-宁可少标也不要瞎标 —— 漏标只是平淡，乱标是直接出戏。
+没有语义变化的普通对白可以省略 emo / act / fx / bgfx / shake；但有明确反应阶段、身体动作或连续升级时，不能为了“控制密度”省略它们。
+没有证据时不要瞎标；正文出现画外线索、共同刺激、物件操作、邀请决定、时间跳跃或明确爆点时，逐项判断
+哪些察觉、反应、结果或余波真正存在并需要独立展示。不能用“克制”漏掉已被正文证明的信息，也不能补齐正文没有的事件链。
+输出前逐个核对第一阶段的 face_arcs：语义阶段变化时，优先选择语义相符且视觉有差异的新 face；若候选中
+没有更合适的新脸，保持当前脸并用语义相符的 emo / act 形成可读变化，不能为了换编号选择语义更差的表情。
+再逐项核对 performance_intents：carriers 默认是可替代实现集合，在指定 anchor、position 和 subjects 上至少兑现一种；
+仅当该意图带 require_all=true 时才必须逐项全部出现；
+新增一个微节拍不能以删除其他已规划的入场、共同反应、焦点交接、峰值或余波为代价。
+第一阶段若给出 solo_emphasis，先复核正文是否确有个人峰值；成立时兑现单人近景，并至少使用一次语义相符的
+face / emo / act 变化。若不成立，明确偏离该计划，不得为了过门强造特写；是否再加特写或集中线由峰值强度决定，
+不设次数上限，也不能为了避免误用而把整场重效果机械归零。
 """
 
 MEMORY_POLICY = """# Agent 记忆规则
@@ -382,11 +829,410 @@ MEMORY_POLICY = """# Agent 记忆规则
 """
 
 
-def build_rules(story_type="auto"):
+PLANNED_EXECUTION_CONTRACT = """# 已规划场景的执行合同
+
+第一阶段已经依据完整台词生成 SCENE_EVENT_PLAN。当前阶段不重新发明事件、镜头数量或固定模板，
+而是把计划转换成合法、连续、可播放的 AA 指令。计划给出的是语义合同，不是具体资源答案：
+AI 仍负责根据当前台词、潜台词、角色状态和动态候选选择 face / emo / act / fx / se，并判断
+可选强调是否适合；后端只处理资源合法性、状态生命周期、几何安全和无歧义的编译修复。
+
+按以下优先级执行，发生冲突时前项优先：
+1. 用户原有标注和真实资源白名单；
+2. 当前台词及其上下文能够证明的刺激、承受者、动作结果和关系变化；
+3. CURRENT_DIRECTION_STATE 的物理存在、当前画面、表情和未完成反应链；
+4. SCENE_EVENT_PLAN 中仍被正文支持的事件因果、shot_group、face_arcs、carriers、silent_beats 与 peak/release。
+计划是第一阶段假设，不是官方答案。若计划要求的镜头、停顿、表演层或 owner 缺少正文证据，明确偏离并保留当前
+更合理的导演决定；不得为了服从计划补空 Wait、假入场、固定事件链或无依据的气泡动作。
+
+空间只分三层：scene_presence 表示人物是否仍在物理场景，shot_group 表示当前完整构图，
+interaction_axis 表示谁行动、谁承受。普通切镜只改变 shot_group，不等于人物离场。
+- 同一 shot_group 的 hold 区间内不要仅因 speaker 改变而重写镜头；但正文明确改变互动轴、结果承受者、揭晓、峰值或关系压力时，
+  可以用完整 cut 覆盖首选 hold 范围。不要为了迎合计划把旧人物继续挂在镜头里，也不要用补人、空 Wait 或假 reframe 掩盖真正换镜。
+- 关系镜头中的旁观者不等于关系组成员：如果第三人只是沉默观察、短暂省略号反应或画外补充，保持原关系组和槽位，
+  让观察者从空槽 reveal、画外承接或下一拍再切入；不要为“让每个有台词的人都在镜头里”而洗牌。只有观察者实际承受
+  新刺激或成为新的互动轴时，才扩组/换组。
+- cut 是完整硬切，可一次重建单人、双人或三人构图；reframe 是同一连续镜头内的重排。硬切是正常镜头语法，
+  不受次数限制，但不能把持镜中的 [A,B] -> [A,C] 原位换人伪装成硬切。
+- 不要把一个角色固定成“所有人轮流对他说话”的画面支点，再让另一侧按说话者不断替换。只有该角色持续承受
+  每一句信息、关系压力或共同反应时才保留这种双人构图；否则优先连续的单人正反打，或切到真正的新关系组。
+- 对白可以采用说话者单人、听者单人反应或关系构图；单镜最多三人。solo_emphasis 使用真正的单人构图，relationship_peak 和
+  group_reaction 保留计划要求的关系或共同反应，不把所有强句机械改成单人。
+- solo_emphasis 的 close/medium_close 是实际景别合同，不是“单人站中间”的同义词：在峰值锚点用
+  `fx=特写` 真正推近，并按计划的 release 在回到关系镜头或切换主体前释放。没有被计划为 solo_emphasis
+  的普通单人对白仍保持常规景别，不能由此反推固定特写数量。
+- 从多人构图进入任何单人 close/特写必须用 `shot_operation=switch_group` 和 `shot_transition=cut` 完整硬切；
+  不得用 hold / reframe / shrink_group / move 制造软推近或人物滑走。受话者不必留在当前镜头，单人正反打合法。
+- cut + positions 只定义新镜头第一帧，不播放位移。观众需要看见让位、靠近或退开时用 reframe/move，
+  并让移动节点实际播放后再切镜。
+- reveal/conceal 只用于仍在场角色加入/离开当前连续镜头，普通情况使用 fade；enter/exit 只用于真实进入/离开物理空间；
+  trans 只随真实背景层变化。普通反打、再次被镜头拍到和换说话者都不触发入退场或背景过渡。
+
+表演按反应阶段而不是字段密度执行：
+- 选择 act 时先说明观众实际会看到的身体运动，再核对动作资源是否准确表达它。台词在语义上完成了确认、
+  汇报或验证，不等于角色做了点头动作；不要用 greeting 冒充操作物件、检查结果或普通肯定句。动作库没有
+  准确操作动作时，可由 face、镜头或有依据的声音承载结果，不套用身体语义错误的 act。这个校准只排除身体语义错误的动作，
+  不能因此减少正文有依据的 act / emo，也不能把整段退回 face-only。
+- 每次有立绘角色发言都重新判断 face；同一细分阶段继续保持并省略重复字段，阶段变化则从当前
+  FACE_SHORTLIST_BY_TARGET 优先选择可读的新 face。plan.stage_change=true 时，必须按 TARGET 顺序比较同角色最近一次
+  非空选择的 face_id，不能把同一物理 face 当成换脸。若新候选语义更差，允许保持当前脸并通过气泡或动作
+  承载阶段变化；语义正确优先于强行换脸。
+- 逐句比较同一角色的相邻台词，特别复核问号、感叹号、省略号、破折号、自我修正，以及“汇报 -> 补充”、
+  “疑问 -> 确认”、“说明 -> 情绪释放”等变化。强标点只是复核信号，不能机械映射固定气泡；但确认形成
+  新阶段后，必须选择合适的新 face，或用语义匹配的 emo / act 让变化可读。正式汇报、回应或确认类台词也要
+  主动评估回应类气泡和克制的身体动作，不能因为句子语气平稳就默认全空。
+- 无对话框 beat 继承上一张脸，除非计划明确进入新的反应阶段；不得用 face=00 占位。
+- performance_intents 的 carriers 默认是可替代实现集合，兑现语义相符的一种即可；只有 require_all=true 才要求全部兑现。
+  但如果同一 chunk 明确规划了多个 action / emoticon 意图，不能把它们整段都降级成只换 face；结合语义挑选少量真正需要的气泡或动作即可。
+  除此之外的气泡、动作、特写和效果由 AI 依据正文自由取舍，不设固定数量、冷却、相邻禁用或字符预算，也不要为了通过检查给每句机械加动作。
+- Wait 只属于没有对话框且确需展示时长的 beat；有台词的节点不写 Wait。无对话框拍若要完整换组，必须在
+  beat 上写 shot_transition=cut 和完整 visible_characters/positions；多人同步反应放在同一个 beat，
+  用 reactions 分别指定各人的反应，不拆成多个假同步节点。
+- 特写是持续状态；回到双人/三人镜头或更换主体前必须释放，不能泄漏到后续群像。
+
+direction 只写变化：shot_operation 说明语义变化，shot_transition 只用 cut / reframe；完整重构时同时给出
+visible_characters，纯 AI 模式再给完整 positions。continuity 只用 start / hold / escalate / end；保持状态时
+省略重复资源。face / emo / act / fx / se / bg / bg_request / place / shake / bgfx / trans / move / shot / reveal
+属于行级字段，不放进 direction。只输出 Schema 要求的 JSON，不复述计划或推理过程。
+"""
+
+
+# Planned G2 is deliberately shorter than the general director manual.  The
+# scene planner supplies semantic context and the compiler owns most DSL/state
+# mechanics; repeating those manuals here made the model optimize for
+# checklist compliance instead of the current dramatic beat.
+#
+# Keep the three layers below separate.  They are intentionally small because
+# a model should spend its attention on the current dramatic beat, not on a
+# catalogue of historical backend bugs.
+DIRECTOR_DECISION_RULE = """PROACTIVE STAGING RULE（积极导演规则；the only aesthetic rule）:
+Read the current line and the last effective dialogue/silent beat as one
+continuous reaction chain. For every event, actively scan six directing
+opportunities: (1) attention moves to a new subject, (2) an expectation is
+broken or new information lands, (3) someone hesitates or suppresses emotion
+before answering, (4) a visible bodily intention appears, (5) relationship
+pressure or distance changes, and (6) a result leaves an emotional aftershock.
+
+When the text or established subtext supports one of these changes, make it
+readable by default with the most specific natural carrier or small combination:
+face, emo, act, fx, camera, sound, or an independent beat. First ask whether it reads naturally on
+the dialogue node. Use an independent silent beat only when the audience needs
+to perceive the reaction or result before the next spoken line. If several
+opportunities exist, choose the one or few with the highest causal value; there
+is no resource or beat quota. An ordinary information exchange may simply hold.
+Speaker, camera subject and stimulus receiver may be different. A visible listener who absorbs a same-node dialogue
+or narration stimulus may use line-level `reactions` (`who` plus face/emo/act); use a silent beat only when it must
+land before the next spoken line.
+
+Actively resist the lowest-effort bias. Omission, hold and face-only are not
+neutral safe defaults: they are directing choices that need a positive reason,
+such as intentional listening, suppression, stillness or unchanged information.
+Before settling on them, compare a more embodied, relational or cinematic
+alternative. When that alternative has causal evidence and makes the person more
+readable, choose it; justified extra direction is not penalized for using more
+commands. Do not confuse low command count with restraint or quality.
+
+先导演这一拍，再校准具体载体：先决定观众应该读到的身体、关系或镜头变化，再从数据库候选中选择语义最准确的
+face / emo / act / camera。不能先从“哪个字段最安全、最不容易出错”出发。首选动作不准确时，换成另一种准确载体或
+小组合继续兑现演出；只有正文确实没有身体变化时才省略 act，不能顺势把整段退回 face-only。
+
+Choose a carrier whose concrete resource meaning matches the new visible fact.
+Across adjacent phases, let one continuing body intention continue; use a new
+act only when the body is doing something newly readable. A facial, attention or
+attitude change does not become clearer merely by attaching a generic motion.
+选择 act 时先描述观众实际会看到的身体运动，再核对动作资源是否真的表达它。台词完成确认、汇报或验证，
+不等于人物做了点头动作；不要用 greeting 冒充操作物件、检查结果或普通肯定句。若当前动作候选不匹配，
+就改用准确的 emo / face / camera 或小组合把同一演出意图兑现。这个校准只排除身体语义错误的动作，不能因此减少正文有依据的
+act / emo，也不能把整段退回 face-only。
+
+Performance inference is proactive; plot inference is strict. A listener pause,
+look, held breath, restrained body reaction or motivated cut may expose subtext
+even when no bracketed stage direction states it. An object operation,
+arrival/departure, event result, new relationship fact or passage of time needs
+textual evidence. Official examples provide directing grammar, never the current
+scene's rhythm template, command count, pause density or shot order.
+
+Positive semantic examples: if new information hits a listener, let the listener
+register it before answering when that reaction changes the answer's meaning; if
+a character speaks tough while relationship pressure has shifted, let a look,
+face or restrained act carry the subtext; if an operation result determines the
+next line, show the feedback first; if an exchange remains informational with no
+stage change, keep it clean. These are decisions, not resource recipes.
+
+Use these three positive directing patterns when the text supports them:
+
+1. RELATION CONTINUITY: If the same object, claim or problem is still being
+   negotiated, keep the current two-person or three-person interaction group
+   while the focus passes between members. A speaker change alone is not a
+   reason to replace the group. Cut to a new group only when the receiver,
+   relationship pressure, reveal or dramatic function really changes. While a
+   question is still awaiting its answer, keep the information holder or the
+   affected person available as the causal anchor when useful; a brief wording
+   correction between side speakers need not erase that pending question/answer
+   axis. The causal anchor may keep the same slot while the other side relays
+   between characters. Preserve the unresolved subject, information holder,
+   affected person or next useful responder—not an arbitrary body chosen only
+   to minimize movement. If the replaced partner has no following dedicated
+   beat, this anchored swap can be smoother than two short solo cuts.
+2. MICRO-ACTION CHAIN: When an object is found, operated or checked, compare
+   the visible milestones instead of collapsing them into dialogue. If the
+   audience needs to see a milestone before the next line, use a short chain
+   such as observe -> operate -> feedback -> verify -> aftershock. Each phase
+   may be a dialogue line or an independent beat; an independent beat needs
+   only the carriers that make its new fact readable (for example wait+act,
+   wait+face, or wait+emo+act). Do not invent a phase that the text does not
+   support.
+3. PEAK AND RELEASE: When a line is the scene's clear emotional or information
+   peak, a solo center/close shot with one strong face, emo, act or fx carrier
+   is a natural option. After the peak, explicitly consider releasing back to
+   the affected listener or the prior relationship group. Do not let a close
+   shot or heavy effect leak into every later line.
+
+These are semantic paths, not recipes: use one, combine them, or use none when
+the current text does not justify it.
+
+CARRIER SURVIVAL CHECK: When the current event plan names a carrier for a
+concrete phenomenon that the text still supports, do not silently collapse that
+phenomenon into face-only because face is the easiest field. Choose one accurate
+carrier shown by the current resource shortlist; a planned action may become an
+accurate emo, camera or sound only when that alternative expresses the same
+visible fact. If no listed resource can express it, omission is valid, but give a
+brief reason in the line decision. This is a semantic handoff check, not a quota:
+do not add a generic act or emo merely to satisfy the plan.
+
+VISIBLE_CHANGE_RULE：见上面的 PROACTIVE STAGING RULE；这是唯一版本，不在其他章节重复解释。
+
+镜头按互动关系和叙事拍点，而不是当前 speaker 组织。对白可以采用说话者单人、听者单人反应或关系构图；
+问者单人后硬切答者单人是合法正反打。硬切是正常镜头语法，不设次数限制；新刺激、焦点承接、揭晓、峰值、
+余波或新互动组可以 cut。只有同一连续镜头内的扩缩、让位、靠近才用 reframe/move。切到新组时完整写出新名单；
+不要把持镜中的 [A,B] → [A,C] 写成原位换图层。说话人变化本身不是切镜理由：只要互动轴、承受者和观众需要看到的关系没有改变，
+优先 continue_group 或同组内焦点变化；只有新刺激、关系压力、揭晓、峰值或新互动组才 switch_group/cut。任何单镜最多三人，
+观察者不因说话自动加入关系镜头。
+从多人镜头收成其中一人的单人镜头时，不能只删除同伴并保持同尺度普通中景：那只会读成某个人突然消失。
+当前句不是独立重点、下一句又马上交给别人时，继续关系镜头或使用上面的因果锚点接力。确实需要独立聚焦时，
+用 switch_group + cut 建立 medium_close / close 的可读新景别；同一连续镜头收组则用淡出加 reframe 完成。
+
+表演层按语义和强度联合选择，而非固定配方：face 是持续态度，emo 是瞬时心理符号，act 是原地身体反应，
+move 是真实位置变化，fx/bgfx 是较重镜头层，se 只跟可听见事件。阶段变化可以由其中一个或多个自然载体表达；
+不要把所有表演塌成 face，也不要为了兑现计划堆满资源。`fire` 只有真实燃烧事件才是音效；愤怒、害羞、发现等
+要根据当前候选的语义选择，示例 `愤怒 face + `emo=怒筋``、`SHY + stiff` 只是语义说明，不是触发器或固定组合。
+重层和组合强度按正文证据、人物基线及相邻阶段的增量判断；相对转折仍可能只是克制的安心、忧虑或迟疑，
+不自动升级为特写、背景效果或多个瞬时层同时叠加。这里校准的是重效果与叠加强度，不是要求 face-only：
+一个准确的轻量 act 或 emo 往往比换一张更重的脸更克制，也能表达 face 无法显示的短促身体或心理信息。
+FACE CADENCE：face 的比较对象是同一角色上一次真正可见的发言或表演，不是紧邻的另一角色台词。该角色再次开口时，
+逐项比较 delivery、潜台词、注意对象和强度；其中任一改变，都重新从本 TARGET 的候选中选。自定义表情库提供许多近义脸，
+通常就是为了在同一情绪内部区分追问、辩解、命令、嘴硬、被盯后的不自在等细拍；有多个同样贴切候选时，优先选择与
+该角色上一张物理 face 不同的候选。连续两次发言保持同一物理 face 只适用于具体态度确实持续，并在 reason 中说明
+intentional_face_hold，或由另一个清楚的可见变化承接；不能仅靠省略 face 被动继承。官方稀疏表情库可以更常保持，
+但“情绪大类相同”仍不足以证明 hold。这是语义推进，不是按编号轮换。
+
+EMOTICON SEMANTICS：emo 字段只填资源表中的精确中文名。预期被打破且带疑问时可用 `emo=惊疑`，
+正文中的 `?!` 只是判断证据；普通信息追问可用 `emo=疑问`；突然注意或被叫住可用 `emo=反应`；
+强烈羞恼或冒火式抗议可用 `emo=冒烟`。极端惊讶只用于真正强冲击。
+特别注意同一 anchor 上的多个载体：act 是身体运动，emo 是瞬时心理；sound、camera 也可能承载另一项新事实。
+它们分别有正文依据且语义不重复时保留小组合；不要因为 carriers 默认可替代就自动只保留最省事的一层。没有准确资源、表达重复或文本不支持时才省略。
+这是防止不同信息被压平的判断提示，不是每句叠加指令的数量要求。
+每一层都要能分别指出正文依据。先导演这一拍，再校准具体载体；选择 act 时描述观众实际会看到的身体运动；
+台词在语义上完成了确认、汇报或验证，不等于角色做了点头动作。不要用 greeting 冒充操作物件、检查结果或
+普通肯定句；候选动作不准确时，换用准确的 act / emo / face / camera 小组合继续兑现演出。这个校准只排除身体语义错误的动作，
+不能因此减少正文有依据的 act / emo，也不能把整段退回 face-only。
+不要把省略当成最安全的默认答案。hold 或 face-only 只有在静止、聆听、压住反应或信息确实没有变化时才是主动导演选择；
+落笔前先比较一个更具身体、关系或镜头表达的合法方案。有因果依据且能让人物更可读时就选择它，合理增加指令不会受罚，
+低指令数量不等于克制或质量。
+
+无对白 beat 只在观众需要看见独立的反应、发现、操作结果、决定停顿、画外线索或时间桥时使用；没有新画面目的就不生成。
+其中仅为展示新 face/emo 的短拍统一称为“无对话表情”：它可以保留，但必须让下一句开口前出现一个无法自然附着在对白上的
+新反应；仅为换脸、拖时长或重复对白已经表达的情绪时省略。无对话表情继承真实可见人物，所有可见人物由后端统一高光。
+普通对白不额外 Wait。Wait 只属于没有对话框的独立 beat；有台词的行不写 Wait；beat 的 wait_ms 只表示没有对话框的展示时长。beat 中的 reactions
+要进入下一 chunk 的反应记忆。特写是持续状态，回到关系镜头或换主体前释放，不能让特写泄漏到后续镜头；只有地点、时间、黑场
+或叙事层真正改变才使用背景过渡。
+
+STAGING COMPLETION CHECK：场景或新镜头第一次显示某人物时用 fade reveal，正文明确左右侧或遮挡物后出现时按证据选方向；
+“从设备后站起”“从柜中探头”是同一空间的 reveal，不是原位换人。多人镜头收成单人时，必须在同一节点完成
+medium_close/close 的完整 cut，或先淡出同伴再 reframe；普通中景里只删名单会读成人物瞬移。峰值 close 后进入普通解释、
+接力或关系余波时，明确 release 回 medium/关系镜头。输出前逐项复核 face cadence、emo 语义、显现过程与 close release。
+
+G1 is a soft hypothesis：未标 required / HARD 的具体镜头和资源可以被现场导演调整；但“软”只允许换成更合适的实现，
+不表示可无理由忽略仍被正文支持的新现象。若计划指出身体反应、瞬时心理、操作反馈或关系变化且当前文本仍成立，
+要让该现象以准确载体可读；只有现象不成立、资源不准确或已被等价载体完整表达时才省略。不要用 face-only 默认吞掉它，也不要为兑现计划补空 Wait、假入场或错误资源。
+
+对话簇保持不等于把所有人轮流挂在同一人身边；不要让所有人轮流对他说话而固定另一侧。
+承受者或互动轴改变时，优先连续的单人正反打，或切到真正的新关系组。"""
+
+DIRECTOR_OWNERSHIP_RULE = """OWNERSHIP RULE（唯一边界）：
+模型决定意义、表演、镜头、关系、调度和节奏。后端只负责协议解析、资源与身份校验、
+物理/镜头状态、三人上限与几何安全，以及可证明的重复指令去重；后端不能替模型补
+审美选择，也不能改写模型已经明确的决定。"""
+
+DIRECTOR_REPAIR_OWNERSHIP = """REPAIR OWNERSHIP:
+Repair only the fields named by the issue. Preserve every unrelated field,
+including camera, positions, reveal/entry state and continuity. An explicitly
+returned empty value clears a field; an omitted field is unchanged. Do not add
+new beats, waits or resources merely to satisfy a checklist."""
+
+PLANNED_DIRECTOR_PRINCIPLES = """# 已规划场景的执行合同 / DIRECTOR PRINCIPLES（唯一权威）
+
+本轮使用 `SCENE_EVENT_PLAN`，但计划不是官方答案：只有正文支持的事实和明确的 HARD 项必须执行。
+
+{DIRECTOR_DECISION_RULE}
+""".format(DIRECTOR_DECISION_RULE=DIRECTOR_DECISION_RULE)
+
+
+PLANNED_OUTPUT_PROTOCOL = """# OUTPUT PROTOCOL（只说明如何表达决定）
+
+只输出本轮 JSON Schema 要求的 JSON，不复述台词、计划或推理。紧凑协议只返回真正变化的行；没有变化的 TARGET 省略。
+`authored` 归原作者。
+direction 放导演状态：scene_type、scene_function、emotion_phase、subtext、focus_kind、focus_character、
+reaction_target、relation_distance、shot_operation、shot_transition、visible_characters、positions、continuity、reason。
+face / emo / act / fx / bgfx / se / move / reveal / reactions / enter / exit / shake / bg / place / trans 属于行级字段，不放进 direction。
+
+FIELD SEPARATION CHECK：`shot` 只填当前被命中的有立绘角色，绝不填景别词（medium/medium_close/close/relation/wide/group）。
+景别与构图用 `visible_characters`、`positions`、`shot_transition`、`shot_operation` 或合法 `fx`；无受击目标就省略 `shot`。
+
+导演状态只能放在该行的 `d` 对象中；表演/生命周期字段只放行顶层。
+不要把同一个字段同时写在行顶层和 `d` 中，也不要把 `face`、`emo`、`act`、`camera` 等表演决定改写成自然语言 direction。
+返修时沿用同一约定；需要保留的字段省略即可，明确清除才填写空值。
+
+shot_transition 只用 cut/reframe；对白行的 cut/reframe 必须配完整 visible_characters，positions 可省略，
+省略时由后端舞台引擎按当前可见人物自动安全排位；如果明确返回 positions，必须覆盖完整名单且通过几何校验。
+无对白 beat 的 cut/reframe 仍必须明确返回完整 visible_characters 和 positions，因为它表达真实的空间/显隐变化。
+同一可见名单、同一站位只做尺度收近时用 `reframe`；重建主体、关系组或构图才用 `cut`。
+shot_operation 只用 continue_group / expand_group / shrink_group / replace_center_subject / switch_group / impact_insert。
+continuity 只允许按 face / emo / act / fx / bgfx 分层记录 start / hold / escalate / end；镜头、站位和切镜
+不是 continuity 层，不能写入 shot / camera / visible 等键；没有表演状态变化就省略。reveal/conceal 只表示仍在场角色加入/离开连续镜头，普通情况用 fade；enter/exit 才表示
+真实进出物理空间；reveal/conceal 与同一节点的 cut 互斥，连续镜头显隐用 reveal/conceal，完整新构图只用 cut。普通反打、再次被镜头拍到、
+人数变化不自动生成 trans 或入退场。
+
+`reaction_target` 只能填写当前 cast 中真实角色名或空串；物件、事实、动作结果和抽象关系写入 `subtext` 或 `reason`，
+不要把自然语言事件短语塞进角色字段。
+
+`reactions` 只用于同一对白或旁白节点上同步可读的其他有立绘角色反应，旁白本身不承载这些字段。
+可用 carrier 的意思是“从中选择自然的一种”。除非计划写 `require_all=true`，不要把可替代集合当成逐项清单；
+计划未写载体时由当前正文决定。无对白 beat 若存在，必须有 reason、主体或 reactions，并在需要时给 wait_ms；对白节点不加 Wait。
+"""
+
+
+PLANNED_HARD_CONSTRAINTS = """# HARD CONSTRAINTS（违反即无效；其余是软导演判断）
+
+- 不改台词，不编造资源；face 只能来自当前目标的 FACE_SHORTLIST，emo/act/se/bg/trans 只能来自资源白名单。
+- 单镜最多三人（最多三名可见角色）；槽位必须唯一、在 1..5 且通过几何安全校验。
+- `cut` 必须是完整新镜头；`move/reframe` 后物理槽位要能跨节点延续。`enter/exit` 只在正文证明真实进出时使用。
+- 有台词的节点不输出 Wait；Wait 只用于没有对话框的独立 beat。没有独立目的的 beat 无效，不得用 face=00 占位。
+- 特写和场景状态必须正确释放/继承；后端只负责协议解析、资源合法性、生命周期、几何和可证明的重复去重。
+
+SOFT DIRECTING：镜头距离、是否单人、是否使用 face/emo/act/fx、是否拆 silent beat、是否偏离 G1，均由当前因果和
+上下文决定；不设固定数量、冷却、相邻禁用或字符预算。后端不会替 AI 选择审美答案。
+
+快速语义校准（不是配方）：压住火气可出现愤怒 face + `emo=怒筋`；短促爆发可加 jump；害羞或被戳穿可出现
+`SHY` 与 stiff；较轻、较短的跳动用 jump，更重并连续多跳的情感用 hophop；`fire` 只跟燃烧事件。
+先问“这一拍新增了什么可见事实”，再选层。
+
+`move/reframe` 更新旧角色的物理槽位后必须让状态跨节点延续；普通切镜不是位移，也不需要为切镜补入退场。
+"""
+
+
+def _planned_execution_rules(layout_mode, dynamic_face_shortlists):
+    face_fewshot = (
+        SEMANTIC_FACE_FEWSHOT if dynamic_face_shortlists else FACE_ID_FEWSHOT
+    )
+    # Keep only the mode-specific ownership statement.  The old path remains
+    # available for legacy checkpoints, while new planned runs use this lean
+    # contract and dynamic resource lists.
     return "\n\n".join([
-        ROLE, _story_priority(story_type), DIRECTOR_CONTRACT,
-        SHOT, WAIT_POLICY, BACKGROUND_REQUEST, PACING, CAMERA,
-        prompt_policy(story_type), DIMENSIONS, FEWSHOT, OUTPUT, MEMORY_POLICY,
+        ROLE,
+        PLANNED_DIRECTOR_PRINCIPLES,
+        PLANNED_OUTPUT_PROTOCOL,
+        PLANNED_HARD_CONSTRAINTS,
+        _layout_mode_policy(layout_mode),
+        face_fewshot,
+        MEMORY_POLICY,
+    ])
+
+
+def build_repair_rules(issue_codes=(), *, layout_mode="pure_ai"):
+    """Return the smallest rule slice needed for a local G2 repair.
+
+    Repair requests already carry the target window, current state, previous
+    execution and concrete issues.  Re-sending the complete planned contract
+    encourages a second global directing pass and often erases unrelated
+    fields.  Keep the protocol/ownership boundary, then add only the affected
+    semantic layer.
+    """
+    codes = {str(code or "").strip() for code in issue_codes}
+    joined = " ".join(sorted(codes)).lower()
+    # A repair is a scoped patch, not a second global directing pass.  The
+    # common part names the protocol boundary; semantic guidance is loaded
+    # only for the affected layer below.
+    sections = [ROLE, DIRECTOR_OWNERSHIP_RULE, DIRECTOR_REPAIR_OWNERSHIP, PLANNED_OUTPUT_PROTOCOL]
+    performance = any(token in joined for token in (
+        "performance", "face", "emo", "act", "fx", "carrier", "reaction",
+    ))
+    camera = any(token in joined for token in (
+        "camera", "shot", "pivot", "relay", "group", "visible", "position",
+        "reframe", "cut", "continuity", "closeup", "close-up", "close up",
+    ))
+    staging = any(token in joined for token in (
+        "reveal", "enter", "exit", "move", "transition", "background", "trans",
+    ))
+    if performance or not (camera or staging):
+        sections.append("""# REPAIR PERFORMANCE (scope: performance)
+只比较目标锚点与上一有效节点。阶段有可见变化时选择一个或少量语义正确的
+face/emo/act/fx carrier；没有变化就 hold。不要为了换编号使用错误表情，也
+不要把已经明确的 reaction、动作或气泡清零；目标之外的字段保持原值。""")
+    if camera:
+        sections.append("""# REPAIR CAMERA (scope: camera)
+只修复当前 issue 指出的镜头/构图。完整换组用 `switch_group + cut` 和完整
+visible_characters；同一连续镜头内的让位/扩缩才用 reframe/move。硬切没有
+次数限制。不要把连续镜头中的 [A,B] -> [A,C] 写成原位换图层。""")
+        if any(token in joined for token in (
+            "closeup", "close-up", "close up",
+        )):
+            sections.append("""# REPAIR CLOSEUP GEOMETRY (scope: reported closeup issue)
+当 issue 是 `closeup_with_multiple_characters` 或 `closeup_requires_hard_cut` 时，
+先判断这一拍真正要保留的是关系构图，还是角色近景。关系峰值、听者反应或
+互动轴仍需要同框时，明确把不合适的 `fx=特写` 清除（顶层返回 `fx=\"\"`），
+保留原有完整构图；不要用单人切镜把关系压力抹掉。只有正文和现场导演确实
+需要看清单人爆点时，才在同一行的 `d` 中同时返回
+`shot_operation=\"switch_group\"`、`shot_transition=\"cut\"`、完整的
+`visible_characters` 和 `positions`，并让名单只包含被聚焦的角色。两条路径
+都必须消除“多人构图中的角色特写”这一协议矛盾；不要返回不完整的 `reframe`
+或 `hold`。若该问题与同一锚点的其他镜头问题同时出现，先让选定路径完整，
+其他未涉及字段按显式保留规则原样保留。""")
+    if staging:
+        sections.append("""# REPAIR STAGING (scope: staging)
+只有正文证明真实进出空间时才用 enter/exit；仍在场角色加入连续镜头用
+reveal。普通切镜、再次被拍到和人数变化不自动生成进退场或 trans；move
+后的物理槽位必须延续到下一节点。""")
+        if "reframe_adds_character_without_reveal" in joined:
+            sections.append("""# REPAIR LINE REVEAL (scope: added character)
+行级 `reveal` 不是角色名，只能填写 `left`、`right`、`fade` 或空值，并且只让本行有立绘的说话者滑入。
+若缺失人物不是本行说话者，或正文没有真实入场/连续滑入依据，不要伪造 reveal/enter；改用同一行 d 中的
+`shot_operation="switch_group"`、`shot_transition="cut"`、完整 `visible_characters` 和安全 `positions`
+重建整镜。未涉及的 face/emo/act/fx 必须省略以保留原值。""")
+    # Layout details matter only when the issue names staging/camera.  Sending
+    # them for a face-only patch was a major source of prompt bloat.
+    if layout_mode and (camera or staging):
+        sections.append(_layout_mode_policy(layout_mode))
+    return "\n\n".join(sections)
+
+
+def build_rules(
+    story_type="auto", *, layout_mode="ai", dynamic_face_shortlists=False,
+    planned_execution=False,
+):
+    face_fewshot = (
+        SEMANTIC_FACE_FEWSHOT if dynamic_face_shortlists else FACE_ID_FEWSHOT
+    )
+    if planned_execution:
+        return _planned_execution_rules(layout_mode, dynamic_face_shortlists)
+    return "\n\n".join([
+        ROLE, _story_priority(story_type), SCENE_MODE_ACTIVATION, DIRECTOR_CONTRACT,
+        PERFORMANCE_STATE_COMPARISON,
+        SHOT, WAIT_POLICY, BACKGROUND_REQUEST, PACING, CAMERA, STAGING_GRAMMAR,
+        OFFICIAL_EVENT_PATTERNS, SHOT_GROUP_PROTOCOL,
+        _layout_mode_policy(layout_mode),
+        prompt_policy(story_type), DIMENSIONS, STAGING_FEWSHOT,
+        PERFORMANCE_GRAMMAR_FEWSHOT, face_fewshot,
+        OUTPUT, MEMORY_POLICY,
     ])
 
 
@@ -397,52 +1243,434 @@ def _labeled_asset(name, labels):
     if isinstance(value, str):
         text = value.strip()
     else:
-        text = "、".join(
-            str(value.get(key) or "").strip()
-            for key in ("label", "place", "time", "mood", "tags")
-            if str(value.get(key) or "").strip()
-        )
+        parts = []
+        for key in (
+            "label", "subcategory", "place", "affiliation_names_cn",
+            "affiliation_hint_cn", "reuse_scope", "reuse_hint_cn",
+            "compatible_affiliation_names_cn", "time", "mood", "tags",
+        ):
+            item = value.get(key)
+            if isinstance(item, (list, tuple)):
+                item = "、".join(
+                    str(entry).strip() for entry in item if str(entry).strip()
+                )
+            item = str(item or "").strip()
+            if item and item not in parts:
+                parts.append(item)
+        text = "、".join(parts)
+    return f"{name}={text}" if text else name
+
+
+def _scene_option(name, labels):
+    value = labels.get(name)
+    if not isinstance(value, dict):
+        return _labeled_asset(name, labels)
+    location = "、".join(filter(None, (
+        str(value.get("main_category_cn") or "").strip(),
+        str(value.get("subcategory") or "").strip(),
+        str(value.get("place") or "").strip(),
+    )))
+    origins = "、".join(value.get("affiliation_names_cn") or []) or "通用"
+    reuse = str(value.get("reuse_scope_cn") or value.get("reuse_scope") or "").strip()
+    compatible = "、".join(value.get("compatible_affiliation_names_cn") or [])
+    if compatible:
+        reuse += f"({compatible})"
+    context = "、".join(filter(None, (
+        str(value.get("time") or "").strip(),
+        str(value.get("mood") or "").strip(),
+    )))
+    parts = [
+        str(value.get("label") or "").strip(),
+        location,
+        f"归属:{origins}",
+        f"复用:{reuse}" if reuse else "",
+        context,
+        str(value.get("usage_hint_cn") or "").strip(),
+    ]
+    avoid = str(value.get("avoid_when_cn") or "").strip()
+    if avoid:
+        parts.append(f"避免:{avoid}")
+    text = "｜".join(part for part in parts if part)
     return f"{name}={text}" if text else name
 
 
 def _face_option(face):
     """Format one generator-safe face without exposing label provenance."""
+    # A two-stage label with a fact/semantic conflict remains visible in the
+    # workbench for review, but must not be offered as a runtime choice until
+    # the conflict is resolved or manually overridden.
+    if face.get("backend_selection_ready") is False:
+        return ""
     if face.get("near_duplicate_of"):
+        return ""
+    if (
+        face.get("active_label_model")
+        and isinstance(face.get("confidence"), (int, float))
+        and not isinstance(face.get("confidence"), bool)
+        and face.get("confidence") <= 0
+    ):
         return ""
     semantic = str(
         face.get("semantic_cn") or face.get("cn") or face.get("label") or ""
     ).strip()
-    if not semantic:
+    if not semantic or semantic.casefold().startswith(
+        ("无法识别", "不可识别", "无法判断", "unknown")
+    ):
         return ""
     text = f"{face['id']}={semantic}"
+    visual = []
+    for label, field in (("眼", "eyes"), ("眉", "brows"), ("嘴", "mouth")):
+        value = str(face.get(field) or "").strip()
+        if value:
+            visual.append(f"{label}:{value}")
+    if face.get("blush"):
+        visual.append("脸红")
+    tears_level = str(face.get("tears_level") or "").strip()
+    if tears_level in {"watery_eyes", "tear_drop", "streaming"}:
+        visual.append(f"泪:{tears_level}")
+    elif face.get("tears"):
+        visual.append("泪")
+    eye_effect = str(face.get("eye_effect") or "").strip()
+    if eye_effect and eye_effect != "normal":
+        visual.append(f"眼效:{eye_effect}")
+    sweat_level = str(face.get("sweat_level") or "").strip()
+    if sweat_level and sweat_level != "none":
+        visual.append(f"汗:{sweat_level}")
+    face_shadow = str(face.get("face_shadow") or "").strip()
+    if face_shadow and face_shadow != "none":
+        visual.append(f"阴影:{face_shadow}")
+    if visual:
+        text += "[视觉:" + ",".join(visual) + "]"
     if face.get("semantic_level") == "rich":
         fields = []
-        family = str(face.get("emotion_family") or "").strip()
-        if family:
-            fields.append(family)
         if face.get("intensity") is not None:
             fields.append(f"I{face['intensity']}")
         expression_class = str(face.get("expression_class") or "").strip()
         if expression_class:
             fields.append(expression_class)
-        beats = [str(value) for value in face.get("beat_fit") or [] if str(value)]
-        if beats:
-            fields.append("|".join(beats))
         hold = str(face.get("hold_policy") or "").strip()
         if hold:
             fields.append(hold)
         if fields:
             text += "[" + ",".join(fields) + "]"
+        delivery_fit = [
+            str(value).strip() for value in face.get("delivery_fit") or []
+            if str(value).strip()
+        ]
+        if delivery_fit:
+            text += "[D:" + "|".join(delivery_fit) + "]"
+        usage_frequency = str(face.get("usage_frequency") or "").strip()
+        if usage_frequency and usage_frequency != "common":
+            text += f"[F:{usage_frequency}]"
+        semantic_tags = [
+            str(value).strip() for value in face.get("semantic_tags") or []
+            if str(value).strip()
+        ]
+        if semantic_tags:
+            text += "[T:" + "|".join(semantic_tags) + "]"
         avoid = str(face.get("avoid_when_cn") or "").strip()
         if avoid:
             text += f" 避免：{avoid}"
     return text
 
 
-def build_resources(idx, cast, cast_names, faces_by_id):
+_ASSET_DIRECTIVE_RE = re.compile(
+    r"^\s*@(?P<cmd>bg|se|sound)\s+(?P<arg>.+?)\s*$", re.IGNORECASE
+)
+
+_SOUND_EVIDENCE = (
+    ("footstep", ("脚步", "走近", "走来", "走到", "走过", "靠近", "离开", "踏步")),
+    ("run", ("跑来", "跑去", "奔跑", "冲过", "狂奔")),
+    ("train", ("列车", "火车", "车厢", "站台", "铁轨")),
+    ("start", ("启动", "发动", "开动")),
+    ("stop", ("停下", "停车", "停靠", "刹车")),
+    ("dooropen", ("开门", "门打开", "推开门")),
+    ("doorclose", ("关门", "门关上", "带上门")),
+    ("knock", ("敲门", "叩门")),
+    ("phone", ("电话", "手机响", "来电")),
+    ("ring", ("铃声", "响铃")),
+    ("alarm", ("警报", "警铃")),
+    ("typing", ("打字", "键盘", "输入")),
+    ("button", ("按钮", "按下", "点击")),
+    ("switch", ("开关", "切换")),
+    ("book", ("翻书", "合上书", "书页")),
+    ("write", ("写字", "书写", "落笔")),
+    ("rain", ("下雨", "雨声", "暴雨", "雨滴")),
+    ("wind", ("风声", "大风", "狂风")),
+    ("thunder", ("雷声", "打雷", "雷鸣")),
+    ("heartbeat", ("心跳", "心脏狂跳")),
+    ("clap", ("鼓掌", "拍手")),
+    ("shot", ("枪声", "开枪", "射击", "子弹")),
+    ("reload", ("换弹", "装弹", "上膛")),
+    ("boom", ("爆炸", "轰鸣", "炸开")),
+    ("break", ("碎裂", "打碎", "断裂", "破裂")),
+    ("fall", ("摔倒", "跌倒", "坠落", "倒下")),
+    ("water", ("水声", "倒水", "泼水", "落水")),
+    ("fire", ("燃烧", "火焰", "着火")),
+)
+
+
+def _flatten_prompt_text(value):
+    if isinstance(value, dict):
+        return " ".join(_flatten_prompt_text(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return " ".join(_flatten_prompt_text(item) for item in value)
+    return str(value or "")
+
+
+def _search_terms(value):
+    text = _flatten_prompt_text(value).casefold()
+    terms = {
+        token for token in re.findall(r"[a-z0-9]{2,}", text)
+        if token not in {
+            "the", "and", "with", "from", "this", "that",
+            # Asset-family prefixes occur in almost every key and carry no
+            # scene meaning, so treating them as evidence selects the catalog.
+            "bg", "se", "sfx", "sound",
+        }
+    }
+    for chunk in re.findall(r"[\u3400-\u9fff]{2,}", text):
+        if len(chunk) <= 16:
+            terms.add(chunk)
+        terms.update(chunk[index:index + 2] for index in range(len(chunk) - 1))
+        terms.update(chunk[index:index + 3] for index in range(len(chunk) - 2))
+    return terms
+
+
+def _canonical_asset_key(value, available):
+    key = str(value or "").strip().strip("\"'")
+    if not key:
+        return ""
+    if key in available:
+        return key
+    folded = key.casefold()
+    return next((item for item in available if str(item).casefold() == folded), "")
+
+
+def _explicit_asset_keys(source_text, commands):
+    result = []
+    for raw in str(source_text or "").splitlines():
+        match = _ASSET_DIRECTIVE_RE.match(raw)
+        if match and match.group("cmd").casefold() in commands:
+            result.append(match.group("arg"))
+    return result
+
+
+def _planned_asset_keys(usage_chain, kinds):
+    selected = []
+    candidate = []
+    for scene in usage_chain or []:
+        if not isinstance(scene, dict):
+            continue
+        for need in scene.get("needs") or []:
+            if not isinstance(need, dict) or str(need.get("kind") or "").casefold() not in kinds:
+                continue
+            value = need.get("aa_key") or need.get("name")
+            if value:
+                selected.append(value)
+            for option in need.get("candidates") or []:
+                if isinstance(option, dict) and option.get("aa_key"):
+                    candidate.append(option["aa_key"])
+    return selected, candidate
+
+
+def _background_label(index, key):
+    folded = str(key).casefold()
+    scene = (index.get("scene_labels") or {}).get("background") or {}
+    for source in (scene, index.get("bg_label") or {}):
+        exact = source.get(key)
+        if isinstance(exact, dict):
+            return exact
+        match = next((value for name, value in source.items()
+                      if str(name).casefold() == folded and isinstance(value, dict)), None)
+        if match is not None:
+            return match
+    return {}
+
+
+def _rank_backgrounds(index, query, available, limit=12, *, context_query=""):
+    query_terms = _search_terms(query)
+    context_terms = _search_terms(context_query)
+    evidence_text = " ".join((str(query or ""), str(context_query or ""))).casefold()
+    if not query_terms and not context_terms:
+        return []
+    ranked = []
+    for key in available:
+        label = _background_label(index, key)
+        asset_terms = _search_terms((key, label))
+        overlap = query_terms & asset_terms
+        context_overlap = context_terms & asset_terms
+        if not overlap and not context_overlap:
+            continue
+        score = sum(3 if len(term) >= 3 else 1 for term in overlap)
+        # Confirmed scene/affiliation evidence is more stable than nouns in
+        # dialogue, which may describe an imagined object rather than the room.
+        score += sum(8 if len(term) >= 3 else 3 for term in context_overlap)
+        if str(key).casefold() in str(query).casefold():
+            score += 20
+        time_value = str(label.get("time") or "").casefold()
+        if time_value == "night" and not any(
+            cue in evidence_text for cue in ("夜", "晚上", "深夜", "通宵", "night")
+        ):
+            score -= 12
+        special_venue = " ".join(
+            str(label.get(field) or "")
+            for field in ("label", "place", "subcategory", "tags")
+        ).casefold()
+        venue_cues = ("展会", "展厅", "博览", "祭典", "庆典", "舞台", "会场")
+        if any(cue in special_venue for cue in venue_cues) and not any(
+            cue in evidence_text for cue in venue_cues
+        ):
+            score -= 12
+        ranked.append((score, str(key).casefold(), key))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    return [key for _score, _folded, key in ranked[:limit]]
+
+
+def _rank_sounds(index, query, available, limit=18):
+    query_text = str(query or "").casefold()
+    query_terms = _search_terms(query)
+    labels = index.get("sound_label") or {}
+    ranked = []
+    for key in available:
+        normalized = re.sub(r"[^a-z0-9]", "", str(key).casefold())
+        score = 0
+        for stem, evidence in _SOUND_EVIDENCE:
+            if stem in normalized and any(term.casefold() in query_text for term in evidence):
+                score += 8
+        overlap = query_terms & _search_terms((key, labels.get(key, {})))
+        score += sum(2 if len(term) >= 3 else 1 for term in overlap)
+        if score:
+            ranked.append((score, str(key).casefold(), key))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    return [key for _score, _folded, key in ranked[:limit]]
+
+
+def select_prompt_assets(index, source_text, usage_chain=None, *, context_text=""):
+    """Return a prompt-only index containing evidence-relevant scene assets.
+
+    Runtime validation still uses the complete index. This function performs
+    semantic retrieval; it does not truncate the resulting prompt by character
+    or token count.
+    """
+    from scene_asset_labeler import generator_background_keys
+
+    result = dict(index)
+    available_bgs = sorted(generator_background_keys(index))
+    available_sounds = list(index.get("sounds") or [])
+    planned_bgs, candidate_bgs = _planned_asset_keys(
+        usage_chain, {"background", "bg"}
+    )
+    planned_sounds, candidate_sounds = _planned_asset_keys(
+        usage_chain, {"sound", "se", "sfx"}
+    )
+    planned_context = _flatten_prompt_text(usage_chain or [])
+    query = " ".join((str(source_text or ""), planned_context))
+    stable_context = " ".join((planned_context, str(context_text or "")))
+
+    selected_bgs = []
+    for value in (
+        _explicit_asset_keys(source_text, {"bg"})
+        + planned_bgs + candidate_bgs
+        + _rank_backgrounds(
+            index, query, available_bgs, context_query=stable_context,
+        )
+    ):
+        key = _canonical_asset_key(value, available_bgs)
+        if key and key.casefold() not in {item.casefold() for item in selected_bgs}:
+            selected_bgs.append(key)
+
+    selected_sounds = []
+    for value in (
+        _explicit_asset_keys(source_text, {"se", "sound"})
+        + planned_sounds + candidate_sounds
+        + _rank_sounds(index, query, available_sounds)
+    ):
+        key = _canonical_asset_key(value, available_sounds)
+        if key and key.casefold() not in {item.casefold() for item in selected_sounds}:
+            selected_sounds.append(key)
+
+    bg_values = index.get("bg") or {}
+    result["bg"] = {key: bg_values.get(key, 0) for key in selected_bgs}
+    result["bg_label"] = {
+        key: _background_label(index, key) for key in selected_bgs
+    }
+    scene_labels = dict(index.get("scene_labels") or {})
+    scene_labels["background"] = {
+        key: _background_label(index, key) for key in selected_bgs
+    }
+    result["scene_labels"] = scene_labels
+    result["sounds"] = selected_sounds
+    sound_labels = index.get("sound_label") or {}
+    result["sound_label"] = {
+        key: sound_labels.get(key, {}) for key in selected_sounds
+    }
+    return result
+
+
+def _format_official_face_examples(face_examples, cast, cast_names):
+    if not face_examples:
+        return []
+    lines = [
+        "\n### 角色专属官方表情语境参考（只用于判断，不是命令模板）\n",
+        "这些是当前角色与 face 编号在官方语料中出现过的少量代表性语境。只参考‘什么语气/反应阶段适合该脸’，不要复制台词或命令。\n",
+    ]
+    for who in cast_names:
+        character = cast.get(who) or {}
+        ident = str(character.get("id") or "")
+        by_face = face_examples.get(ident) or {}
+        if not by_face:
+            continue
+        for face_id, examples in by_face.items():
+            formatted = []
+            for example in examples:
+                text = str(example.get("text") or "").strip()
+                value = f"‘{text}’" if text else "无对白反应拍"
+                extras = []
+                if example.get("emoticons"):
+                    extras.append("气泡=" + "/".join(str(item) for item in example["emoticons"]))
+                if example.get("actions"):
+                    extras.append("动作=" + "/".join(str(item) for item in example["actions"]))
+                if example.get("closeup"):
+                    extras.append("特写")
+                if extras:
+                    value += "（" + "、".join(extras) + "）"
+                formatted.append(value)
+            if formatted:
+                lines.append(f"- {who} face={face_id}：" + "；".join(formatted) + "\n")
+    return lines if len(lines) > 2 else []
+
+
+ACTION_RESOURCE_SEMANTICS = {
+    "greeting": "短促向下点动；只适合可见的点头、致意、接受或认真应允；不是通用说话手势，台词确认事实不自动等于点头，也不能冒充物件操作",
+    "falldownl": "向左倒下；只表达真实倒下",
+    "falldownr": "向右倒下；只表达真实倒下",
+    "stiff": "小幅僵动或颤抖；适合克制不安、受惊或身体发紧",
+    "shake": "大幅颤抖；适合明显失控、恐惧、痛苦或挣扎",
+    "jump": "单次跳动；通常承载较轻、较短的情绪重音，也可用于轻快位移中的一次跳动，例如突然震惊、反驳或突然自信",
+    "hophop": "连续多次跳动；比 jump 多跳一下或形成连跳，主要承载更重、更强烈的情感",
+}
+
+
+def _format_action_resource(value):
+    verb = str(value.get("verb") or "")
+    label = f"{verb}={value.get('cn') or ''}"
+    semantic = ACTION_RESOURCE_SEMANTICS.get(verb)
+    return f"{label}（{semantic}）" if semantic else label
+
+
+def build_resources(
+    idx, cast, cast_names, faces_by_id, face_examples=None, *,
+    dynamic_face_shortlists=False,
+):
     """按本章演员表裁剪过的资源清单。模型只看得到用得上的东西。"""
     import tables
     p = ["\n\n========== 本章可用资源 ==========\n", "\n### 角色与表情\n"]
+    character_records = {
+        str(record.get("identifier") or ""): record
+        for record in idx.get("characters", [])
+        if isinstance(record, dict) and record.get("identifier")
+    }
     for who in cast_names:
         c = cast[who]
         if c.get("narrator"):
@@ -460,7 +1688,17 @@ def build_resources(idx, cast, cast_names, faces_by_id):
             expression_parts = []
         options = [_face_option(face) for face in faces]
         options = [option for option in options if option]
-        if options:
+        if dynamic_face_shortlists and options:
+            p.append(
+                f"- {who} —— 当前装束下共 {len(options)} 个已验证语义表情；每个 TARGET 的完整可用 face "
+                "会由 FACE_SHORTLIST_BY_TARGET 按相关性排序提供，前部只是导演建议，不是审美限制；"
+                "台词行只能原样填写该行 candidate.choice；候选同时公开真实 face_id、完整 semantic 和 is_current；"
+                "无需换脸时留空。对白/旁白节点上同步的其他可见角色反应写入行级 reactions；"
+                "其中 face 只有在该反应角色的候选已明确提供时才填写。独立无对话框 beat/reactions 只有在 "
+                "SILENT_REACTION_SHORTLIST_BY_TARGET 提供候选时才可填写对应 candidate.choice，"
+                "否则 face 留空；禁止自行猜编号。\n"
+            )
+        elif options:
             tbl = "  ".join(options)
             p.append(f"- {who} —— {tbl}\n")
         else:
@@ -473,13 +1711,33 @@ def build_resources(idx, cast, cast_names, faces_by_id):
             )
             if semantic:
                 p.append(f"  语义部件：{semantic}；仅供理解，不能作为 faceId\n")
+        profile = c.get("portrait_layout")
+        if not isinstance(profile, dict):
+            profile = character_records.get(str(c.get("id") or ""), {}).get("portrait_layout")
+        if isinstance(profile, dict):
+            layout_bits = []
+            if profile.get("min_slot_gap"):
+                layout_bits.append(f"最小槽位间距={profile['min_slot_gap']}")
+            if profile.get("face_direction"):
+                layout_bits.append(f"立绘朝向={profile['face_direction']}")
+            if profile.get("visual_width"):
+                layout_bits.append(f"画面占宽={profile['visual_width']}")
+            if profile.get("has_weapon"):
+                layout_bits.append("携带宽幅武器")
+            if profile.get("has_wings"):
+                layout_bits.append("带宽幅翅膀")
+            if layout_bits:
+                p.append("  站位约束：" + "；".join(layout_bits) + "\n")
+
+    if not dynamic_face_shortlists:
+        p.extend(_format_official_face_examples(face_examples or {}, cast, cast_names))
 
     p.append("\n### 气泡 emo（填中文名即可；Chat/叽喳 = emoticon 1，不是动作）\n  ")
     p.append("  ".join(f"{v['cn']}" for _, v in
                        sorted(idx["enums"]["emoticon"].items(), key=lambda x: int(x[0]))
                        if v.get("cn")))
-    p.append("\n\n### 动作 act（jump = 6）\n  ")
-    p.append("  ".join(f"{v['verb']}={v['cn']}" for _, v in
+    p.append("\n\n### 动作 act（jump = 6；每项括号是资源语义，不是触发配方）\n  ")
+    p.append("  ".join(_format_action_resource(v) for _, v in
                        sorted(idx["enums"]["action"].items(), key=lambda x: int(x[0]))))
     p.append("\n\n### 人物效果 fx（可叠加位标记）\n  通讯  黑屏剪影  特写\n"
              "  同一角色可用 + 组合，例如「通讯+特写」；特写表示摄像机拉近，不替代站位或走位。")
@@ -492,10 +1750,11 @@ def build_resources(idx, cast, cast_names, faces_by_id):
         _labeled_asset(name, idx.get("sound_label", {}))
         for name in idx.get("sounds", [])
     ))
-    bgs = sorted(idx.get("bg", {}))
+    from scene_asset_labeler import generator_background_keys
+    bgs = sorted(generator_background_keys(idx))
     p.append(f"\n\n### 背景 bg（{len(bgs)} 个，只能从中选）\n  ")
     p.append("  ".join(
-        _labeled_asset(name, idx.get("bg_label", {}))
+        _scene_option(name, idx.get("bg_label", {}))
         for name in bgs
     ))
     p.append("\n  带“真实标识=中文说明”的条目，输出时只能填写等号左侧的真实标识。")
@@ -503,8 +1762,70 @@ def build_resources(idx, cast, cast_names, faces_by_id):
     return "".join(p)
 
 
-def build_system(idx, cast, cast_names, faces_by_id, *, story_type="auto"):
-    return build_rules(story_type) + build_resources(idx, cast, cast_names, faces_by_id)
+def select_repair_resources(resource_text, issue_codes=()):
+    """Keep only resource sections relevant to a scoped G2 repair.
+
+    The full static prompt remains the source of truth for normal execution.
+    A repair request is a local patch, so carrying every background and sound
+    name into a face-only repair needlessly competes with the target window.
+    Unknown issue codes intentionally fall back to the complete resource block.
+    """
+    text = str(resource_text or "")
+    marker = "========== 本章可用资源 =========="
+    start = text.find(marker)
+    if start < 0:
+        return text
+    prefix = text[:start]
+    block = text[start:]
+    sections = re.split(r"(?=\n### )", block)
+    if len(sections) <= 1:
+        return text
+    codes = {str(code or "").casefold() for code in issue_codes}
+    joined = " ".join(sorted(codes))
+    performance = any(token in joined for token in (
+        "performance", "face", "emo", "act", "fx", "reaction", "carrier",
+    ))
+    camera = any(token in joined for token in (
+        "camera", "shot", "pivot", "relay", "group", "visible", "position",
+        "reframe", "cut", "continuity",
+    ))
+    staging = any(token in joined for token in (
+        "reveal", "enter", "exit", "move", "transition", "background", "trans",
+    ))
+    if not (performance or camera or staging):
+        return text
+    keep = {"角色与表情"}
+    if performance:
+        keep.update({"气泡 emo", "动作 act", "人物效果 fx", "背景效果 bgfx"})
+    if camera:
+        keep.add("人物效果 fx")
+    if staging:
+        keep.update({"过渡 trans", "音效 se", "背景 bg"})
+    selected = [sections[0]]
+    for section in sections[1:]:
+        heading = next(
+            (line.strip() for line in section.splitlines() if line.strip()),
+            "",
+        ).lstrip("# ")
+        if any(heading.startswith(name) for name in keep):
+            selected.append(section)
+    # Retain the explicit marker even when all sections were filtered out.
+    return prefix + "".join(selected)
+
+
+def build_system(
+    idx, cast, cast_names, faces_by_id, *, story_type="auto", layout_mode="ai",
+    face_examples=None, dynamic_face_shortlists=False, planned_execution=False,
+):
+    return build_rules(
+        story_type,
+        layout_mode=layout_mode,
+        dynamic_face_shortlists=dynamic_face_shortlists,
+        planned_execution=planned_execution,
+    ) + build_resources(
+        idx, cast, cast_names, faces_by_id, face_examples=face_examples,
+        dynamic_face_shortlists=dynamic_face_shortlists,
+    )
 
 
 if __name__ == "__main__":

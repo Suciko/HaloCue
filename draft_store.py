@@ -213,6 +213,7 @@ class DraftStore:
         story_token: Optional[str] = None,
         bgm_policy: Optional[Dict[str, Any]] = None,
         annotation_status: Optional[Dict[str, Any]] = None,
+        annotation_trace: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """新建草稿目录并保存各真相源文件"""
         cast = cast if isinstance(cast, dict) else {}
@@ -229,6 +230,17 @@ class DraftStore:
             (draft_dir / "cast.json").write_text(
                 json.dumps(cast, ensure_ascii=False, indent=2), encoding="utf-8"
             )
+            if annotation_trace is not None:
+                if not isinstance(annotation_trace, dict):
+                    raise ValueError("annotation_trace must be an object")
+                if annotation_trace.get("annotated_source_sha256") != calc_sha256(text):
+                    raise ValueError("annotation_trace does not match annotated text")
+                if not isinstance(annotation_trace.get("lines"), list):
+                    raise ValueError("annotation_trace lines must be an array")
+                (draft_dir / "annotation_trace.json").write_text(
+                    json.dumps(annotation_trace, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
 
             source_map = create_source_map(source_content)
             with open(draft_dir / "source_map.json", "w", encoding="utf-8") as f:
@@ -680,6 +692,9 @@ class DraftStore:
                 raise KeyError(f"Card ID not found: {card_id}")
 
             session["draft_version"] += 1
+            session["annotation_override_accepted"] = not any(
+                card.get("review_state") == "pending" for card in identities_data
+            )
             # content_revision 保持不变！
 
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)
@@ -1133,12 +1148,24 @@ class DraftStore:
 
     def assert_review_ready(self, token: str, cast: Optional[Dict[str, Any]] = None):
         """检查草稿是否符合 review_ready 门控。未通过抛出 ReviewPendingError(code="review_pending")"""
-        self.assert_annotation_complete(token)
         draft = self.load_draft(token, cast=cast)
+        session = draft["session"]
+        annotation_status = normalize_annotation_status(session.get("annotation_status"))
         diagnostics = draft["diagnostics"]
         identities = draft["identities"]
 
         pending_count = sum(1 for c in identities if c.get("review_state") == "pending")
+        # A user who explicitly approves every card may compile a partial AI
+        # result.  This is an intentional review decision, not a silent bypass:
+        # the session keeps the partial annotation status for display/audit.
+        forced_review = bool(
+            session.get("annotation_override_accepted") or pending_count == 0
+        )
+        if (
+            (annotation_status["status"] != "complete" or annotation_status["pending_targets"] > 0)
+            and not forced_review
+        ):
+            raise AnnotationIncompleteError(annotation_status)
         blocking_errors = sum(1 for d in diagnostics if d.get("severity") == "error")
         unresolved_issues = sum(1 for d in diagnostics if d.get("severity") in ("error", "warning"))
 
@@ -1192,6 +1219,8 @@ class DraftStore:
                     card["review_state"] = "approved"
 
             session["draft_version"] += 1
+            if not any(card.get("review_state") == "pending" for card in identities_data):
+                session["annotation_override_accepted"] = True
 
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)
             identity_file.write_text(identity_json_str, encoding="utf-8")
@@ -1271,6 +1300,9 @@ class DraftStore:
             (draft_dir / "edited.txt").write_text(new_text, encoding="utf-8")
 
             session["draft_version"] += 1
+            session["annotation_override_accepted"] = not any(
+                card.get("review_state") == "pending" for card in identities_data
+            )
             session["content_revision"] += 1
 
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)

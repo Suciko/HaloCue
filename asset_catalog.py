@@ -109,19 +109,152 @@ def _stronger_face_visual_evidence(current: str, candidate: str) -> str:
     return current
 
 
+def _spine_outfit_aliases(spine: str) -> set[str]:
+    """Return exact AA naming aliases for one catalogued Spine path."""
+    base = str(spine or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if not base:
+        return set()
+    aliases = {base}
+    if base.endswith("_spr"):
+        aliases.add(f"CharacterSpine_{base[:-4]}")
+    if base.startswith("CharacterSpine_"):
+        aliases.add(f"{base[len('CharacterSpine_'):]}_spr")
+    return aliases
+
+
+def _unidentified_variant_owners(con) -> dict[tuple[str, str], str]:
+    """Resolve label batches that retained a skeleton identity but lost ident.
+
+    Batch discovery can find a real Spine bundle before the official character
+    catalogue has attached its AA identifier.  Re-association is allowed only
+    when the outfit naming convention points to exactly one catalogued ident;
+    ambiguous and unmatched batches remain isolated under the empty ident.
+    """
+    owners_by_outfit: dict[str, set[str]] = {}
+    for row in con.execute(
+        "SELECT ident,spine FROM character WHERE ident<>'' AND spine<>''"
+    ):
+        for alias in _spine_outfit_aliases(row["spine"]):
+            owners_by_outfit.setdefault(alias, set()).add(str(row["ident"]))
+
+    identified_outfits: dict[str, set[str]] = {}
+    for row in con.execute(
+        "SELECT ident,outfit_key FROM character_variant WHERE ident<>''"
+    ):
+        identified_outfits.setdefault(str(row["ident"]), set()).update(
+            _spine_outfit_aliases(row["outfit_key"])
+        )
+
+    resolved = {}
+    for row in con.execute(
+        """
+        SELECT DISTINCT spine_signature,outfit_key
+        FROM character_variant
+        WHERE ident=''
+        """
+    ):
+        owners = owners_by_outfit.get(str(row["outfit_key"]), set())
+        if len(owners) == 1:
+            owner = next(iter(owners))
+            if _spine_outfit_aliases(row["outfit_key"]) & identified_outfits.get(
+                owner, set()
+            ):
+                continue
+            resolved[(str(row["spine_signature"]), str(row["outfit_key"]))] = next(
+                iter(owners)
+            )
+    return resolved
+
+
 def _face_capabilities(con) -> dict[str, list[dict]]:
+    unidentified_owners = _unidentified_variant_owners(con)
+
+    def effective_ident(ident: object, signature: object, outfit: object) -> str:
+        value = str(ident or "")
+        if value:
+            return value
+        return unidentified_owners.get((str(signature or ""), str(outfit or "")), "")
+
     variants: dict[tuple[str, str, str], dict] = {}
+    effective_visual_rows = assetdb.effective_visual_label_rows(con)
+
+    def optional_row_value(row, field: str, default=""):
+        """Read columns introduced after the first labelled-DB schema.
+
+        Explicit overlay databases are intentionally opened read-only, so we
+        cannot migrate them in place.  Missing optional provenance columns
+        therefore carry their neutral value while the original semantic face
+        labels remain usable.
+        """
+        try:
+            return row[field]
+        except (IndexError, KeyError):
+            return default
+
     selected_visual = {
         (
             str(row["ident"]), str(row["spine_signature"]),
             str(row["outfit_key"]), str(row["face_id"]),
         ): str(row["model"])
-        for row in assetdb.effective_visual_label_rows(con)
+        for row in effective_visual_rows
     }
+    selected_manual = {
+        (
+            str(row["ident"]), str(row["spine_signature"]),
+            str(row["outfit_key"]), str(row["face_id"]),
+        ): normalize_semantic_payload(_safe_metadata(row["manual_json"]))
+        for row in effective_visual_rows
+    }
+    selected_backend = {
+        (
+            str(row["ident"]), str(row["spine_signature"]),
+            str(row["outfit_key"]), str(row["face_id"]),
+        ): _safe_metadata(optional_row_value(row, "backend_json", "{}"))
+        for row in effective_visual_rows
+    }
+    selected_visual_traits = {}
+    for row in effective_visual_rows:
+        source_key = (
+            str(row["ident"]), str(row["spine_signature"]),
+            str(row["outfit_key"]), str(row["face_id"]),
+        )
+        manual = _safe_metadata(row["manual_json"])
+        observation = _safe_metadata(optional_row_value(row, "observation_json", "{}"))
+        manual_visual = manual.get("visual_facts")
+        if isinstance(manual_visual, dict):
+            observation = {**observation, **manual_visual}
+        blush_level = str(observation.get("blush_level") or "").strip()
+        tears_level = str(observation.get("tears_level") or "").strip()
+        manual_blush = manual.get("blush") if "blush" in manual else None
+        manual_tears = manual.get("tears") if "tears" in manual else None
+        selected_visual_traits[source_key] = {
+            "eyes": str(manual.get("eyes", row["eyes"] or "")).strip(),
+            "brows": str(manual.get("brows", row["brows"] or "")).strip(),
+            "mouth": str(manual.get("mouth", row["mouth"] or "")).strip(),
+            "blush": bool(manual_blush) if manual_blush is not None else (
+                blush_level in {"expressive", "strong"}
+            ),
+            "tears": bool(manual_tears) if manual_tears is not None else (
+                tears_level in {"watery_eyes", "tear_drop", "streaming"}
+            ),
+            "eye_openness": str(observation.get("eye_openness") or "").strip(),
+            "iris_color": str(observation.get("iris_color") or "").strip(),
+            "eye_effect": str(observation.get("eye_effect") or "").strip(),
+            "mouth_openness": str(observation.get("mouth_openness") or "").strip(),
+            "blush_level": blush_level,
+            "tears_level": tears_level,
+            "sweat_level": str(observation.get("sweat_level") or "").strip(),
+            "face_shadow": str(observation.get("face_shadow") or "").strip(),
+        }
     for row in con.execute(
         "SELECT ident,spine_signature,outfit_key,spine FROM character_variant"
     ):
-        variants[(row["ident"], row["spine_signature"], row["outfit_key"])] = {
+        key = (
+            effective_ident(row["ident"], row["spine_signature"], row["outfit_key"]),
+            row["spine_signature"],
+            row["outfit_key"],
+        )
+        variants[key] = {
             "spine_signature": row["spine_signature"], "outfit_key": row["outfit_key"],
             "spine": row["spine"], "faces": {},
         }
@@ -138,7 +271,12 @@ def _face_capabilities(con) -> dict[str, list[dict]]:
           END
         """
     ):
-        key = (row["ident"], row["spine_signature"], row["outfit_key"])
+        source_key = (row["ident"], row["spine_signature"], row["outfit_key"])
+        key = (
+            effective_ident(row["ident"], row["spine_signature"], row["outfit_key"]),
+            row["spine_signature"],
+            row["outfit_key"],
+        )
         variant = variants.setdefault(key, {
             "spine_signature": row["spine_signature"], "outfit_key": row["outfit_key"],
             "spine": "", "faces": {},
@@ -150,7 +288,7 @@ def _face_capabilities(con) -> dict[str, list[dict]]:
             "visual_evidence": "unknown",
         })
         source = str(row["source"])
-        selected_model = selected_visual.get((*key, str(row["face_id"])))
+        selected_model = selected_visual.get((*source_key, str(row["face_id"])))
         active_vision = not source.startswith("vision:") or source == f"vision:{selected_model}"
         face["sources"].append(source)
         face["observed_count"] += row["observed_count"] or 0
@@ -170,10 +308,40 @@ def _face_capabilities(con) -> dict[str, list[dict]]:
                 rich = {}
             if isinstance(rich, dict):
                 rich = normalize_semantic_payload(rich)
+                rich.update(selected_manual.get((*source_key, str(row["face_id"])), {}))
+                backend = selected_backend.get(
+                    (*source_key, str(row["face_id"])),
+                    rich.get("backend_resolution"),
+                )
+                if isinstance(backend, dict):
+                    face["backend_selection_ready"] = bool(
+                        backend.get("selection_ready", True)
+                    )
+                    face["backend_review_required"] = bool(
+                        backend.get("review_required")
+                    )
+                    face["backend_review_flags"] = [
+                        str(value) for value in backend.get("review_flags") or []
+                        if str(value).strip()
+                    ]
+                    selection_profile = backend.get("selection_profile")
+                    if isinstance(selection_profile, dict):
+                        for field in (
+                            "delivery_fit", "usage_frequency", "intensity",
+                            "expression_class", "semantic_confidence", "semantic_tags",
+                            "semantic_modes",
+                        ):
+                            if field in selection_profile:
+                                face[field] = selection_profile[field]
+                    official_evidence = backend.get("official_evidence")
+                    if isinstance(official_evidence, dict):
+                        face["official_usage_profile"] = official_evidence
                 fields = (
                     "emotion_family", "intensity", "expression_class", "beat_fit",
                     "hold_policy", "search_terms_cn", "near_duplicate_of",
-                    "avoid_when_cn",
+                    "avoid_when_cn", "delivery_fit", "usage_frequency",
+                    "semantic_confidence", "semantic_tags",
+                    "semantic_modes",
                 )
                 for field in fields:
                     if field in rich:
@@ -183,6 +351,11 @@ def _face_capabilities(con) -> dict[str, list[dict]]:
                 for field in ("primary_emotion", "usage_hint_cn", "confidence"):
                     if field in rich:
                         face[field] = rich[field]
+                for field, value in selected_visual_traits.get(
+                    (*source_key, str(row["face_id"])), {}
+                ).items():
+                    if value not in ("", False):
+                        face[field] = value
                 face["active_label_model"] = selected_model
         if (
             (source == "spine_semantic" or (source.startswith("vision:") and active_vision))
@@ -214,6 +387,180 @@ def _union_faces(existing: list[dict], capabilities: list[dict]) -> list[dict]:
                 "cn": face.get("cn", ""),
             })
     return [faces[key] for key in sorted(faces)]
+
+
+def merge_face_capabilities(index: dict, con) -> dict:
+    """Overlay the authoritative database face semantics on a JSON index.
+
+    The JSON catalogue remains the compatibility/resource index, while the
+    database can be labelled later and therefore owns the latest face meaning.
+    Identities with no database evidence keep their legacy catalogue records.
+    """
+    merged = copy.deepcopy(index)
+    merged.setdefault("characters", [])
+    evidence_capabilities = _face_capabilities(con)
+    merged_capabilities = copy.deepcopy(merged.get("face_capabilities") or {})
+
+    # A frozen 0.95 install may keep an older writable resource index while
+    # the current labelled database is supplied as a read-only overlay.  The
+    # character table is still authoritative for real selectable identities,
+    # so add missing rows before attaching their face semantics.  This keeps
+    # normal official characters available without rewriting user state.
+    known_characters = {
+        str(row.get("identifier") or "") for row in merged["characters"]
+    }
+    try:
+        character_rows = con.execute(
+            "SELECT ident,name,club,spine,avatar,source FROM character "
+            "WHERE NULLIF(TRIM(name), '') IS NOT NULL"
+        ).fetchall()
+    except Exception:
+        character_rows = []
+    for row in character_rows:
+        ident = str(row["ident"] or "").strip()
+        name = str(row["name"] or "").strip()
+        if not ident or not name or assetdb._looks_placeholder(name) or ident in known_characters:
+            continue
+        try:
+            face_rows = con.execute(
+                "SELECT face_id,raw,label,label_cn FROM face WHERE ident=? ORDER BY face_id",
+                (ident,),
+            ).fetchall()
+        except Exception:
+            face_rows = []
+        merged["characters"].append({
+            "identifier": ident,
+            "name": name,
+            "club": str(row["club"] or ""),
+            "spine": str(row["spine"] or ""),
+            "avatar": str(row["avatar"] or ""),
+            "source": str(row["source"] or ""),
+            "faces": [
+                {
+                    "id": str(face["face_id"]),
+                    "raw": str(face["raw"] or face["face_id"]),
+                    "label": str(face["label"] or ""),
+                    "cn": str(face["label_cn"] or ""),
+                }
+                for face in face_rows
+            ],
+        })
+        known_characters.add(ident)
+
+    def merge_variants(*groups):
+        variants = {}
+        for group in groups:
+            for variant in group or ():
+                key = (
+                    str(variant.get("spine_signature") or ""),
+                    str(variant.get("outfit_key") or ""),
+                )
+                variants[key] = copy.deepcopy(variant)
+        return [variants[key] for key in sorted(variants)]
+
+    for ident, capabilities in evidence_capabilities.items():
+        if ident and capabilities:
+            merged_capabilities[ident] = merge_variants(
+                merged_capabilities.get(ident, []), capabilities
+            )
+
+    for character in merged["characters"]:
+        ident = str(character.get("identifier") or "")
+        if not ident:
+            continue
+        capabilities = merge_variants(
+            merged_capabilities.get(ident, []),
+            character.get("face_capabilities", []),
+            evidence_capabilities.get(ident, []),
+        )
+        if not capabilities:
+            continue
+        character["face_capabilities"] = capabilities
+        character["faces"] = _union_faces(character.get("faces", []), capabilities)
+        merged_capabilities[ident] = capabilities
+
+    merged["face_capabilities"] = merged_capabilities
+    return merged
+
+
+def merge_scene_capabilities(index: dict, con) -> dict:
+    """Overlay labelled background facts from one read-only asset database.
+
+    The JSON resource index is still the runtime catalogue.  This helper only
+    fills missing keys/labels so the first database in an overlay list remains
+    authoritative when two sources describe the same AA asset differently.
+    It deliberately reads through the effective scene-label selector and never
+    migrates or writes the supplied connection.
+    """
+    merged = copy.deepcopy(index)
+    merged.setdefault("bg", {})
+    merged.setdefault("bg_label", {})
+    merged.setdefault("scene_labels", {})
+    merged["scene_labels"].setdefault("background", {})
+    merged["scene_labels"].setdefault("popup", {})
+    merged.setdefault("sounds", [])
+    merged.setdefault("sound_label", {})
+
+    def existing_key(mapping, key):
+        folded = str(key).casefold()
+        for candidate in mapping:
+            if str(candidate).casefold() == folded:
+                return candidate
+        return None
+
+    for row in con.execute(
+        "SELECT name,hash,label,place,time,mood,tags FROM bg ORDER BY name"
+    ):
+        name = str(row["name"] or "").strip()
+        if not name:
+            continue
+        current = existing_key(merged["bg"], name)
+        # A semantic DB cannot introduce a new generator resource: the JSON
+        # index and preview/resource resolver remain the authority for files
+        # that actually exist.  It may only enrich an already indexed key.
+        if current is not None and merged["bg"].get(current) in (None, "", 0) and row["hash"] not in (None, ""):
+            merged["bg"][current] = row["hash"]
+        fallback = {
+            field: row[field] or ""
+            for field in ("label", "place", "time", "mood", "tags")
+        }
+        label_key = existing_key(merged["bg_label"], name)
+        if current is not None and label_key is None and any(fallback.values()):
+            merged["bg_label"][name] = fallback
+
+    for row in con.execute("SELECT name,label FROM sound ORDER BY name"):
+        name = str(row["name"] or "").strip()
+        if not name:
+            continue
+        if not any(str(item).casefold() == name.casefold() for item in merged["sounds"]):
+            continue
+        if row["label"]:
+            key = existing_key(merged["sound_label"], name)
+            if key is None:
+                merged["sound_label"][name] = row["label"]
+
+    # Importing here avoids a module cycle: scene_asset_labeler uses assetdb,
+    # while asset_catalog is imported by the annotation path.
+    from scene_asset_labeler import scene_label_from_row
+    for row in assetdb.effective_scene_label_rows(con):
+        if row["status"] not in {"ready", "manual_locked"}:
+            continue
+        channel = str(row["resource_channel"] or "")
+        if channel not in {"background", "popup"}:
+            continue
+        record = scene_label_from_row(row)
+        target = merged["scene_labels"].setdefault(channel, {})
+        if channel == "background" and existing_key(merged["bg"], record["asset_key"]) is None:
+            continue
+        key = existing_key(target, record["asset_key"])
+        if key is None:
+            target[record["asset_key"]] = record
+        # Keep legacy bg_label in sync for prompt retrieval.
+        if channel == "background":
+            label_key = existing_key(merged["bg_label"], record["asset_key"])
+            if label_key is None:
+                merged["bg_label"][record["asset_key"]] = record
+    return merged
 
 
 def _metadata_face_capabilities(metadata: dict) -> list[dict]:
@@ -1069,11 +1416,19 @@ def merge_model_constraints(index: dict, con, *, scope: str) -> dict:
     merged.setdefault("sounds", [])
     merged.setdefault("sound_label", {})
     merged.setdefault("characters", [])
+    custom_asset_keys = merged.setdefault("custom_asset_keys", {})
+    known_custom_backgrounds = {
+        str(name)
+        for name in custom_asset_keys.get("backgrounds", [])
+        if str(name or "").strip()
+    }
 
     for name, record in custom["backgrounds"].items():
         merged["bg"][name] = record["aa_key"]
+        known_custom_backgrounds.add(name)
         if record.get("labels"):
             merged["bg_label"][name] = record["labels"]
+    custom_asset_keys["backgrounds"] = sorted(known_custom_backgrounds)
     known_sounds = set(merged["sounds"])
     for record in custom["sounds"].values():
         key = str(record["aa_key"])
@@ -1085,12 +1440,27 @@ def merge_model_constraints(index: dict, con, *, scope: str) -> dict:
     known_characters = {
         str(record.get("identifier", "")) for record in merged["characters"]
     }
-    custom_capabilities = {
-        record["identifier"]: record.get("face_capabilities", [])
-        for record in custom["characters"]
-    }
+    merged.setdefault("face_capabilities", {})
     for record in custom["characters"]:
         if record["identifier"] in known_characters:
+            existing = merged["face_capabilities"].setdefault(
+                record["identifier"], []
+            )
+            known_variants = {
+                (
+                    str(variant.get("spine_signature") or ""),
+                    str(variant.get("outfit_key") or ""),
+                )
+                for variant in existing
+            }
+            for variant in record.get("face_capabilities", []):
+                key = (
+                    str(variant.get("spine_signature") or ""),
+                    str(variant.get("outfit_key") or ""),
+                )
+                if key not in known_variants:
+                    existing.append(copy.deepcopy(variant))
+                    known_variants.add(key)
             continue
         merged["characters"].append(
             {
@@ -1110,19 +1480,4 @@ def merge_model_constraints(index: dict, con, *, scope: str) -> dict:
             }
         )
         known_characters.add(record["identifier"])
-    evidence_capabilities = _face_capabilities(con)
-    merged_capabilities = {}
-    for character in merged["characters"]:
-        capabilities = (
-            evidence_capabilities.get(character.get("identifier"), [])
-            or character.get("face_capabilities", [])
-            or custom_capabilities.get(character.get("identifier"), [])
-        )
-        if not capabilities:
-            continue
-        character["face_capabilities"] = capabilities
-        character["faces"] = _union_faces(character.get("faces", []), capabilities)
-        merged_capabilities[character["identifier"]] = capabilities
-    if merged_capabilities:
-        merged["face_capabilities"] = merged_capabilities
-    return merged
+    return merge_face_capabilities(merged, con)

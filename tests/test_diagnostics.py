@@ -56,7 +56,7 @@ def test_blank_node_is_reported_but_separator_is_not():
 
 
 def test_camera_and_command_aliases_are_known_to_document_diagnostics():
-    commands = ("camera", "camera_hold", "music", "sound")
+    commands = ("camera", "camera_hold", "layout", "music", "sound")
     nodes = [
         DocNode(kind="dir", raw=f"@{command} value", line_no=index,
                 fields={"cmd": command, "arg": "value"})

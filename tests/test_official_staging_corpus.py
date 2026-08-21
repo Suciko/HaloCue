@@ -78,6 +78,35 @@ def test_extract_row_keeps_raw_fields_and_resource_resolution(tmp_path):
     assert record["has_staging"] is True
 
 
+def test_extract_row_separates_dialogue_speakers_from_silent_staging_characters(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / "ExcelDB").mkdir(parents=True)
+    record = OfficialStagingExtractor(repo).extract_row(
+        {
+            "group_id": 31070,
+            "script_kr": "5;아즈사;02\n1;하나코;03;이건 대화야.\n#5;closeup\n#1;wait;5000",
+            "text_tw": "这是一句对白。",
+        },
+        "ExcelDB/ScenarioScriptExcel_0.json", 0, 0, 0,
+    )
+    assert record["speakers"] == ["하나코"]
+    assert record["dialogue_speakers"] == ["하나코"]
+    assert record["declared_character_names"] == ["아즈사", "하나코"]
+    assert [item["character_name_kr"] for item in record["staged_characters"]] == ["아즈사", "하나코"]
+
+
+def test_extract_row_classifies_localized_screen_text_without_character_dialogue(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / "ExcelDB").mkdir(parents=True)
+    record = OfficialStagingExtractor(repo).extract_row(
+        {"group_id": 9, "script_kr": "", "text_tw": "[ns]「感觉不错呢。」"},
+        "ExcelDB/ScenarioScriptExcel_0.json", 0, 0, 0,
+    )
+    assert record["speakers"] == []
+    assert record["semantic_kind"] == "screen_text"
+    assert record["screen_text_events"][0]["screen_text_raw"] == "[ns]「感觉不错呢。」"
+
+
 def test_extract_corpus_writes_shards_and_manifest(tmp_path):
     repo = tmp_path / "repo"
     excel = repo / "ExcelDB"

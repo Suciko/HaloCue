@@ -158,6 +158,23 @@ def test_openai_plain_403_is_not_misclassified_as_quota(monkeypatch):
     assert raised.value.retryable is False
 
 
+def test_openai_location_restriction_is_non_retryable_access_error(monkeypatch):
+    payload = json.dumps({"error": {
+        "message": "User location is not supported for the API use.",
+    }}).encode("utf-8")
+
+    def fake_urlopen(_request, timeout):
+        raise HTTPError("https://example.invalid/v1/chat/completions", 400, "Bad Request", {}, io.BytesIO(payload))
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen, raising=False)
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "region-model"})
+
+    with pytest.raises(llm.ModelAccessError) as raised:
+        provider._request_json("/chat/completions", {"model": "region-model"})
+
+    assert raised.value.retryable is False
+
+
 def test_openai_503_is_a_retryable_service_failure(monkeypatch):
     payload = json.dumps({"error": {"message": "Service temporarily unavailable"}}).encode("utf-8")
 

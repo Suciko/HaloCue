@@ -80,6 +80,8 @@ python -X utf8 batch_label_spine_faces.py run --force-vision
 也可以双击 `运行全角色表情自动标注.cmd`。任务按骨骼落库并持续写
 `out/spine-face-batch/report.json`；中断后重新运行会复用渲染缓存和完整模型标注。
 人工修订保存在独立覆盖字段中，AI 重跑不会覆盖人工确认结果。
+新标注版本默认不会自动成为运行时 active model。完成审计后，只有整批无失败、无缺图时
+才可显式追加 `--activate-on-complete`；不完整批次会保留原 active model。
 
 首次使用公开源码仓库时，先双击 `安装Spine网页渲染运行时.cmd`。安装器会从官方 npm
 包下载固定版本并校验摘要。Spine Runtimes 使用单独许可证；请阅读安装器保存的许可证并
@@ -327,6 +329,21 @@ python prepare_release.py -o ../release    # 打包
 
 **核心原则：传代码和知识，不传素材和作品。**
 `overrides/` 下 313 MB 的背景/立绘/CG/音效是 Nexon / Yostar 的版权素材，一律不上传。
+
+### 0.95 统一发布包
+
+当前 0.95 发布包可以直接包含提示词导演链路、背景分类与搜索、全量表情语义，
+以及路径清理后的标注数据库。数据库只含资源名称和文字标注，不含游戏图片、音频、
+Spine 骨骼或大型插件；包内配置使用相对路径，不带本机 AA 路径。
+
+```powershell
+python prepare_release.py --release-095 -o ..\release-output\0.95
+python build_desktop_release.py --output-parent ..\发布包
+```
+
+正式用户版本是后一条命令生成的 `HaloCue-0.95-windows-x64` WebView2 桌面便携包，
+入口为 `HaloCue.exe`，无需预装 Python。发布包仍要求使用者自备 AzureArchive 和模型
+接口配置；0.95 统一使用同一个发布包，不再区分公有包和私有包。
 
 ---
 

@@ -387,9 +387,13 @@ def test_legacy_build_worker_forwards_story_type_to_annotator(tmp_path, monkeypa
     webui.run_build({
         "script": str(source), "project": "旧入口测试", "mapping": {},
         "annotate": True, "story_type": "event",
+        "usage_chain": [{"segment": "开场", "needs": []}],
     })
 
     assert captured["options"]["story_type"] == "event"
+    assert captured["options"]["usage_chain"] == [{"segment": "开场", "needs": []}]
+    assert captured["options"]["agent_enabled"] is True
+    assert captured["options"]["scene_event_planning"] is True
 
 
 def test_annotate_worker_can_create_review_draft_without_calling_model(tmp_path, monkeypatch):
@@ -640,7 +644,109 @@ def test_partial_annotation_draft_is_visible_and_blocked_from_compile(tmp_path, 
             "expected_draft_version": detail["draft_version"],
         })
         assert status == 409
-        assert result["code"] == "annotation_incomplete"
+        # All cards were explicitly approved, so the annotation gate is
+        # bypassed; the remaining actor-binding errors still block compile.
+        assert result["code"] == "review_pending"
+
+
+def test_explicitly_approved_partial_draft_passes_annotation_gate(tmp_path):
+    store = DraftStore(base_dir=tmp_path / "drafts")
+    token = "partial-approved"
+    store.create_draft(
+        token=token,
+        text="凯伊: 你好\n",
+        project="部分结果已接受",
+        cast={"cast": {"凯伊": {"id": "kai", "portrait": True}}},
+        annotation_status={
+            "status": "partial", "completed_targets": 0,
+            "total_targets": 1, "pending_targets": 1,
+        },
+    )
+    draft = store.load_draft(token)
+    store.batch_approve_reviews(
+        token=token, card_ids=None,
+        expected_draft_version=draft["session"]["draft_version"],
+    )
+    session_path = store.get_draft_path(token) / "session.json"
+    legacy_session = json.loads(session_path.read_text(encoding="utf-8"))
+    legacy_session.pop("annotation_override_accepted", None)
+    session_path.write_text(
+        json.dumps(legacy_session, ensure_ascii=False, indent=2), encoding="utf-8",
+    )
+    assert store.assert_review_ready(token) is True
+    detail = webui.get_draft_detail_data(token, store=store)
+    assert detail["annotation_override_accepted"] is True
+    assert detail["counts"]["pending"] == 0
+    assert detail["counts"]["blocking_errors"] == 0
+    annotation_issue = next(
+        item for item in detail["diagnostics"]
+        if item["code"] == "annotation_incomplete"
+    )
+    assert annotation_issue["severity"] == "info"
+
+
+def test_validate_uses_non_blocking_status_for_accepted_partial_draft(
+    tmp_path, monkeypatch
+):
+    with draft_server(tmp_path, monkeypatch) as (base, drafts_dir):
+        store = DraftStore(base_dir=drafts_dir)
+        token = "partial-validate-accepted"
+        store.create_draft(
+            token=token,
+            text="凯伊: 你好\n",
+            project="部分结果校验",
+            cast={"cast": {"凯伊": {"id": "kai", "portrait": True}}},
+            annotation_status={
+                "status": "partial", "completed_targets": 0,
+                "total_targets": 1, "pending_targets": 1,
+            },
+        )
+        draft = store.load_draft(token)
+        store.batch_approve_reviews(
+            token=token,
+            card_ids=None,
+            expected_draft_version=draft["session"]["draft_version"],
+        )
+
+        status, result = req(base, "/api/validate", {"token": token})
+        assert status == 200
+        assert result["blocking_errors"] == 0
+        issue = next(
+            item for item in result["diagnostics"]
+            if item["code"] == "annotation_incomplete"
+        )
+        assert issue["severity"] == "info"
+
+
+def test_compile_returns_json_when_snapshot_review_state_changes(
+    tmp_path, monkeypatch
+):
+    with draft_server(tmp_path, monkeypatch) as (base, drafts_dir):
+        store = DraftStore(base_dir=drafts_dir)
+        token = make_draft(drafts_dir, "旁白: 已确认\n", token="compile-race")
+        draft = store.load_draft(token)
+        store.batch_approve_reviews(
+            token=token,
+            card_ids=None,
+            expected_draft_version=draft["session"]["draft_version"],
+        )
+
+        class RaceManager:
+            def __init__(self, store):
+                self.store = store
+
+            def create_compile_snapshot(self, token, expected_draft_version):
+                raise webui.ReviewPendingError(
+                    "review changed during snapshot", code="review_pending"
+                )
+
+        monkeypatch.setattr(webui, "BuildBundleManager", RaceManager)
+        status, result = req(base, "/api/compile", {
+            "token": token,
+            "expected_draft_version": 2,
+        })
+        assert status == 409
+        assert result["code"] == "review_pending"
 
 
 def test_install_options_and_confirmed_name_are_forwarded_through_http(

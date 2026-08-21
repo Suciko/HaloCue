@@ -116,6 +116,10 @@ def _provider_http_error(model: str, status: int, message: str, formatted: str) 
         return ModelAuthenticationError(formatted, **kwargs)
     if status == 403:
         return ModelAccessError(formatted, **kwargs)
+    if status == 400 and any(marker in normalized for marker in (
+        "location is not supported", "failed_precondition",
+    )):
+        return ModelAccessError(formatted, **kwargs)
     if status == 429:
         return ModelRateLimitError(formatted, **kwargs)
     if status in {408, 504, 524}:
@@ -301,6 +305,7 @@ class Provider:
     def complete_json_stream(
         self, static_system, volatile_system, user, schema, *, on_activity=None,
     ):
+        before_stats = dict(self.stats or {})
         started_ms = int(time.time() * 1000)
         _emit_activity(
             on_activity,
@@ -313,6 +318,7 @@ class Provider:
             finish_reason="",
         )
         result = self.complete_json(static_system, volatile_system, user, schema)
+        after_stats = dict(self.stats or {})
         _emit_activity(
             on_activity,
             "completed",
@@ -322,6 +328,8 @@ class Provider:
             first_delta_ms=None,
             received_chars=0,
             finish_reason="unknown",
+            input_tokens=max(0, int(after_stats.get("in", 0) or 0) - int(before_stats.get("in", 0) or 0)),
+            output_tokens=max(0, int(after_stats.get("out", 0) or 0) - int(before_stats.get("out", 0) or 0)),
         )
         return result
 
@@ -580,6 +588,23 @@ class AnthropicProvider(Provider):
         finish_reason = str(getattr(msg, "stop_reason", "") or "unknown")
         text = "".join(chunks)
         reasoning_text = self._record_anthropic_response(msg, text=text, finish_reason=finish_reason)
+        usage_record = self.request_records[-1] if self.request_records else {}
+        _emit_activity(
+            on_activity,
+            "usage",
+            model=self.model,
+            request_started_at_ms=started_ms,
+            elapsed_ms=max(0, int(time.time() * 1000) - started_ms),
+            first_delta_ms=first_delta_ms,
+            received_chars=received_chars,
+            reasoning_chars=len(reasoning_text),
+            content_chars=received_chars,
+            finish_reason=finish_reason,
+            input_tokens=usage_record.get("input_tokens"),
+            output_tokens=usage_record.get("output_tokens"),
+            reasoning_tokens=usage_record.get("reasoning_tokens"),
+            cache_read_tokens=usage_record.get("cache_read_tokens"),
+        )
         if not text.strip():
             raise EmptyModelResponseError(
                 f"Anthropic 调用返回了空文本（finish_reason={finish_reason}）",
@@ -987,6 +1012,25 @@ class OpenAIProvider(Provider):
                 "finish_reason": finish_reason,
             },
         )
+        usage_record = self.request_records[-1] if self.request_records else {}
+        _emit_activity(
+            activity["callback"], "usage",
+            model=self.model,
+            request_started_at_ms=started_ms,
+            elapsed_ms=max(0, int((time.monotonic() - started_monotonic) * 1000)),
+            first_delta_ms=activity["first_delta_ms"],
+            first_reasoning_ms=first_reasoning_ms,
+            first_content_ms=first_content_ms,
+            received_chars=activity["received_chars"],
+            reasoning_chars=reasoning_chars,
+            content_chars=activity["received_chars"],
+            finish_reason=finish_reason,
+            input_tokens=usage_record.get("input_tokens"),
+            output_tokens=usage_record.get("output_tokens"),
+            reasoning_tokens=usage_record.get("reasoning_tokens"),
+            cache_read_tokens=usage_record.get("cache_read_tokens"),
+            uncached_input_tokens=usage_record.get("uncached_input_tokens"),
+        )
         if reasoning_chars:
             self._append_reasoning_record({
                 "request_index": int(self.stats.get("calls") or 0),
@@ -1171,6 +1215,11 @@ class OpenAIProvider(Provider):
             reasoning_chars=activity.get("reasoning_chars", 0),
             content_chars=activity.get("content_chars", 0),
             finish_reason=getattr(self, "_last_finish_reason", "unknown"),
+            input_tokens=(self.request_records[-1].get("input_tokens") if self.request_records else None),
+            output_tokens=(self.request_records[-1].get("output_tokens") if self.request_records else None),
+            reasoning_tokens=(self.request_records[-1].get("reasoning_tokens") if self.request_records else None),
+            cache_read_tokens=(self.request_records[-1].get("cache_read_tokens") if self.request_records else None),
+            uncached_input_tokens=(self.request_records[-1].get("uncached_input_tokens") if self.request_records else None),
         )
         return result
 
@@ -1235,7 +1284,7 @@ class OpenAIProvider(Provider):
 
 # ---------------------------------------------------------------- 假货（不花钱跑通链路）
 class MockProvider(Provider):
-    """不联网。按行号轮换标注，只用来验证管线是否通畅。"""
+    """不联网。返回无演出标注，只用来验证管线是否通畅。"""
     name = "mock"
 
     def __init__(self, cfg, preset_response=None):
@@ -1272,17 +1321,14 @@ class MockProvider(Provider):
             self.stats["in"] += len(static_system) // 3
             self.stats["out"] += len(rows) * 20
             return {"lines": rows, "state_delta": {}, "memory_events": []}
-        faces = _re.findall(r"^\s{0,2}(\d\d)=", static_system, _re.M) or ["00", "01", "03"]
         rows = []
         for m in _re.finditer(r"^\[(\d+)\]\s*([^:：]+)[:：]", user, _re.M):
             i = int(m.group(1))
-            rows.append({"i": i, "face": faces[i % len(faces)],
-                         "emo": "[!]" if i % 7 == 3 else "",
-                         "act": "jump" if i % 11 == 5 else "",
-                         "fx": "特写" if i % 17 == 8 else "",
-                         "se": "", "wait": 1500 if i % 13 == 9 else 0, "bg": "",
-                         "place": "", "shake": i % 29 == 12,
-                         "move": (i % 5) + 1 if i % 19 == 7 else 0})
+            rows.append({
+                "i": i, "face": "", "emo": "", "act": "", "fx": "",
+                "se": "", "wait": 0, "bg": "", "place": "",
+                "shake": False, "move": 0,
+            })
         self.stats["calls"] += 1
         self.stats["in"] += len(static_system) // 3
         self.stats["out"] += len(rows) * 20

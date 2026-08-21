@@ -8,6 +8,20 @@ import re
 FX_PARTS = frozenset({"通讯", "黑屏剪影", "特写"})
 RESOURCE_FIELDS = ("face", "emo", "act", "fx", "se", "bg")
 CONTINUITY_RESOURCE_FIELDS = ("face", "emo", "act", "fx", "bgfx")
+EMOTICON_ALIASES = {
+    "reaction": "反应",
+    "exclaim": "惊叹",
+    "steam": "冒烟",
+    "chat": "叽喳",
+    "question": "疑问",
+    "dot": "沉默",
+}
+
+
+def normalize_emoticon(value):
+    """Return the canonical resource token for a documented emoticon alias."""
+    text = str(value or "").strip()
+    return EMOTICON_ALIASES.get(text.strip("[]{}").casefold(), text)
 
 
 def is_face_allowed(allow, face):
@@ -73,8 +87,9 @@ def filter_annotation_row(row, item, character, constraints, *, include_details=
                 dropped.append(msg)
                 rejected_details.append({"field": field, "value": value, "reason": msg})
         elif field == "emo":
-            if value in constraints["ok_emo"]:
-                clean[field] = constraints["sym2cn"].get(value, value)
+            normalized = normalize_emoticon(value)
+            if normalized in constraints["ok_emo"]:
+                clean[field] = constraints["sym2cn"].get(normalized, normalized)
             else:
                 msg = f"未知气泡 {value}"
                 dropped.append(msg)
@@ -86,7 +101,9 @@ def filter_annotation_row(row, item, character, constraints, *, include_details=
                 msg = f"未知动作 {value}"
                 dropped.append(msg)
                 rejected_details.append({"field": field, "value": value, "reason": msg})
-        elif field == "fx" and is_fx_allowed(value):
+        elif field == "fx" and (
+            str(value).strip() == "无" or is_fx_allowed(value)
+        ):
             clean[field] = value
         else:
             msg = f"未知效果 {value}"

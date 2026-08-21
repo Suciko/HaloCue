@@ -3,6 +3,7 @@
 
 import assetdb
 import webui
+from dataclasses import replace
 
 
 def _make_con(tmp_path):
@@ -147,6 +148,45 @@ def test_guess_prefers_official_default_spine_when_alias_points_to_variant(
 
     assert out["爱丽丝"]["id"] == "아리스"
     assert out["爱丽丝"]["spine"] == "CharacterSpine_aris"
+
+
+def test_frozen_user_state_reads_plain_aris_from_release_overlay(tmp_path, monkeypatch):
+    primary = assetdb.connect(tmp_path / "primary.db")
+    primary.execute(
+        "INSERT INTO character(ident,name,spine,source) VALUES(?,?,?,?)",
+        ("爱丽丝（防寒服-冬装）", "爱丽丝", "winter", "overrides"),
+    )
+    primary.execute(
+        "INSERT INTO character(ident,name,spine,source) VALUES(?,?,?,?)",
+        ("아리스", "愛麗絲", "CharacterSpine_aris", "official"),
+    )
+    primary.commit()
+    primary.close()
+
+    overlay = assetdb.connect(tmp_path / "overlay.db")
+    overlay.execute(
+        "INSERT INTO character(ident,name,spine,source) VALUES(?,?,?,?)",
+        ("아리스N", "愛麗絲", "CharacterSpine_aris_noweapon", "official"),
+    )
+    overlay.commit()
+    overlay.close()
+
+    monkeypatch.setattr(webui, "LAYOUT", replace(webui.LAYOUT, frozen=True))
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "primary.db"))
+    monkeypatch.setattr(
+        webui, "configured_asset_database_paths",
+        lambda: [str(tmp_path / "primary.db"), str(tmp_path / "overlay.db")],
+    )
+    monkeypatch.setattr(webui, "_ensure_official_character_catalog", lambda: None)
+    monkeypatch.setattr(
+        webui, "db", lambda: assetdb.connect(tmp_path / "primary.db")
+    )
+
+    rows = webui.list_characters("爱丽丝")
+    assert {row["ident"] for row in rows} >= {
+        "아리스", "아리스N", "爱丽丝（防寒服-冬装）"
+    }
+    assert webui.guess_mapping([{"who": "爱丽丝"}])["爱丽丝"]["id"] == "아리스"
 
 
 def test_non_character_speaker_is_not_a_blocking_unmapped_character(

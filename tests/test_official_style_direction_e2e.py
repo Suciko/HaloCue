@@ -55,7 +55,7 @@ CASES = {
             {"direction": {
                 "scene_type": "bond", "scene_function": "emotional_turn",
                 "focus_kind": "listener", "focus_character": "Kai",
-                "visible_characters": ["Kai"], "relation_distance": "approaching",
+                "visible_characters": ["Rin", "Kai"], "relation_distance": "approaching",
                 "subtext": "等待确认", "reason": "listener_reaction",
             }},
             {"direction": {

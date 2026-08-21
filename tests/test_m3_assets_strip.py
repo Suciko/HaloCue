@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import sys
+import json
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
@@ -102,3 +103,82 @@ def test_background_picker_searches_scene_metadata(monkeypatch, tmp_path, query,
     rows = list_backgrounds(q=query, only_ready=True)
 
     assert [row["name"] for row in rows] == [expected]
+
+
+def test_background_picker_uses_new_categories_and_hides_confirmed_cg(monkeypatch, tmp_path):
+    database = tmp_path / "assets.db"
+    monkeypatch.setattr(webui, "DB", str(database))
+    con = assetdb.connect(database)
+    con.executemany(
+        "INSERT INTO bg(name,hash,label) VALUES(?,?,?)",
+        [
+            ("BG_Classroom", 1, "旧教室名"),
+            ("BG_CS_Event", 2, "事件图"),
+        ],
+    )
+    rows = [
+        ("BG_Classroom", "background", {
+            "visual_kind": "background", "label": "清晨教室",
+            "description": "带课桌的空教室", "main_category": "campus",
+            "subcategory": "教室", "dialogue_suitable": True,
+            "staging_capacity": "group", "tags": ["课桌"],
+        }),
+        ("BG_CS_Event", "cg", {
+            "visual_kind": "cg", "label": "争执特写",
+            "description": "两人争执的固定构图", "main_category": "event",
+            "subcategory": "争执场面", "dialogue_suitable": False,
+            "tags": ["争执"],
+        }),
+    ]
+    for key, visual_kind, labels in rows:
+        con.execute(
+            """
+            INSERT INTO scene_visual_label
+              (resource_channel,asset_key,content_sha256,source_kind,model,
+               visual_kind,label_json,confidence,status)
+            VALUES ('background',?,?,'extra_pack','current',?,?,.9,'ready')
+            """,
+            (key, key, visual_kind, json.dumps(labels, ensure_ascii=False)),
+        )
+    con.commit()
+    con.close()
+
+    campus = list_backgrounds(q="校园", only_ready=True)
+    all_rows = list_backgrounds(only_ready=True)
+
+    assert [row["name"] for row in campus] == ["BG_Classroom"]
+    assert campus[0]["subcategory"] == "教室"
+    assert [row["name"] for row in all_rows] == ["BG_Classroom"]
+
+
+def test_background_picker_searches_every_scene_label_field(monkeypatch, tmp_path):
+    database = tmp_path / "assets.db"
+    monkeypatch.setattr(webui, "DB", str(database))
+    con = assetdb.connect(database)
+    con.execute(
+        "INSERT INTO bg(name,hash,label) VALUES(?,?,?)",
+        ("BG_Labelled", 77, "普通名称"),
+    )
+    labels = {
+        "visual_kind": "background", "label": "普通名称",
+        "description": "可持续对白的空间", "main_category": "interior",
+        "subcategory": "资料室", "dialogue_suitable": True,
+        "staging_capacity": "pair", "tags": ["静谧"],
+        "search_terms_cn": ["档案室", "书库"],
+        "affiliation_keys": ["millennium"],
+        "affiliation_names_cn": ["千年"],
+        "category_path_cn": "千年 / 室内 / 资料室",
+    }
+    con.execute(
+        """INSERT INTO scene_visual_label
+          (resource_channel,asset_key,content_sha256,source_kind,model,
+           visual_kind,label_json,confidence,status)
+          VALUES ('background',?,?,?,?,?,?,.9,'ready')""",
+        ("BG_Labelled", "hash", "extra_pack", "current", "background",
+         json.dumps(labels, ensure_ascii=False)),
+    )
+    con.commit()
+    con.close()
+
+    assert [row["name"] for row in list_backgrounds(q="书库", only_ready=True)] == ["BG_Labelled"]
+    assert [row["name"] for row in list_backgrounds(q="千年", only_ready=True)] == ["BG_Labelled"]

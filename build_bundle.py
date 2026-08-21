@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from draft_store import DraftStore, calc_sha256
+from draft_store import AnnotationIncompleteError, DraftStore, calc_sha256
 from document import parse_document_lossless
 from script2aap import compile_script
 from runtime_layout import LAYOUT
@@ -40,7 +40,15 @@ class BuildBundleManager:
 
     def create_compile_snapshot(self, token: str, expected_draft_version: int) -> str:
         """202 响应前在事务锁内验证版本并复制不可变快照"""
-        self.store.assert_annotation_complete(token)
+        # Keep the historical snapshot contract for complete annotations:
+        # the HTTP review endpoint performs the per-card review gate before
+        # getting here.  For a partial run, defer to that same gate so an
+        # explicitly accepted result can compile, while pending cards still
+        # raise AnnotationIncompleteError.
+        try:
+            self.store.assert_annotation_complete(token)
+        except AnnotationIncompleteError:
+            self.store.assert_review_ready(token)
         draft_dir = self.store.get_draft_path(token)
 
         with self.store.draft_lock(token):
@@ -67,6 +75,7 @@ class BuildBundleManager:
                 "diagnostics.json",
                 "source_map.json",
                 "cast.json",
+                "annotation_trace.json",
             ]:
                 fpath = draft_dir / fname
                 if fpath.is_file():
@@ -137,15 +146,17 @@ class BuildBundleManager:
         script_tmp.write_text(edited_text, encoding="utf-8")
 
         # 调纯函数编译生成工程
-        res = compile_script(
-            {
-                "script": str(script_tmp),
-                "out": project_name,
-                "cast": str(input_dir / "cast.json"),
-                "index": str(input_dir / "resources.json"),
-                "install": False,
-            }
-        )
+        compile_options = {
+            "script": str(script_tmp),
+            "out": project_name,
+            "cast": str(input_dir / "cast.json"),
+            "index": str(input_dir / "resources.json"),
+            "install": False,
+        }
+        trace_path = input_dir / "annotation_trace.json"
+        if trace_path.is_file():
+            compile_options["trace"] = str(trace_path)
+        res = compile_script(compile_options)
 
         aap_src = Path(res["aap_file"])
         proj_dir_src = Path(res["project_dir"])
@@ -185,9 +196,29 @@ class BuildBundleManager:
             json.dumps(build_meta, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
-        # 构造 validation.json
+        # 构造 validation.json。质量问题保留在构建包内，供安装门读取。
+        quality = res.get("quality") if isinstance(res.get("quality"), dict) else {}
+        quality_issues = [
+            dict(issue) for issue in quality.get("issues") or []
+            if isinstance(issue, dict)
+        ]
+        blocking_issues = [
+            issue for issue in quality_issues
+            if str(issue.get("resolution") or "ai_repair") == "block"
+            or (
+                str(issue.get("resolution") or "ai_repair") == "ai_repair"
+                and str(issue.get("severity") or issue.get("level") or "").lower()
+                in {"high", "critical"}
+            )
+        ]
+        validation = {
+            "valid": not blocking_issues,
+            "diagnostics": list(res.get("diagnostics") or []),
+            "quality": quality,
+            "blocking_issues": blocking_issues,
+        }
         (output_bundle_tmp / "validation.json").write_text(
-            json.dumps({"valid": True, "diagnostics": []}, ensure_ascii=False, indent=2),
+            json.dumps(validation, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 

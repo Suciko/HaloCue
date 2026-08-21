@@ -69,6 +69,30 @@ def test_setup_status_reports_readiness_without_secret_fields(
     assert "secret_status" not in serialized
 
 
+def test_relative_asset_overlay_is_resolved_beside_runtime_config(tmp_path, monkeypatch):
+    primary = tmp_path / "aa_assets.db"
+    overlay = tmp_path / "databases" / "overlay.db"
+    overlay.parent.mkdir()
+    assetdb.connect(primary).close()
+    assetdb.connect(overlay).close()
+    config = tmp_path / "aa_config.json"
+    config.write_text(
+        '{"asset_databases": ["databases/overlay.db"]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(webui, "DB", str(primary))
+    monkeypatch.setattr(webui, "runtime_config_path", lambda: config)
+    monkeypatch.setattr(
+        webui,
+        "_settings_values",
+        lambda: {"asset_databases": ["databases/overlay.db"]},
+    )
+
+    paths = webui.configured_asset_database_paths()
+
+    assert paths == [str(primary.resolve()), str(overlay.resolve())]
+
+
 def test_setup_status_is_available_over_local_http(
     tmp_path,
     monkeypatch,

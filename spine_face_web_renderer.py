@@ -82,6 +82,26 @@ def _atlas_uses_pma(atlas: Path, family: str) -> bool:
     ))
 
 
+def _texture_requires_neutral_tint(pages: Sequence[tuple[str, Path]]) -> bool:
+    """Detect grayscale exports whose game-runtime tint would crush contrast."""
+    try:
+        for _, path in pages:
+            image = Image.open(path).convert("RGB")
+            red, green, blue = image.split()
+            chroma = ImageChops.lighter(
+                ImageChops.difference(red, green),
+                ImageChops.lighter(
+                    ImageChops.difference(green, blue),
+                    ImageChops.difference(red, blue),
+                ),
+            )
+            if ImageStat.Stat(chroma).mean[0] >= 1.0:
+                return False
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 def _bundle_files(source_dir: str | Path) -> tuple[Path, Path, list[tuple[str, Path]]]:
     source = Path(source_dir).resolve()
     skeletons = sorted(source.glob("*.skel"))
@@ -238,7 +258,8 @@ _LOAD_SCRIPT = r"""async (payload) => {
   const mvp = new webgl.Matrix4();
   const animationNames = skeletonData.animations.map((item) => item.name);
   window.__halocueSpine = {canvas, gl, assets, skeleton, state, shader, batcher,
-    renderer, mvp, animationNames, Shader, pma: Boolean(payload.pma)};
+    renderer, mvp, animationNames, Shader, pma: Boolean(payload.pma),
+    neutralTint: Boolean(payload.neutralTint)};
   return {animationNames};
 }"""
 
@@ -253,6 +274,19 @@ _RENDER_SCRIPT = r"""(faceId) => {
   else if (faceId !== '00') return {missing: true};
   state.update(0);
   state.apply(skeleton);
+  if (r.neutralTint) {
+    // Some grayscale exports carry a stale dark slot tint intended for the
+    // game's runtime shader, which crushes them to near-black in WebGL.
+    if (skeleton.color) skeleton.color.set(1, 1, 1, 1);
+    for (const slot of skeleton.slots || []) {
+      if (slot.color) slot.color.set(1, 1, 1, 1);
+      if (slot.darkColor && slot.darkColor.set) slot.darkColor.set(1, 1, 1, 1);
+      const attachment = slot.getAttachment && slot.getAttachment();
+      if (attachment && attachment.color && attachment.color.set) {
+        attachment.color.set(1, 1, 1, 1);
+      }
+    }
+  }
   try { skeleton.updateWorldTransform(spine.Physics.update); }
   catch (_) { skeleton.updateWorldTransform(); }
   const offset = new spine.Vector2(), size = new spine.Vector2();
@@ -371,6 +405,7 @@ class SpineWebRenderer:
             "canvasSize": self.canvas_size,
             "spineVersion": version,
             "pma": _atlas_uses_pma(atlas, family),
+            "neutralTint": _texture_requires_neutral_tint(texture_pages),
             "skeleton": _data_uri(skeleton, mime="application/octet-stream"),
             "atlas": _data_uri(atlas, mime="text/plain;charset=utf-8"),
             "textures": [

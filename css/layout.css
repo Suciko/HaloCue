@@ -633,6 +633,14 @@ html.drawer-open::-webkit-scrollbar,html.drawer-open body::-webkit-scrollbar,bod
 .generation-mode b,.generation-mode small{display:block}
 .generation-mode b{font-size:13px}
 .generation-mode small{margin-top:2px;color:var(--dim);font-size:11px;overflow-wrap:anywhere}
+.layout-mode{margin:14px 0 0;padding:0;border:0;min-width:0}
+.layout-mode legend{margin-bottom:7px;color:var(--dim);font-size:11px;font-weight:700}
+.layout-mode-options{display:inline-flex;max-width:100%;padding:3px;border:1px solid var(--line-strong);border-radius:6px;background:var(--panel);overflow-x:auto}
+.layout-mode-options label{position:relative;min-width:92px;cursor:pointer}
+.layout-mode-options input{position:absolute;opacity:0;pointer-events:none}
+.layout-mode-options span{display:block;padding:7px 12px;border-radius:4px;color:var(--dim);font-size:12px;font-weight:700;text-align:center}
+.layout-mode-options label:has(input:checked) span{background:var(--card);color:var(--fg);box-shadow:var(--shadow-1)}
+.layout-mode>small{display:block;margin-top:7px;color:var(--dim);font-size:11px;overflow-wrap:anywhere}
 .generation-failure{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px 20px;margin:14px 0;padding:16px 18px;border:1px solid #e6b8b8;border-left:4px solid var(--err);border-radius:8px;background:#fff8f8;box-shadow:var(--shadow-1)}
 .generation-failure[hidden]{display:none}.generation-failure-copy{min-width:0}.generation-failure-copy>span{display:block;color:var(--err);font-size:10px;font-weight:800}.generation-failure-copy h2{margin:2px 0 5px;font-size:16px;line-height:1.3;letter-spacing:0}.generation-failure-copy p{margin:0;color:var(--dim);font-size:13px;overflow-wrap:anywhere}.generation-failure-copy .generation-failure-guidance{margin-top:4px;color:var(--fg)}
 .generation-failure-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}.generation-failure-actions button{min-height:38px;padding:6px 11px}.generation-failure-detail{grid-column:1/-1;border-top:1px solid #edd4d4;padding-top:8px;color:var(--dim);font-size:11px}.generation-failure-detail summary{width:max-content;cursor:pointer}.generation-failure-detail code{display:block;margin-top:7px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--dim);font:11px/1.55 Consolas,"Microsoft YaHei",monospace}

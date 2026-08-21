@@ -3,7 +3,7 @@ import pytest
 from annotate import (
     annotation_constraints, annotation_rows, build_static, filter_annotation_row,
     annotation_directives, apply_annotation_response_row, load_custom_faces,
-    normalize_bgfx_lifetime,
+    normalize_bgfx_lifetime, apply_speaker_turn_face_activation,
 )
 from llm import LLMError
 
@@ -60,6 +60,34 @@ def test_official_named_faces_are_basic_candidates_but_unknown_faces_are_not_sug
     assert "00=默认" in prompt
     assert "03=微笑" in prompt
     assert "17=" not in prompt
+
+
+def test_official_spine_path_selects_one_exact_visual_label_variant():
+    idx = {
+        "bg": {}, "sounds": [], "enums": {"emoticon": {}, "action": {}},
+        "characters": [{
+            "identifier": "juri-work",
+            "spine": r"characters\CH0286_spr\CH0286_spr",
+            "faces": [],
+        }],
+        "face_capabilities": {"juri-work": [{
+            "spine_signature": "sig-juri-work",
+            "outfit_key": "CH0286_spr",
+            "faces": [{
+                "id": "03",
+                "semantic_cn": "得意微笑｜计划顺利时轻快回应",
+                "semantic_level": "rich",
+                "sources": ["vision:model"],
+            }],
+        }]},
+    }
+    cast = {"朱莉": {"id": "juri-work", "portrait": True}}
+
+    constraints = annotation_constraints(idx, cast)
+    static = build_static(idx, cast, ["朱莉"])
+
+    assert constraints["faces_by_id"]["juri-work"] == {"03"}
+    assert "03=得意微笑｜计划顺利时轻快回应" in static
 
 
 def test_legacy_character_face_catalog_remains_model_safe_without_capabilities():
@@ -455,3 +483,160 @@ def test_annotation_rows_accepts_the_schema_lines_object_or_equivalent_list():
 def test_annotation_rows_rejects_an_invalid_top_level_response():
     with pytest.raises(LLMError, match="顶层"):
         annotation_rows({"items": []})
+
+
+def test_normal_aris_does_not_offer_kei_persona_faces():
+    index = {
+        "bg": {}, "sounds": [], "enums": {"emoticon": {}, "action": {}},
+        "characters": [{"identifier": "아리스N", "faces": []}],
+        "face_capabilities": {"아리스N": [{
+            "spine_signature": "aris", "outfit_key": "CharacterSpine_aris_noweapon",
+            "faces": [
+                {"id": "01", "sources": ["aap_observed", "vision:test"],
+                 "semantic_cn": "平静好奇", "evidence_level": "visual_confirmed"},
+                {"id": "14", "sources": ["aap_observed", "vision:test"],
+                 "semantic_cn": "无机质失神", "evidence_level": "visual_confirmed"},
+            ],
+        }]},
+    }
+    cast = {"爱丽丝": {
+        "id": "아리스N", "portrait": True,
+        "spine_signature": "aris", "outfit_key": "CharacterSpine_aris_noweapon",
+    }}
+
+    constraints = annotation_constraints(index, cast)
+
+    assert constraints["faces_by_id"]["아리스N"] == {"01"}
+
+
+def test_legacy_normal_aris_catalog_also_blocks_kei_persona_faces():
+    index = {
+        "bg": {}, "sounds": [], "enums": {"emoticon": {}, "action": {}},
+        "characters": [{
+            "identifier": "아리스N",
+            "faces": [{"id": "01"}, {"id": "14"}],
+        }],
+        "faces_used": {"아리스N": [{"id": "14"}]},
+    }
+
+    constraints = annotation_constraints(
+        index, {"爱丽丝": {"id": "아리스N", "portrait": True}},
+    )
+
+    assert constraints["faces_by_id"]["아리스N"] == {"01"}
+    assert [face["id"] for face in constraints["face_records_by_id"]["아리스N"]] == ["01"]
+
+
+def test_speaker_turn_activation_uses_verified_response_face_once():
+    items = [
+        {"kind": "line", "who": "绿", "text": "第一句。"},
+        {"kind": "line", "who": "桃井", "text": "插话。"},
+        {"kind": "line", "who": "绿", "text": "继续说。"},
+    ]
+    cast = {
+        "绿": {"id": "midori", "portrait": True},
+        "桃井": {"id": "momoi", "portrait": True},
+    }
+    constraints = {
+        "face_records_by_id": {
+            "midori": [{"id": "02", "semantic_cn": "回应", "expression_class": "base"}],
+            "momoi": [],
+        }
+    }
+    proposals = []
+
+    changes = apply_speaker_turn_face_activation(items, cast, constraints, proposals)
+
+    assert items[0]["face"] == "02"
+    assert "face" not in items[2]
+    assert changes == 1
+    assert proposals[0]["rule"] == "speaker_turn_face_activation"
+
+
+def test_filter_accepts_fx_release_as_lifecycle_control():
+    constraints = {
+        "faces_by_id": {"a": set()}, "sym2cn": {}, "ok_emo": set(),
+        "ok_act": set(), "ok_fx": {"特写"}, "ok_se": set(), "ok_bg": set(),
+    }
+
+    clean, dropped = filter_annotation_row(
+        {"fx": "无"},
+        {"who": "A", "kind": "line"},
+        {"id": "a", "portrait": True, "narrator": False},
+        constraints,
+    )
+
+    assert clean == {"fx": "无"}
+    assert dropped == []
+
+
+def test_speaker_turn_activation_uses_semantic_face_for_eager_help_then_report():
+    items = [
+        {"kind": "line", "who": "爱丽丝", "text": "爱丽丝也可以帮忙，一起检查会更快。",
+         "face": "00", "emo": "闪亮", "act": "hophop"},
+        {"kind": "line", "who": "桃井", "text": "那就拜托你了。"},
+        {"kind": "line", "who": "爱丽丝", "text": "记录要员爱丽丝，报告：没有发现异常。"},
+    ]
+    cast = {
+        "爱丽丝": {"id": "aris", "portrait": True},
+        "桃井": {"id": "momoi", "portrait": True},
+    }
+    constraints = {"face_records_by_id": {
+        "aris": [
+            {"id": "00", "semantic_cn": "温和微笑", "emotion_family": "joy",
+             "expression_class": "base", "beat_fit": ["dialogue"]},
+            {"id": "01", "semantic_cn": "平静好奇", "emotion_family": "neutral",
+             "expression_class": "base", "beat_fit": ["dialogue"]},
+            {"id": "02", "semantic_cn": "无神平淡", "emotion_family": "neutral",
+             "expression_class": "base", "beat_fit": ["idle"],
+             "avoid_when_cn": "普通对话、正式报告或需要鲜活反应时尽量不要使用"},
+            {"id": "03", "semantic_cn": "欣喜开朗", "emotion_family": "joy",
+             "expression_class": "accent", "beat_fit": ["reaction"]},
+            {"id": "05", "semantic_cn": "严肃专注", "emotion_family": "determination",
+             "expression_class": "base", "beat_fit": ["exposition", "tension"],
+             "usage_hint_cn": "正式报告、值勤戒备或认真确认时使用"},
+        ],
+        "momoi": [],
+    }}
+
+    apply_speaker_turn_face_activation(items, cast, constraints)
+
+    assert items[0]["face"] == "03"
+    assert items[2]["face"] in {"01", "05"}
+    assert items[2]["face"] != "02"
+
+
+def test_explicit_celebration_can_use_a_verified_peak_face():
+    items = [{
+        "kind": "line", "who": "桃井", "text": "太好了！那我们继续往下检查。",
+        "face": "01", "emo": "闪亮", "act": "hophop",
+    }]
+    cast = {"桃井": {"id": "momoi", "portrait": True}}
+    constraints = {"face_records_by_id": {"momoi": [
+        {"id": "01", "semantic_cn": "得意自信", "emotion_family": "joy",
+         "expression_class": "accent", "beat_fit": ["teasing", "dialogue"]},
+        {"id": "03", "semantic_cn": "开怀大笑", "emotion_family": "joy",
+         "expression_class": "peak", "beat_fit": ["celebration", "resolution"]},
+    ]}}
+
+    apply_speaker_turn_face_activation(items, cast, constraints)
+
+    assert items[0]["face"] == "03"
+
+
+def test_english_emoticon_alias_is_normalized_to_available_chinese_name():
+    item = {"kind": "line", "who": "爱丽丝", "text": "收到。"}
+    character = {"id": "aris", "portrait": True}
+    constraints = {
+        "faces_by_id": {"aris": set()}, "face_evidence_by_id": {"aris": {}},
+        "ok_emo": {"反应"}, "sym2cn": {}, "ok_act": set(),
+        "ok_se": set(), "ok_bg": set(), "ok_shot": set(), "ok_bgfx": set(),
+        "confirmed_bg": set(),
+    }
+
+    clean, dropped = filter_annotation_row(
+        {"emo": "Reaction"}, item, character, constraints
+    )
+
+    assert clean["emo"] == "反应"
+    assert dropped == []

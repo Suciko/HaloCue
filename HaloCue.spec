@@ -12,10 +12,15 @@ datas = [
     (str(ROOT / "js"), "js"),
     (str(ROOT / "css"), "css"),
     (str(ROOT / "branding"), "branding"),
-    (str(ROOT / "tools" / "spine_web_runtime" / "SPINE-RUNTIMES-LICENSE.txt"), "."),
+    (str(ROOT / "tools" / "spine_web_runtime"), "tools/spine_web_runtime"),
+    (str(ROOT / "portrait_layout_hints.json"), "."),
     (str(SEED / "aa_assets.db"), "."),
     (str(SEED / "aa_resources.json"), "."),
+    (str(SEED / "aa_config.seed.json"), "."),
 ] + collect_data_files("UnityPy", includes=["resources/*.tpk"])
+
+if (SEED / "databases").is_dir():
+    datas.append((str(SEED / "databases"), "databases"))
 
 # UnityPy imports fmod_toolkit while opening UnityFS bundles.  Its native FMOD
 # library is loaded through ctypes, so PyInstaller cannot discover it from
@@ -32,6 +37,14 @@ hiddenimports = [
     "desktop_app",
     "webview",
     "webview.platforms.edgechromium",
+    "annotation_scene_planner",
+    "annotation_agent",
+    "annotation_protocol",
+    "direction_quality",
+    "face_selection",
+    "portrait_layout",
+    "scene_asset_labeler",
+    "spine_face_web_renderer",
     # UnityPy imports this package dynamically when opening UnityFS bundles.
     # It is not discovered from the top-level ``import UnityPy`` alone.
     "UnityPy.resources",

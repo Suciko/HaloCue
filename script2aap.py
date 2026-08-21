@@ -10,6 +10,7 @@
 地点名称 / 额外指令，以及每个角色的 表情 / 地位 / 位置 / 表情符号 / 动作 / 效果。
 """
 import argparse, copy, hashlib, itertools, json, os, re, shutil, sys, tempfile, uuid
+from collections.abc import Mapping
 from contextlib import contextmanager, nullcontext
 from pathlib import Path, PureWindowsPath
 
@@ -17,12 +18,18 @@ sys.stdout.reconfigure(encoding="utf-8")
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from stage import Stage, LAYOUT, APPEAR, DISAPPEAR          # noqa: E402
+import portrait_layout                                      # noqa: E402
 import camera                                                # noqa: E402
 from performance_rules import (                               # noqa: E402
     enforce_focusline_shots,
     enforce_persistent_closeups,
 )
 import aapaths, tables                                       # noqa: E402
+from direction_quality import (                              # noqa: E402
+    classify_quality_issues,
+    quality_resolution_summary,
+    validate_compiled_staging,
+)
 from background_requests import (                            # noqa: E402
     UnresolvedBackgroundError,
     collect_background_requests,
@@ -88,8 +95,9 @@ class AppearanceState:
         self.seen.clear()
         self.offscreen.clear()
 
-    def observe(self, visible):
+    def observe(self, visible, physically_present=None):
         visible = set(visible or ())
+        present = None if physically_present is None else set(physically_present)
         fades = set()
         for ident in visible:
             if ident not in self.seen or self.offscreen.get(ident, 0) >= self.reappear_after:
@@ -97,7 +105,10 @@ class AppearanceState:
             self.seen.add(ident)
             self.offscreen[ident] = 0
         for ident in self.seen - visible:
-            self.offscreen[ident] = self.offscreen.get(ident, 0) + 1
+            if present is None or ident not in present:
+                self.offscreen[ident] = self.offscreen.get(ident, 0) + 1
+            else:
+                self.offscreen[ident] = 0
         return fades
 
 
@@ -132,22 +143,31 @@ SYNTAX = """
   @se SE_DoorOpen_01             音效，只作用于下一行
   @place 千年科技学园·游戏开发部    地点名称卡
   @wait 2500                     下一行之前停顿（毫秒）
+  @nodialog                      下一行是无对话框演出节点；没有任何角色真正发言
+  @react {"who":"绿","face":"02","emo":"问号","act":"stiff"}
+                                 给同一无对话框节点中的其他可见角色添加同步反应
 
 舞台（作用于下一行）
-  @enter 凯伊                     入场
+  @reveal 凯伊 5 右               已在场角色从右侧滑入镜头（不表示进入房间）
+  @enter 凯伊                     真实入场
   @enter 凯伊 5 右                入场到位置5，从右边进来（左/右可省）
+  @reveal 凯伊 5                  已在场角色淡入当前镜头
+  @conceal 爱丽丝                 淡出当前镜头，但仍留在剧情空间
   @exit 爱丽丝                    退场
   @exit 爱丽丝 左                 向左退场
   @move 桃井 1                    走位到位置1
   @stage 桃井@1 绿@3 柚子@5        钉死站位，关掉自动排布
   @auto                          恢复自动排布
+  @layout {"relation_distance":"distant","focus_character":"绿","reaction_target":"柚子"}
+                                 持续的语义站位意图；通常由 AI 标注器生成
   @camera 绿,柚子                 下一行只显示这些角色；@camera - 表示单行空镜
   @camera_hold 绿,柚子            持续保持镜头；- 连续空镜；auto 恢复自动镜头
+  @camera_cut 绿,柚子             整镜硬切并重建完整构图，不继承上一镜槽位/入场动画
                                  连续空镜在首个有立绘角色开口时自动恢复
                                  （以上都是 HaloCue 编译期标注，不会原样写进 AA）
   @fx 绿 特写                     立绘效果：特写 / 剪影 / 变暗 / 无
-  @hl 桃井,柚子                   本行高亮谁；@hl - 表示都不高亮
-                                 默认是台上除说话者外全部高亮
+  @hl 桃井,柚子                   本行哪些人进入 #N;h 次要/变暗状态；@hl - 表示无人变暗
+                                 默认是台上除说话者外全部次要/变暗
 
 额外指令（会写进 AA 的"额外指令"框）
   @bgshake                       背景抖一下
@@ -189,6 +209,42 @@ class Warn:
 warn = Warn()
 
 
+_DROPPED_ANNOTATION_WARNING_MARKERS = (
+    "未知气泡", "未知动作", "未知效果", "没有名为", "@react 必须",
+    "不在当前画面", "不在当前镜头", "未知角色", "没有立绘", "最多显示 3 个立绘",
+    "超过 3 人上限", "格式应为", "看不懂",
+)
+_OFFSCREEN_PORTRAIT_WARNING_MARKER = "但当前不在镜头"
+_AUTO_REPAIR_WARNING_MARKERS = ("自动修复标注",)
+
+
+def compiler_warning_issues(items):
+    """Turn lossy compiler warnings into structured quality evidence."""
+    issues = []
+    for line, message in items or ():
+        text = str(message or "")
+        repaired = any(marker in text for marker in _AUTO_REPAIR_WARNING_MARKERS)
+        offscreen_portrait = _OFFSCREEN_PORTRAIT_WARNING_MARKER in text
+        dropped = any(marker in text for marker in _DROPPED_ANNOTATION_WARNING_MARKERS)
+        resource_required = "未解决的背景请求" in text
+        issues.append({
+            "code": (
+                "compiler_annotation_auto_repaired" if repaired
+                else "compiler_annotation_offscreen" if offscreen_portrait
+                else "compiler_annotation_dropped" if dropped
+                else "unresolved_background_request" if resource_required
+                else "compiler_warning"
+            ),
+            "message": text,
+            "severity": (
+                "info" if repaired or offscreen_portrait
+                else "high" if dropped else "warning"
+            ),
+            "line": int(line or 0),
+        })
+    return issues
+
+
 def split_head(head, cast):
     """冒号前的部分 -> 角色 + 演出标注。
     先整体匹配演员表（支持「凯伊（消息）」这类变体名），失败再剥标注。"""
@@ -207,18 +263,65 @@ def split_head(head, cast):
 
 def load_cast(path):
     cfg = json.load(open(path, encoding="utf-8"))
-    cast = dict(cfg.get("cast", {}))
+    raw_cast = dict(cfg.get("cast", {}))
+    cast = dict(raw_cast)
     for a, target in (cfg.get("alias") or {}).items():
         if target in cast:
             cast[a] = cast[target]
-    id2name = {v["id"]: k for k, v in cfg.get("cast", {}).items() if v.get("id")}
+    # Accept a unique human-facing display name as a script alias.  Variant
+    # collisions remain unresolved so the caller must provide an explicit alias.
+    display_keys = {}
+    for key, character in raw_cast.items():
+        display = str(character.get("name") or "").strip()
+        if display and display != key:
+            display_keys.setdefault(display, []).append(key)
+    for display, keys in display_keys.items():
+        if len(keys) == 1 and display not in cast:
+            cast[display] = raw_cast[keys[0]]
+    id2name = {v["id"]: k for k, v in raw_cast.items() if v.get("id")}
     return cfg, cast, id2name
 
 
-def parse_script(path, cast):
+def load_annotation_trace(path, trace_path=None):
+    """Load a trace sidecar only when it matches the exact annotated source."""
+    source = Path(path)
+    candidates = []
+    if trace_path:
+        candidates.append(Path(trace_path))
+    candidates.extend([
+        Path(str(source) + ".trace.json"),
+        source.with_name("annotation_trace.json"),
+    ])
+    expected = hashlib.sha256(source.read_bytes()).hexdigest()
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if (
+            isinstance(payload, dict)
+            and payload.get("annotated_source_sha256") == expected
+            and isinstance(payload.get("lines"), list)
+        ):
+            return payload
+    return {}
+
+
+def parse_script(path, cast, trace_payload=None):
     raw = open(path, encoding="utf-8").read()
     nodes = parse_document_lossless(raw)
     events, diagnostics = compile_document(nodes, cast, {})
+    trace_by_line = {
+        int(entry.get("line") or 0): dict(entry)
+        for entry in (trace_payload or {}).get("lines") or []
+        if isinstance(entry, dict) and int(entry.get("line") or 0) > 0
+    }
+    for event in events:
+        trace = trace_by_line.get(int(event.get("no") or 0))
+        if trace:
+            event["_trace"] = trace
     for diag in diagnostics:
         if "line_no" in diag and "message" in diag:
             warn(diag["line_no"], diag["message"])
@@ -376,6 +479,20 @@ def resolve_shape(tok, no):
     return 0
 
 
+def repair_swapped_action_effect(event, act, act_cn, no):
+    """Repair an action placed in ``<effect>`` only when the token is unambiguous."""
+    effect = str(event.get("fx") or "").strip()
+    if not effect or str(event.get("act") or "").strip() or effect in SHAPE:
+        return False
+    numeric_action = effect.lstrip("-").isdigit() and int(effect) in ACTION_IDS
+    if effect not in act and effect not in act_cn and not numeric_action:
+        return False
+    event["act"] = effect
+    event["fx"] = ""
+    warn(no, f"自动修复标注：<{effect}> 是已注册动作，已按 {{{effect}}} 执行")
+    return True
+
+
 def resolve_face(tok, ident, faces, no):
     if not tok:
         return None
@@ -422,6 +539,8 @@ class Pending:
         self.place = ""
         self.raw = []            # 额外指令，按顺序
         self.shot = []           # (角色标识, 源文本行号)：等站位确定后再转换为 #N;fx;{shot}
+        self.reveal = []         # (ident, 位置or None, appear值)，只表示立绘进入镜头
+        self.conceal = []        # (ident, appear值)，只离开当前镜头，人物仍在场
         self.enter = []          # (ident, 位置or None, appear值)
         self.exit = []           # (ident, appear值)
         self.move = {}           # ident -> 目标位置
@@ -429,6 +548,10 @@ class Pending:
         self.fx_ends = set()     # 显式清除持久 shapeOverride 的角色
         self.camera = None       # None=自动；[]=空镜；[ident...]=下一行明确镜头
         self.hl = None           # None=自动；[]=都不高亮；[ident...]=指定
+        self.no_dialog = False   # 下一行是演出拍，不显示对话框，也没有说话者
+        self.reactions = {}      # ident -> 同一节点中的 face / emo / act
+        self.camera_cut = False  # 下一行是整镜硬切，重建槽位而非镜内移动
+        self.origins = []        # 被下一条 ScriptData 消费的 source/beat 溯源
 
     def prompt(self):
         return "\n".join(self.raw)
@@ -440,12 +563,19 @@ def voice_guid(project, n):
     return str(uuid.uuid5(NS, f"{project}/voice/{n}"))
 
 
-def build(events, cfg, cast, idx, project):
+def build(events, cfg, cast, idx, project, *, semantic_layout=True, layout_mode="ai"):
     id2name_g = {v['id']: k for k, v in cast.items() if v.get('id')}
     emo_sym, emo_cn, act, act_cn, faces = res_lookup(idx)
     bgmap = idx.get("bg", {})            # 只作为已知名单，ID 一律现算
     transmap = idx.get("transition", {}) or {}
     bgfxmap = idx.get("bgeffect", {}) or {}
+    stage_profiles = portrait_layout.profiles_for_cast(
+        idx,
+        cast,
+        catalog_fallback=(
+            semantic_layout and not isinstance(idx.get("portrait_layout_catalog"), dict)
+        ),
+    )
 
     scenes, cur = [], {"title": None, "ev": []}
     for e in events:
@@ -463,6 +593,7 @@ def build(events, cfg, cast, idx, project):
     bg = cfg.get("default_bg", "BG_Black")
     bgm = cfg.get("default_bgm", 999)
     scene_bg = cfg.get("scene_bg", {}) or {}
+    last_emitted_bg = None
 
     def ident_of(nm, no, need_portrait=True):
         if nm not in cast:
@@ -475,7 +606,7 @@ def build(events, cfg, cast, idx, project):
         return c["id"]
 
     cam_opts = cfg.get("camera") or {}
-    cam_on = cam_opts.get("enabled", True)
+    cam_on = cam_opts.get("enabled", True) and layout_mode != "pure_ai"
 
     appearance = AppearanceState()
     for sc in scenes:
@@ -509,7 +640,11 @@ def build(events, cfg, cast, idx, project):
         else:
             cam_plan = None
         cam_i = 0
-        st = Stage()
+        st = Stage(
+            profiles=stage_profiles,
+            semantic_layout=semantic_layout,
+        )
+        layout_state = {}
         pend = Pending()
         trans = 0
         bgfx = 0
@@ -518,16 +653,25 @@ def build(events, cfg, cast, idx, project):
         # 本场登场顺序（决定自动排布的左右次序）
         seen_order = []
         ever = set()          # 曾经进过画面的（用来区分"首次登场"和"再次入镜"）
+        present = set()       # 仍在叙事空间；与当前镜头是否看得见分开维护
 
         for e in sc["ev"]:
             # ---------------------------------------------------- 指令
             if e["k"] == "dir":
                 cmd, arg, no = e["cmd"], e["arg"], e["no"]
+                origin = (
+                    copy.deepcopy(e["_trace"])
+                    if isinstance(e.get("_trace"), dict) else {}
+                )
+                origin.setdefault("command", cmd)
+                origin.setdefault("line", no)
+                pend.origins.append(origin)
                 if cmd in ("bg", "place"):
                     appearance.reset_scene()
                     face_state.clear()
                     held_camera = None
                     bgfx = 0
+                    layout_state = {}
                     pending_fx_scene_reset = True
                 if cmd == "bg":
                     selected_bg = parse_bg_argument(arg)
@@ -558,6 +702,25 @@ def build(events, cfg, cast, idx, project):
                     pend.place = arg
                 elif cmd == "wait":
                     pend.raw.append(f"#wait;{arg}")
+                elif cmd == "nodialog":
+                    pend.no_dialog = True
+                elif cmd == "react":
+                    try:
+                        reaction = json.loads(arg)
+                    except json.JSONDecodeError:
+                        reaction = None
+                    if not isinstance(reaction, dict) or set(reaction) != {
+                        "who", "face", "emo", "act"
+                    }:
+                        warn(no, "@react 必须是包含 who/face/emo/act 的 JSON 对象")
+                        continue
+                    ident = ident_of(str(reaction.get("who") or ""), no)
+                    if ident:
+                        pend.reactions[ident] = {
+                            "face": str(reaction.get("face") or ""),
+                            "emo": str(reaction.get("emo") or ""),
+                            "act": str(reaction.get("act") or ""),
+                        }
                 elif cmd == "raw":
                     pend.raw.append(arg)
                 elif cmd == "bgshake":
@@ -601,8 +764,42 @@ def build(events, cfg, cast, idx, project):
                         i = ident_of(p[0], no)
                         at = int(p[1]) if len(p) > 1 and p[1].isdigit() else None
                         d = next((x for x in p[1:] if not x.isdigit()), "")
+                        expected_side = "左" if at and at <= 2 else "右" if at and at >= 4 else ""
+                        if expected_side and d not in {expected_side, f"从{expected_side}"}:
+                            if d:
+                                warn(
+                                    no,
+                                    f"@enter 目标在槽位 {at}，入场方向已从“{d}”修正为“{expected_side}”",
+                                )
+                            d = expected_side
                         if i:
                             pend.enter.append((i, at, APPEAR.get(d, 3)))
+                elif cmd == "reveal":
+                    p = arg.split()
+                    if not p:
+                        warn(no, "@reveal 要跟角色名")
+                    else:
+                        i = ident_of(p[0], no)
+                        at = int(p[1]) if len(p) > 1 and p[1].isdigit() else None
+                        d = next((x for x in p[1:] if not x.isdigit()), "")
+                        expected_side = "左" if at and at <= 2 else "右" if at and at >= 4 else ""
+                        if expected_side and d not in {expected_side, f"从{expected_side}"}:
+                            if d:
+                                warn(
+                                    no,
+                                    f"@reveal 目标在槽位 {at}，显现方向已从“{d}”修正为“{expected_side}”",
+                                )
+                            d = expected_side
+                        if i:
+                            pend.reveal.append((i, at, APPEAR.get(d, 3)))
+                elif cmd == "conceal":
+                    p = re.split(r"[,，、\s]+", arg)
+                    d = p[-1] if p and p[-1] in DISAPPEAR and len(p) > 1 else ""
+                    names = p[:-1] if d else p
+                    for nm in names:
+                        i = ident_of(nm, no) if nm else None
+                        if i:
+                            pend.conceal.append((i, DISAPPEAR.get(d, 6)))
                 elif cmd == "exit":
                     p = re.split(r"[,，、\s]+", arg)
                     d = p[-1] if p and p[-1] in DISAPPEAR and len(p) > 1 else ""
@@ -636,6 +833,45 @@ def build(events, cfg, cast, idx, project):
                 elif cmd == "auto":
                     st.auto = True
                     st.pinned.clear()
+                elif cmd == "layout":
+                    try:
+                        value = json.loads(arg)
+                    except json.JSONDecodeError:
+                        value = None
+                    if not isinstance(value, dict):
+                        warn(no, "@layout 必须是 JSON 对象")
+                        continue
+                    allowed = {
+                        "relation_distance", "focus_character", "reaction_target", "reason"
+                    }
+                    if set(value) - allowed:
+                        warn(no, "@layout 包含未知字段")
+                        continue
+                    distance = value.get("relation_distance")
+                    if distance is not None:
+                        if distance not in {"distant", "normal", "approaching", "intimate", "remote"}:
+                            warn(no, f"@layout 的关系距离无效：{distance}")
+                            continue
+                        layout_state["relation_distance"] = distance
+                    valid = True
+                    resolved = {}
+                    for field in ("focus_character", "reaction_target"):
+                        if field not in value:
+                            continue
+                        name = str(value.get(field) or "").strip()
+                        if not name:
+                            resolved[field] = ""
+                            continue
+                        ident = ident_of(name, no)
+                        if ident is None:
+                            valid = False
+                            break
+                        resolved[field] = ident
+                    if not valid:
+                        continue
+                    layout_state.update(resolved)
+                    if "reason" in value:
+                        layout_state["reason"] = str(value.get("reason") or "")
                 elif cmd == "camera":
                     value = arg.strip()
                     if value in ("-", "无", "none"):
@@ -656,10 +892,10 @@ def build(events, cfg, cast, idx, project):
                                 elif ident not in resolved:
                                     resolved.append(ident)
                             if valid:
-                                if len(resolved) > 5:
-                                    warn(no, "@camera 最多显示 5 个立绘，已保留前 5 个")
-                                pend.camera = resolved[:5]
-                elif cmd == "camera_hold":
+                                if len(resolved) > 3:
+                                    warn(no, "@camera 最多显示 3 个立绘，已保留前 3 个")
+                                pend.camera = resolved[:3]
+                elif cmd in ("camera_hold", "camera_cut"):
                     value = arg.strip()
                     if value.lower() in ("auto", "自动"):
                         held_camera = None
@@ -676,9 +912,11 @@ def build(events, cfg, cast, idx, project):
                             elif ident not in resolved:
                                 resolved.append(ident)
                         if valid:
-                            if len(resolved) > 5:
-                                warn(no, "@camera_hold 最多显示 5 个立绘，已保留前 5 个")
-                            held_camera = resolved[:5]
+                            if len(resolved) > 3:
+                                warn(no, f"@{cmd} 最多显示 3 个立绘，已保留前 3 个")
+                            held_camera = resolved[:3]
+                    if cmd == "camera_cut":
+                        pend.camera_cut = True
                 elif cmd == "fx":
                     p = arg.split(None, 1)
                     if len(p) < 2:
@@ -709,6 +947,7 @@ def build(events, cfg, cast, idx, project):
             c = cast[e["who"]]
             chars = [blank_char() for _ in range(SLOTS)]
             no = e["no"]
+            repair_swapped_action_effect(e, act, act_cn, no)
 
             # 1. 退场：这一行它还在台上，钉住不动，标记 appear，行末再移除
             leaving = {}
@@ -717,6 +956,13 @@ def build(events, cfg, cast, idx, project):
                     leaving[i] = ap
                 else:
                     warn(no, "@exit 的角色不在台上")
+            concealing = {}
+            for i, ap in pend.conceal:
+                if i in st.pos:
+                    concealing[i] = ap
+                else:
+                    warn(no, "@conceal 的角色不在当前镜头里")
+            departing = set(leaving) | set(concealing)
 
             # 2. 入场：只登记，不占位。真正的落位交给下面的统一排布，
             #    否则会跟重排后的目标撞车，角色在数组里互相覆盖。
@@ -726,6 +972,23 @@ def build(events, cfg, cast, idx, project):
                     warn(no, "@enter 的角色已经在台上了")
                     continue
                 entering[i] = ap
+                present.add(i)
+                if at:
+                    st.pinned[i] = at
+                if i not in seen_order:
+                    seen_order.append(i)
+
+            # 镜头内显现：角色已经属于当前空间，只让立绘以指定方向进入画面。
+            # 它与真实进房间的 @enter 分开建模，但都会在本节点建立可见立绘。
+            for i, at, ap in pend.reveal:
+                if i in st.pos:
+                    warn(no, "@reveal 的角色已经在当前镜头里")
+                    continue
+                if i in entering:
+                    warn(no, "同一角色不能同时 @reveal 和 @enter")
+                    continue
+                entering[i] = ap
+                present.add(i)
                 if at:
                     st.pinned[i] = at
                 if i not in seen_order:
@@ -737,37 +1000,62 @@ def build(events, cfg, cast, idx, project):
             want = None
             planned_want = None
             if cam_plan is not None and cam_i < len(cam_plan):
-                planned_want = [w for w in cam_plan[cam_i] if w not in leaving]
+                planned_want = [w for w in cam_plan[cam_i] if w not in departing]
             if pend.camera is not None:
-                want = [w for w in pend.camera if w not in leaving]
+                want = [w for w in pend.camera if w not in departing]
             elif held_camera is not None:
-                want = [w for w in held_camera if w not in leaving]
+                want = [w for w in held_camera if w not in departing]
             elif planned_want is not None:
                 want = planned_want
             cam_i += 1
 
-            # 4. 说话者：立绘角色若还没上台，自动登场
+            # 硬切不是人物在同一镜头内移动。丢弃上一镜的槽位状态，再按
+            # 当前完整名单建立新构图；人物仍在叙事空间，不能因此播放入场。
+            if pend.camera_cut:
+                for ident in list(st.pos):
+                    if ident not in departing:
+                        st.leave(ident)
+
+            # 4. 对话者/演出主体：无对话框节点仍可让立绘表演，但没有说话者。
+            is_dialogue = bool(str(e.get("text") or "").strip()) and not pend.no_dialog
+            speaker = 0
             speaker_ident = None
+            performance_ident = None
             if c.get("narrator"):
                 speaker = 0
             elif not c.get("portrait"):
                 speaker = 0
-                chars[0]["name"] = c["id"]
+                if is_dialogue:
+                    chars[0]["name"] = c["id"]
             else:
-                speaker_ident = c["id"]
-                if held_camera == [] and pend.camera is None:
+                performance_ident = c["id"]
+                if is_dialogue:
+                    speaker_ident = performance_ident
+                if is_dialogue and held_camera == [] and pend.camera is None:
                     # Official empty narration shots persist across narration
                     # and slot-0 voices, then the next portrait declaration
                     # restores the speaker. Mirror that state transition here.
                     held_camera = None
                     want = planned_want
-                if speaker_ident not in st.pos and speaker_ident not in entering:
+                if performance_ident not in st.pos and performance_ident not in entering:
                     # 首次出现、换场重现和长时间离镜重现都在首句同节点渐变，
                     # 不额外生成空节点或显式等待。
-                    entering[speaker_ident] = 0
-                    if speaker_ident not in seen_order:
-                        seen_order.append(speaker_ident)
-                ever.add(speaker_ident)
+                    entering[performance_ident] = 0
+                    present.add(performance_ident)
+                    if performance_ident not in seen_order:
+                        seen_order.append(performance_ident)
+                ever.add(performance_ident)
+
+            # 同一演出拍的其他反应者也属于这一镜的表演主体。显式镜头名单
+            # 仍然拥有最终决定权；这里仅保证没有镜头声明的手写脚本不会丢人。
+            if want is None:
+                for ident in pend.reactions:
+                    if ident not in st.pos and ident not in entering:
+                        entering[ident] = 0
+                        present.add(ident)
+                        if ident not in seen_order:
+                            seen_order.append(ident)
+                    ever.add(ident)
 
             # 5. 显式走位。角色还没上台就当成"进来时站这儿"
             for i, p in pend.move.items():
@@ -778,27 +1066,39 @@ def build(events, cfg, cast, idx, project):
             if want is not None:
                 # 镜头说了算：不在镜的人从舞台上摘掉（无动画），在镜但不在台上的补进来
                 for i in list(st.pos):
-                    if i not in want and i not in leaving:
+                    if i not in want and i not in departing:
                         st.leave(i)
                         entering.pop(i, None)
                 for i in want:
                     if i not in st.pos and i not in entering:
-                        entering[i] = 3 if i not in ever else 0
+                        entering[i] = 0 if pend.camera_cut else (3 if i not in present else 0)
+                        present.add(i)
                         if i not in seen_order:
                             seen_order.append(i)
                         ever.add(i)
                 order = [i for i in seen_order
-                         if (i in want or i in leaving) and (i in st.pos or i in entering)]
-            fades = appearance.observe(order)
-            if len(order) > 5:
-                drop = order[5:]
-                warn(no, f"台上要放 {len(order)} 个立绘，超过 5 个位置，"
+                         if (i in want or i in departing) and (i in st.pos or i in entering)]
+                # The line's performance owner can be offscreen in a held shot.
+                # Keep that character physically present, but do not pass a stale
+                # pending entry to the layout planner for someone outside `order`.
+                entering = {i: ap for i, ap in entering.items() if i in order}
+            fades = appearance.observe(order, physically_present=present)
+            if pend.camera_cut:
+                fades.clear()
+            if len(order) > 3:
+                drop = order[3:]
+                warn(no, f"当前镜头要放 {len(order)} 个立绘，超过 3 人上限，"
                          f"挤掉：{'、'.join(id2name_g.get(d, d) for d in drop)}")
                 for d in drop:
                     entering.pop(d, None)
                     st.leave(d)
-                order = order[:5]
-            target = st.plan(order, hold=set(leaving), entering=set(entering))
+                order = order[:3]
+            target = st.plan(
+                order,
+                hold=departing,
+                entering=set(entering),
+                intent=layout_state,
+            )
             moves = st.apply(target, entering=set(entering))
 
             if speaker_ident:
@@ -821,6 +1121,8 @@ def build(events, cfg, cast, idx, project):
                     ch["appear"] = 3
                 elif i in leaving:
                     ch["appear"] = leaving[i]
+                elif i in concealing:
+                    ch["appear"] = concealing[i]
                 if i in pend.fx:
                     ch["shapeOverride"] = pend.fx[i]
 
@@ -831,23 +1133,66 @@ def build(events, cfg, cast, idx, project):
                 chars[0]["name"] = str(c.get("id") or e["who"])
                 speaker = 0
 
-            # 6. 说话者自己的标注
-            if speaker_ident and speaker > 0:
-                f = resolve_face(e["face"], speaker_ident, faces, no)
+            # 6. 台词说话者或无对话框演出主体自己的标注
+            performance_slot = chars_pos(chars, performance_ident) if performance_ident else 0
+            if performance_ident and performance_slot > 0:
+                # An empty acting beat is a continuation of the current pose.
+                # Older/generated scripts sometimes wrote ``(00)`` merely to
+                # satisfy the line grammar; treating that placeholder as an
+                # authored reset creates a conspicuous default-face flash.
+                # An intentional silent reset can still use @react face=00.
+                face_token = e["face"]
+                if not str(e.get("text") or "").strip() and str(face_token or "").strip() == "00":
+                    face_token = ""
+                f = resolve_face(face_token, performance_ident, faces, no)
                 if f:
-                    face_state[speaker_ident] = f
-                    chars[speaker]["faceId"] = f
-                chars[speaker]["emoticon"] = resolve_emo(e["emo"], emo_sym, emo_cn, no)
-                chars[speaker]["action"] = resolve_act(e["act"], act, act_cn, no)
+                    face_state[performance_ident] = f
+                    chars[performance_slot]["faceId"] = f
+                chars[performance_slot]["emoticon"] = resolve_emo(e["emo"], emo_sym, emo_cn, no)
+                chars[performance_slot]["action"] = resolve_act(e["act"], act, act_cn, no)
                 if e["fx"]:
-                    chars[speaker]["shapeOverride"] = resolve_shape(e["fx"], no)
+                    chars[performance_slot]["shapeOverride"] = resolve_shape(e["fx"], no)
             elif any((e["face"], e["emo"], e["act"], e["fx"])):
-                warn(no, f"「{e['who']}」没有立绘，表情/气泡/动作/效果标注被忽略")
+                if c.get("portrait") and not c.get("narrator"):
+                    warn(
+                        no,
+                        f"「{e['who']}」是有立绘角色但当前不在镜头，"
+                        "本行表情/气泡/动作/效果保留为画外意图，不写入当前 ScriptData",
+                    )
+                else:
+                    warn(no, f"「{e['who']}」没有立绘，表情/气泡/动作/效果标注被忽略")
 
-            # 7. 高亮：默认台上除说话者外全亮；@hl 可覆盖
+            # 一个无对话框节点可以承载最多三人的同步反应，不能拆成多个
+            # 空节点，否则气泡和动作会变成先后发生。
+            for ident, reaction in pend.reactions.items():
+                slot = chars_pos(chars, ident)
+                if not slot:
+                    warn(no, f"@react 目标‘{id2name_g.get(ident, ident)}’不在当前镜头，已忽略")
+                    continue
+                f = resolve_face(reaction["face"], ident, faces, no)
+                if f:
+                    face_state[ident] = f
+                    chars[slot]["faceId"] = f
+                chars[slot]["emoticon"] = resolve_emo(
+                    reaction["emo"], emo_sym, emo_cn, no,
+                )
+                chars[slot]["action"] = resolve_act(
+                    reaction["act"], act, act_cn, no,
+                )
+
+            # 7. 次要状态：对白节点由 AA 自动高亮说话者，其余在场者进入
+            #    #N;h 次要/变暗集合。无对白演出拍没有说话者，当前镜头全员
+            #    保持高光；不要把“演出主体”误当成对白说话者而压暗旁人。
             live = set(moves)
-            want = live if pend.hl is None else [i for i in pend.hl if i in live]
-            hl = sorted({chars_pos(chars, i) for i in want})
+            secondary = (
+                set()
+                if not is_dialogue
+                else (
+                    live if pend.hl is None
+                    else [i for i in pend.hl if i in live]
+                )
+            )
+            hl = sorted({chars_pos(chars, i) for i in secondary})
             hl = [p for p in hl if p and p != speaker]
 
             # 自动标注只能给出“谁受击”，这一镜的真实槽位要等排布完成后才能知道。
@@ -861,22 +1206,60 @@ def build(events, cfg, cast, idx, project):
                 shot_raw.append(f"#{slot};fx;{{shot}}")
             additional_prompt = "\n".join([p for p in (pend.prompt(), *shot_raw) if p])
 
-            scripts.append({
+            effective_transition = (
+                trans if last_emitted_bg is not None and bg != last_emitted_bg else 0
+            )
+            script_data = {
                 "$type": T_SCRIPT, "text": e["text"], "popup": pend.popup,
                 "bgEffect": bgfx, "bgName": tables.bg_id(bg), "bgFriendlyName": bg,
                 "sound": pend.se, "voice": voice_guid(project, next(vseq)),
-                "transition": trans, "bgmId": bgm, "selectionGroup": 0,
+                "transition": effective_transition, "bgmId": bgm, "selectionGroup": 0,
                 "additionalPrompt": additional_prompt,
                 "characters": {"$type": T_CLIST, "$values": chars},
                 "speakerSlotNum": speaker,
                 "highlightedSlotNums": {"$type": T_ILIST, "$values": hl},
-                "isDialogScript": True, "placeText": pend.place,
+                "isDialogScript": is_dialogue, "placeText": pend.place,
                 "_explicitFxEnds": sorted(pend.fx_ends),
                 "_sceneReset": pending_fx_scene_reset,
-            })
+                "_trace": list(pend.origins) + ([copy.deepcopy(e["_trace"])] if isinstance(e.get("_trace"), dict) else []),
+            }
+            # An annotated script can be compiled without passing through the
+            # structured renderer again (for example, a previously saved 0.95
+            # draft).  In that path an explicit `@camera_cut` may repeat the
+            # exact same compiled character state as the immediately previous
+            # ScriptData.  The cut is then a deterministic no-op: keep the
+            # authored trace and mark the reason, but do not let the quality
+            # checker mistake it for a second visual camera operation.  This
+            # is deliberately limited to byte-for-byte state equality; it does
+            # not impose a cut budget or choose an aesthetic alternative.
+            if pend.camera_cut and scripts:
+                previous_signature = _script_character_signature(scripts[-1])
+                current_signature = _script_character_signature(script_data)
+                if previous_signature == current_signature:
+                    traced = []
+                    deduped = False
+                    for origin in script_data.get("_trace") or ():
+                        if not isinstance(origin, Mapping):
+                            traced.append(origin)
+                            continue
+                        copied = copy.deepcopy(dict(origin))
+                        if copied.get("command") == "camera_cut":
+                            copied["dedup_reason"] = (
+                                "duplicate_camera_signature"
+                            )
+                            copied["dedup_previous_script_index"] = len(scripts) - 1
+                            deduped = True
+                        traced.append(copied)
+                    if deduped:
+                        script_data["_trace"] = traced
+            scripts.append(script_data)
+            last_emitted_bg = bg
             pending_fx_scene_reset = False
 
             for i in leaving:
+                st.leave(i)
+                present.discard(i)
+            for i in concealing:
                 st.leave(i)
             trans = 0                      # 过渡只作用一行
             pend.reset()
@@ -894,6 +1277,27 @@ def chars_pos(chars, ident):
         if c["name"] == ident:
             return k
     return 0
+
+
+def _script_character_signature(script):
+    """Return the visual character state used by compiled staging audits."""
+    values = (script.get("characters") or {}).get("$values") or []
+    return {
+        str(character.get("name")): (
+            int(character.get("endingPos") or 0),
+            str(character.get("faceId") or ""),
+            int(character.get("shapeOverride") or 0),
+            int(
+                character.get("emoticon")
+                if character.get("emoticon") is not None else -1
+            ),
+            int(character.get("action") or 0),
+        )
+        for character in values
+        if isinstance(character, Mapping)
+        and str(character.get("name") or "")
+        and int(character.get("endingPos") or 0) > 0
+    }
 
 
 def wrap_project(scenes, project, preview_bg, bgmap):
@@ -1280,6 +1684,7 @@ def write_aap_atomic(path, payload):
 
 def compile_script(options: dict, *, running_probe=None) -> dict:
     """剧本编译纯函数接口（剥离 sys.argv 与全局状态）"""
+    warn.items.clear()
     script_path = options["script"]
     out_name = options.get("out")
     cast_path = options.get("cast") or os.path.join(HERE, "cast.json")
@@ -1288,6 +1693,7 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
     install = options.get("install", False)
     voices = options.get("voices")
     dry_run = options.get("dry_run", False)
+    trace_path = options.get("trace")
 
     if install:
         unresolved_backgrounds = collect_background_requests(Path(script_path))
@@ -1300,6 +1706,19 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
     cfg, cast, id2name = load_cast(cast_path)
     restore_registered_cast_assets(cast, aa_data)
     build_index = json.load(open(index_path, encoding="utf-8"))
+    portrait_layout_mode = options.get("portrait_layout_mode", "enrich")
+    staging_layout_mode = str(
+        options.get("layout_mode") or cfg.get("layout_mode") or "ai"
+    ).strip().lower()
+    if staging_layout_mode not in {"pure_ai", "ai", "rules"}:
+        raise ValueError("invalid_layout_mode")
+    semantic_layout = (
+        staging_layout_mode in {"pure_ai", "ai"}
+        and (
+            portrait_layout_mode != "snapshot_only"
+            or isinstance(build_index.get("portrait_layout_catalog"), dict)
+        )
+    )
     project = validate_windows_path_component(
         out_name or os.path.splitext(os.path.basename(script_path))[0],
         label="project name",
@@ -1324,9 +1743,92 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
 
     with transaction:
         idx = merge_project_registered_assets(build_index, proj_res)
-        events = parse_script(script_path, cast)
-        scenes = build(events, cfg, cast, idx, project)
+        trace_payload = load_annotation_trace(script_path, trace_path)
+        events = parse_script(script_path, cast, trace_payload)
+        scenes = build(
+            events, cfg, cast, idx, project,
+            semantic_layout=semantic_layout, layout_mode=staging_layout_mode,
+        )
         flat = [s for _, ss in scenes for s in ss]
+        compiled_quality = validate_compiled_staging(
+            flat,
+            plan=trace_payload.get("director_plan") if trace_payload else None,
+        )
+        upstream_quality = trace_payload.get("quality") if trace_payload else None
+        raw_upstream_issues = [
+            dict(issue) for issue in (upstream_quality or {}).get("issues") or []
+            if isinstance(issue, dict)
+        ]
+        # A saved annotate trace can contain quality findings from the
+        # previous compiler pass.  Re-evaluate compiler-owned findings
+        # against the real ScriptData just built; otherwise a deterministic
+        # no-op camera dedupe still leaves the old high-severity warning in
+        # the new 0.95 quality result.  Preserve the old finding as resolved
+        # provenance instead of silently deleting it.
+        current_compiled_issues = list(compiled_quality.get("issues") or [])
+        current_compiled_keys = {
+            (
+                str(issue.get("code") or ""),
+                str(issue.get("source_id") or ""),
+            )
+            for issue in current_compiled_issues
+            if isinstance(issue, dict)
+        }
+        upstream_issues = []
+        resolved_upstream_issues = []
+        for issue in raw_upstream_issues:
+            key = (
+                str(issue.get("code") or ""),
+                str(issue.get("source_id") or ""),
+            )
+            if (
+                str(issue.get("code") or "")
+                == "compiled_redundant_camera_declaration"
+                and key not in current_compiled_keys
+            ):
+                resolved = dict(issue)
+                resolved["resolution"] = "deterministic"
+                resolved["resolved_by"] = "current_compiled_camera_dedupe"
+                resolved_upstream_issues.append(resolved)
+                continue
+            upstream_issues.append(issue)
+        compiler_issues = compiler_warning_issues(warn.items)
+        quality_issues = classify_quality_issues(
+            upstream_issues
+            + list(compiled_quality.get("issues") or [])
+            + compiler_issues
+        )
+        quality_report = {
+            "result": "needs_review" if any(
+                str(issue.get("resolution") or "ai_repair") == "block"
+                or (
+                    str(issue.get("resolution") or "ai_repair") == "ai_repair"
+                    and str(issue.get("severity") or issue.get("level") or "") in {"high", "critical"}
+                )
+                for issue in quality_issues
+            ) else "pass",
+            "issues": quality_issues,
+            "resolution_summary": quality_resolution_summary(quality_issues),
+            "compiled": compiled_quality,
+            "resolved_upstream_issues": resolved_upstream_issues,
+            "trace_applied": bool(trace_payload),
+        }
+
+        compiled_scripts = []
+        for script_index, script in enumerate(flat):
+            compiled_scripts.append({
+                "script_index": script_index,
+                "text": script.get("text", ""),
+                "is_dialog": bool(script.get("isDialogScript")),
+                "speaker_slot": int(script.get("speakerSlotNum") or 0),
+                "additional_prompt": script.get("additionalPrompt", ""),
+                "origins": copy.deepcopy(list(script.get("_trace") or [])),
+                "characters": [
+                    copy.deepcopy(character)
+                    for character in script["characters"]["$values"]
+                    if character.get("name")
+                ],
+            })
 
         used = set()
         for s in flat:
@@ -1335,6 +1837,9 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
                     used.add(c["name"])
 
         first_bg = flat[0]["bgFriendlyName"] if flat else cfg.get("default_bg", "BG_Black")
+        for script in flat:
+            for key in [name for name in script if str(name).startswith("_")]:
+                script.pop(key, None)
         proj = wrap_project(scenes, project, first_bg, idx.get("bg", {}))
         spk = {}
         for s in flat:
@@ -1368,10 +1873,12 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
             print("\n[dry-run] 未写文件")
             return {
                 "events": events,
-                "diagnostics": [],
+                "compiled_scripts": compiled_scripts,
+                "diagnostics": compiler_issues,
                 "project": project,
                 "project_dir": proj_res,
                 "aap_file": aap,
+                "quality": quality_report,
             }
 
         if install_target:
@@ -1407,10 +1914,12 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
 
         return {
             "events": events,
-            "diagnostics": [],
+            "compiled_scripts": compiled_scripts,
+            "diagnostics": compiler_issues,
             "project": project,
             "project_dir": proj_res,
             "aap_file": aap,
+            "quality": quality_report,
         }
 
 

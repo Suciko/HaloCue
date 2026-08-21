@@ -122,7 +122,7 @@ N 是人物位置 1–5，**不能填 0**，且该位置必须有角色，否则
 
 `#na;` 旁白 / `#title;` 标题 / `#place;` 地点 / `#continued` 续接 /
 `#nextepisode;` 下一话 / `#N;hide` 隐藏 / `#N;mK` 移动 / `#N;a` `#N;d` 进出场 /
-`#N;h` 高亮 / `#N;em;` 气泡 / `#N;closeup` 特写 / `#wait` 默认停顿。
+`#N;h` 次要/变暗 / `#N;em;` 气泡 / `#N;closeup` 特写 / `#wait` 默认停顿。
 Chat（原生 `[재잘]`）编译为 `#N;em;[재잘]`，而 Jump 是动作 6，编译为
 `#N;jump`；两者不可互换。`additionalPrompt` 仅接受作者显式写下的高级指令
 （如 `@raw`），模型输出不会直接写入该字段。

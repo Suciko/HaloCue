@@ -10,7 +10,7 @@ if str(HERE) not in sys.path:
 import pytest
 import build_bundle
 from build_bundle import BuildBundleManager, CompileInputStaleError
-from draft_store import AnnotationIncompleteError, DraftStore
+from draft_store import AnnotationIncompleteError, DraftStore, calc_sha256
 
 
 @pytest.fixture
@@ -99,6 +99,39 @@ def test_compile_snapshot_rejects_partial_annotation(temp_draft_store):
         )
 
 
+def test_compile_snapshot_accepts_user_approved_partial_annotation(
+    temp_draft_store,
+):
+    store = temp_draft_store
+    token = "partial-build-approved"
+    store.create_draft(
+        token=token,
+        text="凯伊: 已确认的部分结果\n",
+        project="部分结果快照",
+        cast={"cast": {"凯伊": {"id": "kai", "portrait": True}}},
+        annotation_status={
+            "status": "partial", "completed_targets": 0,
+            "total_targets": 1, "pending_targets": 1,
+        },
+    )
+    draft = store.load_draft(token)
+    store.batch_approve_reviews(
+        token=token,
+        card_ids=None,
+        expected_draft_version=draft["session"]["draft_version"],
+    )
+    draft_dir = store.get_draft_path(token)
+    (draft_dir / "resources.json").write_text(
+        json.dumps({"bg": {"BG_Black": 1}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    build_id = BuildBundleManager(store=store).create_compile_snapshot(
+        token=token, expected_draft_version=2,
+    )
+    assert build_id.startswith("build-")
+
+
 def test_compile_snapshot_captures_the_draft_cast_and_resource_index(
     temp_draft_store,
 ):
@@ -184,6 +217,64 @@ def test_build_worker_compiles_from_the_snapshot_cast_and_resource_index(
     )
 
     assert compiled == {"character": "draft-kei", "backgrounds": ["BG_Draft"]}
+
+
+def test_build_snapshot_forwards_trace_and_persists_compiled_quality(
+    temp_draft_store, tmp_path, monkeypatch
+):
+    store = temp_draft_store
+    token = "trace-quality-build"
+    text = "旁白: 检查演出\n"
+    trace = {
+        "schema_version": 1,
+        "annotated_source_sha256": calc_sha256(text),
+        "lines": [{"line": 1, "source_id": "source-1", "command": ""}],
+    }
+    store.create_draft(
+        token=token, text=text, project="质量门构建", annotation_trace=trace,
+    )
+    draft_dir = store.get_draft_path(token)
+    (draft_dir / "resources.json").write_text(
+        json.dumps({"bg": {"BG_Black": 1}}), encoding="utf-8",
+    )
+    captured = {}
+
+    def compile_fixture(options):
+        captured.update(options)
+        generated = tmp_path / "trace-generated"
+        project = generated / "project"
+        project.mkdir(parents=True)
+        aap = generated / "trace.aap"
+        aap.write_text("compiled", encoding="utf-8")
+        return {
+            "aap_file": str(aap),
+            "project_dir": str(project),
+            "diagnostics": [],
+            "quality": {
+                "result": "needs_review",
+                "issues": [{
+                    "code": "compiled_speaker_missing",
+                    "severity": "critical",
+                    "source_id": "source-1",
+                }],
+            },
+        }
+
+    monkeypatch.setattr(build_bundle, "compile_script", compile_fixture)
+    manager = BuildBundleManager(store=store)
+    build_id = manager.create_compile_snapshot(token, 1)
+    snapshot = draft_dir / "builds" / ".tmp" / build_id / "input"
+    assert json.loads(
+        (snapshot / "annotation_trace.json").read_text(encoding="utf-8")
+    ) == trace
+
+    result = manager.execute_build_worker(token, build_id)
+    assert Path(captured["trace"]).name == "annotation_trace.json"
+    validation = json.loads(
+        (Path(result["bundle_dir"]) / "validation.json").read_text(encoding="utf-8")
+    )
+    assert validation["valid"] is False
+    assert validation["blocking_issues"][0]["source_id"] == "source-1"
 
 
 def test_compile_snapshot_accepts_the_existing_per_draft_resource_file(

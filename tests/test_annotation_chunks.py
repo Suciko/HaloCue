@@ -71,6 +71,30 @@ def test_blank_lines_do_not_split_a_scene():
     assert [scene["target_indices"] for scene in build_scene_map(items)] == [[0, 2]]
 
 
+def test_same_physical_space_keeps_one_scene_with_multiple_allowed_modes():
+    items = make_items([
+        ("桃井", "这份资料证明对方已经开始行动。"),
+        ("绿", "我们得立刻报告。"),
+        ("桃井", "……绿，你刚才其实很担心吧。"),
+        ("绿", "我只是，不想让姐姐一个人承担。"),
+    ])
+    usage_chain = [
+        {
+            "segment": "调查结论与姐妹停顿", "start": "第1行", "end": "第4行",
+            "location": "游戏开发部", "time": "下午",
+            "scene_type": "main", "active_modes": ["main", "bond"],
+            "scene_function": "conflict",
+        },
+    ]
+
+    scenes = build_scene_map(items, usage_chain)
+
+    assert [scene["target_indices"] for scene in scenes] == [[0, 1, 2, 3]]
+    assert scenes[0]["scene_type"] == "main"
+    assert scenes[0]["active_modes"] == ["main", "bond"]
+    assert scenes[0]["location"] == "游戏开发部"
+
+
 def test_chunk_uses_bounded_past_and_future_windows():
     dialogue = list(range(100))
     past, future = context_indices(dialogue, {"target_indices": list(range(30, 60))})

@@ -8,14 +8,17 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import pytest
+import install_manager as install_manager_module
 from build_bundle import BuildBundleManager, calc_file_sha256
 from draft_store import AnnotationIncompleteError, DraftStore
 from install_manager import (
     InstallManager,
     AACorruptBundleError,
     AAInstallTargetExistsError,
+    AAQualityGateError,
     AARunningError,
     _merge_install_manifests,
+    _bundle_custom_backgrounds,
     _repair_install_assets,
     compose_install_project_name,
 )
@@ -116,6 +119,37 @@ def test_aa_running_refuses_install(temp_environment):
 
     with pytest.raises(AARunningError):
         install_mgr.install_build(token=token, build_id=build_id)
+
+
+def test_unresolved_high_quality_issue_refuses_install_before_touching_aa(
+    temp_environment,
+):
+    env = temp_environment
+    token = "quality-gate-install"
+    project = "演出质量未通过"
+    env["store"].create_draft(
+        token=token, text="旁白: 检查\n", project=project,
+    )
+    build_id = env["bundle_mgr"].create_compile_snapshot(token, 1)
+    result = env["bundle_mgr"].execute_build_worker(token, build_id)
+    bundle_dir = Path(result["bundle_dir"])
+    validation_file = bundle_dir / "validation.json"
+    validation_file.write_text(json.dumps({
+        "valid": False,
+        "diagnostics": [],
+        "quality": {"issues": [{
+            "code": "compiled_exit_still_visible", "severity": "critical",
+        }]},
+        "blocking_issues": [],
+    }, ensure_ascii=False), encoding="utf-8")
+    _rehash_bundle_file(bundle_dir, validation_file)
+
+    with pytest.raises(AAQualityGateError) as caught:
+        env["install_mgr"].install_build(token=token, build_id=build_id)
+
+    assert caught.value.code == "staging_quality_failed"
+    assert caught.value.issues[0]["code"] == "compiled_exit_still_visible"
+    assert not (env["aa_data_dir"] / "projects" / f"{project}.aap").exists()
 
 
 @pytest.mark.parametrize(
@@ -596,6 +630,7 @@ def test_missing_custom_background_rolls_back_the_existing_install(
     index = json.loads(index_path.read_text(encoding="utf-8"))
     index.setdefault("bg", {})[background_name] = 987654321
     index.setdefault("bg_label", {})[background_name] = {"label": "缺失背景"}
+    index.setdefault("custom_asset_keys", {})["backgrounds"] = [background_name]
     index_path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
     _rehash_bundle_file(bundle_dir, index_path)
 
@@ -622,6 +657,44 @@ def test_missing_custom_background_rolls_back_the_existing_install(
     assert installed_aap.read_bytes() == b"existing-aap"
     assert (project_dir / "manifest.json").read_bytes() == manifest_bytes
     assert (save_dir / "manifest.json").read_bytes() == manifest_bytes
+
+
+def test_labeled_official_background_is_not_classified_as_custom(tmp_path):
+    bundle_project = tmp_path / "bundle-project"
+    bundle_project.mkdir()
+    (bundle_project / "aa_resources.json").write_text(
+        json.dumps({
+            "bg": {"BG_Black": 1047754314},
+            "bg_label": {"BG_Black": {"label": "黑屏"}},
+            "custom_asset_keys": {"backgrounds": []},
+        }),
+        encoding="utf-8",
+    )
+
+    assert _bundle_custom_backgrounds(bundle_project) == set()
+
+
+def test_legacy_bundle_compares_labels_with_official_catalog(tmp_path, monkeypatch):
+    runtime_root = tmp_path / "runtime"
+    bundle_project = tmp_path / "bundle-project"
+    runtime_root.mkdir()
+    bundle_project.mkdir()
+    (runtime_root / "aa_resources.json").write_text(
+        json.dumps({"bg": {"BG_Black": 1047754314}}), encoding="utf-8"
+    )
+    (bundle_project / "aa_resources.json").write_text(
+        json.dumps({
+            "bg": {"BG_Black": 1047754314, "chapter-night": 987654321},
+            "bg_label": {
+                "BG_Black": {"label": "黑屏"},
+                "chapter-night": {"label": "章节夜景"},
+            },
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(install_manager_module, "HERE", runtime_root)
+
+    assert _bundle_custom_backgrounds(bundle_project) == {"chapter-night"}
 
 
 def test_orphan_character_uses_the_registration_matching_its_existing_files(

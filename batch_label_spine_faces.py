@@ -21,7 +21,8 @@ from pathlib import Path
 from typing import Iterable
 
 import assetdb
-from llm import make_provider
+from llm import make_provider, make_provider_from_settings
+from model_profiles import ModelProfileStore
 from official_spine_cache import materialize_official_spines
 from spine_face_labeler import label_face_images, persist_visual_face_labels
 from spine_face_inventory import (
@@ -38,6 +39,18 @@ _SUPPORTING_NAME_RE = re.compile(
     r"(?:学生|成员|部员|组员|暴走族|Mob|モブ).*(?:[A-ZＡ-Ｚ]|[0-9０-９])(?:（[^）]+）)?$",
     re.IGNORECASE,
 )
+
+
+def _batch_provider(args):
+    if args.model_profile_id:
+        store = ModelProfileStore(args.model_profiles)
+        name, settings = store.provider_settings_for_model(args.model_profile_id)
+        provider = make_provider_from_settings(name, settings)
+    else:
+        provider = make_provider(args.llm, args.provider)
+    if args.model:
+        provider.model = str(args.model)
+    return provider
 
 
 @dataclass(frozen=True)
@@ -424,6 +437,20 @@ def _existing_ids(con, target: FaceBatchTarget, model: str) -> set[str]:
     return set.intersection(*existing_by_binding) if existing_by_binding else set()
 
 
+def _existing_ids_for_binding(con, binding: IdentityBinding, model: str) -> set[str]:
+    rows = con.execute(
+        """
+        SELECT face_id FROM face_visual_label
+        WHERE ident=? AND spine_signature=? AND outfit_key=? AND model=?
+        """,
+        (
+            binding.identifier, binding.spine_signature,
+            binding.outfit_key, str(model),
+        ),
+    ).fetchall()
+    return {str(row["face_id"]) for row in rows}
+
+
 def persist_target_visual_face_labels(
     con,
     *,
@@ -431,8 +458,12 @@ def persist_target_visual_face_labels(
     model: str,
     labels: Iterable[dict],
 ) -> dict:
-    """Write one visual result to every real identity bound to its skeleton."""
+    """Persist a result only when one skeleton has one semantic identity."""
     records = list(labels)
+    if len(target.bindings) != 1:
+        raise ValueError(
+            "shared skeleton semantics must be labeled and persisted per identity"
+        )
     binding_results = []
     for binding in target.bindings:
         result = persist_visual_face_labels(
@@ -491,11 +522,25 @@ class FreshSpineRenderer:
                     raise
 
 
+def _label_batch_activation_ready(report: Mapping, target_count: int) -> bool:
+    completed = list(report.get("completed") or [])
+    return bool(target_count) and not report.get("failed") and all(
+        entry.get("status") in {"complete", "cached_labels"}
+        and not entry.get("missing_face_ids")
+        and not int(entry.get("failed_count") or 0)
+        for entry in completed
+    ) and len(completed) == target_count
+
+
 def run_batch(args, targets: list[FaceBatchTarget], index: dict, report_path: Path) -> int:
-    provider = make_provider(args.llm, args.provider)
-    if args.model:
-        provider.model = str(args.model)
-    label_version = str(args.label_version or provider.model).strip()
+    provider = _batch_provider(args)
+    # The two-stage observation/backend pipeline has separate provenance from
+    # old one-stage labels.  An explicit --label-version still wins, while a
+    # normal run automatically starts/resumes the v4 lane instead of silently
+    # reusing stale semantic-only rows.
+    label_version = str(
+        args.label_version or f"{provider.model}:semantic-profile-v4"
+    ).strip()
     # Some OpenAI-compatible Gemini gateways accept json_schema but silently
     # ignore it (for example returning one face object instead of {items:[...]}).
     # The provider's JSON-object compatibility mode repeats the schema in the
@@ -503,12 +548,14 @@ def run_batch(args, targets: list[FaceBatchTarget], index: dict, report_path: Pa
     if hasattr(provider, "_strict_response_format_unavailable") or provider.name == "openai":
         provider._strict_response_format_unavailable = True
     con = assetdb.connect(args.db)
-    assetdb.set_active_face_label_model(con, label_version)
+    active_model_before = assetdb.active_face_label_model(con)
     hints = _semantic_hints(index)
     report = {
         "started_at": datetime.now(timezone.utc).isoformat(),
         "provider_model": provider.model,
         "label_version": label_version,
+        "activation_requested": bool(args.activate_on_complete),
+        "active_model_before": active_model_before,
         "target_count": len(targets),
         "identity_binding_count": sum(len(item.bindings) for item in targets),
         "face_count": sum(item.face_count for item in targets),
@@ -545,31 +592,89 @@ def run_batch(args, targets: list[FaceBatchTarget], index: dict, report_path: Pa
                 print(" " * 50, end="\r")
                 if render_report.missing_face_ids:
                     print("  跳过骨骼中不存在的编号：" + "、".join(render_report.missing_face_ids))
-                faces_to_label = render_report.faces
-                if not args.force_vision:
-                    faces_to_label = tuple(
-                        face for face in render_report.faces
-                        if face.face_id not in existing
+                binding_results = []
+                for binding_index, binding in enumerate(target.bindings, start=1):
+                    binding_existing = _existing_ids_for_binding(
+                        con, binding, label_version
                     )
-                labels = label_face_images(
-                    provider,
-                    faces_to_label,
-                    batch_size=args.batch_size,
-                    batch_workers=args.api_workers,
-                    confidence_threshold=args.confidence_threshold,
-                    semantic_hints=hints.get((target.identifier, target.outfit_key), {}),
-                    comparison_memory=True,
-                    progress=lambda done, total, batches, reviewed: print(
-                        f"  识别 {done}/{total}，批次 {batches}，复核 {reviewed}",
-                        end="\r", flush=True,
+                    faces_to_label = render_report.faces
+                    if not args.force_vision:
+                        faces_to_label = tuple(
+                            face for face in render_report.faces
+                            if face.face_id not in binding_existing
+                        )
+                    if not faces_to_label:
+                        binding_results.append({
+                            **asdict(binding), "status": "cached_labels",
+                            "saved_count": 0, "failed_count": 0, "failures": [],
+                        })
+                        continue
+                    print(
+                        f"  身份 {binding_index}/{len(target.bindings)}  "
+                        f"{binding.name or binding.identifier}"
+                    )
+                    face_ids = [face.face_id for face in faces_to_label]
+                    official_usage = assetdb.official_face_usage(
+                        con,
+                        ident=binding.identifier,
+                        face_ids=face_ids,
+                        spine_signature=binding.spine_signature,
+                        outfit_key=binding.outfit_key,
+                        representative_limit=3,
+                    )
+                    official_profiles = assetdb.official_face_usage_profiles(
+                        con,
+                        ident=binding.identifier,
+                        face_ids=face_ids,
+                        spine_signature=binding.spine_signature,
+                        outfit_key=binding.outfit_key,
+                    )
+                    labels = label_face_images(
+                        provider,
+                        faces_to_label,
+                        batch_size=args.batch_size,
+                        batch_workers=args.api_workers,
+                        confidence_threshold=args.confidence_threshold,
+                        semantic_hints=hints.get(
+                            (binding.identifier, binding.outfit_key), {}
+                        ),
+                        official_usage=official_usage,
+                        official_profiles=official_profiles,
+                        comparison_memory=True,
+                        require_visual_facts=True,
+                        require_semantic_profile=True,
+                        require_semantic_modes=True,
+                        diagnostic_errors=True,
+                        progress=lambda done, total, batches, reviewed: print(
+                            f"  识别 {done}/{total}，批次 {batches}，复核 {reviewed}",
+                            end="\r", flush=True,
+                        ),
+                    )
+                    result = persist_visual_face_labels(
+                        con,
+                        ident=binding.identifier,
+                        spine_signature=binding.spine_signature,
+                        outfit_key=binding.outfit_key,
+                        model=label_version,
+                        labels=labels,
+                    )
+                    binding_results.append({
+                        **asdict(binding), "status": (
+                            "complete" if not result.get("failed_count") else "partial"
+                        ), **result,
+                    })
+                saved = {
+                    "saved_count": sum(
+                        int(item.get("saved_count") or 0) for item in binding_results
                     ),
-                )
-                saved = persist_target_visual_face_labels(
-                    con,
-                    target=target,
-                    model=label_version,
-                    labels=labels,
-                )
+                    "failed_count": sum(
+                        int(item.get("failed_count") or 0) for item in binding_results
+                    ),
+                    "identity_rows_saved": sum(
+                        int(item.get("saved_count") or 0) for item in binding_results
+                    ),
+                    "binding_results": binding_results,
+                }
                 con.commit()
                 elapsed = round(time.monotonic() - started, 2)
                 entry = {
@@ -601,6 +706,16 @@ def run_batch(args, targets: list[FaceBatchTarget], index: dict, report_path: Pa
             _write_json(report_path, report)
     report["finished_at"] = datetime.now(timezone.utc).isoformat()
     report["provider_report"] = provider.report()
+    activation_ready = _label_batch_activation_ready(report, len(targets))
+    if args.activate_on_complete and activation_ready:
+        assetdb.set_active_face_label_model(con, label_version)
+        report["active_model_after"] = label_version
+        report["activated"] = True
+    else:
+        report["active_model_after"] = assetdb.active_face_label_model(con)
+        report["activated"] = False
+        if args.activate_on_complete and not activation_ready:
+            report["activation_blocked_reason"] = "batch_incomplete_or_needs_review"
     _write_json(report_path, report)
     print(provider.report())
     print(f"报告：{report_path}")
@@ -692,11 +807,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--index", default=str(HERE / "aa_resources.json"))
     parser.add_argument("--db", default=str(HERE / "aa_assets.db"))
     parser.add_argument("--llm", default=str(HERE / "llm.json"))
+    parser.add_argument(
+        "--model-profiles", default=str(HERE / "llm_profiles.json"),
+        help="Model workbench state; secrets remain in Windows Credential Manager",
+    )
+    parser.add_argument(
+        "--model-profile-id",
+        help="Use one saved model-workbench entry instead of llm.json",
+    )
     parser.add_argument("--provider")
     parser.add_argument("--model", help="Vision model ID used for this batch only")
     parser.add_argument(
         "--label-version",
         help="Independent provenance version; use a new value when re-labeling",
+    )
+    parser.add_argument(
+        "--activate-on-complete", action="store_true",
+        help="Activate this label version only after every selected target completes cleanly",
     )
     parser.add_argument(
         "--overrides", action="append",
@@ -710,6 +837,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--shard-count", type=int, default=1)
     parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--subshard-count", type=int, default=1)
+    parser.add_argument("--subshard-index", type=int, default=0)
     parser.add_argument("--force-vision", action="store_true")
     parser.add_argument("--force-render", action="store_true")
     parser.add_argument("--force-prepare", action="store_true")
@@ -734,6 +863,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--shard-count must be at least 1")
     if not 0 <= args.shard_index < args.shard_count:
         parser.error("--shard-index must be in [0, --shard-count)")
+    if args.subshard_count < 1:
+        parser.error("--subshard-count must be at least 1")
+    if not 0 <= args.subshard_index < args.subshard_count:
+        parser.error("--subshard-index must be in [0, --subshard-count)")
 
     config = json.loads(Path(args.config).read_text(encoding="utf-8"))
     index = json.loads(Path(args.index).read_text(encoding="utf-8"))
@@ -759,10 +892,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.ident:
         selected = set(args.ident)
-        targets = [
-            item for item in targets
-            if any(binding.identifier in selected for binding in item.bindings)
-        ]
+        selected_targets = []
+        for item in targets:
+            bindings = tuple(
+                binding for binding in item.bindings
+                if binding.identifier in selected
+            )
+            if not bindings:
+                continue
+            primary = bindings[0]
+            selected_targets.append(replace(
+                item,
+                identifier=primary.identifier,
+                name=primary.name,
+                club=primary.club,
+                outfit_key=primary.outfit_key,
+                spine_signature=primary.spine_signature,
+                identity_bindings=bindings,
+            ))
+        targets = selected_targets
     if args.outfit:
         selected_outfits = {str(value).casefold() for value in args.outfit}
         targets = [
@@ -777,6 +925,11 @@ def main(argv: list[str] | None = None) -> int:
         shard_count=args.shard_count,
         shard_index=args.shard_index,
     )
+    targets = select_target_shard(
+        targets,
+        shard_count=args.subshard_count,
+        shard_index=args.subshard_index,
+    )
     if args.limit is not None:
         targets = targets[: max(0, args.limit)]
 
@@ -787,6 +940,8 @@ def main(argv: list[str] | None = None) -> int:
     plan_payload["selection"] = {
         "shard_count": args.shard_count,
         "shard_index": args.shard_index,
+        "subshard_count": args.subshard_count,
+        "subshard_index": args.subshard_index,
     }
     _write_json(plan_path, plan_payload)
     print(

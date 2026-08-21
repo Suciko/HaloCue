@@ -47,10 +47,14 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+.pytest-*/
+.playwright-cli/
+debug.log
 .venv-desktop-build/
 build/
 dist/
 /release/
+/release-output/
 *.egg-info/
 
 # 每章的演员表是作品相关的，只保留 example

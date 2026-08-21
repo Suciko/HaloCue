@@ -31,7 +31,7 @@
 """
 
 DEFAULTS = {
-    "max_on_cam": 4,      # 同屏上限（硬上限 5）。参数扫描出来 4 最贴近 AA 人工基线
+    "max_on_cam": 3,      # AA 自动演出的确定性安全上限；更高旧配置也会被钳制
     "new_face_hold": 3,   # 新面孔触发硬切所需的"当前镜头已保持行数"
     "stale_after": 6,     # 多少行没说话就下镜
     "min_solo": 1,        # 镜头里至少留几个人（旁白行除外）
@@ -48,7 +48,7 @@ def plan_camera(lines, opts=None):
     """
     o = dict(DEFAULTS)
     o.update(opts or {})
-    MAX = max(1, int(o["max_on_cam"]))
+    MAX = min(3, max(1, int(o["max_on_cam"])))
     NEW_HOLD = int(o["new_face_hold"])
     STALE = int(o["stale_after"])
 

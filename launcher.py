@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import importlib.util
 import json
 import os
@@ -34,6 +35,82 @@ ENTRY_FILE = "启动AA自动写剧本.cmd"
 ERROR_LOG = LAYOUT.user_data_root / "启动失败日志.txt"
 MIN_PYTHON = (3, 9)
 CORE_FILES = ("webui.py", "ui.html")
+
+
+def write_package_self_test(output_path: str | os.PathLike) -> int:
+    """Verify imports and immutable resources from inside the frozen EXE."""
+    required_modules = (
+        "PIL",
+        "UnityPy",
+        "anthropic",
+        "webview",
+        "webview.platforms.edgechromium",
+        "fmod_toolkit",
+        "archspec",
+        "clr",
+        "annotation_scene_planner",
+        "annotation_agent",
+        "annotation_protocol",
+        "direction_quality",
+        "face_selection",
+        "portrait_layout",
+        "scene_asset_labeler",
+        "spine_face_web_renderer",
+    )
+    imported = {}
+    failures = []
+    for name in required_modules:
+        try:
+            importlib.import_module(name)
+        except Exception as exc:
+            failures.append(f"module:{name}:{type(exc).__name__}")
+        else:
+            imported[name] = True
+
+    required_resources = (
+        "ui.html",
+        "portrait_layout_hints.json",
+        "js/spine-webgl-3.8.95.js",
+        "js/spine-webgl-4.2.119.min.js",
+        "tools/spine_web_runtime/spine-webgl-4.2.119.min.js",
+        "tools/spine_web_runtime/SPINE-RUNTIMES-LICENSE.txt",
+        "webview/lib/Microsoft.Web.WebView2.Core.dll",
+        "webview/lib/runtimes/win-x64/native/WebView2Loader.dll",
+        "aa_assets.db",
+        "aa_config.seed.json",
+    )
+    resources = {}
+    for relative in required_resources:
+        ready = (LAYOUT.resource_root / relative).is_file()
+        resources[relative] = ready
+        if not ready:
+            failures.append(f"resource:{relative}:missing")
+
+    database_paths = []
+    try:
+        import webui
+
+        database_paths = webui.configured_asset_database_paths()
+        if len(database_paths) < 2:
+            failures.append("database:expected-primary-and-overlay")
+    except Exception as exc:
+        failures.append(f"database:{type(exc).__name__}")
+
+    payload = {
+        "ok": not failures,
+        "version": "0.95",
+        "frozen": bool(getattr(sys, "frozen", False)),
+        "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        "modules": imported,
+        "resources": resources,
+        "database_count": len(database_paths),
+        "failures": failures,
+    }
+    Path(output_path).resolve().write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return 0 if payload["ok"] else 1
 
 
 def _discover_aa(
@@ -343,7 +420,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--aa-data")
     parser.add_argument("--aa-install")
+    parser.add_argument("--package-self-test", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+
+    if args.package_self_test:
+        return write_package_self_test(args.package_self_test)
 
     report = build_environment_report(
         PROGRAM_DIR,

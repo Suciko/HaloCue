@@ -21,6 +21,12 @@ def test_requested_examples_receive_balanced_direction_cues():
     )["emo"] == "沉默"
     assert infer_direction_cues("……！")["emo"] == "惊叹"
     assert infer_direction_cues("那就更不行了！！")["act"] == "jump"
+    assert infer_direction_cues("爱丽丝也可以帮忙，一起检查会更快。") == {
+        "emo": "闪亮", "act": "hophop",
+    }
+    assert infer_direction_cues("太好了！那我们继续往下检查。") == {
+        "emo": "闪亮", "act": "hophop",
+    }
 
 
 def test_punctuation_alone_does_not_over_direct_ordinary_dialogue():
@@ -63,6 +69,86 @@ def test_supplement_only_fills_empty_portrait_fields():
     assert items[0]["_direction_origins"] == {
         "emo": "deterministic_supplement"
     }
+
+
+def test_eager_positive_cue_repairs_weaker_model_action_but_not_explicit_source():
+    model_item = {
+        "kind": "line", "who": "爱丽丝",
+        "text": "爱丽丝也可以帮忙，一起检查会更快。",
+        "emo": "", "act": "jump", "_direction_origins": {"act": "model"},
+    }
+    explicit_item = {
+        "kind": "line", "who": "桃井",
+        "text": "太好了！那我们继续往下检查。", "act": "jump",
+        "_explicit_direction_fields": {"act"},
+    }
+    cast = {
+        "爱丽丝": {"portrait": True, "narrator": False},
+        "桃井": {"portrait": True, "narrator": False},
+    }
+
+    changes = supplement_directions(
+        [model_item, explicit_item], cast,
+        rule_allowlist={"eager_positive_participation"},
+    )
+
+    assert model_item["emo"] == "闪亮"
+    assert model_item["act"] == "hophop"
+    assert explicit_item["act"] == "jump"
+    assert {(change["field"], change["before"], change["after"]) for change in changes} == {
+        ("emo", "", "闪亮"), ("act", "jump", "hophop"), ("emo", None, "闪亮"),
+    }
+
+
+def test_formal_result_report_receives_light_response_emoticon():
+    item = {
+        "kind": "line", "who": "爱丽丝",
+        "text": "记录要员爱丽丝，报告：入口区域没有发现异常。",
+    }
+    cast = {"爱丽丝": {"portrait": True, "narrator": False}}
+
+    changes = supplement_directions(
+        [item], cast, rule_allowlist={"formal_result_report_response"},
+    )
+
+    assert item["emo"] == "反应"
+    assert changes == [{
+        "item_index": 0,
+        "field": "emo",
+        "before": None,
+        "after": "反应",
+        "rule": "formal_result_report_response",
+    }]
+
+
+def test_formal_result_report_does_not_replace_an_existing_emoticon():
+    item = {
+        "kind": "line", "who": "爱丽丝",
+        "text": "记录要员爱丽丝，报告：入口区域没有发现异常。",
+        "emo": "闪亮", "_direction_origins": {"emo": "model"},
+    }
+    cast = {"爱丽丝": {"portrait": True, "narrator": False}}
+
+    changes = supplement_directions(
+        [item], cast, rule_allowlist={"formal_result_report_response"},
+    )
+
+    assert item["emo"] == "闪亮"
+    assert changes == []
+
+
+def test_ordinary_report_document_mention_does_not_trigger_response_emoticon():
+    item = {
+        "kind": "line", "who": "爱丽丝", "text": "我把调查报告放在桌上了。",
+    }
+    cast = {"爱丽丝": {"portrait": True, "narrator": False}}
+
+    changes = supplement_directions(
+        [item], cast, rule_allowlist={"formal_result_report_response"},
+    )
+
+    assert not item.get("emo")
+    assert changes == []
 
 
 def test_source_direction_has_priority_over_model_and_supplement():

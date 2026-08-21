@@ -46,6 +46,19 @@ class AAInstallTargetExistsError(FileExistsError):
     """A renamed installation would overwrite an existing AA project."""
 
 
+class AAQualityGateError(ValueError):
+    """The build contains unresolved high/critical staging issues."""
+
+    code = "staging_quality_failed"
+
+    def __init__(self, issues):
+        self.issues = [dict(issue) for issue in issues if isinstance(issue, dict)]
+        codes = [str(issue.get("code") or "unknown") for issue in self.issues]
+        summary = "、".join(dict.fromkeys(codes[:6]))
+        suffix = f"：{summary}" if summary else ""
+        super().__init__(f"演出质量检查仍有 {len(self.issues)} 个严重问题，已阻止正式安装{suffix}")
+
+
 def compose_install_project_name(category: str, story_name: str) -> str:
     """Compose one AA project component from an optional one-level category."""
     category = str(category or "").strip()
@@ -220,8 +233,25 @@ def _manifest_character_has_assets(root: Path, row: Dict[str, Any]) -> bool:
 
 
 def _bundle_custom_backgrounds(project_dir: Path) -> set[str]:
-    labels = _bundle_resource_index(project_dir).get("bg_label", {})
-    return set(labels) if isinstance(labels, dict) else set()
+    index = _bundle_resource_index(project_dir)
+    custom_keys = index.get("custom_asset_keys")
+    if isinstance(custom_keys, dict) and isinstance(
+        custom_keys.get("backgrounds"), list
+    ):
+        return {
+            str(name)
+            for name in custom_keys["backgrounds"]
+            if str(name or "").strip()
+        }
+
+    # Compatibility for snapshots created before custom-asset provenance was
+    # recorded explicitly. Semantic labels now cover official backgrounds too,
+    # so only labeled keys absent from the bundled official catalog are custom.
+    labels = index.get("bg_label", {})
+    official = _bundle_resource_index(HERE).get("bg", {})
+    if not isinstance(labels, dict) or not isinstance(official, dict) or not official:
+        return set()
+    return set(labels) - set(official)
 
 
 def _find_character_source(
@@ -561,6 +591,34 @@ class InstallManager:
             if actual_sha != expected_sha:
                 raise AACorruptBundleError(f"Bundle file hash mismatch for {rel_path}")
 
+    @staticmethod
+    def assert_quality_ready(bundle_dir: Path) -> None:
+        validation_file = bundle_dir / "validation.json"
+        if not validation_file.is_file():
+            raise AACorruptBundleError(f"Bundle validation.json missing: {bundle_dir}")
+        try:
+            validation = json.loads(validation_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise AACorruptBundleError(
+                f"Bundle validation.json is invalid: {bundle_dir}"
+            ) from exc
+        quality = validation.get("quality") if isinstance(validation, dict) else {}
+        issues = []
+        for issue in (
+            list(validation.get("blocking_issues") or [])
+            + list((quality or {}).get("issues") or [])
+        ):
+            if not isinstance(issue, dict):
+                continue
+            severity = str(issue.get("severity") or issue.get("level") or "").lower()
+            if severity in {"high", "critical"}:
+                issues.append(issue)
+        unique = {
+            json.dumps(issue, ensure_ascii=False, sort_keys=True): issue for issue in issues
+        }
+        if unique:
+            raise AAQualityGateError(unique.values())
+
     def install_options(self, token: str, build_id: str) -> Dict[str, Any]:
         bundle_dir = self.find_bundle_dir(token, build_id)
         try:
@@ -685,6 +743,9 @@ class InstallManager:
 
         # 2. 校验 Bundle SHA256
         self.verify_bundle(bundle_dir)
+
+        # 2.1 编译后的真实 ScriptData 必须通过严重问题质量门。
+        self.assert_quality_ready(bundle_dir)
 
         # 3. 验证 AA 客户端已关闭
         try:

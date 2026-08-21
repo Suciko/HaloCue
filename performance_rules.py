@@ -41,6 +41,23 @@ def enforce_persistent_closeups(scripts):
             for character in characters[1:]
             if character.get("name")
         }
+        # A closeup is a single-subject composition.  The runtime keeps shape
+        # overrides persistent, but carrying bit 4 into a newly rebuilt group
+        # shot makes the previous solo emphasis leak onto a different layout.
+        # Clear only the closeup bit here; communication (bit 1) may remain
+        # persistent and a later solo shot can explicitly start closeup again.
+        if len(visible) > 1:
+            # A rebuilt group shot must not inherit the previous solo
+            # close-up from either the persistent table or the character
+            # records already shaped on this ScriptData row.  Clear both
+            # sources before collecting the current row's persistent bits;
+            # otherwise the old bit is immediately re-added below.
+            for name in list(active):
+                active[name] &= ~4
+                if not active[name]:
+                    active.pop(name, None)
+            for character in visible.values():
+                character["shapeOverride"] = int(character.get("shapeOverride") or 0) & ~4
         for name, character in visible.items():
             if name in explicit_ends:
                 continue

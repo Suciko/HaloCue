@@ -26,6 +26,12 @@ def test_canonical_vocabularies_are_immutable_and_exact():
         "comedy_hold",
         "decision_pause",
         "physical_reaction",
+        "offscreen_cue",
+        "entrance_reveal",
+        "group_reaction",
+        "object_operation",
+        "montage",
+        "exit_aftershock",
     )
 
 
@@ -74,6 +80,17 @@ def test_normalize_reports_a_non_mapping_root_value():
         "field": "value",
         "message": "Director metadata must be an object",
     }]
+
+
+def test_normalize_accepts_semantic_shot_operation_without_treating_cut_as_evidence():
+    state, diagnostics = normalize_director(
+        {"shot_operation": "expand_group", "shot_transition": "reframe"},
+        cast_names={"A", "B"}, displayable_names={"A", "B"},
+    )
+
+    assert state["shot_operation"] == "expand_group"
+    assert state["shot_transition"] == "reframe"
+    assert diagnostics == []
 
 
 def test_normalize_downgrades_a_non_displayable_focus_character():

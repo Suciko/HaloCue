@@ -1,0 +1,5388 @@
+{
+  "characters": {
+    "桃井": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": true,
+      "has_wings": false,
+      "hint_count": 1,
+      "visual_width": "wide",
+      "min_slot_gap": 2
+    },
+    "绿": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": true,
+      "has_wings": false,
+      "hint_count": 1,
+      "visual_width": "wide",
+      "min_slot_gap": 2
+    },
+    "綠": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": true,
+      "has_wings": false,
+      "hint_count": 1,
+      "visual_width": "wide",
+      "min_slot_gap": 2
+    },
+    "12": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "162": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "188": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "189": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": true,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": true,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "190": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "191": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "197": {
+      "face_direction": "right",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "198": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "200": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "204": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "208": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "209": {
+      "face_direction": "left",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "left",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "217": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "218": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "219": {
+      "face_direction": "right",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "220": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "221": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "222": {
+      "face_direction": "right",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "223": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "226": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "231": {
+      "face_direction": "right",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "234": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "235": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "244": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "248": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "252": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "254": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "261": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "263": {
+      "face_direction": "right",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "266": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "267": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "268": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "270": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "274": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": true,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": true,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "275": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "283": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "289": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "290": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": true,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": true,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "291": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "292": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": true,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": true,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "293": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "294": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": true,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": true,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "311": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "312": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "313": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "319": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "322": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "323": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "324": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": true,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": true,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "325": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "326": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "327": {
+      "face_direction": "right",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "358": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": true,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": true,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "363": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "378": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "390": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "526": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "527": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "529": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": true,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": true,
+          "has_wings": false,
+          "skin_count": 3
+        }
+      ],
+      "skin_count": 3
+    },
+    "530": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "531": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "533": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "534": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "535": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "536": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "549": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "550": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "552": {
+      "face_direction": "left",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": true,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "left",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": true,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "553": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "554": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "556": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": true,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": true,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "558": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "559": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "560": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "561": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "562": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "587": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "588": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "592": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "593": {
+      "face_direction": "center",
+      "framing": "full",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "full",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "594": {
+      "face_direction": "right",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "600": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "601": {
+      "face_direction": "left",
+      "framing": "half",
+      "has_weapon": true,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "left",
+          "framing": "half",
+          "has_weapon": true,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "602": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "605": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "606": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "613": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "614": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "615": {
+      "face_direction": "right",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "一之濑明日奈": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "七度雪乃": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "七神凛": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        }
+      ],
+      "skin_count": 3
+    },
+    "三善贵音": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "下仓惠": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "下江小春": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": null,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": true,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "不知火花耶": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "中务桐乃": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": null,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": true,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "丰见琴里": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "丹花伊吹": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "久田泉奈": {
+      "face_direction": null,
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "乙花堇": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "京极皋月": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "仲正一花": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "伊原木好美": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "伊草春香": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": null,
+      "has_wings": false,
+      "hint_count": 4,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": true,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "伊落玛丽": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "佐城巴": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "佐天泪子": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "元宫千明": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "内海青叶": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "冰室濑名": {
+      "face_direction": null,
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "初音未来": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "剑先鹤城": {
+      "face_direction": null,
+      "framing": null,
+      "has_weapon": null,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": true,
+          "has_wings": false,
+          "skin_count": 3
+        }
+      ],
+      "skin_count": 3
+    },
+    "勇美枫": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "勘解由小路紫": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        }
+      ],
+      "skin_count": 3
+    },
+    "勘解由小路雏芥子": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "十六夜野宫": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 6
+        }
+      ],
+      "skin_count": 6
+    },
+    "千鸟满": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "古关忧": {
+      "face_direction": null,
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "left",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "各务千寻": {
+      "face_direction": null,
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "合欢垣吹雪": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": null,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": true,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "和乐千世": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "和泉元艾米": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "圆堂志美子": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": null,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": true,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "圣园未花": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        }
+      ],
+      "skin_count": 3
+    },
+    "夜樱绮罗罗": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "大野月咏": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "天地尼娅": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "天童柯伊": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 4
+        }
+      ],
+      "skin_count": 4
+    },
+    "天童爱丽丝": {
+      "face_direction": null,
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "天见和香": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "天雨亚子": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        }
+      ],
+      "skin_count": 3
+    },
+    "奥尔": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "奥空绫音": {
+      "face_direction": null,
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 6
+        }
+      ],
+      "skin_count": 6
+    },
+    "妮可": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        }
+      ],
+      "skin_count": 3
+    },
+    "姬木芽瑠": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "宇泽玲纱": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "守月铃美": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": null,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": true,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "安守实梨": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "室笠茜": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "小涂真纪": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "小钩晴": {
+      "face_direction": null,
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "小鸟游星野": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 4,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 4
+        }
+      ],
+      "skin_count": 4
+    },
+    "尾刃康娜": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "岩柜步": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "川流诗音": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "御伽": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "御坂美琴": {
+      "face_direction": "right",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "御稜名草": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "戒野美咲": {
+      "face_direction": null,
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "扇喜葵": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "才羽桃": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "才羽绿": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "旗见绘梨香": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "早濑优香": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "明星日鞠": {
+      "face_direction": null,
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        },
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        }
+      ],
+      "skin_count": 3
+    },
+    "春原心奈": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "春原瞬": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "春日椿": {
+      "face_direction": null,
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "普拉娜": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "月雪宫子": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "朝比奈菲娜": {
+      "face_direction": null,
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "left",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "朝雾周防": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        }
+      ],
+      "skin_count": 3
+    },
+    "朝颜花江": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "未来": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "朱城瑠海": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "李": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "杏山和纱": {
+      "face_direction": null,
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "left",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        }
+      ],
+      "skin_count": 3
+    },
+    "板垣": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": true,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": true,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "枣伊吕波": {
+      "face_direction": null,
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "柚鸟夏": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        }
+      ],
+      "skin_count": 3
+    },
+    "栀子梦": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "栗村爱理": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": true,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": true,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": true,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "栗浜明美": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "桐生桔梗": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "桐藤渚": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "桑上果穗": {
+      "face_direction": "right",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "椎名纺": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "槌永日和": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "橘光": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "橘望": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "歌住樱子": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": null,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": true,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        }
+      ],
+      "skin_count": 3
+    },
+    "水羽三森": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "池仓真里奈": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "河和静子": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "河驹风兰舞": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "浅黄睦月": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 4,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "浦和花子": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "清澄晶": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "火宫千夏": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "爱清风香": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "牛牧朱莉": {
+      "face_direction": null,
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "狐坂若藻": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "狮子堂泉": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "猫冢响": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "玛尔扈特": {
+      "face_direction": "right",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        }
+      ],
+      "skin_count": 3
+    },
+    "生盐诺亚": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "由良木桃可": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "白洲梓": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "白石歌原": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "百合园圣娅": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "砂狼白子": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 5
+        }
+      ],
+      "skin_count": 5
+    },
+    "砂狼白子_恐怖": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "神名十文字": {
+      "face_direction": "right",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "秋泉红叶": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "秤亚津子": {
+      "face_direction": null,
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        }
+      ],
+      "skin_count": 3
+    },
+    "空": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "空井咲": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "空崎日奈": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": null,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": true,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 4
+        }
+      ],
+      "skin_count": 4
+    },
+    "笑笑教授": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "笛卡尔": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "箭吹棕榈": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "索芙": {
+      "face_direction": "right",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "美甘妮露": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 3
+        }
+      ],
+      "skin_count": 3
+    },
+    "羽川莲见": {
+      "face_direction": null,
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "left",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "羽沼真琴": {
+      "face_direction": null,
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "联邦理事会长": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "胡桃": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "艾茵": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "花冈柚子": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "苍森美祢": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "若叶日向": {
+      "face_direction": null,
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "荒槙八云": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "药子纱绫": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "葛叶": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "角楯花凛": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "调月莉音": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "赤司纯子": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": null,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": true,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "近卫南": {
+      "face_direction": "right",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "连河切里诺": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "里浜海香": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "野正莱依": {
+      "face_direction": "left",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "left",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "银镜伊织": {
+      "face_direction": null,
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "left",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "锭前纱织": {
+      "face_direction": null,
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "left",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        },
+        {
+          "face_direction": "left",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "间宵时雨": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "阿慈谷日富美": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "阿洛娜": {
+      "face_direction": "center",
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "陆八魔爱露": {
+      "face_direction": null,
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": null,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": true,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "霞泽美游": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "静山真白": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "音濑小玉": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "风仓萌绘": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "风卷舞": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "飞鸟马时": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 4,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 5
+        }
+      ],
+      "skin_count": 5
+    },
+    "食蜂操祈": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": true,
+      "has_wings": true,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": true,
+          "has_wings": true,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "鬼怒川霞": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "鬼方佳代子": {
+      "face_direction": null,
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "鳄渊明里": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": null,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": true,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "鹫见芹娜": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "鹿山丽情": {
+      "face_direction": "center",
+      "framing": "closeup",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 1,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    },
+    "黑崎小雪": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": null,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": true,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "黑见芹香": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 6
+        }
+      ],
+      "skin_count": 6
+    },
+    "黑馆晴奈": {
+      "face_direction": "center",
+      "framing": null,
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 3,
+      "observed": [
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        },
+        {
+          "face_direction": "center",
+          "framing": "closeup",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 1
+        }
+      ],
+      "skin_count": 1
+    },
+    "龙华妃咲": {
+      "face_direction": null,
+      "framing": "half",
+      "has_weapon": false,
+      "has_wings": false,
+      "hint_count": 2,
+      "observed": [
+        {
+          "face_direction": "right",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        },
+        {
+          "face_direction": "center",
+          "framing": "half",
+          "has_weapon": false,
+          "has_wings": false,
+          "skin_count": 2
+        }
+      ],
+      "skin_count": 2
+    }
+  },
+  "input_rows": 402,
+  "source": "community_face_pos_default_skin_export",
+  "version": 1
+}

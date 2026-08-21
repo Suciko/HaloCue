@@ -18,6 +18,17 @@ SCENE_FUNCTIONS = (
 )
 FOCUS_KINDS = ("speaker", "listener", "group", "offscreen_space")
 RELATION_DISTANCES = ("distant", "normal", "approaching", "intimate", "remote")
+SHOT_TRANSITIONS = ("cut", "reframe")
+# Semantic camera operation chosen before the renderer maps it to cut/reframe.
+# These are intentionally relationship- and character-independent.
+SHOT_OPERATIONS = (
+    "continue_group",
+    "expand_group",
+    "shrink_group",
+    "replace_center_subject",
+    "switch_group",
+    "impact_insert",
+)
 CONTINUITY_STATES = ("start", "hold", "escalate", "end", "none")
 DIRECTION_REASONS = (
     "new_stimulus",
@@ -38,6 +49,12 @@ BEAT_REASONS = (
     "comedy_hold",
     "decision_pause",
     "physical_reaction",
+    "offscreen_cue",
+    "entrance_reveal",
+    "group_reaction",
+    "object_operation",
+    "montage",
+    "exit_aftershock",
 )
 
 _CONTINUITY_LAYERS = ("face", "emo", "act", "fx", "bgfx")
@@ -52,10 +69,13 @@ def default_director(scene_type: str = "other") -> dict[str, Any]:
         "emotion_phase": "",
         "subtext": "",
         "relation_distance": "normal",
+        "shot_operation": "",
+        "shot_transition": "",
         "focus_kind": "speaker",
         "focus_character": "",
         "reaction_target": "",
         "visible_characters": [],
+        "positions": {},
         "continuity": {layer: "none" for layer in _CONTINUITY_LAYERS},
         "reason": "none",
     }
@@ -90,6 +110,8 @@ def normalize_director(
     enum("scene_type", SCENE_TYPES)
     enum("scene_function", SCENE_FUNCTIONS)
     enum("relation_distance", RELATION_DISTANCES)
+    enum("shot_operation", SHOT_OPERATIONS)
+    enum("shot_transition", SHOT_TRANSITIONS)
     enum("focus_kind", FOCUS_KINDS)
     enum("reason", DIRECTION_REASONS)
 
@@ -131,7 +153,7 @@ def normalize_director(
 
     visible = source.get("visible_characters", [])
     if isinstance(visible, (list, tuple)):
-        for candidate in visible[:5]:
+        for candidate in visible[:3]:
             if not isinstance(candidate, str):
                 diagnostic("director_invalid_value", "visible_characters", "Visible characters must be names")
             elif candidate not in cast_names:
@@ -140,13 +162,31 @@ def normalize_director(
                 diagnostic("director_non_displayable_character", "visible_characters", f"Character cannot be displayed: {candidate}")
             elif candidate not in state["visible_characters"]:
                 state["visible_characters"].append(candidate)
-        if len(visible) > 5:
+        if len(visible) > 3:
             diagnostic(
                 "director_visible_characters_limited", "visible_characters",
-                "At most five characters can be visible in an AA shot",
+                "At most three characters can be visible in an AA shot",
             )
     elif visible is not None:
         diagnostic("director_invalid_value", "visible_characters", "Visible characters must be a list")
+
+    positions = source.get("positions", {})
+    if isinstance(positions, Mapping):
+        used_slots: set[int] = set()
+        for candidate, slot in positions.items():
+            if candidate not in displayable_names:
+                diagnostic("director_unknown_character", "positions", f"Unknown or hidden character: {candidate}")
+            elif isinstance(slot, bool) or not isinstance(slot, int) or not 1 <= slot <= 5:
+                diagnostic("director_invalid_value", "positions", f"Invalid AA slot for {candidate}: {slot}")
+            elif slot in used_slots:
+                diagnostic("director_duplicate_slot", "positions", f"AA slot is used twice: {slot}")
+            else:
+                state["positions"][candidate] = slot
+                used_slots.add(slot)
+        if len(positions) > 3:
+            diagnostic("director_positions_limited", "positions", "At most three positions are allowed")
+    elif positions is not None:
+        diagnostic("director_invalid_value", "positions", "Positions must be an object")
 
     continuity = source.get("continuity", {})
     if isinstance(continuity, Mapping):

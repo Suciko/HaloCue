@@ -207,6 +207,7 @@ console.log(JSON.stringify({
   waiting:h.window.AppRuntime.annotationProgressDetail({state:'waiting',detail:'正在标注第 1/4 个场景块',model:'deepseek-v4-flash'}),
   receiving:h.window.AppRuntime.annotationProgressDetail({state:'receiving',detail:'正在标注第 1/4 个场景块',received_chars:8192,elapsed_ms:7300,model:'deepseek-v4-flash'}),
   reasoning:h.window.AppRuntime.annotationProgressDetail({state:'reasoning',detail:'正在标注第 1/4 个场景块',reasoning_chars:4096,elapsed_ms:7300,model:'deepseek-v4-flash'}),
+  g1:h.window.AppRuntime.annotationProgressDetail({state:'completed',stage:'G1',detail:'已规划场景事件链 1/4',input_tokens:1200,reasoning_tokens:800,output_tokens:300,reasoning_summary:'正在梳理场景因果'}),
   retrying:h.window.AppRuntime.annotationProgressDetail({state:'retrying',detail:'正在标注第 1/4 个场景块',retry_count:1,model:'deepseek-v4-flash'}),
   reasoningCapacity:h.window.AppRuntime.annotationProgressDetail({state:'retrying',reason:'reasoning_capacity',detail:'正在标注第 1/4 个场景块',retry_count:1,model:'deepseek-v4-flash'}),
   subdividing:h.window.AppRuntime.annotationProgressDetail({state:'subdividing',detail:'正在标注第 1/4 个场景块',subdivision_count:2,model:'deepseek-v4-flash'})
@@ -216,6 +217,10 @@ console.log(JSON.stringify({
     assert "等待模型首段响应" in result["waiting"]
     assert "已接收 8,192 字符" in result["receiving"]
     assert "已思考 4,096 字符" in result["reasoning"]
+    assert "G1 场景事件链" in result["g1"]
+    assert "输入 1,200" in result["g1"]
+    assert "思考 800" in result["g1"]
+    assert "输出 300" in result["g1"]
     assert "正在纠正返回格式" in result["retrying"]
     assert "增加预算并保留推理" in result["reasoningCapacity"]
     assert "正在拆分当前场景块" in result["subdividing"]
@@ -258,6 +263,46 @@ const h=createHarness({request:async p=>{
     assert "剩余 27" in result["status"]
     assert result["compile"] is True
     assert result["install"] is True
+
+
+def test_accepted_partial_annotation_enables_compile_without_hiding_status():
+    script = r'''
+const {createHarness}=require(process.argv[1]);
+const h=createHarness({request:async p=>{
+  if(p==='/api/draft?token=d') return {
+    story_token:'S',draft_version:2,
+    annotation_status:{status:'partial',completed_targets:0,total_targets:8,pending_targets:8},
+    annotation_override_accepted:true,
+    counts:{pending:0,blocking_errors:0},cards:[]
+  };
+  if(p.startsWith('/api/story/assets')) return {characters:[],backgrounds:[],sounds:[],bgms:[]};
+  return {profiles:[]};
+}});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'S'});h.get('#rvDraftSelect').value='d';await h.window.AppRuntime.loadReview();console.log(JSON.stringify({status:h.get('#rvStatus').textContent,compile:h.get('#rvCompile').disabled,install:h.get('#rvInstall').disabled}));})();
+'''
+    result = run_harness(script)
+    assert "已接受当前结果" in result["status"]
+    assert "AI 标注 0/8" in result["status"]
+    assert result["compile"] is False
+    assert result["install"] is True
+
+
+def test_validate_review_shows_the_actual_diagnostic_instead_of_only_a_count():
+    script = r'''
+const {createHarness}=require(process.argv[1]);
+const h=createHarness({request:async p=>{
+  if(p==='/api/draft?token=d') return {story_token:'S',draft_version:1,counts:{pending:0,blocking_errors:1},cards:[],diagnostics:[]};
+  if(p==='/api/validate') return {ok:true,blocking_errors:1,diagnostics:[{severity:'error',code:'actor_missing',line_no:2,message:'角色未绑定'}]};
+  if(p.startsWith('/api/story/assets')) return {characters:[],backgrounds:[],sounds:[],bgms:[]};
+  return {profiles:[]};
+}});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'S'});h.get('#rvDraftSelect').value='d';await h.window.AppRuntime.loadReview();await h.window.AppRuntime.validateReview();console.log(JSON.stringify({status:h.get('#rvStatus').textContent,title:h.get('#rvStatus').title}));})();
+'''
+    result = run_harness(script)
+    assert "1 项待处理" in result["status"]
+    assert "第 2 行" in result["status"]
+    assert "角色未绑定" in result["status"]
+    assert result["title"] == "错误 · 第 2 行 · 角色未绑定"
 
 
 def test_story_runtime_scopes_drafts_and_handles_build_terminal_states():
@@ -355,7 +400,7 @@ vm.runInNewContext(source,sandbox);
     assert result["build"] == {
         "story_token": "story-a", "project": "A", "script": "C:/stories/a.txt",
         "mapping": {}, "bg": "BG_Black", "annotate": False,
-        "model_profile_id": "", "install": False,
+        "model_profile_id": "", "layout_mode": "", "install": False,
     }
     # A transient continue request failure leaves the resolved task retryable,
     # while the primary build action remains locked behind that task.

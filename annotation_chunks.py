@@ -181,6 +181,7 @@ def build_scene_map(items: List[Dict[str, Any]], usage_chain: Optional[Sequence[
             "segment": str(matching.get("segment") or "") if matching else "",
             "time": str(matching.get("time") or "") if matching else "",
             "scene_type": str(matching.get("scene_type") or "other") if matching else "other",
+            "active_modes": list(matching.get("active_modes") or []) if matching else [],
             "scene_function": str(matching.get("scene_function") or "dialogue") if matching else "dialogue",
             "purpose": str(matching.get("reason") or "") if matching else "",
             "evidence": str(matching.get("evidence") or "") if matching else "",

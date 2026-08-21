@@ -1,13 +1,37 @@
 import hashlib
 from pathlib import Path
+import pytest
 
 import batch_label_spine_faces
 from batch_label_spine_faces import (
-    FreshSpineRenderer,
+    FreshSpineRenderer, _label_batch_activation_ready,
     discover_main_character_targets,
     persist_target_visual_face_labels,
     select_target_shard,
 )
+
+
+@pytest.mark.parametrize("report,target_count", [
+    ({"completed": [{"status": "complete", "failed_count": 0}], "failed": []}, 1),
+    ({"completed": [{"status": "cached_labels"}], "failed": []}, 1),
+])
+def test_label_batch_activation_requires_every_target_to_finish_cleanly(
+    report, target_count,
+):
+    assert _label_batch_activation_ready(report, target_count)
+
+
+@pytest.mark.parametrize("report,target_count", [
+    ({"completed": [], "failed": []}, 0),
+    ({"completed": [], "failed": []}, 1),
+    ({"completed": [{"status": "partial", "failed_count": 1}], "failed": []}, 1),
+    ({"completed": [{"status": "complete", "missing_face_ids": ["05"]}], "failed": []}, 1),
+    ({"completed": [{"status": "complete"}], "failed": [{"error": "boom"}]}, 1),
+])
+def test_label_batch_activation_rejects_empty_partial_missing_or_failed_runs(
+    report, target_count,
+):
+    assert not _label_batch_activation_ready(report, target_count)
 
 
 def _bundle(root: Path, stem: str) -> Path:
@@ -102,7 +126,31 @@ def test_shared_skeleton_keeps_every_real_identity_binding(tmp_path):
     assert not any(item.get("reason") == "duplicate_skeleton" for item in excluded)
 
 
-def test_one_visual_result_is_persisted_for_every_identity_binding(tmp_path, monkeypatch):
+def test_explicit_ident_selection_can_narrow_one_shared_skeleton_binding(tmp_path):
+    _bundle(tmp_path, "CH0001_spr")
+    index = {"characters": [
+        _character("identity-a", "CH0001_spr", 4),
+        _character("identity-b", "CH0001_spr", 4),
+    ]}
+    targets = discover_main_character_targets(index, overrides_root=tmp_path)[0]
+    item = targets[0]
+    selected = tuple(
+        binding for binding in item.bindings if binding.identifier == "identity-b"
+    )
+    narrowed = batch_label_spine_faces.replace(
+        item,
+        identifier=selected[0].identifier,
+        name=selected[0].name,
+        club=selected[0].club,
+        outfit_key=selected[0].outfit_key,
+        spine_signature=selected[0].spine_signature,
+        identity_bindings=selected,
+    )
+    assert narrowed.identifier == "identity-b"
+    assert [binding.identifier for binding in narrowed.bindings] == ["identity-b"]
+
+
+def test_shared_skeleton_rejects_cross_identity_semantic_propagation(tmp_path, monkeypatch):
     _bundle(tmp_path, "CH0001_spr")
     index = {"characters": [
         _character("identity-a", "CH0001_spr", 4),
@@ -116,14 +164,11 @@ def test_one_visual_result_is_persisted_for_every_identity_binding(tmp_path, mon
         return {"saved_count": len(kwargs["labels"]), "failed_count": 0}
 
     monkeypatch.setattr(batch_label_spine_faces, "persist_visual_face_labels", fake_persist)
-    result = persist_target_visual_face_labels(
-        object(), target=target, model="current-model", labels=[{"face_id": "00"}]
-    )
-
-    assert [item["ident"] for item in calls] == ["identity-a", "identity-b"]
-    assert all(item["model"] == "current-model" for item in calls)
-    assert result["saved_count"] == 1
-    assert result["identity_rows_saved"] == 2
+    with pytest.raises(ValueError, match="per identity"):
+        persist_target_visual_face_labels(
+            object(), target=target, model="current-model", labels=[{"face_id": "00"}]
+        )
+    assert calls == []
 
 
 def test_target_shards_are_disjoint_and_cover_every_target(tmp_path):

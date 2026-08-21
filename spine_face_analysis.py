@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Callable
 from runtime_layout import LAYOUT
+import assetdb
 
 from spine_face_labeler import (
     label_face_images,
@@ -306,10 +307,20 @@ def analyze_character_faces(
             total,
         )
 
+    official_usage = assetdb.official_face_usage(
+        con,
+        ident=str(ident),
+        face_ids=[face.face_id for face in report.faces],
+        spine_signature=str(spine_signature or ""),
+        outfit_key=str(outfit_key or ""),
+        representative_limit=3,
+    )
     labels = label_face_images(
         provider,
         report.faces,
         semantic_hints=semantic_hints,
+        official_usage=official_usage,
+        require_visual_facts=True,
         progress=report_label_progress,
     )
     _notify(

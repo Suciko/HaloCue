@@ -477,7 +477,7 @@ def test_build_inherits_story_project_and_rejects_mismatched_project(tmp_path, m
 
     assert received == [{
         "story_token": story["story_token"], "script": str(source),
-        "mapping": {}, "project": "StoryBound",
+        "mapping": {}, "layout_mode": "ai", "project": "StoryBound",
         "bgm_policy": {"enabled": False, "arrangement": "manual", "bgmId": 999},
     }]
 

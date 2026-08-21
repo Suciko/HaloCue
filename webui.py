@@ -7,7 +7,7 @@ AA 剧本编译器 · 本地网页界面
 跑起来后浏览器打开 http://127.0.0.1:8770 。只监听本机，不对外。
 只用标准库 + PIL（缩略图），不需要装框架。
 """
-import argparse, hashlib, io, json, mimetypes, os, re, socket, sys, threading, traceback, uuid, webbrowser
+import argparse, hashlib, io, json, mimetypes, os, re, socket, sqlite3, sys, threading, traceback, uuid, webbrowser
 from contextlib import ExitStack
 from dataclasses import replace
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -77,6 +77,7 @@ from install_manager import (  # noqa: E402
     InstallManager,
     AACorruptBundleError,
     AAInstallTargetExistsError,
+    AAQualityGateError,
     AARunningError,
 )
 from jobs import global_job_manager                             # noqa: E402
@@ -92,6 +93,7 @@ from story_workspace import (                                  # noqa: E402
 
 STORY_ROOT = STATE_DIR if LAYOUT.frozen else os.path.dirname(os.path.dirname(HERE))
 BUILD_API_DEPRECATED = True
+PIPELINE_VERSION = "0.95"
 DB = str(LAYOUT.database_path)
 INDEX = str(LAYOUT.resource_index_path)
 LLMCFG = str(LAYOUT.llm_config_path)
@@ -156,6 +158,7 @@ FACE_JOB_LOCK = threading.Lock()
 RESOURCE_INDEX_LOCK = threading.RLock()
 OFFICIAL_CHARACTER_IMPORT_LOCK = threading.RLock()
 _STORY_TYPES = frozenset({"auto", "main", "event", "bond"})
+_LAYOUT_MODES = frozenset({"pure_ai", "ai", "rules"})
 _BUILTIN_VOICE_CHARACTERS = {
     "老师": "45145456",
     "teacher": "45145456",
@@ -172,6 +175,13 @@ def normalize_story_type(value: object) -> str:
     normalized = str(value or "auto").strip().lower()
     if normalized not in _STORY_TYPES:
         raise ValueError("invalid_story_type")
+    return normalized
+
+
+def normalize_layout_mode(value: object) -> str:
+    normalized = str(value or "ai").strip().lower()
+    if normalized not in _LAYOUT_MODES:
+        raise ValueError("invalid_layout_mode")
     return normalized
 
 
@@ -1122,6 +1132,50 @@ def _settings_values() -> dict[str, object]:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def configured_asset_database_paths() -> list[str]:
+    """Return the explicit 0.95 read-only asset database overlay list.
+
+    The active user database is always first.  A second source is opt-in via
+    ``asset_databases`` in ``aa_config.json`` (or the equivalent
+    ``HALOCUE_ASSET_DATABASES`` path-separated environment variable).  This
+    keeps the 1.0 handoff database out of 0.95 until the user explicitly
+    selects it, while making both large labelled sources usable by the same
+    preflight/G1/G2 pipeline once selected.
+    """
+    values = _settings_values()
+    raw = values.get("asset_databases")
+    config_base = runtime_config_path().parent
+    if raw is None:
+        raw = os.environ.get("HALOCUE_ASSET_DATABASES", "")
+        config_base = None
+    if isinstance(raw, (str, os.PathLike)):
+        raw = [part for part in str(raw).split(os.pathsep) if part.strip()]
+    if not isinstance(raw, (list, tuple)):
+        raw = []
+    # ``DB`` is intentionally used instead of reading LAYOUT again: tests and
+    # embedded callers may point the active user database at an isolated path.
+    candidates = [str(DB), *(str(item) for item in raw)]
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in candidates:
+        try:
+            candidate = Path(value).expanduser()
+            # Packaged 0.95 configs intentionally use relative database
+            # paths. Resolve those beside aa_config.json so direct CLI
+            # launches work even when the current directory is elsewhere.
+            if config_base is not None and not candidate.is_absolute():
+                candidate = config_base / candidate
+            path = str(candidate.resolve())
+        except (OSError, ValueError):
+            path = str(value)
+        folded = path.casefold()
+        if folded in seen or not Path(path).is_file():
+            continue
+        seen.add(folded)
+        result.append(path)
+    return result
+
+
 def _current_aa_discovery() -> AADiscoveryResult:
     """Refresh AA's own paths without modifying the installed application."""
     config_path = runtime_config_path()
@@ -1493,10 +1547,18 @@ def setup_status():
         configured_spine or None, config_path=config_path
     )
     return {
+        "pipeline": {
+            "version": PIPELINE_VERSION,
+            "prompt_revision": "v10-canonical-emo-protocol",
+            "director_stages": ["preflight", "G1/G2 annotation", "AAP compile"],
+            "database": "explicit read-only labelled DB overlay",
+        },
         "aa": _public_aa_status(discovery, preview_state),
         "database": {
             "ready": database_ready,
             "stats": stats,
+            "paths": configured_asset_database_paths(),
+            "count": len(configured_asset_database_paths()),
         },
         "model": model,
         "spine": {
@@ -1636,67 +1698,144 @@ def character_catalog_metadata(ident: str) -> dict:
     return CHARACTER_CATALOG_METADATA["items"].get(str(ident), {})
 
 
+def _effective_character_catalog(con):
+    """Read the writable catalogue plus the explicit read-only release overlay."""
+    records = {}
+    aliases = []
+
+    def collect(source_con):
+        try:
+            rows = source_con.execute(
+                """
+                SELECT c.ident,c.name,c.club,c.spine,c.avatar,c.source,
+                       (SELECT COUNT(*) FROM face f WHERE f.ident=c.ident) AS nface
+                FROM character c
+                WHERE NULLIF(TRIM(c.name), '') IS NOT NULL
+                """
+            ).fetchall()
+        except sqlite3.Error:
+            rows = []
+        for row in rows:
+            ident = str(row["ident"] or "").strip()
+            if not ident:
+                continue
+            incoming = {
+                "ident": ident,
+                "name": str(row["name"] or ""),
+                "club": str(row["club"] or ""),
+                "spine": str(row["spine"] or ""),
+                "avatar": str(row["avatar"] or ""),
+                "source": str(row["source"] or ""),
+                "nface": int(row["nface"] or 0),
+            }
+            current = records.get(ident)
+            if current is None:
+                records[ident] = incoming
+                continue
+            for field in ("name", "club", "spine", "avatar", "source"):
+                if not current[field] and incoming[field]:
+                    current[field] = incoming[field]
+            current["nface"] = max(current["nface"], incoming["nface"])
+        try:
+            aliases.extend(
+                (str(row["script_name"] or ""), str(row["ident"] or ""),
+                 str(row["kind"] or ""), int(row["uses"] or 0))
+                for row in source_con.execute(
+                    "SELECT script_name,ident,kind,uses FROM name_alias"
+                )
+                if row["script_name"] and row["ident"]
+            )
+        except sqlite3.Error:
+            pass
+
+    collect(con)
+    # An isolated test/source connection should remain isolated.  The frozen
+    # desktop runtime supplements the stale writable state with its release overlay.
+    if LAYOUT.frozen:
+        primary_path = str(Path(DB).resolve()).casefold()
+        for database_path in configured_asset_database_paths():
+            if str(Path(database_path).resolve()).casefold() == primary_path:
+                continue
+            try:
+                overlay = assetdb.connect_readonly(database_path)
+            except (OSError, sqlite3.Error):
+                continue
+            try:
+                collect(overlay)
+            finally:
+                overlay.close()
+    return list(records.values()), aliases
+
+
 def list_characters(q="", limit=400):
     _ensure_official_character_catalog()
     con = db()
-    sql = ("SELECT c.ident, c.name, c.club, c.spine, c.avatar, c.source, "
-           "  (SELECT COUNT(*) FROM face f WHERE f.ident=c.ident) AS nface "
-           "FROM character c "
-           "WHERE NULLIF(TRIM(c.name), '') IS NOT NULL ")
-    args = []
-    if q:
-        conditions = [
-            "c.ident LIKE ?", "c.name LIKE ?", "c.club LIKE ?",
-            "EXISTS (SELECT 1 FROM name_alias a WHERE a.ident=c.ident AND a.script_name LIKE ?)",
-            "EXISTS (SELECT 1 FROM name_alias a JOIN character target ON target.ident=a.ident "
-            "WHERE a.script_name LIKE ? AND target.name=c.name)",
-        ]
-        args = [f"%{q}%"] * len(conditions)
-        builtin_ids = [
+    try:
+        rows, aliases = _effective_character_catalog(con)
+        query = str(q or "").casefold()
+        alias_ids = {
+            ident for script_name, ident, kind, _uses in aliases
+            if kind == "portrait" and query and query in script_name.casefold()
+        }
+        alias_ids.update(
             ident for script_name, ident, kind in assetdb.SEED_ALIAS
-            if ident and kind == "portrait" and str(q).casefold() in script_name.casefold()
-        ]
-        if builtin_ids:
-            placeholders = ",".join("?" for _ in builtin_ids)
-            conditions.append("c.ident IN (" + placeholders + ")")
-            conditions.append(
-                "c.name IN (SELECT name FROM character WHERE ident IN (" + placeholders + "))"
+            if ident and kind == "portrait" and query and query in script_name.casefold()
+        )
+        alias_names = {
+            row["name"] for row in rows
+            if row["ident"] in alias_ids and row["name"]
+        }
+        filtered = []
+        for row in rows:
+            if query:
+                values = (row["ident"], row["name"], row["club"])
+                if (
+                    row["ident"] not in alias_ids
+                    and row["name"] not in alias_names
+                    and not any(
+                    query in str(value).casefold() for value in values
+                    )
+                ):
+                    continue
+            filtered.append(row)
+        filtered.sort(key=lambda row: (
+            row["name"] is None, -int(row["nface"]), row["ident"].casefold()
+        ))
+        out = []
+        for r in filtered[:max(1, int(limit))]:
+            catalog = character_catalog_metadata(r["ident"])
+            avatar_value = str(r["avatar"] or catalog.get("avatar") or "")
+            spine_value = str(r["spine"] or catalog.get("spine") or "")
+            avatar_key = Path(avatar_value.replace("\\", "/")).name or spine_value
+            avatar = character_avatar_path(avatar_value, spine_value)
+            if not avatar:
+                avatar = registered_character_avatar_path(con, r["ident"])
+            if avatar and not avatar_key:
+                avatar_key = str(r["ident"])
+            out.append({
+                "ident": r["ident"], "name": r["name"] or r["ident"],
+                "club": r["club"], "spine": spine_value,
+                "faces": r["nface"], "source": r["source"],
+                "avatar": (
+                    "/thumb/av/" + quote(avatar_key, safe="")
+                    if avatar and avatar_key else ""
+                ),
+            })
+        def variant_rank(item):
+            stem = str(item.get("spine") or "").replace("\\", "/").rsplit("/", 1)[-1].casefold()
+            suffix = stem[len("characterspine_"):] if stem.startswith("characterspine_") else ""
+            return (
+                0 if suffix and "_" not in suffix
+                else 2 if suffix.endswith(("_noweapon", "_n", "_nf")) else 1,
+                str(item.get("ident") or "").casefold(),
             )
-            args.extend(builtin_ids)
-            args.extend(builtin_ids)
-        sql += "AND (" + " OR ".join(conditions) + ") "
-    sql += "ORDER BY (c.name IS NULL), nface DESC, c.ident LIMIT ?"
-    args.append(limit)
-    out = []
-    for r in con.execute(sql, args):
-        catalog = character_catalog_metadata(r["ident"])
-        avatar_value = str(r["avatar"] or catalog.get("avatar") or "")
-        spine_value = str(r["spine"] or catalog.get("spine") or "")
-        avatar_key = Path(
-            avatar_value.replace("\\", "/")
-        ).name or spine_value
-        avatar = character_avatar_path(avatar_value, spine_value)
-        if not avatar:
-            avatar = registered_character_avatar_path(con, r["ident"])
-        if avatar and not avatar_key:
-            avatar_key = str(r["ident"])
-        out.append({"ident": r["ident"], "name": r["name"] or r["ident"],
-                    "club": r["club"] or "", "spine": spine_value,
-                    "faces": r["nface"], "source": r["source"],
-                    "avatar": (
-                        "/thumb/av/" + quote(avatar_key, safe="")
-                        if avatar and avatar_key else ""
-                    )})
-    def variant_rank(item):
-        stem = str(item.get("spine") or "").replace("\\", "/").rsplit("/", 1)[-1].casefold()
-        suffix = stem[len("characterspine_"):] if stem.startswith("characterspine_") else ""
-        return (0 if suffix and "_" not in suffix else 2 if suffix.endswith(("_noweapon", "_n", "_nf")) else 1,
-                str(item.get("ident") or "").casefold())
-    out.sort(key=lambda item: (
-        0 if str(item.get("source") or "").casefold() not in {"overrides", "custom", "current_story_custom"} else 1,
-        variant_rank(item), str(item.get("name") or "").casefold(),
-    ))
-    return out
+        out.sort(key=lambda item: (
+            0 if str(item.get("source") or "").casefold() not in {"overrides", "custom", "current_story_custom"} else 1,
+            variant_rank(item), str(item.get("name") or "").casefold(),
+        ))
+        return out
+    finally:
+        con.close()
 
 
 def list_backgrounds(
@@ -1716,12 +1855,6 @@ def list_backgrounds(
         page_offset = 0
     sql = "SELECT name,hash,label,place,time,mood,tags FROM bg "
     where, args = [], []
-    if q:
-        where.append(
-            "(name LIKE ? OR label LIKE ? OR place LIKE ? OR time LIKE ? "
-            "OR mood LIKE ? OR tags LIKE ?)"
-        )
-        args += [f"%{q}%"] * 6
     if only_ready:
         where.append("hash IS NOT NULL")
     if only_official:
@@ -1735,13 +1868,88 @@ def list_backgrounds(
     # 多取一些，在 Python 里按“有预览图 → 有标签 → 名称”重排，
     # 避免把无标签的哈希名（00000-*）顶到前面。
     sql += "ORDER BY (hash IS NULL), name"
+    scene_labels = {
+        item["asset_key"].casefold(): item
+        for item in assetdb.query_scene_assets(
+            con, resource_channel="background"
+        )
+    }
+    # The browser uses the same explicit DB overlay as preflight.  Main DB
+    # labels win; an additional read-only source only fills a missing semantic
+    # record for an already registered/background-indexed key.
+    primary_db = str(Path(DB).resolve()).casefold()
+    for database_path in configured_asset_database_paths():
+        if str(Path(database_path).resolve()).casefold() == primary_db:
+            continue
+        try:
+            overlay_con = assetdb.connect_readonly(database_path)
+        except (OSError, sqlite3.Error):
+            continue
+        try:
+            for item in assetdb.query_scene_assets(
+                overlay_con, resource_channel="background"
+            ):
+                scene_labels.setdefault(item["asset_key"].casefold(), item)
+        finally:
+            overlay_con.close()
     out = []
     for r in con.execute(sql, args):
-        out.append({"name": r["name"], "ready": r["hash"] is not None,
-                    "label": r["label"] or "", "place": r["place"] or "",
-                    "time": r["time"] or "", "mood": r["mood"] or "",
-                    "tags": r["tags"] or "",
-                    "img": _background_preview_available(r["name"])})
+        semantics = scene_labels.get(str(r["name"]).casefold())
+        if semantics is not None and not (
+            semantics["visual_kind"] == "background"
+            and semantics["dialogue_suitable"]
+        ):
+            continue
+        item = {
+            "name": r["name"], "ready": r["hash"] is not None,
+            "label": r["label"] or "", "place": r["place"] or "",
+            "time": r["time"] or "", "mood": r["mood"] or "",
+            "tags": r["tags"] or "",
+            "img": _background_preview_available(r["name"]),
+        }
+        if semantics is not None:
+            # Keep labels entered in the active DB authoritative.  The
+            # optional second DB is a semantic supplement, not a replacement:
+            # its normalized ``time``/``mood``/``place``/``tags`` must not hide
+            # values the user already attached to the same background key.
+            semantic_fields = (
+                "visual_kind", "main_category", "main_category_cn",
+                "subcategory", "description", "place", "indoor_outdoor",
+                "time", "weather", "season", "mood", "tags",
+                "staging_capacity", "dialogue_suitable",
+                "setting_scope", "affiliation_keys",
+                "affiliation_names_cn", "affiliation_hint_cn",
+                "affiliation_evidence", "affiliation_confidence",
+                "reuse_scope", "compatible_affiliation_keys",
+                "compatible_affiliation_names_cn", "reuse_hint_cn",
+                "reuse_scope_cn", "category_path_cn", "search_terms_cn",
+            )
+            for field in semantic_fields:
+                value = semantics.get(field)
+                if field in {"place", "time", "mood", "tags"} and item.get(field):
+                    continue
+                if value not in (None, "", [], {}):
+                    item[field] = value
+        if q:
+            # Scene labels are intentionally rich (category, affiliation,
+            # search synonyms, compatibility and evidence).  Searching only
+            # scalar fields made many user annotations invisible; flatten the
+            # complete returned record so every labelled term is searchable.
+            needle = str(q).casefold()
+
+            def search_values(value):
+                if isinstance(value, dict):
+                    for child in value.values():
+                        yield from search_values(child)
+                elif isinstance(value, (list, tuple, set)):
+                    for child in value:
+                        yield from search_values(child)
+                elif value not in (None, ""):
+                    yield str(value)
+
+            if not any(needle in value.casefold() for value in search_values(item)):
+                continue
+        out.append(item)
     out.sort(key=lambda item: (not item["img"], not bool(item["label"]), item["name"].casefold()))
     label_counts = {}
     for item in out:
@@ -1978,6 +2186,10 @@ def guess_mapping(speakers):
     用户自己导入的「桃井」而不是别名里的占位 ???）；退回学过的别名时同样跳过
     占位垃圾角色。用户始终可在“确认演员”一步手动修改对应关系。"""
     con = db()
+    catalog_rows, _catalog_aliases = _effective_character_catalog(con)
+    catalog_by_id = {
+        str(row["ident"]): row for row in catalog_rows if row.get("ident")
+    }
     out = {}
     for sp in speakers:
         w = sp["who"]
@@ -1989,10 +2201,16 @@ def guess_mapping(speakers):
             continue
         # 1. 名字/标识完全一致。全局 overrides 里的服装变体仍需让已学习的
         # 官方本体映射优先；当前剧情自定义素材会在预检拿到 scope 后单独提升。
-        row = con.execute(
-            "SELECT ident,name,club,spine,source FROM character WHERE name=? OR ident=? "
-            "ORDER BY (ident<>?), (spine IS NULL), LENGTH(ident) LIMIT 1",
-            (w, w, w)).fetchone()
+        exact_rows = [
+            item for item in catalog_rows
+            if item["name"] == w or item["ident"] == w
+        ]
+        row = sorted(
+            exact_rows,
+            key=lambda item: (
+                item["ident"] != w, not bool(item["spine"]), len(item["ident"])
+            ),
+        )[0] if exact_rows else None
         exact_valid = row is not None and not assetdb._looks_placeholder(row["name"])
         if exact_valid and row["source"] != "overrides":
             row = _preferred_variant(con, row)
@@ -2008,10 +2226,7 @@ def guess_mapping(speakers):
             if a["kind"] == "narrator":
                 out[w] = {"kind": "narrator"}
                 continue
-            crow = con.execute(
-                "SELECT ident,name,club,spine,source FROM character WHERE ident=?",
-                (a["ident"],),
-            ).fetchone()
+            crow = catalog_by_id.get(str(a["ident"]))
             if crow is not None and not assetdb._looks_placeholder(crow["name"]):
                 crow = _preferred_variant(con, crow)
                 out[w] = {"kind": a["kind"], "id": crow["ident"],
@@ -2139,6 +2354,9 @@ _PREFLIGHT_SCHEMA = {
                 "location": {"type": "string", "maxLength": 120},
                 "time": {"type": "string", "maxLength": 40},
                 "story_type": {"type": "string", "enum": list(SCENE_TYPES)},
+                "active_modes": {"type": "array", "items": {
+                    "type": "string", "enum": list(SCENE_TYPES),
+                }},
                 "scene_function": {"type": "string", "enum": list(SCENE_FUNCTIONS)},
                 "needs": {"type": "array", "maxItems": 8, "items": {
                     "type": "object", "additionalProperties": False,
@@ -2258,6 +2476,7 @@ def _compact_preflight_to_internal(value: dict, text: str) -> dict:
             "evidence": evidence,
             "time": time_label,
             "scene_type": str(scene.get("story_type") or "other"),
+            "active_modes": list(scene.get("active_modes") or []),
             "scene_function": str(scene.get("scene_function") or "dialogue"),
             "needs": needs,
         })
@@ -2365,7 +2584,11 @@ def _merge_preflight_internal(parts: list[dict]) -> dict:
 def _preflight_character_library(con, speakers: list[dict], custom_assets: dict,
                                  baseline: dict, limit: int = 160) -> dict:
     """给 AI 提供相关角色候选，避免把 1000+ 全库塞进提示词。"""
-    total = int(con.execute("SELECT COUNT(*) FROM character").fetchone()[0])
+    catalog_rows, _catalog_aliases = _effective_character_catalog(con)
+    total = len(catalog_rows)
+    catalog_by_id = {
+        str(row["ident"]): row for row in catalog_rows if row.get("ident")
+    }
     custom_ids = {
         str(item.get("aa_key") or "").casefold()
         for item in custom_assets.get("characters", [])
@@ -2390,44 +2613,51 @@ def _preflight_character_library(con, speakers: list[dict], custom_assets: dict,
         ident = str(mapping.get("id") or "")
         if not ident:
             continue
-        row = con.execute(
-            "SELECT ident,name,club,source FROM character WHERE ident=? LIMIT 1", (ident,)
-        ).fetchone()
+        row = catalog_by_id.get(ident)
         add(ident, row["name"] if row else mapping.get("name"),
             row["club"] if row else "", row["source"] if row else "library")
     for speaker in speakers:
         who = str(speaker.get("who") or "").strip()
         if not who:
             continue
-        rows = con.execute(
-            """
-            SELECT ident,name,club,source FROM character
-            WHERE ident LIKE ? OR name LIKE ? OR club LIKE ?
-            ORDER BY (ident=? OR name=?) DESC, (name IS NULL), ident
-            LIMIT 16
-            """,
-            (f"%{who}%", f"%{who}%", f"%{who}%", who, who),
-        ).fetchall()
+        rows = [
+            row for row in catalog_rows
+            if any(who.casefold() in str(row[field] or "").casefold()
+                   for field in ("ident", "name", "club"))
+        ]
+        rows.sort(key=lambda row: (
+            not (row["ident"] == who or row["name"] == who),
+            row["name"] is None,
+            row["ident"],
+        ))
         for row in rows:
             if not assetdb._looks_placeholder(row["name"]):
                 add(row["ident"], row["name"], row["club"], row["source"])
     return {"total": total, "candidates": list(candidates.values())}
 
 
-def _preflight_background_library(con, limit: int = 800) -> list[dict]:
+def _preflight_background_library(
+    con, limit: int = 800, *, readonly: bool = False
+) -> list[dict]:
     """Expose usable AA backgrounds to the model without filesystem details."""
-    asset_catalog.migrate(con)
+    if not readonly:
+        asset_catalog.migrate(con)
+    has_asset_install = bool(con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='asset_install'"
+    ).fetchone())
+    custom_exclusion = (
+        "NOT EXISTS (SELECT 1 FROM asset_install AS custom "
+        "WHERE custom.kind='background' AND custom.status='registered' "
+        "AND CAST(custom.aa_key AS TEXT)=CAST(official.hash AS TEXT))"
+        if has_asset_install else "1=1"
+    )
     rows = con.execute(
-        """
+        f"""
         SELECT official.name,official.label,official.place,official.time,
                official.mood,official.tags
         FROM bg AS official
         WHERE official.hash IS NOT NULL
-          AND NOT EXISTS (
-              SELECT 1 FROM asset_install AS custom
-              WHERE custom.kind='background' AND custom.status='registered'
-                AND CAST(custom.aa_key AS TEXT)=CAST(official.hash AS TEXT)
-          )
+          AND {custom_exclusion}
         ORDER BY official.name
         """,
     ).fetchall()
@@ -2436,19 +2666,49 @@ def _preflight_background_library(con, limit: int = 800) -> list[dict]:
         for row in rows
         if _background_preview_available(str(row["name"]))
     }
+    scene_labels = {
+        item["asset_key"].casefold(): item
+        for item in assetdb.query_scene_assets(
+            con, resource_channel="background"
+        )
+    }
     grouped: dict[tuple[str, str], dict] = {}
     for row in rows:
         aa_key = str(row["name"] or "")
         if not aa_key:
             continue
-        label = str(row["label"] or aa_key)
-        time = str(row["time"] or "")
+        semantics = scene_labels.get(aa_key.casefold())
+        if semantics is not None and not (
+            semantics["visual_kind"] == "background"
+            and semantics["dialogue_suitable"]
+        ):
+            continue
+        label = str((semantics or {}).get("label") or row["label"] or aa_key)
+        time = str((semantics or {}).get("time") or row["time"] or "")
         group_key = (label.casefold(), time.casefold())
         item = {
             "aa_key": aa_key, "label": label,
-            "place": str(row["place"] or ""), "time": time,
-            "mood": str(row["mood"] or ""), "tags": str(row["tags"] or ""),
+            "place": str((semantics or {}).get("place") or row["place"] or ""),
+            "time": time,
+            "mood": str((semantics or {}).get("mood") or row["mood"] or ""),
+            "tags": (semantics or {}).get("tags") or str(row["tags"] or ""),
         }
+        if semantics is not None:
+            item.update({
+                field: semantics.get(field)
+                for field in (
+                    "main_category", "main_category_cn", "subcategory",
+                    "description", "indoor_outdoor", "weather", "season",
+                    "staging_capacity", "dialogue_suitable",
+                    "setting_scope", "affiliation_keys",
+                    "affiliation_names_cn", "affiliation_hint_cn",
+                    "affiliation_evidence",
+                    "affiliation_confidence",
+                    "reuse_scope", "compatible_affiliation_keys",
+                    "compatible_affiliation_names_cn", "reuse_hint_cn",
+                    "reuse_scope_cn", "category_path_cn", "search_terms_cn",
+                )
+            })
         existing = grouped.get(group_key)
         if existing is None or (
             aa_key in preview_keys and existing["aa_key"] not in preview_keys
@@ -2651,16 +2911,21 @@ _BACKGROUND_OUTDOOR_TERMS = ("outside", "outdoor", "street", "district", "park",
 def _catalog_background_candidates(con, *context: str, limit: int = 3) -> list[dict]:
     """Suggest official approximations only after an explicit place match."""
     query = " ".join(str(value or "") for value in context).casefold()
-    place_groups: list[tuple[tuple[str, float], ...]] = []
+    place_groups: list[tuple[tuple[str, ...], tuple[tuple[str, float], ...]]] = []
     for aliases, terms in _BACKGROUND_CATALOG_PLACE_HINTS:
         if any(alias.casefold() in query for alias in aliases):
-            place_groups.append(terms)
+            place_groups.append((aliases, terms))
     if not place_groups:
         return []
 
     modifier_weights: dict[str, float] = {}
     for aliases, terms in _BACKGROUND_CATALOG_MODIFIER_HINTS:
         if any(alias.casefold() in query for alias in aliases):
+            alias_weight = max((weight for _term, weight in terms), default=1.0)
+            for alias in aliases:
+                modifier_weights[alias.casefold()] = max(
+                    modifier_weights.get(alias.casefold(), 0.0), alias_weight
+                )
             for term, weight in terms:
                 modifier_weights[term] = max(modifier_weights.get(term, 0.0), weight)
     requested_times = {
@@ -2673,32 +2938,73 @@ def _catalog_background_candidates(con, *context: str, limit: int = 3) -> list[d
         else ""
     )
 
+    has_asset_install = bool(con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='asset_install'"
+    ).fetchone())
+    custom_exclusion = (
+        "NOT EXISTS (SELECT 1 FROM asset_install AS custom "
+        "WHERE custom.kind='background' AND custom.status='registered' "
+        "AND CAST(custom.aa_key AS TEXT)=CAST(official.hash AS TEXT))"
+        if has_asset_install else "1=1"
+    )
     rows = con.execute(
-        """SELECT official.name,official.label,official.place,official.time,
-                  official.mood,official.tags
-           FROM bg AS official
-           WHERE official.hash IS NOT NULL
-             AND NOT EXISTS (
-                 SELECT 1 FROM asset_install AS custom
-                 WHERE custom.kind='background' AND custom.status='registered'
-                   AND CAST(custom.aa_key AS TEXT)=CAST(official.hash AS TEXT)
-             )""",
+        f"""SELECT official.name,official.label,official.place,official.time,
+                   official.mood,official.tags
+            FROM bg AS official
+            WHERE official.hash IS NOT NULL AND {custom_exclusion}""",
     ).fetchall()
+    scene_labels = {
+        item["asset_key"].casefold(): item
+        for item in assetdb.query_scene_assets(con, resource_channel="background")
+    }
+    primary_db = str(Path(DB).resolve()).casefold()
+    for database_path in configured_asset_database_paths():
+        if str(Path(database_path).resolve()).casefold() == primary_db:
+            continue
+        try:
+            overlay_con = assetdb.connect_readonly(database_path)
+        except (OSError, sqlite3.Error):
+            continue
+        try:
+            for item in assetdb.query_scene_assets(
+                overlay_con, resource_channel="background"
+            ):
+                scene_labels.setdefault(item["asset_key"].casefold(), item)
+        finally:
+            overlay_con.close()
+
+    def search_values(value):
+        if isinstance(value, dict):
+            for child in value.values():
+                yield from search_values(child)
+        elif isinstance(value, (list, tuple, set)):
+            for child in value:
+                yield from search_values(child)
+        elif value not in (None, ""):
+            yield str(value)
+
     ranked: list[tuple[float, str, dict]] = []
     for row in rows:
         name = str(row["name"] or "")
         if not name:
             continue
-        searchable = " ".join(str(row[field] or "").casefold() for field in (
-            "name", "label", "place", "time", "mood", "tags",
-        ))
+        semantics = scene_labels.get(name.casefold())
+        searchable = " ".join([
+            *(str(row[field] or "") for field in (
+                "name", "label", "place", "time", "mood", "tags",
+            )),
+            *search_values(semantics or {}),
+        ]).casefold()
         if requested_space == "outdoor" and any(term in searchable for term in _BACKGROUND_INDOOR_TERMS):
             continue
         if requested_space == "indoor" and any(term in searchable for term in _BACKGROUND_OUTDOOR_TERMS):
             continue
         place_score = max(
-            sum(weight for term, weight in terms if term in searchable)
-            for terms in place_groups
+            max(
+                5.0 if any(alias.casefold() in searchable for alias in aliases) else 0.0,
+                sum(weight for term, weight in terms if term in searchable),
+            )
+            for aliases, terms in place_groups
         )
         if place_score <= 0:
             continue
@@ -2719,7 +3025,7 @@ def _catalog_background_candidates(con, *context: str, limit: int = 3) -> list[d
         score = place_score + modifier_score
         ranked.append((score, name.casefold(), {
             "aa_key": name,
-            "label": str(row["label"] or name),
+            "label": str((semantics or {}).get("label") or row["label"] or name),
             "source": "official",
             "preview_source": "official",
             # A local fallback is deliberately never strong enough to auto-apply.
@@ -2903,6 +3209,14 @@ def _normalize_usage_chain(raw_chain: object, custom_assets: dict, con) -> tuple
         start = _compact_timeline_marker(raw_segment.get("start"))
         end = _compact_timeline_marker(raw_segment.get("end"))
         evidence = _compact_preflight_evidence(raw_segment.get("evidence"))
+        scene_type = str(raw_segment.get("scene_type") or "other").strip().lower()
+        active_modes = []
+        for value in raw_segment.get("active_modes") or []:
+            mode = str(value or "").strip().lower()
+            if mode in {"main", "event", "bond"} and mode not in active_modes:
+                active_modes.append(mode)
+        if not active_modes and scene_type in {"main", "event", "bond"}:
+            active_modes.append(scene_type)
         needs: list[dict] = []
         for raw_need in (raw_segment.get("needs") or [])[:80]:
             if not isinstance(raw_need, dict):
@@ -3081,21 +3395,177 @@ def _normalize_usage_chain(raw_chain: object, custom_assets: dict, con) -> tuple
             "segment": segment, "location": location, "start": start,
             "end": end, "evidence": evidence,
             "time": time_label,
-            "scene_type": str(raw_segment.get("scene_type") or "other").strip()[:32],
+            "scene_type": scene_type[:32],
+            "active_modes": active_modes,
             "scene_function": str(raw_segment.get("scene_function") or "dialogue").strip()[:48],
             "needs": needs,
         })
     return chain, refs
 
 
+def _apply_explicit_preflight_assets(
+    chain: list[dict], chain_refs: list[dict], text: str, custom_assets: dict, con
+) -> tuple[list[dict], list[dict]]:
+    """Make authored asset directives authoritative over AI scene suggestions."""
+    if not chain:
+        return chain, chain_refs
+    directive = re.compile(
+        r"^\s*@(?P<cmd>bg|se|sound|bgm|music)\s+(?P<arg>.+?)\s*$", re.I
+    )
+    kind_map = {
+        "bg": "background", "se": "sound", "sound": "sound",
+        "bgm": "bgm", "music": "bgm",
+    }
+    buckets = {
+        "background": custom_assets.get("backgrounds", []),
+        "sound": custom_assets.get("sounds", []),
+        "bgm": custom_assets.get("bgms", []),
+    }
+
+    def marker(value: object) -> int | None:
+        match = re.search(r"\d+", str(value or ""))
+        return int(match.group()) if match else None
+
+    def scene_for(line_no: int) -> dict | None:
+        bounded = []
+        preceding = []
+        for index, segment in enumerate(chain):
+            start = marker(segment.get("start"))
+            end = marker(segment.get("end"))
+            if start is not None and end is not None and start <= line_no <= end:
+                bounded.append((end - start, index, segment))
+            elif start is not None and start <= line_no:
+                preceding.append((start, index, segment))
+        if bounded:
+            return min(bounded, key=lambda item: (item[0], item[1]))[2]
+        if preceding:
+            return max(preceding, key=lambda item: (item[0], item[1]))[2]
+        return chain[0]
+
+    def resolved_need(kind: str, name: str, line_no: int, segment: dict) -> dict:
+        folded = name.casefold()
+        found = next((
+            item for item in buckets[kind]
+            if str(item.get("name") or "").casefold() == folded
+            or str(item.get("aa_key") or "").casefold() == folded
+        ), None)
+        need = {
+            "kind": kind,
+            "name": name,
+            "location": f"第{line_no}行",
+            "reason": "原文已明确指定，必须保留。",
+            "confidence": 1.0,
+            "status": "registered" if found else "missing",
+            "required": True,
+            "evidence": str(segment.get("evidence") or ""),
+            "candidates": [],
+            "detected_by": "directive",
+        }
+        if found:
+            need.update({
+                "aa_key": str(found.get("aa_key") or name),
+                "selected_label": str(found.get("name") or name),
+                "source": "custom",
+                "preview_source": "story",
+                "preview_available": bool(found.get("preview_available")),
+            })
+            return need
+        if kind == "background":
+            row = con.execute(
+                """SELECT official.name,official.label FROM bg AS official
+                   WHERE official.hash IS NOT NULL
+                     AND (official.name=? COLLATE NOCASE OR official.label=? COLLATE NOCASE)
+                     AND NOT EXISTS (
+                         SELECT 1 FROM asset_install AS custom
+                         WHERE custom.kind='background' AND custom.status='registered'
+                           AND CAST(custom.aa_key AS TEXT)=CAST(official.hash AS TEXT)
+                     )
+                   LIMIT 1""",
+                (name, name),
+            ).fetchone()
+            if row is not None:
+                key = str(row["name"])
+                need.update({
+                    "name": key, "aa_key": key, "status": "builtin",
+                    "selected_label": str(row["label"] or key),
+                    "source": "official", "preview_source": "official",
+                    "preview_available": _background_preview_available(key),
+                })
+        elif kind == "sound":
+            row = con.execute(
+                "SELECT name FROM sound WHERE name=? COLLATE NOCASE OR label=? COLLATE NOCASE LIMIT 1",
+                (name, name),
+            ).fetchone()
+            if row is not None:
+                key = str(row["name"])
+                need.update({"name": key, "aa_key": key, "status": "builtin"})
+        elif kind == "bgm" and name.lstrip("-").isdigit():
+            need.update({"aa_key": name, "status": "builtin"})
+        return need
+
+    for line_no, raw in enumerate(text.splitlines(), 1):
+        match = directive.match(raw)
+        if not match:
+            continue
+        name = match.group("arg").strip().strip("\"'")
+        if not name:
+            continue
+        kind = kind_map[match.group("cmd").casefold()]
+        segment = scene_for(line_no)
+        if segment is None:
+            continue
+        authored = resolved_need(kind, name, line_no, segment)
+        needs = [item for item in (segment.get("needs") or []) if isinstance(item, dict)]
+        if kind in {"background", "bgm"}:
+            needs = [item for item in needs if item.get("kind") != kind]
+        else:
+            keys = {
+                str(authored.get("name") or "").casefold(),
+                str(authored.get("aa_key") or "").casefold(),
+            }
+            needs = [
+                item for item in needs
+                if item.get("kind") != kind
+                or not keys.intersection({
+                    str(item.get("name") or "").casefold(),
+                    str(item.get("aa_key") or "").casefold(),
+                })
+            ]
+        segment["needs"] = [authored, *needs]
+
+    refs = []
+    seen = set()
+    for segment in chain:
+        for need in segment.get("needs") or []:
+            if not isinstance(need, dict) or need.get("status") in {"builtin", "inherited"}:
+                continue
+            kind = str(need.get("kind") or "")
+            name = str(need.get("name") or "")
+            key = (kind, name.casefold())
+            if not kind or not name or key in seen:
+                continue
+            seen.add(key)
+            refs.append({
+                "kind": kind,
+                "name": name,
+                "status": str(need.get("status") or "missing"),
+                "location": str(need.get("location") or segment.get("start") or "AI 从全文识别"),
+                "reason": str(need.get("reason") or "AI 根据全文识别出的演出需求。"),
+                "detected_by": str(need.get("detected_by") or "ai"),
+                "evidence": str(need.get("evidence") or segment.get("evidence") or ""),
+                "confidence": float(need.get("confidence") or 0.0),
+            })
+    return chain, refs
+
+
 _PREFLIGHT_COMMANDS = {
     "bg", "trans", "bgfx", "popup", "bgm", "music", "se", "sound",
     "place", "wait", "raw", "bgshake", "clearst", "hidemenu", "showmenu",
-    "aronatouch", "shot", "st", "stm", "zoom", "enter", "exit", "move",
-    "stage", "auto", "camera", "camera_hold", "fx", "hl",
+    "aronatouch", "shot", "st", "stm", "zoom", "reveal", "enter", "exit", "move",
+    "stage", "auto", "camera", "camera_hold", "camera_cut", "fx", "hl", "nodialog", "react",
 }
 _PREFLIGHT_ARG_REQUIRED = _PREFLIGHT_COMMANDS - {
-    "bgshake", "clearst", "hidemenu", "showmenu", "aronatouch", "auto",
+    "bgshake", "clearst", "hidemenu", "showmenu", "aronatouch", "auto", "nodialog",
 }
 
 
@@ -3132,17 +3602,13 @@ def _preflight_directive_issues(text: str) -> list[dict]:
 
 
 def _preflight_output_budget(provider, analysis: dict) -> int:
-    """Use a bounded, scene-scaled budget independent from annotation chunks."""
-    line_count = max(1, int(analysis.get("lines") or 0))
-    header_count = len(analysis.get("scenes") or [])
-    estimated_scenes = max(header_count, (line_count + 39) // 40, 1)
-    target = min(6000, max(2048, 2048 + estimated_scenes * 192))
+    """Use the configured model output setting without a smaller backend cap."""
     cfg = getattr(provider, "cfg", {}) or {}
     try:
-        model_limit = int(cfg.get("annotation_max_tokens") or cfg.get("max_tokens") or target)
+        model_limit = int(cfg.get("annotation_max_tokens") or cfg.get("max_tokens") or 16000)
     except (TypeError, ValueError):
-        model_limit = target
-    return max(1, min(target, model_limit))
+        model_limit = 16000
+    return max(1, model_limit)
 
 
 def _complete_preflight(
@@ -3182,6 +3648,7 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
     text = Path(script).read_text(encoding="utf-8", errors="replace")
     analysis = analyze(script)
     baseline = guess_mapping(analysis.get("speakers") or [])
+    background_library: list[dict] = []
     con = db()
     try:
         custom_assets = asset_catalog.list_story_assets(con, scope=scope)
@@ -3192,6 +3659,39 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
                 baseline[who] = story_mapping
         character_library = _preflight_character_library(
             con, analysis.get("speakers") or [], custom_assets, baseline
+        )
+        # Give the first (semantic) pass the same labelled background facts
+        # that the later G1/G2 resource shortlist uses.  This is metadata
+        # only: the model still chooses a key from the validated catalogue and
+        # the compiler remains the final authority on legality.
+        background_library = _preflight_background_library(con)
+        # Add explicitly selected labelled sources without mutating them.  The
+        # active user DB remains first and wins duplicate AA keys; a second DB
+        # only enriches the semantic catalogue where the first has no record.
+        primary_db = str(Path(DB).resolve()).casefold()
+        for database_path in configured_asset_database_paths():
+            if str(Path(database_path).resolve()).casefold() == primary_db:
+                continue
+            try:
+                overlay_con = assetdb.connect_readonly(database_path)
+            except (OSError, sqlite3.Error):
+                continue
+            try:
+                background_library.extend(
+                    _preflight_background_library(
+                        overlay_con, readonly=True,
+                    )
+                )
+            finally:
+                overlay_con.close()
+        deduped_backgrounds = {}
+        for item in background_library:
+            key = str(item.get("aa_key") or item.get("label") or "").casefold()
+            if key and key not in deduped_backgrounds:
+                deduped_backgrounds[key] = item
+        background_library = list(deduped_backgrounds.values())
+        background_library.extend(
+            _preflight_custom_background_library(custom_assets)
         )
         refs = _preflight_asset_refs(text, custom_assets, con)
         builtin_asset_names = {
@@ -3254,11 +3754,11 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
             "你是 AA 剧本编译器的轻量初审规划器。你只做必须理解全文才能完成的语义判断，"
             "不改写台词，也不输出 AA 标注。只返回 schema 规定的紧凑 JSON。"
             "extra_speakers 只列规则结果遗漏、但正文明确说话或出场的人物；不要重复 speakers。"
-            "scenes 只按会改变画面背景的边界覆盖正文：地点改变、室内外改变、时间段明显改变、"
-            "原文明示转场或背景指令改变时才新建 scene，用 L 行号填写 start_line/end_line。"
-            "同一物理地点中的动作升级、对话阶段、人物进出、镜头节拍或剧情转折都不算背景变化，"
-            "不要因此拆出新 scene。相邻内容继续使用同一背景时合并到同一 scene。"
-            "每场填写地点、时间、main/event/bond/other 和 scene_function。"
+            "scenes 是物理场景：地点改变、室内外改变、时间段明显改变、原文明示转场或背景指令改变时才新建 scene，"
+            "用 L 行号填写 start_line/end_line。同一物理地点中的剧情转折、人物进出、普通反打、镜头节拍或短暂动作都不拆 scene。"
+            "每场填写地点、时间、主类型 story_type、scene_function，以及 active_modes。active_modes 是本场可用的 main/event/bond 策略集合："
+            "通常只填一个；同一物理场景同时存在活动式事件推进和羁绊式关系停顿时可同时填 event、bond，后续演出 AI 会逐拍自行选择，"
+            "不需要标出固定切换行。不要把无关模式放进 active_modes。"
             "needs 只写语义素材名：每个真正发生背景变化的 scene 写一个 background；"
             "只有正文有明确声音线索时才写 sound，"
             "只有音乐对情绪结构不可替代时才写 bgm。不要输出候选、aa_key、状态、证据原文、理由或置信度。"
@@ -3272,6 +3772,7 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
             "speakers": [{
                 "name": str(item.get("who") or ""), "count": int(item.get("n") or 0),
             } for item in analysis.get("speakers", [])],
+            "background_library": background_library,
         }
         if len(windows) == 1:
             volatile_base["scene_headers"] = analysis.get("scenes", [])
@@ -3315,6 +3816,9 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
                 try:
                     usage_chain, chain_refs = _normalize_usage_chain(
                         ai.get("usage_chain"), custom_assets, chain_con
+                    )
+                    usage_chain, chain_refs = _apply_explicit_preflight_assets(
+                        usage_chain, chain_refs, text, custom_assets, chain_con
                     )
                 finally:
                     chain_con.close()
@@ -3816,11 +4320,13 @@ def run_build(payload, job=None):
     )
     try:
         story_type = normalize_story_type(payload.get("story_type"))
+        layout_mode = normalize_layout_mode(payload.get("layout_mode"))
         script = payload["script"]
         project = build_project_name(payload)
         cast = {"default_bg": payload.get("bg") or "BG_Black",
-                "default_bgm": 999, "scene_bg": payload.get("scene_bg") or {},
-                "cast": {}, "alias": payload.get("alias") or {}}
+            "default_bgm": 999, "scene_bg": payload.get("scene_bg") or {},
+            "cast": {}, "alias": payload.get("alias") or {},
+            "layout_mode": layout_mode}
         for who, m in payload["mapping"].items():
             k = m.get("kind")
             if k == "narrator":
@@ -3869,7 +4375,18 @@ def run_build(payload, job=None):
                 "out": out,
                 "cast": cpath,
                 "index": index_path,
+                # The project index is a JSON snapshot; labelled face/scene
+                # facts remain in the authoritative user-state DB.  Pass it
+                # explicitly so 0.95 cannot fall back to an empty sibling DB.
+                "database_paths": configured_asset_database_paths(),
+                "usage_chain": payload.get("usage_chain") or [],
+                # 0.95 ships the same G1 + G2 path that passed the V10 blind
+                # validation.  Callers can still explicitly disable either
+                # stage for diagnosis or format-only conversion.
+                "agent_enabled": payload.get("agent_enabled", True),
+                "scene_event_planning": payload.get("scene_event_planning", True),
                 "story_type": story_type,
+                "layout_mode": layout_mode,
             }
             if payload.get("provider"):
                 opts["provider"] = payload["provider"]
@@ -3909,10 +4426,12 @@ def annotate_draft_worker(payload, job=None):
     """AI 演出标注 -> 建草稿 -> 存 cast/proposals。供 /api/annotate 的 Job 调用。"""
     import annotate as ANN
     story_type = normalize_story_type(payload.get("story_type"))
+    layout_mode = normalize_layout_mode(payload.get("layout_mode"))
     project = build_project_name(payload)
     cast = {"default_bg": payload.get("bg") or "BG_Black",
             "default_bgm": 999, "scene_bg": payload.get("scene_bg") or {},
-            "cast": {}, "alias": payload.get("alias") or {}}
+            "cast": {}, "alias": payload.get("alias") or {},
+            "layout_mode": layout_mode}
     for who, m in payload["mapping"].items():
         k = m.get("kind")
         if k == "narrator":
@@ -3975,13 +4494,16 @@ def annotate_draft_worker(payload, job=None):
             "out": out_path,
             "cast": cpath,
             "index": index_path,
+            "database_paths": configured_asset_database_paths(),
             "usage_chain": payload.get("usage_chain") or [],
             "agent_enabled": payload.get("agent_enabled", True),
+            "scene_event_planning": payload.get("scene_event_planning", True),
             "checkpoint_dir": os.path.join(OUT_DIR, "annotation-checkpoints"),
             "progress": annotation_progress,
             "model_activity": annotation_model_activity,
             "cancelled": job.is_cancel_requested if job else None,
             "story_type": story_type,
+            "layout_mode": layout_mode,
         }
         if payload.get("provider"):
             opts["provider"] = payload["provider"]
@@ -4042,22 +4564,36 @@ def annotate_draft_worker(payload, job=None):
                 "diagnostics": result.get("diagnostics") or [],
                 "story_type": story_type,
             }
+    annotation_trace = None
+    trace_path = result.get("trace")
+    if trace_path:
+        try:
+            candidate_trace = json.loads(Path(trace_path).read_text(encoding="utf-8"))
+            if isinstance(candidate_trace, dict):
+                annotation_trace = candidate_trace
+        except (OSError, json.JSONDecodeError):
+            annotation_trace = None
     store.create_draft(token=token, text=annotated, project=project,
                        source_text=source_text, cast=cast,
                        story_token=payload.get("story_token"),
                        bgm_policy=payload.get("bgm_policy"),
-                       annotation_status=annotation_status)
+                       annotation_status=annotation_status,
+                       annotation_trace=annotation_trace)
     store.save_cast(token, cast)
     proposals = result.get("proposals") or []
     if proposals:
         store.add_proposals(token, proposals)
-    return {"draft_token": token, "project": project,
+    response_payload = {"draft_token": token, "project": project,
             "lines": len(annotated.splitlines()), "proposals": len(proposals),
              "resumed_chunks": int(agent.get("resumed_chunks") or 0),
              "timed_out": bool(agent.get("timed_out")),
              "agent_metrics": metrics,
              "diagnostics": result.get("diagnostics") or [],
              "story_type": story_type}
+    if result.get("generation_error"):
+        response_payload["partial"] = True
+        response_payload["generation_error"] = dict(result["generation_error"])
+    return response_payload
 
 
 def get_draft_detail_data(token, store=None):
@@ -4069,12 +4605,30 @@ def get_draft_detail_data(token, store=None):
     identities_data = draft["identities"]
     diagnostics = draft["diagnostics"]
     annotation_status = normalize_annotation_status(session.get("annotation_status"))
+    # A partial AI run is normally a blocking error.  Once every current
+    # card has been explicitly approved, however, the user has made the
+    # documented decision to keep that partial result.  Keep the diagnostic
+    # visible for audit, but do not let the informational state masquerade as
+    # a fresh compile blocker in the review UI.
+    pending_count = sum(
+        1 for identity in identities_data
+        if identity.get("review_state") == "pending"
+    )
+    annotation_override_accepted = bool(
+        session.get("annotation_override_accepted")
+        or (annotation_status["status"] != "complete" and pending_count == 0)
+    )
     if annotation_status["status"] != "complete":
         diagnostics = list(diagnostics) + [{
             "code": "annotation_incomplete",
-            "severity": "error",
+            "severity": "info" if annotation_override_accepted else "error",
             "message": (
-                f"AI 标注尚未完成：{annotation_status['completed_targets']}/"
+                (
+                    "AI 标注尚未完成，但用户已接受当前结果："
+                    if annotation_override_accepted
+                    else "AI 标注尚未完成："
+                )
+                + f"{annotation_status['completed_targets']}/"
                 f"{annotation_status['total_targets']}，剩余 "
                 f"{annotation_status['pending_targets']} 条"
             ),
@@ -4114,6 +4668,9 @@ def get_draft_detail_data(token, store=None):
             "proposal_ids": [],
         })
 
+    # Keep the count derived from the rendered cards as the source of truth;
+    # it should match the identity scan above, but using the final card list
+    # protects the response if normalization ever drops an invalid node.
     pending_count = sum(1 for c in cards if c["review_state"] == "pending")
     unresolved_issues = sum(1 for d in diagnostics if d.get("severity") in ("error", "warning"))
     blocking_errors = sum(1 for d in diagnostics if d.get("severity") == "error")
@@ -4150,6 +4707,7 @@ def get_draft_detail_data(token, store=None):
         "story_token": session.get("story_token"),
         "bgm_policy": normalize_bgm_policy(session.get("bgm_policy")),
         "annotation_status": annotation_status,
+        "annotation_override_accepted": annotation_override_accepted,
         "cast": cast_summary,
     }
 
@@ -5286,6 +5844,16 @@ class H(BaseHTTPRequestHandler):
                 bundle_mgr = BuildBundleManager(store=store)
                 try:
                     build_id = bundle_mgr.create_compile_snapshot(token=token, expected_draft_version=expected_ver)
+                except ReviewPendingError as exc:
+                    # The review state can change between the initial gate
+                    # and snapshot creation. Return a normal JSON conflict
+                    # instead of letting the handler drop the connection and
+                    # making the browser report only "Failed to fetch".
+                    return self._send(409, {
+                        "ok": False,
+                        "code": exc.code,
+                        "e": str(exc),
+                    })
                 except CompileInputStaleError as exc:
                     return self._send(409, {"ok": False, "code": "compile_input_stale", "e": str(exc)})
 
@@ -5314,6 +5882,11 @@ class H(BaseHTTPRequestHandler):
                 except AAInstallTargetExistsError as exc:
                     return self._send(409, {
                         "ok": False, "code": "install_target_exists", "e": str(exc),
+                    })
+                except AAQualityGateError as exc:
+                    return self._send(409, {
+                        "ok": False, "code": exc.code, "e": str(exc),
+                        "issues": exc.issues,
                     })
                 except AACorruptBundleError as exc:
                     return self._send(400, {"ok": False, "code": "corrupted_bundle", "e": str(exc)})
@@ -5536,12 +6109,19 @@ class H(BaseHTTPRequestHandler):
                 mapping = data.get("mapping")
                 try:
                     story_type = normalize_story_type(data.get("story_type"))
+                    layout_mode = normalize_layout_mode(data.get("layout_mode"))
                     if "story_type" in data:
                         data["story_type"] = story_type
-                except ValueError:
+                    data["layout_mode"] = layout_mode
+                except ValueError as exc:
+                    code = (
+                        "invalid_layout_mode"
+                        if str(exc) == "invalid_layout_mode"
+                        else "invalid_story_type"
+                    )
                     return self._send(400, {
-                        "ok": False, "code": "invalid_story_type",
-                        "e": "invalid story type",
+                        "ok": False, "code": code,
+                        "e": "invalid generation mode",
                     })
                 try:
                     context = inherit_story_context(data)
@@ -5635,15 +6215,18 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "code": "bad_request", "e": "缺少 token"})
                 try:
                     store = DraftStore()
-                    draft = store.load_draft(token)
-                    diagnostics = draft["diagnostics"]
-                    blocking = sum(1 for d in diagnostics if d.get("severity") == "error")
+                    # Use the same derived review view as /api/draft.  In
+                    # particular, an accepted partial annotation is an audit
+                    # info item rather than a new compile blocker; reading the
+                    # raw diagnostics here used to disagree with the review
+                    # gate and left the UI saying "可以编译" while disabling it.
+                    detail = get_draft_detail_data(token, store=store)
                     return self._send(200, {
                         "ok": True,
-                        "blocking_errors": blocking,
-                        "diagnostics": diagnostics,
-                        "draft_version": draft["session"]["draft_version"],
-                        "content_revision": draft["session"]["content_revision"],
+                        "blocking_errors": detail["counts"]["blocking_errors"],
+                        "diagnostics": detail["diagnostics"],
+                        "draft_version": detail["draft_version"],
+                        "content_revision": detail["content_revision"],
                     })
                 except Exception as exc:
                     return self._send(400, {"ok": False, "code": "bad_request", "e": str(exc)})
@@ -5771,8 +6354,10 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/build":
             try:
                 story_type = normalize_story_type(data.get("story_type"))
+                layout_mode = normalize_layout_mode(data.get("layout_mode"))
                 if "story_type" in data:
                     data["story_type"] = story_type
+                data["layout_mode"] = layout_mode
                 inherit_story_context(data)
                 project_name = build_project_name(data)
             except StoryProjectMismatchError:
@@ -5784,6 +6369,8 @@ class H(BaseHTTPRequestHandler):
                 code = (
                     "invalid_story_type"
                     if str(exc) == "invalid_story_type"
+                    else "invalid_layout_mode"
+                    if str(exc) == "invalid_layout_mode"
                     else "bad_request"
                 )
                 return self._send(400, {"ok": False, "code": code, "e": str(exc)})

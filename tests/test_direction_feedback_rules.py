@@ -109,7 +109,7 @@ def test_focusline_is_kept_only_for_an_existing_centered_solo_closeup():
     assert script["characters"]["$values"][3]["shapeOverride"] == 5
 
 
-def test_closeup_survives_a_listener_cut_until_explicit_end_or_scene_reset():
+def test_closeup_is_cleared_when_a_new_group_shot_is_built():
     scripts = [
         _script({2: "kei"}, shapes={2: 4}, speaker_slot=2),
         _script({2: "kei"}, speaker_slot=2),
@@ -120,9 +120,31 @@ def test_closeup_survives_a_listener_cut_until_explicit_end_or_scene_reset():
 
     enforce_persistent_closeups(scripts)
 
-    assert [row["characters"]["$values"][2]["shapeOverride"] for row in scripts[:3]] == [4, 4, 4]
+    assert [row["characters"]["$values"][2]["shapeOverride"] for row in scripts[:3]] == [4, 4, 0]
     assert scripts[3]["characters"]["$values"][4]["shapeOverride"] == 0
-    assert scripts[4]["characters"]["$values"][2]["shapeOverride"] == 4
+    assert scripts[4]["characters"]["$values"][2]["shapeOverride"] == 0
+
+
+def test_closeup_is_not_reintroduced_from_current_group_records():
+    scripts = [
+        _script({2: "kei"}, shapes={2: 4}, speaker_slot=2),
+        _script({2: "kei", 4: "momoi"}, shapes={2: 4}, speaker_slot=4),
+    ]
+
+    enforce_persistent_closeups(scripts)
+
+    assert scripts[1]["characters"]["$values"][2]["shapeOverride"] == 0
+
+
+def test_communication_bit_can_still_persist_into_a_group_shot():
+    scripts = [
+        _script({2: "kei"}, shapes={2: 1}, speaker_slot=2),
+        _script({2: "kei", 4: "momoi"}, speaker_slot=4),
+    ]
+
+    enforce_persistent_closeups(scripts)
+
+    assert scripts[1]["characters"]["$values"][2]["shapeOverride"] == 1
 
 
 def test_closeup_ends_only_after_explicit_end():
@@ -288,7 +310,9 @@ def test_expression_prompt_holds_only_the_same_detailed_reaction_beat():
     assert "不要为了画面变化而换 face" in rules
     assert "保持正确表情比制造变化更重要" in rules
     assert "连续第 3 次仍保持同一 face" in rules
-    assert "优先选择一个与上一句不同" not in rules
+    assert "从听者重新变成说话者" in rules
+    assert "优先选择一个与当前持有表情不同" in rules
+    assert "同一句拆开的连续气口" in rules
 
 
 def test_expression_prompt_treats_usage_context_as_guidance_not_trigger():
@@ -297,6 +321,15 @@ def test_expression_prompt_treats_usage_context_as_guidance_not_trigger():
     assert "使用语境是候选提示，不是关键词触发规则" in rules
     assert "不能仅凭脸红、泪水等视觉现象决定表情" in rules
     assert "没有完美差分时" in rules
+
+
+def test_staging_prompt_requests_motivated_portrait_reveals_instead_of_implicit_refades():
+    rules = build_rules(layout_mode="pure_ai")
+
+    assert "有动机的再次显现" in rules
+    assert "普通切镜只改变 visible_characters" in rules
+    assert "不会因为离镜时间长就擅自再次渐入" in rules
+    assert "让立绘动起来" in rules
 
     idx = {
         "bg": {},

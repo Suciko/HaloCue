@@ -644,8 +644,8 @@ def test_background_timeline_uses_official_preview_before_marking_asset_missing(
     script = r'''
 const {createHarness}=require(process.argv[1]);
 const cards=[{card_id:'bg-official',kind:'dir',line_no:6,current:{cmd:'bg',arg:'BG_ShoppingDistrict'}}];
-const h=createHarness({request:async p=>{if(p.startsWith('/api/draft?'))return {story_token:'story-1',draft_version:1,counts:{pending:0,blocking_errors:0},cards};if(p.startsWith('/api/story/assets'))return {characters:[],backgrounds:[],sounds:[],bgms:[]};return {profiles:[]};}});
-(async()=>{h.window.StoryStore.set({story_token:'story-1',project:'测试'});h.get('#rvDraftSelect').value='draft-1';await h.window.AppRuntime.loadReview();const node=h.get('#bgTimeline').children[1].children[0],jump=node.children[0],image=jump.children[0],placeholder=jump.children[1],meta=jump.children[3];const before={missing:node.classList.contains('is-missing'),src:image.src,meta:meta.textContent};image.dispatch('load',{target:image});const loaded={missing:node.classList.contains('is-missing'),meta:meta.textContent};image.dispatch('error',{target:image});const failed={missing:node.classList.contains('is-missing'),placeholder:placeholder.textContent,meta:meta.textContent};console.log(JSON.stringify({before,loaded,failed}));})();
+const h=createHarness({request:async p=>{if(p.startsWith('/api/draft?'))return {story_token:'story-1',draft_version:1,counts:{pending:0,blocking_errors:0},cards};if(p.startsWith('/api/story/assets'))return {characters:[],backgrounds:[],sounds:[],bgms:[]};if(p.startsWith('/api/backgrounds?'))return [{name:'BG_ShoppingDistrict',ready:true,img:false}];return {profiles:[]};}});
+(async()=>{h.window.StoryStore.set({story_token:'story-1',project:'测试'});h.get('#rvDraftSelect').value='draft-1';await h.window.AppRuntime.loadReview();const node=h.get('#bgTimeline').children[1].children[0],jump=node.children[0],image=jump.children[0],placeholder=jump.children[1],meta=jump.children[3];const before={missing:node.classList.contains('is-missing'),src:image.src,meta:meta.textContent};image.dispatch('load',{target:image});const loaded={missing:node.classList.contains('is-missing'),meta:meta.textContent};image.dispatch('error',{target:image});await h.drain();const failed={missing:node.classList.contains('is-missing'),placeholder:placeholder.textContent,meta:meta.textContent};console.log(JSON.stringify({before,loaded,failed}));})();
 '''
     result = run_runtime(script)
     assert result["before"] == {
@@ -655,10 +655,21 @@ const h=createHarness({request:async p=>{if(p.startsWith('/api/draft?'))return {
     }
     assert result["loaded"] == {"missing": False, "meta": "AA 官方背景"}
     assert result["failed"] == {
-        "missing": True,
-        "placeholder": "素材缺失",
-        "meta": "AA 资源中未找到此背景",
+        "missing": False,
+        "placeholder": "预览未建立",
+        "meta": "AA 背景已登记 · 预览未建立",
     }
+
+
+def test_analyze_reuses_in_flight_request_for_the_same_story():
+    script = r'''
+const {createHarness}=require(process.argv[1]);const calls=[];
+const preflight={ai_status:'completed',usage_chain_status:'completed',characters:[],assets:[],issues:[],usage_chain:[]};
+const h=createHarness({request:async(p)=>{calls.push(p);if(p==='/api/picker')return {file_token:'file-1'};if(p==='/api/stories/open')return {story_token:'story-1',project:'测试',source_name:'story.txt'};if(p.startsWith('/api/analyze'))return {path:'private',lines:1,speakers:[],scenes:[]};if(p.startsWith('/api/guess'))return {};if(p==='/api/preflight')return preflight;if(p==='/api/drafts')return [];if(p.startsWith('/api/story/assets'))return {characters:[],backgrounds:[],sounds:[],bgms:[]};if(p.startsWith('/api/backgrounds'))return [];return {profiles:[]};}});
+(async()=>{h.get('#path').value='story.txt';await Promise.all([h.window.AppRuntime.analyze(),h.window.AppRuntime.analyze()]);console.log(JSON.stringify({analyze:calls.filter(p=>p.startsWith('/api/analyze')).length,guess:calls.filter(p=>p.startsWith('/api/guess')).length,preflight:calls.filter(p=>p==='/api/preflight').length,busy:h.get('#analyzeStoryButton').getAttribute('aria-busy')}));})();
+'''
+    result = run_runtime(script)
+    assert result == {"analyze": 1, "guess": 1, "preflight": 1, "busy": "false"}
 
 
 def test_background_timeline_opens_workbench_and_applies_copy_to_same_card_from_latest_revision():

@@ -5,7 +5,7 @@
 打标是一次性成本：谁跑过一次，把 aa_assets.db 拷给别人就行，不用再让 AI 看一遍图。
 所有写入都是幂等的，重复跑只补空缺、不覆盖已有标注（除非 --force）。
 """
-import json, os, sqlite3, threading
+import json, os, re, sqlite3, threading
 
 from tables import bg_id
 
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS face_evidence (
     observed_count  INTEGER,
     PRIMARY KEY (ident, spine_signature, outfit_key, face_id, source)
 );
-    CREATE TABLE IF NOT EXISTS face_visual_label (
+CREATE TABLE IF NOT EXISTS face_visual_label (
     ident              TEXT NOT NULL,
     spine_signature    TEXT NOT NULL,
     outfit_key         TEXT NOT NULL,
@@ -92,12 +92,30 @@ CREATE TABLE IF NOT EXISTS face_evidence (
     confidence         REAL NOT NULL DEFAULT 0,
         description_cn     TEXT,
         semantic_json      TEXT NOT NULL DEFAULT '{}',
+        observation_json    TEXT NOT NULL DEFAULT '{}',
+        backend_json        TEXT NOT NULL DEFAULT '{}',
         head_path          TEXT,
     reviewed           INTEGER NOT NULL DEFAULT 0,
     manual_json        TEXT NOT NULL DEFAULT '{}',
     version            INTEGER NOT NULL DEFAULT 1,
     updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (ident, spine_signature, outfit_key, face_id, model)
+);
+-- 官方语料中该角色/表情的真实使用证据。它是检索提示，不是视觉标注，
+-- 因此和 face_visual_label 分表，避免文本语境覆盖眼眉嘴等画面事实。
+CREATE TABLE IF NOT EXISTS face_official_usage (
+    ident           TEXT NOT NULL,
+    spine_signature TEXT NOT NULL DEFAULT '',
+    outfit_key      TEXT NOT NULL DEFAULT '',
+    face_id         TEXT NOT NULL,
+    record_uid      TEXT NOT NULL,
+    text_cn         TEXT NOT NULL DEFAULT '',
+    silent          INTEGER NOT NULL DEFAULT 0,
+    emoticons_json  TEXT NOT NULL DEFAULT '[]',
+    actions_json    TEXT NOT NULL DEFAULT '[]',
+    closeup         INTEGER NOT NULL DEFAULT 0,
+    source          TEXT NOT NULL DEFAULT 'official_corpus',
+    PRIMARY KEY (ident, spine_signature, outfit_key, face_id, record_uid)
 );
 CREATE TABLE IF NOT EXISTS expression_part (
     ident           TEXT NOT NULL,
@@ -108,6 +126,21 @@ CREATE TABLE IF NOT EXISTS expression_part (
     labels_json     TEXT NOT NULL,
     source          TEXT NOT NULL,
     PRIMARY KEY (ident, spine_signature, outfit_key, raw_name, source)
+);
+CREATE TABLE IF NOT EXISTS scene_visual_label (
+    resource_channel TEXT NOT NULL,
+    asset_key        TEXT NOT NULL,
+    content_sha256   TEXT NOT NULL DEFAULT '',
+    source_kind      TEXT NOT NULL DEFAULT '',
+    model            TEXT NOT NULL,
+    visual_kind      TEXT NOT NULL DEFAULT 'unknown',
+    label_json       TEXT NOT NULL DEFAULT '{}',
+    evidence_json    TEXT NOT NULL DEFAULT '{}',
+    confidence       REAL NOT NULL DEFAULT 0,
+    status           TEXT NOT NULL DEFAULT 'pending',
+    manual_json      TEXT NOT NULL DEFAULT '{}',
+    updated_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (resource_channel, asset_key, content_sha256, model)
 );
 CREATE TABLE IF NOT EXISTS enum (
     kind     TEXT,                 -- emoticon / action / appear / shape
@@ -129,10 +162,14 @@ CREATE INDEX IF NOT EXISTS ix_bg_label    ON bg(label);
 CREATE INDEX IF NOT EXISTS ix_face_ident  ON face(ident);
 CREATE INDEX IF NOT EXISTS ix_face_evidence_ident ON face_evidence(ident);
 CREATE INDEX IF NOT EXISTS ix_face_visual_label_ident ON face_visual_label(ident);
+CREATE INDEX IF NOT EXISTS ix_face_official_usage_lookup
+ON face_official_usage(ident, spine_signature, outfit_key, face_id);
 CREATE INDEX IF NOT EXISTS ix_expression_part_ident ON expression_part(ident);
+CREATE INDEX IF NOT EXISTS ix_scene_visual_label_key
+ON scene_visual_label(resource_channel, asset_key);
 """
 
-_SCHEMA_VERSION = "2"
+_SCHEMA_VERSION = "5"
 _MIGRATE_LOCK = threading.RLock()
 
 # 从用户已完成的工程里核对出来的对应关系，作为初始种子。
@@ -218,6 +255,7 @@ def connect(path):
         if needs_schema:
             con.executescript(SCHEMA)
             migrate_visual_face_labels(con)
+            migrate_face_official_usage(con)
             migrate_character_avatar(con)
             con.execute(
                 """
@@ -227,6 +265,27 @@ def connect(path):
                 (_SCHEMA_VERSION,),
             )
         con.commit()
+    return con
+
+
+def connect_readonly(path):
+    """Open an existing asset database without migrations or writes.
+
+    Generation and audit passes only need to read the labelled asset facts.
+    Keeping this connection genuinely read-only prevents a missing/old output
+    directory from creating a second empty ``aa_assets.db`` beside a project
+    index, and makes the database used by a run explicit and auditable.
+    """
+    target = os.path.abspath(os.fspath(path))
+    if not os.path.isfile(target):
+        raise FileNotFoundError(target)
+    con = sqlite3.connect(
+        f"file:{target.replace(chr(92), '/') }?mode=ro",
+        uri=True,
+        timeout=5.0,
+    )
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA busy_timeout=5000")
     return con
 
 
@@ -248,6 +307,8 @@ def migrate_visual_face_labels(con):
     }
     additions = {
         "semantic_json": "TEXT NOT NULL DEFAULT '{}'",
+        "observation_json": "TEXT NOT NULL DEFAULT '{}'",
+        "backend_json": "TEXT NOT NULL DEFAULT '{}'",
         "manual_json": "TEXT NOT NULL DEFAULT '{}'",
         "version": "INTEGER NOT NULL DEFAULT 1",
         "updated_at": "TEXT NOT NULL DEFAULT ''",
@@ -463,6 +524,375 @@ def set_active_face_label_model(con, model):
     con.commit()
 
 
+def migrate_face_official_usage(con):
+    """Ensure the additive official-usage evidence table exists.
+
+    The table is also present in ``SCHEMA`` for new databases; keeping this
+    idempotent migration makes upgrades from a partially-created v3 database
+    safe and explicit.
+    """
+    con.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS face_official_usage (
+            ident           TEXT NOT NULL,
+            spine_signature TEXT NOT NULL DEFAULT '',
+            outfit_key      TEXT NOT NULL DEFAULT '',
+            face_id         TEXT NOT NULL,
+            record_uid      TEXT NOT NULL,
+            text_cn         TEXT NOT NULL DEFAULT '',
+            silent          INTEGER NOT NULL DEFAULT 0,
+            emoticons_json  TEXT NOT NULL DEFAULT '[]',
+            actions_json    TEXT NOT NULL DEFAULT '[]',
+            closeup         INTEGER NOT NULL DEFAULT 0,
+            source          TEXT NOT NULL DEFAULT 'official_corpus',
+            PRIMARY KEY (ident, spine_signature, outfit_key, face_id, record_uid)
+        );
+        CREATE INDEX IF NOT EXISTS ix_face_official_usage_lookup
+        ON face_official_usage(ident, spine_signature, outfit_key, face_id);
+        """
+    )
+
+
+def replace_face_official_usage(con, records, *, source="official_corpus"):
+    """Replace one imported source while preserving other evidence sources.
+
+    ``records`` may contain role-level evidence (empty spine/outfit) or exact
+    variant evidence. Values are normalized before insertion and all writes
+    are additive with respect to visual labels.
+    """
+    source = str(source or "official_corpus")
+    con.execute("DELETE FROM face_official_usage WHERE source=?", (source,))
+    rows = []
+    for record in records or []:
+        if not isinstance(record, dict):
+            continue
+        ident = str(record.get("ident") or "").strip()
+        face_id = str(record.get("face_id") or "").strip()
+        uid = str(record.get("record_uid") or "").strip()
+        if not ident or not face_id or not uid:
+            continue
+        def _json_list(value):
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except (TypeError, ValueError):
+                    value = []
+            if not isinstance(value, (list, tuple)):
+                return []
+            return [str(item).strip() for item in value if str(item).strip()]
+        rows.append((
+            ident,
+            str(record.get("spine_signature") or ""),
+            str(record.get("outfit_key") or ""),
+            face_id,
+            uid,
+            str(record.get("text_cn") or record.get("text") or "").strip(),
+            int(bool(record.get("silent"))),
+            json.dumps(_json_list(record.get("emoticons")), ensure_ascii=False),
+            json.dumps(_json_list(record.get("actions")), ensure_ascii=False),
+            int(bool(record.get("closeup"))),
+            source,
+        ))
+    con.executemany(
+        """
+        INSERT OR REPLACE INTO face_official_usage
+          (ident,spine_signature,outfit_key,face_id,record_uid,text_cn,silent,
+           emoticons_json,actions_json,closeup,source)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        rows,
+    )
+    con.commit()
+    return len(rows)
+
+
+_OFFICIAL_FACE_USAGE_IDENT_ALIASES = {
+    # 官方语料使用基础身份，AA 素材库把普通爱丽丝拆成了独立立绘身份。
+    "아리스N": ("아리스",),
+}
+
+
+def _official_face_usage_idents(ident):
+    primary = str(ident or "").strip()
+    return tuple(dict.fromkeys(
+        (primary, *_OFFICIAL_FACE_USAGE_IDENT_ALIASES.get(primary, ()))
+    ))
+
+
+def official_face_usage(con, *, ident, face_ids=None, spine_signature="", outfit_key="", representative_limit=3):
+    """Return compact, variant-aware official contexts for prompt assembly.
+
+    Exact variant rows win over role-level rows. The limit is retrieval
+    relevance per face, not an output-token budget.
+    """
+    ident = str(ident or "").strip()
+    if not ident:
+        return {}
+    allowed = {str(face_id).strip() for face_id in (face_ids or []) if str(face_id).strip()}
+    identities = _official_face_usage_idents(ident)
+    placeholders = ",".join("?" for _ in identities)
+    params = [*identities, str(spine_signature or ""), str(outfit_key or ""), ident]
+    rows = con.execute(
+        f"""
+        SELECT * FROM face_official_usage
+        WHERE ident IN ({placeholders}) AND
+          ((spine_signature=? AND outfit_key=?) OR
+           (spine_signature='' AND outfit_key=''))
+        ORDER BY face_id, CASE WHEN ident=? THEN 0 ELSE 1 END,
+                 CASE WHEN spine_signature<>'' OR outfit_key<>'' THEN 0 ELSE 1 END,
+                 CASE WHEN text_cn<>'' THEN 0 ELSE 1 END,
+                 CASE WHEN emoticons_json<>'[]' OR actions_json<>'[]' OR closeup=1 THEN 0 ELSE 1 END,
+                 record_uid
+        """, params,
+    ).fetchall()
+    result = {}
+    seen = {}
+    for row in rows:
+        face_id = str(row["face_id"])
+        if allowed and face_id not in allowed:
+            continue
+        bucket = result.setdefault(face_id, [])
+        if len(bucket) >= max(1, int(representative_limit)):
+            continue
+        keys = seen.setdefault(face_id, set())
+        exact = bool(row["spine_signature"] or row["outfit_key"])
+        # If an exact variant has evidence, don't pad it with role-level rows.
+        if not exact and any(item.get("_exact") for item in bucket):
+            continue
+        key = (str(row["text_cn"] or ""), int(row["silent"] or 0),
+               str(row["emoticons_json"]), str(row["actions_json"]), int(row["closeup"] or 0))
+        if key in keys:
+            continue
+        keys.add(key)
+        try:
+            emoticons = json.loads(row["emoticons_json"] or "[]")
+        except (TypeError, ValueError):
+            emoticons = []
+        try:
+            actions = json.loads(row["actions_json"] or "[]")
+        except (TypeError, ValueError):
+            actions = []
+        bucket.append({
+            "text": str(row["text_cn"] or ""),
+            "silent": bool(row["silent"]),
+            "emoticons": emoticons if isinstance(emoticons, list) else [],
+            "actions": actions if isinstance(actions, list) else [],
+            "closeup": bool(row["closeup"]),
+            "record_uid": str(row["record_uid"] or ""),
+            "_exact": exact,
+        })
+    for examples in result.values():
+        for item in examples:
+            item.pop("_exact", None)
+    return result
+
+
+_NONLEXICAL_FACE_TEXT_RE = re.compile(
+    r"[\s…\.．!！?？,，、:：;；~～—─\-（）()\[\]【】「」『』]+"
+)
+
+
+def _face_text_has_lexical_dialogue(text):
+    value = str(text or "").strip()
+    if not value:
+        return False
+    compact = value.replace("#n", "").strip()
+    if compact[:1] in {"（", "("} and compact[-1:] in {"）", ")"}:
+        inner = _NONLEXICAL_FACE_TEXT_RE.sub("", compact[1:-1])
+        if len(inner) <= 2:
+            return False
+    return bool(_NONLEXICAL_FACE_TEXT_RE.sub("", compact))
+
+
+def official_face_usage_profiles(
+    con, *, ident, face_ids=None, spine_signature="", outfit_key=""
+):
+    """Return deterministic per-face usage counts from all applicable evidence."""
+    ident = str(ident or "").strip()
+    if not ident:
+        return {}
+    allowed = {
+        str(face_id).strip() for face_id in (face_ids or []) if str(face_id).strip()
+    }
+    identities = _official_face_usage_idents(ident)
+    placeholders = ",".join("?" for _ in identities)
+    rows = con.execute(
+        f"""
+        SELECT * FROM face_official_usage
+        WHERE ident IN ({placeholders}) AND
+          ((spine_signature=? AND outfit_key=?) OR
+           (spine_signature='' AND outfit_key=''))
+        ORDER BY face_id, CASE WHEN ident=? THEN 0 ELSE 1 END, record_uid
+        """,
+        (*identities, str(spine_signature or ""), str(outfit_key or ""), ident),
+    ).fetchall()
+    grouped = {}
+    for row in rows:
+        face_id = str(row["face_id"])
+        if allowed and face_id not in allowed:
+            continue
+        grouped.setdefault(face_id, []).append(row)
+    profiles = {}
+    for face_id, candidates in grouped.items():
+        deduplicated = {}
+        for row in candidates:
+            key = (
+                str(row["record_uid"] or ""), str(row["text_cn"] or ""),
+                int(row["silent"] or 0), str(row["emoticons_json"] or "[]"),
+                str(row["actions_json"] or "[]"), int(row["closeup"] or 0),
+            )
+            deduplicated.setdefault(key, row)
+        candidates = list(deduplicated.values())
+        exact = [
+            row for row in candidates
+            if row["spine_signature"] or row["outfit_key"]
+        ]
+        selected = exact or [
+            row for row in candidates
+            if not row["spine_signature"] and not row["outfit_key"]
+        ]
+        lexical = 0
+        nonlexical = 0
+        no_dialogue = 0
+        action = 0
+        emoticon = 0
+        closeup = 0
+        for row in selected:
+            text = str(row["text_cn"] or "").strip()
+            if bool(row["silent"]) or not text:
+                no_dialogue += 1
+            elif _face_text_has_lexical_dialogue(text):
+                lexical += 1
+            else:
+                nonlexical += 1
+            action += int(str(row["actions_json"] or "[]") != "[]")
+            emoticon += int(str(row["emoticons_json"] or "[]") != "[]")
+            closeup += int(bool(row["closeup"]))
+        profiles[face_id] = {
+            "total_count": len(selected),
+            "lexical_dialogue_count": lexical,
+            "nonlexical_dialogue_count": nonlexical,
+            "no_dialogue_count": no_dialogue,
+            "action_count": action,
+            "emoticon_count": emoticon,
+            "closeup_count": closeup,
+            "variant_exact": bool(exact),
+        }
+    return profiles
+
+
+def set_active_scene_label_model(con, model):
+    """Select the scene-label version exposed to catalogs and generators."""
+    set_meta(con, active_scene_label_model=str(model or "").strip())
+    con.commit()
+
+
+def active_scene_label_model(con):
+    row = con.execute(
+        "SELECT value FROM meta WHERE key='active_scene_label_model'"
+    ).fetchone()
+    return str(row[0] or "").strip() if row else ""
+
+
+def effective_scene_label_rows(con, *, resource_channel=None, asset_key=None):
+    """Select one effective visual label per real AA channel/key identity.
+
+    Manual locks win, followed by the explicitly active model, the currently
+    installed extra pack, recency, confidence, and a deterministic tie break.
+    Model and content hash remain provenance and never leak into the AA key.
+    """
+    clauses = []
+    values = []
+    for column, value in (
+        ("resource_channel", resource_channel),
+        ("asset_key", asset_key),
+    ):
+        if value is not None:
+            clauses.append(f"{column}=?")
+            values.append(str(value or ""))
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    preferred = active_scene_label_model(con)
+    rows = con.execute(
+        f"""
+        SELECT * FROM scene_visual_label
+        {where}
+        ORDER BY resource_channel,LOWER(asset_key),
+          CASE
+            WHEN status='manual_locked'
+              OR TRIM(COALESCE(manual_json,'')) NOT IN ('','{{}}','null') THEN 0
+            WHEN model=? THEN 1
+            ELSE 2
+          END,
+          CASE source_kind
+            WHEN 'extra_pack' THEN 0
+            WHEN 'official_base' THEN 1
+            ELSE 2
+          END,
+          updated_at DESC, confidence DESC, model DESC, content_sha256 DESC
+        """,
+        (*values, preferred),
+    )
+    selected = {}
+    for row in rows:
+        key = (str(row["resource_channel"]), str(row["asset_key"]).casefold())
+        selected.setdefault(key, row)
+    return list(selected.values())
+
+
+def query_scene_assets(
+    con,
+    *,
+    query="",
+    resource_channel=None,
+    visual_kind=None,
+    generator_only=False,
+):
+    """Return effective, ready scene semantics without exposing model versions."""
+    from scene_asset_labeler import scene_label_from_row
+
+    needle = str(query or "").strip().casefold()
+    results = []
+    for row in effective_scene_label_rows(
+        con, resource_channel=resource_channel
+    ):
+        if row["status"] not in {"ready", "manual_locked"}:
+            continue
+        record = scene_label_from_row(row)
+        if visual_kind and record["visual_kind"] != str(visual_kind):
+            continue
+        if generator_only and not (
+            record["resource_channel"] == "background"
+            and record["visual_kind"] == "background"
+            and record["dialogue_suitable"]
+        ):
+            continue
+        if needle:
+            haystack = [
+                record.get("asset_key"), record.get("label"),
+                record.get("source_category"),
+                record.get("main_category"), record.get("main_category_cn"),
+                record.get("subcategory"), record.get("place"),
+                record.get("mood"), record.get("description"),
+                record.get("setting_scope"), record.get("affiliation_hint_cn"),
+                *(record.get("affiliation_names_cn") or []),
+                record.get("reuse_scope"), record.get("reuse_hint_cn"),
+                *(record.get("compatible_affiliation_names_cn") or []),
+                record.get("category_path_cn"),
+                *(record.get("search_terms_cn") or []),
+                *(record.get("tags") or []),
+            ]
+            if not any(needle in str(value or "").casefold() for value in haystack):
+                continue
+        results.append(record)
+    return sorted(
+        results,
+        key=lambda item: (
+            item["resource_channel"], item["label"].casefold(),
+            item["asset_key"].casefold(),
+        ),
+    )
+
+
 def active_face_label_model(con):
     row = con.execute(
         "SELECT value FROM meta WHERE key='active_face_label_model'"
@@ -476,8 +906,12 @@ def effective_visual_label_rows(
     """Select one effective model row per real variant/face identity.
 
     Model is provenance, not part of the consumer-facing face identity. Manual
-    overrides win first, followed by the explicitly active model, recency,
-    confidence, and finally a deterministic model-name tie break.
+    overrides win first. Runtime-usable rows from the explicitly active model
+    come next, then usable fallback models. Identity/persona safety blocks on
+    the active model never fall back across model versions. Ordinary incomplete
+    relabel rows may still fall back, so a partial batch does not hide a
+    previously usable label. Rows that merely need review remain usable and are
+    downgraded by face_selection.
     """
     clauses = []
     values = []
@@ -505,14 +939,64 @@ def effective_visual_label_rows(
         """,
         (*values, preferred),
     )
-    selected = {}
+    grouped = {}
     for row in rows:
         key = (
             str(row["ident"]), str(row["spine_signature"]),
             str(row["outfit_key"]), str(row["face_id"]),
         )
-        selected.setdefault(key, row)
-    return list(selected.values())
+        grouped.setdefault(key, []).append(row)
+
+    def has_manual(row):
+        return str(row["manual_json"] or "").strip() not in ("", "{}", "null")
+
+    def backend_payload(row):
+        # Read-only overlay databases can legitimately come from an older
+        # HaloCue schema.  ``backend_json`` was added after the original face
+        # labels; absence means there is no newer safety/selection metadata,
+        # not that the otherwise valid semantic row is unreadable.
+        try:
+            value = json.loads(row["backend_json"] or "{}")
+        except (IndexError, KeyError, TypeError, ValueError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def blocks_model_fallback(row):
+        if has_manual(row):
+            return False
+        backend = backend_payload(row)
+        blocks = {
+            str(value) for value in backend.get("hard_blocks") or [] if str(value)
+        }
+        return "persona_scope_blocked" in blocks
+
+    def runtime_ready(row):
+        if has_manual(row):
+            return True
+        backend = backend_payload(row)
+        if not backend:
+            return True
+        return bool(backend.get("selection_ready", True))
+
+    selected = []
+    for candidates in grouped.values():
+        active_safety_block = next((
+            item for item in candidates
+            if str(item["model"]) == preferred and blocks_model_fallback(item)
+        ), None)
+        if active_safety_block is not None:
+            selected.append(active_safety_block)
+            continue
+        row = next((item for item in candidates if has_manual(item)), None)
+        if row is None:
+            row = next((
+                item for item in candidates
+                if str(item["model"]) == preferred and runtime_ready(item)
+            ), None)
+        if row is None:
+            row = next((item for item in candidates if runtime_ready(item)), None)
+        selected.append(row if row is not None else candidates[0])
+    return selected
 
 
 def import_index(con, idx):
@@ -697,7 +1181,20 @@ def stats(con):
 
 def export_json(con, path):
     """导出成 annotate.py 直接可读的结构，避免运行时依赖 sqlite 查询。"""
-    out = {
+    legacy = {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            loaded = json.load(fh)
+        if isinstance(loaded, dict):
+            legacy = loaded
+    except (FileNotFoundError, OSError, TypeError, ValueError):
+        pass
+    generated_keys = {
+        "bg", "bg_label", "popup_label", "sounds", "sound_label",
+        "scene_labels", "characters", "enums",
+    }
+    out = {key: value for key, value in legacy.items() if key not in generated_keys}
+    out.update({
         "bg": {r["name"]: r["hash"] for r in con.execute("SELECT name,hash FROM bg")},
         "bg_label": {r["name"]: {"label": r["label"], "place": r["place"],
                                  "time": r["time"], "mood": r["mood"], "tags": r["tags"]}
@@ -708,18 +1205,60 @@ def export_json(con, path):
         "sounds": [r["name"] for r in con.execute("SELECT name FROM sound ORDER BY name")],
         "sound_label": {r["name"]: r["label"]
                         for r in con.execute("SELECT * FROM sound WHERE label IS NOT NULL")},
-    }
+    })
+    from scene_asset_labeler import scene_label_from_row
+    scene_labels = {"background": {}, "popup": {}}
+    for row in effective_scene_label_rows(con):
+        if row["status"] not in {"ready", "manual_locked"}:
+            continue
+        record = scene_label_from_row(row)
+        channel = record["resource_channel"]
+        scene_labels.setdefault(channel, {})[record["asset_key"]] = record
+        if channel == "background":
+            out["bg_label"][record["asset_key"]] = record
+        elif channel == "popup":
+            out["popup_label"][record["asset_key"]] = record
+    out["scene_labels"] = scene_labels
+    legacy_chars = [
+        item for item in (legacy.get("characters") or [])
+        if isinstance(item, dict) and str(item.get("identifier") or "")
+    ]
+    used_legacy_chars = set()
+
+    def legacy_character_for(ident, spine):
+        candidates = [
+            (index, item) for index, item in enumerate(legacy_chars)
+            if index not in used_legacy_chars
+            and str(item.get("identifier") or "") == ident
+        ]
+        normalized_spine = str(spine or "").replace("/", "\\").casefold()
+        exact = [
+            pair for pair in candidates
+            if str(pair[1].get("spine") or "").replace("/", "\\").casefold()
+            == normalized_spine
+        ]
+        selected = exact[0] if exact else (candidates[0] if len(candidates) == 1 else None)
+        if selected is None:
+            return {}
+        used_legacy_chars.add(selected[0])
+        return selected[1]
+
     chars = {}
     for r in con.execute("SELECT * FROM character"):
-        chars[r["ident"]] = {"identifier": r["ident"], "name": r["name"],
-                             "club": r["club"], "spine": r["spine"],
-                             "avatar": r["avatar"] or "", "faces": []}
+        record = dict(legacy_character_for(r["ident"], r["spine"]))
+        record.update({"identifier": r["ident"], "name": r["name"],
+                       "club": r["club"], "spine": r["spine"],
+                       "avatar": r["avatar"] or "", "faces": []})
+        chars[r["ident"]] = record
     for r in con.execute("SELECT * FROM face ORDER BY ident, face_id"):
         if r["ident"] in chars:
             chars[r["ident"]]["faces"].append(
                 {"id": r["face_id"], "raw": r["raw"], "label": r["label"],
                  "cn": r["label_cn"]})
-    out["characters"] = list(chars.values())
+    out["characters"] = list(chars.values()) + [
+        record for index, record in enumerate(legacy_chars)
+        if index not in used_legacy_chars
+    ]
     enums = {}
     for r in con.execute("SELECT * FROM enum"):
         enums.setdefault(r["kind"], {})[str(r["value"])] = (

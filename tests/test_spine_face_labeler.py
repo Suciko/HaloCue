@@ -1,5 +1,6 @@
 import io
 import json
+from copy import deepcopy
 from pathlib import Path
 
 from PIL import Image
@@ -10,7 +11,7 @@ import llm
 import spine_face_labeler
 from asset_catalog import _face_capabilities
 from spine_face_labeler import (
-    _SYSTEM,
+    _SYSTEM, _valid_vision_item,
     VISION_SCHEMA,
     label_face_images,
     list_visual_face_labels,
@@ -81,24 +82,238 @@ def _compact_label(
     *,
     emotion: str = "平静",
     usage: str = "普通交谈或安静倾听",
+    eyes: str = "睁眼",
+    brows: str = "自然",
+    mouth: str = "闭嘴",
     confidence: float = 0.9,
 ):
     return {
         "face_id": face_id,
         "primary_emotion": emotion,
         "usage_hint_cn": usage,
+        "eyes": eyes,
+        "brows": brows,
+        "mouth": mouth,
+        "blush": False,
+        "tears": False,
         "confidence": confidence,
     }
 
 
-def test_visual_schema_accepts_selection_semantics_without_face_components(tmp_path):
+def test_semantic_modes_schema_accepts_controlled_modes_and_rejects_unknown_values():
+    required = {
+        "face_id", "primary_emotion", "usage_hint_cn", "eyes", "brows",
+        "mouth", "blush", "tears", "confidence", "semantic_modes",
+    }
+    mode = {
+        "label_cn": "认真说明", "beat_fit": ["exposition"],
+        "delivery_fit": ["normal_speech"], "intensity": 1,
+        "semantic_tags": ["serious"], "avoid_when_cn": "激烈喊叫",
+    }
+    valid = _compact_label("05") | {"semantic_modes": [mode]}
+
+    assert _valid_vision_item(valid, required)
+    for field, invalid in (
+        ("beat_fit", ["invented_beat"]),
+        ("delivery_fit", ["whispering"]),
+        ("semantic_tags", ["invented_tag"]),
+    ):
+        changed = dict(mode)
+        changed[field] = invalid
+        assert not _valid_vision_item(
+            _compact_label("05") | {"semantic_modes": [changed]}, required,
+        )
+
+
+def test_v4_visual_facts_reject_semantic_or_redundant_tags_and_unneeded_notes():
+    required = {
+        "face_id", "primary_emotion", "usage_hint_cn", "eyes", "brows",
+        "mouth", "blush", "tears", "confidence", "visual_facts",
+    }
+    valid = _compact_label("05")
+    valid["visual_facts"] = {
+        "eye_openness": "open", "gaze": "forward", "iris_color": "pink",
+        "eye_effect": "normal", "brow_shape": "relaxed",
+        "mouth_openness": "closed", "mouth_shape": "neutral",
+        "blush_level": "base", "tears_level": "none", "sweat_level": "none",
+        "face_shadow": "none", "visual_tags": [], "visual_confidence": 0.9,
+        "review_note_cn": "",
+    }
+    assert _valid_vision_item(valid, required)
+
+    for tag in ("平静", "治愈笑", "闭嘴", "closed_eyes"):
+        changed = deepcopy(valid)
+        changed["visual_facts"]["visual_tags"] = [tag]
+        assert not _valid_vision_item(changed, required)
+
+    visible_extra = deepcopy(valid)
+    visible_extra["visual_facts"]["visual_tags"] = ["额头竖向压力线"]
+    assert _valid_vision_item(visible_extra, required)
+
+    narration = deepcopy(valid)
+    narration["visual_facts"]["review_note_cn"] = "双眼自然睁开，嘴部闭合。"
+    assert not _valid_vision_item(narration, required)
+
+    review_needed = deepcopy(valid)
+    review_needed["visual_facts"]["review_note_cn"] = "嘴部像素差异很小，需要人工复核。"
+    assert _valid_vision_item(review_needed, required)
+
+
+def test_v4_visual_facts_enforce_backend_special_visual_contract():
+    required = {
+        "face_id", "primary_emotion", "usage_hint_cn", "eyes", "brows",
+        "mouth", "blush", "tears", "confidence", "emotion_family",
+        "intensity", "expression_class", "beat_fit", "hold_policy",
+        "delivery_fit", "usage_frequency", "semantic_confidence",
+        "semantic_tags", "avoid_when_cn", "visual_facts",
+    }
+    item = _compact_label("09") | {
+        "emotion_family": "surprise_fear", "intensity": 3,
+        "expression_class": "special", "beat_fit": ["reaction"],
+        "hold_policy": "short", "delivery_fit": ["silent_reaction"],
+        "usage_frequency": "rare", "semantic_confidence": 0.9,
+        "semantic_tags": ["surprised"], "avoid_when_cn": "普通对话",
+        "visual_facts": {
+            "eye_openness": "open", "gaze": "not_visible",
+            "iris_color": "not_visible", "eye_effect": "blank",
+            "brow_shape": "raised", "mouth_openness": "open",
+            "mouth_shape": "round", "blush_level": "base",
+            "tears_level": "none", "sweat_level": "none",
+            "face_shadow": "none", "visual_tags": [],
+            "visual_confidence": 0.9, "review_note_cn": "",
+        },
+    }
+    assert _valid_vision_item(item, required)
+
+    ordinary = deepcopy(item)
+    ordinary["expression_class"] = "base"
+    assert not _valid_vision_item(ordinary, required)
+
+    too_common = deepcopy(item)
+    too_common["usage_frequency"] = "common"
+    assert not _valid_vision_item(too_common, required)
+
+    closed_visible_iris = deepcopy(item)
+    closed_visible_iris["visual_facts"]["eye_openness"] = "closed"
+    closed_visible_iris["visual_facts"]["iris_color"] = "pink"
+    assert not _valid_vision_item(closed_visible_iris, required)
+
+    invented_tears = deepcopy(item)
+    invented_tears["visual_facts"]["eye_effect"] = "stylized"
+    invented_tears["visual_facts"]["tears_level"] = "none"
+    invented_tears["primary_emotion"] = "血泪强笑"
+    invented_tears["usage_hint_cn"] = "适合流泪后仍勉强微笑"
+    assert not _valid_vision_item(invented_tears, required)
+
+
+def test_v4_single_face_retry_receives_backend_validation_reason(tmp_path):
+    valid = _compact_label("07", emotion="勉强微笑", usage="适合受挫后克制地回应") | {
+        "emotion_family": "sadness_hurt", "intensity": 2,
+        "expression_class": "accent", "beat_fit": ["reaction"],
+        "hold_policy": "hold", "delivery_fit": ["soft_speech"],
+        "usage_frequency": "conditional", "semantic_confidence": 0.9,
+        "semantic_tags": ["resigned"], "avoid_when_cn": "轻松庆祝",
+        "semantic_modes": [{
+            "label_cn": "受挫后克制回应", "beat_fit": ["reaction"],
+            "delivery_fit": ["soft_speech"], "intensity": 2,
+            "semantic_tags": ["resigned"], "avoid_when_cn": "轻松庆祝",
+        }],
+        "visual_facts": {
+            "eye_openness": "open", "gaze": "forward", "iris_color": "red",
+            "eye_effect": "normal", "brow_shape": "inner_raised",
+            "mouth_openness": "closed", "mouth_shape": "smile",
+            "blush_level": "base", "tears_level": "none",
+            "sweat_level": "none", "face_shadow": "none", "visual_tags": [],
+            "visual_confidence": 0.9, "review_note_cn": "",
+        },
+    }
+
+    class CorrectingProvider(FakeVisionProvider):
+        def complete_json_vision(self, system, images, user, schema):
+            self.calls.append((system, images, user, schema))
+            item = deepcopy(valid)
+            if len(self.calls) == 1:
+                item["primary_emotion"] = "流泪强笑"
+            return {"items": [item]}
+
+    provider = CorrectingProvider()
+    labels = label_face_images(
+        provider,
+        [_face(tmp_path, "07", (120, 80, 80))],
+        require_visual_facts=True,
+        require_semantic_profile=True,
+        require_semantic_modes=True,
+        max_attempts=2,
+    )
+
+    assert len(provider.calls) == 2
+    assert "backend_hard_blocks=candidate_conflicts_with_tears" in provider.calls[1][2]
+    assert "expression_class 改为 special 或 peak" in provider.calls[1][2]
+    assert labels[0]["primary_emotion"] == "勉强微笑"
+
+
+def test_v4_single_face_retry_applies_official_usage_profile(tmp_path):
+    valid = _compact_label("99", emotion="闭目从容", usage="适合平静说明和温和回应") | {
+        "emotion_family": "neutral", "intensity": 1,
+        "expression_class": "base", "beat_fit": ["dialogue"],
+        "hold_policy": "hold", "delivery_fit": ["normal_speech"],
+        "usage_frequency": "common", "semantic_confidence": 0.9,
+        "semantic_tags": ["neutral"], "avoid_when_cn": "激烈喊叫",
+        "semantic_modes": [{
+            "label_cn": "闭目说明", "beat_fit": ["dialogue"],
+            "delivery_fit": ["normal_speech"], "intensity": 1,
+            "semantic_tags": ["neutral"], "avoid_when_cn": "激烈喊叫",
+        }],
+        "visual_facts": {
+            "eye_openness": "closed", "gaze": "not_visible",
+            "iris_color": "not_visible", "eye_effect": "normal",
+            "brow_shape": "relaxed", "mouth_openness": "closed",
+            "mouth_shape": "neutral", "blush_level": "base",
+            "tears_level": "none", "sweat_level": "none",
+            "face_shadow": "none", "visual_tags": [],
+            "visual_confidence": 0.9, "review_note_cn": "",
+        },
+    }
+
+    class CorrectingProvider(FakeVisionProvider):
+        def complete_json_vision(self, system, images, user, schema):
+            self.calls.append((system, images, user, schema))
+            item = deepcopy(valid)
+            if len(self.calls) == 1:
+                item["primary_emotion"] = "安详沉睡"
+                item["usage_hint_cn"] = "适合平静入眠"
+            return {"items": [item]}
+
+    provider = CorrectingProvider()
+    labels = label_face_images(
+        provider,
+        [_face(tmp_path, "99", (120, 80, 80))],
+        official_profiles={"99": {
+            "total_count": 20, "lexical_dialogue_count": 18,
+            "nonlexical_dialogue_count": 1, "no_dialogue_count": 1,
+        }},
+        require_visual_facts=True,
+        require_semantic_profile=True,
+        require_semantic_modes=True,
+        max_attempts=2,
+    )
+
+    assert len(provider.calls) == 2
+    assert "candidate_conflicts_with_official_speech" in provider.calls[1][2]
+    assert labels[0]["primary_emotion"] == "闭目从容"
+
+
+def test_visual_schema_requires_objective_face_components_separate_from_semantics(tmp_path):
     item_schema = VISION_SCHEMA["properties"]["items"]["items"]
     assert set(item_schema["required"]) == {
-        "face_id", "primary_emotion", "usage_hint_cn", "confidence",
+        "face_id", "primary_emotion", "usage_hint_cn", "eyes", "brows",
+        "mouth", "blush", "tears", "confidence",
     }
-    assert not {
-        "eyes", "brows", "mouth", "blush", "tears",
-    }.intersection(item_schema["properties"])
+    assert item_schema["properties"]["eyes"]["type"] == "string"
+    assert item_schema["properties"]["brows"]["type"] == "string"
+    assert item_schema["properties"]["mouth"]["type"] == "string"
+    assert item_schema["properties"]["blush"]["type"] == "boolean"
+    assert item_schema["properties"]["tears"]["type"] == "boolean"
 
     class CompactProvider(FakeVisionProvider):
         def complete_json_vision(self, system, images, user, schema):
@@ -114,7 +329,11 @@ def test_visual_schema_accepts_selection_semantics_without_face_components(tmp_p
     )
 
     assert labels[0]["usage_hint_cn"] == "普通交谈或安静倾听"
-    assert "不得用是否脸红、是否流泪等视觉现象决定是否使用" in provider.calls[0][0]
+    assert labels[0]["eyes"] == "睁眼"
+    assert labels[0]["brows"] == "自然"
+    assert labels[0]["mouth"] == "闭嘴"
+    assert "不得用是否闭眼、脸红、流泪等单一视觉现象决定是否使用" in provider.calls[0][0]
+    assert "闭眼与眯眼必须区分" in provider.calls[0][0]
 
 
 def test_rich_semantics_round_trip_and_legacy_level(tmp_path):
@@ -222,7 +441,8 @@ def test_visual_labeler_sends_one_numbered_sheet_and_keeps_exact_face_ids(tmp_pa
     assert len(sent) == 1
     assert sent[0][0] == "编号九宫格:05,12"
     assert sent[0][1].startswith(b"\xff\xd8")
-    assert "只判断整体情绪、态度和适用的台词语境" in _SYSTEM
+    assert "客观面部构成" in _SYSTEM
+    assert "整体情绪、态度和适用的台词语境" in _SYSTEM
     assert "涓" not in _SYSTEM
 
 
@@ -433,6 +653,7 @@ def test_visual_labeler_preserves_valid_batch_items_and_falls_back_per_bad_face(
     ("confidence", "not-a-number"),
     ("confidence", 1.5),
     ("primary_emotion", 123),
+    ("primary_emotion", "无法识别"),
     ("usage_hint_cn", 123),
 ])
 def test_visual_labeler_reviews_batch_items_with_invalid_schema_values(

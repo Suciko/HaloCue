@@ -760,7 +760,8 @@ def test_preflight_keeps_background_catalog_local_instead_of_sending_it_to_model
 
     webui._preflight_result(str(script), scope=str(tmp_path / "project"))
 
-    assert set(captured) == {"speakers", "scene_headers", "schema"}
+    assert set(captured) == {"speakers", "scene_headers", "background_library", "schema"}
+    assert captured["background_library"][0]["aa_key"] == "BG_ShoppingDistrict"
     assert "official_backgrounds" not in captured
     assert captured["schema"]["required"] == ["extra_speakers", "scenes", "ambiguities"]
 
@@ -792,6 +793,7 @@ def test_compact_preflight_expands_line_ranges_and_scene_direction_locally(
                     "location": "商店街入口",
                     "time": "傍晚",
                     "story_type": "event",
+                    "active_modes": ["event", "bond"],
                     "scene_function": "entrance",
                     "needs": [{
                         "kind": "background",
@@ -811,9 +813,10 @@ def test_compact_preflight_expands_line_ranges_and_scene_direction_locally(
 
     result = webui._preflight_result(str(script), scope=str(tmp_path / "project"))
 
-    assert set(captured["volatile"]) == {"speakers", "scene_headers"}
-    assert "动作升级、对话阶段、人物进出" in captured["static"]
-    assert "都不算背景变化" in captured["static"]
+    assert set(captured["volatile"]) == {"speakers", "scene_headers", "background_library"}
+    assert "scenes 是物理场景" in captured["static"]
+    assert "active_modes 是本场可用的 main/event/bond 策略集合" in captured["static"]
+    assert "不需要标出固定切换行" in captured["static"]
     assert "L1\t旁白：傍晚，众人在商店街入口集合。" in captured["user"]
     assert "店员" in {item["speaker"] for item in result["characters"]}
     scene = result["usage_chain"][0]
@@ -821,6 +824,7 @@ def test_compact_preflight_expands_line_ranges_and_scene_direction_locally(
     assert scene["evidence"] == "旁白：傍晚，众人在商店街入口集合。"
     assert scene["time"] == "傍晚"
     assert scene["scene_type"] == "event"
+    assert scene["active_modes"] == ["event", "bond"]
     assert scene["scene_function"] == "entrance"
     need = scene["needs"][0]
     assert need["name"] == "商店街入口"
@@ -850,12 +854,11 @@ def test_preflight_uses_a_small_task_budget_and_restores_provider_settings(
 
     result = webui._preflight_result(str(script), scope=str(tmp_path / "project"))
 
-    assert 2048 <= observed["budget"] <= 8192
-    assert observed["budget"] < provider.cfg["annotation_max_tokens"]
+    assert observed["budget"] == provider.cfg["annotation_max_tokens"]
     assert observed["reasoning_mode"] == "speed"
     assert "_output_budget_override" not in provider.cfg
     assert provider.cfg["reasoning_mode"] == "deep"
-    assert result["ai_usage"]["output_budget"] == observed["budget"]
+    assert result["ai_usage"]["output_budget"] == provider.cfg["annotation_max_tokens"]
 
 
 def test_long_preflight_uses_bounded_windows_and_merges_duplicate_findings(
@@ -1003,6 +1006,100 @@ def test_usage_chain_exact_background_with_no_available_file_stays_missing(tmp_p
     assert "aa_key" not in need
     assert refs[0]["status"] == "missing"
 
+
+def test_authored_background_overrides_ai_scene_background_suggestion(tmp_path, monkeypatch):
+    database = tmp_path / "assets.db"
+    monkeypatch.setattr(webui, "DB", str(database))
+    con = assetdb.connect(database)
+    con.executemany(
+        "INSERT INTO bg(name,hash,label,tags) VALUES(?,?,?,?)",
+        [
+            ("BG_GameDevRoom", 101, "Game Dev Room", "game,club"),
+            ("BG_GehennaClubRoom", 102, "Gehenna Club Room", "club"),
+        ],
+    )
+    con.commit()
+    con.close()
+
+    class Provider:
+        def complete_json(self, *_args):
+            return {
+                "extra_speakers": [],
+                "scenes": [{
+                    "label": "社团室对话", "start_line": 1, "end_line": 3,
+                    "location": "游戏开发部社团室", "time": "傍晚",
+                    "story_type": "event", "scene_function": "dialogue",
+                    "needs": [{
+                        "kind": "background", "name": "Gehenna Club Room",
+                        "required": True,
+                    }],
+                }],
+                "ambiguities": [],
+            }
+
+    monkeypatch.setattr(webui, "annotation_provider", lambda _profile=None: Provider())
+    script = tmp_path / "story.txt"
+    script.write_text(
+        "## 场景一：游戏开发部社团室，傍晚\n"
+        "@bg BG_GameDevRoom\n"
+        "桃井: 开始吧。\n",
+        encoding="utf-8",
+    )
+
+    result = webui._preflight_result(str(script), scope=str(tmp_path / "project"))
+
+    needs = result["usage_chain"][0]["needs"]
+    assert [(item["kind"], item["name"], item["status"]) for item in needs] == [
+        ("background", "BG_GameDevRoom", "builtin")
+    ]
+    assert needs[0]["aa_key"] == "BG_GameDevRoom"
+    assert not any("Gehenna" in item.get("name", "") for item in result["assets"])
+    assert not any("Gehenna" in item.get("message", "") for item in result["issues"])
+
+
+def test_background_search_reads_labels_from_explicit_overlay_database(tmp_path, monkeypatch):
+    primary = tmp_path / "primary.db"
+    overlay = tmp_path / "overlay.db"
+    con = assetdb.connect(primary)
+    con.execute(
+        "INSERT INTO bg(name,hash,label) VALUES(?,?,?)",
+        ("BG_OverlayCorridor", 77, ""),
+    )
+    con.commit()
+    con.close()
+    con = assetdb.connect(overlay)
+    con.execute(
+        """INSERT INTO scene_visual_label
+        (resource_channel,asset_key,content_sha256,source_kind,model,visual_kind,
+         label_json,evidence_json,confidence,status)
+        VALUES(?,?,?,?,?,?,?,?,?,?)""",
+        (
+            "background", "BG_OverlayCorridor", "d", "official_base", "m",
+            "background", json.dumps({
+                "label": "千年教学楼走廊", "description": "有明确分类的走廊",
+                "visual_kind": "background", "main_category": "campus", "subcategory": "教学楼走廊",
+                "dialogue_suitable": True, "search_terms_cn": ["教学楼走廊"],
+            }, ensure_ascii=False), "{}", 0.9, "ready",
+        ),
+    )
+    con.commit()
+    con.close()
+    monkeypatch.setattr(webui, "DB", str(primary))
+    monkeypatch.setattr(webui, "_settings_values", lambda: {"asset_databases": [str(overlay)]})
+    monkeypatch.setattr(webui, "_background_preview_available", lambda _name: True)
+    result = webui.list_backgrounds(q="教学楼走廊", with_total=True)
+    assert result["total"] == 1
+    assert result["items"][0]["name"] == "BG_OverlayCorridor"
+
+    con = assetdb.connect_readonly(primary)
+    try:
+        candidates = webui._catalog_background_candidates(
+            con, "夜晚的教学楼走廊", limit=3
+        )
+    finally:
+        con.close()
+    assert candidates[0]["aa_key"] == "BG_OverlayCorridor"
+    assert candidates[0]["label"] == "千年教学楼走廊"
 
 def test_legacy_ai_asset_does_not_trust_background_with_no_available_file(tmp_path, monkeypatch):
     database = tmp_path / "assets.db"
@@ -1254,7 +1351,11 @@ def test_custom_background_candidate_model_input_excludes_unlabeled_and_other_sc
 
     webui._preflight_result(str(script), scope=current_scope)
 
-    assert set(captured) == {"speakers", "scene_headers"}
+    assert set(captured) == {"speakers", "scene_headers", "background_library"}
+    library_keys = {item["aa_key"] for item in captured["background_library"]}
+    assert "current-labeled" in library_keys
+    assert "current-unlabeled" not in library_keys
+    assert "other-labeled" not in library_keys
     assert "custom_backgrounds" not in captured
     assert "current-unlabeled" not in json.dumps(captured)
     assert "other-labeled" not in json.dumps(captured)

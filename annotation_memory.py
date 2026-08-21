@@ -13,9 +13,15 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from annotation_chunks import context_indices
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 STORY_TYPES = {"auto", "main", "event", "bond"}
 TRANSIENT_BGFX = {"集中线", "闪白", "闪电", "传送", "BG_FocusLine", "BG_Flash", "BG_Flash_Sound", "BG_Teleport"}
+SHOT_OPERATION_VALUES = {
+    "continue_group", "expand_group", "shrink_group", "replace_center_subject",
+    "switch_group", "impact_insert",
+}
+SHOT_GROUP_STATUSES = {"active", "suspended", "closed"}
+REACTION_PHASES = {"cue", "group_reaction", "focus_handoff", "action", "result", "aftershock", "resolved"}
 
 
 def _story_type(value: Any) -> str:
@@ -34,12 +40,25 @@ def initial_memory(story_summary: str = "", story_type: str = "auto") -> Dict[st
         "scene": {
             "id": "", "location": "", "time": "", "purpose": "", "mood": "", "summary": "",
             "scene_type": normalized_story_type if normalized_story_type != "auto" else "other",
-            "scene_function": "dialogue",
+            "active_modes": [normalized_story_type] if normalized_story_type != "auto" else [],
+            "scene_function": "dialogue", "mode_source": "user" if normalized_story_type != "auto" else "unknown",
         },
         "direction": {
             "background": None, "place": None, "bgfx": None,
             "visible_characters": [], "shot_visible_characters": [],
+            "scene_presence": {},
             "positions": {}, "last_faces": {},
+            "shot_operation": "",
+            "shot_transition": "",
+            "shot_group": {
+                "group_id": "", "members": [], "anchor_stimulus": "",
+                "interaction_topic": "", "focus_owner": "", "spatial_mode": "stable", "status": "closed",
+            },
+            "reaction_chain": {
+                "stimulus_id": "", "phase": "resolved", "participants": [],
+                "primary_responder": "", "resolved": True,
+            },
+            "last_performance_node": {},
             "recent_emoticons": [], "recent_actions": [], "recent_sounds": [],
             "focus": {"kind": "speaker", "character": ""},
             "relation_distance": "normal", "emotion_phase": "", "subtext": "",
@@ -81,11 +100,18 @@ def apply_state_delta(memory: Mapping[str, Any], delta: Mapping[str, Any], *, ca
         direction["bgfx"] = None if bgfx in TRANSIENT_BGFX else bgfx[:80]
 
     valid_people = set(cast)
+    if "scene_presence" in delta and isinstance(delta.get("scene_presence"), Mapping):
+        presence = dict(direction.get("scene_presence") or {})
+        for name, status in delta["scene_presence"].items():
+            if name in valid_people and status in {"unknown", "present", "absent"}:
+                presence[name] = status
+        direction["scene_presence"] = presence
     if "visible_characters" in delta:
-        direction["visible_characters"] = [
+        direction["shot_visible_characters"] = [
             name for name in _bounded_strings(delta.get("visible_characters"), 8)
             if name in valid_people
-        ]
+        ][:3]
+        direction.pop("visible_characters", None)
     positions = delta.get("positions")
     if isinstance(positions, dict):
         direction["positions"] = {
@@ -131,10 +157,50 @@ def apply_state_delta(memory: Mapping[str, Any], delta: Mapping[str, Any], *, ca
         )
     if "open_threads" in delta:
         updated.setdefault("story", {})["open_threads"] = _bounded_strings(delta.get("open_threads"), 20)
+    if "shot_group" in delta and isinstance(delta.get("shot_group"), Mapping):
+        raw_group = delta["shot_group"]
+        members = [name for name in _bounded_strings(raw_group.get("members"), 3) if name in valid_people]
+        status = str(raw_group.get("status") or "closed")
+        spatial_mode = str(raw_group.get("spatial_mode") or "stable")
+        if status not in SHOT_GROUP_STATUSES:
+            status = "closed"
+        if spatial_mode not in {"stable", "reframe", "insert"}:
+            spatial_mode = "stable"
+        focus_owner = str(raw_group.get("focus_owner") or "")[:80]
+        if focus_owner not in members:
+            focus_owner = ""
+        direction["shot_group"] = {
+            "group_id": str(raw_group.get("group_id") or "")[:80],
+            "members": members,
+            "anchor_stimulus": str(raw_group.get("anchor_stimulus") or "")[:160],
+            "interaction_topic": str(raw_group.get("interaction_topic") or "")[:160],
+            "focus_owner": focus_owner,
+            "spatial_mode": spatial_mode,
+            "status": status,
+        }
+    if "reaction_chain" in delta and isinstance(delta.get("reaction_chain"), Mapping):
+        raw_chain = delta["reaction_chain"]
+        participants = [name for name in _bounded_strings(raw_chain.get("participants"), 3) if name in valid_people]
+        phase = str(raw_chain.get("phase") or "resolved")
+        if phase not in REACTION_PHASES:
+            phase = "resolved"
+        primary = str(raw_chain.get("primary_responder") or "")[:80]
+        if primary not in participants:
+            primary = ""
+        direction["reaction_chain"] = {
+            "stimulus_id": str(raw_chain.get("stimulus_id") or "")[:80],
+            "phase": phase,
+            "participants": participants,
+            "primary_responder": primary,
+            "resolved": bool(raw_chain.get("resolved", phase == "resolved")),
+        }
     return updated
 
 
-def complete_scene(memory: Mapping[str, Any], scene: Mapping[str, Any], summary: str) -> Dict[str, Any]:
+def complete_scene(
+    memory: Mapping[str, Any], scene: Mapping[str, Any], summary: str,
+    *, cast_names: Iterable[str] = (),
+) -> Dict[str, Any]:
     updated = copy.deepcopy(dict(memory))
     previous_scene_type = str((updated.get("scene") or {}).get("scene_type") or "other")
     updated["scene"] = {
@@ -145,13 +211,28 @@ def complete_scene(memory: Mapping[str, Any], scene: Mapping[str, Any], summary:
         "mood": str(scene.get("mood") or ""),
         "summary": str(summary or "")[:1200],
         "scene_type": str(scene.get("scene_type") or previous_scene_type)[:32],
+        "active_modes": _bounded_strings(scene.get("active_modes"), 3),
         "scene_function": str(scene.get("scene_function") or "dialogue")[:32],
+        "mode_source": str(scene.get("mode_source") or "inferred")[:32],
     }
     direction = updated.setdefault("direction", {})
     direction.update({
         "background": None, "place": None, "bgfx": None,
         "visible_characters": [], "shot_visible_characters": [],
         "positions": {}, "last_faces": {},
+        "scene_presence": {
+            str(name): "unknown" for name in cast_names if str(name)
+        },
+        "shot_operation": "", "shot_transition": "",
+        "shot_group": {
+            "group_id": "", "members": [], "anchor_stimulus": "",
+            "interaction_topic": "", "focus_owner": "", "spatial_mode": "stable", "status": "closed",
+        },
+        "reaction_chain": {
+            "stimulus_id": "", "phase": "resolved", "participants": [],
+            "primary_responder": "", "resolved": True,
+        },
+        "last_performance_node": {},
         "recent_emoticons": [], "recent_actions": [], "recent_sounds": [],
         "focus": {"kind": "speaker", "character": ""},
         "relation_distance": "normal", "emotion_phase": "", "subtext": "",
@@ -198,7 +279,7 @@ def _annotation_scene_context(
         selected_indices.update(range(min(2, len(rows))))
     allowed = {
         "segment", "start", "end", "location", "time", "scene_type",
-        "scene_function", "reason", "needs", "required", "background",
+        "active_modes", "scene_function", "reason", "needs", "required", "background",
         "bg", "se", "bgm", "aa_key",
     }
 
@@ -234,7 +315,9 @@ def assemble_chunk_context(
     items: Sequence[Mapping[str, Any]], chunk: Mapping[str, Any], memory: Mapping[str, Any],
     events: Sequence[Mapping[str, Any]], usage_chain: Sequence[Mapping[str, Any]], *,
     before: int = 15, after: int = 10, max_events: int = 8, compact: bool = False,
-    story_type: str = "auto",
+    story_type: str = "auto", scene_event_plan: Mapping[str, Any] | None = None,
+    cast: Mapping[str, Any] | None = None,
+    constraints: Mapping[str, Any] | None = None,
 ) -> Tuple[str, str]:
     dialogue = [i for i, item in enumerate(items) if item.get("kind") == "line"]
     past, future = context_indices(dialogue, dict(chunk), before=before, after=after)
@@ -250,12 +333,16 @@ def assemble_chunk_context(
         "scene_type": str(scene.get("scene_type") or (
             normalized_story_type if normalized_story_type != "auto" else "other"
         ))[:32],
+        "active_modes": _bounded_strings(scene.get("active_modes"), 3),
         "scene_function": str(scene.get("scene_function") or "dialogue")[:32],
+        "mode_source": str(scene.get("mode_source") or "unknown")[:32],
         "focus": {
             "kind": str(focus.get("kind") or "speaker")[:32],
             "character": str(focus.get("character") or "")[:160],
         },
         "relation_distance": str(direction.get("relation_distance") or "normal")[:32],
+        "shot_operation": str(direction.get("shot_operation") or "")[:32],
+        "shot_transition": str(direction.get("shot_transition") or "")[:32],
         "emotion_phase": str(direction.get("emotion_phase") or "")[:160],
         "subtext": str(direction.get("subtext") or "")[:160],
         "reaction_target": str(direction.get("reaction_target") or "")[:160],
@@ -267,13 +354,22 @@ def assemble_chunk_context(
         "visible_characters": _bounded_strings(
             direction.get("shot_visible_characters", direction.get("visible_characters")), 8
         ),
+        "shot_group": dict(direction.get("shot_group") or {}),
+        "reaction_chain": dict(direction.get("reaction_chain") or {}),
     }
     positions = direction.get("positions") if isinstance(direction.get("positions"), Mapping) else {}
     direction_snapshot = {
         "background": str(direction.get("background") or "")[:160],
         "place": str(direction.get("place") or "")[:80],
         "bgfx": str(direction.get("bgfx") or "")[:80],
-        "visible_characters": _bounded_strings(direction.get("visible_characters"), 8),
+        "visible_characters": _bounded_strings(
+            direction.get("shot_visible_characters", direction.get("visible_characters")), 8
+        ),
+        "scene_presence": {
+            str(name)[:160]: str(status)
+            for name, status in dict(direction.get("scene_presence") or {}).items()
+            if status in {"unknown", "present", "absent"}
+        },
         "positions": {
             str(name)[:160]: value for name, value in positions.items()
             if isinstance(value, int)
@@ -282,23 +378,157 @@ def assemble_chunk_context(
             str(name)[:160]: str(value)[:32]
             for name, value in dict(direction.get("last_faces") or {}).items()
         },
+        "shot_operation": str(direction.get("shot_operation") or "")[:32],
+        "shot_transition": str(direction.get("shot_transition") or "")[:32],
+        "shot_group": dict(direction.get("shot_group") or {}),
+        "reaction_chain": dict(direction.get("reaction_chain") or {}),
+        "last_performance_node": dict(direction.get("last_performance_node") or {}),
         "recent_emoticons": _bounded_strings(direction.get("recent_emoticons"), 8),
         "recent_actions": _bounded_strings(direction.get("recent_actions"), 8),
         "recent_sounds": _bounded_strings(direction.get("recent_sounds"), 8),
     }
+    # Put the current decision order before resource candidates. The complete
+    # rules stay cacheable, while this short block keeps the model focused on
+    # event causality and shot space before it starts choosing assets.
     volatile_parts = [
+        "CURRENT_DIRECTING_TASK\n"
+        "先按事件因果和当前拍摄小组决定画面，再选 face/emo/act/fx。"
+        "逐 TARGET 比较最近一个实际演出节点；该节点可以是对白或无对白 beat。"
+        "先判断阶段变化是否有因果价值；有价值时主动选择至少一个自然的可见承载，"
+        "没有变化时保持状态并使用有语义依据的 hold。"
+        "镜头变化必须给出完整构图；普通保持不重复声明。"
+        "只有真实入退场才 enter/exit；连续镜头中的立绘显隐用 reveal/conceal，普通情况淡入淡出；move 必须先落地再 cut。"
+        "对白镜头可给说话者、听者反应或关系构图；不能因为台词强制同框。单镜最多三人，Wait 只用于无对话框 beat。"
+        "计划是软导演假设；所选 carrier 有准确资源时用它兑现。"
+        "计划的 action 没有语义准确的动作资源时，改用准确的 face/emo/camera/sound，不能为兑现计划选错 act。"
+        "没有选择表演意图时不要为了配额补齐，无法确定的审美选择交给 AI。",
         "CURRENT_STORY_MEMORY\n" + json.dumps(memory.get("story") or {}, ensure_ascii=False, separators=(",", ":")),
         "CURRENT_SCENE_MEMORY\n" + json.dumps(memory.get("scene") or {}, ensure_ascii=False, separators=(",", ":")),
         "CURRENT_DIRECTION_STATE\n" + json.dumps(direction_snapshot, ensure_ascii=False, separators=(",", ":")),
         "DIRECTOR_CONTEXT\n" + json.dumps(director_context, ensure_ascii=False, separators=(",", ":")),
     ]
+    from prompt import scene_mode_policy
+    volatile_parts.append(scene_mode_policy(
+        director_context["scene_type"], director_context["active_modes"],
+    ))
     scene_context = _annotation_scene_context(usage_chain, targets, items)
     if scene_context:
         volatile_parts.append(
             "CONFIRMED_SCENE_PLAN\n"
-            + json.dumps(scene_context, ensure_ascii=False, separators=(",", ":"))[:6000]
+            + json.dumps(scene_context, ensure_ascii=False, separators=(",", ":"))
         )
     volatile_parts.append("RELEVANT_MEMORY_EVENTS\n" + json.dumps(selected, ensure_ascii=False, separators=(",", ":")))
+    if scene_event_plan:
+        from annotation_scene_planner import project_scene_event_plan
+
+        target_ids = [str(items[index].get("annotation_id") or "") for index in targets]
+        projected = project_scene_event_plan(scene_event_plan, target_ids)
+        if projected.get("active_events"):
+            volatile_parts.append(
+                "SCENE_EVENT_PLAN\n"
+                + json.dumps(projected, ensure_ascii=False, separators=(",", ":"))
+                + "\n先遵守事件因果和拍摄小组，再选择逐行资源；不要把计划退化成按说话者换镜。\n"
+                "本块按同一顺序联合决策：①确认当前 event、互动轴和 shot_group 保持区间；"
+                "②从 CURRENT_DIRECTION_STATE 推演 cut/reframe/reveal/conceal/enter/exit/move 后的完整空间；"
+                "③逐角色比较 face_arc、上一张脸和当前候选；context_role=previous/next 只供连续性参考，"
+                "若没有语义更合适的新脸则保持并用其他表演载体承载变化；"
+                "④performance_intents 是软导演假设：优先用语义准确的 carrier 兑现；"
+                "若 action 没有准确资源，用 face/emo/camera/sound 等准确载体表达，而不选错 act；"
+                "只有 require_all=true 且每层都有准确资源时才全部兑现，再判断正文支持的额外动作或气泡；"
+                "⑤只在计划的 silent_beat 上生成无对话框节点并按实际展示需要填写 wait_ms；"
+                "⑥复核峰值释放、镜头意图明确、同镜不超过三人和立绘不重叠。"
+                "这是决策顺序，不是镜头、动作、气泡或 Wait 的数量配额。"
+            )
+    if cast and constraints:
+        from face_selection import silent_reaction_shortlists, target_face_shortlists
+
+        face_shortlists = target_face_shortlists(
+            items,
+            targets,
+            cast=cast,
+            constraints=constraints,
+            last_faces=direction.get("last_faces") or {},
+            scene_event_plan=scene_event_plan,
+            include_all=True,
+        )
+        if face_shortlists:
+            public_shortlists = []
+            for entry in face_shortlists:
+                current_face = str(entry.get("previous_face") or "")
+                public_shortlists.append({
+                    key: value for key, value in entry.items() if key != "candidates"
+                } | {
+                    "candidates": [
+                        {
+                            "choice": str(candidate.get("token") or ""),
+                            "face_id": str(candidate.get("id") or ""),
+                            "semantic": str(candidate.get("semantic") or ""),
+                            "is_current": bool(
+                                current_face
+                                and str(candidate.get("id") or "") == current_face
+                            ),
+                        }
+                        for candidate in entry.get("candidates") or []
+                        if str(candidate.get("token") or "")
+                        and str(candidate.get("id") or "")
+                    ],
+                })
+            volatile_parts.append(
+                "FACE_SHORTLIST_BY_TARGET\n"
+                + json.dumps(public_shortlists, ensure_ascii=False, separators=(",", ":"))
+                + "\n这是表情标注后端按当前台词排序的完整安全候选。"
+                "候选前部是相关性建议，但列表包含当前角色和装束下全部已验证语义表情；"
+                "face 只能原样填写对应 candidate.choice；face_id 是真实物理表情，semantic 是完整含义，"
+                "is_current 表示它与块开始时的当前表情相同。AI 负责结合潜台词最终择一，也可以在无需换脸时留空。"
+                "当 plan.stage_change=true 时，还要按 TARGET 顺序比较 face_id 与同角色此前最近一次非空选择；"
+                "要求真实换脸时不得选择相同 face_id。"
+                "若对白或旁白节点使用行级 reactions，reaction.face 只能复用这里展示的该反应角色 candidate.choice；"
+                "当前块没有该角色候选时，优先用 reaction.emo/act 或独立 beat，不猜 face 编号。"
+            )
+        silent_shortlists = silent_reaction_shortlists(
+            items,
+            targets,
+            cast=cast,
+            constraints=constraints,
+            scene_event_plan=scene_event_plan,
+            last_faces=direction.get("last_faces") or {},
+            include_all=True,
+        )
+        if silent_shortlists:
+            public_silent = []
+            for entry in silent_shortlists:
+                public_silent.append({
+                    "anchor_i": entry["anchor_i"],
+                    "position": entry["position"],
+                    "phase": entry["phase"],
+                    "purpose": entry["purpose"],
+                    "faces": {
+                        who: [
+                            {
+                                "choice": str(candidate.get("token") or ""),
+                                "face_id": str(candidate.get("id") or ""),
+                                "semantic": str(candidate.get("semantic") or ""),
+                                "is_current": bool(
+                                    str((direction.get("last_faces") or {}).get(who) or "")
+                                    and str(candidate.get("id") or "")
+                                    == str((direction.get("last_faces") or {}).get(who) or "")
+                                ),
+                            }
+                            for candidate in candidates
+                            if str(candidate.get("token") or "")
+                            and str(candidate.get("id") or "")
+                        ]
+                        for who, candidates in entry.get("faces", {}).items()
+                    },
+                })
+            volatile_parts.append(
+                "SILENT_REACTION_SHORTLIST_BY_TARGET\n"
+                + json.dumps(public_silent, ensure_ascii=False, separators=(",", ":"))
+                + "\n这里只覆盖确实计划了可读情绪反应的无对话框节点。"
+                "beat.face 与 reactions.face 只能填写对应 anchor、position 和角色下的 candidate.choice，"
+                "也可以在不需要换脸时留空；未列出的无对话框节点不要猜表情。"
+                "face_id 与 is_current 用于判断是否发生真实物理变化。"
+            )
     body = [
         "Update continuity across lines from DIRECTOR_CONTEXT; do not reset direction state for each line.",
         "只为 TARGET 行输出标注；PAST_CONTEXT 和 FUTURE_CONTEXT 只用于理解，不得标注 FUTURE_CONTEXT。",
@@ -330,20 +560,27 @@ def build_run_fingerprint(
     prompt_version: str, schema_version: int, chunk_version: str,
     model_config: Mapping[str, Any], scene_hashes: Optional[Sequence[str]] = None,
     *, story_type: str = "auto", director_version: str = "",
+    run_mode: str = "balanced", source_id: str = "",
 ) -> Dict[str, Any]:
     safe_model = {
         "provider": str(model_config.get("provider") or ""),
         "model": str(model_config.get("model") or ""),
+        "runtime_fingerprint_sha256": str(
+            model_config.get("runtime_fingerprint_sha256") or ""
+        ),
         "max_tokens": int(model_config.get("max_tokens") or 0),
         "annotation_max_tokens": int(model_config.get("annotation_max_tokens") or 0),
         "reasoning_mode": str(model_config.get("reasoning_mode") or ""),
         "reasoning_wire_protocol": str(model_config.get("reasoning_wire_protocol") or ""),
+        "source_context_strategy": str(model_config.get("source_context_strategy") or "preserve"),
     }
     return {
         "script_sha256": _sha(script_text), "cast_sha256": _sha(cast),
         "resources_sha256": _sha(resources), "prompt_version": str(prompt_version),
         "schema_version": int(schema_version), "chunk_version": str(chunk_version),
         "story_type": _story_type(story_type), "director_version": str(director_version or ""),
+        "run_mode": str(run_mode or "balanced").strip().lower(),
+        "source_id": str(source_id or "").strip(),
         "model": safe_model, "scene_hashes": list(scene_hashes or []),
     }
 
@@ -428,7 +665,9 @@ def build_story_plan(items: Sequence[Mapping[str, Any]], scenes: Sequence[Mappin
             "evidence": str(entry.get("evidence") or scene.get("evidence") or scene.get("opening_text") or ""),
             "time": str(entry.get("time") or scene.get("time") or ""),
             "scene_type": str(entry.get("scene_type") or scene.get("scene_type") or "other"),
+            "active_modes": list(entry.get("active_modes") or scene.get("active_modes") or []),
             "scene_function": str(entry.get("scene_function") or scene.get("scene_function") or "dialogue"),
+            "mode_source": "preflight" if entry.get("scene_type") else "inferred",
             "purpose": str(entry.get("reason") or scene.get("purpose") or ""),
         })
     summary = f"共 {len(planned)} 个场景；出场：{'、'.join(speakers)}。"

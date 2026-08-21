@@ -6,6 +6,7 @@ from annotation_memory import (
     apply_state_delta,
     assemble_chunk_context,
     build_run_fingerprint,
+    complete_scene,
     initial_memory,
 )
 
@@ -14,9 +15,30 @@ def test_initial_memory_contains_director_state():
     memory = initial_memory("summary", "bond")
 
     assert memory["story"]["type"] == "bond"
+    assert memory["direction"]["scene_presence"] == {}
     assert memory["scene"]["scene_type"] == "bond"
     assert memory["direction"]["focus"] == {"kind": "speaker", "character": ""}
     assert memory["direction"]["continuity"] == {}
+    assert memory["direction"]["last_performance_node"] == {}
+
+
+def test_scene_boundary_starts_relevant_people_unknown_and_delta_updates_presence():
+    memory = complete_scene(
+        initial_memory(), {"scene_id": "scene-2"}, "new scene",
+        cast_names=["凯伊", "爱丽丝"],
+    )
+    assert memory["direction"]["scene_presence"] == {
+        "凯伊": "unknown", "爱丽丝": "unknown",
+    }
+
+    updated = apply_state_delta(
+        memory,
+        {"scene_presence": {"凯伊": "present", "爱丽丝": "absent", "未知": "present"}},
+        cast={"凯伊": {}, "爱丽丝": {}}, constraints={},
+    )
+    assert updated["direction"]["scene_presence"] == {
+        "凯伊": "present", "爱丽丝": "absent",
+    }
 
 
 def test_fingerprint_changes_when_director_version_or_story_type_changes():
@@ -47,8 +69,31 @@ def test_state_delta_preserves_background_and_rejects_unknown_character():
         constraints={"ok_bg": {"BG_Street"}, "faces_by_id": {"kei": {"03"}}},
     )
     assert updated["direction"]["background"] == "BG_Street"
-    assert updated["direction"]["visible_characters"] == ["凯伊"]
+    assert updated["direction"]["shot_visible_characters"] == ["凯伊"]
+    assert "visible_characters" not in updated["direction"]
     assert "不存在" not in updated["direction"]["last_faces"]
+
+
+def test_state_delta_persists_compact_shot_group_and_reaction_chain():
+    updated = apply_state_delta(
+        initial_memory(),
+        {
+            "shot_group": {
+                "group_id": "g-1", "members": ["A", "B"],
+                "anchor_stimulus": "发现异常", "interaction_topic": "入口检查",
+                "focus_owner": "B", "spatial_mode": "reframe", "status": "active",
+            },
+            "reaction_chain": {
+                "stimulus_id": "s-1", "phase": "focus_handoff",
+                "participants": ["A", "B"], "primary_responder": "B", "resolved": False,
+            },
+        },
+        cast={"A": {"id": "a", "portrait": True}, "B": {"id": "b", "portrait": True}},
+        constraints={},
+    )
+
+    assert updated["direction"]["shot_group"]["members"] == ["A", "B"]
+    assert updated["direction"]["reaction_chain"]["phase"] == "focus_handoff"
 
 
 def test_state_delta_rejects_unverified_faces_and_unknown_recent_assets():
@@ -125,6 +170,27 @@ def test_context_marks_target_past_and_future_and_limits_events():
     assert "不得标注 FUTURE_CONTEXT" in user
 
 
+def test_context_exposes_latest_performance_node_for_cross_chunk_comparison():
+    items = make_items(1)
+    memory = initial_memory("summary")
+    memory["direction"]["last_performance_node"] = {
+        "source_id": "beat-7", "speaker": "凯伊", "silent": True,
+        "face": "03", "emo": "疑问", "act": "stiff",
+        "visible_characters": ["凯伊"],
+    }
+
+    volatile, _user = assemble_chunk_context(
+        items=items,
+        chunk={"scene_id": "scene-1", "target_indices": [0]},
+        memory=memory, events=[], usage_chain=[], before=0, after=0,
+    )
+
+    snapshot = volatile.split("CURRENT_DIRECTION_STATE\n", 1)[1].split("\n\n", 1)[0]
+    state = json.loads(snapshot)
+    assert state["last_performance_node"]["source_id"] == "beat-7"
+    assert state["last_performance_node"]["silent"] is True
+
+
 def test_context_emits_bounded_director_context_and_continuity_instruction():
     items = make_items(3)
     memory = initial_memory("summary", "bond")
@@ -141,9 +207,204 @@ def test_context_emits_bounded_director_context_and_continuity_instruction():
     director_context = json.loads(marker)
     assert director_context["story_type"] == "bond"
     assert director_context["scene_type"] == "bond"
+    assert "ACTIVE_MODE_POLICY=bond" in volatile
     assert len(marker) <= 4000
     assert "continuity" in user.lower()
     assert "line" in user.lower()
+
+
+def test_context_puts_plan_before_resources_and_uses_it_for_face_shortlist():
+    items = assign_annotation_ids([{
+        "kind": "line", "line_no": 1, "split_index": 0,
+        "who": "爱丽丝", "text": "我明白了。", "raw": "爱丽丝: 我明白了。",
+    }])
+    anchor_id = items[0]["annotation_id"]
+    plan = {"events": [{
+        "source_ids": [anchor_id], "kind": "inference",
+        "face_arcs": [{"who": "爱丽丝", "stages": [{
+            "anchor_id": anchor_id, "position": "on",
+            "semantic_state": "认真确认", "change_reason": "理解关键信息",
+        }]}],
+    }]}
+
+    volatile, _user = assemble_chunk_context(
+        items=items, chunk={"scene_id": "scene-1", "target_indices": [0]},
+        memory=initial_memory(), events=[], usage_chain=[], before=0, after=0,
+        cast={"爱丽丝": {"id": "aris", "portrait": True}},
+        constraints={"face_records_by_id": {"aris": [{
+            "id": "05", "semantic_cn": "认真确认", "beat_fit": ["exposition"],
+            "semantic_tags": ["serious"], "backend_selection_ready": True,
+        }]}}, scene_event_plan=plan,
+    )
+
+    assert volatile.startswith("CURRENT_DIRECTING_TASK")
+    assert "不能为兑现计划选错 act" in volatile
+    assert volatile.index("SCENE_EVENT_PLAN") < volatile.index("FACE_SHORTLIST_BY_TARGET")
+    shortlist = json.loads(
+        volatile.split("FACE_SHORTLIST_BY_TARGET\n", 1)[1].split("\n", 1)[0]
+    )
+    assert shortlist[0]["plan"]["semantic_state"] == "认真确认"
+
+
+def test_context_injects_only_the_preflight_approved_mode_set():
+    items = make_items(1)
+    memory = initial_memory("summary")
+    memory["scene"].update({
+        "scene_type": "event", "active_modes": ["event", "bond"],
+    })
+
+    volatile, _user = assemble_chunk_context(
+        items=items,
+        chunk={"scene_id": "scene-1", "target_indices": [0]},
+        memory=memory, events=[], usage_chain=[], before=0, after=0,
+    )
+
+    assert "ACTIVE_MODE_POLICIES=event,bond" in volatile
+    assert "本场按活动策略" in volatile
+    assert "本场按羁绊策略" in volatile
+    assert "本场按主线策略" not in volatile
+
+
+def test_context_injects_backend_face_shortlist_for_each_target():
+    items = assign_annotation_ids([{
+        "kind": "line", "line_no": 1, "split_index": 0,
+        "who": "爱丽丝", "text": "报告：任务开始。", "raw": "爱丽丝: 报告：任务开始。",
+    }])
+    volatile, _user = assemble_chunk_context(
+        items=items,
+        chunk={"scene_id": "scene-1", "target_indices": [0]},
+        memory=initial_memory(), events=[], usage_chain=[], before=0, after=0,
+        cast={"爱丽丝": {"id": "aris", "portrait": True}},
+        constraints={"face_records_by_id": {"aris": [{
+            "id": "05", "semantic_cn": "认真坚定｜正式报告",
+            "beat_fit": ["exposition"], "delivery_fit": ["normal_speech"],
+            "semantic_tags": ["focused", "serious"], "intensity": 2,
+            "usage_frequency": "common", "backend_selection_ready": True,
+        }, {
+            "id": "14", "semantic_cn": "红眼人格状态",
+            "backend_selection_ready": False,
+        }]}},
+    )
+    payload = volatile.split("FACE_SHORTLIST_BY_TARGET\n", 1)[1].split("\n", 1)[0]
+    shortlists = json.loads(payload)
+    assert shortlists[0]["candidates"][0] == {
+        "choice": "[Emo:认真坚定]",
+        "face_id": "05",
+        "semantic": "认真坚定｜正式报告",
+        "is_current": False,
+    }
+    assert "14" not in payload
+
+
+def test_context_marks_current_physical_face_and_required_stage_change():
+    items = assign_annotation_ids([{
+        "kind": "line", "line_no": 1, "split_index": 0,
+        "who": "爱丽丝", "text": "报告：任务开始。", "raw": "爱丽丝: 报告：任务开始。",
+    }])
+    source_id = items[0]["annotation_id"]
+    memory = initial_memory()
+    memory["direction"]["last_faces"] = {"爱丽丝": "05"}
+    volatile, _user = assemble_chunk_context(
+        items=items, chunk={"scene_id": "scene-1", "target_indices": [0]},
+        memory=memory, events=[], usage_chain=[], before=0, after=0,
+        cast={"爱丽丝": {"id": "aris", "portrait": True}},
+        constraints={"face_records_by_id": {"aris": [{
+            "id": "05", "semantic_cn": "认真坚定｜正式报告",
+            "beat_fit": ["exposition"], "delivery_fit": ["normal_speech"],
+            "semantic_tags": ["focused", "serious"], "intensity": 2,
+            "backend_selection_ready": True,
+        }, {
+            "id": "07", "semantic_cn": "坚决宣告｜任务推进",
+            "beat_fit": ["exposition"], "delivery_fit": ["normal_speech"],
+            "semantic_tags": ["focused", "determined"], "intensity": 2,
+            "backend_selection_ready": True,
+        }]}, "faces_by_id": {"aris": {"05", "07"}}},
+        scene_event_plan={"events": [{
+            "event_id": "event-1", "source_ids": [source_id],
+            "shot_groups": [], "silent_beats": [], "peaks": [],
+            "performance_intents": [{
+                "anchor_id": source_id, "position": "on", "subjects": ["爱丽丝"],
+                "carriers": ["face_change"], "purpose": "切换到任务状态",
+            }],
+            "face_arcs": [{"who": "爱丽丝", "stages": [{
+                "anchor_id": source_id, "position": "on",
+                "semantic_state": "坚决推进任务", "change_reason": "阶段变化",
+            }]}],
+        }]},
+    )
+
+    payload = volatile.split("FACE_SHORTLIST_BY_TARGET\n", 1)[1].split("\n", 1)[0]
+    shortlist = json.loads(payload)[0]
+    assert shortlist["previous_face"] == "05"
+    assert shortlist["plan"]["stage_change"] is True
+    by_id = {candidate["face_id"]: candidate for candidate in shortlist["candidates"]}
+    assert by_id["05"]["is_current"] is True
+    assert by_id["07"]["is_current"] is False
+    assert "比较 face_id" in volatile
+
+
+def test_context_uses_scene_plan_for_the_same_face_shortlist_shown_to_model():
+    items = assign_annotation_ids([{
+        "kind": "line", "line_no": 1, "split_index": 0,
+        "who": "爱丽丝", "text": "那就拜托你了。", "raw": "爱丽丝: 那就拜托你了。",
+    }])
+    source_id = items[0]["annotation_id"]
+    volatile, _user = assemble_chunk_context(
+        items=items,
+        chunk={"scene_id": "scene-1", "target_indices": [0]},
+        memory=initial_memory(), events=[], usage_chain=[], before=0, after=0,
+        cast={"爱丽丝": {"id": "aris", "portrait": True}},
+        constraints={"face_records_by_id": {"aris": [{
+            "id": "01", "semantic_cn": "日常温和说明",
+            "delivery_fit": ["normal_speech"], "semantic_tags": ["gentle"],
+            "intensity": 1, "backend_selection_ready": True,
+        }, {
+            "id": "05", "semantic_cn": "严肃专注",
+            "delivery_fit": ["emphatic_speech"], "semantic_tags": ["focused", "serious"],
+            "intensity": 2, "backend_selection_ready": True,
+        }]}},
+        scene_event_plan={"events": [{
+            "event_id": "event-1", "source_ids": [source_id],
+            "shot_groups": [], "silent_beats": [], "peaks": [],
+            "performance_intents": [{
+                "anchor_id": source_id, "position": "on", "subjects": ["爱丽丝"],
+                "carriers": ["face_change"], "purpose": "认真托付任务",
+            }],
+            "face_arcs": [{
+                "who": "爱丽丝", "stages": [{
+                    "anchor_id": source_id, "position": "on",
+                    "semantic_state": "严肃专注的任务托付",
+                    "change_reason": "从闲谈转为正式委托",
+                }],
+            }],
+        }]},
+    )
+
+    payload = volatile.split("FACE_SHORTLIST_BY_TARGET\n", 1)[1].split("\n", 1)[0]
+    shortlist = json.loads(payload)[0]
+    assert shortlist["plan"]["stage_change"] is True
+    assert shortlist["plan"]["semantic_state"] == "严肃专注的任务托付"
+    assert "performance_intent" in shortlist["plan"]["evidence"]
+
+
+def test_scene_event_plan_injects_compact_execution_order_without_quotas():
+    items = make_items(2)
+    volatile, _user = assemble_chunk_context(
+        items=items,
+        chunk={"scene_id": "scene-1", "target_indices": [0, 1]},
+        memory=initial_memory(), events=[], usage_chain=[], before=0, after=0,
+        scene_event_plan={"events": [{
+            "event_id": "event-1",
+            "source_ids": [items[0]["annotation_id"], items[1]["annotation_id"]],
+            "shot_groups": [], "performance_intents": [], "face_arcs": [],
+            "silent_beats": [], "peaks": [],
+        }]},
+    )
+
+    assert "SCENE_EVENT_PLAN" in volatile
+    assert "确认当前 event、互动轴和 shot_group 保持区间" in volatile
+    assert "这是决策顺序" in volatile
+    assert "数量配额" in volatile
 
 
 def test_target_context_uses_short_indices_without_full_fingerprints():
@@ -184,6 +445,44 @@ def test_run_fingerprint_changes_when_reasoning_mode_changes():
          "annotation_max_tokens": 16000, "reasoning_mode": "speed"},
     )
     assert base != speed
+
+
+def test_run_fingerprint_separates_run_mode_and_source_id():
+    common = (
+        "script", {"凯伊": {"id": "kei"}}, {}, "prompt", 1, "chunk",
+        {"provider": "openai", "model": "test", "max_tokens": 16000},
+    )
+    balanced_main = build_run_fingerprint(
+        *common, run_mode="balanced", source_id="main-p03",
+    )
+    quality_main = build_run_fingerprint(
+        *common, run_mode="quality", source_id="main-p03",
+    )
+    balanced_seia = build_run_fingerprint(
+        *common, run_mode="balanced", source_id="codebox-seia",
+    )
+
+    assert balanced_main["run_mode"] == "balanced"
+    assert balanced_main["source_id"] == "main-p03"
+    assert balanced_main != quality_main
+    assert balanced_main != balanced_seia
+
+
+def test_run_fingerprint_changes_when_runtime_fingerprint_changes():
+    common = (
+        "script", {"凯伊": {"id": "kei"}}, {}, "prompt", 1, "chunk",
+    )
+    first = build_run_fingerprint(
+        *common,
+        {"provider": "openai", "model": "test", "runtime_fingerprint_sha256": "a" * 64},
+    )
+    second = build_run_fingerprint(
+        *common,
+        {"provider": "openai", "model": "test", "runtime_fingerprint_sha256": "b" * 64},
+    )
+
+    assert first["model"]["runtime_fingerprint_sha256"] == "a" * 64
+    assert first != second
 
 
 def test_corrupt_checkpoint_is_ignored_without_deleting_it(tmp_path):

@@ -8,6 +8,8 @@ from director_policy import normalize_direction_plan
 
 DIRECTION_FIELDS = frozenset({"face", "emo", "act", "fx"})
 STRONG_ACTIONS = frozenset({"jump", "shake", "hophop"})
+# Shake is a visible reaction state, not a resource to throttle globally.
+UNTHROTTLED_ACTIONS = frozenset({"shake"})
 COMEDY_EMOTICON_ESCALATIONS = frozenset(
     {
         ("疑问", "惊叹"),
@@ -134,6 +136,11 @@ def normalize_action_density(items):
         if not action:
             previous_had_strong_action = False
             continue
+        if action in UNTHROTTLED_ACTIONS:
+            last_speaker_action[(who, action)] = speaker_turn
+            previous_had_strong_action = action in STRONG_ACTIONS
+            previous_target = str(_director_value(item, "reaction_target", "") or "")
+            continue
         last_turn = last_speaker_action.get((who, action), -10_000)
         repeated_too_soon = speaker_turn - last_turn <= 3
         adjacent_strong = action in STRONG_ACTIONS and previous_had_strong_action
@@ -163,6 +170,31 @@ def normalize_direction_density(items):
 def _direction_candidates(text, previous_text=""):
     previous_text = re.sub(r"\s+", "", str(previous_text or ""))
     value = re.sub(r"\s+", "", str(text or ""))
+    eager_help = (
+        any(token in value for token in ("也可以帮忙", "我也可以帮忙", "我也来帮忙"))
+        and any(token in value for token in ("一起", "更快", "帮忙", "检查", "确认"))
+    )
+    clear_celebration = (
+        value.startswith(("太好了！", "太好了!"))
+        and any(token in value for token in ("继续", "成功", "通过", "完成", "没问题"))
+    )
+    formal_result_report = (
+        bool(re.search(r"(?:报告|汇报|检查结果)[：:]", value))
+        and any(
+            token in value
+            for token in (
+                "没有发现", "未发现", "未检测到", "确认", "正常", "异常",
+                "安全", "完毕", "结束", "已完成", "以上",
+            )
+        )
+    )
+    if formal_result_report:
+        return {"emo": ("反应", "formal_result_report_response")}
+    if eager_help or clear_celebration:
+        return {
+            "emo": ("闪亮", "eager_positive_participation"),
+            "act": ("hophop", "eager_positive_participation"),
+        }
     if re.search(r"[！？!?]$", value) and ("！？" in value or "?!" in value or "!?" in value):
         return {"emo": ("惊叹", "mixed_surprise_question")}
     if re.fullmatch(r"[…⋯.·]+[!！]+", value):
@@ -234,9 +266,10 @@ def infer_direction_cues(text, previous_text=""):
     }
 
 
-def supplement_directions(items, cast):
+def supplement_directions(items, cast, *, rule_allowlist=None):
     """Fill empty portrait fields and report each deterministic supplement."""
     changes = []
+    allowed_rules = set(rule_allowlist) if rule_allowlist is not None else None
     previous_text = ""
     for index, item in enumerate(items):
         if item.get("kind") != "line":
@@ -246,9 +279,17 @@ def supplement_directions(items, cast):
             for field, (value, rule) in _direction_candidates(
                 item.get("text", ""), previous_text
             ).items():
-                if item.get(field):
+                if allowed_rules is not None and rule not in allowed_rules:
                     continue
                 before = item.get(field)
+                explicit = set(item.get("_explicit_direction_fields") or ())
+                repair_eager_cue = (
+                    rule == "eager_positive_participation"
+                    and field in {"emo", "act"}
+                    and field not in explicit
+                )
+                if before == value or (before and not repair_eager_cue):
+                    continue
                 item[field] = value
                 item.setdefault("_direction_origins", {})[field] = (
                     "deterministic_supplement"

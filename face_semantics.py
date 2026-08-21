@@ -21,6 +21,21 @@ CONTROLLED_BEAT_FIT = frozenset({
     "transition",
 })
 
+CONTROLLED_DELIVERY_FIT = frozenset({
+    "silent_reaction", "listening", "soft_speech", "normal_speech",
+    "emphatic_speech", "shout",
+})
+
+CONTROLLED_USAGE_FREQUENCY = frozenset({
+    "default", "common", "conditional", "rare",
+})
+
+CONTROLLED_SEMANTIC_TAGS = frozenset({
+    "neutral", "curious", "focused", "serious", "assertive", "blank",
+    "playful", "joyful", "embarrassed", "distressed", "angry", "sad",
+    "surprised", "afraid", "resigned", "smug", "gentle", "determined",
+})
+
 _BEAT_ALIASES = {
     "react": "reaction", "response": "reaction", "positive_reaction": "reaction",
     "积极回应": "reaction", "回应": "reaction", "反应": "reaction",
@@ -75,6 +90,40 @@ def _is_chinese(value: str) -> bool:
     return any("\u4e00" <= char <= "\u9fff" for char in value)
 
 
+def normalize_semantic_modes(value: object) -> list[dict]:
+    """Normalize up to three alternate acting uses for one visible face."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    result = []
+    for raw in value:
+        if not isinstance(raw, Mapping):
+            continue
+        label = str(raw.get("label_cn") or "").strip()
+        if not label:
+            continue
+        normalized = normalize_semantic_payload({
+            "beat_fit": raw.get("beat_fit") or [],
+            "delivery_fit": raw.get("delivery_fit") or [],
+            "semantic_tags": raw.get("semantic_tags") or [],
+        })
+        intensity = raw.get("intensity")
+        if isinstance(intensity, bool) or not isinstance(intensity, int) or not 0 <= intensity <= 3:
+            intensity = 1
+        mode = {
+            "label_cn": label,
+            "beat_fit": normalized.get("beat_fit") or [],
+            "delivery_fit": normalized.get("delivery_fit") or [],
+            "intensity": intensity,
+            "semantic_tags": normalized.get("semantic_tags") or [],
+            "avoid_when_cn": str(raw.get("avoid_when_cn") or "").strip(),
+        }
+        if mode not in result:
+            result.append(mode)
+        if len(result) == 3:
+            break
+    return result
+
+
 def normalize_semantic_payload(payload: Mapping | None) -> dict:
     """Return a compatible payload with controlled beats and Chinese search terms."""
     source = dict(payload or {})
@@ -101,6 +150,22 @@ def normalize_semantic_payload(payload: Mapping | None) -> dict:
     if has_terms:
         source["beat_fit"] = controlled
         source["search_terms_cn"] = search_terms
+    delivery_fit = _strings(source.get("delivery_fit"))
+    if "delivery_fit" in source:
+        source["delivery_fit"] = [
+            value for value in dict.fromkeys(delivery_fit)
+            if value in CONTROLLED_DELIVERY_FIT
+        ]
+    frequency = str(source.get("usage_frequency") or "").strip()
+    if "usage_frequency" in source and frequency not in CONTROLLED_USAGE_FREQUENCY:
+        source.pop("usage_frequency", None)
+    if "semantic_tags" in source:
+        source["semantic_tags"] = [
+            value for value in dict.fromkeys(_strings(source.get("semantic_tags")))
+            if value in CONTROLLED_SEMANTIC_TAGS
+        ][:3]
+    if "semantic_modes" in source:
+        source["semantic_modes"] = normalize_semantic_modes(source.get("semantic_modes"))
     source.pop("special_tags", None)
     return source
 

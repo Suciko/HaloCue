@@ -7,15 +7,17 @@ AA 的位置模型（由 137 个工程的数据反推确认）：
   - endingPos 是本行结束时移动到的位置；两者不等就是一次移动
   - 下一行该角色的下标 = 上一行的 endingPos
   - 位置 1~5 是立绘位，0 是"无立绘说话位"（旁白/只出声的角色）
-  - 进出场靠 appear：3=登场 1=从左入 2=从右入 6=退场 4=向左退 5=向右退
+  - 进出场靠 appear：3=淡入 1=从右入 2=从左入 6=退场 4=向左退 5=向右退
     进出场的那一行 startingPos == endingPos
 
 所以人物"活起来"靠的是：台上人数变化时重新排布，产生真实的走位。
 """
 
+import itertools
+
 # 台上 N 人时的标准站位。中间优先，两侧对称。
 LAYOUT = {
-    0: [], 1: [3], 2: [2, 4], 3: [1, 3, 5],
+    0: [], 1: [3], 2: [1, 5], 3: [1, 3, 5],
     4: [1, 2, 4, 5], 5: [1, 2, 3, 4, 5],
 }
 
@@ -27,11 +29,22 @@ DISAPPEAR = {"": 6, "退场": 6, "d": 6,
              "右": 5, "向右": 5, "dr": 5}
 
 
+DISTANCE_GAPS = {
+    "intimate": 1,
+    "approaching": 2,
+    "normal": 4,
+    "distant": 4,
+    "remote": 4,
+}
+
+
 class Stage:
     """一个场景内的舞台状态。"""
 
-    def __init__(self, layout=None):
+    def __init__(self, layout=None, profiles=None, semantic_layout=True):
         self.layout = layout or LAYOUT
+        self.profiles = profiles or {}
+        self.semantic_layout = semantic_layout
         self.pos = {}            # ident -> 当前位置 1..5
         self.pinned = {}         # ident -> 用户显式钉死的位置
         self.auto = True         # 自动排布 / 手动站位
@@ -53,6 +66,13 @@ class Stage:
                 return p
         return None
 
+    def can_fit_composition(self, order):
+        """Return whether known portrait footprints fit in one AA frame."""
+        order = list(dict.fromkeys(order))
+        if not order or len(order) > 5:
+            return False
+        return self._semantic_plan(order, (), (), {}) is not None
+
     # ---- 变更
     def leave(self, ident):
         self.pinned.pop(ident, None)
@@ -61,7 +81,7 @@ class Stage:
     def pin(self, ident, p):
         self.pinned[ident] = p
 
-    def plan(self, order, hold=(), entering=()):
+    def plan(self, order, hold=(), entering=(), intent=None):
         """算出目标站位。
 
         order     本行结束时台上角色的期望左右顺序，可以包含还没上台的。
@@ -76,6 +96,24 @@ class Stage:
         order = list(dict.fromkeys(order))
         if not order:
             return {}
+        # Relationship distance is meaningful only for the two portraits that
+        # are actually visible. Single shots stay centered; three-person shots
+        # retain the stable 1/3/5 composition.
+        intent = intent if isinstance(intent, dict) else {}
+        has_portrait_geometry = any(self.profiles.get(ident) for ident in order)
+        layout_intent = intent if len(order) == 2 else {}
+        if (
+            len(order) >= 2
+            and self.semantic_layout
+            and (layout_intent or has_portrait_geometry)
+        ):
+            enhanced = self._semantic_plan(order, hold, entering, layout_intent)
+            if enhanced is not None:
+                return enhanced
+        return self._standard_plan(order, hold, entering)
+
+    def _standard_plan(self, order, hold=(), entering=()):
+        """Original deterministic layout, retained as the compatibility path."""
         entering, hold = set(entering), set(hold)
         occupied_now = set(self.pos.values())
         canon = self.layout.get(len(order), self.layout[5])
@@ -130,6 +168,165 @@ class Stage:
                   for i in target]
         assert len(set(starts)) == len(starts), "起始位置撞了"
         return target
+
+    def _semantic_plan(self, order, hold, entering, intent):
+        """Pick the best legal AA layout for semantic staging intent.
+
+        Slot safety and authored positions remain hard constraints. Narrative
+        distance, portrait geometry and continuity are soft scoring goals, so
+        unusual shots remain possible without making one phrase a rigid map.
+        """
+        entering, hold = set(entering), set(hold)
+        occupied_now = set(self.pos.values())
+        pinned = {}
+        for ident in order:
+            if ident in hold and ident in self.pos:
+                pinned[ident] = self.pos[ident]
+            elif ident in self.pinned:
+                pinned[ident] = self.pinned[ident]
+            elif not self.auto and ident in self.pos:
+                pinned[ident] = self.pos[ident]
+
+        if len(set(pinned.values())) != len(pinned):
+            return None
+
+        candidates = []
+        for slots in itertools.permutations(range(1, 6), len(order)):
+            target = dict(zip(order, slots))
+            if any(target[ident] != slot for ident, slot in pinned.items()):
+                continue
+            if any(target[ident] in occupied_now for ident in entering):
+                continue
+            if not self._portrait_spacing_is_safe(order, target):
+                continue
+            starts = {
+                ident: target[ident] if ident in entering else self.pos.get(ident, target[ident])
+                for ident in order
+            }
+            if not self._portrait_spacing_is_safe(order, starts):
+                continue
+            candidates.append((self._layout_score(order, target, intent), target))
+        if not candidates:
+            return None
+
+        _, target = min(candidates, key=lambda item: item[0])
+        starts = [target[i] if i in entering else self.pos.get(i, target[i]) for i in order]
+        assert len(set(target.values())) == len(target), "目标站位撞了"
+        assert len(set(starts)) == len(starts), "起始位置撞了"
+        return target
+
+    def _portrait_spacing_is_safe(self, order, target):
+        """Reject layouts whose known portrait footprints would overlap."""
+        for left_index, first in enumerate(order):
+            for second in order[left_index + 1:]:
+                first_slot, second_slot = target[first], target[second]
+                if first_slot <= second_slot:
+                    left, right = first, second
+                else:
+                    left, right = second, first
+                left_profile = self.profiles.get(left) or {}
+                right_profile = self.profiles.get(right) or {}
+                required = max(
+                    self._positive_int(left_profile.get("min_slot_gap"), 1),
+                    self._positive_int(right_profile.get("min_slot_gap"), 1),
+                )
+                if abs(first_slot - second_slot) < required:
+                    return False
+        return True
+
+    @staticmethod
+    def _positive_int(value, default):
+        try:
+            return max(default, int(value))
+        except (TypeError, ValueError):
+            return default
+
+    def _layout_score(self, order, target, intent):
+        canon = self.layout.get(len(order), self.layout[5])
+        focus = intent.get("focus_character")
+        reaction = intent.get("reaction_target")
+        pair = []
+        for ident in (focus, reaction):
+            if ident in order and ident not in pair:
+                pair.append(ident)
+        if len(pair) < 2 and len(order) == 2:
+            pair = list(order)
+        elif len(pair) == 1:
+            nearest = min(
+                (ident for ident in order if ident != pair[0]),
+                key=lambda ident: abs(target[ident] - target[pair[0]]),
+                default=None,
+            )
+            if nearest:
+                pair.append(nearest)
+
+        score = 0
+        referenced = {
+            ident for ident in (focus, reaction) if ident
+        }
+        desired_gap = (
+            DISTANCE_GAPS.get(str(intent.get("relation_distance") or ""))
+            if not referenced or referenced <= set(order)
+            else None
+        )
+        if desired_gap and len(pair) == 2:
+            score += abs(abs(target[pair[0]] - target[pair[1]]) - desired_gap) * 30
+
+        # The normal symmetric layout is a preference, not a fixed answer.
+        score += sum(abs(target[ident] - canon[index]) * 2 for index, ident in enumerate(order))
+
+        movers = 0
+        movement = 0
+        for ident in order:
+            if ident in self.pos:
+                delta = abs(target[ident] - self.pos[ident])
+                movement += delta
+                movers += int(delta > 0)
+        score += movers * 7 + movement * 4
+
+        inversions = 0
+        for left_index, left in enumerate(order):
+            for right in order[left_index + 1:]:
+                if target[left] > target[right]:
+                    inversions += 1
+                if left in self.pos and right in self.pos:
+                    before = self.pos[left] - self.pos[right]
+                    after = target[left] - target[right]
+                    if before and after and (before < 0) != (after < 0):
+                        score += 16
+        score += inversions * 5
+
+        for ident in order:
+            slot = target[ident]
+            profile = self.profiles.get(ident) or {}
+            direction = profile.get("face_direction")
+            if direction == "left":
+                score += max(0, 3 - slot) * 5 + abs(slot - 4)
+            elif direction == "right":
+                score += max(0, slot - 3) * 5 + abs(slot - 2)
+            if profile.get("has_weapon") or profile.get("has_wings"):
+                score += min(abs(slot - 1), abs(slot - 5)) * 3
+            if ident == focus:
+                score += abs(slot - 3)
+
+        for left_index, left in enumerate(order):
+            for right in order[left_index + 1:]:
+                if abs(target[left] - target[right]) != 1:
+                    continue
+                left_profile = self.profiles.get(left) or {}
+                right_profile = self.profiles.get(right) or {}
+                if (
+                    left_profile.get("framing") == "closeup"
+                    or right_profile.get("framing") == "closeup"
+                    or left_profile.get("has_weapon")
+                    or right_profile.get("has_weapon")
+                    or left_profile.get("has_wings")
+                    or right_profile.get("has_wings")
+                ):
+                    score += 8
+
+        slots = tuple(target[ident] for ident in order)
+        return score, movers, movement, inversions, slots
 
     def apply(self, target, entering=()):
         """落实站位。返回 {ident: (起点, 终点)}。
