@@ -14,6 +14,7 @@ datas = [
     (str(ROOT / "branding"), "branding"),
     (str(ROOT / "tools" / "spine_web_runtime"), "tools/spine_web_runtime"),
     (str(ROOT / "portrait_layout_hints.json"), "."),
+    (str(ROOT / "character_aliases.json"), "."),
     (str(SEED / "aa_assets.db"), "."),
     (str(SEED / "aa_resources.json"), "."),
     (str(SEED / "aa_config.seed.json"), "."),

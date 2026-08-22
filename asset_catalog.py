@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime, timezone
+import hashlib
 import json
 import math
 import re
@@ -12,6 +13,7 @@ import threading
 from pathlib import Path
 
 import assetdb
+import aa_manifest_catalog
 from asset_models import AssetCandidate
 from face_semantics import normalize_semantic_payload
 
@@ -47,6 +49,8 @@ ALLOWED_MODEL_STATUSES = ("registered", "verified")
 STORY_ASSET_STATUS = "registered"
 _ASSET_SCHEMA_VERSION = "2"
 _MIGRATE_LOCK = threading.RLock()
+_MANIFEST_SYNC_LOCK = threading.RLock()
+_MANIFEST_SYNC_CACHE: dict[tuple[str, str], tuple[str, frozenset[str]]] = {}
 _OFFICIAL_CATALOG_SOURCES = {
     "observed", "verified", "aa_verified", "aap_observed", "official",
     "builtin", "built_in", "database", "library",
@@ -54,6 +58,7 @@ _OFFICIAL_CATALOG_SOURCES = {
 _CUSTOM_CATALOG_SOURCES = {
     "custom", "import", "imported", "导入登记", "overrides", "override",
     "history_import", "historical_import", "local_import",
+    "aa_manifest_custom",
 }
 _LIBRARY_ROLES = {"series_shared", "chapter_only"}
 _SAFE_LABEL_FIELDS = {
@@ -995,6 +1000,175 @@ def library_custom_rows(con):
         row for row in rows
         if _is_story_custom_row(row, _safe_metadata(row["metadata_json"]))
     ]
+
+
+def _manifest_library_scope(aa_data: str | Path) -> str:
+    """Return a stable, non-AA scope used for local manifest-only materials."""
+    return str((Path(aa_data).resolve() / ".halocue-manifest-library").resolve())
+
+
+def _manifest_character_catalog(con, characters):
+    """Apply the same Identifier/Spine matching used by the runtime cast list."""
+    records = {}
+    for row in con.execute(
+        "SELECT ident,name,club,spine,avatar,source FROM character"
+    ):
+        ident = str(row["ident"] or "").strip()
+        if not ident:
+            continue
+        records[ident] = {
+            "ident": ident,
+            "name": str(row["name"] or ""),
+            "club": str(row["club"] or ""),
+            "spine": str(row["spine"] or ""),
+            "avatar": str(row["avatar"] or ""),
+            "source": str(row["source"] or ""),
+            "nface": 0,
+        }
+    merged, _ = aa_manifest_catalog.merge_runtime_catalog(records, [], characters)
+    return merged
+
+
+def _manifest_character_candidate(
+    character: aa_manifest_catalog.AAManifestCharacter,
+    *,
+    roots: tuple[Path, ...],
+):
+    """Validate a manifest Spine bundle without copying or changing AA files."""
+    from asset_validation import validate_spine
+
+    relative = str(character.spine_path or "").replace("\\", "/").strip("/")
+    if not relative or relative.startswith("../") or "/../" in relative:
+        return None
+    for root in roots:
+        try:
+            base = (root / relative).resolve()
+            base.relative_to(root.resolve())
+        except (OSError, ValueError):
+            continue
+        directory = base.parent
+        try:
+            if (
+                not directory.is_dir()
+                or len(tuple(directory.glob("*.skel"))) != 1
+                or len(tuple(directory.glob("*.atlas"))) != 1
+            ):
+                continue
+            result = validate_spine(base, identifier=character.identifier)
+        except (OSError, ValueError, TypeError):
+            continue
+        if result.candidate is not None:
+            return result.candidate
+    return None
+
+
+def sync_manifest_custom_characters(
+    con, *, aa_data: str | Path | None,
+) -> int:
+    """Expose unknown AA manifest characters as local, labelable materials.
+
+    This is deliberately a local catalog overlay.  It never edits the AA
+    manifest, never inserts into the official character tables, and is marked
+    ``manifest_only`` so the material workbench does not offer a misleading
+    history-copy action for a resource already installed in the user's AA.
+    """
+    if not aa_data:
+        return 0
+    data_root = Path(aa_data).resolve()
+    manifest_path = aa_manifest_catalog.manifest_path_for_data(data_root)
+    try:
+        manifest_fingerprint = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    except (AttributeError, OSError):
+        manifest_fingerprint = "missing"
+    database_path = ""
+    for row in con.execute("PRAGMA database_list"):
+        if row[1] == "main":
+            database_path = str(row[2] or "")
+            break
+    scope = _manifest_library_scope(data_root)
+    cache_key = (database_path, scope)
+    with _MANIFEST_SYNC_LOCK:
+        cached = _MANIFEST_SYNC_CACHE.get(cache_key)
+        if cached and cached[0] == manifest_fingerprint:
+            rows = con.execute(
+                "SELECT aa_key,metadata_json FROM asset_install "
+                "WHERE scope=? AND kind='character'",
+                (scope,),
+            ).fetchall()
+            current_keys = frozenset(
+                str(row["aa_key"])
+                for row in rows
+                if _safe_metadata(row["metadata_json"]).get("manifest_only")
+            )
+            if current_keys == cached[1]:
+                return len(current_keys)
+    characters = aa_manifest_catalog.read_characters_for_data(data_root)
+    merged = _manifest_character_catalog(con, characters) if characters else {}
+    roots = tuple(
+        root for root in (data_root / "overrides", data_root)
+        if root.is_dir()
+    )
+    if not roots:
+        return 0
+    synced = 0
+    active_keys: set[str] = set()
+    for character in characters:
+        record = merged.get(character.identifier) or {}
+        if not bool(record.get("user_custom")):
+            continue
+        candidate = _manifest_character_candidate(character, roots=roots)
+        if candidate is None:
+            continue
+        active_keys.add(character.identifier)
+        metadata = {
+            **dict(candidate.metadata),
+            "catalog_source": "aa_manifest_custom",
+            "manifest_only": True,
+            "manifest_bound": True,
+            "user_custom": True,
+            "manifest_identifier": character.identifier,
+        }
+        display_name = (
+            aa_manifest_catalog.to_simplified(character.display_name)
+            or aa_manifest_catalog.to_simplified(character.base_identifier)
+            or character.identifier
+        )
+        upsert_candidate(
+            con,
+            AssetCandidate(
+                kind="character", source_path=candidate.source_path,
+                stem=candidate.stem, aa_key=character.identifier,
+                sha256=candidate.sha256, metadata=metadata,
+            ),
+            scope=scope,
+            status=STORY_ASSET_STATUS,
+            install_path=str(candidate.source_path),
+            display_name=display_name,
+        )
+        synced += 1
+    # Prune only HaloCue's manifest overlay rows. Face labels use their own
+    # identity table and remain available if the same skeleton returns later.
+    stale_rows = con.execute(
+        "SELECT aa_key,metadata_json FROM asset_install WHERE scope=? AND kind='character'",
+        (scope,),
+    ).fetchall()
+    stale_keys = [
+        str(row["aa_key"])
+        for row in stale_rows
+        if _safe_metadata(row["metadata_json"]).get("manifest_only")
+        and str(row["aa_key"]) not in active_keys
+    ]
+    if stale_keys:
+        with con:
+            con.executemany(
+                "DELETE FROM asset_install WHERE scope=? AND kind='character' AND aa_key=?",
+                [(scope, key) for key in stale_keys],
+            )
+    with _MANIFEST_SYNC_LOCK:
+        _MANIFEST_SYNC_CACHE[cache_key] = (
+            manifest_fingerprint, frozenset(active_keys)
+        )
+    return synced
 
 
 def _visual_label_summaries(con) -> dict[tuple[str, str, str], dict[str, int | str]]:

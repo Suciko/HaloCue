@@ -161,6 +161,67 @@ def test_library_excludes_observed_verified_and_bgm_rows(tmp_path):
     }
 
 
+def test_unknown_manifest_character_enters_local_library_for_ai_labeling(tmp_path):
+    """A new AA manifest resource is labelable locally, without becoming a copy."""
+    aa_data = tmp_path / "aa-data"
+    bundle = aa_data / "overrides" / "characters" / "custom-hero"
+    bundle.mkdir(parents=True)
+    spine_base = bundle / "custom-hero"
+    spine_base.with_suffix(".skel").write_bytes(b"4.2.00-custom")
+    spine_base.with_suffix(".atlas").write_text("", encoding="utf-8")
+    manifest = aa_data / "overrides" / "manifest.json"
+    manifest.write_text(json.dumps({"CharacterOverrides": [{
+        "Identifier": "custom-hero", "Name": "自定义凯伊",
+        "Nickname": "本地角色", "SpinePortraitPath": "characters\\custom-hero\\custom-hero",
+    }]}, ensure_ascii=False), encoding="utf-8")
+    before = manifest.read_bytes()
+
+    con = assetdb.connect(tmp_path / "assets.db")
+    asset_catalog.migrate(con)
+    synced = asset_catalog.sync_manifest_custom_characters(con, aa_data=aa_data)
+    assert synced == 1
+
+    row = con.execute(
+        "SELECT * FROM asset_install WHERE kind='character' AND aa_key=?",
+        ("custom-hero",),
+    ).fetchone()
+    assert row is not None
+    metadata = asset_catalog._safe_metadata(row["metadata_json"])
+    assert metadata["manifest_only"] is True
+    assert metadata["catalog_source"] == "aa_manifest_custom"
+    assert manifest.read_bytes() == before
+
+    current = StoryContext(
+        story_token="story", project="Chapter", project_dir=tmp_path / "projects" / "Chapter",
+        save_dir=tmp_path / "saves" / "Chapter", source_path=None,
+        latest_draft_token=None, bgm_default={},
+    )
+    browser = HistoryAssetBrowser(aa_data=aa_data)
+    payload = browser.list_library(con, current_context=current)
+    item = payload["characters"][0]
+    assert item["name"] == "自定义凯伊"
+    assert item["manifest_only"] is True
+    assert item["user_custom"] is True
+    assert item["copies"] == []
+    assert item["details"]["face_count"] == 0
+    assert str(tmp_path) not in json.dumps(payload, ensure_ascii=False)
+
+    target = asset_catalog.library_character_analysis_target(
+        con, aa_key="custom-hero", sha256=row["sha256"]
+    )
+    assert target["source"] == str(bundle)
+
+    manifest.write_text(
+        json.dumps({"CharacterOverrides": []}, ensure_ascii=False), encoding="utf-8"
+    )
+    assert asset_catalog.sync_manifest_custom_characters(con, aa_data=aa_data) == 0
+    assert con.execute(
+        "SELECT 1 FROM asset_install WHERE kind='character' AND aa_key=?",
+        ("custom-hero",),
+    ).fetchone() is None
+    con.close()
+
+
 def test_library_accepts_legacy_registered_rows_without_a_catalog_source(tmp_path):
     """Dropping legacy source-less registrations would empty upgraded material libraries."""
     con, current, browser = library_fixture(tmp_path)

@@ -422,7 +422,11 @@
       button.dataset.assetKey = item._assetKey;
       button.appendChild(make('b', 'asset-name', item.name || String(item.aa_key || '未命名素材')));
       button.appendChild(make('span', 'asset-kind', kindLabel(item.kind)));
-      button.appendChild(make('span', 'asset-state', item.registered_in_current ? '本章已登记' : '未登记'));
+      button.appendChild(make(
+        'span', 'asset-state', item.manifest_only
+          ? 'AA 本机自定义'
+          : (item.registered_in_current ? '本章已登记' : '未登记')
+      ));
       button.appendChild(make('span', 'asset-auxiliary', auxiliary(item)));
       const imported = formatLibraryTime(item.imported_at);
       const chapter = String(item.last_used_chapter || '').trim();
@@ -465,46 +469,56 @@
     else if (this.detail.insertBefore) this.detail.insertBefore(back, this.detail.firstChild);
     else this.detail.appendChild(back);
     const actions = make('section', 'asset-detail-actions');
+    if (item.manifest_only) {
+      const note = make(
+        'p', 'asset-action-status',
+        '这是当前 AA 中的本机自定义骨骼。它不会修改 manifest，也不会进入公共数据库；可以直接在这里运行 AI 表情标注。'
+      );
+      this.detail.appendChild(note);
+    }
     const applyMode = Boolean(
       this.context.background_target && item.kind === 'background'
     );
-    const primary = make(
-      'button', '', applyMode
-        ? (item.registered_in_current ? '应用到当前场景' : '复制并应用到当前场景')
-        : (item.registered_in_current ? '本章已登记' : '复制到当前剧情')
-    );
-    primary.type = 'button';
-    primary.disabled = Boolean(item.registered_in_current && !applyMode);
-    const actionStatus = make('p', 'asset-action-status');
-    actionStatus.setAttribute('aria-live', 'polite');
-    primary.addEventListener('click', async function () {
-      if (!applyMode) return this.transfer.copy(item);
-      const idleLabel = item.registered_in_current
-        ? '应用到当前场景'
-        : '复制并应用到当前场景';
-      primary.disabled = true;
-      primary.textContent = '正在应用…';
-      actionStatus.textContent = '正在把这个背景应用到当前场景。';
-      actionStatus.classList.remove('is-error');
-      try {
-        await this.applyBackground(item);
-      } catch (error) {
-        const raw = String(error && (error.e || error.message) || '背景未能应用到当前场景，请重试。');
-        const message = error && error.status === 404 || raw === 'not found'
-          ? '本地服务版本较旧，请重启程序后再试。'
-          : raw;
-        primary.disabled = false;
-        primary.textContent = '重新' + idleLabel;
-        actionStatus.textContent = '应用失败：' + message;
-        actionStatus.classList.add('is-error');
-      }
-    }.bind(this));
-    actions.appendChild(primary);
-    const manage = make('button', 'ghost', '管理副本');
-    manage.type = 'button';
-    manage.disabled = !item.preview_token;
-    manage.addEventListener('click', function () { this.copies.open(item); }.bind(this));
-    actions.appendChild(manage);
+    let actionStatus = null;
+    if (!item.manifest_only) {
+      const primary = make(
+        'button', '', applyMode
+          ? (item.registered_in_current ? '应用到当前场景' : '复制并应用到当前场景')
+          : (item.registered_in_current ? '本章已登记' : '复制到当前剧情')
+      );
+      primary.type = 'button';
+      primary.disabled = Boolean(item.registered_in_current && !applyMode);
+      actionStatus = make('p', 'asset-action-status');
+      actionStatus.setAttribute('aria-live', 'polite');
+      primary.addEventListener('click', async function () {
+        if (!applyMode) return this.transfer.copy(item);
+        const idleLabel = item.registered_in_current
+          ? '应用到当前场景'
+          : '复制并应用到当前场景';
+        primary.disabled = true;
+        primary.textContent = '正在应用…';
+        actionStatus.textContent = '正在把这个背景应用到当前场景。';
+        actionStatus.classList.remove('is-error');
+        try {
+          await this.applyBackground(item);
+        } catch (error) {
+          const raw = String(error && (error.e || error.message) || '背景未能应用到当前场景，请重试。');
+          const message = error && error.status === 404 || raw === 'not found'
+            ? '本地服务版本较旧，请重启程序后再试。'
+            : raw;
+          primary.disabled = false;
+          primary.textContent = '重新' + idleLabel;
+          actionStatus.textContent = '应用失败：' + message;
+          actionStatus.classList.add('is-error');
+        }
+      }.bind(this));
+      actions.appendChild(primary);
+      const manage = make('button', 'ghost', '管理副本');
+      manage.type = 'button';
+      manage.disabled = !item.preview_token;
+      manage.addEventListener('click', function () { this.copies.open(item); }.bind(this));
+      actions.appendChild(manage);
+    }
     if (item.kind === 'character') {
       const faces = make('button', 'ghost', '打开表情标注');
       faces.type = 'button';
@@ -515,8 +529,8 @@
       actions.appendChild(faces);
     }
     this.detail.appendChild(actions);
-    if (applyMode) this.detail.appendChild(actionStatus);
-    this.renderProfileEditor(item);
+    if (applyMode && actionStatus) this.detail.appendChild(actionStatus);
+    if (!item.manifest_only) this.renderProfileEditor(item);
     if (item.kind === 'background') this.renderBackgroundLabelEditor(item);
   };
 

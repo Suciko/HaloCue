@@ -47,6 +47,7 @@ def write_package_self_test(output_path: str | os.PathLike) -> int:
         "webview.platforms.edgechromium",
         "fmod_toolkit",
         "archspec",
+        "opencc",
         "clr",
         "annotation_scene_planner",
         "annotation_agent",
@@ -70,6 +71,7 @@ def write_package_self_test(output_path: str | os.PathLike) -> int:
     required_resources = (
         "ui.html",
         "portrait_layout_hints.json",
+        "character_aliases.json",
         "js/spine-webgl-3.8.95.js",
         "js/spine-webgl-4.2.119.min.js",
         "tools/spine_web_runtime/spine-webgl-4.2.119.min.js",

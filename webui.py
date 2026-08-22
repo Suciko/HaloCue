@@ -1822,10 +1822,12 @@ def list_characters(q="", limit=400):
             if avatar and not avatar_key:
                 avatar_key = str(r["ident"])
             out.append({
-                "ident": r["ident"], "name": r["name"] or r["ident"],
+                "ident": r["ident"],
+                "name": r.get("preferred_name") or r["name"] or r["ident"],
                 "club": r["club"], "spine": spine_value,
                 "faces": r["nface"], "source": r["source"],
                 "manifest_bound": bool(r.get("manifest_bound")),
+                "user_custom": bool(r.get("user_custom")),
                 "avatar": (
                     "/thumb/av/" + quote(avatar_key, safe="")
                     if avatar and avatar_key else ""
@@ -1841,6 +1843,7 @@ def list_characters(q="", limit=400):
             )
         out.sort(key=lambda item: (
             0 if str(item.get("source") or "").casefold() not in {"overrides", "custom", "current_story_custom"} else 1,
+            aa_manifest_catalog.has_outfit_suffix(item.get("ident")),
             variant_rank(item), str(item.get("name") or "").casefold(),
         ))
         return out
@@ -2202,9 +2205,18 @@ def guess_mapping(speakers):
     }
     out = {}
 
+    def row_value(row, key, default=""):
+        if isinstance(row, dict):
+            return row.get(key, default)
+        try:
+            return row[key]
+        except (IndexError, KeyError, TypeError):
+            return default
+
     def portrait_mapping(who, row, *, learned=False):
         value = {"kind": "portrait", "id": row["ident"],
-                 "name": row["name"] or who, "club": row["club"] or "",
+                 "name": row_value(row, "preferred_name") or row["name"] or who,
+                 "club": row["club"] or "",
                  "spine": row["spine"] or ""}
         if learned:
             value["learned"] = True
@@ -2216,6 +2228,7 @@ def guess_mapping(speakers):
             suffix = stem[len("characterspine_"):] if stem.startswith("characterspine_") else ""
             return (
                 item["ident"] != who,
+                aa_manifest_catalog.has_outfit_suffix(item["ident"]),
                 0 if suffix and "_" not in suffix else 2 if suffix.endswith(("_noweapon", "_n", "_nf")) else 1,
                 not bool(item.get("spine")),
                 len(item["ident"]),
@@ -2233,39 +2246,30 @@ def guess_mapping(speakers):
             continue
         # 1. 名字/标识完全一致。全局 overrides 里的服装变体仍需让已学习的
         # 官方本体映射优先；当前剧情自定义素材会在预检拿到 scope 后单独提升。
+        identifier_rows = [
+            item for item in catalog_rows if item["ident"] == w
+        ]
+        identifier_row = choose(identifier_rows, w)
+        if identifier_row is not None and not assetdb._looks_placeholder(
+            identifier_row["name"]
+        ):
+            out[w] = portrait_mapping(w, identifier_row)
+            continue
         exact_rows = [
             item for item in catalog_rows
-            if item["name"] == w or item["ident"] == w
+            if item["name"] == w
         ]
         row = choose(exact_rows, w)
         exact_valid = row is not None and not assetdb._looks_placeholder(row["name"])
         if exact_valid and row["source"] not in {"overrides", "aa_manifest"}:
             if not row.get("manifest_bound"):
                 row = _preferred_variant(con, row)
+                row = catalog_by_id.get(str(row["ident"]), row)
             out[w] = portrait_mapping(w, row)
             continue
-        # 2. 学过的别名（portrait 别名已过滤占位垃圾）
-        a = assetdb.best_alias(con, w)
-        if exact_valid and a is not None and a["kind"] != "portrait":
-            a = None
-        if a:
-            if a["kind"] == "narrator":
-                out[w] = {"kind": "narrator"}
-                continue
-            crow = catalog_by_id.get(str(a["ident"]))
-            if crow is not None and not assetdb._looks_placeholder(crow["name"]):
-                if not crow.get("manifest_bound"):
-                    crow = _preferred_variant(con, crow)
-                out[w] = portrait_mapping(w, crow, learned=True)
-                out[w]["name"] = w
-                continue
-            # voice 角色可能没有名字（无头像的语音位），仍按语音映射
-            if a["kind"] == "voice":
-                out[w] = {"kind": "voice", "id": a["ident"],
-                          "name": w, "club": "", "spine": "", "learned": True}
-                continue
-        # 3. AA manifest and database reconciliation aliases.  These are
-        # read-only runtime facts, including pairs such as 乃爱/诺亚.
+        # 2. Regional translation aliases group a person before selecting an
+        # outfit. A plain alias prefers the default portrait; an explicit
+        # outfit identifier was already handled above.
         alias_ids = {
             identifier
             for alias, identifier, kind, _uses in catalog_aliases
@@ -2280,8 +2284,27 @@ def guess_mapping(speakers):
         alias_row = choose(alias_rows, w)
         if alias_row is not None and not assetdb._looks_placeholder(alias_row["name"]):
             out[w] = portrait_mapping(w, alias_row, learned=True)
-            out[w]["name"] = w
             continue
+        # 3. 学过的别名（portrait 别名已过滤占位垃圾）
+        a = assetdb.best_alias(con, w)
+        if exact_valid and a is not None and a["kind"] != "portrait":
+            a = None
+        if a:
+            if a["kind"] == "narrator":
+                out[w] = {"kind": "narrator"}
+                continue
+            crow = catalog_by_id.get(str(a["ident"]))
+            if crow is not None and not assetdb._looks_placeholder(crow["name"]):
+                if not crow.get("manifest_bound"):
+                    crow = _preferred_variant(con, crow)
+                    crow = catalog_by_id.get(str(crow["ident"]), crow)
+                out[w] = portrait_mapping(w, crow, learned=True)
+                continue
+            # voice 角色可能没有名字（无头像的语音位），仍按语音映射
+            if a["kind"] == "voice":
+                out[w] = {"kind": "voice", "id": a["ident"],
+                          "name": w, "club": "", "spine": "", "learned": True}
+                continue
         # 4. Simplified/Traditional spelling equivalence for native AA names.
         normalized_rows = [
             item for item in catalog_rows

@@ -58,6 +58,30 @@ def _configure_preview_store(tmp_path, monkeypatch):
     return store
 
 
+def test_stale_preview_manifest_is_parsed_only_once_per_file_revision(
+    tmp_path, monkeypatch
+):
+    store = OfficialPreviewIndex(tmp_path / "previews")
+    store.root.mkdir(parents=True)
+    store.manifest_path.write_text(
+        '{"schema_version":2,"records":[]}', encoding="utf-8"
+    )
+    original = Path.read_text
+    reads = 0
+
+    def counted(path, *args, **kwargs):
+        nonlocal reads
+        if path == store.manifest_path:
+            reads += 1
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counted)
+
+    assert store.resolve("background", "BG_One") is None
+    assert store.resolve("background", "BG_Two") is None
+    assert reads == 1
+
+
 def test_custom_background_preview_precedes_official(tmp_path, monkeypatch):
     _configure_preview_store(tmp_path, monkeypatch)
     custom = tmp_path / "overrides" / "bgs" / "BG_Classroom.png"

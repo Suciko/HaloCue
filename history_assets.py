@@ -306,8 +306,13 @@ class HistoryAssetBrowser:
     def list_library(self, con, *, current_context: StoryContext | None) -> dict:
         """Aggregate registered custom copies and issue process-local workbench tokens."""
         with self._lock:
+            # Unknown characters from the active AA manifest are local
+            # materials too. Sync only their fingerprint into the user DB;
+            # the AA manifest and its files remain untouched.
+            asset_catalog.sync_manifest_custom_characters(con, aa_data=self.aa_data)
             self._library_db_path = self._catalog_database_path(con)
             current_scope = str(current_context.project_dir) if current_context else ""
+            manifest_scope = asset_catalog._manifest_library_scope(self.aa_data)
             if current_context is not None:
                 self._library_story_token = current_context.story_token
                 self._library_story_scope = current_scope
@@ -320,10 +325,39 @@ class HistoryAssetBrowser:
             }
             visual_counts = asset_catalog._visual_label_summaries(con)
             for row in asset_catalog.library_custom_rows(con):
+                metadata = asset_catalog._safe_metadata(row["metadata_json"])
+                if metadata.get("manifest_only"):
+                    if str(row["scope"] or "") != manifest_scope:
+                        continue
+                    key = (str(row["kind"]), str(row["aa_key"]), str(row["sha256"]))
+                    item = groups.setdefault(key, {
+                        "kind": key[0],
+                        "aa_key": asset_catalog._numeric_key(key[1]),
+                        "sha256": key[2],
+                        "name": asset_catalog._safe_catalog_text(
+                            row["display_name"], fallback=key[1]
+                        ),
+                        "asset_role": "chapter_only",
+                        "series_name": "",
+                        "details": asset_catalog._library_item_details(
+                            key[0], metadata
+                        ),
+                        "registered_in_current": True,
+                        "manifest_only": True,
+                        "manifest_bound": True,
+                        "user_custom": True,
+                        "preview_available": False,
+                        "preview_token": "",
+                        "copies": [],
+                    })
+                    asset_catalog._merge_visual_label_summary(
+                        item["details"], kind=key[0], aa_key=key[1],
+                        metadata=metadata, summaries=visual_counts,
+                    )
+                    continue
                 copy = self._library_copy_from_row(row)
                 key = (copy.kind, copy.aa_key, copy.sha256)
                 profile = profiles.get(key)
-                metadata = asset_catalog._safe_metadata(row["metadata_json"])
                 item = groups.setdefault(key, {
                     "kind": copy.kind,
                     "aa_key": asset_catalog._numeric_key(copy.aa_key),

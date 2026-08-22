@@ -29,8 +29,13 @@ def test_manifest_reader_uses_last_duplicate_without_modifying_source(tmp_path):
     assert manifest.read_bytes() == before
 
 
-def test_runtime_catalog_learns_non_glyph_translation_from_same_identifier():
+def test_runtime_catalog_groups_translation_aliases_without_merging_outfits():
     records = {
+        "노아": {
+            "ident": "노아", "name": "乃愛", "club": "研讨会",
+            "spine": r"UIs\03_Scenario\02_Character\CharacterSpine_CH0095",
+            "avatar": "", "source": "official", "nface": 8,
+        },
         "诺亚（睡衣）": {
             "ident": "诺亚（睡衣）", "name": "诺亚", "club": "研讨会",
             "spine": r"characters\CH0285_spr\CH0285_spr",
@@ -48,7 +53,14 @@ def test_runtime_catalog_learns_non_glyph_translation_from_same_identifier():
 
     assert merged["诺亚（睡衣）"]["name"] == "诺亚"
     assert merged["诺亚（睡衣）"]["manifest_bound"] is True
-    assert any(alias == "乃爱" and ident == "诺亚（睡衣）" for alias, ident, _, _ in aliases)
+    assert merged["诺亚（睡衣）"]["user_custom"] is False
+    assert merged["노아"]["preferred_name"] == "诺亚"
+    assert merged["诺亚（睡衣）"]["preferred_name"] == "诺亚"
+    targets = {
+        ident for alias, ident, _, _ in aliases
+        if aa_manifest_catalog.name_key(alias) == aa_manifest_catalog.name_key("乃爱")
+    }
+    assert targets >= {"노아", "诺亚（睡衣）"}
 
 
 def test_runtime_catalog_rekeys_unique_spine_match_and_preserves_face_count():
@@ -70,6 +82,7 @@ def test_runtime_catalog_rekeys_unique_spine_match_and_preserves_face_count():
 
     assert merged["爱莉（鬼屋）"]["catalog_ident"] == "爱莉（鬼屋装扮）"
     assert merged["爱莉（鬼屋）"]["nface"] == 9
+    assert merged["爱莉（鬼屋）"]["user_custom"] is False
     alias_keys = {
         aa_manifest_catalog.name_key(alias)
         for alias, ident, _, _ in aliases
@@ -119,11 +132,44 @@ def test_unknown_manifest_character_remains_selectable_without_invented_faces():
     index = aa_manifest_catalog.merge_model_index({"characters": []}, manifest)
 
     assert merged["新人物"]["source"] == "aa_manifest"
+    assert merged["新人物"]["user_custom"] is True
     assert merged["新人物"]["nface"] == 0
     assert aliases[0][1] == "新人物"
     assert index["characters"][0]["faces"] == []
+    assert index["characters"][0]["user_custom"] is True
+
+
+def test_user_rename_does_not_turn_known_resource_into_custom_content():
+    records = {
+        "노아": {
+            "ident": "노아", "name": "乃愛", "club": "研讨会",
+            "spine": "CharacterSpine_CH0095", "avatar": "",
+            "source": "official", "nface": 9,
+        }
+    }
+    manifest = [aa_manifest_catalog.AAManifestCharacter(
+        "노아", "我自己改的诺亚名", "研讨会",
+        "CharacterSpine_CH0095", "",
+    )]
+
+    merged, _ = aa_manifest_catalog.merge_runtime_catalog(records, [], manifest)
+
+    assert merged["노아"]["manifest_bound"] is True
+    assert merged["노아"]["user_custom"] is False
+    assert merged["노아"]["manifest_name"] == "我自己改的诺亚名"
 
 
 def test_name_key_normalizes_traditional_chinese_and_parentheses():
     assert aa_manifest_catalog.name_key(" 愛麗絲 ") == "爱丽丝"
     assert aa_manifest_catalog.name_key("诺亚（睡衣）") == aa_manifest_catalog.name_key("諾亞(睡衣)")
+
+
+def test_bundled_alias_index_contains_regional_name_pairs():
+    identities = {
+        item.canonical_name: set(item.aliases)
+        for item in aa_manifest_catalog.load_character_identities()
+    }
+
+    assert len(identities) >= 100
+    assert identities["生盐诺亚"] >= {"诺亚", "乃爱"}
+    assert identities["黑见芹香"] >= {"黑见芹香", "茜香"}

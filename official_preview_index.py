@@ -112,6 +112,7 @@ class OfficialPreviewIndex:
         self.manifest_path = self.root / "manifest.json"
         self._manifest_cache_stamp: tuple[int, int] | None = None
         self._manifest_cache: dict | None = None
+        self._record_cache: dict[tuple[str, str], dict] = {}
 
     def _read_manifest(self) -> dict | None:
         try:
@@ -125,7 +126,13 @@ class OfficialPreviewIndex:
         except (OSError, ValueError):
             self._manifest_cache_stamp = None
             self._manifest_cache = None
+            self._record_cache = {}
             return None
+        # Cache negative validation results for this exact file revision too.
+        # Otherwise a stale schema is parsed once for every asset candidate.
+        self._manifest_cache_stamp = stamp
+        self._manifest_cache = None
+        self._record_cache = {}
         if not isinstance(manifest, dict):
             return None
         if manifest.get("schema_version") != self.SCHEMA_VERSION:
@@ -134,6 +141,11 @@ class OfficialPreviewIndex:
             return None
         self._manifest_cache_stamp = stamp
         self._manifest_cache = manifest
+        self._record_cache = {
+            (str(row.get("kind") or ""), str(row.get("normalized_key") or "")): row
+            for row in manifest["records"]
+            if isinstance(row, dict)
+        }
         return manifest
 
     @staticmethod
@@ -181,6 +193,7 @@ class OfficialPreviewIndex:
         os.replace(temporary, self.manifest_path)
         self._manifest_cache_stamp = None
         self._manifest_cache = None
+        self._record_cache = {}
 
     def _manifest_payload(
         self,
@@ -427,15 +440,7 @@ class OfficialPreviewIndex:
         manifest = self._read_manifest()
         if manifest is None:
             return None
-        row = next(
-            (
-                item
-                for item in manifest["records"]
-                if item.get("kind") == kind
-                and item.get("normalized_key") == normalized
-            ),
-            None,
-        )
+        row = self._record_cache.get((kind, normalized))
         if row is None:
             return None
         try:

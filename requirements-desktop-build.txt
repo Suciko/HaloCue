@@ -4,3 +4,4 @@ pyinstaller==6.22.0
 pillow==12.3.0
 UnityPy==1.25.3
 anthropic==0.121.0
+opencc-python-reimplemented==0.1.7

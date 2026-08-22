@@ -191,7 +191,9 @@ def test_frozen_user_state_reads_plain_aris_from_release_overlay(tmp_path, monke
     assert webui.guess_mapping([{"who": "爱丽丝"}])["爱丽丝"]["id"] == "아리스"
 
 
-def test_manifest_translation_alias_maps_to_users_actual_identifier(tmp_path, monkeypatch):
+def test_plain_translation_alias_prefers_default_and_explicit_outfit_stays_outfit(
+    tmp_path, monkeypatch
+):
     data = tmp_path / "data"
     manifest = data / "overrides" / "manifest.json"
     manifest.parent.mkdir(parents=True)
@@ -204,18 +206,58 @@ def test_manifest_translation_alias_maps_to_users_actual_identifier(tmp_path, mo
     con = assetdb.connect(tmp_path / "assets.db")
     con.execute(
         "INSERT INTO character(ident,name,club,spine,source) VALUES(?,?,?,?,?)",
+        ("노아", "乃愛", "研讨会",
+         r"UIs\03_Scenario\02_Character\CharacterSpine_CH0095", "official"),
+    )
+    con.execute(
+        "INSERT INTO character(ident,name,club,spine,source) VALUES(?,?,?,?,?)",
         ("诺亚（睡衣）", "诺亚", "研讨会",
          r"characters\CH0285_spr\CH0285_spr", "overrides"),
     )
     con.commit()
     monkeypatch.setitem(webui.CFG, "aa_data", str(data))
     monkeypatch.setattr(webui, "db", lambda: con)
+    monkeypatch.setattr(webui, "_ensure_official_character_catalog", lambda: None)
+    before = manifest.read_bytes()
+
+    mapping = webui.guess_mapping([{"who": "乃爱"}])["乃爱"]
+    explicit = webui.guess_mapping([{"who": "诺亚（睡衣）"}])["诺亚（睡衣）"]
+    rows = webui.list_characters("诺亚")
+
+    assert mapping["kind"] == "portrait"
+    assert mapping["id"] == "노아"
+    assert mapping["name"] == "诺亚"
+    assert mapping["spine"].endswith("CharacterSpine_CH0095")
+    assert explicit["id"] == "诺亚（睡衣）"
+    assert explicit["name"] == "诺亚"
+    assert explicit["spine"].endswith(r"诺亚（睡衣）\CH0285_spr")
+    assert {row["ident"] for row in rows} >= {"노아", "诺亚（睡衣）"}
+    assert rows[0]["ident"] == "노아"
+    assert manifest.read_bytes() == before
+
+
+def test_regional_alias_ignores_stale_learned_outfit_choice(tmp_path, monkeypatch):
+    con = assetdb.connect(tmp_path / "assets.db")
+    con.execute(
+        "INSERT INTO character(ident,name,spine,source) VALUES(?,?,?,?)",
+        ("노아", "乃愛", "CharacterSpine_CH0095", "official"),
+    )
+    con.execute(
+        "INSERT INTO character(ident,name,spine,source) VALUES(?,?,?,?)",
+        ("诺亚（睡衣）", "诺亚", "CH0285_spr", "overrides"),
+    )
+    con.execute(
+        "INSERT INTO name_alias(script_name,ident,kind,uses) VALUES(?,?,?,?)",
+        ("乃爱", "诺亚（睡衣）", "portrait", 99),
+    )
+    con.commit()
+    monkeypatch.setitem(webui.CFG, "aa_data", None)
+    monkeypatch.setattr(webui, "db", lambda: con)
 
     mapping = webui.guess_mapping([{"who": "乃爱"}])["乃爱"]
 
-    assert mapping["kind"] == "portrait"
-    assert mapping["id"] == "诺亚（睡衣）"
-    assert mapping["spine"].endswith(r"诺亚（睡衣）\CH0285_spr")
+    assert mapping["id"] == "노아"
+    assert mapping["name"] == "诺亚"
 
 
 def test_manifest_outfit_does_not_capture_learned_plain_character(tmp_path, monkeypatch):

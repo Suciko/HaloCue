@@ -1,0 +1,1030 @@
+{
+  "version": 1,
+  "source_files": 102,
+  "normalized_source_files": 1,
+  "characters": [
+    {
+      "canonical_name": "一之濑明日奈",
+      "aliases": [
+        "一之瀨明日奈",
+        "明日奈",
+        "一之瀬アスナ",
+        "Ichinose Asuna"
+      ]
+    },
+    {
+      "canonical_name": "下仓惠",
+      "aliases": [
+        "惠",
+        "下倉惠",
+        "下倉 メグ",
+        "メグ",
+        "Shimokura Megu",
+        "Megu",
+        "温泉开发部现场班长"
+      ]
+    },
+    {
+      "canonical_name": "下江小春",
+      "aliases": [
+        "小春",
+        "下江コハル",
+        "Shimoe Koharu"
+      ]
+    },
+    {
+      "canonical_name": "丹花伊吹",
+      "aliases": [
+        "伊吹",
+        "Tanga Ibuki",
+        "丹花イブキ",
+        "탄가 이부키",
+        "Ibuki",
+        "イブキ",
+        "이부키"
+      ]
+    },
+    {
+      "canonical_name": "久田泉奈",
+      "aliases": [
+        "泉奈",
+        "久田伊树菜",
+        "久田伊樹菜",
+        "伊树菜",
+        "伊樹菜",
+        "久田イズナ",
+        "Kuda Izuna",
+        "이즈나"
+      ]
+    },
+    {
+      "canonical_name": "乙花堇",
+      "aliases": [
+        "堇",
+        "乙花スミレ",
+        "스미레",
+        "乙花堇",
+        "乙花堇（泳装）",
+        "训练部部长",
+        "指导员",
+        "Otahana Sumire",
+        "Sumire"
+      ]
+    },
+    {
+      "canonical_name": "仲正一花",
+      "aliases": [
+        "一花",
+        "仲正伊知花",
+        "仲正イチカ",
+        "Nakamasa Ichika",
+        "이치카"
+      ]
+    },
+    {
+      "canonical_name": "伊草遥香",
+      "aliases": [
+        "遥香",
+        "遙香",
+        "伊草遙香",
+        "伊草ハルカ",
+        "Igusa Haruka"
+      ]
+    },
+    {
+      "canonical_name": "伊落玛丽",
+      "aliases": [
+        "玛丽",
+        "伊落マリー",
+        "Iochi Mari"
+      ]
+    },
+    {
+      "canonical_name": "冰室濑名",
+      "aliases": [
+        "濑名",
+        "氷室瀬奈",
+        "氷室 セナ",
+        "セナ",
+        "Himuro Sena",
+        "Sena",
+        "急救医学部部长"
+      ]
+    },
+    {
+      "canonical_name": "剑先鹤城",
+      "aliases": [
+        "鹤城",
+        "剑先弦生",
+        "弦生",
+        "劍先弦生",
+        "剣先ツルギ",
+        "Kenzaki Tsurugi"
+      ]
+    },
+    {
+      "canonical_name": "勘解由小路紫",
+      "aliases": [
+        "紫",
+        "勘解由小路ユカリ",
+        "유카리",
+        "Kadenokouji Yukari"
+      ]
+    },
+    {
+      "canonical_name": "十六夜野宫",
+      "aliases": [
+        "野宫",
+        "野乃美",
+        "十六夜野乃美",
+        "Nonomi",
+        "ノノミ"
+      ]
+    },
+    {
+      "canonical_name": "古关忧",
+      "aliases": [
+        "忧",
+        "古関忧",
+        "古関憂",
+        "古関ウイ",
+        "ウイ",
+        "Kozeki Ui"
+      ]
+    },
+    {
+      "canonical_name": "各务千寻",
+      "aliases": [
+        "千寻",
+        "各務千尋",
+        "各務 チヒロ",
+        "チヒロ",
+        "Kagami Chihiro",
+        "Chihiro",
+        "贝里塔斯副部长"
+      ]
+    },
+    {
+      "canonical_name": "合欢垣吹雪",
+      "aliases": [
+        "吹雪",
+        "合欢垣",
+        "Fubuki",
+        "Nemugaki Fubuki"
+      ]
+    },
+    {
+      "canonical_name": "和乐知世",
+      "aliases": [
+        "知世",
+        "和乐千世",
+        "千世",
+        "和樂知世",
+        "和楽チセ",
+        "Waraku Chise",
+        "치세"
+      ]
+    },
+    {
+      "canonical_name": "和泉元英美",
+      "aliases": [
+        "英美",
+        "Eimi",
+        "에이미"
+      ]
+    },
+    {
+      "canonical_name": "圣园未花",
+      "aliases": [
+        "圣园弥香",
+        "弥香",
+        "Mika",
+        "咪卡"
+      ]
+    },
+    {
+      "canonical_name": "天童凯伊",
+      "aliases": [
+        "Kei",
+        "Key",
+        "＜Key＞",
+        "凯伊",
+        "柯伊",
+        "天童ケイ"
+      ]
+    },
+    {
+      "canonical_name": "天童爱丽丝",
+      "aliases": [
+        "爱丽丝",
+        "AL-1S"
+      ]
+    },
+    {
+      "canonical_name": "天见和香",
+      "aliases": [
+        "和香",
+        "天見和香",
+        "天見ノドカ",
+        "노도카",
+        "Nodoka",
+        "227号特别班",
+        "望远镜少女"
+      ]
+    },
+    {
+      "canonical_name": "天雨亚子",
+      "aliases": [
+        "亚子",
+        "天雨亞子",
+        "亞子",
+        "天雨アコ",
+        "Amau Ako"
+      ]
+    },
+    {
+      "canonical_name": "奥空绫音",
+      "aliases": [
+        "绫音",
+        "Ayane",
+        "Abydos 对策委员会书记"
+      ]
+    },
+    {
+      "canonical_name": "宇泽澪纱",
+      "aliases": [
+        "澪纱",
+        "宇沢澪纱",
+        "宇沢澪紗",
+        "宇沢レイサ",
+        "宇泽玲纱",
+        "宇泽丽莎",
+        "レイサ",
+        "Uzawa Reisa",
+        "Reisa"
+      ]
+    },
+    {
+      "canonical_name": "安守实里",
+      "aliases": [
+        "安守實里",
+        "安守ミノリ",
+        "实里",
+        "實里",
+        "미노리",
+        "Yasumori Minori",
+        "Minori"
+      ]
+    },
+    {
+      "canonical_name": "室笠朱音",
+      "aliases": [
+        "朱音",
+        "阿卡内"
+      ]
+    },
+    {
+      "canonical_name": "小涂真纪",
+      "aliases": [
+        "真纪",
+        "小涂真紀",
+        "小塗真紀",
+        "小塗マキ",
+        "Maki Konuri",
+        "Konuri Maki"
+      ]
+    },
+    {
+      "canonical_name": "小钩晴",
+      "aliases": [
+        "晴",
+        "Hare"
+      ]
+    },
+    {
+      "canonical_name": "小鸟游星野",
+      "aliases": [
+        "星野",
+        "小鸟游星野",
+        "Hoshino",
+        "阿拜多斯的大叔",
+        "大叔"
+      ]
+    },
+    {
+      "canonical_name": "尾刃环奈",
+      "aliases": [
+        "环奈",
+        "尾刃環奈",
+        "環奈",
+        "尾刃康娜",
+        "康娜",
+        "尾刃カンナ",
+        "カンナ",
+        "오가타 칸나",
+        "칸나",
+        "Ogata Kanna",
+        "Kanna",
+        "公安局长",
+        "公安局的狂犬"
+      ]
+    },
+    {
+      "canonical_name": "戒野美咲",
+      "aliases": [
+        "美咲",
+        "戒野ミサキ",
+        "Imashino Misaki",
+        "Misaki"
+      ]
+    },
+    {
+      "canonical_name": "才羽桃井",
+      "aliases": [
+        "桃井",
+        "Momoi"
+      ]
+    },
+    {
+      "canonical_name": "才羽绿",
+      "aliases": [
+        "绿",
+        "小绿",
+        "Midori"
+      ]
+    },
+    {
+      "canonical_name": "早濑优香",
+      "aliases": [
+        "优香"
+      ]
+    },
+    {
+      "canonical_name": "明星日鞠",
+      "aliases": [
+        "明星阳葵",
+        "日鞠",
+        "阳葵"
+      ]
+    },
+    {
+      "canonical_name": "春原心菜",
+      "aliases": [
+        "心菜",
+        "心菜教官",
+        "心菜酱",
+        "春原ココナ",
+        "코코나",
+        "Sunohara Kokona"
+      ]
+    },
+    {
+      "canonical_name": "春原瞬",
+      "aliases": [
+        "瞬",
+        "瞬（幼年）",
+        "幼年瞬",
+        "小瞬",
+        "雪玲",
+        "シュエリン",
+        "슈에링",
+        "Shunling",
+        "春原旬",
+        "春原シュン",
+        "Sunohara Shun"
+      ]
+    },
+    {
+      "canonical_name": "春日椿",
+      "aliases": [
+        "椿",
+        "春日ツバキ",
+        "Kasuga Tsubaki",
+        "츠바키"
+      ]
+    },
+    {
+      "canonical_name": "普拉娜",
+      "aliases": [
+        "星奈",
+        "黑色阿罗娜",
+        "プラナ",
+        "Plana"
+      ]
+    },
+    {
+      "canonical_name": "月雪宫子",
+      "aliases": [
+        "月雪都子",
+        "宫子",
+        "都子",
+        "月雪ミヤコ",
+        "ミヤコ",
+        "Tsukiyuki Miyako",
+        "Miyako"
+      ]
+    },
+    {
+      "canonical_name": "朝颜花江",
+      "aliases": [
+        "花江",
+        "朝颜花绘",
+        "花绘",
+        "朝顏花繪",
+        "花繪",
+        "朝顔ハナエ",
+        "Asagao Hanae",
+        "아사가오 하나에",
+        "하나에"
+      ]
+    },
+    {
+      "canonical_name": "杏山和纱",
+      "aliases": [
+        "杏山千纱",
+        "和纱",
+        "千纱",
+        "凯西·帕鲁格",
+        "凯茜·帕鲁格"
+      ]
+    },
+    {
+      "canonical_name": "枣伊吕波",
+      "aliases": [
+        "伊吕波",
+        "棗イロハ",
+        "Natsume Iroha"
+      ]
+    },
+    {
+      "canonical_name": "柚鸟夏",
+      "aliases": [
+        "夏",
+        "小夏",
+        "柚鸟夏",
+        "Yutori Natsu",
+        "柚鳥ナツ"
+      ]
+    },
+    {
+      "canonical_name": "桐生桔梗",
+      "aliases": [
+        "桔梗",
+        "桐生キキョウ",
+        "キキョウ",
+        "Kiryuu Kikyou",
+        "Kikyou",
+        "百花缭乱作战参谋"
+      ]
+    },
+    {
+      "canonical_name": "桐藤渚",
+      "aliases": [
+        "渚",
+        "渚大人",
+        "桐藤ナギサ",
+        "나기사",
+        "Kirifuji Nagisa",
+        "Nagisa"
+      ]
+    },
+    {
+      "canonical_name": "桑上佳穗",
+      "aliases": [
+        "佳穗",
+        "Kaho"
+      ]
+    },
+    {
+      "canonical_name": "槌永日和",
+      "aliases": [
+        "日和",
+        "槌永ヒヨリ",
+        "Tsuchinaga Hiyori",
+        "Hiyori"
+      ]
+    },
+    {
+      "canonical_name": "橘光",
+      "aliases": [
+        "光",
+        "橘ヒカリ",
+        "ヒカリ",
+        "Hikari"
+      ]
+    },
+    {
+      "canonical_name": "橘望",
+      "aliases": [
+        "望",
+        "希望",
+        "橘希望",
+        "橘ノゾミ",
+        "ノゾミ",
+        "Nozomi"
+      ]
+    },
+    {
+      "canonical_name": "歌住樱子",
+      "aliases": [
+        "樱子",
+        "歌住櫻子",
+        "歌住サクラコ",
+        "Utazumi Sakurako"
+      ]
+    },
+    {
+      "canonical_name": "水羽三森",
+      "aliases": [
+        "三森",
+        "Mimori"
+      ]
+    },
+    {
+      "canonical_name": "池仓玛丽娜",
+      "aliases": [
+        "玛丽娜",
+        "池仓玛丽娜",
+        "Marina",
+        "池倉瑪麗娜"
+      ]
+    },
+    {
+      "canonical_name": "河和静子",
+      "aliases": [
+        "静子",
+        "河和靜子",
+        "靜子",
+        "カワワシズコ",
+        "Kawawa Shizuko",
+        "카와와 시즈코",
+        "시즈코"
+      ]
+    },
+    {
+      "canonical_name": "浅黄睦月",
+      "aliases": [
+        "睦月",
+        "无月",
+        "浅黄无月",
+        "淺黃無月",
+        "無月",
+        "浅黄ムツキ",
+        "Asagi Mutsuki"
+      ]
+    },
+    {
+      "canonical_name": "浦和花子",
+      "aliases": [
+        "花子",
+        "Hanako",
+        "Urawa Hanako",
+        "浦和ハナコ"
+      ]
+    },
+    {
+      "canonical_name": "火宫千夏",
+      "aliases": [
+        "千夏",
+        "火宫チナツ",
+        "치나츠",
+        "Chinatsu"
+      ]
+    },
+    {
+      "canonical_name": "爱清风华",
+      "aliases": [
+        "风华",
+        "爱清风香",
+        "愛清風華",
+        "愛清フウカ",
+        "Aikiyo Fuuka",
+        "후우카"
+      ]
+    },
+    {
+      "canonical_name": "牛牧茱莉",
+      "aliases": [
+        "茱莉",
+        "茱莉酱",
+        "牛牧ジュリ",
+        "ジュリ",
+        "Juri"
+      ]
+    },
+    {
+      "canonical_name": "狐坂若藻",
+      "aliases": [
+        "若藻",
+        "狐坂ワカモ",
+        "Kosaka Wakamo",
+        "와카모"
+      ]
+    },
+    {
+      "canonical_name": "猫冢响",
+      "aliases": [
+        "响",
+        "猫塚響",
+        "響",
+        "ヒビキ",
+        "Nekozuka Hibiki",
+        "네코즈카 히비키",
+        "히비키"
+      ]
+    },
+    {
+      "canonical_name": "生盐诺亚",
+      "aliases": [
+        "诺亚",
+        "乃爱"
+      ]
+    },
+    {
+      "canonical_name": "白洲梓",
+      "aliases": [
+        "梓",
+        "梓酱",
+        "白洲同学",
+        "白洲梓",
+        "Shirasu Azusa",
+        "Azusa"
+      ]
+    },
+    {
+      "canonical_name": "白石詠葉",
+      "aliases": [
+        "白石咏叶",
+        "詠葉",
+        "咏叶",
+        "白石ウタハ",
+        "ウタハ",
+        "시라이시 우타하",
+        "Shiraishi Utaha",
+        "工程师部部长",
+        "千年的巨匠"
+      ]
+    },
+    {
+      "canonical_name": "百合园圣娅",
+      "aliases": [
+        "圣娅",
+        "Seia",
+        "Yurizono Seia"
+      ]
+    },
+    {
+      "canonical_name": "砂狼白子",
+      "aliases": [
+        "白子",
+        "Shiroko",
+        "砂狼シロコ"
+      ]
+    },
+    {
+      "canonical_name": "砂狼白子＊恐怖",
+      "aliases": [
+        "砂狼白子*恐怖",
+        "白子＊恐怖",
+        "砂狼白子*色彩",
+        "白子＊色彩",
+        "另一个时间轴的白子",
+        "色彩的向导者"
+      ]
+    },
+    {
+      "canonical_name": "秤亚津子",
+      "aliases": [
+        "亚津子",
+        "敦子",
+        "公主"
+      ]
+    },
+    {
+      "canonical_name": "空井咲",
+      "aliases": [
+        "空井咲希",
+        "咲",
+        "咲希",
+        "空井サキ",
+        "サキ",
+        "Sorai Saki",
+        "Saki"
+      ]
+    },
+    {
+      "canonical_name": "空崎日奈",
+      "aliases": [
+        "日奈",
+        "阳奈",
+        "空崎阳奈",
+        "Hina",
+        "风纪委员长"
+      ]
+    },
+    {
+      "canonical_name": "美甘宁瑠",
+      "aliases": [
+        "美甘寧瑠",
+        "宁瑠",
+        "美甘ネル",
+        "Mikamo Neru"
+      ]
+    },
+    {
+      "canonical_name": "羽川莲实",
+      "aliases": [
+        "莲实",
+        "羽川ハスミ",
+        "ハスミ",
+        "Hasumi",
+        "하스미"
+      ]
+    },
+    {
+      "canonical_name": "羽沼真琴",
+      "aliases": [
+        "真琴",
+        "羽沼マコト",
+        "マコト",
+        "하누마 마코토",
+        "마코토",
+        "Hanuma Makoto",
+        "Makoto",
+        "万魔殿议长",
+        "真琴大人"
+      ]
+    },
+    {
+      "canonical_name": "花冈柚子",
+      "aliases": [
+        "柚子",
+        "UZQueen"
+      ]
+    },
+    {
+      "canonical_name": "苍森美祢",
+      "aliases": [
+        "美祢",
+        "美祢团长",
+        "苍森ミネ",
+        "미네",
+        "Aomori Mine",
+        "Mine"
+      ]
+    },
+    {
+      "canonical_name": "若叶日向",
+      "aliases": [
+        "若葉日向",
+        "若葉ヒナタ",
+        "日向",
+        "히나타",
+        "Wakaba Hinata",
+        "Hinata"
+      ]
+    },
+    {
+      "canonical_name": "药子沙耶",
+      "aliases": [
+        "沙耶",
+        "藥子沙耶",
+        "薬子サヤ",
+        "Yakushi Saya",
+        "Saya",
+        "야쿠시 사야",
+        "사야"
+      ]
+    },
+    {
+      "canonical_name": "角楯花凛",
+      "aliases": [
+        "花凛",
+        "角楯カリン",
+        "Kakudate Karin"
+      ]
+    },
+    {
+      "canonical_name": "调月莉音",
+      "aliases": [
+        "调月莉央",
+        "莉音",
+        "莉央"
+      ]
+    },
+    {
+      "canonical_name": "赤司纯子",
+      "aliases": [
+        "赤司淳子",
+        "纯子",
+        "淳子"
+      ]
+    },
+    {
+      "canonical_name": "近卫美奈",
+      "aliases": [
+        "美奈",
+        "近衛美奈",
+        "近衛ミナ",
+        "ミナ",
+        "Konoe Mina",
+        "Mina",
+        "玄龙门执行部长"
+      ]
+    },
+    {
+      "canonical_name": "连河切里诺",
+      "aliases": [
+        "切里诺",
+        "连河洁莉诺",
+        "洁莉诺",
+        "連河潔莉諾",
+        "潔莉諾",
+        "連河チェリノ",
+        "Renkawa Cherino"
+      ]
+    },
+    {
+      "canonical_name": "银镜伊织",
+      "aliases": [
+        "伊织",
+        "銀鏡伊織",
+        "伊織",
+        "銀鏡イオリ",
+        "Shiromi Iori"
+      ]
+    },
+    {
+      "canonical_name": "锭前纱织",
+      "aliases": [
+        "沙织",
+        "錠前沙織",
+        "錠前サオリ",
+        "Joumae Saori"
+      ]
+    },
+    {
+      "canonical_name": "间宵时雨",
+      "aliases": [
+        "时雨",
+        "Shigure"
+      ]
+    },
+    {
+      "canonical_name": "阿慈谷日富美",
+      "aliases": [
+        "日富美",
+        "阿慈谷日步美",
+        "Hifumi Ajitani",
+        "Hifumi",
+        "浮士德",
+        "Faust"
+      ]
+    },
+    {
+      "canonical_name": "阿罗娜",
+      "aliases": [
+        "彩奈",
+        "アロナ",
+        "Arona"
+      ]
+    },
+    {
+      "canonical_name": "陆八魔爱露",
+      "aliases": [
+        "爱露",
+        "陆八魔亚瑠",
+        "亚瑠",
+        "陸八魔亞瑠",
+        "亞瑠",
+        "陸八魔アル",
+        "Rikuhachima Aru"
+      ]
+    },
+    {
+      "canonical_name": "霞泽美游",
+      "aliases": [
+        "美游",
+        "霞沢美優",
+        "霞沢ミユ",
+        "Kasumizawa Miyu",
+        "RABBIT 4"
+      ]
+    },
+    {
+      "canonical_name": "静山麻白",
+      "aliases": [
+        "麻白",
+        "靜山麻白",
+        "静山マシロ",
+        "Shizuyama Mashiro"
+      ]
+    },
+    {
+      "canonical_name": "音濑小玉",
+      "aliases": [
+        "小玉",
+        "音瀬小玉",
+        "音瀬コタマ",
+        "Otose Kotama",
+        "Kotama",
+        "오토세 코타마",
+        "코타마"
+      ]
+    },
+    {
+      "canonical_name": "风仓萌",
+      "aliases": [
+        "萌",
+        "風倉萌",
+        "風倉モエ",
+        "Kazekura Moe"
+      ]
+    },
+    {
+      "canonical_name": "飞鸟马时",
+      "aliases": [
+        "飞鸟马季",
+        "季",
+        "时",
+        "飛鳥馬トキ",
+        "Asuma Toki"
+      ]
+    },
+    {
+      "canonical_name": "鬼怒川佳澄",
+      "aliases": [
+        "鬼怒川カスミ",
+        "佳澄",
+        "카스미",
+        "Kinugawa Kasumi",
+        "Kasumi"
+      ]
+    },
+    {
+      "canonical_name": "鬼方佳代子",
+      "aliases": [
+        "佳代子",
+        "鬼方佳世子",
+        "佳世子",
+        "鬼方カヨコ",
+        "カヨコ",
+        "Onikata Kayoko"
+      ]
+    },
+    {
+      "canonical_name": "鹫见芹奈",
+      "aliases": [
+        "芹奈",
+        "芹奈酱",
+        "鷲見芹奈",
+        "鷲見セリナ",
+        "세리나",
+        "Serina"
+      ]
+    },
+    {
+      "canonical_name": "黑崎小雪",
+      "aliases": [
+        "小雪",
+        "黑崎こゆき",
+        "黒崎コユキ",
+        "Kurosaki Koyuki",
+        "코유키"
+      ]
+    },
+    {
+      "canonical_name": "黑见芹香",
+      "aliases": [
+        "黑见芹香",
+        "黑见茜香",
+        "茜香",
+        "Serika",
+        "Kuromi Serika"
+      ]
+    },
+    {
+      "canonical_name": "黑馆羽留奈",
+      "aliases": [
+        "黑舘羽留奈",
+        "羽留奈",
+        "黒舘ハルナ",
+        "Kurodate Haruna"
+      ]
+    },
+    {
+      "canonical_name": "龙华妃咲",
+      "aliases": [
+        "龙华妃姬",
+        "龍華妃姬",
+        "妃咲",
+        "妃姬",
+        "竜華キサキ",
+        "キサキ",
+        "Ryuuge Kisaki",
+        "Kisaki",
+        "玄龙门门主"
+      ]
+    }
+  ]
+}
