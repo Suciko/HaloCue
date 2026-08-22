@@ -85,6 +85,70 @@ def test_release_seed_includes_sanitized_read_only_overlay(tmp_path):
     assert VERSION == "0.95"
 
 
+def test_release_seed_excludes_private_custom_characters_and_index_entries(tmp_path):
+    source_db = tmp_path / "source.db"
+    overlay_db = tmp_path / "overlay.db"
+    for database in (source_db, overlay_db):
+        con = sqlite3.connect(database)
+        con.executescript(
+            """
+            CREATE TABLE character(ident TEXT, name TEXT, source TEXT);
+            CREATE TABLE character_variant(ident TEXT, spine_signature TEXT, outfit_key TEXT, spine TEXT);
+            CREATE TABLE face(ident TEXT, face_id TEXT, raw TEXT, source TEXT);
+            CREATE TABLE face_visual_label(ident TEXT, face_id TEXT, description_cn TEXT);
+            CREATE TABLE expression_part(ident TEXT, spine_signature TEXT, outfit_key TEXT, kind TEXT);
+            CREATE TABLE asset_install(kind TEXT, source_path TEXT);
+            INSERT INTO character VALUES('official-1', '官方人物', 'official_flatdata');
+            INSERT INTO character VALUES('private-1', '自定义人物', 'custom');
+            INSERT INTO character_variant VALUES('official-1', 'sig-o', 'outfit-o', 'official');
+            INSERT INTO character_variant VALUES('private-1', 'sig-p', 'outfit-p', 'private');
+            INSERT INTO face VALUES('official-1', '00', 'normal', 'official');
+            INSERT INTO face VALUES('private-1', '00', 'normal', 'custom');
+            INSERT INTO face_visual_label VALUES('private-1', '00', 'private');
+            INSERT INTO expression_part VALUES('private-1', 'sig-p', 'outfit-p', 'eyes');
+            INSERT INTO asset_install VALUES('character', 'C:\\private\\custom.skel');
+            """
+        )
+        con.commit()
+        con.close()
+
+    source_index = tmp_path / "aa_resources.json"
+    source_index.write_text(
+        json.dumps(
+            {
+                "characters": [
+                    {"identifier": "official-1", "name": "官方人物"},
+                    {"identifier": "private-1", "name": "自定义人物"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    seed_dir = prepare_release_seed(
+        source_db,
+        source_index,
+        tmp_path / "seed",
+        overlay_databases=[overlay_db],
+    )
+
+    for database in (
+        seed_dir / "aa_assets.db",
+        seed_dir / "databases" / "overlay-1-aa-assets.db",
+    ):
+        con = sqlite3.connect(database)
+        assert con.execute("SELECT ident FROM character").fetchall() == [("official-1",)]
+        assert con.execute("SELECT ident FROM character_variant").fetchall() == [("official-1",)]
+        assert con.execute("SELECT ident FROM face").fetchall() == [("official-1",)]
+        assert con.execute("SELECT COUNT(*) FROM face_visual_label").fetchone()[0] == 0
+        assert con.execute("SELECT COUNT(*) FROM expression_part").fetchone()[0] == 0
+        assert con.execute("SELECT COUNT(*) FROM asset_install").fetchone()[0] == 0
+        con.close()
+
+    index = json.loads((seed_dir / "aa_resources.json").read_text(encoding="utf-8"))
+    assert [item["identifier"] for item in index["characters"]] == ["official-1"]
+
+
 def test_private_runtime_copy_keeps_only_required_spine_files(tmp_path, monkeypatch):
     source = tmp_path / "Spine3.8.75"
     (source / "launcher").mkdir(parents=True)

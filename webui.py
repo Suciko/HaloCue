@@ -35,6 +35,7 @@ def runtime_config_path():
     return CONFIG_PATH if LAYOUT.frozen else Path(HERE) / "aa_config.json"
 
 import aapaths                                                  # noqa: E402
+import aa_manifest_catalog                                      # noqa: E402
 import asset_catalog                                            # noqa: E402
 import asset_import                                             # noqa: E402
 import assetdb                                                  # noqa: E402
@@ -1764,6 +1765,11 @@ def _effective_character_catalog(con):
                 collect(overlay)
             finally:
                 overlay.close()
+    records, aliases = aa_manifest_catalog.merge_runtime_catalog(
+        records,
+        aliases,
+        aa_manifest_catalog.read_characters_for_data(CFG.get("aa_data")),
+    )
     return list(records.values()), aliases
 
 
@@ -1773,13 +1779,16 @@ def list_characters(q="", limit=400):
     try:
         rows, aliases = _effective_character_catalog(con)
         query = str(q or "").casefold()
+        query_key = aa_manifest_catalog.name_key(q)
         alias_ids = {
             ident for script_name, ident, kind, _uses in aliases
-            if kind == "portrait" and query and query in script_name.casefold()
+            if kind == "portrait" and query_key
+            and query_key in aa_manifest_catalog.name_key(script_name)
         }
         alias_ids.update(
             ident for script_name, ident, kind in assetdb.SEED_ALIAS
-            if ident and kind == "portrait" and query and query in script_name.casefold()
+            if ident and kind == "portrait" and query_key
+            and query_key in aa_manifest_catalog.name_key(script_name)
         )
         alias_names = {
             row["name"] for row in rows
@@ -1788,12 +1797,12 @@ def list_characters(q="", limit=400):
         filtered = []
         for row in rows:
             if query:
-                values = (row["ident"], row["name"], row["club"])
+                values = (row["ident"], row["name"], row["club"], row.get("manifest_name", ""))
                 if (
                     row["ident"] not in alias_ids
                     and row["name"] not in alias_names
                     and not any(
-                    query in str(value).casefold() for value in values
+                    query_key in aa_manifest_catalog.name_key(value) for value in values
                     )
                 ):
                     continue
@@ -1816,6 +1825,7 @@ def list_characters(q="", limit=400):
                 "ident": r["ident"], "name": r["name"] or r["ident"],
                 "club": r["club"], "spine": spine_value,
                 "faces": r["nface"], "source": r["source"],
+                "manifest_bound": bool(r.get("manifest_bound")),
                 "avatar": (
                     "/thumb/av/" + quote(avatar_key, safe="")
                     if avatar and avatar_key else ""
@@ -2186,11 +2196,33 @@ def guess_mapping(speakers):
     用户自己导入的「桃井」而不是别名里的占位 ???）；退回学过的别名时同样跳过
     占位垃圾角色。用户始终可在“确认演员”一步手动修改对应关系。"""
     con = db()
-    catalog_rows, _catalog_aliases = _effective_character_catalog(con)
+    catalog_rows, catalog_aliases = _effective_character_catalog(con)
     catalog_by_id = {
         str(row["ident"]): row for row in catalog_rows if row.get("ident")
     }
     out = {}
+
+    def portrait_mapping(who, row, *, learned=False):
+        value = {"kind": "portrait", "id": row["ident"],
+                 "name": row["name"] or who, "club": row["club"] or "",
+                 "spine": row["spine"] or ""}
+        if learned:
+            value["learned"] = True
+        return value
+
+    def choose(rows, who):
+        def rank(item):
+            stem = aa_manifest_catalog.spine_resource_key(item.get("spine"))
+            suffix = stem[len("characterspine_"):] if stem.startswith("characterspine_") else ""
+            return (
+                item["ident"] != who,
+                0 if suffix and "_" not in suffix else 2 if suffix.endswith(("_noweapon", "_n", "_nf")) else 1,
+                not bool(item.get("spine")),
+                len(item["ident"]),
+                item["ident"].casefold(),
+            )
+        return sorted(rows, key=rank)[0] if rows else None
+
     for sp in speakers:
         w = sp["who"]
         if is_non_character_speaker(w):
@@ -2205,18 +2237,12 @@ def guess_mapping(speakers):
             item for item in catalog_rows
             if item["name"] == w or item["ident"] == w
         ]
-        row = sorted(
-            exact_rows,
-            key=lambda item: (
-                item["ident"] != w, not bool(item["spine"]), len(item["ident"])
-            ),
-        )[0] if exact_rows else None
+        row = choose(exact_rows, w)
         exact_valid = row is not None and not assetdb._looks_placeholder(row["name"])
-        if exact_valid and row["source"] != "overrides":
-            row = _preferred_variant(con, row)
-            out[w] = {"kind": "portrait", "id": row["ident"],
-                      "name": row["name"] or w, "club": row["club"] or "",
-                      "spine": row["spine"] or ""}
+        if exact_valid and row["source"] not in {"overrides", "aa_manifest"}:
+            if not row.get("manifest_bound"):
+                row = _preferred_variant(con, row)
+            out[w] = portrait_mapping(w, row)
             continue
         # 2. 学过的别名（portrait 别名已过滤占位垃圾）
         a = assetdb.best_alias(con, w)
@@ -2228,21 +2254,48 @@ def guess_mapping(speakers):
                 continue
             crow = catalog_by_id.get(str(a["ident"]))
             if crow is not None and not assetdb._looks_placeholder(crow["name"]):
-                crow = _preferred_variant(con, crow)
-                out[w] = {"kind": a["kind"], "id": crow["ident"],
-                          "name": w, "club": crow["club"] or "",
-                          "spine": crow["spine"] or "",
-                          "learned": True}
+                if not crow.get("manifest_bound"):
+                    crow = _preferred_variant(con, crow)
+                out[w] = portrait_mapping(w, crow, learned=True)
+                out[w]["name"] = w
                 continue
             # voice 角色可能没有名字（无头像的语音位），仍按语音映射
             if a["kind"] == "voice":
                 out[w] = {"kind": "voice", "id": a["ident"],
                           "name": w, "club": "", "spine": "", "learned": True}
                 continue
+        # 3. AA manifest and database reconciliation aliases.  These are
+        # read-only runtime facts, including pairs such as 乃爱/诺亚.
+        alias_ids = {
+            identifier
+            for alias, identifier, kind, _uses in catalog_aliases
+            if kind == "portrait"
+            and aa_manifest_catalog.name_key(alias) == aa_manifest_catalog.name_key(w)
+        }
+        alias_rows = [
+            catalog_by_id[identifier]
+            for identifier in alias_ids
+            if identifier in catalog_by_id
+        ]
+        alias_row = choose(alias_rows, w)
+        if alias_row is not None and not assetdb._looks_placeholder(alias_row["name"]):
+            out[w] = portrait_mapping(w, alias_row, learned=True)
+            out[w]["name"] = w
+            continue
+        # 4. Simplified/Traditional spelling equivalence for native AA names.
+        normalized_rows = [
+            item for item in catalog_rows
+            if aa_manifest_catalog.name_key(item["name"])
+            == aa_manifest_catalog.name_key(w)
+        ]
+        normalized_row = choose(normalized_rows, w)
+        if normalized_row is not None and not assetdb._looks_placeholder(normalized_row["name"]):
+            if not normalized_row.get("manifest_bound"):
+                normalized_row = _preferred_variant(con, normalized_row)
+            out[w] = portrait_mapping(w, normalized_row)
+            continue
         if exact_valid:
-            out[w] = {"kind": "portrait", "id": row["ident"],
-                      "name": row["name"] or w, "club": row["club"] or "",
-                      "spine": row["spine"] or ""}
+            out[w] = portrait_mapping(w, row)
             continue
         # AA slot 0 is not synonymous with narration. Preserve every named
         # speaker even when no portrait exists, so its display name survives.
@@ -4122,6 +4175,10 @@ def prepare_project_index(index_path, project_dir, output_path, *, con=None):
             con,
             scope=os.path.abspath(project_dir),
         )
+    merged = aa_manifest_catalog.merge_model_index(
+        merged,
+        aa_manifest_catalog.read_characters_for_data(CFG.get("aa_data")),
+    )
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as target:
         json.dump(merged, target, ensure_ascii=False, indent=1)

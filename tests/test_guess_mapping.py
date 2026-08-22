@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """角色识别（guess_mapping）行为契约：跳过占位垃圾别名、精确名优先、保留 voice 别名。"""
 
+import json
+
 import assetdb
 import webui
 from dataclasses import replace
@@ -187,6 +189,86 @@ def test_frozen_user_state_reads_plain_aris_from_release_overlay(tmp_path, monke
         "아리스", "아리스N", "爱丽丝（防寒服-冬装）"
     }
     assert webui.guess_mapping([{"who": "爱丽丝"}])["爱丽丝"]["id"] == "아리스"
+
+
+def test_manifest_translation_alias_maps_to_users_actual_identifier(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    manifest = data / "overrides" / "manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({
+        "CharacterOverrides": [{
+            "Identifier": "诺亚（睡衣）", "Name": "乃爱", "Nickname": "研讨会",
+            "SpinePortraitPath": r"characters\诺亚（睡衣）\CH0285_spr",
+        }]
+    }, ensure_ascii=False), encoding="utf-8")
+    con = assetdb.connect(tmp_path / "assets.db")
+    con.execute(
+        "INSERT INTO character(ident,name,club,spine,source) VALUES(?,?,?,?,?)",
+        ("诺亚（睡衣）", "诺亚", "研讨会",
+         r"characters\CH0285_spr\CH0285_spr", "overrides"),
+    )
+    con.commit()
+    monkeypatch.setitem(webui.CFG, "aa_data", str(data))
+    monkeypatch.setattr(webui, "db", lambda: con)
+
+    mapping = webui.guess_mapping([{"who": "乃爱"}])["乃爱"]
+
+    assert mapping["kind"] == "portrait"
+    assert mapping["id"] == "诺亚（睡衣）"
+    assert mapping["spine"].endswith(r"诺亚（睡衣）\CH0285_spr")
+
+
+def test_manifest_outfit_does_not_capture_learned_plain_character(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    manifest = data / "overrides" / "manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({
+        "CharacterOverrides": [{
+            "Identifier": "临战爱丽丝", "Name": "爱丽丝",
+            "SpinePortraitPath": r"characters\临战爱丽丝\CH0334_spr",
+        }]
+    }, ensure_ascii=False), encoding="utf-8")
+    con = assetdb.connect(tmp_path / "assets.db")
+    con.execute(
+        "INSERT INTO character(ident,name,spine,source) VALUES(?,?,?,?)",
+        ("아리스", "愛麗絲", "CharacterSpine_aris", "official_flatdata"),
+    )
+    con.execute(
+        "INSERT INTO name_alias(script_name,ident,kind,uses) VALUES(?,?,?,?)",
+        ("爱丽丝", "아리스", "portrait", 20),
+    )
+    con.commit()
+    monkeypatch.setitem(webui.CFG, "aa_data", str(data))
+    monkeypatch.setattr(webui, "db", lambda: con)
+
+    mapping = webui.guess_mapping([{"who": "爱丽丝"}])["爱丽丝"]
+
+    assert mapping["id"] == "아리스"
+    assert mapping["spine"] == "CharacterSpine_aris"
+
+
+def test_simplified_search_finds_traditional_default_before_outfit(tmp_path, monkeypatch):
+    con = assetdb.connect(tmp_path / "assets.db")
+    con.execute(
+        "INSERT INTO character(ident,name,spine,source) VALUES(?,?,?,?)",
+        ("아리스", "愛麗絲", "CharacterSpine_aris", "official_flatdata"),
+    )
+    con.execute(
+        "INSERT INTO character(ident,name,spine,source) VALUES(?,?,?,?)",
+        ("爱丽丝（防寒服-冬装）", "爱丽丝", "NP0234_spr", "overrides"),
+    )
+    con.commit()
+    con.close()
+    monkeypatch.setitem(webui.CFG, "aa_data", None)
+    monkeypatch.setattr(webui, "DB", str(tmp_path / "assets.db"))
+    monkeypatch.setattr(webui, "db", lambda: assetdb.connect(webui.DB))
+    monkeypatch.setattr(webui, "_ensure_official_character_catalog", lambda: None)
+
+    rows = webui.list_characters("爱丽丝")
+    mapping = webui.guess_mapping([{"who": "爱丽丝"}])["爱丽丝"]
+
+    assert rows[0]["ident"] == "아리스"
+    assert mapping["id"] == "아리스"
 
 
 def test_non_character_speaker_is_not_a_blocking_unmapped_character(

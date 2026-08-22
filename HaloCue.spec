@@ -19,6 +19,10 @@ datas = [
     (str(SEED / "aa_config.seed.json"), "."),
 ] + collect_data_files("UnityPy", includes=["resources/*.tpk"])
 
+# Character lookup normalizes official Traditional-Chinese display names to
+# Simplified Chinese.  OpenCC loads its conversion tables as package data.
+datas += collect_data_files("opencc", includes=["config/*.json", "dictionary/*.txt"])
+
 if (SEED / "databases").is_dir():
     datas.append((str(SEED / "databases"), "databases"))
 

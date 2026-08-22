@@ -66,6 +66,58 @@ def _table_names(con: sqlite3.Connection) -> set[str]:
     }
 
 
+def _custom_character_identifiers(
+    con: sqlite3.Connection, tables: set[str]
+) -> set[str]:
+    """Return private character registrations that must stay local to a user."""
+    if "character" not in tables:
+        return set()
+    columns = {
+        str(row[1])
+        for row in con.execute('PRAGMA table_info("character")')
+    }
+    if not {"ident", "source"} <= columns:
+        return set()
+    return {
+        str(row[0])
+        for row in con.execute(
+            'SELECT ident FROM "character" '
+            "WHERE lower(trim(coalesce(source, ''))) = 'custom' "
+            "AND ident IS NOT NULL"
+        )
+        if str(row[0])
+    }
+
+
+def _remove_custom_character_rows(
+    con: sqlite3.Connection,
+    tables: set[str],
+    identifiers: set[str],
+) -> None:
+    """Remove custom registrations and metadata linked to their identifiers."""
+    if not identifiers:
+        return
+    placeholders = ", ".join("?" for _ in identifiers)
+    values = tuple(sorted(identifiers))
+    for table in sorted(tables):
+        if table in {"name_alias", "character"}:
+            continue
+        columns = {
+            str(row[1])
+            for row in con.execute(f'PRAGMA table_info("{table}")')
+        }
+        if "ident" in columns:
+            con.execute(
+                f'DELETE FROM "{table}" WHERE ident IN ({placeholders})',
+                values,
+            )
+    if "character" in tables:
+        con.execute(
+            f'DELETE FROM "character" WHERE ident IN ({placeholders})',
+            values,
+        )
+
+
 def prepare_release_seed(
     source_db: str | Path,
     source_index: str | Path,
@@ -80,13 +132,15 @@ def prepare_release_seed(
     destination.mkdir(parents=True, exist_ok=True)
     target_db = destination / "aa_assets.db"
 
-    def sanitize_database(source: Path, target: Path) -> None:
+    def sanitize_database(source: Path, target: Path) -> set[str]:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
 
         con = sqlite3.connect(target)
         try:
             tables = _table_names(con)
+            custom_identifiers = _custom_character_identifiers(con, tables)
+            _remove_custom_character_rows(con, tables, custom_identifiers)
             for private_table in ("asset_install", "asset_library_profile", "name_alias"):
                 if private_table in tables:
                     con.execute(f'DELETE FROM "{private_table}"')
@@ -114,10 +168,11 @@ def prepare_release_seed(
                         )
             con.commit()
             con.execute("VACUUM")
+            return custom_identifiers
         finally:
             con.close()
 
-    sanitize_database(source_db, target_db)
+    custom_identifiers = sanitize_database(source_db, target_db)
 
     packaged_overlays = []
     for index, overlay in enumerate(overlay_databases, 1):
@@ -125,7 +180,7 @@ def prepare_release_seed(
         if not source.is_file():
             raise FileNotFoundError(f"第二标注数据库不存在：{source}")
         relative = Path("databases") / f"overlay-{index}-aa-assets.db"
-        sanitize_database(source, destination / relative)
+        custom_identifiers.update(sanitize_database(source, destination / relative))
         packaged_overlays.append(relative.as_posix())
 
     (destination / "aa_config.seed.json").write_text(
@@ -144,6 +199,15 @@ def prepare_release_seed(
 
     data = json.loads(source_index.read_text(encoding="utf-8"))
     if isinstance(data, dict):
+        if custom_identifiers and isinstance(data.get("characters"), list):
+            data["characters"] = [
+                item
+                for item in data["characters"]
+                if not (
+                    isinstance(item, dict)
+                    and str(item.get("identifier") or "") in custom_identifiers
+                )
+            ]
         data["_source"] = ""
     (destination / "aa_resources.json").write_text(
         json.dumps(_sanitize_json_value(data), ensure_ascii=False, indent=1),
