@@ -1021,6 +1021,27 @@ def build(events, cfg, cast, idx, project, *, semantic_layout=True, layout_mode=
             speaker = 0
             speaker_ident = None
             performance_ident = None
+            # A line-level reaction belongs to the visual context of the
+            # following dialogue. A narrator/teacher line has no portrait
+            # context, so carrying pending reactions across it would make
+            # unrelated on-screen characters emote while an off-screen voice
+            # is speaking. This also protects old drafts/checkpoint replays
+            # that bypass the current response sanitizer.
+            if is_dialogue and (c.get("narrator") or not c.get("portrait")) and pend.reactions:
+                dropped_targets = [
+                    id2name_g.get(ident, ident) for ident in pend.reactions
+                ]
+                for origin in pend.origins:
+                    if isinstance(origin, dict) and origin.get("command") == "react":
+                        origin["resolution"] = "deterministic"
+                        origin["drop_reason"] = "non_portrait_speaker_reaction_cleared"
+                        origin["dropped_targets"] = list(dropped_targets)
+                warn(
+                    no,
+                    "自动修复标注：无立绘对白前的 @react 已清除，"
+                    f"目标：{'、'.join(dropped_targets)}",
+                )
+                pend.reactions.clear()
             if c.get("narrator"):
                 speaker = 0
             elif not c.get("portrait"):
@@ -1165,6 +1186,12 @@ def build(events, cfg, cast, idx, project, *, semantic_layout=True, layout_mode=
             # 一个无对话框节点可以承载最多三人的同步反应，不能拆成多个
             # 空节点，否则气泡和动作会变成先后发生。
             for ident, reaction in pend.reactions.items():
+                if not any(str(value or "").strip() for value in reaction.values()):
+                    for origin in pend.origins:
+                        if isinstance(origin, dict) and origin.get("command") == "react":
+                            origin["resolution"] = "deterministic"
+                            origin["drop_reason"] = "empty_reaction_noop"
+                    continue
                 slot = chars_pos(chars, ident)
                 if not slot:
                     warn(no, f"@react 目标‘{id2name_g.get(ident, ident)}’不在当前镜头，已忽略")

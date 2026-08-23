@@ -67,6 +67,7 @@ from build_index import (                                       # noqa: E402
 )
 from build_bundle import BuildBundleManager, CompileInputStaleError  # noqa: E402
 from document import normalize_draft_nodes, parse_document_lossless  # noqa: E402
+from diagnostics import classify_diagnostics  # noqa: E402
 from draft_store import (                                       # noqa: E402
     DraftStore,
     InvalidDraftTokenError,
@@ -130,6 +131,7 @@ HISTORY_ASSET_BROWSER = None
 HISTORY_ASSET_BROWSER_LOCK = threading.RLock()
 _DRAFT_TOKEN_BODY_PATHS = frozenset({
     "/api/review/approve",
+    "/api/review/quality-override",
     "/api/compile",
     "/api/install",
     "/api/cards/update",
@@ -1777,6 +1779,10 @@ def list_characters(q="", limit=400):
     _ensure_official_character_catalog()
     con = db()
     try:
+        try:
+            preview_status = _preview_state_for_discovery(_current_aa_discovery()).status
+        except (OSError, ValueError, TypeError):
+            preview_status = "not_built"
         rows, aliases = _effective_character_catalog(con)
         query = str(q or "").casefold()
         query_key = aa_manifest_catalog.name_key(q)
@@ -1815,10 +1821,30 @@ def list_characters(q="", limit=400):
             catalog = character_catalog_metadata(r["ident"])
             avatar_value = str(r["avatar"] or catalog.get("avatar") or "")
             spine_value = str(r["spine"] or catalog.get("spine") or "")
-            avatar_key = Path(avatar_value.replace("\\", "/")).name or spine_value
-            avatar = character_avatar_path(avatar_value, spine_value)
+            manifest_avatar = str(r.get("manifest_avatar") or "")
+            avatar, avatar_source = character_avatar_details(
+                avatar_value, spine_value, manifest_avatar=manifest_avatar
+            )
             if not avatar:
                 avatar = registered_character_avatar_path(con, r["ident"])
+                if avatar:
+                    avatar_source = "registered"
+            if not avatar and avatar_source == "missing":
+                source_key = str(r.get("source") or "").casefold()
+                custom = bool(r.get("user_custom")) or source_key in {
+                    "custom", "current_story_custom", "aa_manifest"
+                }
+                if not custom:
+                    avatar_source = (
+                        "official_pending"
+                        if preview_status in {"not_built", "building", "stale"}
+                        else "official_unavailable"
+                    )
+            avatar_key = (
+                str(r["ident"])
+                if manifest_avatar
+                else Path(avatar_value.replace("\\", "/")).name or spine_value
+            )
             if avatar and not avatar_key:
                 avatar_key = str(r["ident"])
             out.append({
@@ -1828,6 +1854,8 @@ def list_characters(q="", limit=400):
                 "faces": r["nface"], "source": r["source"],
                 "manifest_bound": bool(r.get("manifest_bound")),
                 "user_custom": bool(r.get("user_custom")),
+                "avatar_source": avatar_source,
+                "avatar_available": bool(avatar),
                 "avatar": (
                     "/thumb/av/" + quote(avatar_key, safe="")
                     if avatar and avatar_key else ""
@@ -1853,7 +1881,8 @@ def list_characters(q="", limit=400):
 
 def list_backgrounds(
     q="", only_ready=False, limit=80, only_official=False, offset=0,
-    with_total=False,
+    with_total=False, source_filter="", category="", space="", time_filter="",
+    weather="", tag="",
 ):
     con = db()
     if only_official:
@@ -1905,6 +1934,26 @@ def list_backgrounds(
                 scene_labels.setdefault(item["asset_key"].casefold(), item)
         finally:
             overlay_con.close()
+    custom_keys = set()
+    try:
+        if con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='asset_install'"
+        ).fetchone():
+            custom_keys = {
+                str(row[0]).casefold()
+                for row in con.execute(
+                    """SELECT aa_key FROM asset_install
+                       WHERE kind='background' AND status='registered'"""
+                )
+            }
+    except sqlite3.Error:
+        custom_keys = set()
+    source_filter = str(source_filter or "").strip().casefold()
+    category = str(category or "").strip().casefold()
+    space = str(space or "").strip().casefold()
+    time_filter = str(time_filter or "").strip().casefold()
+    weather = str(weather or "").strip().casefold()
+    tag = str(tag or "").strip().casefold()
     out = []
     for r in con.execute(sql, args):
         semantics = scene_labels.get(str(r["name"]).casefold())
@@ -1919,6 +1968,7 @@ def list_backgrounds(
             "time": r["time"] or "", "mood": r["mood"] or "",
             "tags": r["tags"] or "",
             "img": _background_preview_available(r["name"]),
+            "source": "custom" if str(r["hash"]).casefold() in custom_keys else "official",
         }
         if semantics is not None:
             # Keep labels entered in the active DB authoritative.  The
@@ -1943,6 +1993,27 @@ def list_backgrounds(
                     continue
                 if value not in (None, "", [], {}):
                     item[field] = value
+        searchable = " ".join(str(value) for value in item.values()).casefold()
+        if source_filter in {"official", "custom"} and item["source"] != source_filter:
+            continue
+        if category and category not in searchable:
+            continue
+        if space:
+            candidate_space = str(item.get("indoor_outdoor") or "").casefold()
+            if space in {"indoor", "室内"} and not any(
+                token in candidate_space for token in ("indoor", "室内", "屋内")
+            ):
+                continue
+            if space in {"outdoor", "室外"} and not any(
+                token in candidate_space for token in ("outdoor", "室外", "户外")
+            ):
+                continue
+        if time_filter and time_filter not in searchable:
+            continue
+        if weather and weather not in searchable:
+            continue
+        if tag and tag not in searchable:
+            continue
         if q:
             # Scene labels are intentionally rich (category, affiliation,
             # search synonyms, compatibility and evidence).  Searching only
@@ -2021,6 +2092,22 @@ def avatar_path(spine):
     return p if os.path.exists(p) else None
 
 
+def manifest_avatar_path(value: str) -> Path | None:
+    """Resolve a manifest portrait below the active AA overrides directory."""
+    overrides = CFG.get("overrides")
+    raw = str(value or "").strip().replace("\\", os.sep).replace("/", os.sep)
+    if not overrides or not raw:
+        return None
+    try:
+        root = Path(overrides).resolve()
+        candidate = (root / raw).resolve()
+        if candidate == root or root not in candidate.parents:
+            return None
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+    return candidate if candidate.is_file() else None
+
+
 def official_avatar_key_from_spine(spine: str) -> str:
     """Derive the indexed portrait key for a standard AA character spine."""
     stem = Path(str(spine or "").replace("\\", "/")).name
@@ -2028,16 +2115,35 @@ def official_avatar_key_from_spine(spine: str) -> str:
     return "Student_Portrait_" + match.group(1) if match else ""
 
 
-def character_avatar_path(avatar: str, spine: str) -> Path | None:
+def character_avatar_details(
+    avatar: str,
+    spine: str,
+    *,
+    manifest_avatar: str = "",
+) -> tuple[Path | None, str]:
+    manifest = manifest_avatar_path(manifest_avatar)
+    if manifest:
+        return manifest, "manifest"
     custom = avatar_path(spine)
     if custom:
-        return Path(custom)
+        return Path(custom), "overrides"
     key = Path(str(avatar or "").replace("\\", "/")).name
     preview = OFFICIAL_PREVIEW_INDEX.resolve("avatar", key) if key else None
     if preview:
-        return preview
+        return preview, "official"
     derived_key = official_avatar_key_from_spine(spine)
-    return OFFICIAL_PREVIEW_INDEX.resolve("avatar", derived_key) if derived_key else None
+    preview = OFFICIAL_PREVIEW_INDEX.resolve("avatar", derived_key) if derived_key else None
+    return (preview, "official") if preview else (None, "missing")
+
+
+def character_avatar_path(
+    avatar: str,
+    spine: str,
+    manifest_avatar: str = "",
+) -> Path | None:
+    return character_avatar_details(
+        avatar, spine, manifest_avatar=manifest_avatar
+    )[0]
 
 
 def avatar_thumb(src, px, key):
@@ -2740,7 +2846,7 @@ def _preflight_background_library(
     preview_keys = {
         str(row["name"])
         for row in rows
-        if _background_preview_available(str(row["name"]))
+        if OFFICIAL_PREVIEW_INDEX.contains("background", str(row["name"]))
     }
     scene_labels = {
         item["asset_key"].casefold(): item
@@ -3366,12 +3472,15 @@ def _normalize_usage_chain(raw_chain: object, custom_assets: dict, con) -> tuple
                 candidates.sort(key=lambda item: (-item["confidence"], item["aa_key"].casefold()))
                 candidates = candidates[:3]
                 if not candidates:
-                    candidates = _custom_background_candidates(
-                        custom_backgrounds, name, reason, evidence, need_location, location
-                    )
-                if not candidates:
+                    # When the model supplied only a semantic need, prefer an
+                    # official approximation.  Custom scenery remains a
+                    # fallback and can still be selected explicitly later.
                     candidates = _catalog_background_candidates(
                         con, name, reason, evidence, need_location, location
+                    )
+                if not candidates:
+                    candidates = _custom_background_candidates(
+                        custom_backgrounds, name, reason, evidence, need_location, location
                     )
             found = next((item for item in buckets[kind] if (
                 str(item.get("name") or "").casefold() == name.casefold()
@@ -4549,6 +4658,7 @@ def annotate_draft_worker(payload, job=None):
         pass
 
     result = {}
+    fresh_generation = bool(payload.get("fresh_generation"))
     if payload.get("annotate", True):
         def annotation_model_activity(activity):
             if not job or not hasattr(job, "update_activity"):
@@ -4569,6 +4679,17 @@ def annotate_draft_worker(payload, job=None):
             ratio = min(1.0, max(0.0, (current / total) if total else 0.0))
             job.update_progress((phase_start + (phase_end - phase_start) * ratio) * 100, detail)
 
+        # A completed draft is a normal starting point for a new AI pass.  Do
+        # not let its matching checkpoint turn an explicit user retry into a
+        # silent replay.  Partial drafts keep the shared checkpoint path so a
+        # timeout can resume the accepted chunks as before.
+        checkpoint_dir = os.path.join(OUT_DIR, "annotation-checkpoints")
+        if fresh_generation:
+            checkpoint_dir = os.path.join(
+                OUT_DIR,
+                "annotation-checkpoints",
+                "fresh-" + uuid.uuid4().hex,
+            )
         opts = {
             "script": payload["script"],
             "out": out_path,
@@ -4578,7 +4699,7 @@ def annotate_draft_worker(payload, job=None):
             "usage_chain": payload.get("usage_chain") or [],
             "agent_enabled": payload.get("agent_enabled", True),
             "scene_event_planning": payload.get("scene_event_planning", True),
-            "checkpoint_dir": os.path.join(OUT_DIR, "annotation-checkpoints"),
+            "checkpoint_dir": checkpoint_dir,
             "progress": annotation_progress,
             "model_activity": annotation_model_activity,
             "cancelled": job.is_cancel_requested if job else None,
@@ -4623,6 +4744,7 @@ def annotate_draft_worker(payload, job=None):
         and total_targets > 0
         and completed_targets == total_targets
         and annotation_status["status"] == "complete"
+        and not fresh_generation
     )
     if fully_reused:
         existing_token = store.find_identical_complete_draft(
@@ -4715,6 +4837,7 @@ def get_draft_detail_data(token, store=None):
             "pending_start_line": annotation_status.get("pending_start_line"),
             "pending_end_line": annotation_status.get("pending_end_line"),
         }]
+    diagnostics = classify_diagnostics(diagnostics)
     cast_data = store.load_cast(token)
     cast_members = cast_data.get("cast", {}) if isinstance(cast_data, dict) else {}
     cast_summary = {
@@ -4752,8 +4875,33 @@ def get_draft_detail_data(token, store=None):
     # it should match the identity scan above, but using the final card list
     # protects the response if normalization ever drops an invalid node.
     pending_count = sum(1 for c in cards if c["review_state"] == "pending")
-    unresolved_issues = sum(1 for d in diagnostics if d.get("severity") in ("error", "warning"))
-    blocking_errors = sum(1 for d in diagnostics if d.get("severity") == "error")
+    classified_diagnostics = diagnostics
+    unresolved_issues = sum(
+        1 for d in classified_diagnostics
+        if d.get("resolution") == "block"
+        or (
+            not session.get("quality_override_accepted")
+            and str(d.get("severity") or d.get("level") or "").lower()
+            in {"warning", "info"}
+        )
+    )
+    blocking_errors = sum(1 for d in classified_diagnostics if d.get("resolution") == "block")
+    quality_warnings = [
+        item for item in classified_diagnostics
+        if item.get("resolution") != "block"
+        and str(item.get("severity") or item.get("level") or "").lower()
+        in {"warning", "info"}
+    ]
+    proposals = store.load_proposals(token)
+    proposals_by_card = {}
+    for proposal in proposals:
+        proposals_by_card.setdefault(str(proposal.get("card_id") or ""), []).append(proposal)
+    for card in cards:
+        card["proposals"] = proposals_by_card.get(str(card["card_id"]), [])
+        card["proposal_ids"] = [
+            str(item.get("proposal_id") or "")
+            for item in card["proposals"] if item.get("proposal_id")
+        ]
     compiled_build_id = (
         session.get("last_compiled_build_id")
         if session.get("last_compiled_content_revision") == session.get("content_revision")
@@ -4768,12 +4916,21 @@ def get_draft_detail_data(token, store=None):
 
     return {
         "cards": cards,
-        "diagnostics": diagnostics,
+        "diagnostics": classified_diagnostics,
+        "proposals": proposals,
         "counts": {
             "pending": pending_count,
             "unresolved_issues": unresolved_issues,
             "blocking_errors": blocking_errors,
         },
+        "quality_override_allowed": bool(
+            quality_warnings
+            and not session.get("quality_override_accepted")
+            and not blocking_errors
+            and pending_count == 0
+        ),
+        "quality_override_accepted": bool(session.get("quality_override_accepted")),
+        "quality_override_codes": list(session.get("quality_override_codes") or []),
         "draft_version": session["draft_version"],
         "generation_version": store.generation_version(token),
         "content_revision": session["content_revision"],
@@ -5052,7 +5209,14 @@ class H(BaseHTTPRequestHandler):
                     limit=background_limit,
                     only_official=q.get("official") == "1",
                     offset=background_offset,
-                    with_total=q.get("paged") == "1"))
+                    with_total=q.get("paged") == "1",
+                    source_filter=q.get("source", ""),
+                    category=q.get("category", ""),
+                    space=q.get("space", ""),
+                    time_filter=q.get("time", ""),
+                    weather=q.get("weather", ""),
+                    tag=q.get("tag", ""),
+                ))
             if p == "/api/install/options":
                 try:
                     return self._send(200, InstallManager().install_options(
@@ -5329,6 +5493,34 @@ class H(BaseHTTPRequestHandler):
                             if not f:
                                 f = registered_character_avatar_path(con, row["ident"])
                             break
+                    if not f:
+                        records, _aliases = _effective_character_catalog(con)
+                        for row in records:
+                            avatar_value = str(row.get("avatar") or "")
+                            spine_value = str(row.get("spine") or "")
+                            manifest_avatar = str(row.get("manifest_avatar") or "")
+                            avatar_key = (
+                                str(row.get("ident") or "")
+                                if manifest_avatar
+                                else Path(avatar_value.replace("\\", "/")).name
+                                or spine_value
+                            )
+                            if key not in {
+                                avatar_key,
+                                str(row.get("ident") or ""),
+                                spine_value,
+                            }:
+                                continue
+                            f, _source = character_avatar_details(
+                                avatar_value,
+                                spine_value,
+                                manifest_avatar=manifest_avatar,
+                            )
+                            if not f:
+                                f = registered_character_avatar_path(
+                                    con, str(row.get("ident") or "")
+                                )
+                            break
                 finally:
                     con.close()
                 if not f:
@@ -5458,6 +5650,33 @@ class H(BaseHTTPRequestHandler):
         except InvalidDraftTokenError as exc:
             return self._send(400, _invalid_draft_token_payload(exc))
         try:
+            if p == "/api/characters/alias":
+                script_name = str(data.get("script_name") or "").strip()
+                ident = str(data.get("ident") or "").strip()
+                kind = str(data.get("kind") or "portrait").strip().casefold()
+                if not script_name or not ident or kind not in {"portrait", "voice", "narrator"}:
+                    return self._send(400, {
+                        "ok": False, "code": "invalid_character_alias",
+                        "e": "别名、角色标识和角色类型不能为空",
+                    })
+                con = db()
+                try:
+                    records, _aliases = _effective_character_catalog(con)
+                    if kind == "portrait" and ident not in {
+                        str(row.get("ident") or "") for row in records
+                    }:
+                        return self._send(404, {
+                            "ok": False, "code": "character_not_found",
+                            "e": "没有找到可绑定该别名的角色",
+                        })
+                    assetdb.remember_alias(con, script_name, ident, kind)
+                finally:
+                    con.close()
+                return self._send(200, {
+                    "ok": True, "script_name": script_name,
+                    "ident": ident, "kind": kind,
+                })
+
             if p == "/api/picker":
                 path_val = data.get("path")
                 if not path_val or not os.path.exists(path_val):
@@ -5908,12 +6127,49 @@ class H(BaseHTTPRequestHandler):
                 except Exception as exc:
                     return self._send(409, {"ok": False, "code": "revision_conflict", "e": str(exc)})
 
+            if p == "/api/review/quality-override":
+                token = data.get("token")
+                expected_ver = data.get("expected_draft_version", 1)
+                try:
+                    result = DraftStore().accept_quality_warnings(
+                        token=token, expected_draft_version=expected_ver,
+                    )
+                    return self._send(200, {
+                        "ok": True,
+                        "draft_version": result["draft_version"],
+                        "content_revision": result["content_revision"],
+                        "accepted_issues": result["accepted_issues"],
+                        "quality_override_accepted": True,
+                    })
+                except RevisionConflictError as exc:
+                    return self._send(409, {"ok": False, "code": "revision_conflict", "e": str(exc)})
+                except ReviewPendingError as exc:
+                    return self._send(409, {
+                        "ok": False, "code": exc.code, "e": str(exc),
+                        "issues": exc.issues,
+                        "override_allowed": bool(exc.override_allowed),
+                    })
+                except Exception as exc:
+                    return self._send(400, {"ok": False, "code": "quality_override_rejected", "e": str(exc)})
+
             if p == "/api/compile":
                 token = data.get("token")
                 expected_ver = data.get("expected_draft_version", 1)
                 store = DraftStore()
                 try:
-                    store.assert_review_ready(token)
+                    store.assert_review_ready(
+                        token,
+                        allow_quality_warnings=bool(data.get("allow_quality_warnings")),
+                    )
+                except ReviewPendingError as exc:
+                    return self._send(409, {
+                        "ok": False,
+                        "code": exc.code,
+                        "e": str(exc),
+                        "issues": exc.issues,
+                        "override_allowed": bool(exc.override_allowed),
+                        "counts": exc.counts,
+                    })
                 except Exception as exc:
                     return self._send(409, {
                         "ok": False,
@@ -5923,7 +6179,13 @@ class H(BaseHTTPRequestHandler):
 
                 bundle_mgr = BuildBundleManager(store=store)
                 try:
-                    build_id = bundle_mgr.create_compile_snapshot(token=token, expected_draft_version=expected_ver)
+                    snapshot_kwargs = {
+                        "token": token,
+                        "expected_draft_version": expected_ver,
+                    }
+                    if data.get("allow_quality_warnings"):
+                        snapshot_kwargs["allow_quality_warnings"] = True
+                    build_id = bundle_mgr.create_compile_snapshot(**snapshot_kwargs)
                 except ReviewPendingError as exc:
                     # The review state can change between the initial gate
                     # and snapshot creation. Return a normal JSON conflict
@@ -5933,6 +6195,9 @@ class H(BaseHTTPRequestHandler):
                         "ok": False,
                         "code": exc.code,
                         "e": str(exc),
+                        "issues": exc.issues,
+                        "override_allowed": bool(exc.override_allowed),
+                        "counts": exc.counts,
                     })
                 except CompileInputStaleError as exc:
                     return self._send(409, {"ok": False, "code": "compile_input_stale", "e": str(exc)})
@@ -5948,15 +6213,33 @@ class H(BaseHTTPRequestHandler):
                 build_id = data.get("build_id")
                 install_mgr = InstallManager()
                 try:
+                    install_kwargs = {
+                        "token": token,
+                        "build_id": build_id,
+                        "category": data.get("category", ""),
+                        "story_name": data.get("story_name"),
+                    }
+                    if data.get("allow_quality_warnings"):
+                        install_kwargs["allow_quality_warnings"] = True
+                    if data.get("allow_incomplete_annotation"):
+                        install_kwargs["allow_incomplete_annotation"] = True
                     res = install_mgr.install_build(
-                        token=token,
-                        build_id=build_id,
-                        category=data.get("category", ""),
-                        story_name=data.get("story_name"),
+                        **install_kwargs,
                     )
                     return self._send(200, res)
                 except ReviewPendingError as exc:
-                    return self._send(409, {"ok": False, "code": exc.code, "e": str(exc)})
+                    payload = {
+                        "ok": False,
+                        "code": exc.code,
+                        "e": str(exc),
+                        "counts": exc.counts,
+                        "issues": exc.issues,
+                        "override_allowed": bool(exc.override_allowed),
+                    }
+                    annotation_status = getattr(exc, "annotation_status", None)
+                    if annotation_status:
+                        payload["annotation_status"] = annotation_status
+                    return self._send(409, payload)
                 except AARunningError as exc:
                     return self._send(423, {"ok": False, "code": "aa_running", "e": str(exc)})
                 except AAInstallTargetExistsError as exc:
@@ -5967,6 +6250,7 @@ class H(BaseHTTPRequestHandler):
                     return self._send(409, {
                         "ok": False, "code": exc.code, "e": str(exc),
                         "issues": exc.issues,
+                        "override_allowed": bool(exc.override_allowed),
                     })
                 except AACorruptBundleError as exc:
                     return self._send(400, {"ok": False, "code": "corrupted_bundle", "e": str(exc)})
@@ -6304,6 +6588,9 @@ class H(BaseHTTPRequestHandler):
                     return self._send(200, {
                         "ok": True,
                         "blocking_errors": detail["counts"]["blocking_errors"],
+                        "unresolved_issues": detail["counts"]["unresolved_issues"],
+                        "quality_override_allowed": detail.get("quality_override_allowed", False),
+                        "quality_override_accepted": detail.get("quality_override_accepted", False),
                         "diagnostics": detail["diagnostics"],
                         "draft_version": detail["draft_version"],
                         "content_revision": detail["content_revision"],

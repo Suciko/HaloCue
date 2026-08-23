@@ -290,9 +290,12 @@ def _offscreen_fixture(tmp_path, provider):
         "kind": "line", "line_no": 1, "split_index": 0,
         "who": "老师", "text": "先确认一下。", "raw": "老师: 先确认一下。",
     }])
-    cast = {"老师": {"id": "teacher", "portrait": False, "narrator": False}}
+    cast = {
+        "老师": {"id": "teacher", "portrait": False, "narrator": False},
+        "爱丽丝": {"id": "alice", "portrait": True, "narrator": False},
+    }
     constraints = {
-        "faces_by_id": {"teacher": set()}, "sym2cn": {},
+        "faces_by_id": {"teacher": set(), "alice": {"31"}}, "sym2cn": {},
         "ok_emo": {"惊疑"}, "ok_act": {"stiff"}, "ok_fx": {"特写"},
         "ok_se": set(), "ok_bg": set(), "ok_bgfx": set(), "ok_shot": set(),
     }
@@ -401,6 +404,9 @@ def test_checkpoint_reuse_reapplies_nonportrait_resource_boundary(tmp_path):
     source_id = next(iter(saved["chunk_outputs"][chunk_id]["lines_by_id"]))
     saved["chunk_outputs"][chunk_id]["lines_by_id"][source_id].update({
         "face": "99", "emo": "惊疑", "act": "stiff", "fx": "特写",
+        "reactions": [{
+            "who": "爱丽丝", "face": "31", "emo": "惊疑", "act": "stiff",
+        }],
     })
     store.commit(checkpoint_path.parent.name, saved)
 
@@ -421,6 +427,7 @@ def test_checkpoint_reuse_reapplies_nonportrait_resource_boundary(tmp_path):
         not output["lines_by_id"][source_id].get(field)
         for field in ("face", "emo", "act", "fx")
     )
+    assert output["lines_by_id"][source_id]["reactions"] == []
     assert any(
         item.get("stage") == "checkpoint_reuse"
         for item in resumed["diagnostics"]
@@ -441,6 +448,47 @@ def test_nonportrait_resource_helper_preserves_portrait_speaker_resources():
 
     assert repairs == []
     assert response["lines"][0]["face"] == "[Emo:意外]"
+
+
+def test_offscreen_speaker_reactions_do_not_reach_final_rows(tmp_path):
+    class TeacherReactionProvider:
+        name = "teacher-reaction"
+        model = "teacher-reaction"
+        supports_compact_annotation = True
+
+        def __init__(self):
+            self.calls = 0
+
+        def complete_json(self, _static, _volatile, _user, _schema):
+            self.calls += 1
+            return {
+                "lines": [{
+                    "i": 1,
+                    "visible_characters": ["爱丽丝"],
+                    "focus_kind": "listener",
+                    "focus_character": "爱丽丝",
+                    "reactions": [{
+                        "who": "爱丽丝", "face": "31", "emo": "惊疑", "act": "stiff",
+                    }],
+                }],
+                "state_delta": {}, "memory_events": [],
+            }
+
+    provider = TeacherReactionProvider()
+    result = _offscreen_fixture(tmp_path, provider)
+
+    assert provider.calls == 1
+    row = next(iter(result["rows_by_id"].values()))
+    assert row["reactions"] == []
+    attempt = next(iter(result["chunk_outputs"].values()))["model_attempts"][0]
+    assert attempt["response"]["lines"][0]["reactions"] == [{
+        "who": "爱丽丝", "face": "31", "emo": "惊疑", "act": "stiff",
+    }]
+    assert any(
+        repair.get("field") == "reactions"
+        and repair.get("reason") == "non_portrait_speaker_reaction_cleared"
+        for repair in attempt.get("protocol_repairs") or []
+    )
 
 
 def test_agent_carries_state_and_event_into_next_chunk(tmp_path):
@@ -477,6 +525,26 @@ def test_protocol_retry_receives_previous_response_and_preserves_directing_contr
     assert "不是重新导演" in retry
     assert '"reveal":"left"' in retry
     assert '"shot_transition":"cut"' in retry
+
+
+def test_shot_coverage_protocol_error_gets_one_extra_narrow_retry(tmp_path):
+    class ShotCoverageRetryProvider(RecordingProvider):
+        def complete_json(self, static, volatile, user, schema):
+            response = super().complete_json(static, volatile, user, schema)
+            if self.calls <= 2 and response.get("lines"):
+                response["lines"][0]["direction"] = {
+                    "shot_transition": "cut",
+                    "visible_characters": ["凯伊"],
+                    "positions": {},
+                }
+            return response
+
+    provider = ShotCoverageRetryProvider()
+    result = fixture(tmp_path, provider, count=1)
+
+    assert result["completed_chunks"] == 1
+    assert provider.calls == 3
+    assert "positions must cover the full shot" in provider.requests[2]["user"]
 
 
 def test_agent_retries_face_outside_backend_shortlist(tmp_path):
@@ -746,6 +814,72 @@ def test_scene_event_planner_repairs_one_invalid_v2_plan_before_execution(tmp_pa
     assert scene["event_plan_source"] == "model_repaired"
     assert scene["event_plan_quality"]["result"] == "pass"
     assert scene["event_plan"]["events"][0]["shot_groups"][0]["framing"] == "close"
+
+
+def test_scene_event_planner_retries_transient_structured_failure(tmp_path):
+    class RetryPlanProvider(RecordingProvider):
+        def __init__(self):
+            super().__init__()
+            self.plan_calls = 0
+            self.planner_users = []
+
+        def complete_json(self, static, volatile, user, schema):
+            if "场景事件规划器" in static:
+                self.calls += 1
+                self.plan_calls += 1
+                self.planner_users.append(user)
+                if self.plan_calls == 1:
+                    raise llm.StructuredOutputError("planner returned invalid JSON")
+                return {"events": [{
+                    "event_id": "dialogue",
+                    "start_i": 1,
+                    "end_i": 1,
+                    "kind": "dialogue_cluster",
+                    "stimulus": "一句新的信息",
+                    "stimulus_targets": ["凯伊"],
+                    "outcome": "凯伊作出回应",
+                    "result_owner": "凯伊",
+                    "aftershock_owner": "",
+                    "release_owner": "",
+                    "phase_order": [],
+                    "phase_anchors": [],
+                    "peak_hints": [],
+                }]}
+            return super().complete_json(static, volatile, user, schema)
+
+    provider = RetryPlanProvider()
+    result = fixture(tmp_path, provider, count=1, scene_event_planning=True)
+    scene = result["director_plan"]["scenes"][0]
+
+    assert provider.plan_calls == 2
+    assert scene["event_plan_source"] == "model_retry"
+    assert [attempt["outcome"] for attempt in scene["event_plan_attempts"]] == [
+        "failed", "accepted",
+    ]
+    assert any(item["code"] == "scene_event_plan_retrying" for item in result["diagnostics"])
+    assert "PLANNER_PROTOCOL_RETRY" in provider.planner_users[1]
+
+
+def test_scene_event_planner_does_not_retry_authentication_failure(tmp_path):
+    class AuthPlanProvider(RecordingProvider):
+        def __init__(self):
+            super().__init__()
+            self.plan_calls = 0
+
+        def complete_json(self, static, volatile, user, schema):
+            if "场景事件规划器" in static:
+                self.calls += 1
+                self.plan_calls += 1
+                raise llm.ModelAuthenticationError("invalid token")
+            return super().complete_json(static, volatile, user, schema)
+
+    provider = AuthPlanProvider()
+    result = fixture(tmp_path, provider, count=1, scene_event_planning=True)
+    scene = result["director_plan"]["scenes"][0]
+
+    assert provider.plan_calls == 1
+    assert scene["event_plan_source"] == "fallback"
+    assert not any(item["code"] == "scene_event_plan_retrying" for item in result["diagnostics"])
 
 
 def test_g2_does_not_repair_only_to_satisfy_a_planner_silent_beat(tmp_path):
@@ -2158,6 +2292,41 @@ def test_resume_after_deadline_uses_smaller_target_batches(tmp_path):
     assert resumed["pending_targets"] == 0
     assert resumed_provider.requests
     assert max(len(call["target_ids"]) for call in resumed_provider.requests) <= 12
+
+
+def test_resume_after_deadline_initializes_progress_before_subdivision(tmp_path):
+    class DeadlineProvider(RecordingProvider):
+        def complete_json(self, static, volatile, user, schema):
+            self.requests.append({
+                "target_ids": re.findall(r"\[TARGET ([^\]]+)\]", user),
+            })
+            raise llm.RequestDeadlineError("deadline")
+
+    first_provider = DeadlineProvider()
+    first = fixture(
+        tmp_path, first_provider, count=8,
+        target=8, soft_limit=8, hard_limit=8,
+    )
+    assert first["timed_out"] is True
+    assert first["memory"]["progress"]["resume_target_limit"] == 5
+
+    # The next run must enter the learned safe-limit subdivision path before
+    # making another model request.  Previously that path referenced
+    # ``current``/``total`` before assigning them and crashed with
+    # UnboundLocalError.
+    resumed_provider = RecordingProvider()
+    resumed_activity = []
+    resumed = fixture(
+        tmp_path, resumed_provider, count=8,
+        target=8, soft_limit=8, hard_limit=8,
+        model_activity=resumed_activity.append,
+    )
+
+    assert resumed["timed_out"] is False
+    assert resumed["completed_targets"] == 8
+    assert resumed_provider.requests
+    assert max(len(call["target_ids"]) for call in resumed_provider.requests) <= 5
+    assert any(event.get("state") == "subdividing" for event in resumed_activity)
 
 
 def test_model_activity_adds_chunk_context_to_provider_events(tmp_path):

@@ -102,6 +102,72 @@ def test_install_rechecks_annotation_completion(temp_environment, monkeypatch):
         env["install_mgr"].install_build(token=token, build_id="stale-build")
 
 
+def test_partial_annotation_install_requires_explicit_review_override(
+    temp_environment,
+):
+    env = temp_environment
+    store = env["store"]
+    bundle_mgr = env["bundle_mgr"]
+    install_mgr = env["install_mgr"]
+    token = "partial-install-approved"
+    created = store.create_draft(
+        token=token,
+        text="旁白: 已保留的部分结果\n",
+        project="部分结果安装",
+        cast={"cast": {"旁白": {"narrator": True}}},
+        annotation_status={
+            "status": "partial", "completed_targets": 0,
+            "total_targets": 8, "pending_targets": 8,
+        },
+    )
+    with pytest.raises(AnnotationIncompleteError):
+        install_mgr.install_build(token=token, build_id="stale-build")
+
+    reviewed = store.batch_approve_reviews(
+        token=token,
+        card_ids=None,
+        expected_draft_version=created["session"]["draft_version"],
+    )
+    assert reviewed["session"]["annotation_override_accepted"] is True
+    build_id = bundle_mgr.create_compile_snapshot(
+        token=token, expected_draft_version=reviewed["session"]["draft_version"],
+    )
+    bundle_mgr.execute_build_worker(token=token, build_id=build_id)
+
+    with pytest.raises(AnnotationIncompleteError):
+        install_mgr.install_build(token=token, build_id=build_id)
+    result = install_mgr.install_build(
+        token=token,
+        build_id=build_id,
+        allow_incomplete_annotation=True,
+    )
+    assert result["ok"] is True
+    assert result["install_audit"]["annotation_incomplete_override"] is True
+    assert result["install_audit"]["annotation_status"]["pending_targets"] == 8
+
+
+def test_partial_annotation_override_flag_without_review_is_not_enough(
+    temp_environment,
+):
+    env = temp_environment
+    token = "partial-install-unreviewed"
+    env["store"].create_draft(
+        token=token,
+        text="旁白: 未审查结果\n",
+        project="未审查部分结果",
+        annotation_status={
+            "status": "partial", "completed_targets": 0,
+            "total_targets": 8, "pending_targets": 8,
+        },
+    )
+    with pytest.raises(AnnotationIncompleteError):
+        env["install_mgr"].install_build(
+            token=token,
+            build_id="stale-build",
+            allow_incomplete_annotation=True,
+        )
+
+
 def test_aa_running_refuses_install(temp_environment):
     env = temp_environment
     store = env["store"]
@@ -150,6 +216,87 @@ def test_unresolved_high_quality_issue_refuses_install_before_touching_aa(
     assert caught.value.code == "staging_quality_failed"
     assert caught.value.issues[0]["code"] == "compiled_exit_still_visible"
     assert not (env["aa_data_dir"] / "projects" / f"{project}.aap").exists()
+
+
+def test_deterministic_duplicate_camera_issue_does_not_block_install(temp_environment):
+    env = temp_environment
+    token = "quality-dedup-install"
+    project = "重复镜头可安装"
+    env["store"].create_draft(token=token, text="旁白: 检查\n", project=project)
+    build_id = env["bundle_mgr"].create_compile_snapshot(token, 1)
+    result = env["bundle_mgr"].execute_build_worker(token, build_id)
+    bundle_dir = Path(result["bundle_dir"])
+    validation_file = bundle_dir / "validation.json"
+    validation_file.write_text(json.dumps({
+        "valid": True,
+        "diagnostics": [],
+        "quality": {"issues": [{
+            "code": "compiled_redundant_camera_declaration",
+            "severity": "high",
+        }]},
+        "blocking_issues": [],
+    }, ensure_ascii=False), encoding="utf-8")
+    _rehash_bundle_file(bundle_dir, validation_file)
+
+    decision = InstallManager.assert_quality_ready(bundle_dir)
+
+    assert decision["resolved_issues"]
+    assert decision["resolved_issues"][0]["resolution"] == "deterministic"
+
+
+def test_quality_warning_can_be_overridden_without_allowing_hard_error(temp_environment):
+    env = temp_environment
+    token = "quality-warning-override"
+    project = "质量提示保留"
+    env["store"].create_draft(token=token, text="旁白: 检查\n", project=project)
+    build_id = env["bundle_mgr"].create_compile_snapshot(token, 1)
+    result = env["bundle_mgr"].execute_build_worker(token, build_id)
+    bundle_dir = Path(result["bundle_dir"])
+    validation_file = bundle_dir / "validation.json"
+    validation_file.write_text(json.dumps({
+        "valid": True,
+        "diagnostics": [],
+        "quality": {"issues": [{
+            "code": "unclassified_quality_warning",
+            "severity": "high",
+        }]},
+        "blocking_issues": [],
+    }, ensure_ascii=False), encoding="utf-8")
+    _rehash_bundle_file(bundle_dir, validation_file)
+
+    with pytest.raises(AAQualityGateError):
+        InstallManager.assert_quality_ready(bundle_dir)
+    decision = InstallManager.assert_quality_ready(
+        bundle_dir, allow_quality_warnings=True
+    )
+
+    assert decision["warnings_overridden"] is True
+
+
+def test_mixed_quality_report_does_not_offer_a_bypass_for_hard_errors(
+    temp_environment,
+):
+    env = temp_environment
+    token = "quality-mixed-override"
+    env["store"].create_draft(token=token, text="旁白: 检查\n", project="混合质量问题")
+    build_id = env["bundle_mgr"].create_compile_snapshot(token, 1)
+    result = env["bundle_mgr"].execute_build_worker(token, build_id)
+    bundle_dir = Path(result["bundle_dir"])
+    validation_file = bundle_dir / "validation.json"
+    validation_file.write_text(json.dumps({
+        "valid": False,
+        "diagnostics": [],
+        "quality": {"issues": [
+            {"code": "unclassified_quality_warning", "severity": "high"},
+            {"code": "compiled_exit_still_visible", "severity": "critical"},
+        ]},
+        "blocking_issues": [],
+    }, ensure_ascii=False), encoding="utf-8")
+    _rehash_bundle_file(bundle_dir, validation_file)
+
+    with pytest.raises(AAQualityGateError) as caught:
+        InstallManager.assert_quality_ready(bundle_dir)
+    assert caught.value.override_allowed is False
 
 
 @pytest.mark.parametrize(

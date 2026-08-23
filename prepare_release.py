@@ -44,7 +44,13 @@ CODE = [
     "official_face_examples.py",
 ]
 PROGRAM_FILES = ["启动程序.cmd", "检查运行环境.cmd"]
-DATA_FILES = ["aa_resources.json", "portrait_layout_hints.json"]
+DATA_FILES = [
+    "aa_resources.json",
+    "portrait_layout_hints.json",
+    # Name aliases are runtime data, not private user configuration.  Keep
+    # the source package aligned with the desktop bundle's character lookup.
+    "character_aliases.json",
+]
 STATIC_DIRS = ["js", "css", os.path.join("tools", "spine_web_runtime")]
 DOCS = ["README.md", "UPLOAD.md", ".gitignore", "使用说明-从这里开始.md"]
 EXAMPLES = {"llm.json": "llm.json.example", "cast.json": "cast.example.json"}
@@ -55,6 +61,10 @@ SECRET_RE = re.compile(
     r"(sk-[A-Za-z0-9_\-]{20,}|sk-ant-[A-Za-z0-9_\-]{20,}|"
     r"['\"]?api[_-]?key['\"]?\s*[:=]\s*['\"][^'\"]{20,}['\"])", re.I)
 ABS_RE = re.compile(r"[A-Za-z]:\\\\?(?:Users|AzureArchive|桌面|下载)")
+TEXT_PATH_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9])[A-Z]:[\\/]"
+    r"(?=(?:Users|AzureArchive|桌面|下载)(?=[^A-Za-z0-9]|$))"
+)
 
 _SKIP_DIR_NAMES = {
     "__pycache__", ".git", ".worktrees", ".venv-desktop-build", "build",
@@ -86,6 +96,18 @@ def _sanitized_json_copy(source, destination):
         return
     with open(destination, "w", encoding="utf-8") as handle:
         json.dump(_sanitize_json_value(value), handle, ensure_ascii=False, indent=1)
+
+
+def _sanitized_text_copy(source, destination):
+    """Copy public text while removing machine-specific drive prefixes."""
+    try:
+        text = open(source, encoding="utf-8", errors="replace").read()
+    except OSError:
+        shutil.copy2(source, destination)
+        return
+    text = TEXT_PATH_RE.sub("<local-path>/", text)
+    with open(destination, "w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
 
 
 def _configured_overlay_databases():
@@ -267,7 +289,7 @@ def main():
     for fn in DOCS:
         p = os.path.join(HERE, fn)
         if os.path.exists(p):
-            shutil.copy2(p, os.path.join(out, fn))
+            _sanitized_text_copy(p, os.path.join(out, fn))
             n += 1
     for relative_dir in STATIC_DIRS:
         source_dir = os.path.join(HERE, relative_dir)
@@ -293,10 +315,8 @@ def main():
             )
             os.makedirs(destination, exist_ok=True)
             for fn in files:
-                shutil.copy2(
-                    os.path.join(dp, fn),
-                    os.path.join(destination, fn),
-                )
+                source = os.path.join(dp, fn)
+                _sanitized_text_copy(source, os.path.join(destination, fn))
                 n += 1
     if release_095:
         primary = os.path.join(HERE, "aa_assets.db")

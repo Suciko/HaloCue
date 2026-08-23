@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from aa_registry import (
+    RegistrationConflictError,
     register_background,
     register_character,
     register_sound,
@@ -195,6 +196,59 @@ def register_asset_request(
         display_name = str(data.get("display_name") or "").strip()
         if not display_name:
             raise AssetImportRequestError("display_name is required for character")
+        reused = None
+        if con is not None:
+            from asset_catalog import migrate as migrate_asset_catalog
+
+            migrate_asset_catalog(con)
+            reused = con.execute(
+                """SELECT aa_key,display_name,install_path,source_path,sha256,metadata_json
+                   FROM asset_install
+                   WHERE kind='character' AND status='registered' AND scope=?
+                     AND (CAST(aa_key AS TEXT)=? OR sha256=?)
+                   ORDER BY registered_at DESC LIMIT 1""",
+                (
+                    str(target.project_dir),
+                    str(result.candidate.aa_key),
+                    str(result.candidate.sha256 or ""),
+                ),
+            ).fetchone()
+        if reused is not None:
+            stored_sha = str(reused["sha256"] or "")
+            same_content = bool(
+                result.candidate.sha256
+                and stored_sha
+                and stored_sha.casefold() == str(result.candidate.sha256).casefold()
+            )
+            same_identifier = str(reused["aa_key"] or "") == str(result.candidate.aa_key)
+            if same_identifier and not same_content:
+                # Let the normal AA registry path produce the stable conflict
+                # error for an identifier that points at different content.
+                reused = None
+            elif same_content and str(reused["display_name"] or "") != display_name:
+                raise RegistrationConflictError(
+                    f"Identifier {result.candidate.aa_key!r} 已用于不同身份或内容"
+                )
+        if reused is not None:
+            return {
+                **_validation_payload(result),
+                "metadata": {
+                    **result.candidate.metadata,
+                    "display_name": display_name,
+                    "nickname": str(data.get("nickname") or ""),
+                },
+                "ok": True,
+                "status": "registered",
+                "reused": True,
+                "changed": False,
+                "project_dir": str(target.project_dir),
+                "save_dir": str(target.save_dir),
+                "install_path": str(reused["install_path"] or ""),
+                "source_path": str(reused["source_path"] or ""),
+                "sha256": str(reused["sha256"] or result.candidate.sha256 or ""),
+                "install_paths": [str(reused["install_path"] or "")],
+                "manifest_paths": [],
+            }
         registration = register_character(
             result,
             target,

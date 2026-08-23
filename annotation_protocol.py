@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import re
 import json
 import uuid
@@ -755,6 +756,94 @@ def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, 
     }, director_intents=director_intents, annotation_intents=annotation_intents)
 
 
+def merge_compact_retry_response(
+    response: Any,
+    previous_response: Mapping[str, Any] | None,
+    targets: Sequence[Mapping[str, Any]],
+    *,
+    clear_fields: Iterable[str] = (),
+) -> Dict[str, Any]:
+    """Preserve authored fields when a compact protocol retry omits them.
+
+    A protocol retry may return only fields changed to fix the reported
+    error. Expanding that sparse response from blank defaults would silently
+    erase valid face/emo/act/camera choices from the failed attempt. Merge at
+    the wire level so explicit empty values still clear a field while omitted
+    fields retain the previous response.
+    """
+    current = copy.deepcopy(dict(_require_dict(
+        response, "invalid_response", "模型响应必须是对象",
+    )))
+    if not isinstance(previous_response, Mapping):
+        return current
+    previous = dict(previous_response)
+    index_by_source = {
+        str(target.get("annotation_id") or ""): index
+        for index, target in enumerate(targets, 1)
+    }
+
+    def line_index(line):
+        if not isinstance(line, Mapping):
+            return None
+        source_id = line.get("source_id")
+        if isinstance(source_id, str) and source_id in index_by_source:
+            return index_by_source[source_id]
+        value = line.get("i")
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    previous_lines = {
+        index: dict(line)
+        for line in previous.get("lines") or ()
+        if (index := line_index(line)) is not None
+    }
+    current_lines = []
+    seen = set()
+    for line in current.get("lines") or ():
+        if not isinstance(line, Mapping):
+            current_lines.append(line)
+            continue
+        merged = dict(line)
+        index = line_index(line)
+        previous_line = previous_lines.get(index)
+        if previous_line is not None:
+            # Presence is the compact protocol's clear/keep signal. Explicit
+            # empty strings/false/zero remain authored values.
+            for field in set(ANNOTATION_FIELDS) | LINE_REACTION_FIELDS:
+                if field not in merged and field in previous_line:
+                    merged[field] = copy.deepcopy(previous_line[field])
+            previous_direction = dict(previous_line.get("d") or {})
+            for field in DIRECTION_FIELDS:
+                if field in previous_line and field != "d":
+                    previous_direction[field] = previous_line[field]
+            current_direction = dict(merged.get("d") or {})
+            for field in DIRECTION_FIELDS:
+                if field in merged and field != "d":
+                    current_direction[field] = merged[field]
+            if previous_direction or current_direction:
+                merged["d"] = {**previous_direction, **current_direction}
+        current_lines.append(merged)
+        if index is not None:
+            seen.add(index)
+
+    # Omitted rows are no-op rows in compact mode; carry their previous wire
+    # entries into this retry so authored values survive expansion.
+    for index, line in previous_lines.items():
+        if index not in seen:
+            current_lines.append(copy.deepcopy(line))
+    for line in current_lines:
+        if isinstance(line, dict):
+            for field in clear_fields:
+                line.pop(str(field), None)
+    current["lines"] = current_lines
+
+    if not current.get("state_delta") and previous.get("state_delta"):
+        current["state_delta"] = copy.deepcopy(previous["state_delta"])
+    for field in ("memory_events", "beats"):
+        if not current.get(field) and previous.get(field):
+            current[field] = copy.deepcopy(previous[field])
+    return current
+
+
 def _validate_beats(
     value: Any, expected_ids: Iterable[str], cast: Mapping[str, Any],
     constraints: Mapping[str, Any],
@@ -1339,6 +1428,7 @@ def _validate_line_resources(
 def validate_chunk_response(
     response: Any, targets: Sequence[Mapping[str, Any]], visible_ids: Iterable[str] = (),
     *, cast: Mapping[str, Any] = {}, constraints: Mapping[str, Any] = {},
+    initial_visible_characters: Sequence[str] | None = None,
 ) -> Dict[str, Any]:
     expanded_compact = isinstance(response, _ExpandedChunkResponse)
     director_intents = getattr(response, "director_intents", {})
@@ -1362,6 +1452,14 @@ def validate_chunk_response(
         name for name, character in cast.items()
         if isinstance(character, Mapping) and character.get("portrait") and not character.get("narrator")
     } if isinstance(cast, Mapping) else set()
+    # ``None`` preserves the protocol helper's historical standalone behavior.
+    # Live annotation passes the previous shot explicitly so a reaction cannot
+    # target an actor who merely exists in the cast but is still off camera.
+    tracking_visibility = initial_visible_characters is not None
+    active_visible = list(dict.fromkeys(
+        str(name) for name in (initial_visible_characters or ())
+        if str(name) in displayable_names
+    ))[:3]
     for row in lines:
         row = _validate_annotation_row(row)
         source_id = row["source_id"]
@@ -1430,6 +1528,13 @@ def validate_chunk_response(
         reaction_visible = None
         if isinstance(raw_intent, Mapping) and "visible_characters" in raw_intent:
             reaction_visible = direction.get("visible_characters") or []
+            if tracking_visibility:
+                active_visible = list(dict.fromkeys(
+                    str(name) for name in reaction_visible
+                    if str(name) in displayable_names
+                ))[:3]
+        elif tracking_visibility:
+            reaction_visible = list(active_visible)
         normalized_row["reactions"] = _normalize_reactions(
             row.get("reactions", []),
             cast=cast if isinstance(cast, Mapping) else {},
@@ -1451,6 +1556,13 @@ def validate_chunk_response(
                 raise ChunkProtocolError(
                     "invalid_line", "line.reveal 不能与整镜硬切同时使用",
                 )
+        if tracking_visibility:
+            # Speaking does not prove that the portrait is on camera: an
+            # authored listener shot may deliberately keep the voice outside
+            # the frame. Only an explicit shot or reveal advances visibility.
+            if normalized_row.get("reveal") and speaker_name not in active_visible:
+                active_visible.append(speaker_name)
+                active_visible = active_visible[:3]
         # An explicit listener shot can keep the speaker off screen.  That is
         # an authored shot/reverse-shot decision, not a protocol violation.
         normalized_row["direction_intent"] = _normalized_direction_intent(

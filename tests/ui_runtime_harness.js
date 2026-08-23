@@ -135,6 +135,7 @@ function createHarness(config) {
       (windowListeners[event.type] || []).forEach(handler => handler(event));
       return true;
     },
+    confirm: config.confirm,
   };
   function CustomEvent(type, options) { this.type = type; this.detail = options && options.detail; }
   const sandbox = {

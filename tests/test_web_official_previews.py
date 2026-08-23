@@ -143,6 +143,40 @@ def test_character_avatar_uses_preview_matching_official_spine(
     ) == (store.root / "official-avatar.png")
 
 
+def test_character_avatar_prefers_manifest_small_portrait_path_inside_overrides(
+    tmp_path, monkeypatch
+):
+    _configure_preview_store(tmp_path, monkeypatch)
+    overrides = tmp_path / "overrides"
+    portrait = overrides / "UIs" / "01_Common" / "01_Character" / "Student_Portrait_Custom.png"
+    _make_image(portrait, "red")
+    monkeypatch.setitem(webui.CFG, "overrides", str(overrides))
+
+    resolved, source = webui.character_avatar_details(
+        "Student_Portrait_Custom",
+        "characters/Custom",
+        manifest_avatar=r"UIs\01_Common\01_Character\Student_Portrait_Custom.png",
+    )
+
+    assert resolved == portrait
+    assert source == "manifest"
+
+
+def test_character_avatar_rejects_manifest_path_escape(tmp_path, monkeypatch):
+    _configure_preview_store(tmp_path, monkeypatch)
+    overrides = tmp_path / "overrides"
+    outside = tmp_path / "outside.png"
+    _make_image(outside, "red")
+    monkeypatch.setitem(webui.CFG, "overrides", str(overrides))
+
+    resolved, source = webui.character_avatar_details(
+        "", "characters/Custom", manifest_avatar=r"..\outside.png"
+    )
+
+    assert resolved is None
+    assert source == "missing"
+
+
 def test_character_list_exposes_avatar_route_only_when_preview_exists(
     tmp_path,
     monkeypatch,

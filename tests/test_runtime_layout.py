@@ -130,3 +130,72 @@ def test_frozen_start_upgrades_stale_resource_index_without_dropping_custom_rows
     assert merged["characters"][1]["name"] == "旧爱丽丝"
     assert merged["characters"][1]["spine"] == "old_spine"
     assert merged["sounds"] == ["old_sound"]
+
+
+def test_repeated_frozen_start_skips_large_seed_merge_and_overlay_copy(tmp_path, monkeypatch):
+    resources = tmp_path / "resources"
+    state = tmp_path / "state"
+    (resources / "databases").mkdir(parents=True)
+    (resources / "aa_assets.db").write_bytes(b"primary")
+    (resources / "aa_resources.json").write_text(
+        json.dumps({"characters": [{"identifier": "aris"}]}),
+        encoding="utf-8",
+    )
+    (resources / "databases" / "overlay.db").write_bytes(b"overlay")
+    (resources / "aa_config.seed.json").write_text(
+        json.dumps({"asset_databases": ["databases/overlay.db"]}),
+        encoding="utf-8",
+    )
+    layout = resolve_runtime_layout(
+        module_file=resources / "runtime_layout.py",
+        executable=tmp_path / "HaloCue.exe",
+        environ={"HALOCUE_USER_DATA_DIR": str(state)},
+        frozen_root=resources,
+    )
+
+    prepare_user_state(layout)
+    index_mtime = layout.resource_index_path.stat().st_mtime_ns
+    overlay_mtime = (state / "databases" / "overlay.db").stat().st_mtime_ns
+    original_loads = json.loads
+    calls = []
+
+    def counting_loads(value, *args, **kwargs):
+        calls.append(value)
+        return original_loads(value, *args, **kwargs)
+
+    monkeypatch.setattr("runtime_layout.json.loads", counting_loads)
+    prepare_user_state(layout)
+
+    assert len(calls) <= 3  # seed config + stamp + settings; seed is not parsed
+    assert layout.resource_index_path.stat().st_mtime_ns == index_mtime
+    assert (state / "databases" / "overlay.db").stat().st_mtime_ns == overlay_mtime
+
+
+def test_frozen_user_state_preparation_is_idempotent_within_one_process(tmp_path, monkeypatch):
+    resources = tmp_path / "resources"
+    state = tmp_path / "state"
+    resources.mkdir()
+    (resources / "aa_assets.db").write_bytes(b"primary")
+    (resources / "aa_resources.json").write_text("{}", encoding="utf-8")
+    (resources / "aa_config.seed.json").write_text("{}", encoding="utf-8")
+    layout = resolve_runtime_layout(
+        module_file=resources / "runtime_layout.py",
+        executable=tmp_path / "HaloCue.exe",
+        environ={"HALOCUE_USER_DATA_DIR": str(state)},
+        frozen_root=resources,
+    )
+
+    calls = []
+    original_write = Path.write_text
+
+    def counting_write(path, *args, **kwargs):
+        calls.append(path)
+        return original_write(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", counting_write)
+    prepare_user_state(layout)
+    first_count = len(calls)
+    prepare_user_state(layout)
+
+    assert first_count > 0
+    assert len(calls) == first_count

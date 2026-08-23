@@ -452,6 +452,59 @@ button:disabled {
   height: 52px;
   border-radius: 10px;
 }
+.cast-picker-speaker {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+}
+.cast-picker-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.cast-picker-status:empty { display: none; }
+.cast-picker-status.is-warning { border-color: #e9c88f; background: #fffaf0; color: #76551a; }
+.cast-picker-status.is-progress { border-color: #b9d6ee; background: #f4f9fd; }
+.cast-picker-status button { min-height: 30px; padding: 4px 9px; font-size: 12px; }
+.cast-picker-alias-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+.cast-picker-alias-tools[hidden] { display: none; }
+.cast-picker-alias-tools > span { min-width: 0; font-size: 11px; line-height: 1.45; }
+.cast-picker-alias-tools button { flex: 0 0 auto; min-height: 32px; padding: 5px 10px; font-size: 12px; }
+.cast-special-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.cast-special-label {
+  flex: 0 0 100%;
+  color: var(--dim);
+  font-size: 11px;
+  font-weight: 750;
+}
+.cast-special-actions button { min-height: 34px; padding: 5px 10px; font-size: 12px; }
+.cast-result-avatar-status { display: block; color: var(--warn); font-size: 11px; }
+.cast-avatar[data-avatar-state="official_pending"],
+.preflight-avatar[data-avatar-state="official_pending"] { border-style: dashed; }
 .preflight-avatar img,
 .cast-avatar img {
   display: block;
@@ -498,6 +551,9 @@ button:disabled {
   border-color: var(--accent);
   background: var(--accent-soft, #f2f7ff);
 }
+.cast-result-wrap { display: grid; gap: 4px; }
+.cast-alias-save { justify-self: end; min-height: 28px; padding: 4px 9px; font-size: 11px; }
+.install-quality-override { margin-top: 10px; color: var(--warn); }
 .cast-result-body {
   display: grid;
   min-width: 0;
@@ -515,6 +571,22 @@ button:disabled {
   color: var(--dim);
   font-size: 11px;
 }
+.card-proposals {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface-soft);
+}
+.card-proposal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.card-proposal-message { flex: 1 1 260px; color: var(--dim); font-size: 12px; }
+.card-proposal button { min-height: 28px; padding: 4px 9px; }
 .preflight-asset-row {
   align-items: flex-start;
   border: 1px solid var(--line);

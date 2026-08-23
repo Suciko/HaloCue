@@ -23,6 +23,14 @@ EVENT_PHASES = (
     "object_action", "feedback", "verification", "result", "decision_pause", "time_bridge",
     "aftershock", "relay",
 )
+# A few gateways have returned the event kind as a phase.  Keep this one
+# documented compatibility spelling at the wire boundary, then normalize it
+# back to the actual execution phase and audit the repair.  Do not broaden this
+# into accepting arbitrary phase guesses.
+PHASE_COMPAT_ALIASES = {
+    "object_test": "object_action",
+}
+PHASE_SCHEMA_VALUES = tuple(dict.fromkeys((*EVENT_PHASES, *PHASE_COMPAT_ALIASES)))
 PEAK_TYPES = ("solo_emphasis", "relationship_peak", "group_reaction")
 SHOT_OPERATIONS = (
     "establish", "hold", "reframe", "expand", "shrink", "switch",
@@ -120,6 +128,11 @@ phase 名称只是描述当前文本已经存在的功能，不是待补齐清�
 object_test、invitation、decision 或 montage，就自动补接触、反馈、验证、停顿、软化、余波或时间桥。
 连续评价同一对象时，根据当前承受关系选择单人、双人或画外评价，不预设固定接力形式。
 
+听觉载体单独过证据门：只有正文明确出现可听见的声源、启动反馈、机械声、警报、脚步或其他可靠听觉结果时，
+才把 sound 放进 carriers；“开始操作”“确认成功”本身不等于有声音。没有独立听觉事实时不要把 sound 写进
+require_all=true，也不要为了让 G2 看起来更完整而补音效。若声音只是多个等价表达中的一种，可以保留 sound
+作为可选 carrier，但 G2 应按当前可用资源和语义选择，不因计划中出现它就强制添加。
+
 phase_order 可使用 cue / reveal / group_reaction / focus_handoff / action / object_action / feedback / verification / result /
 decision_pause / time_bridge / aftershock / relay。silent_beats 只列真正没有对话框但第二阶段必须兑现的 phase：
 画外 cue 必须有声音或其他明确载体；同步 group_reaction 把反应者放在同一拍。若 A 的反应成为 B 的新刺激，
@@ -183,20 +196,22 @@ PLANNER_SYSTEM_COMPACT = """你是视觉小说演出的场景事件规划器。�
 3. 只有确有必要时才写 shot_groups、focus_turns、silent_beats、face_arcs、performance_intents 或 peaks。
    独立 silent_beat 必须有新的可见/可听目的；有台词的节点不规划 Wait。事件类型不会自动补蒙太奇、反馈、验证或决定停顿。
 
-角色表会把人物分成 DISPLAYABLE_CAST 与 OFFSCREEN_NAMED_SPEAKERS。后者是“有姓名的画外发言者”：可以拥有台词、
+角色表会把人物分成 DISPLAYABLE_CAST 与 OFFSCREEN_NAMED_SPEAKERS。DISPLAYABLE_CAST 只表示“有可用立绘资源”，
+不表示人物在场、已经入镜或应该从场景开头出现。后者是“有姓名的画外发言者”：可以拥有台词、
 参与 stimulus/outcome/关系语义，也可以成为被画面中角色注视或回应的对象；但他们没有立绘，绝不能进入 shot_groups.members、
 focus_turns、face_arcs、performance_intents.subjects、silent_beats.participants 或 peaks.subject。涉及他们的关系变化，要把可见反应
-规划给 DISPLAYABLE_CAST 中真正能演出的人；若刺激与对白/旁白同拍落地且反应不必先于下一句独立展示，
-把该可见承受者标成 listener reaction 的执行对象，供 G2 用行级 `reactions` 承载；若必须先被观众看见，
-再规划独立 silent_beat。不能为了双人关系构图虚构其立绘、站位、入退场、表情或动作。
+规划给 DISPLAYABLE_CAST 中真正能演出的人；有立绘说话者的刺激若与对白同拍落地且反应不必先于下一句独立展示，
+把该可见承受者标成 listener reaction 的执行对象，供 G2 用行级 `reactions` 承载。画外/旁白说话者不自动触发同拍反应；
+只有正文明确写出画内角色响应画外声音时，才规划独立 silent_beat。不能为了双人关系构图虚构其立绘、站位、入退场、表情或动作。
 
 ## 积极演出扫描（唯一版本）
 每个事件都主动检查六类机会：注意对象改变；预期被打破或新信息落地；回答前的犹豫或压住情绪；可见身体意图；
 关系压力或距离改变；结果落地后的情绪余波。有因果价值时，默认让变化可读，不等待原文逐字写出舞台指示。
 
 先判断变化能否自然承载在对白节点；可以时规划 face_change、emoticon、action、camera_change、movement、entry_exit 或 sound
-中最具体、最能让因果与人物状态可读的一项或少数组合。对白或旁白同拍击中可见听者时，保留该 listener reaction，
-让 G2 在行级 `reactions` 中明确承受者；只有该反应或结果必须在下一句开口前被观众单独读到时，才规划 silent_beat。
+中最具体、最能让因果与人物状态可读的一项或少数组合。有立绘说话者同拍击中可见听者时，保留该 listener reaction，
+让 G2 在行级 `reactions` 中明确承受者；画外/旁白说话者不自动产生该字段。只有画内反应或结果必须在下一句开口前被观众单独读到、
+且正文有证据时，才规划 silent_beat。
 多个机会并存时选择最能增加因果可读性的一项或少数几项，不设节点、镜头或资源配额；普通信息交换没有阶段变化时可以自然保持。
 
 表情阶段要按“同一角色上一次真正可见的发言或表演”比较，不按紧邻台词的说话人比较。再次开口时，若语用从追问变成
@@ -219,6 +234,11 @@ focus_turns、face_arcs、performance_intents.subjects、silent_beats.participan
 操作结果决定下一句意义时，可先呈现反馈；纯信息交换没有反应阶段变化时保持即可。这些例子说明判断方向，不绑定资源组合。
 
 ## 软导演先验
+`shot_groups.members` 是该组 anchor 时刻观众实际看见的立绘，不是整个事件的 participants，也不是之后会说话的人物名单。
+场景开头或新事件开始时，先根据截至 anchor 的正文与当前跨段状态判断谁已经可见；不能因为演员表里有某人、后文轮到某人说话、
+或某人属于 stimulus_targets，就把他提前摆进更早镜头。后文人物可以在其对白、被明确看见/点到、reveal、真实 enter，或有依据的完整
+cut 时加入；若上下文已明确多人共同在场，则允许他们在开口前进入关系镜头。这里约束的是可见性事实，不限制有依据的关系构图。
+
 单人正反打是正常且常用的镜头语法；受话者或被谈论者不必留在当前镜头，不能把同一问答自动等同于同框。
 有动机的完整硬切搭档轮换是合法镜头语法，角色可以跨 hard cut 保留同一侧；不要把换组写成 hold/reframe 或无过程换图层。
 同一问题尚未解决时，可以让真正的因果锚点保持原槽位，另一侧按接力需要更换角色。锚点应是被讨论对象、信息持有者、
@@ -281,6 +301,14 @@ arrival 只有真实到场证据才规划 enter/reveal；有证据时可以由�
 可读状态时写；不能因事件类型补蒙太奇，也不能用峰值之前的停顿冒充结果余波。多人反应可用 action -> relay -> aftershock，
 后者不必是前者全体。若 A 的反应成为 B 的刺激，保留所有权，不压成全员同步。
 
+注意：`object_test` 是事件的 kind，不是 phase_order 或 phase_anchors 的值；涉及试机过程时，phase 使用
+`object_action`，结果确认使用 `feedback` / `verification`。
+
+听觉载体单独过证据门：只有正文明确出现可听见的声源、启动反馈、机械声、警报、脚步或其他可靠听觉结果时，
+才把 sound 放进 carriers；“开始操作”“确认成功”本身不等于有声音。没有独立听觉事实时不要把 sound 写进
+require_all=true，也不要为了让 G2 看起来更完整而补音效。若声音只是多个等价表达中的一种，可以保留 sound
+作为可选 carrier，但 G2 应按当前可用资源和语义选择，不因计划中出现它就强制添加。
+
 只输出 Schema JSON，不复述台词或解释推理。未提供的可选字段直接省略，不要用空数组填满。
 """
 
@@ -309,7 +337,9 @@ STAGING_PLANNER_SYSTEM = """你是视觉小说演出的空间与镜头导演。�
 背景或音效资源。
 
 先为每个事件建立互不重叠的 shot_groups。每组必须说明从 anchor_i 到 hold_until_i 的首选连续范围、完整人物名单、焦点、景别和
-变化操作。镜头单位是互动轴和承受关系，不是当前说话者：同一问答、操作或笑点推进时优先持镜；互动轴、刺激承受者、
+变化操作。`members` 表示 anchor 时刻观众实际看得到的立绘，不是事件的全部 participants、未来说话者或可能被刺激的人；
+后续人物即使已经参与事件，也要等正文已有到场/在场/被看见证据，或等其对白、reveal、enter、完整 cut 到来后再加入画面。
+镜头单位是互动轴和承受关系，不是当前说话者：同一问答、操作或笑点推进时优先持镜；互动轴、刺激承受者、
 揭晓、峰值或余波主体改变时可以完整硬切。硬切没有次数配额。单人/双人为默认，只有真实三方互动或共同反应才用三人，
 绝不超过三人。
 
@@ -486,6 +516,10 @@ def _event_schema(
         "properties": {
             "who": person,
             "stages": {"type": "array", "items": face_stage},
+            # A narrow compatibility repair for gateways that drift an
+            # event-level field into a face arc. Normalization moves it back
+            # to the event and records the repair in the plan audit.
+            "continuity_goal": {"type": "string"},
         },
         "required": ["who", "stages"],
         "additionalProperties": False,
@@ -550,7 +584,7 @@ def _event_schema(
             "release_owner": person_or_empty,
             "phase_order": {
                 "type": "array", "items": {
-                    "type": "string", "enum": list(EVENT_PHASES),
+                "type": "string", "enum": list(PHASE_SCHEMA_VALUES),
                 },
             },
             "shot_groups": {"type": "array", "items": shot_group},
@@ -591,6 +625,7 @@ def build_scene_planner_request(
     previous_plan: Mapping[str, Any] | None = None,
     quality_issues: Sequence[Mapping[str, Any]] = (),
     cast: Mapping[str, Any] | None = None,
+    retry_instruction: str = "",
 ) -> tuple[str, dict[str, Any], list[Mapping[str, Any]]]:
     targets = _scene_targets(items, scene)
     cast_names = [
@@ -614,6 +649,14 @@ def build_scene_planner_request(
         "请为以下完整场景建立事件计划。编号只用于 start_i/end_i/anchor_i：\n"
         + "\n".join(lines)
     )
+    if retry_instruction:
+        user += (
+            "\n\nPLANNER_PROTOCOL_RETRY\n"
+            "上一次规划请求没有通过协议或上游请求暂时失败。请重新完成同一场景的完整计划，"
+            "只输出符合当前 Schema 的 JSON；不要加入 Schema 未声明的顶层字段，不要使用不在允许枚举中的 phase。"
+            "`object_test` 只能作为事件 kind；phase_order 中试机用 `object_action`，结果确认用 `feedback` 或 `verification`。\n"
+            + str(retry_instruction)
+        )
     if previous_plan and quality_issues:
         compact_issues = [
             {
@@ -668,6 +711,58 @@ def _coerce_string_list(value: Any) -> list[str]:
 def _normalize_plan_fields(raw: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize only array-shaped fields that models commonly flatten."""
     value = dict(raw)
+    protocol_repairs: list[dict[str, Any]] = []
+    normalized_arcs = []
+    misplaced_goals: list[tuple[int, str]] = []
+    for arc_index, arc in enumerate(value.get("face_arcs") or []):
+        if not isinstance(arc, Mapping):
+            normalized_arcs.append(arc)
+            continue
+        normalized_arc = dict(arc)
+        misplaced = normalized_arc.pop("continuity_goal", None)
+        if isinstance(misplaced, str) and misplaced.strip():
+            misplaced_goals.append((arc_index, misplaced.strip()))
+        normalized_arcs.append(normalized_arc)
+    if "face_arcs" in value:
+        value["face_arcs"] = normalized_arcs
+    phase_order = value.get("phase_order")
+    if isinstance(phase_order, list):
+        normalized_phases = []
+        for phase in phase_order:
+            phase_name = str(phase or "")
+            replacement = PHASE_COMPAT_ALIASES.get(phase_name, phase_name)
+            if replacement != phase_name:
+                protocol_repairs.append({
+                    "code": "planner_phase_alias",
+                    "field": "phase_order",
+                    "source_value": phase_name,
+                    "value": replacement,
+                    "action": "mapped_compat_alias",
+                    "reason": "event kind was returned in phase_order",
+                })
+            normalized_phases.append(replacement)
+        value["phase_order"] = normalized_phases
+    if misplaced_goals:
+        event_goal = value.get("continuity_goal")
+        has_event_goal = isinstance(event_goal, str) and bool(event_goal.strip())
+        if not has_event_goal:
+            value["continuity_goal"] = misplaced_goals[0][1]
+        for arc_index, goal in misplaced_goals:
+            moved = (
+                arc_index == misplaced_goals[0][0]
+                and value.get("continuity_goal") == goal
+                and not has_event_goal
+            )
+            protocol_repairs.append({
+                "code": "planner_misplaced_event_field",
+                "field": "continuity_goal",
+                "source_path": f"face_arcs[{arc_index}].continuity_goal",
+                "target_path": "continuity_goal" if moved else "",
+                "action": "moved_to_event" if moved else "discarded_duplicate",
+                "reason": "event-level continuity_goal was nested under face_arc",
+            })
+    if protocol_repairs:
+        value["_protocol_repairs"] = protocol_repairs
     for field in ("stimulus_targets", "focus_turns"):
         if field in value:
             value[field] = _coerce_string_list(value.get(field))
@@ -731,12 +826,14 @@ def normalize_scene_event_plan(
     response: Mapping[str, Any], targets: Sequence[Mapping[str, Any]], scene_id: str,
 ) -> dict[str, Any]:
     result = []
+    protocol_repairs: list[dict[str, Any]] = []
     previous_end = 0
     seen_ids: set[str] = set()
     for ordinal, raw in enumerate(response.get("events") or [], 1):
         if not isinstance(raw, Mapping):
             continue
         raw = _normalize_plan_fields(raw)
+        event_repairs = list(raw.pop("_protocol_repairs", []) or [])
         start = int(raw.get("start_i") or 0)
         end = int(raw.get("end_i") or 0)
         if not (1 <= start <= end <= len(targets)):
@@ -845,8 +942,12 @@ def normalize_scene_event_plan(
             "peaks": peaks,
             "overlaps_previous": start <= previous_end,
         })
+        protocol_repairs.extend({"event_id": event_id, **dict(repair)} for repair in event_repairs)
         previous_end = max(previous_end, end)
-    return {"scene_id": str(scene_id), "events": result}
+    plan = {"scene_id": str(scene_id), "events": result}
+    if protocol_repairs:
+        plan["protocol_repairs"] = protocol_repairs
+    return plan
 
 
 def plan_scene_events(
@@ -857,15 +958,17 @@ def plan_scene_events(
     quality_issues: Sequence[Mapping[str, Any]] = (),
     cast: Mapping[str, Any] | None = None,
     on_activity: Any = None,
+    retry_instruction: str = "",
+    use_stream: bool = True,
 ) -> dict[str, Any]:
     user, schema, targets = build_scene_planner_request(
         items, scene, previous_plan=previous_plan, quality_issues=quality_issues,
-        cast=cast,
+        cast=cast, retry_instruction=retry_instruction,
     )
     if not targets:
         return {"scene_id": str(scene.get("scene_id") or ""), "events": []}
     stream_method = getattr(provider, "complete_json_stream", None)
-    if callable(stream_method):
+    if use_stream and callable(stream_method):
         response = stream_method(
             PLANNER_SYSTEM, "", user, schema, on_activity=on_activity,
         )

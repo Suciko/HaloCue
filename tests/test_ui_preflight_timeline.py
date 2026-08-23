@@ -99,6 +99,38 @@ const result={ai_status:'completed',characters:[
     }
 
 
+def test_cast_picker_keeps_alias_action_outside_character_results():
+    script = r'''
+const {createHarness}=require(process.argv[1]);
+const h=createHarness({request:async p=>p.startsWith('/api/characters')?[
+  {ident:'a',name:'甲',source:'official',avatar:'/thumb/a.jpg',avatar_available:true},
+  {ident:'b',name:'乙',source:'official',avatar:'/thumb/b.jpg',avatar_available:true}
+]:{profiles:[]}});
+h.window.AppRuntime.openCastPicker('脚本中的甲');
+(async()=>{await h.drain();const root=h.get('#castResults');const aliases=[];const walk=node=>(node.children||[]).forEach(child=>{if(String(child.className||'').includes('cast-alias-save'))aliases.push(child);walk(child);});walk(root);console.log(JSON.stringify({aliasCards:aliases.length,aliasToolsHidden:h.get('#castPickerAliasTools').hidden,results:root.children.filter(child=>String(child.className||'').includes('cast-result')).length}));})();
+'''
+    assert run_runtime(script) == {
+        "aliasCards": 0,
+        "aliasToolsHidden": True,
+        "results": 2,
+    }
+
+
+def test_cast_picker_explains_unbuilt_official_avatar_preview():
+    script = r'''
+const {createHarness}=require(process.argv[1]);
+const h=createHarness({request:async p=>p.startsWith('/api/characters')?[
+  {ident:'a',name:'甲',source:'official',avatar:'',avatar_source:'official_pending',avatar_available:false}
+]:{profiles:[]}});
+h.window.AppRuntime.renderAAStatus({resource:{status:'installed'},preview_index:{status:'not_built'}});
+h.window.AppRuntime.openCastPicker('甲');
+(async()=>{await h.drain();console.log(JSON.stringify({message:h.get('#castPickerStatus').textContent,hasBuildButton:h.get('#castPickerStatus').children.length===2}));})();
+'''
+    result = run_runtime(script)
+    assert "官方头像预览尚未建立" in result["message"]
+    assert result["hasBuildButton"] is True
+
+
 def test_preflight_cast_avatar_falls_back_to_initial_when_preview_is_missing():
     script = r'''
 const {createHarness}=require(process.argv[1]);const h=createHarness();

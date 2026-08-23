@@ -149,6 +149,7 @@
       model_rate_limited: {title: '模型请求过于频繁', message: '供应商暂时限制了新的模型请求。', action: '请稍等片刻后重试。', retryable: true},
       model_connection_failed: {title: '模型连接中断', message: '生成期间未能持续连接模型接口。', action: '请检查网络或接口地址后重试。', retryable: true},
       model_service_unavailable: {title: '模型服务暂时不可用', message: '供应商暂时无法处理这次正式生成请求。', action: '旧草稿不受影响，可以稍后重试。', retryable: true},
+      structured_output: {title: '模型返回格式未通过校验', message: 'AI 的演出判断尚未进入 G2 质量返修；这次先在结构化协议层发现了镜头字段不完整。', action: '本次请求已自动尝试窄范围协议修复；点击重试会重新请求当前段，协议通过后才会继续进入 G2，不会把质量问题偷偷改成后端规则。', retryable: true},
       partial_generation: {title: '结果已生成，但仍有一处需要确认', message: '已完成的内容已经保留，未完成部分按原文进入审查。你可以直接查看并保留当前结果，或修复后重新生成。', action: '当前结果标记为 partial/needs_review，不会自动安装到 AA。', retryable: true}
     };
     return Object.assign({title: '草稿生成失败', message: '本次生成未完成，已有草稿和原剧本没有被覆盖。', action: '可检查技术详情后重试，或打开模型设置。', retryable: detail.retryable !== false}, views[code] || {}, {code: code, technical: sanitizeModelError(job.error || (error && error.message) || '未知错误')});
@@ -179,8 +180,9 @@
       return [part('输入', activity.input_tokens), part('思考', activity.reasoning_tokens), part('输出', activity.output_tokens)].filter(Boolean).join(' · ');
     };
     const suffix = function (value) { return detail ? detail + ' · ' + value : value; };
-    const stage = activity.stage === 'G1' ? 'G1 场景事件链' : 'G2 演出标注';
+    const stage = activity.stage === 'G1' ? 'G1 场景事件链' : activity.stage === 'protocol' ? '协议修复' : 'G2 演出标注';
     if (activityState === 'waiting') return suffix(stage + ' · 等待模型首段响应' + (activity.reasoning_summary ? ' · ' + activity.reasoning_summary : ''));
+    if (activityState === 'repairing') return suffix(stage + ' · ' + (activity.reasoning_summary || '正在返修当前演出锚点'));
     if (activityState === 'reasoning') {
       const count = Number.isFinite(reasoningChars) ? '已思考 ' + reasoningChars.toLocaleString('en-US') + ' 字符' : '模型思考中';
       const waited = Number.isFinite(elapsed) && elapsed >= 1000 ? ' · 已用时 ' + Math.max(1, Math.floor(elapsed / 1000)) + ' 秒' : '';
@@ -192,7 +194,7 @@
       return suffix(stage + ' · ' + received + waited);
     }
     if (activityState === 'usage' || activityState === 'completed') return suffix(stage + ' · ' + (tokenText() || '模型已返回') + (activity.reasoning_summary ? ' · ' + activity.reasoning_summary : ''));
-    if (activityState === 'retrying') return suffix(activity.reason === 'reasoning_capacity' ? '推理占满预算，正在增加预算并保留推理' : '正在纠正返回格式');
+    if (activityState === 'retrying') return suffix(activity.stage === 'protocol' ? stage + ' · 正在纠正返回格式' : (activity.reason === 'reasoning_capacity' ? '推理占满预算，正在增加预算并保留推理' : '正在纠正返回格式'));
     if (activityState === 'subdividing') return suffix('正在拆分当前场景块');
     if (!detail || !item.updated_at || item.state !== 'running') return detail;
     const age = Date.now() - Date.parse(item.updated_at);
@@ -222,7 +224,9 @@
     if (metrics.cache_reported === true && Number.isFinite(Number(metrics.cache_hit_rate))) {
       parts.push('缓存命中 ' + Math.round(Number(metrics.cache_hit_rate) * 100) + '%');
       if (Number.isFinite(Number(metrics.cache_read_tokens)) || Number.isFinite(Number(metrics.uncached_input_tokens))) {
-        parts.push('缓存输入 ' + count(metrics.cache_read_tokens || 0) + ' / 未命中 ' + count(metrics.uncached_input_tokens || 0));
+        const denominator = Number.isFinite(Number(metrics.cache_input_tokens)) ? Number(metrics.cache_input_tokens) : null;
+        const detail = '缓存输入 ' + count(metrics.cache_read_tokens || 0) + ' / 未命中 ' + count(metrics.uncached_input_tokens || 0);
+        parts.push(denominator !== null ? detail + ' / 报告输入 ' + count(denominator) : detail);
       }
     } else {
       parts.push('缓存未报告');
@@ -472,9 +476,13 @@
     }
     const label = document.createElement('span'); label.className = 'cap';
     const title = document.createElement('b'); title.textContent = item.label || item.name; label.appendChild(title);
+    const sourceLabel = item.source === 'custom' ? '当前剧情素材' : 'AA 官方背景';
+    card.dataset.source = item.source || 'official';
+    card.setAttribute('aria-label', (item.label || item.name || '背景') + ' · ' + sourceLabel);
+    card.title = (item.label || item.name || '背景') + ' · ' + sourceLabel;
     if (item.disambiguate && item.label && item.label !== item.name) {
       const key = document.createElement('small'); key.textContent = item.name; label.appendChild(key);
-      card.title = (item.label || item.name) + ' · ' + item.name;
+      card.title = (item.label || item.name) + ' · ' + item.name + ' · ' + sourceLabel;
     }
     card.appendChild(label); card.addEventListener('click', function () { selectBackground(item.name, item.label); }); return card;
   }
@@ -486,12 +494,16 @@
     const loadId = ++backgroundLoadId;
     const query = encodeURIComponent($('#bgq').value); const ready = $('#bgready').checked ? '1' : '0';
     const official = state.preflightBackgroundChoice ? '&official=1' : '';
+    const filterValue = function (id) { const node = $(id); return node ? encodeURIComponent(node.value || '') : ''; };
+    const filters = '&source=' + filterValue('#bgsource') + '&category=' + filterValue('#bgcategory') +
+      '&space=' + filterValue('#bgspace') + '&time=' + filterValue('#bgtime') +
+      '&weather=' + filterValue('#bgweather') + '&tag=' + filterValue('#bgtag');
     const offset = append ? backgroundBrowser.offset : 0;
     const status = $('#backgroundBrowserStatus'); const more = $('#backgroundLoadMore');
     backgroundBrowser.loading = true; more.disabled = true;
     status.textContent = append ? '正在加载更多背景…' : '正在读取背景…';
     try {
-      const result = await request('/api/backgrounds?q=' + query + '&ready=' + ready + official + '&paged=1&offset=' + offset + '&limit=' + BACKGROUND_PAGE_SIZE);
+      const result = await request('/api/backgrounds?q=' + query + '&ready=' + ready + official + filters + '&paged=1&offset=' + offset + '&limit=' + BACKGROUND_PAGE_SIZE);
       if (!isCurrentView(view) || loadId !== backgroundLoadId) return;
       const items = Array.isArray(result) ? result : (result.items || []);
       const root = $('#bggrid'); if (!append) clearElement(root);
@@ -701,6 +713,7 @@
     state.preflightBackgroundChoice = {segment: segment, need: need, trigger: trigger || null};
     $('#backgroundPickerTitle').textContent = '查找 AA 官方背景';
     $('#bgq').value = '';
+    ['#bgsource', '#bgcategory', '#bgspace', '#bgtime', '#bgweather', '#bgtag'].forEach(function (id) { const node = $(id); if (node) node.value = ''; });
     $('#bgready').checked = true;
     openModal('#mBackgroundPicker', trigger);
     return loadBackgrounds();
@@ -940,11 +953,18 @@
     const wrapper = document.createElement('span');
     wrapper.className = className || 'cast-avatar';
     wrapper.setAttribute('aria-hidden', 'true');
+    const status = avatarStatusLabel(data);
+    if (status) {
+      wrapper.dataset.avatarState = String(data.avatar_source || 'missing');
+      wrapper.title = status;
+    }
     const fallback = function () {
       clearElement(wrapper);
+      wrapper.dataset.avatarState = wrapper.dataset.avatarState || 'unavailable';
       const initial = document.createElement('span');
       initial.className = 'cast-avatar-fallback';
       initial.textContent = characterInitial(data.name || data.ident || data.speaker);
+      initial.title = status || '头像预览不可用';
       wrapper.appendChild(initial);
     };
     if (data.avatar) {
@@ -1017,7 +1037,7 @@
     characters.forEach(function (item) {
       const match = cache[String(item.id || item.name || '').trim()];
       if (!match) return;
-      ['avatar', 'source', 'club', 'faces', 'spine'].forEach(function (field) {
+      ['avatar', 'avatar_source', 'avatar_available', 'source', 'club', 'faces', 'spine'].forEach(function (field) {
         if (match[field] !== undefined && match[field] !== null && match[field] !== '') item[field] = match[field];
       });
       item.custom = isCustomCharacter(item);
@@ -1061,7 +1081,7 @@
     const castRoot = $('#preflightCast'); clearElement(castRoot);
     (result.characters || []).forEach(function (item) {
       const row = document.createElement('div'); row.className = 'preflight-row preflight-cast-row';
-      row.appendChild(characterAvatar({name: item.name || item.speaker, ident: item.id, speaker: item.speaker, avatar: item.avatar}, 'preflight-avatar'));
+      row.appendChild(characterAvatar({name: item.name || item.speaker, ident: item.id, speaker: item.speaker, avatar: item.avatar, avatar_source: item.avatar_source, avatar_available: item.avatar_available}, 'preflight-avatar'));
       const main = document.createElement('div'); main.className = 'preflight-row-main';
       const name = document.createElement('b'); name.textContent = item.speaker || '未命名说话者'; main.appendChild(name);
       const map = document.createElement('span'); map.className = 'dim'; map.textContent = item.kind === 'narrator' ? '旁白' : item.kind === 'unset' ? '未指定' : ((item.name || item.id || '未命名角色') + (item.custom ? ' · 本章自定义骨骼' : item.kind === 'portrait' ? ' · AA 骨骼角色' : ' · 语音角色')); main.appendChild(map);
@@ -1239,10 +1259,75 @@
   }
   let castPickerSpeaker = '';
   let castSearchTimer = null;
+  let castPickerAliasTarget = null;
+  let castPickerItems = [];
+  function avatarStatusLabel(item) {
+    const source = String(item && item.avatar_source || '').toLowerCase();
+    if (source === 'official_pending') return '官方头像预览尚未建立';
+    if (source === 'official_unavailable') return '官方头像预览不可用';
+    const preview = aaStatusSnapshot.preview_index || {};
+    if (source === 'missing' && item && !isCustomCharacter(item) && ['not_built', 'building', 'stale'].includes(preview.status)) return '官方头像预览尚未建立';
+    if (source === 'missing') return '未找到头像预览';
+    return '';
+  }
+  function renderCastPickerStatus(items) {
+    const status = $('#castPickerStatus');
+    if (!status) return;
+    clearElement(status);
+    const list = Array.isArray(items) ? items : [];
+    const missing = list.some(function (item) { return item && !item.avatar_available; });
+    const officialMissing = list.some(function (item) { return item && !item.avatar_available && !isCustomCharacter(item); });
+    const preview = aaStatusSnapshot.preview_index || {};
+    const previewStatus = preview.status || (list.some(function (item) { return item && item.avatar_source === 'official_pending'; }) ? 'not_built' : '');
+    if (!missing) return;
+    const message = document.createElement('span');
+    if (officialMissing && previewStatus === 'building') {
+      message.textContent = '正在建立官方头像预览；完成后重新打开此窗口即可显示头像。';
+      status.className = 'cast-picker-status is-progress';
+    } else if (officialMissing && (previewStatus === 'not_built' || previewStatus === 'stale')) {
+      message.textContent = previewStatus === 'stale'
+        ? '官方资源已更新，需要重新建立头像预览。'
+        : '官方头像预览尚未建立；角色仍可绑定，建立后会显示真实头像。';
+      status.className = 'cast-picker-status is-warning';
+      const build = document.createElement('button');
+      build.type = 'button'; build.className = 'ghost'; build.textContent = previewStatus === 'stale' ? '重新建立头像预览' : '建立官方头像预览';
+      build.addEventListener('click', async function () {
+        build.disabled = true;
+        await buildAAIndex();
+        await searchCharacters($('#castSearch') ? $('#castSearch').value : '');
+      });
+      status.append(message, build);
+      return;
+    } else {
+      message.textContent = '部分角色没有可用头像预览，但不影响角色绑定。';
+      status.className = 'cast-picker-status';
+    }
+    status.appendChild(message);
+  }
+  function renderCastPickerAlias(item) {
+    const tools = $('#castPickerAliasTools');
+    const hint = $('#castPickerAliasHint');
+    const button = $('#castPickerAlias');
+    if (!tools || !hint || !button) return;
+    const target = item && item.ident ? item : null;
+    castPickerAliasTarget = target;
+    tools.hidden = !target || !castPickerSpeaker;
+    button.disabled = !target || !castPickerSpeaker;
+    button.textContent = target
+      ? '保存“' + castPickerSpeaker + '”为别名'
+      : '保存为本机别名';
+    hint.textContent = target
+      ? '绑定后可让后续同名说话者自动使用“' + (target.name || target.ident) + '”。'
+      : '';
+    button.title = target ? '只保存本机别名，不修改 AA 配置文件。' : '';
+  }
   function openCastPicker(who) {
     castPickerSpeaker = who;
+    castPickerAliasTarget = null;
+    castPickerItems = [];
     const speakerLabel = $('#castPickerSpeaker'); if (speakerLabel) speakerLabel.textContent = '说话者：' + who;
     const search = $('#castSearch'); if (search) search.value = '';
+    renderCastPickerAlias(null);
     searchCharacters('');
     openModal('#mCast', document.activeElement);
   }
@@ -1250,8 +1335,10 @@
     const root = $('#castResults'); if (!root) return;
     clearElement(root);
     let items = [];
-    try { items = await request('/api/characters?q=' + encodeURIComponent(q)); } catch (_) { const fail = document.createElement('p'); fail.className = 'dim'; fail.textContent = '角色搜索失败，请重试。'; root.appendChild(fail); return; }
-    if (!Array.isArray(items) || !items.length) { const empty = document.createElement('p'); empty.className = 'dim'; empty.textContent = '没有匹配的角色，可换关键词试试。'; root.appendChild(empty); return; }
+    try { items = await request('/api/characters?q=' + encodeURIComponent(q)); } catch (_) { castPickerItems = []; renderCastPickerStatus([]); renderCastPickerAlias(null); const fail = document.createElement('p'); fail.className = 'dim'; fail.textContent = '角色搜索失败，请重试。'; root.appendChild(fail); return; }
+    castPickerItems = Array.isArray(items) ? items : [];
+    if (!Array.isArray(items) || !items.length) { renderCastPickerStatus([]); renderCastPickerAlias(null); const empty = document.createElement('p'); empty.className = 'dim'; empty.textContent = '没有匹配的角色，可换关键词试试。'; root.appendChild(empty); return; }
+    renderCastPickerStatus(items);
     const current = (state.mapping && state.mapping[castPickerSpeaker]) || ((state.preflight && state.preflight.characters || []).find(function (item) { return item.speaker === castPickerSpeaker; }) || {});
     const groups = [
       {key: 'custom', label: '自定义骨骼', items: items.filter(isCustomCharacter)},
@@ -1264,23 +1351,46 @@
       group.items.forEach(function (item) {
         const selected = String(current.id || '') === String(item.ident || '');
         const row = document.createElement('button'); row.type = 'button'; row.className = 'cast-result' + (selected ? ' is-selected' : ''); row.dataset.ident = item.ident || ''; row.setAttribute('aria-pressed', selected ? 'true' : 'false');
-        row.appendChild(characterAvatar({name: item.name || item.ident, ident: item.ident, avatar: item.avatar}, 'cast-avatar'));
+        row.appendChild(characterAvatar({name: item.name || item.ident, ident: item.ident, avatar: item.avatar, avatar_source: item.avatar_source, avatar_available: item.avatar_available}, 'cast-avatar'));
         const body = document.createElement('span'); body.className = 'cast-result-body';
         const name = document.createElement('b'); name.textContent = item.name || item.ident;
         const meta = document.createElement('span'); meta.className = 'cast-result-meta'; meta.textContent = [item.club, item.ident, item.spine ? item.spine.split('/').pop() : '', item.faces ? item.faces + ' 表情' : ''].filter(Boolean).join(' · ');
-        body.append(name, meta); row.appendChild(body);
-        row.addEventListener('click', function () { pickCharacter(item); });
+        body.append(name, meta);
+        const avatarStatus = avatarStatusLabel(item);
+        if (avatarStatus) { const availability = document.createElement('small'); availability.className = 'cast-result-avatar-status'; availability.textContent = avatarStatus; body.appendChild(availability); }
+        row.appendChild(body);
+        row.addEventListener('click', function () { renderCastPickerAlias(item); pickCharacter(item); });
+        // Keep result buttons as direct children for existing keyboard and test consumers.
         root.appendChild(row);
+        if (selected && !castPickerAliasTarget) renderCastPickerAlias(item);
       });
     });
+  }
+  async function saveCharacterAlias(item, trigger) {
+    if (!item || !item.ident || !castPickerSpeaker) return;
+    trigger.disabled = true;
+    try {
+      await request('/api/characters/alias', window.Api.json('POST', {
+        script_name: castPickerSpeaker, ident: item.ident, kind: 'portrait'
+      }));
+      trigger.textContent = '别名已保存';
+    } catch (error) {
+      trigger.disabled = false;
+      trigger.textContent = '保存失败';
+      trigger.title = error.message || '别名保存失败';
+    }
+  }
+  async function saveCurrentCharacterAlias(trigger) {
+    if (!castPickerAliasTarget) return;
+    await saveCharacterAlias(castPickerAliasTarget, trigger || $('#castPickerAlias'));
   }
   function pickCharacter(item) {
     const who = castPickerSpeaker;
     if (!who) return;
-    state.mapping[who] = {kind: 'portrait', id: item.ident, name: item.name || item.ident, club: item.club || '', spine: item.spine || '', source: item.source || '', avatar: item.avatar || ''};
+    state.mapping[who] = {kind: 'portrait', id: item.ident, name: item.name || item.ident, club: item.club || '', spine: item.spine || '', source: item.source || '', avatar: item.avatar || '', avatar_source: item.avatar_source || '', avatar_available: item.avatar_available !== false};
     if (state.preflight) {
       const target = (state.preflight.characters || []).find(function (row) { return row.speaker === who; });
-      if (target) { target.kind = 'portrait'; target.id = item.ident; target.name = item.name || item.ident; target.spine = item.spine || ''; target.source = item.source || ''; target.avatar = item.avatar || ''; target.club = item.club || ''; target.faces = item.faces || 0; target.custom = isCustomCharacter(item); target.reason = '用户已手动修改映射。'; }
+      if (target) { target.kind = 'portrait'; target.id = item.ident; target.name = item.name || item.ident; target.spine = item.spine || ''; target.source = item.source || ''; target.avatar = item.avatar || ''; target.avatar_source = item.avatar_source || ''; target.avatar_available = item.avatar_available !== false; target.club = item.club || ''; target.faces = item.faces || 0; target.custom = isCustomCharacter(item); target.reason = '用户已手动修改映射。'; }
       renderPreflight(state.preflight);
     }
     closeModal('#mCast');
@@ -1814,16 +1924,24 @@
       return pollAAIndex();
     }, 1000);
   }
-  async function pollAAIndex() {
-    if (!settingsDrawerOpen()) {
+  async function pollAAIndex(force) {
+    if (!force && !settingsDrawerOpen()) {
       stopAAIndexPolling();
       return null;
     }
     try {
       const result = await request('/api/resources/index');
       const preview = result && result.preview_index;
-      if (preview) renderAAStatus({preview_index: preview});
-      if (preview && preview.status === 'building') scheduleAAIndexPoll();
+      if (preview) {
+        renderAAStatus({preview_index: preview});
+        renderCastPickerStatus(castPickerItems);
+      }
+      if (preview && preview.status === 'building') {
+        if (force) setTimeout(function () { return pollAAIndex(true); }, 1000);
+        else scheduleAAIndexPoll();
+      } else if (preview && $('#mCast') && $('#mCast').classList.contains('on')) {
+        searchCharacters($('#castSearch') ? $('#castSearch').value : '');
+      }
       else stopAAIndexPolling();
       return result;
     } catch (error) {
@@ -1839,7 +1957,9 @@
     try {
       const result = await post('/api/resources/index', {});
       if (result && result.preview_index) renderAAStatus({preview_index: result.preview_index});
-      if (result && result.preview_index && result.preview_index.status === 'building') scheduleAAIndexPoll();
+      if (result && result.preview_index && result.preview_index.status === 'building') {
+        setTimeout(function () { return pollAAIndex(true); }, 1000);
+      }
       return result;
     } catch (error) {
       if ($('#aaInstallStatus')) $('#aaInstallStatus').textContent = error.message || '图片预览建立失败。';
@@ -2120,6 +2240,7 @@
     const shown = filtered.length > limit ? filtered.slice(0, limit) : filtered;
     if (window.CardList) window.CardList.renderCardList($('#rvCards'), shown, {
       onSelectCard: selectCard,
+      onProposalAction: handleProposalAction,
       onUseDefaultBackground: function (card) { return resolveDraftBackgroundRequest(card, 'BG_Black'); },
       onChooseBackground: openDraftBackgroundPicker,
       onFillBackground: fillBackgroundFromHistory
@@ -2130,6 +2251,15 @@
       const more = document.createElement('button'); more.type = 'button'; more.className = 'ghost card-list-more'; more.textContent = '显示全部 ' + all.length + ' 条';
       more.addEventListener('click', function () { state.review.cardLimit = filtered.length; renderReviewCards(); });
       $('#rvCards').appendChild(more);
+    }
+  }
+  async function handleProposalAction(proposal, action) {
+    if (!proposal || !proposal.proposal_id || !action) return;
+    try {
+      await reviewPost('/api/proposals/' + encodeURIComponent(proposal.proposal_id) + '/' + encodeURIComponent(action), {});
+      await loadReview(proposal.card_id);
+    } catch (error) {
+      status('返修处理失败：' + (error.message || '请刷新后重试'));
     }
   }
   function cardMatchesReviewFilter(card, filter) {
@@ -2316,7 +2446,9 @@
     if (!card || card.kind !== 'background_request' || !state.review.token) return;
     state.reviewBackgroundRequest = card;
     if (state.backgroundJob) state.backgroundJob.resolveRequestId = null;
-    $('#backgroundPickerTitle').textContent = '选择官方背景';
+    $('#backgroundPickerTitle').textContent = '选择背景';
+    ['#bgq', '#bgsource', '#bgcategory', '#bgspace', '#bgtime', '#bgweather', '#bgtag'].forEach(function (id) { const node = $(id); if (node) node.value = ''; });
+    $('#bgready').checked = true;
     openModal('#mBackgroundPicker', trigger);
     loadBackgrounds();
   }
@@ -2372,7 +2504,7 @@
       return false;
     }
   }
-  async function reviewPost(path, payload, method) { const review = state.review; const view = captureView(); if (!review.token || !isCurrentView(view)) return null; const body = Object.assign({token: review.token, expected_draft_version: review.revision}, payload); const result = await request(path, window.Api.json(method || 'POST', body)); if (!isCurrentView(view) || state.review !== review) return null; if (!result.ok) throw new Error(result.e || result.code); review.revision = result.draft_version || review.revision; contextStatus({save: '保存：已保存'}); return result; }
+  async function reviewPost(path, payload, method) { const review = state.review; const view = captureView(); if (!review.token || !isCurrentView(view)) return null; const body = Object.assign({token: review.token, expected_draft_version: review.revision}, payload); const result = await request(path, window.Api.json(method || 'POST', body)); if (!isCurrentView(view) || state.review !== review) return null; if (!result.ok) { const error = new Error(result.e || result.code); Object.assign(error, result); throw error; } review.revision = result.draft_version || review.revision; contextStatus({save: '保存：已保存'}); return result; }
   function setBusyButton(id, busy, busyText, idleText) { const button = $(id); button.disabled = Boolean(busy); button.textContent = busy ? busyText : idleText; button.setAttribute('aria-busy', String(Boolean(busy))); }
   let approveAllPending = false;
   function requestApproveAll(trigger) {
@@ -2393,18 +2525,33 @@
   }
   async function validateReview() {
     const view = captureView(); setBusyButton('#rvValidate', true, '检查中…', '检查问题'); status('正在检查草稿…');
-    try { const result = await reviewPost('/api/validate', {}); if (!result || !isCurrentView(view)) return; const diagnosticSummary = reviewDiagnosticsSummary(result.diagnostics); const baseStatus = result.blocking_errors ? ('检查完成 · ' + result.blocking_errors + ' 项待处理') : '检查通过，可以编译'; status(diagnosticSummary ? baseStatus + ' · ' + diagnosticSummary : baseStatus); $('#rvStatus').title = diagnosticSummary; contextStatus({review: result.blocking_errors ? ('审查：已校验 · 有 ' + result.blocking_errors + ' 项待处理') : '审查：校验通过'}); }
+    try { const result = await reviewPost('/api/validate', {}); if (!result || !isCurrentView(view)) return; const diagnosticSummary = reviewDiagnosticsSummary(result.diagnostics); const baseStatus = result.blocking_errors ? ('检查完成 · ' + result.blocking_errors + ' 项待处理') : result.quality_override_allowed ? '检查完成 · 有非致命质量提示，可保留并编译' : '检查通过，可以编译'; status(diagnosticSummary ? baseStatus + ' · ' + diagnosticSummary : baseStatus); $('#rvStatus').title = diagnosticSummary; contextStatus({review: result.blocking_errors ? ('审查：已校验 · 有 ' + result.blocking_errors + ' 项待处理') : result.quality_override_allowed ? '审查：质量提示待确认' : '审查：校验通过'}); }
     catch (error) { if (isCurrentView(view)) status('检查失败：' + error.message); }
     finally { if (isCurrentView(view)) setBusyButton('#rvValidate', false, '', '检查问题'); }
   }
-  async function compile() {
+  async function compile(allowQualityWarnings) {
     const op = beginOperation('compile', state.review.token); if (!op.storyToken || !op.reviewToken) return;
     try {
       setBusyButton('#rvCompile', true, '编译中…', '编译工程'); status('正在编译工程…'); $('#rvInstall').disabled = true;
-      const result = await reviewPost('/api/compile', {}); if (!result || !isCurrentOperation('compile', op)) return; const job = await window.Api.poll('/api/jobs/' + result.job_id, function (item) { return ['succeeded', 'failed', 'cancelled'].includes(item.state); }, {isCurrent: function () { return isCurrentOperation('compile', op); }, onRetry: function () { if (isCurrentOperation('compile', op)) status('连接中断，正在重试'); }}); if (!isCurrentOperation('compile', op)) return;
+      const result = await reviewPost('/api/compile', allowQualityWarnings ? {allow_quality_warnings: true} : {}); if (!result || !isCurrentOperation('compile', op)) return; const job = await window.Api.poll('/api/jobs/' + result.job_id, function (item) { return ['succeeded', 'failed', 'cancelled'].includes(item.state); }, {isCurrent: function () { return isCurrentOperation('compile', op); }, onRetry: function () { if (isCurrentOperation('compile', op)) status('连接中断，正在重试'); }}); if (!isCurrentOperation('compile', op)) return;
       if (job.state !== 'succeeded' || !result.build_id) throw new Error(job.error || (job.state === 'cancelled' ? '编译已取消' : '编译失败'));
       state.review.buildId = result.build_id; $('#rvInstall').disabled = false; status('编译成功 · ' + result.build_id + ' · 可安装'); contextStatus({compile: '编译：已完成 · ' + result.build_id});
-    } catch (error) { if (!isCurrentOperation('compile', op)) return; state.review.buildId = null; $('#rvInstall').disabled = true; status('编译失败：' + error.message); contextStatus({compile: '编译：失败'}); }
+    } catch (error) {
+      if (!isCurrentOperation('compile', op)) return;
+      if (!allowQualityWarnings && error && error.code === 'review_pending' && error.override_allowed === true && typeof window.confirm === 'function') {
+        const accepted = window.confirm('检查发现非致命质量提示。是否保留当前结果并忽略这些提示，继续编译？');
+        if (accepted) {
+          try {
+            await reviewPost('/api/review/quality-override', {});
+            status('已确认保留当前结果，正在继续编译…');
+            return compile(true);
+          } catch (overrideError) {
+            status('质量提示确认失败：' + (overrideError.message || '请重新检查草稿'));
+          }
+        }
+      }
+      state.review.buildId = null; $('#rvInstall').disabled = true; status('编译失败：' + error.message); contextStatus({compile: '编译：失败'});
+    }
     finally { if (isCurrentOperation('compile', op)) setBusyButton('#rvCompile', false, '', '编译工程'); }
   }
   function updateInstallProjectPreview() {
@@ -2449,6 +2596,8 @@
     $('#installStoryName').value = story && story.project || '';
     clearElement($('#installCategoryOptions'));
     $('#installResult').hidden = true;
+    $('#installQualityOverrideRow').hidden = true;
+    $('#installQualityOverride').checked = false;
     $('#installDialogStatus').textContent = '正在读取 AA 中已有的分类…';
     updateInstallProjectPreview();
     openModal('#mInstall', trigger);
@@ -2485,11 +2634,16 @@
     $('#installDialogStatus').textContent = '正在安装到 AA…';
     $('#installResult').hidden = true;
     try {
-      const result = await reviewPost('/api/install', {
+      const installPayload = {
         build_id: state.review.buildId,
         category: category,
-        story_name: storyName
-      });
+        story_name: storyName,
+      };
+      if ($('#installQualityOverride').checked) installPayload.allow_quality_warnings = true;
+      if (state.review && state.review.annotationOverrideAccepted) {
+        installPayload.allow_incomplete_annotation = true;
+      }
+      const result = await reviewPost('/api/install', installPayload);
       if (!result || !isCurrentView(view)) return;
       showInstallLocation(result);
       $('#installDialogStatus').textContent = '文件已写入；请按下方位置在 AA 中打开。';
@@ -2497,7 +2651,20 @@
       contextStatus({install: '安装：已安装'});
     } catch (error) {
       if (isCurrentView(view)) {
-        $('#installDialogStatus').textContent = '安装失败：' + error.message;
+        const issues = Array.isArray(error && error.issues) ? error.issues : [];
+        const codes = issues.map(function (item) { return item && (item.code || item.message); }).filter(Boolean);
+        const annotationStatus = error && error.annotation_status;
+        const annotationIncomplete = error && error.code === 'annotation_incomplete';
+        const annotationHint = annotationIncomplete && annotationStatus
+          ? '（AI 标注 ' + Number(annotationStatus.completed_targets || 0) + '/' + Number(annotationStatus.total_targets || 0) + '，剩余 ' + Number(annotationStatus.pending_targets || 0) + '；请先打开保留草稿并全部标记已审）'
+          : '';
+        $('#installDialogStatus').textContent = '安装失败：' + error.message + annotationHint + (codes.length ? ' · ' + codes.join('、') : '');
+        const overrideRow = $('#installQualityOverrideRow');
+        const override = $('#installQualityOverride');
+        const canOverride = error && error.code === 'staging_quality_failed' && error.override_allowed === true;
+        if (overrideRow) overrideRow.hidden = !canOverride;
+        if (override && !canOverride) override.checked = false;
+        if (canOverride) $('#installDialogStatus').textContent += '。可勾选“保留当前结果”后再次确认。';
         status('安装失败：' + error.message);
         contextStatus({install: '安装：失败'});
       }
@@ -2516,17 +2683,55 @@
     try {
       await refreshDrafts(draftToken);
       const selected = $('#rvDraftSelect').value;
-      if (!selected) return false;
+      if (!selected) {
+        log('本次生成失败，当前剧情没有可恢复的保留草稿。');
+        return false;
+      }
       await loadReview(selected === draftToken ? cardId : null);
+      if (!state.review || state.review.token !== selected) {
+        log('保留草稿未能打开，请在审查区手动选择草稿后重试。');
+        return false;
+      }
       return true;
-    } catch (_) {
+    } catch (error) {
+      log('保留草稿打开失败：' + (error && error.message || '请求未完成'));
       return false;
+    }
+  }
+
+  async function openExistingDraft(trigger) {
+    const button = trigger || $('#generationFailureDraft');
+    const originalLabel = button && button.textContent || '查看保留草稿';
+    if (button) setBusyButton('#generationFailureDraft', true, '正在打开…', originalLabel);
+    try {
+      const preferred = $('#rvDraftSelect').value || state.review.token || '';
+      if (!preferred) {
+        const message = '没有可恢复的保留草稿。';
+        status(message); log(message);
+        return false;
+      }
+      if (!$('#rvDraftSelect').value) await refreshDrafts(preferred);
+      if (!$('#rvDraftSelect').value) throw new Error('当前剧情没有可恢复的草稿');
+      await loadReview();
+      if (!state.review || !state.review.token) throw new Error('草稿数据为空');
+      status('已打开保留草稿，可继续审查；本次失败没有覆盖原结果。');
+      log('已打开保留草稿，可继续审查或重新生成。');
+      const guidance = $('#generationFailureAction');
+      if (guidance) guidance.textContent = '保留草稿已打开。协议错误不会跳过 G2；修复格式后重新生成才会继续进入 G2 质量返修。';
+      if ($('#reviewPhase').scrollIntoView) $('#reviewPhase').scrollIntoView({behavior: 'smooth', block: 'start'});
+      return true;
+    } catch (error) {
+      const message = '保留草稿打开失败：' + (error && error.message || '请求未完成');
+      status(message); log(message);
+      return false;
+    } finally {
+      if (button) setBusyButton('#generationFailureDraft', false, '', originalLabel);
     }
   }
 
   async function annotate() {
     const op = beginOperation('annotate'); const useAI = $('input[name=anno]:checked').value === 'ai';
-    const layoutModeRadio = $('input[name=layoutMode]:checked'); const layoutMode = layoutModeRadio ? layoutModeRadio.value : 'ai';
+    const layoutModeRadio = $('input[name=layoutMode]:checked'); const layoutMode = layoutModeRadio ? layoutModeRadio.value : 'pure_ai';
     const previousDraftToken = state.review.token || $('#rvDraftSelect').value || '';
     const previousCardId = state.review.selected && state.review.selected.card_id || null;
     let job = null;
@@ -2535,7 +2740,10 @@
       hideGenerationFailure();
       setBusyButton('#goAnnotate', true, useAI ? 'AI 生成中…' : '正在转换…', '生成审查草稿');
       log(useAI ? 'AI 正在安排演出并生成草稿…' : '正在按原文生成审查草稿…');
-      const result = await post('/api/annotate', {story_token: story.story_token, mapping: state.mapping, bg: state.background || 'BG_Black', usage_chain: state.preflight && Array.isArray(state.preflight.usage_chain) ? state.preflight.usage_chain : [], annotate: useAI, layout_mode: layoutMode, model_profile_id: legacyModelProfileId()});
+      // A completed draft is an explicit new-generation request.  Only an
+      // incomplete draft should reuse its checkpoint after a timeout.
+      const resumeIncompleteDraft = Boolean(state.review && state.review.annotationIncomplete);
+      const result = await post('/api/annotate', {story_token: story.story_token, mapping: state.mapping, bg: state.background || 'BG_Black', usage_chain: state.preflight && Array.isArray(state.preflight.usage_chain) ? state.preflight.usage_chain : [], annotate: useAI, layout_mode: layoutMode, model_profile_id: legacyModelProfileId(), fresh_generation: !resumeIncompleteDraft});
       if (!isCurrentOperation('annotate', op)) return;
       let lastAnnotationDetail = '';
       job = await window.Api.poll('/api/jobs/' + result.job_id, function (item) { return ['succeeded', 'failed', 'cancelled'].includes(item.state); }, {isCurrent: function () { return isCurrentOperation('annotate', op); }, onProgress: function (item) { const detail = annotationProgressDetail(item); if (isCurrentOperation('annotate', op) && detail && detail !== lastAnnotationDetail) { lastAnnotationDetail = detail; log(detail); } }, onRetry: function () { if (isCurrentOperation('annotate', op)) log('连接中断，正在重试'); }});
@@ -2594,7 +2802,7 @@
     else if (job.state === 'succeeded') { log('生成完成'); $('#backgroundRequestsPanel').classList.remove('open'); }
     checkReady(); return job;
   }
-  async function build() { if (state.buildActive || state.backgroundJob) return; const op = beginOperation('build'); try { const story = requireStory(); if (!state.analysis) throw new Error('请先读取剧本'); const layoutModeRadio = $('input[name=layoutMode]:checked'); state.buildActive = true; log('启动中…'); checkReady(); await post('/api/build', {story_token: story.story_token, project: story.project, script: state.analysis.path, mapping: state.mapping, bg: state.background || 'BG_Black', annotate: $('input[name=anno]:checked').value === 'ai', layout_mode: layoutModeRadio ? layoutModeRadio.value : 'ai', model_profile_id: legacyModelProfileId(), install: $('#install').checked}); if (!isCurrentOperation('build', op)) return; return await pollBuild(op); } catch (error) { if (!isCurrentOperation('build', op)) return; state.buildActive = false; log(error.message); } finally { if (isCurrentOperation('build', op)) checkReady(); } }
+  async function build() { if (state.buildActive || state.backgroundJob) return; const op = beginOperation('build'); try { const story = requireStory(); if (!state.analysis) throw new Error('请先读取剧本'); const layoutModeRadio = $('input[name=layoutMode]:checked'); state.buildActive = true; log('启动中…'); checkReady(); await post('/api/build', {story_token: story.story_token, project: story.project, script: state.analysis.path, mapping: state.mapping, bg: state.background || 'BG_Black', annotate: $('input[name=anno]:checked').value === 'ai', layout_mode: layoutModeRadio ? layoutModeRadio.value : 'pure_ai', model_profile_id: legacyModelProfileId(), install: $('#install').checked}); if (!isCurrentOperation('build', op)) return; return await pollBuild(op); } catch (error) { if (!isCurrentOperation('build', op)) return; state.buildActive = false; log(error.message); } finally { if (isCurrentOperation('build', op)) checkReady(); } }
 
   const recentStories = new window.StoryUI.RecentStories($('#recentStories'), openRecent);
   const storyFilePicker = window.StoryUI && window.StoryUI.StoryFilePicker ? new window.StoryUI.StoryFilePicker($('#mBrowse'), {title: '选择剧情文本', onChoose: openSelectedStory}) : null;
@@ -2663,6 +2871,7 @@
     'show-create': function () { $('#view-create').scrollIntoView({behavior: 'smooth'}); }, 'open-script': openScript, analyze: analyze, 'retry-story-load': function () { if (state.loadFailure) replaceStory(state.loadFailure.story, state.loadFailure.options); }, 'dismiss-welcome': function () { $('#welcomePanel').hidden = true; localStorage.setItem('aa-welcome-dismissed-v1', '1'); }, 'show-welcome': function () { $('#welcomePanel').hidden = false; localStorage.removeItem('aa-welcome-dismissed-v1'); }, 'open-settings': function () { setDrawer('settings', true); loadAAData(); }, 'close-settings': function () { setDrawer('settings', false); }, 'save-aa-install': function () { return saveAAInstall(); }, 'open-help': function () { setDrawer('help', true); }, 'close-help': function () { setDrawer('help', false); }, 'close-browse': function () { if (storyFilePicker) storyFilePicker.close(); else closeModal('#mBrowse'); }, 'story-picker-device': function () { if (storyFilePicker) storyFilePicker.chooseDevice(); }, 'story-picker-host': function () { if (storyFilePicker) storyFilePicker.openHost(); }, 'story-picker-refresh': function () { if (storyFilePicker) storyFilePicker.load(storyFilePicker.locationToken, false); }, 'story-picker-source': function () { if (storyFilePicker) storyFilePicker.open(storyFilePicker.trigger); }, 'choose-current-dir': chooseCurrentDirectory, 'close-cast': function () { closeModal('#mCast'); }, 'close-bg-replace': function () { closeModal('#mBgReplace'); state.bgReplaceCard = null; }, 'bg-replace-history': openBgHistory, 'approve-preflight': approvePreflight, 'rerun-preflight': rerunPreflight, 'cast-narrator': function () { castSetKind('narrator'); }, 'cast-unset': function () { castSetKind('unset'); }, 'resolve-background': function (target) { state.backgroundJob = Object.assign({}, state.backgroundJob, {resolveRequestId: target.dataset.requestId}); openModal('#mBackgroundPicker', target); loadBackgrounds(); }, 'continue-background': continueBackground, 'refresh-drafts': refreshDrafts, 'load-review': loadReview, 'approve-all': requestApproveAll, 'confirm-approve-all': approveAll, 'cancel-approve-all': function () { closeModal('#mApproveAll'); }, validate: validateReview, compile: compile, install: openInstallDialog, 'confirm-install': confirmInstall, 'close-install': function () { closeModal('#mInstall'); }, 'edit-card': editCard, 'save-edit': saveEdit, 'close-edit': function () { closeModal('#mEdit'); }, 'insert-line': function () { insertCard('line'); }, 'insert-dir': function () { insertCard('dir'); }, 'move-up': function () { moveCard('up'); }, 'move-down': function () { moveCard('down'); }, 'delete-card': deleteCard, 'bind-cast': bindCast, annotate: annotate, build: build, 'new-profile': function () { renderProfile(null); }, 'activate-profile': async function () { try { await post('/api/llm/profiles/activate', {id: $('#modelProfileId').value}); await loadProfiles($('#modelProfileId').value); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'delete-profile': async function () { try { await post('/api/llm/profiles/delete', {id: $('#modelProfileId').value, delete_credential: true}); await loadProfiles(); } catch (error) { $('#modelStatus').textContent = error.message; } }, 'save-profile': saveProfile, 'clear-profile-key': clearProfileKey, 'discover-models': async function () { $('#modelStatus').textContent = '正在读取可用模型…'; try { const result = await post('/api/llm/models', {id: $('#modelProfileId').value}); const list = $('#modelOptions'); clearElement(list); result.models.forEach(function (name) { const option = document.createElement('option'); option.value = name; list.appendChild(option); }); $('#modelStatus').textContent = '已读取 ' + result.models.length + ' 个模型，可在模型输入框中选择。'; } catch (error) { $('#modelStatus').textContent = error.message; } }, 'test-text': function () { testProfile('text'); }, 'test-vision': function () { testProfile('vision'); }, 'preset-openai': function () { applyModelPreset(presetByKey('openai')); }, 'preset-anthropic': function () { applyModelPreset(presetByKey('anthropic')); }, 'preset-deepseek': function () { applyModelPreset(presetByKey('deepseek')); }, 'preset-ollama': function () { applyModelPreset(presetByKey('ollama')); }, 'preset-silicon': function () { applyModelPreset(presetByKey('siliconflow')); }, 'preset-openrouter': function () { applyModelPreset(presetByKey('openrouter')); }
   };
   actions['cast-voice'] = function () { return castSetKind('voice'); };
+  actions['save-cast-alias'] = saveCurrentCharacterAlias;
   actions['close-browse'] = function () { if (activeFilePicker) activeFilePicker.close(); else closeModal('#mBrowse'); activeFilePicker = storyFilePicker; };
   actions['new-profile'] = openProviderLayer;
   actions['discover-models'] = async function () {
@@ -2710,9 +2919,9 @@
   actions['jump-review-card'] = jumpToReviewCard;
   actions['open-model-settings'] = function () { setDrawer('settings', true); return Promise.all([loadModelWorkbench(), loadAAData()]); };
   actions['retry-annotation'] = function () { if (!$('#generationFailureRetry').disabled) return annotate(); };
-  actions['open-existing-draft'] = async function () { if ($('#rvDraftSelect').value) await loadReview(); if ($('#reviewPhase').scrollIntoView) $('#reviewPhase').scrollIntoView({behavior: 'smooth', block: 'start'}); };
+  actions['open-existing-draft'] = openExistingDraft;
   document.addEventListener('click', function (event) { const sortTarget = event.target.closest('[data-story-sort]'); if (sortTarget && activeFilePicker) { activeFilePicker.sortBy(sortTarget.dataset.storySort); return; } const target = event.target.closest('[data-action]'); if (target && actions[target.dataset.action]) actions[target.dataset.action](target); });
-  $('#bgq').addEventListener('input', loadBackgrounds); $('#bgready').addEventListener('change', loadBackgrounds); $('#rvDraftSelect').addEventListener('change', loadReview); $('#installCategory').addEventListener('input', updateInstallProjectPreview); $('#installStoryName').addEventListener('input', updateInstallProjectPreview);
+  $('#bgq').addEventListener('input', loadBackgrounds); $('#bgready').addEventListener('change', loadBackgrounds); ['#bgsource', '#bgcategory', '#bgspace', '#bgtime', '#bgweather', '#bgtag'].forEach(function (id) { const node = $(id); if (node) node.addEventListener(node.tagName === 'INPUT' ? 'input' : 'change', loadBackgrounds); }); $('#rvDraftSelect').addEventListener('change', loadReview); $('#installCategory').addEventListener('input', updateInstallProjectPreview); $('#installStoryName').addEventListener('input', updateInstallProjectPreview);
   $('#rvCardJump').addEventListener('keydown', function (event) { if (event.key === 'Enter') jumpToReviewCard(); });
   $('#modelSelectionQuery').addEventListener('input', renderModelSelection); $('#modelSelectionProvider').addEventListener('change', renderModelSelection); $('#modelSelectionStatus').addEventListener('change', renderModelSelection);
   $('#modelProfileSelect').addEventListener('change', function () {
@@ -2752,7 +2961,7 @@
     try {
       const saved = JSON.parse(localStorage.getItem('aa-workbench-preferences-v1') || '{}');
       const anno = saved.anno === 'no' ? 'no' : 'ai';
-      const layoutMode = ['pure_ai', 'ai', 'rules'].includes(saved.layoutMode) ? saved.layoutMode : 'ai';
+      const layoutMode = ['pure_ai', 'ai', 'rules'].includes(saved.layoutMode) ? saved.layoutMode : 'pure_ai';
       const radios = document.querySelectorAll ? Array.from(document.querySelectorAll('input[name=anno]')) : [];
       radios.forEach(function (radio) { radio.checked = radio.value === anno; });
       const layoutRadios = document.querySelectorAll ? Array.from(document.querySelectorAll('input[name=layoutMode]')) : [];
@@ -2768,7 +2977,7 @@
       const install = document.querySelector ? document.querySelector('#install') : null;
       localStorage.setItem('aa-workbench-preferences-v1', JSON.stringify({
         anno: annoRadio ? annoRadio.value : 'ai',
-        layoutMode: layoutModeRadio ? layoutModeRadio.value : 'ai',
+        layoutMode: layoutModeRadio ? layoutModeRadio.value : 'pure_ai',
         install: install ? install.checked : true
       }));
     } catch (_) {}

@@ -85,6 +85,37 @@
       cardEl.appendChild(chipsEl);
     }
 
+    // AI repair proposals are explicit, reviewable changes. They never alter
+    // the card until the user accepts or rejects the proposal.
+    const proposals = Array.isArray(card.proposals)
+      ? card.proposals.filter(function (item) { return item && item.state === 'pending'; })
+      : [];
+    if (proposals.length && options.onProposalAction) {
+      const proposalsEl = document.createElement('div');
+      proposalsEl.className = 'card-proposals';
+      proposals.forEach(function (proposal) {
+        const row = document.createElement('div'); row.className = 'card-proposal';
+        const message = document.createElement('span'); message.className = 'card-proposal-message';
+        const field = proposal.field || '字段';
+        message.textContent = (proposal.type === 'suggested_fix' ? '返修建议：' : '已应用，待确认：') + field + ' ' + String(proposal.before ?? '') + ' → ' + String(proposal.after ?? '');
+        row.appendChild(message);
+        const accept = document.createElement('button'); accept.type = 'button'; accept.className = 'ghost';
+        accept.textContent = proposal.type === 'suggested_fix' ? '接受返修' : '保留修改';
+        accept.addEventListener('click', function (event) {
+          event.stopPropagation(); options.onProposalAction(proposal, proposal.type === 'suggested_fix' ? 'accept' : 'approve');
+        });
+        row.appendChild(accept);
+        const reject = document.createElement('button'); reject.type = 'button'; reject.className = 'ghost';
+        reject.textContent = proposal.type === 'suggested_fix' ? '忽略' : '撤销修改';
+        reject.addEventListener('click', function (event) {
+          event.stopPropagation(); options.onProposalAction(proposal, 'reject');
+        });
+        row.appendChild(reject);
+        proposalsEl.appendChild(row);
+      });
+      cardEl.appendChild(proposalsEl);
+    }
+
     // 4b. 背景请求卡动作
     if (card.kind === 'background_request' && (options.onUseDefaultBackground || options.onChooseBackground || options.onFillBackground)) {
       const actionsEl = document.createElement('div');

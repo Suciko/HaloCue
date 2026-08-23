@@ -148,6 +148,58 @@ def test_partial_annotation_status_is_persisted_and_blocks_review_gate(temp_draf
     assert getattr(exc_info.value, "code", None) == "annotation_incomplete"
 
 
+def test_nonfatal_quality_warning_can_be_explicitly_accepted_for_compile(temp_draft_dir):
+    store = temp_draft_dir
+    token = "quality-warning-review"
+    created = store.create_draft(
+        token=token,
+        text="@stage a b c d e f\n旁白: 保留结果\n",
+        project="质量提示",
+        cast={"cast": {"旁白": {"narrator": True}}},
+    )
+    assert any(item["code"] == "cast.overflow_warning" for item in created["diagnostics"])
+    store.batch_approve_reviews(token, None, created["session"]["draft_version"])
+    draft = store.load_draft(token)
+    with pytest.raises(Exception) as blocked:
+        store.assert_review_ready(token)
+    assert blocked.value.override_allowed is True
+    assert store.assert_review_ready(token, allow_quality_warnings=True) is True
+    accepted = store.accept_quality_warnings(token, draft["session"]["draft_version"])
+    assert accepted["quality_override_accepted"] is True
+    assert store.assert_review_ready(token) is True
+
+    # Any content-affecting edit invalidates the old decision and requires a
+    # fresh explicit review of the resulting quality warning.
+    current = store.load_draft(token)
+    line_card = next(card for card in current["identities"] if card.get("source_id"))
+    edited = store.update_card_content(
+        token=token,
+        card_id=line_card["card_id"],
+        patch={"text": "保留结果（已编辑）"},
+        expected_draft_version=accepted["draft_version"],
+    )
+    assert edited["session"].get("quality_override_accepted") is None
+    with pytest.raises(Exception) as blocked_again:
+        store.assert_review_ready(token)
+    assert blocked_again.value.override_allowed is False
+    reapproved = store.batch_approve_reviews(
+        token, None, edited["session"]["draft_version"]
+    )
+    with pytest.raises(Exception) as warning_again:
+        store.assert_review_ready(token)
+    assert warning_again.value.override_allowed is True
+
+
+def test_hard_diagnostic_cannot_be_overridden_for_compile(temp_draft_dir):
+    store = temp_draft_dir
+    token = "hard-review-error"
+    created = store.create_draft(token=token, text="未绑定角色: 会阻断\n", project="硬错误")
+    store.batch_approve_reviews(token, None, created["session"]["draft_version"])
+    with pytest.raises(Exception) as blocked:
+        store.assert_review_ready(token, allow_quality_warnings=True)
+    assert blocked.value.override_allowed is False
+
+
 def test_list_sessions_derives_generation_from_project_and_source_without_writes(temp_draft_dir):
     """Same-source generations are v1/v2; a changed source starts a new lineage."""
     store = temp_draft_dir

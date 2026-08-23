@@ -59,6 +59,10 @@ def test_planned_prompt_learns_official_grammar_without_copying_official_rhythm(
     assert "Performance inference is proactive; plot inference is strict" in planned
     assert "Official examples provide directing grammar" in planned
     assert "An object operation,\narrival/departure" in planned
+    assert "CAST/VISIBILITY FACT" in planned
+    assert "cast/resource list says who can be rendered; it is not\nthe opening shot" in planned
+    assert "speak later, appear in DISPLAYABLE_CAST" in planned
+    assert "Offscreen/narrator-only speakers" in planned
 
 
 def test_planned_prompt_chooses_carriers_after_detecting_causal_opportunity():

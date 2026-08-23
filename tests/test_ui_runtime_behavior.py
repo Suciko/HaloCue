@@ -147,6 +147,33 @@ const h=createHarness({poll:async path=>({state:'succeeded',result:path.includes
     assert "build-short" in result["compile"]
 
 
+def test_compile_preserves_quality_gate_fields_and_retries_after_confirmation():
+    script = r'''
+const {createHarness}=require(process.argv[1]);let compileCalls=0,overrideCalls=0,compilePayloads=[];
+const h=createHarness({confirm:()=>true,request:async(p,o)=>{
+  if(p==='/api/draft?token=d')return {story_token:'S',draft_version:1,counts:{pending:0,blocking_errors:0},cards:[]};
+  if(p==='/api/compile'){
+    compileCalls+=1;compilePayloads.push(o&&o.payload||{});
+    if(compileCalls===1){const error=new Error('存在非致命质量提示');error.code='review_pending';error.override_allowed=true;throw error;}
+    return {ok:true,build_id:'quality-build',job_id:'quality-job'};
+  }
+  if(p==='/api/review/quality-override'){overrideCalls+=1;return {ok:true,draft_version:2};}
+  return {profiles:[]};
+},poll:async()=>({state:'succeeded'})});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'S'});h.get('#rvDraftSelect').value='d';await h.window.AppRuntime.loadReview();await h.window.AppRuntime.compile();console.log(JSON.stringify({compileCalls,overrideCalls,compilePayloads,status:h.get('#rvStatus').textContent,installDisabled:h.get('#rvInstall').disabled}));})();
+'''
+    assert run_harness(script) == {
+        "compileCalls": 2,
+        "overrideCalls": 1,
+        "compilePayloads": [
+            {"token": "d", "expected_draft_version": 1},
+            {"token": "d", "expected_draft_version": 2, "allow_quality_warnings": True},
+        ],
+        "status": "编译成功 · quality-build · 可安装",
+        "installDisabled": False,
+    }
+
+
 def test_annotation_log_reports_checkpoint_reuse_count():
     script = r'''
 const {createHarness}=require(process.argv[1]);
@@ -155,6 +182,26 @@ const h=createHarness({poll:async()=>({state:'succeeded',result:{draft_token:'d'
 (async()=>{await h.window.replaceStory(story);await h.window.AppRuntime.annotate();console.log(JSON.stringify({log:h.get('#log').textContent}));})();
 '''
     assert "复用 3 段" in run_harness(script)["log"]
+
+
+def test_completed_draft_annotation_requests_a_fresh_generation():
+    script = r'''
+const {createHarness}=require(process.argv[1]);let payloads=[];
+const story={story_token:'S',project:'S',preflight_snapshot:{state:'fresh',approved:true,result:{ai_status:'completed',analysis:{lines:1,speakers:[],scenes:[]},characters:[],assets:[],issues:[]}}};
+const h=createHarness({poll:async()=>({state:'succeeded',result:{draft_token:'d',agent_metrics:{requests:1}}}),request:async(p,o)=>{if(p==='/api/annotate'){payloads.push(o.payload);return {job_id:'annotate-1'};}if(p==='/api/drafts')return [{draft_token:'d',story_token:'S',project:'S',draft_version:1}];if(p==='/api/draft?token=d')return {story_token:'S',draft_version:1,annotation_status:{status:'complete',completed_targets:1,total_targets:1,pending_targets:0},counts:{pending:0,blocking_errors:0},cards:[]};if(p.startsWith('/api/story/assets'))return {characters:[],backgrounds:[],sounds:[],bgms:[]};return {profiles:[]};}});
+(async()=>{await h.window.replaceStory(story);await h.window.AppRuntime.loadReview('d');await h.window.AppRuntime.annotate();console.log(JSON.stringify(payloads[0]));})();
+'''
+    assert run_harness(script)["fresh_generation"] is True
+
+
+def test_partial_draft_annotation_keeps_checkpoint_resume():
+    script = r'''
+const {createHarness}=require(process.argv[1]);let payloads=[];
+const story={story_token:'S',project:'S',preflight_snapshot:{state:'fresh',approved:true,result:{ai_status:'completed',analysis:{lines:1,speakers:[],scenes:[]},characters:[],assets:[],issues:[]}}};
+const h=createHarness({poll:async()=>({state:'succeeded',result:{draft_token:'d',resumed_chunks:1}}),request:async(p,o)=>{if(p==='/api/annotate'){payloads.push(o.payload);return {job_id:'annotate-1'};}if(p==='/api/drafts')return [{draft_token:'d',story_token:'S',project:'S',draft_version:1}];if(p==='/api/draft?token=d')return {story_token:'S',draft_version:1,annotation_status:{status:'partial',completed_targets:1,total_targets:2,pending_targets:1},counts:{pending:0,blocking_errors:0},cards:[]};if(p.startsWith('/api/story/assets'))return {characters:[],backgrounds:[],sounds:[],bgms:[]};return {profiles:[]};}});
+(async()=>{await h.window.replaceStory(story);await h.window.AppRuntime.loadReview('d');await h.window.AppRuntime.annotate();console.log(JSON.stringify(payloads[0]));})();
+'''
+    assert run_harness(script)["fresh_generation"] is False
 
 
 def test_completed_checkpoint_log_explains_that_no_model_was_called():
@@ -192,6 +239,50 @@ const h=createHarness({cardList:{renderCardList(_root,value){shown=value.map(x=>
     assert result["settings"] is True
 
 
+def test_open_saved_draft_has_visible_success_feedback():
+    script = r'''
+const {createHarness}=require(process.argv[1]);
+const h=createHarness({request:async p=>{
+  if(p==='/api/drafts')return [{draft_token:'saved',story_token:'S',project:'S',generation_version:2}];
+  if(p==='/api/draft?token=saved')return {draft_token:'saved',story_token:'S',draft_version:2,counts:{pending:0,blocking_errors:0},cards:[]};
+  return {profiles:[]};
+}});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'S'});h.get('#rvDraftSelect').value='saved';h.get('#generationFailureDraft').hidden=false;await h.clickAction('open-existing-draft');await h.drain();console.log(JSON.stringify({status:h.get('#rvStatus').textContent,log:h.get('#log').textContent,reviewHidden:h.get('#reviewPhase').classList.contains('is-hidden'),disabled:h.get('#generationFailureDraft').disabled,label:h.get('#generationFailureDraft').textContent}));})();
+'''
+    result = run_harness(script)
+    assert result["status"].startswith("已打开保留草稿")
+    assert "已打开保留草稿" in result["log"]
+    assert result["reviewHidden"] is False
+    assert result["disabled"] is False
+    assert result["label"] == "查看保留草稿"
+
+
+def test_open_saved_draft_reports_when_no_draft_exists():
+    script = r'''
+const {createHarness}=require(process.argv[1]);
+const h=createHarness({request:async p=>p==='/api/drafts'?[]:{profiles:[]}});
+(async()=>{h.window.StoryStore.set({story_token:'S',project:'S'});await h.clickAction('open-existing-draft');await h.drain();console.log(JSON.stringify({status:h.get('#rvStatus').textContent,log:h.get('#log').textContent,disabled:h.get('#generationFailureDraft').disabled}));})();
+'''
+    result = run_harness(script)
+    assert result["status"] == "没有可恢复的保留草稿。"
+    assert result["log"] == "没有可恢复的保留草稿。"
+    assert result["disabled"] is False
+
+
+def test_structured_output_failure_explains_that_g2_has_not_started():
+    script = r'''
+const {createHarness}=require(process.argv[1]);
+const story={story_token:'S',project:'S',preflight_snapshot:{state:'fresh',approved:true,result:{ai_status:'completed',analysis:{lines:1,speakers:[],scenes:[]},characters:[],assets:[],issues:[]}}};
+const h=createHarness({poll:async()=>({state:'failed',error:'structured_output scene-1/scene-1-chunk-1: invalid_line: positions must cover the full shot',error_code:'structured_output'}),request:async p=>{if(p==='/api/annotate')return {job_id:'annotate-1'};if(p==='/api/drafts')return [];return {profiles:[]};}});
+(async()=>{await h.window.replaceStory(story);await h.window.AppRuntime.annotate();console.log(JSON.stringify({title:h.get('#generationFailureTitle').textContent,message:h.get('#generationFailureMessage').textContent,action:h.get('#generationFailureAction').textContent,retryDisabled:h.get('#generationFailureRetry').disabled}));})();
+'''
+    result = run_harness(script)
+    assert result["title"] == "模型返回格式未通过校验"
+    assert "尚未进入 G2" in result["message"]
+    assert "窄范围协议修复" in result["action"]
+    assert result["retryDisabled"] is False
+
+
 def test_connection_test_copy_states_that_it_is_only_a_basic_check():
     app = (HERE / "js" / "app.js").read_text(encoding="utf-8")
     html = (HERE / "ui.html").read_text(encoding="utf-8")
@@ -208,6 +299,8 @@ console.log(JSON.stringify({
   receiving:h.window.AppRuntime.annotationProgressDetail({state:'receiving',detail:'正在标注第 1/4 个场景块',received_chars:8192,elapsed_ms:7300,model:'deepseek-v4-flash'}),
   reasoning:h.window.AppRuntime.annotationProgressDetail({state:'reasoning',detail:'正在标注第 1/4 个场景块',reasoning_chars:4096,elapsed_ms:7300,model:'deepseek-v4-flash'}),
   g1:h.window.AppRuntime.annotationProgressDetail({state:'completed',stage:'G1',detail:'已规划场景事件链 1/4',input_tokens:1200,reasoning_tokens:800,output_tokens:300,reasoning_summary:'正在梳理场景因果'}),
+  protocol:h.window.AppRuntime.annotationProgressDetail({state:'retrying',stage:'protocol',detail:'正在纠正返回格式',reason:'invalid_line'}),
+  g2Repair:h.window.AppRuntime.annotationProgressDetail({state:'repairing',stage:'G2',detail:'正在处理质量提示',reasoning_summary:'正在针对质量问题返修当前演出锚点'}),
   retrying:h.window.AppRuntime.annotationProgressDetail({state:'retrying',detail:'正在标注第 1/4 个场景块',retry_count:1,model:'deepseek-v4-flash'}),
   reasoningCapacity:h.window.AppRuntime.annotationProgressDetail({state:'retrying',reason:'reasoning_capacity',detail:'正在标注第 1/4 个场景块',retry_count:1,model:'deepseek-v4-flash'}),
   subdividing:h.window.AppRuntime.annotationProgressDetail({state:'subdividing',detail:'正在标注第 1/4 个场景块',subdivision_count:2,model:'deepseek-v4-flash'})
@@ -221,6 +314,8 @@ console.log(JSON.stringify({
     assert "输入 1,200" in result["g1"]
     assert "思考 800" in result["g1"]
     assert "输出 300" in result["g1"]
+    assert "协议修复" in result["protocol"]
+    assert "G2 演出标注" in result["g2Repair"]
     assert "正在纠正返回格式" in result["retrying"]
     assert "增加预算并保留推理" in result["reasoningCapacity"]
     assert "正在拆分当前场景块" in result["subdividing"]

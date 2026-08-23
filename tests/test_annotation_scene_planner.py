@@ -1,4 +1,5 @@
 from annotation_chunks import assign_annotation_ids
+from llm import validate_json_schema
 from annotation_scene_planner import (
     EVENT_PHASES,
     PEAK_TYPES,
@@ -27,6 +28,7 @@ def test_planner_treats_declared_carriers_as_flexible_contract_without_quotas():
     assert "peak 只表示场景内的相对升级" in PLANNER_SYSTEM
     assert "不能把首次露面自动当入场" in PLANNER_SYSTEM
     assert "不压成全员同步" in PLANNER_SYSTEM
+    assert "听觉载体单独过证据门" in PLANNER_SYSTEM
     assert "给 G2 的语义假设" in PLANNER_SYSTEM
     assert "上一有效演出节点（对白或无对白）" in PLANNER_SYSTEM
     assert "才规划 silent_beat" in PLANNER_SYSTEM
@@ -35,6 +37,9 @@ def test_planner_treats_declared_carriers_as_flexible_contract_without_quotas():
     assert "普通反打、显现和人数变化不规划 trans" in STAGING_PLANNER_SYSTEM
     assert "OFFSCREEN_NAMED_SPEAKERS" in PLANNER_SYSTEM
     assert "不能为了双人关系构图虚构其立绘" in PLANNER_SYSTEM
+    assert "只表示“有可用立绘资源”" in PLANNER_SYSTEM
+    assert "不是之后会说话的人物名单" in PLANNER_SYSTEM
+    assert "把他提前摆进更早镜头" in PLANNER_SYSTEM
     assert 'carriers=["action"]' in PLANNER_SYSTEM
     assert "不要把这种 action 与" in PLANNER_SYSTEM
     assert "物件操作本身不等于通用身体 action" in PLANNER_SYSTEM
@@ -283,6 +288,76 @@ def test_normalize_repairs_flattened_model_arrays_without_changing_choices():
     assert event["shot_groups"][0]["members"] == ["圣娅", "桃井"]
     assert event["performance_intents"][0]["subjects"] == ["圣娅"]
     assert event["performance_intents"][0]["carriers"] == ["face_change", "action"]
+
+
+def test_normalize_moves_misplaced_event_continuity_goal_out_of_face_arc():
+    targets = _targets()
+    response = {"events": [{
+        "event_id": "misplaced-continuity",
+        "start_i": 1,
+        "end_i": 2,
+        "kind": "dialogue_cluster",
+        "stimulus": "老师从画外提醒",
+        "outcome": "圣娅收住动作",
+        "face_arcs": [{
+            "who": "圣娅",
+            "stages": [{
+                "anchor_i": 1,
+                "position": "on",
+                "semantic_state": "收住动作",
+                "change_reason": "听到提醒",
+            }],
+            "continuity_goal": "保持圣娅单人反应镜头",
+        }],
+    }]}
+    validate_json_schema(
+        response,
+        _event_schema(len(targets), ["圣娅", "老师"], optional_execution_fields=True),
+    )
+    plan = normalize_scene_event_plan(response, targets, "scene-1")
+
+    event = plan["events"][0]
+    assert event["continuity_goal"] == "保持圣娅单人反应镜头"
+    assert "continuity_goal" not in event["face_arcs"][0]
+    assert plan["protocol_repairs"] == [{
+        "event_id": "misplaced-continuity",
+        "code": "planner_misplaced_event_field",
+        "field": "continuity_goal",
+        "source_path": "face_arcs[0].continuity_goal",
+        "target_path": "continuity_goal",
+        "action": "moved_to_event",
+        "reason": "event-level continuity_goal was nested under face_arc",
+    }]
+
+
+def test_normalize_maps_only_known_object_test_phase_alias_and_audits_it():
+    targets = _targets()
+    response = {"events": [{
+        "event_id": "object-compat",
+        "start_i": 1,
+        "end_i": 2,
+        "kind": "object_test",
+        "stimulus": "发现设备",
+        "outcome": "开始验证",
+        "phase_order": ["object_test", "verification"],
+    }]}
+    validate_json_schema(
+        response,
+        _event_schema(len(targets), ["圣娅", "老师"], optional_execution_fields=True),
+    )
+
+    plan = normalize_scene_event_plan(response, targets, "scene-1")
+
+    assert plan["events"][0]["phase_order"] == ["object_action", "verification"]
+    assert plan["protocol_repairs"] == [{
+        "event_id": "object-compat",
+        "code": "planner_phase_alias",
+        "field": "phase_order",
+        "source_value": "object_test",
+        "value": "object_action",
+        "action": "mapped_compat_alias",
+        "reason": "event kind was returned in phase_order",
+    }]
 
 
 def test_normalize_and_project_plan_v2_preserves_stable_source_anchors():

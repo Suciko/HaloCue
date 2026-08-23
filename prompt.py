@@ -16,7 +16,7 @@ from director_policy import prompt_policy
 
 # Named revision for the 0.95 integration.  This is metadata only; it does
 # not change the director's creative freedom or impose a resource quota.
-PROMPT_REVISION = "v10-canonical-emo-protocol"
+PROMPT_REVISION = "v10-visibility-fact-and-planner-field-repair"
 
 # ---------------------------------------------------------------- 角色与铁律
 ROLE = """你是蔚蓝档案（Blue Archive）同人剧情的**演出指导**。
@@ -32,13 +32,15 @@ ROLE = """你是蔚蓝档案（Blue Archive）同人剧情的**演出指导**。
 4. 旁白和无立绘角色（资源表里标了的）是“有姓名的画外发言者”：可以正常拥有姓名、台词和剧情关系，
    但不能进入 visible_characters / positions，不能 move / reveal / conceal / enter / exit，也不能填表情、气泡、动作或效果。
    画面需要回应他们时，只演出当前真正有立绘的角色；不能为了双人关系镜头虚构画外发言者的立绘。
-   同拍需要回应时，用行级 `reactions` 写真实有立绘角色的 face/emo/act，不要把反应挂在画外说话人身上。
+   无立绘说话者不会自动触发画内角色的同拍反应：不要因为老师/旁白开口就给画内立绘加感叹号、气泡或动作。
+   只有正文明确写出某个画内角色的可见反应时，才把它拆成独立无对白 beat；有立绘角色之间仍可用行级 `reactions`。
 """
 
 # ---------------------------------------------------------------- 停顿模型
 SHOT = """# 行级 shot 字段：只表示受击目标，不表示景别
 
 `shot` 是 AA 旧协议中的“射击/受击目标”字段，不是 camera shot、景别或构图字段。
+即使该角色是本行的 `focus_character`，也不能因此填写 `shot`；镜头主体永远写在导演层的 `visible_characters` / `focus_character`。
 只有当前画面中某个已显示角色实际遭受攻击、被命中时，才填该受击角色的精确名字。
 开枪者开火、瞄准、威胁、枪声、未命中、画外受击、没有立绘的对象，一律填空串。
 不要把 `medium_close`、`close`、`relation`、`wide`、`group` 或任何景别词写进 `shot`；
@@ -51,7 +53,7 @@ WAIT_POLICY = """# 独立无对话框反应与动作拍
 普通对白行没有 wait 字段，不要在普通对白前生成 `#wait`，也不要用它替代气泡、动作或镜头的默认节奏。
 只有本轮输出 Schema 包含 beats 时，才可为确实需要留白的独立无对话框反应输出 beat；用 `wait_ms` 控制展示时长。
 这里的“无对话框”表示这一拍没有任何角色真正发言，因此全体可见人物保持高光；它仍可同时包含
-face / emo / act / se / 镜头。同步反应可写在同一 beat 的 reactions，或写在对白/旁白行的行级 reactions；
+face / emo / act / se / 镜头。同步反应可写在同一 beat 的 reactions，或写在有立绘说话者对白行的行级 reactions；
 只有必须在下一句前单独被看见时才拆成 beat，不把反应挂在无立绘说话人身上。
 例如角色被荒唐发言噎住时，可在对应 anchor 后生成空文本的 Dot / 沉默反应并等待 2500ms。
 旁白明确写出某个有立绘角色僵住、受惊、点头、发抖或爆发，而旁白本身不能承载角色 act 时，
@@ -864,6 +866,8 @@ interaction_axis 表示谁行动、谁承受。普通切镜只改变 shot_group�
   不得用 hold / reframe / shrink_group / move 制造软推近或人物滑走。受话者不必留在当前镜头，单人正反打合法。
 - cut + positions 只定义新镜头第一帧，不播放位移。观众需要看见让位、靠近或退开时用 reframe/move，
   并让移动节点实际播放后再切镜。
+- 单人峰值或特写之后若回到刚才的关系组，且正文没有真实走位、入退场或关系重排，沿用该关系组最近一次稳定的
+  positions；不要为了“重新建立”而把人物无解释地跳回另一套槽位。若确实改变了构图，明确写出改变的语义依据。
 - reveal/conceal 只用于仍在场角色加入/离开当前连续镜头，普通情况使用 fade；enter/exit 只用于真实进入/离开物理空间；
   trans 只随真实背景层变化。普通反打、再次被镜头拍到和换说话者都不触发入退场或背景过渡。
 
@@ -881,6 +885,8 @@ interaction_axis 表示谁行动、谁承受。普通切镜只改变 shot_group�
   新阶段后，必须选择合适的新 face，或用语义匹配的 emo / act 让变化可读。正式汇报、回应或确认类台词也要
   主动评估回应类气泡和克制的身体动作，不能因为句子语气平稳就默认全空。
 - 无对话框 beat 继承上一张脸，除非计划明确进入新的反应阶段；不得用 face=00 占位。
+- reactions 只给当前刺激真正击中的可见承受者；画面里只是旁观、没有新反应依据的人保持克制，不要因为同框就给所有人
+  同时加气泡或符号。说话者是画外音/旁白时，不要给画内角色挂 line-level reaction。
 - performance_intents 的 carriers 默认是可替代实现集合，兑现语义相符的一种即可；只有 require_all=true 才要求全部兑现。
   但如果同一 chunk 明确规划了多个 action / emoticon 意图，不能把它们整段都降级成只换 face；结合语义挑选少量真正需要的气泡或动作即可。
   除此之外的气泡、动作、特写和效果由 AI 依据正文自由取舍，不设固定数量、冷却、相邻禁用或字符预算，也不要为了通过检查给每句机械加动作。
@@ -919,9 +925,10 @@ the dialogue node. Use an independent silent beat only when the audience needs
 to perceive the reaction or result before the next spoken line. If several
 opportunities exist, choose the one or few with the highest causal value; there
 is no resource or beat quota. An ordinary information exchange may simply hold.
-Speaker, camera subject and stimulus receiver may be different. A visible listener who absorbs a same-node dialogue
-or narration stimulus may use line-level `reactions` (`who` plus face/emo/act); use a silent beat only when it must
-land before the next spoken line.
+Speaker, camera subject and stimulus receiver may be different. A visible listener may use line-level `reactions`
+(`who` plus face/emo/act) for an explicit same-node stimulus from an on-screen speaker. An offscreen/narrator-only
+speaker does not automatically trigger a visible reaction; when the text explicitly shows that reaction, use a separate
+silent beat so it is a distinct authored event. Use a silent beat only when it must land before the next spoken line.
 
 Actively resist the lowest-effort bias. Omission, hold and face-only are not
 neutral safe defaults: they are directing choices that need a positive reason,
@@ -950,6 +957,18 @@ even when no bracketed stage direction states it. An object operation,
 arrival/departure, event result, new relationship fact or passage of time needs
 textual evidence. Official examples provide directing grammar, never the current
 scene's rhythm template, command count, pause density or shot order.
+
+CAST/VISIBILITY FACT: The cast/resource list says who can be rendered; it is not
+the opening shot and does not prove that every portrait character is already
+visible. Build the first shot from CURRENT_DIRECTION_STATE and evidence known by
+that anchor. Do not place a character into an earlier shot merely because they
+speak later, appear in DISPLAYABLE_CAST, or are a future stimulus target. A
+later character may join when the text establishes that they are seen/present,
+on their own line, through a justified reveal/enter, or through a motivated full
+cut. If prior context already establishes a shared group, showing them earlier
+is still valid. Offscreen/narrator-only speakers never become a portrait, position, face, emo, act or camera member
+themselves, and do not automatically trigger a visible listener reaction. A visible reaction to them needs explicit
+textual evidence and a separate beat. This protects plot visibility facts; it does not impose a shot-count pattern.
 
 Positive semantic examples: if new information hits a listener, let the listener
 register it before answering when that reaction changes the answer's meaning; if
@@ -1025,7 +1044,9 @@ FACE CADENCE：face 的比较对象是同一角色上一次真正可见的发言
 intentional_face_hold，或由另一个清楚的可见变化承接；不能仅靠省略 face 被动继承。官方稀疏表情库可以更常保持，
 但“情绪大类相同”仍不足以证明 hold。这是语义推进，不是按编号轮换。
 
-EMOTICON SEMANTICS：emo 字段只填资源表中的精确中文名。预期被打破且带疑问时可用 `emo=惊疑`，
+EMOTICON SEMANTICS：emo 字段只填资源表中的精确中文名。它是可选的瞬时心理载体，不是“新信息”的默认标记；
+普通说明、普通追问、已经由 face 或镜头读清的阶段变化，通常留空。只有观众需要单独读到一个短促心理闪现，
+且 face、act、camera 或对白本身不能完整承载时，才使用一个准确气泡。预期被打破且带疑问时可用 `emo=惊疑`，
 正文中的 `?!` 只是判断证据；普通信息追问可用 `emo=疑问`；突然注意或被叫住可用 `emo=反应`；
 强烈羞恼或冒火式抗议可用 `emo=冒烟`。极端惊讶只用于真正强冲击。
 特别注意同一 anchor 上的多个载体：act 是身体运动，emo 是瞬时心理；sound、camera 也可能承载另一项新事实。
@@ -1105,7 +1126,8 @@ continuity 只允许按 face / emo / act / fx / bgfx 分层记录 start / hold /
 `reaction_target` 只能填写当前 cast 中真实角色名或空串；物件、事实、动作结果和抽象关系写入 `subtext` 或 `reason`，
 不要把自然语言事件短语塞进角色字段。
 
-`reactions` 只用于同一对白或旁白节点上同步可读的其他有立绘角色反应，旁白本身不承载这些字段。
+`reactions` 只用于有立绘说话者对白节点上同步可读的其他有立绘角色反应；旁白/无立绘说话者行不得填写
+`reactions`。正文明确写出画内角色响应画外声音时，用独立无对白 beat，而不是把反应附着在画外对白行上。
 可用 carrier 的意思是“从中选择自然的一种”。除非计划写 `require_all=true`，不要把可替代集合当成逐项清单；
 计划未写载体时由当前正文决定。无对白 beat 若存在，必须有 reason、主体或 reactions，并在需要时给 wait_ms；对白节点不加 Wait。
 """

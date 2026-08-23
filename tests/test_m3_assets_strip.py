@@ -109,6 +109,8 @@ def test_background_picker_uses_new_categories_and_hides_confirmed_cg(monkeypatc
     database = tmp_path / "assets.db"
     monkeypatch.setattr(webui, "DB", str(database))
     con = assetdb.connect(database)
+    import asset_catalog
+    asset_catalog.migrate(con)
     con.executemany(
         "INSERT INTO bg(name,hash,label) VALUES(?,?,?)",
         [
@@ -182,3 +184,46 @@ def test_background_picker_searches_every_scene_label_field(monkeypatch, tmp_pat
 
     assert [row["name"] for row in list_backgrounds(q="书库", only_ready=True)] == ["BG_Labelled"]
     assert [row["name"] for row in list_backgrounds(q="千年", only_ready=True)] == ["BG_Labelled"]
+
+
+def test_background_picker_filters_source_and_scene_facets(monkeypatch, tmp_path):
+    database = tmp_path / "assets.db"
+    monkeypatch.setattr(webui, "DB", str(database))
+    con = assetdb.connect(database)
+    import asset_catalog
+    asset_catalog.migrate(con)
+    con.executemany(
+        "INSERT INTO bg(name,hash,label) VALUES(?,?,?)",
+        [("BG_Official", 1001, "校园教室"), ("BG_Custom", 1002, "校园教室")],
+    )
+    con.execute(
+        """INSERT INTO asset_install
+           (scope,kind,aa_key,display_name,source_path,sha256,status,install_path,metadata_json)
+           VALUES(?,?,?,?,?,?,?,?,?)""",
+        (str(tmp_path / "project"), "background", "1002", "校园教室",
+         str(tmp_path / "custom.png"), "digest", "registered",
+         str(tmp_path / "custom.png"), "{}"),
+    )
+    labels = {
+        "visual_kind": "background", "label": "校园教室",
+        "main_category": "campus", "subcategory": "教室",
+        "indoor_outdoor": "indoor", "time": "dawn", "weather": "sunny",
+        "dialogue_suitable": True,
+    }
+    for key in ("BG_Official", "BG_Custom"):
+        con.execute(
+            """INSERT INTO scene_visual_label
+              (resource_channel,asset_key,content_sha256,source_kind,model,
+               visual_kind,label_json,confidence,status)
+              VALUES ('background',?,?,?,?,?,?,.9,'ready')""",
+            (key, key, "extra_pack", "current", "background", json.dumps(labels, ensure_ascii=False)),
+        )
+    con.commit()
+    con.close()
+
+    official = list_backgrounds(only_ready=True, source_filter="official", category="教室", space="indoor")
+    custom = list_backgrounds(only_ready=True, source_filter="custom", time_filter="dawn", weather="sunny")
+
+    assert [row["name"] for row in official] == ["BG_Official"]
+    assert [row["name"] for row in custom] == ["BG_Custom"]
+    assert custom[0]["source"] == "custom"

@@ -568,6 +568,73 @@ def test_dialogue_free_reaction_beat_compiles_to_one_explicit_wait(tmp_path):
     assert character["emoticon"] == 0
 
 
+def test_line_reaction_before_offscreen_dialogue_is_cleared_at_compiler_boundary(tmp_path):
+    script = tmp_path / "offscreen-reaction.txt"
+    script.write_text(
+        '@react {"who":"Alice","face":"","emo":"问号","act":""}\n'
+        "Teacher: off-screen voice\n",
+        encoding="utf-8",
+    )
+    cast = {
+        "Alice": {"id": "alice", "portrait": True},
+        "Teacher": {"id": "teacher", "portrait": False},
+    }
+    index = {
+        "bg": {}, "characters": [],
+        "enums": {"emoticon": {"6": {"sym": "[?]", "cn": "问号"}}, "action": {}},
+    }
+
+    script2aap.warn.items.clear()
+    rows = build(
+        parse_script(script, cast), {"camera": {"enabled": False}},
+        cast, index, "offscreen-reaction",
+    )[0][1]
+    teacher_row = rows[0]
+    visible = [
+        character for character in teacher_row["characters"]["$values"]
+        if character["name"]
+    ]
+
+    assert visible == [{
+        "$type": script2aap.T_CHAR, "name": "teacher", "faceId": "00",
+        "startingPos": 0, "endingPos": 0, "emoticon": -1, "action": 0,
+        "effect": 0, "appear": 0, "shapeOverride": 0,
+    }]
+    assert any("无立绘对白前的 @react 已清除" in message for _, message in script2aap.warn.items)
+
+
+def test_empty_line_reaction_is_a_noop_not_a_default_emoticon(tmp_path):
+    script = tmp_path / "empty-reaction.txt"
+    script.write_text(
+        '@react {"who":"Alice","face":"","emo":"","act":""}\n'
+        "Alice: unchanged\n",
+        encoding="utf-8",
+    )
+    cast = {"Alice": {"id": "alice", "portrait": True}}
+    index = {"bg": {}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+
+    rows = build(
+        parse_script(script, cast), {"camera": {"enabled": False}},
+        cast, index, "empty-reaction",
+    )[0][1]
+    character = rows[0]["characters"]["$values"][rows[0]["speakerSlotNum"]]
+
+    assert character["emoticon"] == -1
+    assert character["action"] == 0
+
+
+def test_renderer_does_not_reintroduce_reactions_on_legacy_offscreen_line():
+    rendered = render_annotated_items([{
+        "kind": "line", "who": "Teacher", "text": "off-screen voice",
+        "face": "", "emo": "", "act": "", "fx": "",
+        "_speaker_has_portrait": False,
+        "_reactions": [{"who": "Alice", "face": "", "emo": "问号", "act": ""}],
+    }])
+
+    assert "@react" not in rendered
+    assert "Teacher: off-screen voice" in rendered
+
+
 def test_dialogue_free_beat_applies_multiple_reactions_in_one_highlighted_node(tmp_path):
     items = [{
         "kind": "line", "annotation_id": "src-1", "raw": "Alice: What?",

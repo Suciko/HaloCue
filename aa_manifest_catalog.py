@@ -366,6 +366,7 @@ def merge_runtime_catalog(
                 "club": character.nickname,
                 "spine": character.spine_path,
                 "avatar": character.avatar_path,
+                "manifest_avatar": character.avatar_path,
                 "source": "aa_manifest",
                 "nface": 0,
             }
@@ -376,6 +377,7 @@ def merge_runtime_catalog(
         record["user_custom"] = user_custom
         record["manifest_name"] = character.display_name
         record["manifest_spine"] = character.spine_path
+        record["manifest_avatar"] = character.avatar_path
         if character.spine_path:
             record["spine"] = character.spine_path
         if character.avatar_path:
@@ -449,6 +451,7 @@ def merge_model_index(
                 "club": character.nickname,
                 "spine": character.spine_path,
                 "avatar": character.avatar_path,
+                "manifest_avatar": character.avatar_path,
                 "source": "aa_manifest",
                 "faces": [],
             }
@@ -463,6 +466,7 @@ def merge_model_index(
             record["club"] = character.nickname
         record["manifest_bound"] = True
         record["user_custom"] = user_custom
+        record["manifest_avatar"] = character.avatar_path
         record["aliases"] = list(
             dict.fromkeys([*(record.get("aliases") or []), *_aliases_for(character, source)])
         )

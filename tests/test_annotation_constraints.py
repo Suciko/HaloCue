@@ -421,6 +421,48 @@ def test_filter_accepts_shot_only_for_a_registered_portrait_target():
     assert invalid_dropped == ["射击目标‘旁白’不是可显示角色"]
 
 
+def test_filter_drops_camera_focus_mistaken_for_shot_target_without_attack_evidence():
+    constraints = annotation_constraints(
+        {"bg": {}, "sounds": [], "enums": {"emoticon": {}, "action": {}}},
+        {"柚子": {"id": "yuzu", "portrait": True}},
+    )
+
+    clean, dropped, details = filter_annotation_row(
+        {
+            "shot": "柚子",
+            "direction": {
+                "focus_character": "柚子",
+                "visible_characters": ["柚子"],
+            },
+        },
+        {"who": "柚子", "kind": "line", "text": "屏幕上出现了一个陌生账号。"},
+        {"id": "yuzu", "portrait": True}, constraints, include_details=True,
+    )
+
+    assert "shot" not in clean
+    assert any(item["code"] == "shot_camera_subject_confusion" for item in details)
+    assert dropped
+
+
+def test_filter_keeps_explicit_attack_target_even_when_it_is_the_focus():
+    constraints = annotation_constraints(
+        {"bg": {}, "sounds": [], "enums": {"emoticon": {}, "action": {}}},
+        {"柚子": {"id": "yuzu", "portrait": True}},
+    )
+
+    clean, dropped = filter_annotation_row(
+        {
+            "shot": "柚子",
+            "direction": {"focus_character": "柚子"},
+        },
+        {"who": "柚子", "kind": "line", "text": "柚子被击中了！"},
+        {"id": "yuzu", "portrait": True}, constraints,
+    )
+
+    assert clean == {"shot": "柚子"}
+    assert dropped == []
+
+
 def test_background_generation_request_suppresses_an_unconfirmed_background_swap():
     constraints = annotation_constraints(
         {"bg": {"BG_Campus": 1}, "sounds": [], "enums": {"emoticon": {}, "action": {}}},

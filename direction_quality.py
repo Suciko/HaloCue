@@ -34,6 +34,7 @@ def _issue(code: str, message: str, **extra: Any) -> dict[str, Any]:
 # violation.
 _DETERMINISTIC_REPAIR_CODES = frozenset({
     "compiler_annotation_auto_repaired",
+    "compiled_redundant_camera_declaration",
 })
 _RESOURCE_REQUIRED_CODES = frozenset({
     "unresolved_background_request",
@@ -946,8 +947,38 @@ _HEAVY_FX_RE = re.compile(r"(?:集中线|FocusLine|BG_FocusLine|闪白|BG_Flash)
 def sanitize_execution_beats(
     beats: Sequence[Mapping[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Copy validated beats without reinterpreting legal face IDs as placeholders."""
-    return [copy.deepcopy(dict(beat)) for beat in beats], []
+    """Drop only execution beats that have no observable carrier at all.
+
+    A beat containing a wait, camera change, reaction, or lifecycle operation
+    remains executable. This deliberately does not impose a beat quota or
+    reject a short silent pause; it only removes a protocol placeholder that
+    would otherwise become an AA ``<EMPTY>`` card with no visible effect.
+    """
+    carriers = (
+        "face", "emo", "act", "fx", "se", "bg", "bgfx", "trans", "place",
+        "shake", "wait_ms", "move", "reveal", "conceal", "enter", "exit",
+        "visible_characters", "positions", "shot_transition", "shot_operation",
+        "reactions",
+    )
+    kept: list[dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
+    for beat in beats or ():
+        value = copy.deepcopy(dict(beat))
+        observable = any(
+            bool(value.get(field)) for field in carriers if field != "wait_ms"
+        ) or int(value.get("wait_ms") or 0) > 0
+        if observable:
+            kept.append(value)
+            continue
+        issues.append({
+            "code": "empty_execution_beat_removed",
+            "severity": "info",
+            "resolution": "deterministic",
+            "reason": "no_observable_carrier",
+            "beat_id": str(value.get("beat_id") or ""),
+            "anchor_id": str(value.get("anchor_id") or ""),
+        })
+    return kept, issues
 
 
 def _planned_shot_spans(

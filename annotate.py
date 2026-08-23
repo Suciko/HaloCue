@@ -868,6 +868,14 @@ def parse_lines(path, cast):
         item = {"raw": raw, "kind": "line", "line_no": line_no, "split_index": 0, "who": who,
                 "text": m.group("text").strip(),
                 "face": face, "emo": emo, "act": act, "fx": fx}
+        # Keep the speaker boundary available to the final renderer. This is
+        # needed for old drafts/checkpoint replays where line-level reactions
+        # may still exist even though the current model sanitizer removes
+        # them for off-screen speakers.
+        item["_speaker_has_portrait"] = bool(
+            (cast.get(who) or {}).get("portrait")
+            and not (cast.get(who) or {}).get("narrator")
+        )
         mark_explicit_directions(item)
         out.append(item)
     pending_directives = set()
@@ -1057,7 +1065,18 @@ def render_annotated_items_with_trace(items):
                 "@react " + json.dumps(reaction, ensure_ascii=False, separators=(",", ":")),
                 item, "directive", command="react",
             )
-        for reaction in item.get("_reactions", ()):
+        line_reactions = item.get("_reactions", ())
+        if item.get("_speaker_has_portrait") is False and line_reactions:
+            # A line spoken by a narrator/teacher cannot own a portrait
+            # reaction. Keep the authored value in the audit trail, but do
+            # not serialize it into the executable script.
+            item.setdefault("_render_direction_drops", []).append({
+                "field": "reactions",
+                "reason": "non_portrait_speaker_reaction_cleared",
+                "value": copy.deepcopy(list(line_reactions)),
+            })
+            line_reactions = ()
+        for reaction in line_reactions:
             emit(
                 "@react " + json.dumps(reaction, ensure_ascii=False, separators=(",", ":")),
                 item, "directive", command="react", target=str(reaction.get("who") or ""),

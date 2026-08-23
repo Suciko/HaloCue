@@ -23,6 +23,40 @@ DIAGNOSTIC_CODES = {
     "shot.target_offscreen": {"severity": "warning", "message_tmpl": "@shot 目标「{target}」不在画面中"},
 }
 
+# These findings mean that the compiler cannot faithfully represent the
+# authored document or would silently omit a resource. They remain hard
+# blockers even when the user accepts non-fatal quality warnings.
+HARD_DIAGNOSTIC_CODES = frozenset({
+    "draft.blank_node",
+    "actor.unbound",
+    "line.unparsable",
+    "dir.unknown",
+    "dir.argument_error",
+    "face.invalid",
+    "bg.unregistered",
+    "sound.unregistered",
+    "actor.portrait_fields_ignored",
+    "move.position_invalid",
+    "bg.request_unresolved",
+})
+
+
+def classify_diagnostic(diagnostic: Dict[str, Any]) -> Dict[str, Any]:
+    """Attach the review owner without changing the original diagnostic."""
+    result = dict(diagnostic or {})
+    code = str(result.get("code") or "")
+    severity = str(result.get("severity") or result.get("level") or "").lower()
+    result["resolution"] = (
+        "block" if code in HARD_DIAGNOSTIC_CODES or severity == "error"
+        else "advisory"
+    )
+    result["override_allowed"] = result["resolution"] != "block"
+    return result
+
+
+def classify_diagnostics(diagnostics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [classify_diagnostic(item) for item in diagnostics if isinstance(item, dict)]
+
 KNOWN_COMMANDS = {
     "bg",
     "trans",

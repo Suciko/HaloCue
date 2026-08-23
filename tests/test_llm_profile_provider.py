@@ -672,6 +672,10 @@ def test_openai_stream_request_record_captures_redacted_usage(monkeypatch):
     assert record["input_tokens"] == 100
     assert record["cache_read_tokens"] == 70
     assert record["uncached_input_tokens"] == 30
+    assert record["cache_input_tokens"] == 100
+    assert record["cache_hit_rate"] == pytest.approx(0.70)
+    assert record["cache_hit_source"] == "prompt_cache_hit_tokens"
+    assert record["cache_miss_source"] == "prompt_cache_miss_tokens"
     assert record["output_tokens"] == 9
     assert record["reasoning_tokens"] == 7
     assert record["reasoning_chars"] == 5
@@ -818,6 +822,23 @@ def test_openai_stream_wall_timeout_applies_during_reasoning(monkeypatch):
     })
     with pytest.raises(llm.RequestDeadlineError):
         provider.complete_json_stream("system", "", "user", {"type": "object"})
+
+
+def test_openai_reasoning_defaults_allow_long_streams():
+    provider = llm.OpenAIProvider({"api_key": "secret", "model": "gpt-5.6-sol"})
+    assert provider.timeout == 600
+    assert provider.wall_timeout == 1200
+
+
+def test_openai_explicit_timeouts_still_override_long_defaults():
+    provider = llm.OpenAIProvider({
+        "api_key": "secret",
+        "model": "gpt-5.6-sol",
+        "timeout": 45,
+        "wall_timeout": 90,
+    })
+    assert provider.timeout == 45
+    assert provider.wall_timeout == 90
 
 
 def test_openai_uses_annotation_budget_instead_of_model_limit(monkeypatch):

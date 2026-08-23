@@ -14,7 +14,7 @@ import pytest
 
 import webui
 from webui import H
-from draft_store import DraftStore
+from draft_store import AnnotationIncompleteError, DraftStore
 from install_manager import AAInstallTargetExistsError
 
 
@@ -116,6 +116,99 @@ def test_draft_detail_attaches_diagnostics_to_the_affected_card(tmp_path, monkey
         assert status == 200
         card = next(item for item in draft["cards"] if item["line_no"] == 2)
         assert any(issue["severity"] == "error" for issue in card["issues"])
+
+
+def test_quality_warning_override_is_explicit_and_exposes_repair_proposals(tmp_path, monkeypatch):
+    with draft_server(tmp_path, monkeypatch) as (base, drafts_dir):
+        store = DraftStore(base_dir=drafts_dir)
+        token = "quality-http"
+        store.create_draft(
+            token=token,
+            text="@stage a b c d e f\n旁白: 保留结果\n",
+            project="质量提示 HTTP",
+            cast={"cast": {"旁白": {"narrator": True}}},
+        )
+        draft = store.load_draft(token)
+        store.batch_approve_reviews(token, None, draft["session"]["draft_version"])
+        draft = store.load_draft(token)
+        card = next(item for item in draft["identities"] if item["source_id"])
+        store.add_proposals(token, [{
+            "proposal_id": "repair-1",
+            "card_id": card["card_id"],
+            "type": "suggested_fix",
+            "field": "emo",
+            "before": None,
+            "after": "问号",
+            "state": "pending",
+        }])
+
+        status, detail = req(base, "/api/draft?token=" + token, method="GET")
+        assert status == 200
+        assert detail["quality_override_allowed"] is True
+        assert detail["cards"][0]["proposals"] or any(
+            card.get("proposals") for card in detail["cards"]
+        )
+        status, result = req(base, "/api/review/quality-override", {
+            "token": token,
+            "expected_draft_version": detail["draft_version"],
+        })
+        assert status == 200
+        assert result["quality_override_accepted"] is True
+        status, detail = req(base, "/api/draft?token=" + token, method="GET")
+        assert status == 200
+        assert detail["quality_override_accepted"] is True
+        assert detail["quality_override_allowed"] is False
+
+
+def test_quality_warning_override_reaches_compile_snapshot(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeBundleManager:
+        def __init__(self, store):
+            self.store = store
+
+        def create_compile_snapshot(self, token, expected_draft_version, **kwargs):
+            calls.append((token, expected_draft_version, kwargs))
+            return "build-quality-warning"
+
+        def execute_build_worker(self, token, build_id):
+            return {"ok": True, "build_id": build_id}
+
+    monkeypatch.setattr(webui, "BuildBundleManager", FakeBundleManager)
+    with draft_server(tmp_path, monkeypatch) as (base, drafts_dir):
+        store = DraftStore(base_dir=drafts_dir)
+        token = "quality-compile-http"
+        store.create_draft(
+            token=token,
+            text="@stage a b c d e f\n旁白: 保留结果\n",
+            project="质量提示编译",
+            cast={"cast": {"旁白": {"narrator": True}}},
+        )
+        draft = store.load_draft(token)
+        approved = store.batch_approve_reviews(
+            token, None, draft["session"]["draft_version"]
+        )
+
+        status, result = req(base, "/api/compile", {
+            "token": token,
+            "expected_draft_version": approved["session"]["draft_version"],
+        })
+        assert status == 409
+        assert result["code"] == "review_pending"
+        assert result["override_allowed"] is True
+
+        status, result = req(base, "/api/review/quality-override", {
+            "token": token,
+            "expected_draft_version": approved["session"]["draft_version"],
+        })
+        assert status == 200
+        status, result = req(base, "/api/compile", {
+            "token": token,
+            "expected_draft_version": result["draft_version"],
+            "allow_quality_warnings": True,
+        })
+        assert status == 202
+        assert calls and calls[-1][2] == {"allow_quality_warnings": True}
 
 
 def test_cards_insert_move_delete(tmp_path, monkeypatch):
@@ -514,6 +607,60 @@ def test_completed_checkpoint_reuses_identical_draft_without_creating_duplicate(
     assert len(DraftStore(base_dir=drafts_dir).list_sessions()) == 1
 
 
+def test_explicit_fresh_generation_does_not_reuse_completed_checkpoint(tmp_path, monkeypatch):
+    source = tmp_path / "原稿.txt"
+    source.write_text("旁白: 保留原文\n", encoding="utf-8")
+    drafts_dir = tmp_path / "drafts"
+    existing = DraftStore(base_dir=drafts_dir)
+    existing.create_draft(
+        token="draft-existing",
+        text="@camera -\n旁白: 保留原文\n",
+        source_text=source.read_text(encoding="utf-8"),
+        project="复用测试",
+        story_token="story-reuse",
+        annotation_status={
+            "status": "complete", "completed_targets": 1,
+            "total_targets": 1, "pending_targets": 0,
+        },
+    )
+
+    captured = {}
+
+    monkeypatch.setattr(webui, "HERE", str(tmp_path))
+    monkeypatch.setitem(webui.CFG, "aa_data", str(tmp_path / "aa-data"))
+    monkeypatch.setattr(webui, "db", lambda: object())
+    monkeypatch.setattr(webui, "prepare_project_index", lambda *args, **kwargs: None)
+    monkeypatch.setattr(webui, "attach_registered_variants", lambda *args, **kwargs: None)
+    monkeypatch.setattr(webui, "DraftStore", lambda: DraftStore(base_dir=drafts_dir))
+    monkeypatch.setattr(webui, "annotation_provider", lambda *_: object())
+
+    def fake_annotate(options, **_kwargs):
+        captured["checkpoint_dir"] = options["checkpoint_dir"]
+        return {
+            "text": "@camera -\n旁白: 保留原文\n",
+            "agent": {
+                "resumed_chunks": 1,
+                "completed_targets": 1,
+                "total_targets": 1,
+                "pending_targets": 0,
+                "metrics": {"requests": 0},
+            },
+            "proposals": [],
+        }
+
+    monkeypatch.setattr("annotate.annotate_script", fake_annotate)
+
+    result = webui.annotate_draft_worker({
+        "script": str(source), "project": "复用测试", "mapping": {},
+        "annotate": True, "story_token": "story-reuse",
+        "fresh_generation": True,
+    })
+
+    assert result.get("reused_draft") is not True
+    assert result["draft_token"] != "draft-existing"
+    assert "fresh-" in captured["checkpoint_dir"]
+
+
 def test_annotate_worker_forwards_model_activity_and_returns_agent_metrics(tmp_path, monkeypatch):
     source = tmp_path / "原稿.txt"
     source.write_text("旁白: 保留原文\n", encoding="utf-8")
@@ -800,6 +947,76 @@ def test_install_options_and_confirmed_name_are_forwarded_through_http(
         ("options", "draft-one", "build-one"),
         ("install", "draft-one", "build-one", "大故事", "第一幕-第一章"),
     ]
+
+
+def test_install_forwards_explicit_partial_annotation_override(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeInstallManager:
+        def install_build(
+            self,
+            token,
+            build_id,
+            *,
+            category,
+            story_name,
+            allow_incomplete_annotation=False,
+        ):
+            calls.append({
+                "token": token,
+                "build_id": build_id,
+                "category": category,
+                "story_name": story_name,
+                "allow_incomplete_annotation": allow_incomplete_annotation,
+            })
+            return {"ok": True, "project": story_name}
+
+    monkeypatch.setattr(webui, "InstallManager", FakeInstallManager)
+    with draft_server(tmp_path, monkeypatch) as (base, _):
+        status, result = req(base, "/api/install", {
+            "token": "partial-draft",
+            "build_id": "build-partial",
+            "category": "",
+            "story_name": "部分结果",
+            "allow_incomplete_annotation": True,
+        })
+
+    assert status == 200
+    assert result["ok"] is True
+    assert calls == [{
+        "token": "partial-draft",
+        "build_id": "build-partial",
+        "category": "",
+        "story_name": "部分结果",
+        "allow_incomplete_annotation": True,
+    }]
+
+
+def test_install_returns_structured_annotation_status_on_partial_draft(
+    tmp_path, monkeypatch
+):
+    class IncompleteInstallManager:
+        def install_build(self, **_kwargs):
+            raise AnnotationIncompleteError({
+                "status": "partial",
+                "completed_targets": 0,
+                "total_targets": 8,
+                "pending_targets": 8,
+            })
+
+    monkeypatch.setattr(webui, "InstallManager", IncompleteInstallManager)
+    with draft_server(tmp_path, monkeypatch) as (base, _):
+        status, result = req(base, "/api/install", {
+            "token": "partial-draft",
+            "build_id": "build-partial",
+            "category": "",
+            "story_name": "部分结果",
+        })
+
+    assert status == 409
+    assert result["code"] == "annotation_incomplete"
+    assert result["annotation_status"]["pending_targets"] == 8
+    assert result["counts"]["annotation_pending"] == 8
 
 
 def test_install_target_conflict_is_reported_as_409(tmp_path, monkeypatch):

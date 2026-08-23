@@ -8,6 +8,7 @@ from annotation_protocol import (
     build_chunk_schema,
     build_compact_chunk_schema,
     expand_compact_chunk_response,
+    merge_compact_retry_response,
     validate_chunk_response,
 )
 
@@ -208,6 +209,67 @@ def test_line_reaction_cannot_be_attached_to_a_narrator_or_hidden_character():
             response, targets, cast=cast,
             constraints={"faces_by_id": {"kai": {"31"}}},
         )
+
+
+def test_line_reaction_uses_previous_shot_visibility_when_direction_is_omitted():
+    response = complete_response()
+    response["lines"][0]["reactions"] = [{
+        "who": "桃井", "face": "", "emo": "", "act": "",
+    }]
+    targets = [dict(TARGETS[0], who="爱丽丝"), dict(TARGETS[1], who="桃井")]
+    cast = {
+        "爱丽丝": {"id": "aris", "portrait": True},
+        "桃井": {"id": "momoi", "portrait": True},
+    }
+
+    with pytest.raises(ChunkProtocolError, match="不在本镜可见名单"):
+        validate_chunk_response(
+            response, targets, cast=cast,
+            initial_visible_characters=["爱丽丝"],
+        )
+
+
+def test_line_reaction_keeps_previous_shot_member_without_new_camera_declaration():
+    response = complete_response()
+    response["lines"][0]["reactions"] = [{
+        "who": "爱丽丝", "face": "", "emo": "", "act": "",
+    }]
+    targets = [dict(TARGETS[0], who="老师"), dict(TARGETS[1], who="爱丽丝")]
+    cast = {
+        "老师": {"id": "teacher", "portrait": False},
+        "爱丽丝": {"id": "aris", "portrait": True},
+    }
+
+    result = validate_chunk_response(
+        response, targets, cast=cast,
+        initial_visible_characters=["爱丽丝"],
+    )
+    assert result["lines_by_id"]["src-1-0-a"]["reactions"][0]["who"] == "爱丽丝"
+
+
+def test_line_reaction_accepts_character_added_by_current_explicit_shot():
+    response = complete_response()
+    response["lines"][0]["direction"] = {
+        "visible_characters": ["爱丽丝", "桃井"],
+        "positions": {"爱丽丝": 1, "桃井": 5},
+        "shot_transition": "cut",
+        "shot_operation": "switch_group",
+    }
+    response["lines"][0]["reactions"] = [{
+        "who": "桃井", "face": "", "emo": "疑问", "act": "",
+    }]
+    cast = {
+        "爱丽丝": {"id": "alice", "portrait": True},
+        "桃井": {"id": "momoi", "portrait": True},
+    }
+
+    result = validate_chunk_response(
+        response, [dict(TARGETS[0], who="爱丽丝"), dict(TARGETS[1], who="桃井")], cast=cast,
+        constraints={"ok_emo": {"疑问"}, "sym2cn": {}},
+        initial_visible_characters=["爱丽丝"],
+    )
+
+    assert result["lines_by_id"]["src-1-0-a"]["reactions"][0]["who"] == "桃井"
 
 
 def test_dialogue_reveal_adds_the_speaker_to_a_continuous_shot_without_cut():
@@ -1208,6 +1270,45 @@ def test_compact_response_restores_identity_and_protocol_defaults():
     ]
     validated = validate_chunk_response(expanded, TARGETS)
     assert list(validated["lines_by_id"]) == ["src-1-0-a", "src-2-0-b"]
+
+
+def test_compact_protocol_retry_preserves_omitted_performance_fields():
+    previous = {
+        "lines": [{
+            "i": 1,
+            "face": "05",
+            "emo": "冷汗",
+            "act": "stiff",
+            "d": {
+                "visible_characters": ["Kai", "Ari"],
+                "positions": {"Kai": 1, "Ari": 5},
+                "shot_transition": "cut",
+            },
+        }, {"i": 2, "face": "03"}],
+        "state_delta": {"visible_characters": ["Kai", "Ari"]},
+        "memory_events": [{
+            "kind": "mystery", "participants": ["Kai"], "keywords": ["x"],
+            "summary": "x", "source_ids": [1], "evidence": "x",
+            "importance": 0.5, "status": "open",
+        }],
+    }
+    retry = {
+        "lines": [{
+            "i": 1,
+            "d": {"positions": {"Kai": 1, "Ari": 5}},
+        }],
+        "state_delta": {}, "memory_events": [],
+    }
+
+    merged = merge_compact_retry_response(retry, previous, TARGETS)
+    expanded = expand_compact_chunk_response(merged, TARGETS)
+
+    assert expanded["lines"][0]["face"] == "05"
+    assert expanded["lines"][0]["emo"] == "冷汗"
+    assert expanded["lines"][0]["act"] == "stiff"
+    assert expanded["lines"][0]["direction"]["shot_transition"] == "cut"
+    assert expanded["lines"][1]["face"] == "03"
+    assert expanded["memory_events"][0]["source_ids"] == ["src-1-0-a"]
 
 
 def test_compact_direction_expands_and_omitted_direction_uses_defaults():

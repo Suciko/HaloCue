@@ -38,7 +38,13 @@ class BuildBundleManager:
     def __init__(self, store: Optional[DraftStore] = None):
         self.store = store or DraftStore()
 
-    def create_compile_snapshot(self, token: str, expected_draft_version: int) -> str:
+    def create_compile_snapshot(
+        self,
+        token: str,
+        expected_draft_version: int,
+        *,
+        allow_quality_warnings: bool = False,
+    ) -> str:
         """202 响应前在事务锁内验证版本并复制不可变快照"""
         # Keep the historical snapshot contract for complete annotations:
         # the HTTP review endpoint performs the per-card review gate before
@@ -48,7 +54,9 @@ class BuildBundleManager:
         try:
             self.store.assert_annotation_complete(token)
         except AnnotationIncompleteError:
-            self.store.assert_review_ready(token)
+            self.store.assert_review_ready(
+                token, allow_quality_warnings=allow_quality_warnings
+            )
         draft_dir = self.store.get_draft_path(token)
 
         with self.store.draft_lock(token):

@@ -28,7 +28,8 @@ from annotation_memory import (
 )
 from annotation_protocol import (
     ChunkProtocolError, build_chunk_schema, build_compact_chunk_schema,
-    expand_compact_chunk_response, validate_chunk_response,
+    expand_compact_chunk_response, merge_compact_retry_response,
+    validate_chunk_response,
     validate_review_patches,
 )
 from annotation_safety import project_effective_annotation_row
@@ -45,7 +46,10 @@ from direction_quality import (
 )
 from face_selection import silent_reaction_shortlists, target_face_shortlists
 from prompt import build_repair_rules, select_repair_resources
-from llm import EmptyModelResponseError, OutputCapacityError, RequestDeadlineError, StructuredOutputError
+from llm import (
+    EmptyModelResponseError, LLMError, OutputCapacityError, RequestDeadlineError,
+    StructuredOutputError,
+)
 
 
 _CAPACITY_PROTOCOL_CODES = {"missing_target"}
@@ -117,6 +121,24 @@ def _classify_chunk_error(exc: Exception) -> str:
 
 def _is_request_deadline(exc: Exception) -> bool:
     return isinstance(exc, RequestDeadlineError)
+
+
+def _is_retryable_scene_plan_error(exc: Exception) -> bool:
+    """Retry planner failures that can plausibly succeed unchanged.
+
+    Authentication, quota and access errors are excluded by the provider's
+    ``retryable`` flag.  Some OpenAI-compatible gateways surface a transient
+    upstream outage as a generic HTTP 400, so that exact message is accepted
+    without turning arbitrary malformed requests into a retry loop.
+    """
+    if isinstance(exc, (StructuredOutputError, EmptyModelResponseError, RequestDeadlineError)):
+        return True
+    if not isinstance(exc, LLMError) or not bool(getattr(exc, "retryable", False)):
+        return False
+    status = getattr(exc, "http_status", None)
+    if status in {408, 429, 500, 502, 503, 504, 524}:
+        return True
+    return status == 400 and "upstream request failed" in str(exc).casefold()
 
 
 def _chunk_error_code(exc: Exception) -> str:
@@ -202,6 +224,10 @@ class AnnotationAgentError(RuntimeError):
     ):
         super().__init__(f"{stage} {scene_id}/{chunk_id}: {detail}")
         self.stage = stage
+        # Expose the pipeline stage to the job/API layer.  Without this
+        # stable code, the web UI only saw ``task_failed`` and could not tell
+        # a protocol failure (before G2) from a provider outage.
+        self.code = str(stage)
         self.scene_id = scene_id
         self.chunk_id = chunk_id
         self.detail = detail
@@ -706,6 +732,16 @@ def _strip_nonportrait_line_resources(
             continue
         if character.get("portrait") and not character.get("narrator"):
             continue
+        reactions = row.get("reactions")
+        if isinstance(reactions, list) and reactions:
+            row["reactions"] = []
+            repairs.append({
+                "source_id": str(row.get("source_id") or ""),
+                "speaker": speaker,
+                "field": "reactions",
+                "value": json.dumps(reactions, ensure_ascii=False, separators=(",", ":")),
+                "reason": "non_portrait_speaker_reaction_cleared",
+            })
         for field in ("face", "emo", "act", "fx"):
             value = row.get(field)
             if value in (None, ""):
@@ -750,6 +786,16 @@ def _strip_nonportrait_validated_rows(
             continue
         if character.get("portrait") and not character.get("narrator"):
             continue
+        reactions = row.get("reactions")
+        if isinstance(reactions, list) and reactions:
+            row["reactions"] = []
+            repairs.append({
+                "source_id": source_id,
+                "speaker": speaker,
+                "field": "reactions",
+                "value": json.dumps(reactions, ensure_ascii=False, separators=(",", ":")),
+                "reason": "non_portrait_speaker_reaction_cleared",
+            })
         for field in ("face", "emo", "act", "fx"):
             value = row.get(field)
             if value in (None, ""):
@@ -1317,30 +1363,99 @@ def run_annotation_agent(
                 and items[int(index)].get("kind") == "line"
             ]
             plan_quality: Dict[str, Any] = {"result": "not_run", "issues": []}
+            plan = {"scene_id": scene_id, "events": []}
+            planner_attempts: List[Dict[str, Any]] = []
             if scene_id in saved_scene_plans:
                 plan = sanitize_scene_event_plan_for_cast(saved_scene_plans[scene_id], cast)
                 source = "checkpoint"
                 plan_quality = validate_plan_quality(plan, targets=scene_plan_targets, cast=cast)
+                planner_attempts.append({"attempt": 0, "outcome": "checkpoint"})
             else:
-                try:
-                    request_count += 1
-                    plan = plan_scene_events(
-                        provider, items, scene, cast=cast,
-                        on_activity=planning_activity,
-                    )
-                    source = "model"
-                    plan_quality = validate_plan_quality(plan, targets=scene_plan_targets, cast=cast)
-                    if plan_quality.get("result") == "fail":
-                        initial_plan_issues = [
-                            dict(issue) for issue in plan_quality.get("issues") or ()
-                            if isinstance(issue, Mapping)
-                        ]
-                        diagnostics.extend({
-                            **dict(issue),
-                            "level": str(issue.get("severity") or "high"),
-                            "scene_id": scene_id,
-                            "stage": "G1",
-                        } for issue in plan_quality.get("issues") or [])
+                source = "fallback"
+                for planner_attempt in range(1, 3):
+                    try:
+                        request_count += 1
+                        previous_failure = next(
+                            (
+                                attempt for attempt in reversed(planner_attempts)
+                                if attempt.get("outcome") == "failed"
+                            ),
+                            None,
+                        )
+                        plan = plan_scene_events(
+                            provider, items, scene, cast=cast,
+                            on_activity=planning_activity,
+                            retry_instruction=(
+                                str(previous_failure.get("detail") or "")
+                                if previous_failure else ""
+                            ),
+                            # The compatibility gateway occasionally drops a
+                            # planner JSON while streaming.  The one allowed
+                            # retry uses the normal JSON path to recover the
+                            # same semantic request without adding a third call.
+                            use_stream=not bool(previous_failure),
+                        )
+                        planner_attempts.append({
+                            "attempt": planner_attempt, "outcome": "accepted",
+                        })
+                        source = "model_retry" if planner_attempt > 1 else "model"
+                        plan_quality = validate_plan_quality(
+                            plan, targets=scene_plan_targets, cast=cast,
+                        )
+                        break
+                    except Exception as exc:
+                        retryable = _is_retryable_scene_plan_error(exc)
+                        planner_attempts.append({
+                            "attempt": planner_attempt, "outcome": "failed",
+                            "error_code": _chunk_error_code(exc),
+                            "detail": _chunk_error_detail(exc),
+                            "retryable": retryable,
+                        })
+                        diagnostics.append({
+                            "code": "scene_event_plan_attempt_failed", "level": "warning",
+                            "scene_id": scene_id, "stage": "G1",
+                            "attempt": planner_attempt,
+                            "error_code": _chunk_error_code(exc),
+                            "detail": _chunk_error_detail(exc),
+                            "retryable": retryable,
+                        })
+                        if planner_attempt == 1 and retryable:
+                            diagnostics.append({
+                                "code": "scene_event_plan_retrying", "level": "info",
+                                "scene_id": scene_id, "stage": "G1",
+                                "attempt": 2, "reason": _chunk_error_code(exc),
+                            })
+                            if model_activity:
+                                planning_activity({
+                                    "state": "retrying", "reason": "g1_planner_failure",
+                                    "error_code": _chunk_error_code(exc),
+                                })
+                            continue
+                        source = (
+                            "g1_retry_failed_fallback"
+                            if planner_attempt > 1 else "fallback"
+                        )
+                        plan = {"scene_id": scene_id, "events": []}
+                        diagnostics.append({
+                            "code": "scene_event_plan_failed", "level": "warning",
+                            "scene_id": scene_id, "stage": "G1",
+                            "detail": _chunk_error_detail(exc),
+                            "attempts": planner_attempt,
+                        })
+                        break
+
+                if plan_quality.get("result") == "fail" and plan.get("events"):
+                    initial_plan_issues = [
+                        dict(issue) for issue in plan_quality.get("issues") or ()
+                        if isinstance(issue, Mapping)
+                    ]
+                    diagnostics.extend({
+                        **dict(issue),
+                        "level": str(issue.get("severity") or "high"),
+                        "scene_id": scene_id,
+                        "stage": "G1",
+                    } for issue in plan_quality.get("issues") or [])
+                    try:
                         request_count += 1
                         repaired = plan_scene_events(
                             provider, items, scene,
@@ -1355,9 +1470,6 @@ def run_annotation_agent(
                         plan = repaired
                         plan_quality = repaired_quality
                         if repaired_quality.get("result") == "pass":
-                            # Keep the first G1 finding for provenance, but do
-                            # not let a repaired hypothesis explain a later
-                            # field loss or remain an active quality failure.
                             initial_codes = {
                                 str(issue.get("code") or "")
                                 for issue in initial_plan_issues
@@ -1371,19 +1483,36 @@ def run_annotation_agent(
                                     diagnostic["evidence_status"] = "superseded_by_g1_repair"
                                     diagnostic["needs_review"] = False
                                     diagnostic["resolution"] = "advisory"
-                        source = (
-                            "model_repaired"
-                            if repaired_quality.get("result") == "pass"
-                            else "model_needs_review"
-                        )
-                except Exception as exc:
-                    plan = {"scene_id": scene_id, "events": []}
-                    source = "fallback"
-                    diagnostics.append({
-                        "code": "scene_event_plan_failed", "level": "warning",
-                        "scene_id": scene_id, "detail": str(exc),
-                    })
+                            source = "model_repaired"
+                        else:
+                            source = "model_needs_review"
+                        planner_attempts.append({
+                            "attempt": "quality_repair",
+                            "outcome": "accepted",
+                            "quality": repaired_quality.get("result"),
+                        })
+                    except Exception as exc:
+                        # Keep the valid first plan when its optional quality
+                        # repair is unavailable; do not erase useful G1 work.
+                        source = "model_needs_review"
+                        planner_attempts.append({
+                            "attempt": "quality_repair", "outcome": "failed",
+                            "error_code": _chunk_error_code(exc),
+                            "detail": _chunk_error_detail(exc),
+                        })
+                        diagnostics.append({
+                            "code": "scene_event_plan_quality_repair_failed",
+                            "level": "warning", "scene_id": scene_id,
+                            "stage": "G1", "detail": _chunk_error_detail(exc),
+                        })
             scene_event_plans[scene_id] = plan
+            diagnostics.extend({
+                **dict(repair),
+                "level": "warning",
+                "scene_id": scene_id,
+                "stage": "G1-normalize",
+                "resolution": "deterministic",
+            } for repair in plan.get("protocol_repairs") or [])
             if plan_quality.get("result") == "fail":
                 diagnostics.extend({
                     **dict(issue),
@@ -1400,6 +1529,7 @@ def run_annotation_agent(
                     director_scene["event_plan"] = copy.deepcopy(plan)
                     director_scene["event_plan_source"] = source
                     director_scene["event_plan_quality"] = copy.deepcopy(plan_quality)
+                    director_scene["event_plan_attempts"] = copy.deepcopy(planner_attempts)
                     break
             diagnostics.append({
                 "code": "scene_event_plan_ready", "level": "info",
@@ -1569,6 +1699,32 @@ def run_annotation_agent(
                 return None
             return sum(int(value or 0) for value in values)
 
+        reported_cache_input = None
+        cache_input_values = []
+        for record in records:
+            if not isinstance(record, Mapping):
+                continue
+            cache_read_value = record.get("cache_read_tokens")
+            cache_miss_value = record.get("uncached_input_tokens")
+            cache_input_value = record.get("cache_input_tokens")
+            if cache_input_value is not None:
+                cache_input_values.append(int(cache_input_value or 0))
+            elif cache_read_value is not None or cache_miss_value is not None:
+                # Backward-compatible telemetry from older checkpoints did
+                # not carry the denominator.  Prefer the request's prompt
+                # count when available; otherwise fall back to hit+miss.
+                prompt_value = record.get("input_tokens")
+                if prompt_value is not None:
+                    cache_input_values.append(int(prompt_value or 0))
+                else:
+                    cache_input_values.append(
+                        int(cache_read_value or 0) + int(cache_miss_value or 0)
+                    )
+        if cache_input_values:
+            reported_cache_input = sum(cache_input_values)
+        if reported_cache_input is None and cache_reported:
+            reported_cache_input = cache_total
+
         return {
             "requests": request_count,
             "retries": retries,
@@ -1577,9 +1733,10 @@ def run_annotation_agent(
             "output_tokens": token_delta("out"),
             "cache_read_tokens": cache_read if cache_reported else None,
             "uncached_input_tokens": cache_miss if cache_reported else None,
+            "cache_input_tokens": reported_cache_input if cache_reported else None,
             "cache_hit_rate": (
-                cache_read / cache_total
-                if cache_reported and cache_total
+                cache_read / reported_cache_input
+                if cache_reported and reported_cache_input
                 else (0.0 if cache_reported else None)
             ),
             "cache_reported": cache_reported,
@@ -1725,6 +1882,10 @@ def run_annotation_agent(
             chunk["target_ids"] = [items[index].get("annotation_id") for index in pending_indices]
             chunk["start_line"] = items[pending_indices[0]].get("line_no")
             chunk["end_line"] = items[pending_indices[-1]].get("line_no")
+        # Progress is needed by recovery callbacks too.  Initialize it before
+        # the learned safe-limit subdivision branch, which can run before the
+        # normal request setup below.
+        current, total = user_progress()
         if cancelled and cancelled():
             current, total = user_progress(include_current=False)
             _emit(progress, "cancelled", current, total, "标注已暂停，可继续")
@@ -2071,6 +2232,25 @@ def run_annotation_agent(
                     f"\n\n上次响应无效：{_chunk_error_code(last_error)} - {_chunk_error_detail(last_error)}。"
                     "请修正内容，保持相同 TARGET，并且只返回 TARGET。"
                 )
+                error_detail = _chunk_error_detail(last_error)
+                if ".scene_function" in error_detail:
+                    call_user += (
+                        "\n导演字段协议修复：scene_function 只能使用 "
+                        "establishing / entrance / exposition / dialogue / "
+                        "comedy_escalation / conflict / emotional_turn / action / closing。"
+                        "请将当前行改成最接近的一个合法值，只修复该枚举字段，其他表演、镜头、站位和状态保持不变。"
+                    )
+                if ".scene_type" in error_detail:
+                    call_user += (
+                        "\n导演字段协议修复：scene_type 只能使用 main / event / bond / other；"
+                        "只修复该枚举字段，其他选择保持不变。"
+                    )
+                if "positions must cover the full shot" in error_detail:
+                    call_user += (
+                        "\n镜头协议修复要点：cut/reframe 的 positions 必须逐字覆盖该行 "
+                        "visible_characters 中的全部角色，不能漏人、加人或只填写当前说话人；"
+                        "只修复 positions/对应镜头字段，其他表演和导演选择保持不变。"
+                    )
                 if previous_invalid_response is not None:
                     call_user += (
                         "\n\nG2_EXECUTION_REPAIR\n"
@@ -2116,6 +2296,16 @@ def run_annotation_agent(
                 }
                 model_attempts.append(attempt_record)
                 visible = _visible_items(items, chunk, before, after)
+                if compact_protocol and previous_invalid_response is not None:
+                    clear_fields = (
+                        {"reveal"}
+                        if "line.reveal" in _chunk_error_detail(last_error)
+                        else set()
+                    )
+                    response = merge_compact_retry_response(
+                        response, previous_invalid_response, targets,
+                        clear_fields=clear_fields,
+                    )
                 if compact_protocol:
                     response = expand_compact_chunk_response(response, targets)
                 attempt_record["expanded_response"] = copy.deepcopy(dict(response))
@@ -2142,6 +2332,10 @@ def run_annotation_agent(
                     response, targets,
                     visible_ids=[item["annotation_id"] for item in visible],
                     cast=cast, constraints=constraints,
+                    initial_visible_characters=(
+                        ((memory.get("direction") or {}).get("shot_visible_characters") or [])
+                        if isinstance(memory, Mapping) else []
+                    ),
                 )
                 for source_id, validated_row in validated["lines_by_id"].items():
                     selected_face = str(validated_row.get("face") or "")
@@ -2250,20 +2444,47 @@ def run_annotation_agent(
                         empty_retry_attempted = True
                         retries += 1
                         continue
-                if kind == "protocol" and protocol_attempts == 0:
+                # A malformed shot is a hard protocol defect, not a semantic
+                # quality finding.  Keep the established single retry for
+                # ordinary protocol errors.  Shot coverage errors get one
+                # additional narrow correction because models commonly omit
+                # a member while copying a complete cut/reframe; this keeps
+                # G2 available without turning repair into an open loop.
+                error_detail = _chunk_error_detail(exc)
+                enum_field_retry = any(
+                    field in error_detail
+                    for field in (".scene_function", ".scene_type")
+                )
+                extra_shot_retry = (
+                    "positions must cover the full shot" in error_detail
+                    or "positions 必须覆盖完整镜头" in error_detail
+                )
+                if kind == "protocol" and (
+                    protocol_attempts == 0
+                    or (
+                        protocol_attempts == 1
+                        and (extra_shot_retry or enum_field_retry)
+                    )
+                ):
                     observe_chunk({"success": False, "reason": "protocol"}, scene_id=str(chunk["scene_id"]), chunk_id=chunk_id)
                     previous_response = model_attempts[-1].get("response") if model_attempts else None
-                    previous_invalid_response = (
-                        copy.deepcopy(dict(previous_response))
-                        if isinstance(previous_response, Mapping)
-                        else None
-                    )
+                    if isinstance(previous_response, Mapping):
+                        # Compact retries are sparse. Accumulate the latest
+                        # response on top of every prior rejected response so
+                        # a second correction cannot erase a valid
+                        # face/emo/act decision from the first one.
+                        previous_invalid_response = merge_compact_retry_response(
+                            previous_response,
+                            previous_invalid_response,
+                            targets,
+                        ) if previous_invalid_response is not None else copy.deepcopy(dict(previous_response))
                     protocol_attempts += 1
                     retries += 1
                     if model_activity:
                         emit_model_activity(
                             {
                                 "state": "retrying",
+                                "stage": "protocol",
                                 "reason": _chunk_error_code(exc),
                             },
                             scene_id=str(chunk["scene_id"]),
@@ -2490,6 +2711,18 @@ def run_annotation_agent(
                 try:
                     request_count += 1
                     retries += 1
+                    if model_activity:
+                        emit_model_activity(
+                            {
+                                "state": "repairing",
+                                "stage": "G2",
+                                "reason": "execution_quality",
+                                "reasoning_summary": "正在针对质量问题返修当前演出锚点",
+                            },
+                            scene_id=scene_id, chunk_id=f"{chunk_id}:g2-repair",
+                            current=current, total=total, request_index=request_count,
+                            retry_count=retries, subdivision_count=subdivisions,
+                        )
                     with _temporary_reasoning_mode(provider, reasoning_mode):
                         with _temporary_output_budget(provider, output_budget):
                             repair_response = complete_chunk(
@@ -2541,6 +2774,10 @@ def run_annotation_agent(
                             items, repair_chunk, min(before, 5), min(after, 5),
                         )],
                         cast=cast, constraints=constraints,
+                        initial_visible_characters=(
+                            ((memory.get("direction") or {}).get("shot_visible_characters") or [])
+                            if isinstance(memory, Mapping) else []
+                        ),
                     )
                     repaired["beats"], repair_placeholder_issues = sanitize_execution_beats(
                         repaired.get("beats") or [],

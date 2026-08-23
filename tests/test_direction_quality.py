@@ -992,6 +992,25 @@ def test_execution_preserves_explicit_valid_zero_face_and_keeps_persistent_id():
     assert issues == []
 
 
+def test_execution_removes_only_a_truly_empty_placeholder_beat():
+    beats, issues = sanitize_execution_beats([{
+        "beat_id": "empty", "anchor_id": "L1", "position": "after", "who": "A",
+    }, {
+        "beat_id": "pause", "anchor_id": "L1", "position": "after", "who": "A",
+        "wait_ms": 350,
+    }])
+
+    assert [beat["beat_id"] for beat in beats] == ["pause"]
+    assert issues == [{
+        "code": "empty_execution_beat_removed",
+        "severity": "info",
+        "resolution": "deterministic",
+        "reason": "no_observable_carrier",
+        "beat_id": "empty",
+        "anchor_id": "L1",
+    }]
+
+
 def test_execution_requires_solo_peak_camera_and_planned_silent_carrier():
     targets = [
         {"annotation_id": "L1", "who": "A", "text": "看这里！"},

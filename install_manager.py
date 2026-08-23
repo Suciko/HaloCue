@@ -13,6 +13,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Dict, Optional
 
 import aapaths
+from direction_quality import classify_quality_issue
 from aa_project_assets import (
     assert_aa_closed,
     resolve_project_target,
@@ -53,6 +54,15 @@ class AAQualityGateError(ValueError):
 
     def __init__(self, issues):
         self.issues = [dict(issue) for issue in issues if isinstance(issue, dict)]
+        hard = any(
+            str(issue.get("resolution") or "ai_repair") in {"block", "resource_required"}
+            or str(issue.get("severity") or issue.get("level") or "").lower() == "critical"
+            for issue in self.issues
+        )
+        # A mixed report still contains a hard error.  Do not offer a bypass
+        # checkbox when retrying with allow_quality_warnings would inevitably
+        # fail again on that hard subset.
+        self.override_allowed = bool(self.issues) and not hard
         codes = [str(issue.get("code") or "unknown") for issue in self.issues]
         summary = "、".join(dict.fromkeys(codes[:6]))
         suffix = f"：{summary}" if summary else ""
@@ -592,7 +602,11 @@ class InstallManager:
                 raise AACorruptBundleError(f"Bundle file hash mismatch for {rel_path}")
 
     @staticmethod
-    def assert_quality_ready(bundle_dir: Path) -> None:
+    def assert_quality_ready(
+        bundle_dir: Path,
+        *,
+        allow_quality_warnings: bool = False,
+    ) -> Dict[str, Any]:
         validation_file = bundle_dir / "validation.json"
         if not validation_file.is_file():
             raise AACorruptBundleError(f"Bundle validation.json missing: {bundle_dir}")
@@ -604,20 +618,41 @@ class InstallManager:
             ) from exc
         quality = validation.get("quality") if isinstance(validation, dict) else {}
         issues = []
+        resolved_issues = []
         for issue in (
             list(validation.get("blocking_issues") or [])
             + list((quality or {}).get("issues") or [])
         ):
             if not isinstance(issue, dict):
                 continue
-            severity = str(issue.get("severity") or issue.get("level") or "").lower()
+            classified = classify_quality_issue(issue)
+            severity = str(classified.get("severity") or classified.get("level") or "").lower()
+            resolution = str(classified.get("resolution") or "ai_repair")
+            if resolution in {"deterministic", "advisory"} and classified.get("needs_review") is not True:
+                resolved_issues.append(classified)
+                continue
             if severity in {"high", "critical"}:
-                issues.append(issue)
+                issues.append(classified)
         unique = {
             json.dumps(issue, ensure_ascii=False, sort_keys=True): issue for issue in issues
         }
-        if unique:
-            raise AAQualityGateError(unique.values())
+        all_issues = list(unique.values())
+        hard = [
+            issue for issue in all_issues
+            if str(issue.get("resolution") or "ai_repair") in {"block", "resource_required"}
+            or str(issue.get("severity") or issue.get("level") or "").lower() == "critical"
+        ]
+        blockers = hard if allow_quality_warnings else all_issues
+        if blockers:
+            raise AAQualityGateError(blockers)
+        return {
+            "issues": all_issues,
+            "resolved_issues": resolved_issues + [
+                issue for issue in all_issues
+                if str(issue.get("resolution") or "") in {"deterministic", "advisory"}
+            ],
+            "warnings_overridden": bool(allow_quality_warnings and all_issues),
+        }
 
     def install_options(self, token: str, build_id: str) -> Dict[str, Any]:
         bundle_dir = self.find_bundle_dir(token, build_id)
@@ -735,8 +770,24 @@ class InstallManager:
         *,
         category: str = "",
         story_name: Optional[str] = None,
+        allow_quality_warnings: bool = False,
+        allow_incomplete_annotation: bool = False,
     ) -> Dict[str, Any]:
-        self.store.assert_annotation_complete(token)
+        annotation_state = self.store.get_annotation_review_state(token)
+        annotation_status = annotation_state["status"]
+        annotation_incomplete = (
+            annotation_status["status"] != "complete"
+            or annotation_status["pending_targets"] > 0
+        )
+        self.store.assert_annotation_complete(
+            token,
+            allow_override=bool(allow_incomplete_annotation),
+        )
+        annotation_incomplete_override = bool(
+            annotation_incomplete
+            and allow_incomplete_annotation
+            and annotation_state["override_accepted"]
+        )
 
         # 1. 查找 Bundle
         bundle_dir = self.find_bundle_dir(token, build_id)
@@ -745,7 +796,9 @@ class InstallManager:
         self.verify_bundle(bundle_dir)
 
         # 2.1 编译后的真实 ScriptData 必须通过严重问题质量门。
-        self.assert_quality_ready(bundle_dir)
+        quality_decision = self.assert_quality_ready(
+            bundle_dir, allow_quality_warnings=allow_quality_warnings
+        )
 
         # 3. 验证 AA 客户端已关闭
         try:
@@ -840,13 +893,33 @@ class InstallManager:
             except Exception:
                 records = {}
 
+        installed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        issue_codes = list(dict.fromkeys(
+            str(issue.get("code") or "unknown")
+            for issue in (quality_decision.get("issues") or [])
+            if isinstance(issue, dict)
+        ))
+        install_audit = {
+            "allow_quality_warnings": bool(allow_quality_warnings),
+            "warnings_overridden": bool(quality_decision["warnings_overridden"]),
+            "allow_incomplete_annotation": bool(allow_incomplete_annotation),
+            "annotation_incomplete_override": annotation_incomplete_override,
+            "annotation_override_accepted": bool(annotation_state["override_accepted"]),
+            "annotation_override_at": annotation_state.get("override_at"),
+            "annotation_status": annotation_status,
+            "issue_codes": issue_codes,
+            "build_id": build_id,
+            "installed_at": installed_at,
+        }
+        quality_decision["install_audit"] = install_audit
         records[project_name] = {
             "project": project_name,
             "source_project": source_project,
             "category": category,
             "installed_build_id": build_id,
-            "installed_at": datetime.datetime.now().isoformat(),
+            "installed_at": installed_at,
             "source_draft_token": token,
+            "quality": quality_decision,
         }
         self.record_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -861,7 +934,7 @@ class InstallManager:
                 sess["installed_at"] = datetime.datetime.now().isoformat()
                 session_file.write_text(json.dumps(sess, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        return {
+        response = {
             "ok": True,
             "project": project_name,
             "source_project": source_project,
@@ -870,3 +943,11 @@ class InstallManager:
             "project_dir": str(proj_res_dest),
             "save_dir": str(save_res_dest),
         }
+        if (
+            quality_decision["resolved_issues"]
+            or allow_quality_warnings
+            or annotation_incomplete_override
+        ):
+            response["resolved_issues"] = quality_decision["resolved_issues"]
+            response["install_audit"] = install_audit
+        return response

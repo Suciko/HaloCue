@@ -450,3 +450,23 @@ class OfficialPreviewIndex:
         except (KeyError, OSError, ValueError):
             return None
         return path if path.is_file() else None
+
+    def contains(
+        self,
+        kind: Literal["background", "avatar"],
+        key: str,
+    ) -> bool:
+        """Return whether the index records a preview without touching disk.
+
+        Callers that only need to rank candidates should not resolve and stat
+        every indexed file.  ``resolve`` remains the authority when a preview
+        is actually served.
+        """
+        if kind not in {"background", "avatar"}:
+            return False
+        normalized = _normalized_key(key)
+        if not normalized or "/" in normalized or "\\" in normalized:
+            return False
+        return self._read_manifest() is not None and (
+            kind, normalized
+        ) in self._record_cache

@@ -201,7 +201,13 @@ def _validate_schema_value(value, schema, path: str) -> None:
         raise _schema_error(path, "应为 null")
     enum = schema.get("enum")
     if enum is not None and value not in enum:
-        raise _schema_error(path, "值不在允许范围内")
+        # Include the rejected wire value in diagnostics.  Without it a real
+        # gateway drift is indistinguishable from a local schema bug and the
+        # retry prompt cannot target the offending field.
+        raise _schema_error(
+            path,
+            f"值不在允许范围内（收到 {value!r}，允许值 {list(enum)!r}）",
+        )
 
 
 def validate_json_schema(value, schema):
@@ -644,12 +650,21 @@ class OpenAIProvider(Provider):
     name = "openai"
     supports_compact_annotation = True
 
+    # Reasoning-heavy models can spend several minutes streaming before they
+    # emit the terminal usage event.  These are per-request transport limits,
+    # not a limit on the full annotation job; explicit profile values still
+    # take precedence.
+    DEFAULT_READ_TIMEOUT_SECONDS = 600
+    DEFAULT_WALL_TIMEOUT_SECONDS = 1200
+
     def __init__(self, cfg):
         super().__init__(cfg)
         self.api_key = self._key()
         self.base_url = str(cfg.get("base_url") or "https://api.openai.com/v1").rstrip("/")
-        self.timeout = max(1, int(cfg.get("timeout") or 180))
-        self.wall_timeout = max(1, int(cfg.get("wall_timeout") or 300))
+        self.timeout = max(1, int(cfg.get("timeout") or self.DEFAULT_READ_TIMEOUT_SECONDS))
+        self.wall_timeout = max(1, int(
+            cfg.get("wall_timeout") or self.DEFAULT_WALL_TIMEOUT_SECONDS
+        ))
         self.model = cfg.get("model") or "gpt-5"
 
     def _apply_reasoning_payload(self, payload):
@@ -770,15 +785,21 @@ class OpenAIProvider(Provider):
         completion_details = usage.get("completion_tokens_details") or {}
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
         cached = usage.get("prompt_cache_hit_tokens")
+        cache_hit_source = "prompt_cache_hit_tokens" if cached is not None else ""
         if cached is None:
             cached = details.get("cached_tokens")
+            if cached is not None:
+                cache_hit_source = "prompt_tokens_details.cached_tokens"
         missed = usage.get("prompt_cache_miss_tokens")
+        cache_miss_source = "prompt_cache_miss_tokens" if missed is not None else ""
         if missed is None and cached is not None:
             missed = max(0, prompt_tokens - int(cached or 0))
+            cache_miss_source = "derived_from_prompt_tokens"
+        cache_reported = cached is not None or missed is not None
         self.stats["calls"] += 1
         self.stats["in"] += prompt_tokens
         self.stats["out"] += int(usage.get("completion_tokens") or 0)
-        if cached is not None or missed is not None:
+        if cache_reported:
             self.stats["cache_reports"] += 1
             self.stats["cache_read"] += int(cached or 0)
             self.stats["cache_miss"] += int(missed or 0)
@@ -788,6 +809,17 @@ class OpenAIProvider(Provider):
                 "input_tokens": prompt_tokens,
                 "cache_read_tokens": int(cached) if cached is not None else None,
                 "uncached_input_tokens": int(missed) if missed is not None else None,
+                # Keep the supplier's denominator and field names beside the
+                # aggregate counters.  A cache-miss field can be absent or
+                # derived, and cache_total is not always the same as the
+                # request's prompt_tokens on compatible gateways.
+                "cache_input_tokens": prompt_tokens if cache_reported else None,
+                "cache_hit_rate": (
+                    int(cached or 0) / prompt_tokens
+                    if cache_reported and prompt_tokens > 0 else None
+                ),
+                "cache_hit_source": cache_hit_source or None,
+                "cache_miss_source": cache_miss_source or None,
                 "output_tokens": int(usage.get("completion_tokens") or 0),
                 "reasoning_tokens": (
                     int(completion_details.get("reasoning_tokens"))

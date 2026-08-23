@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from aa_project_assets import validate_windows_path_component
 from document import compile_document, normalize_draft_nodes, parse_document_lossless
+from diagnostics import classify_diagnostics
 from draft_identity import (
     CardIdentity,
     assign_identity,
@@ -35,6 +36,13 @@ def _parse_draft_nodes(text: str) -> List[Any]:
     return normalize_draft_nodes(parse_document_lossless(text))
 
 
+def _clear_quality_override(session: Dict[str, Any]) -> None:
+    """A content edit invalidates a previous warning-acceptance decision."""
+    session.pop("quality_override_accepted", None)
+    session.pop("quality_override_codes", None)
+    session.pop("quality_override_at", None)
+
+
 class RevisionConflictError(ValueError):
     """草稿版本冲突异常 (HTTP 409 code: revision_conflict)"""
     pass
@@ -46,10 +54,12 @@ class InvalidDraftTokenError(ValueError):
 
 class ReviewPendingError(ValueError):
     """未通过审查门控异常 (HTTP 409 code: review_pending)"""
-    def __init__(self, message="Draft has pending reviews or unresolved errors", code="review_pending", counts=None):
+    def __init__(self, message="Draft has pending reviews or unresolved errors", code="review_pending", counts=None, *, override_allowed=False, issues=None):
         super().__init__(message)
         self.code = code
         self.counts = counts or {}
+        self.override_allowed = bool(override_allowed)
+        self.issues = [dict(item) for item in (issues or []) if isinstance(item, dict)]
 
 
 class AnnotationIncompleteError(ReviewPendingError):
@@ -307,6 +317,17 @@ class DraftStore:
                 return json.loads(f.read_text(encoding="utf-8"))
             return {}
 
+    def load_proposals(self, token: str) -> List[Dict[str, Any]]:
+        """Load persisted AI/manual repair proposals for the review surface."""
+        proposal_file = self.get_draft_path(token) / "proposals.json"
+        if not proposal_file.is_file():
+            return []
+        try:
+            value = json.loads(proposal_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return []
+        return [dict(item) for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
     def _diagnostic_cast(
         self, token: str, cast: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -370,6 +391,7 @@ class DraftStore:
 
             session["draft_version"] += 1
             session["content_revision"] += 1
+            _clear_quality_override(session)
 
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)
             (draft_dir / "identity.json").write_text(identity_json_str, encoding="utf-8")
@@ -625,6 +647,7 @@ class DraftStore:
             session["draft_version"] += 1
             if is_content_change:
                 session["content_revision"] += 1
+                _clear_quality_override(session)
 
             (draft_dir / "edited.txt").write_text(new_text, encoding="utf-8")
             source_map = {}
@@ -776,6 +799,7 @@ class DraftStore:
 
             session["draft_version"] += 1
             session["content_revision"] += 1
+            _clear_quality_override(session)
 
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)
             identity_file.write_text(identity_json_str, encoding="utf-8")
@@ -875,6 +899,7 @@ class DraftStore:
 
             session["draft_version"] += 1
             session["content_revision"] += 1
+            _clear_quality_override(session)
 
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)
             (draft_dir / "identity.json").write_text(identity_json_str, encoding="utf-8")
@@ -941,6 +966,7 @@ class DraftStore:
 
             session["draft_version"] += 1
             session["content_revision"] += 1
+            _clear_quality_override(session)
 
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)
             (draft_dir / "identity.json").write_text(identity_json_str, encoding="utf-8")
@@ -1027,6 +1053,7 @@ class DraftStore:
 
             session["draft_version"] += 1
             session["content_revision"] += 1
+            _clear_quality_override(session)
 
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)
             (draft_dir / "identity.json").write_text(identity_json_str, encoding="utf-8")
@@ -1146,12 +1173,21 @@ class DraftStore:
                 expected_draft_version=expected_draft_version,
             )
 
-    def assert_review_ready(self, token: str, cast: Optional[Dict[str, Any]] = None):
+    def assert_review_ready(
+        self,
+        token: str,
+        cast: Optional[Dict[str, Any]] = None,
+        *,
+        allow_quality_warnings: bool = False,
+    ):
         """检查草稿是否符合 review_ready 门控。未通过抛出 ReviewPendingError(code="review_pending")"""
         draft = self.load_draft(token, cast=cast)
         session = draft["session"]
         annotation_status = normalize_annotation_status(session.get("annotation_status"))
-        diagnostics = draft["diagnostics"]
+        diagnostics = classify_diagnostics(draft["diagnostics"])
+        allow_quality_warnings = bool(
+            allow_quality_warnings or session.get("quality_override_accepted")
+        )
         identities = draft["identities"]
 
         pending_count = sum(1 for c in identities if c.get("review_state") == "pending")
@@ -1166,8 +1202,20 @@ class DraftStore:
             and not forced_review
         ):
             raise AnnotationIncompleteError(annotation_status)
-        blocking_errors = sum(1 for d in diagnostics if d.get("severity") == "error")
-        unresolved_issues = sum(1 for d in diagnostics if d.get("severity") in ("error", "warning"))
+        hard_issues = [
+            item for item in diagnostics
+            if str(item.get("resolution") or "") == "block"
+            or str(item.get("severity") or item.get("level") or "").lower() == "error"
+        ]
+        warning_issues = [
+            item for item in diagnostics
+            if item not in hard_issues
+            and str(item.get("severity") or item.get("level") or "").lower() in {"warning", "info"}
+        ]
+        blocking_errors = len(hard_issues)
+        unresolved_issues = len(hard_issues) + (
+            0 if allow_quality_warnings else len(warning_issues)
+        )
 
         counts = {
             "pending": pending_count,
@@ -1180,15 +1228,133 @@ class DraftStore:
                 message=f"Draft {token} not ready: pending={pending_count}, blocking={blocking_errors}",
                 code="review_pending",
                 counts=counts,
+                override_allowed=(
+                    pending_count == 0 and not hard_issues and bool(warning_issues)
+                ),
+                issues=warning_issues if not hard_issues else diagnostics,
             )
         return True
 
-    def assert_annotation_complete(self, token: str) -> bool:
+    def accept_quality_warnings(
+        self,
+        token: str,
+        expected_draft_version: int,
+    ) -> Dict[str, Any]:
+        """Record an explicit decision to keep non-fatal review warnings."""
+        draft_dir = self.get_draft_path(token)
         with self.draft_lock(token):
-            session_file = self.get_draft_path(token) / "session.json"
+            session_file = draft_dir / "session.json"
+            session = json.loads(session_file.read_text(encoding="utf-8"))
+            if int(session.get("draft_version") or 0) != int(expected_draft_version):
+                raise RevisionConflictError(
+                    f"Draft version mismatch: expected {expected_draft_version}, got {session.get('draft_version')}"
+                )
+            draft = self._load_draft_locked(token)
+            diagnostics = classify_diagnostics(draft["diagnostics"])
+            hard = [item for item in diagnostics if item.get("resolution") == "block"]
+            pending = [
+                item for item in draft["identities"]
+                if item.get("review_state") == "pending"
+            ]
+            if hard or pending:
+                raise ReviewPendingError(
+                    "Only non-fatal quality warnings can be accepted",
+                    counts={"pending": len(pending), "blocking_errors": len(hard)},
+                    override_allowed=False,
+                    issues=hard,
+                )
+            accepted = [
+                item for item in diagnostics
+                if str(item.get("severity") or item.get("level") or "").lower()
+                in {"warning", "info"}
+            ]
+            if not accepted:
+                raise ReviewPendingError(
+                    "No non-fatal quality warnings are available to accept",
+                    counts={"pending": 0, "blocking_errors": 0},
+                    override_allowed=False,
+                    issues=[],
+                )
+            session["draft_version"] = int(session.get("draft_version") or 0) + 1
+            session["quality_override_accepted"] = bool(accepted)
+            session["quality_override_codes"] = list(dict.fromkeys(
+                str(item.get("code") or "unknown") for item in accepted
+            ))
+            session["quality_override_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            session_file.write_text(
+                json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            return {
+                "session": session,
+                "accepted_issues": accepted,
+                "draft_version": session["draft_version"],
+                "content_revision": session.get("content_revision", 0),
+                "quality_override_accepted": bool(accepted),
+            }
+
+    def get_annotation_review_state(self, token: str) -> Dict[str, Any]:
+        """Return the persisted annotation gate state for install/audit decisions."""
+        with self.draft_lock(token):
+            draft_dir = self.get_draft_path(token)
+            session_file = draft_dir / "session.json"
+            session = json.loads(session_file.read_text(encoding="utf-8"))
+            identity_file = draft_dir / "identity.json"
+            try:
+                identities = json.loads(identity_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError):
+                identities = []
+        status = normalize_annotation_status(session.get("annotation_status"))
+        no_pending_cards = bool(identities) and not any(
+            item.get("review_state") == "pending"
+            for item in identities
+            if isinstance(item, dict)
+        )
+        return {
+            "status": status,
+            # Legacy drafts may predate the explicit session flag.  A
+            # persisted identity set with no pending cards is the same
+            # explicit review decision and keeps the review/install gates in
+            # agreement after an upgrade.
+            "override_accepted": bool(
+                session.get("annotation_override_accepted")
+                or (
+                    status["status"] != "complete"
+                    and no_pending_cards
+                )
+            ),
+            "override_at": session.get("annotation_override_at"),
+        }
+
+    def assert_annotation_complete(
+        self,
+        token: str,
+        *,
+        allow_override: bool = False,
+    ) -> bool:
+        with self.draft_lock(token):
+            draft_dir = self.get_draft_path(token)
+            session_file = draft_dir / "session.json"
             session = json.loads(session_file.read_text(encoding="utf-8"))
             status = normalize_annotation_status(session.get("annotation_status"))
         if status["status"] != "complete" or status["pending_targets"] > 0:
+            # A partial result may only pass this second gate after the user
+            # explicitly reviewed every current card.  The request flag alone
+            # is never sufficient, which keeps an unreviewed timeout blocked.
+            try:
+                identities = json.loads(
+                    (draft_dir / "identity.json").read_text(encoding="utf-8")
+                )
+            except (OSError, json.JSONDecodeError, TypeError):
+                identities = []
+            no_pending_cards = bool(identities) and not any(
+                item.get("review_state") == "pending"
+                for item in identities
+                if isinstance(item, dict)
+            )
+            if allow_override and bool(
+                session.get("annotation_override_accepted") or no_pending_cards
+            ):
+                return True
             raise AnnotationIncompleteError(status)
         return True
 
@@ -1304,6 +1470,7 @@ class DraftStore:
                 card.get("review_state") == "pending" for card in identities_data
             )
             session["content_revision"] += 1
+            _clear_quality_override(session)
 
             identity_json_str = json.dumps(identities_data, ensure_ascii=False, indent=2)
             (draft_dir / "identity.json").write_text(identity_json_str, encoding="utf-8")

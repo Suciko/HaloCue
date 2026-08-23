@@ -17,6 +17,16 @@ EMOTICON_ALIASES = {
     "dot": "沉默",
 }
 
+_SHOT_EVIDENCE_TOKENS = (
+    "攻击", "射击", "开枪", "枪击", "命中", "击中", "受击", "中弹",
+    "炮击", "爆炸", "子弹", "弹幕", "火力", "袭击", "打中", "被打",
+)
+
+
+def _has_explicit_shot_evidence(text):
+    compact = re.sub(r"\s+", "", str(text or ""))
+    return any(token in compact for token in _SHOT_EVIDENCE_TOKENS)
+
 
 def normalize_emoticon(value):
     """Return the canonical resource token for a documented emoticon alias."""
@@ -130,7 +140,24 @@ def filter_annotation_row(row, item, character, constraints, *, include_details=
     shot = row.get("shot")
     if shot:
         if shot in constraints["ok_shot"]:
-            clean["shot"] = shot
+            direction = row.get("direction")
+            focus = direction.get("focus_character") if isinstance(direction, dict) else ""
+            # ``shot`` is the legacy AA hit target, not a camera subject.  A
+            # model that repeats the current focus in this field without any
+            # attack evidence is almost certainly serializing camera language
+            # into an FX command.  Drop only that unambiguous collision and
+            # keep an auditable reason; explicit attack lines remain legal.
+            if str(shot) == str(focus or "") and not _has_explicit_shot_evidence(item.get("text")):
+                msg = f"{shot} 只是镜头焦点，正文没有受击证据；已忽略 shot"
+                dropped.append(msg)
+                rejected_details.append({
+                    "code": "shot_camera_subject_confusion",
+                    "field": "shot",
+                    "value": shot,
+                    "reason": msg,
+                })
+            else:
+                clean["shot"] = shot
         else:
             msg = f"射击目标‘{shot}’不是可显示角色"
             dropped.append(msg)
