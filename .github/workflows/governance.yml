@@ -43,6 +43,7 @@ jobs:
           required=(
             AGENTS.md CONTEXT-MAP.md CONTRIBUTING.md
             docs/product-direction-1.x.md
+            docs/architecture/current-layout.md
             docs/adr/README.md
             docs/agents/issue-tracker.md
             docs/agents/triage-labels.md
