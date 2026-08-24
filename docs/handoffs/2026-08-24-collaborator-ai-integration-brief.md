@@ -22,7 +22,9 @@ directory into HaloCue.
   Get-Content -Raw contexts\ba-editor\CONTEXT.md
   Get-ChildItem docs\adr -File | Sort-Object Name
 
-你的实现分支是 feature/1.1-ba-editor。跨模块 schema 或类型合同不要直接
+`feature/1.1-ba-editor` 是 1.1 集成基线。你要从它切出自己的短期分支，例
+如 `feature/1.1-ba-editor-scene-preview`；维护者也为自己的切片使用独立
+分支。两个人不要共用同一个本地工作分支。跨模块 schema 或类型合同不要直接
 改在本分支：先在 chore/contracts 建独立提交/PR，加入迁移、round-trip 测试
 和消费者测试，再回到编辑器分支接入。所有成果通过 PR 进入目标分支，禁止
 force-push、压缩包覆盖和直接复制文件交接。

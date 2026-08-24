@@ -67,6 +67,9 @@ Record the exact command and result in a handoff when a slice crosses contexts.
 - `feature/1.0-runtime` is the runtime/client stream.
 - `feature/1.1-ba-editor` is the BA editor stream.
 - `chore/contracts` is the shared contract stream.
+- When both maintainers work on 1.1, treat `feature/1.1-ba-editor` as the
+  integration base and use one short-lived `feature/1.1-*` branch per slice;
+  never share a mutable working branch.
 - Use `docs/handoffs/` for school-break handoffs: commits, contracts, tests,
   known issues, commands, and decisions needing confirmation.
 - The 1.1 editor is an alternating-time collaboration: the maintainer and
