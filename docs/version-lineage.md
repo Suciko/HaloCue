@@ -14,6 +14,7 @@ claim that every later workspace has been merged into `main`.
 | `v0.95-r12` | `9ae1f99` | 0.95 iteration 12 | Reproducible Git tag |
 | `v0.95-r15` | `e8c40d6` | 0.95 iteration 15 | Reproducible Git tag |
 | `v0.95-r23` | `df41f13` | Latest public 0.95 release snapshot | Reproducible Git tag and release |
+| `0.95-compile-baseline` | `df41f13` | Maintainer-confirmed compilable 0.95 source | Reproducible Git tag; CI build evidence pending |
 
 `v0.95-r23` is on the separate `release/0.95` history and is not an ancestor
 of the current `main`. The migration must therefore import its behavior through
@@ -57,4 +58,3 @@ the receiving slice must record:
    state can round-trip before adding the BA editor.
 4. Record every accepted difference in an ADR or handoff rather than silently
    overwriting an earlier baseline.
-

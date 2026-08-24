@@ -35,6 +35,18 @@ python -m ruff format --check tests/test_resource_manifest_contract.py
 
 Result: `7 passed`; Ruff check and format check passed.
 
+The repository-wide legacy baseline was also measured:
+
+```text
+python -m ruff check .
+python -m ruff format --check .
+```
+
+Both currently fail on pre-existing 0.9 style debt; the format check reports
+180 files that would be reformatted. No bulk formatting was applied. New 1.x
+Python slices must pass scoped Ruff checks while the legacy baseline is reduced
+through dedicated issues.
+
 From the read-only local integration archive:
 
 ```text
@@ -49,6 +61,8 @@ Result: `9 passed in 173.72s`.
 
 - `v0.95-r23` resolves to `df41f13795dd24d58736286531dc6e845795accf` and is the
   latest public 0.95 release snapshot.
+- `0.95-compile-baseline` points directly to the same commit without moving the
+  older `0.9-baseline` tag.
 - `v0.95-r23` is not an ancestor of `main`; migration must be explicit.
 - The maintainer confirms 0.95 compiles successfully. The exact build command,
   tool versions, output archive, and SHA-256 still need to be attached before
@@ -60,9 +74,13 @@ Result: `9 passed in 173.72s`.
 
 - Existing Windows CI on the 0.9 line has pre-existing failures involving
   missing `ffprobe`, a launcher fixture without `aa_assets.db`, and story-picker
-  Playwright assumptions. These are not caused by the resource contract.
+  Playwright assumptions. The failures are tracked in issues `#20` through
+  `#23` and are not caused by the resource contract.
 - PR checks for the new branches must finish before merge; governance checks
   are already passing while the Windows matrix is still running.
+- The Studio 1.11 archive recorded in `docs/research-inputs.sha256` is not
+  currently present at its recorded local path, so unpacking/research has not
+  been claimed in this handoff.
 - The manifest importer, SHA-256 verifier, local staging cache, and AA/MMT
   renderer are intentionally separate implementation slices tracked by issues
   `#6`, `#8`, and `#13`.
