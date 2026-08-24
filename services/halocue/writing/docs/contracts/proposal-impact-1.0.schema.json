@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://halocue.local/contracts/proposal-impact-1.0.schema.json",
+  "title": "HaloCue knowledge proposal impact preview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "operation", "base_snapshot", "target", "changes", "affected_consumers", "affected_refs", "conflict_summary", "decision", "digest"],
+  "properties": {
+    "schema_version": {"const": "proposal-impact/1.0"},
+    "kind": {"enum": ["character_card", "world_card", "world_rule", "canon_fact"]},
+    "operation": {"enum": ["create", "update", "retire"]},
+    "base_snapshot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["work_version", "revision_id"],
+      "properties": {"work_version": {"type": "integer", "minimum": 1}, "revision_id": {"type": ["string", "null"]}}
+    },
+    "target": {
+      "type": "object", "additionalProperties": false,
+      "required": ["artifact_kind", "scope_type", "label", "scope_id", "title"],
+      "properties": {
+        "artifact_kind": {"enum": ["character_card", "world_bible", "work_canon"]},
+        "scope_type": {"enum": ["character", "work"]},
+        "label": {"type": "string", "minLength": 1}, "scope_id": {"type": "string", "minLength": 1}, "title": {"type": "string", "minLength": 1}
+      }
+    },
+    "changes": {"type": "array", "items": {"$ref": "#/$defs/change"}},
+    "affected_consumers": {"type": "array", "items": {"$ref": "#/$defs/consumer"}},
+    "affected_refs": {"type": "array", "items": {"$ref": "#/$defs/affectedRef"}},
+    "conflict_summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "count", "blocking_count", "items"],
+      "properties": {
+        "status": {"enum": ["clear", "review", "blocking"]},
+        "count": {"type": "integer", "minimum": 0},
+        "blocking_count": {"type": "integer", "minimum": 0},
+        "items": {"type": "array", "items": {"$ref": "#/$defs/conflict"}}
+      }
+    },
+    "decision": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requires_user_confirmation", "partial_accept_supported"],
+      "properties": {"requires_user_confirmation": {"const": true}, "partial_accept_supported": {"type": "boolean"}}
+    },
+    "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+  },
+  "$defs": {
+    "change": {"type": "object", "additionalProperties": false, "required": ["key", "label"], "properties": {"key": {"type": "string", "minLength": 1}, "label": {"type": "string", "minLength": 1}}},
+    "consumer": {"type": "object", "additionalProperties": false, "required": ["id", "label", "scope_type", "scope_id", "effect"], "properties": {"id": {"type": "string"}, "label": {"type": "string"}, "scope_type": {"type": "string"}, "scope_id": {"type": "string"}, "effect": {"type": "string"}}},
+    "affectedRef": {"type": "object", "additionalProperties": false, "required": ["kind", "id", "label", "effect", "status"], "properties": {"kind": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"}, "effect": {"type": "string"}, "status": {"type": "string"}}},
+    "conflict": {"type": "object", "additionalProperties": false, "required": ["kind", "label", "blocking", "resolution"], "properties": {"kind": {"type": "string"}, "label": {"type": "string"}, "blocking": {"type": "boolean"}, "resolution": {"type": "string"}}}
+  }
+}

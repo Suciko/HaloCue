@@ -1,0 +1,21 @@
+# External research inputs
+# These files stay outside the repository. Stable aliases avoid publishing local
+# machine paths. Hashes identify evidence; they do not grant redistribution rights.
+
+# Verified from the unpacked Studio 1.11 snapshot on 2026-08-24.
+83B430690A76C5025956F02F1AF9148E15CC52A81BBAFE4FA5BDEFE1BBA485AC  studio-1.11.0/sdk/types/schema.ts
+AE19869A0BA57B88670CD37D239F3F32F495C614BBBD0FF4CC4914D48C646D2B  studio-1.11.0/sdk/types/block-schema.ts
+85F39FCBD42F4D594A023CE6108EA18951942110B05B78895A728730B2FE3BC5  studio-1.11.0/sdk/save-schema.ts
+D7587EFD699B32AAD1897A5C8B02F16553680612B4A621CA49AC3E2FA7353514  studio-1.11.0/default-shell/src/manifest.ts
+
+# Previously recorded snapshots. The Studio ZIP was unavailable for rechecking
+# on 2026-08-24; its unpacked evidence is identified above instead.
+# 32DECC248377D967ED2E4C781413EC10BD0C51AE5775689A7B00530E246BA127  studio-1.11.0/installer.zip
+FA6E4230B2E721A5FD5A6BE57AF8E563F8D097AEAEA2DA5ED131B168A706D7AE  vulkan-ssbo/benchmark-bundle.7z
+# The local snapshots were verified at E:\AzureArchive_decompiled and
+# E:\ChatArchive_decompiled on 2026-08-24. The aliases above intentionally omit
+# machine-specific parent-directory names.
+80D20CC7B34D18F762FA63331D82ACAC249A9133561388196E458D54DE4388AA  azurearchive-decompiled/README.md
+50F894A841B072C457A65AE4F6B2B38335B3CA8108557E78AAB46D54AC311C5A  chatarchive-decompiled/README.md
+
+# Reference repository commits are recorded in docs/handoffs when a slice uses them.

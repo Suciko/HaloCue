@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://halocue.local/contracts/provider-capabilities-1.0.schema.json",
+  "title": "HaloCue Provider Capabilities 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "usage", "cache", "reasoning_summary"],
+  "properties": {
+    "schema_version": {"const": "provider-capabilities/1.0"},
+    "usage": {
+      "type": "object",
+      "required": ["support", "source"],
+      "properties": {
+        "support": {"enum": ["supported", "unsupported", "unknown"]},
+        "source": {"type": "string"},
+        "missing_response_policy": {"enum": ["not_reported"]}
+      }
+    },
+    "cache": {
+      "type": "object",
+      "required": ["support", "mode"],
+      "properties": {
+        "support": {"enum": ["supported", "unsupported", "unknown"]},
+        "mode": {"enum": ["none", "explicit_ephemeral", "provider_managed", "provider_specific", "response_reported"]},
+        "observation_values": {
+          "type": "array",
+          "items": {"enum": ["unsupported", "unknown", "supported_miss", "supported_hit"]},
+          "uniqueItems": true
+        }
+      }
+    },
+    "reasoning_summary": {
+      "type": "object",
+      "required": ["support", "mode", "hidden_chain_exposed"],
+      "properties": {
+        "support": {"enum": ["supported", "unsupported", "unknown"]},
+        "mode": {"enum": ["none", "provider_specific", "model_authored_public_summary"]},
+        "hidden_chain_exposed": {"const": false},
+        "required_for": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

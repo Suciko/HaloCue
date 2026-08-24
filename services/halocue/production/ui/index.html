@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HaloCue · AA 制作</title>
+  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="layout-mode.css">
+  <link rel="stylesheet" href="previews.css">
+  <link rel="stylesheet" href="preflight.css">
+  <link rel="stylesheet" href="cg-responsive.css">
+  <link rel="stylesheet" href="workspace-migration.css">
+</head>
+<body>
+  <div class="app-shell">
+    <nav class="app-rail" aria-label="主导航">
+      <strong class="brand" title="HaloCue">H</strong>
+      <button class="rail-button" id="openAssetLibrary" title="素材库" aria-label="素材库">库</button>
+      <button class="rail-button active" title="AA 制作" aria-label="AA 制作">制</button>
+      <button class="rail-button" id="openTasks" title="后台任务" aria-label="后台任务">任</button>
+      <span class="rail-spacer"></span>
+      <button class="rail-button" id="openSettings" title="设置" aria-label="设置">设</button>
+    </nav>
+
+    <aside class="stage-sidebar">
+      <header class="side-header">
+        <small>HALOCUE 1.0</small>
+        <h1>AA 制作</h1>
+        <p id="runTitle">尚未建立制作任务</p>
+      </header>
+      <section class="flow-progress" aria-label="制作进度">
+        <div><small>制作流程</small><strong id="flowProgressLabel">0 / 4</strong></div>
+        <span class="flow-progress-track" aria-hidden="true"><i id="flowProgressBar"></i></span>
+      </section>
+      <ol class="stage-list" aria-label="制作流程">
+        <li class="active" data-stage="source" role="button" tabindex="0"><b>1</b><span><strong>选择剧本</strong><small>建立制作任务</small></span><em data-stage-state>当前</em></li>
+        <li data-stage="mapping" role="button" tabindex="-1" aria-disabled="true"><b>2</b><span><strong>剧本初审</strong><small>确认角色与结构</small></span><em data-stage-state>未开始</em></li>
+        <li data-stage="generation" role="button" tabindex="-1" aria-disabled="true"><b>3</b><span><strong>生成准备</strong><small>选择转换方式</small></span><em data-stage-state>未开始</em></li>
+        <li data-stage="review" role="button" tabindex="-1" aria-disabled="true"><b>4</b><span><strong>审查与安装</strong><small>逐卡确认并交付 AA</small></span><em data-stage-state>未开始</em></li>
+      </ol>
+      <section class="side-status">
+        <small>制作状态</small>
+        <strong id="sideState">等待剧本</strong>
+        <p id="sideDetail">输入已有剧本即可开始，不需要先进入写作系统。</p>
+        <p id="sideOrigin" class="side-origin" hidden></p>
+      </section>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div><small id="breadcrumb">制作 / 选择剧本</small><h2 id="pageTitle">把已有剧本转换为 AA 工程</h2></div>
+        <div class="top-actions"><button type="button" class="overview-button" id="openRunOverview" disabled>任务总览</button><span class="status-dot" id="serviceState">正在连接后端</span><button class="icon-button" id="refreshRun" title="刷新当前任务" aria-label="刷新">↻</button></div>
+      </header>
+
+      <section class="page active" id="page-source">
+        <div class="page-lead">
+          <div>
+            <small>第一步</small>
+            <h3>选择要制作的剧本</h3>
+            <p>剧本文本会被冻结为发布版本，后续修改只发生在演出草稿中。</p>
+          </div>
+          <span class="mode-badge">已有剧本短路径</span>
+        </div>
+
+        <!-- 剧本来源选择面板：从写作作品选用 vs 本机文件/手动录入 -->
+        <section class="source-mode-selector" aria-label="剧本来源选择">
+          <nav class="source-tabs" role="tablist">
+            <button type="button" class="source-tab active" data-source-tab="writing" role="tab" aria-selected="true" aria-controls="sourcePaneWriting">
+              <span class="tab-mark">写</span>
+              <span>从写作作品中选用</span>
+            </button>
+            <button type="button" class="source-tab" data-source-tab="file" role="tab" aria-selected="false" aria-controls="sourcePaneFile" tabindex="-1">
+              <span class="tab-mark">文</span>
+              <span>从本机文件导入</span>
+            </button>
+            <button type="button" class="source-tab" data-source-tab="manual" role="tab" aria-selected="false" aria-controls="sourcePaneManual" tabindex="-1">
+              <span class="tab-mark">编</span>
+              <span>手动编写 / 粘贴</span>
+            </button>
+          </nav>
+
+          <!-- 来源 1：从写作作品选用面板 -->
+          <div class="source-pane active" id="sourcePaneWriting" role="tabpanel">
+            <div class="writing-works-list-container">
+              <div class="writing-works-head">
+                <strong>已冻结的写作定稿</strong>
+                <button type="button" class="text-button" id="refreshWritingReleases">刷新作品列表</button>
+              </div>
+              <div class="writing-releases-grid" id="writingReleasesGrid">
+                <p class="empty">正在读取写作工作台作品与定稿...</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 来源 2：本机文件导入面板（现代化拖拽上传卡片） -->
+          <div class="source-pane hidden" id="sourcePaneFile" role="tabpanel">
+            <div class="modern-dropzone" id="scriptDropzone">
+              <input id="scriptFile" type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" style="display:none;">
+              <div class="dropzone-inner" id="dropzonePrompt">
+                <span class="dropzone-icon" aria-hidden="true">文</span>
+                <strong>点击选择剧本文件，或将文件拖放到此处</strong>
+                <small id="scriptFileStatus">支持 .txt、.md、Markdown 剧本文档（最大 5 MiB）</small>
+                <button type="button" class="quiet dropzone-btn" id="browseFileBtn">浏览本机文件</button>
+              </div>
+              <div class="dropzone-file-info hidden" id="dropzoneFileInfo">
+                <span class="dropzone-file-icon" aria-hidden="true">文</span>
+                <div class="dropzone-file-details">
+                  <strong id="dropzoneFileName">剧本文档.txt</strong>
+                  <small id="dropzoneFileMeta">4.2 KB · 128 行</small>
+                </div>
+                <div class="dropzone-file-actions">
+                  <button type="button" class="quiet" id="dropzoneRechoose">重新选择</button>
+                  <button type="button" class="text-button" id="dropzoneClear">清空</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="source-pane hidden source-pane-manual" id="sourcePaneManual" role="tabpanel">
+            <strong>直接编辑剧本文本</strong>
+            <p>在下方填写工程名称并粘贴剧本。手动内容会作为独立来源冻结，不会冒充写作端定稿。</p>
+          </div>
+        </section>
+
+        <form class="source-form" id="sourceForm">
+          <div class="active-source-badge hidden" id="activeSourceBadge">
+            <span class="badge-tag">定稿已关联</span>
+            <strong id="activeSourceTitle">UI 流程验收 0814 (v1)</strong>
+            <button type="button" class="text-button" id="clearActiveSource">解除绑定</button>
+          </div>
+
+          <label>AA 工程名称<input id="projectName" required maxlength="80" placeholder="例如：凯伊约会篇-第一章"></label>
+          <label>剧本文本<textarea id="scriptText" required placeholder="## 场景 01&#10;爱丽丝: 前方发现了新的副本入口！&#10;凯伊: ……先别进去。"></textarea></label>
+          <fieldset class="generation-mode-fieldset"><legend>草稿生成方式</legend><label class="mode-choice"><input type="radio" name="generationMode" value="format_only" checked><span><b>仅转换格式</b><small>保留已有演出指令，直接进入映射与审查</small></span></label><label class="mode-choice" id="aiModeChoice"><input type="radio" name="generationMode" value="ai_direction"><span><b>AI 安排演出</b><small id="aiModeState">正在检查演出模型</small></span></label><div class="generation-mode-notice" id="generationModeNotice"><span>当前将按原剧本建立草稿。</span><button type="button" id="configureGenerationModel" class="hidden">配置 AI 模型</button></div></fieldset>
+          <div class="form-footer"><span id="sourceStatus">支持“角色: 台词”、场景标题和 AA 指令混合格式。</span><span class="source-actions"><button type="button" id="preflightSource">先检查剧本</button><button class="primary" type="submit">建立制作任务</button></span></div>
+        </form>
+        <section class="preflight-panel hidden" id="sourcePreflight" aria-live="polite"></section>
+        <section class="recent-runs"><header><div><small>继续制作</small><h3>最近任务</h3></div><button class="text-button" id="reloadRuns">刷新</button></header><div id="runList" class="run-list"><p class="empty">暂无制作任务</p></div></section>
+      </section>
+
+      <section class="page" id="page-mapping">
+        <div class="page-lead"><div><small>第二步</small><h3>确认每个说话者在 AA 中是谁</h3><p>骨骼、头像和表情来自具体角色映射，不是全局素材设置。</p></div><span class="mode-badge" id="mappingCount">0 位说话者</span></div>
+        <section class="task-preflight-panel" id="taskPreflight" aria-live="polite"><p class="empty">正在读取本任务的初审摘要。</p></section>
+        <section class="ai-preflight-panel" id="aiPreflight" aria-live="polite"><p class="empty">正在检查 AI 初审是否可用。</p></section>
+        <div id="mappingList" class="mapping-list"></div>
+        <div class="sticky-actions"><span id="mappingStatus">完成全部映射后继续。</span><button class="primary" id="mappingContinue">进入生成准备</button></div>
+      </section>
+
+      <section class="page" id="page-generation">
+        <div class="page-lead"><div><small>第三步</small><h3>生成演出草稿</h3><p id="generationDescription">当前任务使用仅转换格式，草稿已经建立。</p></div><span class="mode-badge" id="generationModeBadge">仅转换格式</span></div>
+        <div class="gate-grid" id="generationGates"></div>
+        <fieldset class="layout-mode-fieldset" id="layoutModeFieldset"><legend>演出方式</legend><label class="mode-choice"><input type="radio" name="layoutMode" value="pure_ai"><span><b>纯 AI</b><small>AI 负责镜头、站位、入退场、位移与无台词反应链</small></span></label><label class="mode-choice"><input type="radio" name="layoutMode" value="ai" checked><span><b>现 AI</b><small>AI 判断演出意图，后端修正站位与连续性</small></span></label><label class="mode-choice"><input type="radio" name="layoutMode" value="rules"><span><b>稳定后端</b><small>使用固定、安全且可复现的标准演出规则</small></span></label></fieldset>
+        <section class="action-panel"><div><small>下一步</small><h3 id="generationActionTitle">打开草稿审查</h3><p id="generationActionCopy">逐卡处理未登记背景、音效和待审内容。</p></div><button class="primary" id="generateOrReview">进入审查</button></section>
+      </section>
+
+      <section class="page" id="page-review">
+        <div class="review-head"><div><small>第四步</small><h3>逐卡审查与安装</h3><p id="reviewSummary">尚未载入草稿</p></div><div class="review-actions"><button id="openPerformancePreview">查看草稿演出</button><button id="openDirectionProposals">查看 AI 演出建议</button><button id="openCgDialog">插入 CG 段落</button><button id="validateDraft">检查问题</button><button id="approveAll">全部标记已审</button></div></div>
+        <section class="workflow-hint" aria-label="审查操作顺序">
+          <header><strong>审查路径</strong><small id="reviewFlowState">先选择一张待处理卡片</small></header>
+          <div class="workflow-track">
+            <span class="active" data-review-step="0"><b>1</b><em>选择卡片</em></span>
+            <i aria-hidden="true"></i>
+            <span data-review-step="1"><b>2</b><em>修改或处理素材</em></span>
+            <i aria-hidden="true"></i>
+            <span data-review-step="2"><b>3</b><em>标记已审</em></span>
+            <i aria-hidden="true"></i>
+            <span data-review-step="3"><b>4</b><em>通过后编译</em></span>
+          </div>
+        </section>
+        <div class="review-layout">
+          <div class="review-column"><div class="filterbar"><button class="active" data-filter="all">全部</button><button data-filter="pending">待审</button><button data-filter="blocking">待处理</button><button data-filter="direction">演出</button></div><div id="cardList" class="card-list"></div></div>
+          <aside class="inspector"><small>当前决定</small><h3 id="inspectorTitle">选择一张卡片</h3><div id="inspectorBody"><p>在左侧选择卡片后，可编辑内容或处理素材请求。</p></div></aside>
+        </div>
+        <footer class="buildbar"><div><small>编译门</small><strong id="compileGate">等待审查</strong><p id="compileBlockers">完成角色映射、处理请求并审查全部卡片。</p></div><button class="primary" id="compileButton" disabled>编译 AA 工程</button></footer>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="mappingDialog"><form method="dialog" class="dialog-shell"><header><div><small>角色映射</small><h3 id="mappingDialogTitle">选择 AA 角色</h3></div><button value="cancel" class="icon-button" aria-label="关闭">×</button></header><input id="characterSearch" placeholder="搜索角色名、变体或社团"><div class="mapping-kinds"><button type="button" data-kind="voice">无立绘角色</button><button type="button" data-kind="narrator">旁白</button><button type="button" data-kind="unset">不映射</button></div><div id="characterResults" class="character-results"></div><p id="mappingDialogStatus" class="dialog-status"></p></form></dialog>
+
+  <dialog id="settingsDialog"><section class="dialog-shell production-settings-shell"><header><div><small>制作设置</small><h3>连接 AA 与演出模型</h3></div><button type="button" class="icon-button" data-close-dialog="settingsDialog" aria-label="关闭">×</button></header><nav class="settings-tabs" aria-label="设置分类"><button type="button" class="active" data-settings-pane="workspace">AA 制作环境</button><button type="button" data-settings-pane="model">AI 模型</button></nav><section id="settingsWorkspacePane" class="settings-pane"><label>AzureArchive.exe、安装目录或 AA data 工作区<input id="aaSelection" placeholder="例如：E:\AzureArchive 或 D:\AA\data"></label><div class="settings-actions"><button type="button" id="inspectAaEnvironment">检测</button><button type="button" class="primary" id="adoptAaEnvironment" disabled>采用此工作区</button></div><section id="aaEnvironmentStatus" class="environment-status"><strong>尚未检测</strong><p>输入 AA 程序、安装目录或 data 工作区后检测。</p></section></section><form id="modelForm" class="settings-pane settings-form hidden"><label>协议<select id="modelProvider"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic</option></select></label><label>接口地址<input id="modelBaseUrl" placeholder="https://api.openai.com/v1"></label><label>模型名称<input id="modelName" placeholder="gpt-5"></label><label>API Key<input id="modelApiKey" type="password" autocomplete="new-password" placeholder="仅保存到当前 Windows 用户的加密存储"></label><div class="dialog-footer"><span id="modelStatus">尚未配置</span><button type="button" id="testModel">测试连接</button><button class="primary" type="submit">保存模型</button></div></form></section></dialog>
+
+  <dialog id="tasksDialog"><section class="dialog-shell task-dialog-shell"><header><div><small>后台任务</small><h3>正在做什么，失败后去哪里</h3><p class="dialog-status">这里只显示真实后台任务；失败不会自动覆盖草稿或重试。</p></div><div class="dialog-header-actions"><button type="button" id="refreshTasks">刷新</button><button class="icon-button" data-close-dialog="tasksDialog" aria-label="关闭">×</button></div></header><div id="taskList" class="task-list"></div></section></dialog>
+  <dialog id="runOverviewDialog"><section class="dialog-shell run-overview-shell"><header><div><small>当前制作任务</small><h3>任务总览</h3><p class="dialog-status">集中查看进度、阻断项和下一步，不会修改草稿。</p></div><button class="icon-button" data-close-dialog="runOverviewDialog" aria-label="关闭">×</button></header><div id="runOverviewBody"></div><footer class="dialog-footer run-overview-footer"><span id="runOverviewHint">从推荐步骤继续。</span><button type="button" class="primary" id="runOverviewContinue">继续制作</button></footer></section></dialog>
+  <dialog id="resourceDialog"><section class="dialog-shell"><header><div><small id="resourceDialogEyebrow">素材选择</small><h3 id="resourceDialogTitle">选择素材</h3></div><button class="icon-button" data-close-dialog="resourceDialog" aria-label="关闭">×</button></header><input id="resourceSearch" placeholder="输入名称筛选"><div id="resourceResults" class="character-results"></div><p id="resourceDialogStatus" class="dialog-status"></p></section></dialog>
+  <dialog id="assetLibraryDialog"><section class="dialog-shell asset-library-shell"><header><div><small>素材库</small><h3>浏览当前任务可用素材</h3><p>先在这里确认素材，再从审查器的“选择背景/选择音效”把它用到卡片上。CG 使用背景切换；插图用于独立的 @popup 指令。标有“本任务导入”的素材可移除；已使用的素材需要先在审查器替换引用。</p></div><div class="dialog-header-actions"><button type="button" id="openAssetImport">导入素材</button><button class="icon-button" data-close-dialog="assetLibraryDialog" aria-label="关闭">×</button></div></header><nav class="asset-tabs" aria-label="素材类型"><button type="button" class="active" data-asset-kind="characters">角色</button><button type="button" data-asset-kind="backgrounds">背景</button><button type="button" data-asset-kind="sounds">音效</button><button type="button" data-asset-kind="cg">插图</button></nav><label class="asset-search-label">搜索当前素材<input id="assetLibrarySearch" placeholder="输入名称、变体或文件名筛选"></label><div id="assetLibraryResults" class="asset-library-results"></div><footer class="dialog-footer"><span id="assetLibraryStatus">正在读取素材索引。</span><button type="button" id="assetLibraryMore">加载更多</button></footer></section></dialog>
+  <dialog id="assetImportDialog"><section class="dialog-shell asset-import-shell"><header><div><small>当前任务素材</small><h3>导入并检查素材</h3><p>素材先保存到当前任务，只有最后安装 AA 工程时才写入 AA 工作区。</p></div><button class="icon-button" data-close-dialog="assetImportDialog" aria-label="关闭">×</button></header><div class="import-steps" aria-label="素材导入步骤"><span class="active" data-import-step="1"><b>1</b>选择文件</span><span data-import-step="2"><b>2</b>检查格式</span><span data-import-step="3"><b>3</b>登记到任务</span></div><fieldset class="import-kind"><legend>这是什么素材</legend><label><input type="radio" name="assetImportKind" value="background" checked><span><b>背景图片</b><small>PNG 或 JPG，可作为场景或 CG 背景</small></span></label><label><input type="radio" name="assetImportKind" value="cg"><span><b>插图图片</b><small>PNG 或 JPG，用于 @popup 覆盖画面</small></span></label><label><input type="radio" name="assetImportKind" value="sound"><span><b>音效</b><small>16-bit WAV</small></span></label><label><input type="radio" name="assetImportKind" value="character"><span><b>角色骨骼</b><small>ZIP，含 skel/atlas/贴图/头像</small></span></label></fieldset><label class="import-file">选择本机文件<input id="assetImportFile" type="file" accept=".png,.jpg,.jpeg"></label><div id="assetCharacterFields" class="import-fields hidden"><label>角色 Identifier<input id="assetIdentifier" placeholder="例如：my-alice"></label><label>显示名称<input id="assetDisplayName" placeholder="例如：爱丽丝（私服）"></label><label>社团或备注<input id="assetNickname" placeholder="可不填"></label></div><div id="assetBackgroundFields" class="import-fields"><label>中文标签或名称<input id="assetLabel" placeholder="例如：教室、夜晚、雨天或雨夜的约定"></label></div><section id="assetValidationResult" class="asset-validation empty">选择文件后，点击“上传并检查”。</section><footer class="dialog-footer"><span id="assetImportStatus">尚未选择文件。</span><div><button type="button" id="validateAssetImport">上传并检查</button><button type="button" class="primary" id="registerAssetImport" disabled>登记到当前任务</button></div></footer></section></dialog>
+  <dialog id="insertCardDialog"><form method="dialog" class="dialog-shell" id="insertCardForm"><header><div><small>草稿编辑</small><h3>在当前卡片后插入</h3><p id="insertCardHint" class="dialog-status">新卡片会插入到选中卡片之后，并标记为待审。</p></div><button value="cancel" class="icon-button" aria-label="关闭">×</button></header><label>卡片类型<select id="insertCardKind"><option value="line">台词</option><option value="dir">演出指令</option><option value="scene">场景标题</option><option value="meta">文本备注</option></select></label><div id="insertLineFields" class="insert-fields"><label>说话者<input id="insertWho" placeholder="例如：爱丽丝"></label><label>台词<textarea id="insertText" placeholder="输入要加入的台词"></textarea></label></div><div id="insertDirFields" class="insert-fields hidden"><label>指令名称<input id="insertCmd" placeholder="例如：wait、bg、se"></label><label>指令参数<input id="insertArg" placeholder="例如：1 或 BG_Classroom"></label></div><div id="insertSceneFields" class="insert-fields hidden"><label>场景标题<input id="insertTitle" placeholder="例如：放学后的走廊"></label></div><div id="insertMetaFields" class="insert-fields hidden"><label>备注文本<textarea id="insertMetaText" placeholder="输入一行备注"></textarea></label></div><footer class="dialog-footer"><span id="insertCardStatus">插入后需要重新审查相关卡片。</span><button value="cancel">取消</button><button class="primary" id="confirmInsertCard" value="default">插入卡片</button></footer></form></dialog>
+  <dialog id="cgDialog"><section class="dialog-shell cg-dialog-shell"><header><div><small>CG 段落</small><h3>选择 CG 画面并隐藏立绘</h3></div><button class="icon-button" data-close-dialog="cgDialog" aria-label="关闭">×</button></header><p class="cg-rule">这里只显示自定义背景和官方 CG，普通场景背景不会出现。进入所选范围时会切换画面并清空全部 Spine 立绘；对话保留人物名字，结束后恢复此前背景。</p><div class="cg-range-grid"><label>起始卡<select id="cgStartCard"></select></label><label>结束卡<select id="cgEndCard"></select></label></div><section class="cg-advice-control"><div><small>作者选择后再咨询</small><strong>先决定范围，再向 AI 要图像制作意见</strong><p>只分析你选中的卡片，返回是否值得做 CG 和 GPT Image 提示词草案；不会移动范围、不会上传图片，也不会插入 CG。</p></div><button type="button" id="askCgAdvice">获取 AI 制作意见</button></section><section id="cgAdvice" class="cg-advice hidden" aria-live="polite"></section><label class="cg-label">段落标签<input id="cgLabel" maxlength="80" placeholder="例如：雨夜的约定"></label><section class="cg-material-picker"><div><small>CG 画面</small><strong id="cgSelectedMaterial">尚未选择</strong></div><input id="cgSearch" placeholder="搜索自定义背景或官方 CG"><div id="cgResults" class="character-results"></div></section><footer class="dialog-footer"><span id="cgDialogStatus">普通场景背景不会显示在这里。</span><button class="primary" id="createCgSegment" disabled>设为 CG 段落</button></footer></section></dialog>
+  <dialog id="performancePreviewDialog"><section class="dialog-shell performance-preview-dialog"><header><div><small>草稿演出预览</small><h3>按当前草稿检查观看顺序</h3><p>这是只读预览：它不会写入草稿、不会调用 AI，也不等同于最终 AA 渲染。最终效果以编译后的 AA 工程为准。</p></div><button class="icon-button" data-close-dialog="performancePreviewDialog" aria-label="关闭">×</button></header><div id="performancePreview" class="performance-preview-empty"><strong>正在读取当前草稿</strong><p>预览会使用本任务冻结的背景、CG 和角色映射。</p></div><footer class="dialog-footer performance-preview-footer"><span id="performancePreviewStatus">未做任何修改。</span><div><button type="button" id="previewPrevious">上一张</button><button type="button" id="previewNext">下一张</button><button type="button" class="primary" id="previewOpenCard">回到这张卡修改</button></div></footer></section></dialog>
+  <dialog id="directionProposalsDialog"><section class="dialog-shell direction-proposals-dialog"><header><div><small>AI 演出建议 · 只读记录</small><h3>先看模型做了什么，再逐卡确认</h3><p>这里列出 AI 生成时提出的表情、情绪、动作和画面效果。它不会在这里直接修改草稿；需要调整时，请回到逐卡审查器处理对应台词。</p></div><button class="icon-button" data-close-dialog="directionProposalsDialog" aria-label="关闭">×</button></header><div id="directionProposals" class="direction-proposals-empty"><strong>正在读取 AI 演出记录</strong><p>不会写入草稿，也不会重新调用模型。</p></div><footer class="dialog-footer"><span id="directionProposalsStatus">未做任何修改。</span><button type="button" class="primary" data-close-dialog="directionProposalsDialog">回到逐卡审查</button></footer></section></dialog>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>
