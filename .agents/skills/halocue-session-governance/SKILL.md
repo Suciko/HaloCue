@@ -12,7 +12,8 @@ work to the other collaborator.
 
 1. Read `docs/product-direction-1.x.md`.
 2. Read `CONTEXT-MAP.md`, the owning context, and relevant `docs/adr/` files.
-3. Read `docs/agents/long-term-memory.md` and the newest applicable handoff.
+3. Read `docs/agents/long-term-memory.md`,
+   `docs/agents/remote-collaboration.md`, and the newest applicable handoff.
 4. Run `git status --short --branch`; preserve unrelated changes.
 5. Identify the GitHub Issue, branch, and smallest demonstrable vertical slice.
 

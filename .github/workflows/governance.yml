@@ -48,6 +48,7 @@ jobs:
             docs/agents/triage-labels.md
             docs/agents/domain.md
             docs/agents/long-term-memory.md
+            docs/agents/remote-collaboration.md
             docs/agents/skill-proposals.md
             docs/agents/skill-proposals/TEMPLATE.md
             .agents/skills/halocue-session-governance/SKILL.md

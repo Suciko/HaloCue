@@ -17,7 +17,8 @@ and an AI GalGame workspace.
 5. Identify the GitHub issue and branch for the change. One issue should describe
    one demonstrable vertical slice.
 6. For a cross-session or collaborator change, follow
-   `docs/agents/long-term-memory.md` and read the newest applicable handoff.
+   `docs/agents/long-term-memory.md`,
+   `docs/agents/remote-collaboration.md`, and read the newest applicable handoff.
 
 ## Repository boundaries
 
@@ -84,6 +85,9 @@ Record the exact command and result in a handoff when a slice crosses contexts.
   `docs/agents/triage-labels.md`.
 - New ideas and architecture concerns use `.github/ISSUE_TEMPLATE/proposal.yml`;
   implemented work is handed over through a focused PR and `docs/handoffs/`.
+- The collaborator works from another computer. Use relative repository paths and
+  remote commit/PR references; maintainer-local research paths are never shared
+  prerequisites. See `docs/agents/remote-collaboration.md`.
 - Repeated workflows become Skill proposals under
   `docs/agents/skill-proposals/`; only reviewed PRs activate a Skill under
   `.agents/skills/`.
@@ -116,6 +120,7 @@ gate are defined in `docs/agents/long-term-memory.md`,
 
 - Cross-system context: `CONTEXT-MAP.md`
 - Product direction: `docs/product-direction-1.x.md`
+- Remote collaboration: `docs/agents/remote-collaboration.md`
 - Issue tracker and triage: `docs/agents/`
 - Architecture decisions: `docs/adr/`
 - Client: `contexts/client/CONTEXT.md`

@@ -48,9 +48,13 @@ handoff；结束工作时推送分支、打开或更新 PR，并写 handoff。�
 
 本地研究输入的位置如下：
 
-  Studio 1.11 解包研究：E:\Studio-1.11.0-win\learning-source\
-  AzureArchive 行为研究：E:\AzureArchive_decompiled\
-  ChatArchive 行为研究：E:\ChatArchive_decompiled\
+  Studio 1.11 解包研究：<MAINTAINER_LOCAL>/Studio-1.11.0-win/learning-source/
+  AzureArchive 行为研究：<MAINTAINER_LOCAL>/AzureArchive_decompiled/
+  ChatArchive 行为研究：<MAINTAINER_LOCAL>/ChatArchive_decompiled/
+
+这些是维护者电脑上的只读输入，不是合作者电脑上的必备路径。合作者应使用
+自己的授权输入或合成 fixture；需要共享的内容必须通过合同、测试、commit
+和 PR 交接，不能复制整个研究目录。
 
 这些目录是只读研究输入。请提取“行为、数据字段、资源角色、逻辑键、相对
 路径、用户流程”形成自己的合同和测试，再独立重写实现。请不要把以下内容

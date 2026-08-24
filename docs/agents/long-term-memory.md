@@ -15,6 +15,8 @@ Complete these reads before editing code or deciding a cross-context change:
 4. Read `CONTEXT-MAP.md`, the owning `contexts/*/CONTEXT.md`, and relevant ADRs.
 5. Read `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md` before
    creating or changing an Issue.
+6. If another developer will receive the work, read
+   `docs/agents/remote-collaboration.md`; use relative paths and a pushed commit.
 
 If a handoff, Issue, ADR, or test conflicts with local memory, trust the
 reviewed repository record and report the conflict in the current PR or

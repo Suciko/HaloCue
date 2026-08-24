@@ -25,6 +25,8 @@ or implementing a cross-context change.
 - Durable project truth, collaborator handoffs, feedback, and Skill proposals
   follow `docs/agents/long-term-memory.md` and ADR-0006. Local agent memory is
   recall only.
+- The maintainers work on separate computers. GitHub commits, PRs, Issues, and
+  handoffs are the shared boundary; absolute local paths are never contracts.
 
 ## Contexts
 
@@ -45,6 +47,7 @@ or implementing a cross-context change.
 - Product direction: `docs/product-direction-1.x.md`
 - Long-term memory and Skill governance: `docs/agents/long-term-memory.md`,
   `docs/agents/skill-proposals.md`
+- Remote collaboration: `docs/agents/remote-collaboration.md`
 
 ## Change routing
 
