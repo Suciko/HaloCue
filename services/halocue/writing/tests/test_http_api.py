@@ -1920,6 +1920,9 @@ def test_onboarding_explains_key_work_and_scene_controls():
     script = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
 
     assert "state.surface==='writing'&&state.stage==='draft'" in script
+    assert "root.addEventListener('click'" in script
+    assert "root.addEventListener('keydown'" in script
+    assert "event.key==='Escape'" in script
     assert "选择要应用的变化" in script
     assert "Agent 只能产生候选" in script
     assert "正文候选不是聊天文案" in script

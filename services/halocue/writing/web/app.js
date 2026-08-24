@@ -92,6 +92,24 @@ function onboardingOverlay(){
   root.className='onboarding-tour';
   root.hidden=true;
   root.innerHTML=`<div class="onboarding-highlight" aria-hidden="true"></div><section class="onboarding-coach" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle"><span data-onboarding-count></span><h2 id="onboardingTitle" data-onboarding-title></h2><p data-onboarding-body></p><div class="onboarding-actions"><button type="button" class="quiet" data-onboarding-skip>跳过</button><button type="button" class="primary" data-onboarding-next>下一步</button></div></section>`;
+  root.addEventListener('click',event=>{
+    const control=event.target?.closest?.('[data-onboarding-next],[data-onboarding-skip]');
+    if(!control)return;
+    event.preventDefault();
+    if(control.matches('[data-onboarding-skip]')){finishOnboardingTour();return}
+    onboardingTourIndex+=1;
+    if(onboardingTourIndex>=onboardingTourSteps.length)finishOnboardingTour();
+    else positionOnboardingStep();
+  });
+  root.addEventListener('keydown',event=>{
+    if(event.key==='Escape'){event.preventDefault();finishOnboardingTour();return}
+    if(event.key==='Enter'&&event.target?.matches?.('[data-onboarding-next]')){
+      event.preventDefault();
+      onboardingTourIndex+=1;
+      if(onboardingTourIndex>=onboardingTourSteps.length)finishOnboardingTour();
+      else positionOnboardingStep();
+    }
+  });
   document.body.append(root);
   return root;
 }
@@ -145,8 +163,6 @@ window.addEventListener('scroll',()=>requestAnimationFrame(positionOnboardingSte
 document.addEventListener('click',event=>{
   const start=event.target.closest('[data-onboarding-start]');
   if(start){event.preventDefault();$('#settingsDialog')?.close();setTimeout(()=>startOnboardingTour(true),80);return}
-  if(event.target.closest('[data-onboarding-skip]')){event.preventDefault();finishOnboardingTour();return}
-  if(event.target.closest('[data-onboarding-next]')){event.preventDefault();onboardingTourIndex+=1;if(onboardingTourIndex>=onboardingTourSteps.length)finishOnboardingTour();else positionOnboardingStep()}
 },true);
 
 let pendingManuscriptNavigation=null;
