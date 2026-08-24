@@ -5,8 +5,8 @@
 - Issue: [#24](https://github.com/Suciko/HaloCue/issues/24)
 - Source branch: `feature/1.1-ba-editor-scene-preview`
 - Target branch: `feature/1.1-ba-editor`
-- Previous PR: [#25](https://github.com/Suciko/HaloCue/pull/25)
-- This slice is intended for the same short-lived branch/PR after review.
+- UI slice commit: `3d973b6 feat(ba-editor): add synthetic scene preview UI`
+- PR: [#25](https://github.com/Suciko/HaloCue/pull/25), pushed and open
 
 ## Scope and acceptance
 
@@ -35,7 +35,7 @@ copied.
 
 ```text
 python -m pytest -q tests/test_ba_scene_preview.py tests/test_ba_scene_preview_ui.py
-6 passed, 1 skipped (browser skipped when local Chromium is unavailable)
+6 passed, 1 skipped (standalone Chromium was unavailable to the local pytest process)
 
 ruff check packages/project-model/project_model.py tests/test_ba_scene_preview.py tests/test_ba_scene_preview_ui.py
 passed
@@ -48,7 +48,10 @@ The new UI flow is marked `browser` and writes a local screenshot under the
 ignored `acceptance-output/` directory when Chromium is installed. The full
 legacy suite remains noisy on this machine: existing 0.9 UI harness failures,
 missing historical fixtures, and browser setup errors are recorded separately
-from this slice.
+from this slice. The same page was also opened through the local in-app browser:
+six slots were visible, the Nowar Rounded option applied, and three event
+advances showed Alice's dialogue with the active-slot highlight; the screenshot
+was inspected without adding it to the repository.
 
 ## Known issues and next action
 
