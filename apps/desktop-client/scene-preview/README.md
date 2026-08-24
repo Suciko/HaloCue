@@ -6,7 +6,7 @@ copy of AA or Studio code.
 
 The preview demonstrates:
 
-- six stable character slots with deterministic horizontal positions;
+- five stable AA foreground character slots with deterministic horizontal positions;
 - enter/exit events and active-speaker highlighting;
 - dialogue progression from the descriptor event list; and
 - selectable HarmonyOS Sans Medium, Noto Sans, and Nowar Rounded CSS font

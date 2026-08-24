@@ -12,7 +12,7 @@ from typing import Any
 
 PROJECT_SCHEMA_VERSION = "halocue-project/1.0"
 SCENE_DESCRIPTOR_SCHEMA_VERSION = "scene-descriptor/1.0"
-AA_SLOT_COUNT = 6
+AA_SLOT_COUNT = 5
 
 
 def _diagnostic(code: str, path: str, message: str) -> dict[str, str]:
@@ -203,7 +203,13 @@ def build_aa_scene_descriptor(project: dict[str, Any], scene_id: str) -> dict[st
         item["resource_id"]: item for item in project.get("resources", [])
     }
     actors: dict[int, dict[str, Any]] = {
-        slot: {"slot": slot, "character_id": None, "resource_id": None, "state": "hidden"}
+        slot: {
+            "slot": slot,
+            "character_id": None,
+            "display_name": None,
+            "resource_id": None,
+            "state": "hidden",
+        }
         for slot in range(1, AA_SLOT_COUNT + 1)
     }
     background: dict[str, Any] | None = None
@@ -218,6 +224,7 @@ def build_aa_scene_descriptor(project: dict[str, Any], scene_id: str) -> dict[st
             actors[slot] = {
                 "slot": slot,
                 "character_id": character_id,
+                "display_name": character.get("name"),
                 "resource_id": character.get("resource_id"),
                 "state": "visible",
             }
@@ -225,6 +232,7 @@ def build_aa_scene_descriptor(project: dict[str, Any], scene_id: str) -> dict[st
             actors[event["slot"]] = {
                 "slot": event["slot"],
                 "character_id": None,
+                "display_name": None,
                 "resource_id": None,
                 "state": "hidden",
             }

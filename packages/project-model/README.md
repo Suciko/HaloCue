@@ -9,7 +9,7 @@ The slice supports:
 - chapters, scenes, ordered events, characters, and logical resource IDs;
 - stable-ID and reference validation with structured diagnostic codes;
 - validated JSON deserialization for persistence and round-trip tests; and
-- a deterministic `scene-descriptor/1.0` AA presentation adapter with six
+- a deterministic `scene-descriptor/1.0` AA presentation adapter with five
   character slots.
 
 This is not yet the complete project model. Variables, proposals, revisions,

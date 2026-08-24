@@ -9,12 +9,10 @@
   <body>
     <main class="preview-shell" aria-label="HaloCue scene preview">
       <header class="preview-toolbar">
-        <div>
-          <p class="eyebrow">HALOCUE / SCENE PREVIEW</p>
-          <h1 id="scene-title">Synthetic scene</h1>
-        </div>
+        <span class="preview-label">预览</span>
+        <h1 id="scene-title">预览</h1>
         <label class="font-picker">
-          <span>Dialogue font</span>
+          <span>T</span>
           <select id="font-select" aria-label="Dialogue font">
             <option value="harmony">HarmonyOS Sans Medium</option>
             <option value="noto">Noto Sans</option>
@@ -27,22 +25,32 @@
         <div id="stage-background" class="stage-background" aria-hidden="true"></div>
         <div class="stage-floor" aria-hidden="true"></div>
         <div id="actor-layer" class="actor-layer" aria-label="Character slots"></div>
+        <nav class="runtime-controls" aria-label="Presentation controls">
+          <button id="font-cycle-button" class="runtime-control" type="button" title="Switch dialogue font" aria-label="Switch dialogue font">A文</button>
+          <button id="fullscreen-button" class="runtime-control" type="button" title="Toggle fullscreen" aria-label="Toggle fullscreen">◉</button>
+          <button id="close-button" class="runtime-control" type="button" title="Close preview" aria-label="Close preview">×</button>
+        </nav>
         <div class="dialogue-shade" aria-hidden="true"></div>
         <section class="dialogue-panel" aria-label="Dialogue">
           <div class="speaker-line">
-            <span id="speaker-name" class="speaker-name">Scene</span>
+            <div class="speaker-identity">
+              <span id="speaker-name" class="speaker-name">Scene</span>
+              <span id="club-name" class="club-name" hidden></span>
+            </div>
             <span id="event-progress" class="event-progress">0 / 0</span>
           </div>
-          <p id="dialogue-text" class="dialogue-text">Press advance to begin.</p>
+          <p id="dialogue-text" class="dialogue-text"><span id="dialogue-copy">Press advance to begin.</span><span id="dialogue-caret" class="dialogue-caret" aria-hidden="true" hidden></span></p>
           <div class="dialogue-footer">
             <span id="preview-status" class="preview-status">Ready</span>
             <button id="advance-button" type="button">Advance</button>
           </div>
         </section>
+        <span class="frame-counter" aria-label="Frame">0221 帧</span>
       </section>
 
       <p id="preview-error" class="preview-error" role="alert" hidden></p>
     </main>
+    <script src="./aa-runtime.js"></script>
     <script src="./preview.js"></script>
   </body>
 </html>
