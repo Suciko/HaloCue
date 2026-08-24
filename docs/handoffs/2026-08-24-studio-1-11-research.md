@@ -3,6 +3,8 @@
 ## Delivery
 
 - Branch: `chore/contracts`
+- Research boundary commit: `888b9c1`
+- Contract PR: `#19`
 - Architecture decision: `docs/adr/0005-studio-1-11-research-boundary.md`
 - Evidence inventory: `docs/research-inputs.sha256`
 - Related issues: `#8`, `#13`, `#14`
