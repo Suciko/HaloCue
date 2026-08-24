@@ -1,0 +1,23 @@
+{
+  "schema_version": "scene-descriptor/1.0",
+  "scene_id": "scene/synthetic-classroom",
+  "background": {
+    "resource_id": "synthetic/background/classroom",
+    "logical_key": "background/classroom"
+  },
+  "actors": [
+    { "slot": 1, "character_id": null, "resource_id": null, "state": "hidden" },
+    { "slot": 2, "character_id": null, "resource_id": null, "state": "hidden" },
+    { "slot": 3, "character_id": "character/alice", "resource_id": "synthetic/character/alice/portrait", "state": "visible" },
+    { "slot": 4, "character_id": "character/bob", "resource_id": "synthetic/character/bob/portrait", "state": "visible" },
+    { "slot": 5, "character_id": null, "resource_id": null, "state": "hidden" },
+    { "slot": 6, "character_id": null, "resource_id": null, "state": "hidden" }
+  ],
+  "events": [
+    { "event_id": "event/background", "kind": "background", "resource_id": "synthetic/background/classroom" },
+    { "event_id": "event/alice-enter", "kind": "enter", "character_id": "character/alice", "slot": 3 },
+    { "event_id": "event/alice-line", "kind": "dialogue", "character_id": "character/alice", "text": "Welcome to the classroom." },
+    { "event_id": "event/bob-enter", "kind": "enter", "character_id": "character/bob", "slot": 4 },
+    { "event_id": "event/bob-line", "kind": "dialogue", "character_id": "character/bob", "text": "The synthetic preview is ready." }
+  ]
+}
