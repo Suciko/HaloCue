@@ -28,15 +28,15 @@ def _serve_preview():
     return server, thread
 
 
-def test_synthetic_descriptor_fixture_has_versioned_six_slot_shape():
+def test_synthetic_descriptor_fixture_has_versioned_five_slot_shape():
     descriptor = json.loads(
         (PREVIEW_ROOT / "example.scene-descriptor.json").read_text(encoding="utf-8")
     )
 
     assert descriptor["schema_version"] == "scene-descriptor/1.0"
-    assert descriptor["background"]["preview_uri"] == "./assets/demo-conference-room.jpg"
+    assert descriptor["background"]["preview_uri"] == "./assets/demo-conference-room.png"
     assert not descriptor["background"]["preview_uri"].startswith("/")
-    assert [actor["slot"] for actor in descriptor["actors"]] == [1, 2, 3, 4, 5, 6]
+    assert [actor["slot"] for actor in descriptor["actors"]] == [1, 2, 3, 4, 5]
     assert all(
         actor["resource_id"] is None or actor["resource_id"].startswith("synthetic/")
         for actor in descriptor["actors"]
@@ -44,7 +44,7 @@ def test_synthetic_descriptor_fixture_has_versioned_six_slot_shape():
 
 
 @pytest.mark.browser
-def test_preview_renders_six_slots_advances_dialogue_and_switches_font(tmp_path):
+def test_preview_renders_five_slots_advances_dialogue_and_switches_font(tmp_path):
     playwright = pytest.importorskip("playwright.sync_api")
     server, thread = _serve_preview()
     try:
@@ -60,20 +60,20 @@ def test_preview_renders_six_slots_advances_dialogue_and_switches_font(tmp_path)
             page.wait_for_selector(".actor-slot")
             page.wait_for_selector("#preview-stage.has-background-image")
 
-            assert page.locator(".actor-slot").count() == 6
-            assert page.locator(".actor-slot.is-visible").count() == 6
+            assert page.locator(".actor-slot").count() == 5
+            assert page.locator(".actor-slot.is-visible").count() == 5
 
             page.select_option("#font-select", "nowar")
             assert page.locator("#preview-stage").get_attribute("data-font") == "nowar"
 
             for _ in range(3):
-                page.click("#advance-button")
+                page.locator("#preview-stage").click(position={"x": 640, "y": 160})
             assert page.locator("#speaker-name").inner_text() == "Alice"
-            assert "Welcome" in page.locator("#dialogue-text").inner_text()
+            assert "欢迎来到 StoryForge" in page.locator("#dialogue-text").inner_text()
             assert page.locator('.actor-slot.is-active[data-slot="3"]').count() == 1
 
             for _ in range(2):
-                page.click("#advance-button")
+                page.locator("#preview-stage").click(position={"x": 640, "y": 160})
             assert page.locator("#speaker-name").inner_text() == "Bob"
             assert page.locator('.actor-slot.is-active[data-slot="4"]').count() == 1
 

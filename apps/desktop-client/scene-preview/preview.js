@@ -1,15 +1,16 @@
 (function () {
   "use strict";
 
-  const SLOT_X = Object.freeze([9, 25, 39, 61, 75, 91]);
+  const AA = window.HaloCueAARuntime;
+  const SLOT_X = AA.SLOT_LEFT_PERCENT;
   const SUPPORTED_SCHEMA = "scene-descriptor/1.0";
 
   function assertDescriptor(descriptor) {
     if (!descriptor || descriptor.schema_version !== SUPPORTED_SCHEMA) {
       throw new Error(`Unsupported scene descriptor; expected ${SUPPORTED_SCHEMA}.`);
     }
-    if (!Array.isArray(descriptor.actors) || descriptor.actors.length !== 6) {
-      throw new Error("Scene descriptor must contain exactly six actor slots.");
+    if (!Array.isArray(descriptor.actors) || descriptor.actors.length !== 5) {
+      throw new Error("Scene descriptor must contain exactly five actor slots.");
     }
     if (!Array.isArray(descriptor.events)) {
       throw new Error("Scene descriptor events must be an array.");
@@ -17,6 +18,7 @@
   }
 
   function actorName(actor) {
+    if (actor.display_name) return actor.display_name;
     if (!actor.character_id) return "";
     const value = actor.character_id.split("/").pop() || actor.character_id;
     return value.charAt(0).toUpperCase() + value.slice(1);
@@ -45,16 +47,30 @@
     if (!stage) throw new Error("Preview stage root was not found.");
     const actorLayer = stage.querySelector("#actor-layer");
     const speaker = stage.querySelector("#speaker-name");
+    const club = stage.querySelector("#club-name");
     const text = stage.querySelector("#dialogue-text");
+    const copy = stage.querySelector("#dialogue-copy");
+    const caret = stage.querySelector("#dialogue-caret");
     const progress = stage.querySelector("#event-progress");
     const status = stage.querySelector("#preview-status");
     const advance = stage.querySelector("#advance-button");
+    const fontSelect = document.querySelector("#font-select");
+    const fontCycleButton = stage.querySelector("#font-cycle-button");
+    const fullscreenButton = stage.querySelector("#fullscreen-button");
+    const closeButton = stage.querySelector("#close-button");
     const stageBackground = stage.querySelector("#stage-background");
     actorLayer.replaceChildren(...descriptor.actors.map((actor) => createActor(actor.slot)));
     const actorElements = new Map(
       [...actorLayer.children].map((element) => [Number(element.dataset.slot), element]),
     );
-    const state = { eventIndex: -1, actors: descriptor.actors.map((actor) => ({ ...actor })) };
+    const state = {
+      eventIndex: -1,
+      actors: descriptor.actors.map((actor) => ({
+        ...actor,
+        presentation: AA.createCharacterState(actor.slot, actor),
+      })),
+      typewriter: null,
+    };
 
     function renderActors(activeCharacterId) {
       state.actors.forEach((actor) => {
@@ -73,6 +89,10 @@
         const portrait = element.querySelector(".actor-portrait");
         label.textContent = visible ? actorName(actor) : "";
         portrait.textContent = visible ? actorName(actor).slice(0, 1) : "";
+        element.style.left = `${actor.presentation.leftPercent}%`;
+        element.style.opacity = visible ? String(actor.presentation.opacity) : "0";
+        element.style.zIndex = String(actor.presentation.sortingOrder);
+        element.style.setProperty("--actor-luminance", String(actor.presentation.luminance));
         element.setAttribute("aria-label", visible ? `Slot ${actor.slot}: ${actorName(actor)}` : `Slot ${actor.slot}: empty`);
       });
     }
@@ -80,13 +100,21 @@
     function renderEvent(event) {
       if (!event) {
         speaker.textContent = "Scene";
-        text.textContent = "Press advance to begin.";
+        club.hidden = true;
+        copy.textContent = "Press advance to begin.";
+        caret.hidden = true;
         status.textContent = "Ready";
         renderActors(null);
       } else {
         const active = event.character_id || null;
-        speaker.textContent = active ? actorName({ character_id: active }) : "Scene";
-        text.textContent = event.text || (event.kind === "background" ? "Background changed." : `${event.kind}.`);
+        const activeActor = state.actors.find((actor) => actor.character_id === active);
+        speaker.textContent = activeActor ? actorName(activeActor) : "Scene";
+        club.textContent = active ? "StoryForge" : "";
+        club.hidden = !active;
+        const eventText = event.text || (event.kind === "background" ? "Background changed." : `${event.kind}.`);
+        copy.textContent = eventText;
+        caret.hidden = event.kind !== "dialogue";
+        state.typewriter = event.kind === "dialogue" ? AA.queueTypewriter(eventText) : null;
         status.textContent = event.kind === "dialogue" ? "Dialogue" : event.kind;
         renderActors(active);
       }
@@ -102,8 +130,13 @@
           resource_id: event.resource_id || state.actors[event.slot - 1].resource_id,
           state: "visible",
         };
+        const character = state.actors[event.slot - 1].presentation;
+        AA.setPos(character, AA.slotWorldPosition(event.slot));
+        AA.fadeAnimation(character, true).complete();
+        AA.setOnTop(character);
       }
       if (event.kind === "exit" && event.slot) {
+        AA.hideAnimation(state.actors[event.slot - 1].presentation);
         state.actors[event.slot - 1] = {
           ...state.actors[event.slot - 1], character_id: null, resource_id: null, state: "hidden",
         };
@@ -111,10 +144,16 @@
     }
 
     function advanceEvent() {
+      if (state.typewriter && state.eventIndex >= 0 && !state.typewriterComplete) {
+        copy.textContent = state.typewriter.complete();
+        state.typewriterComplete = true;
+        return;
+      }
       if (state.eventIndex >= descriptor.events.length - 1) return;
       state.eventIndex += 1;
       const event = descriptor.events[state.eventIndex];
       applyEvent(event);
+      state.typewriterComplete = false;
       renderEvent(event);
     }
 
@@ -134,6 +173,26 @@
     }
 
     advance.addEventListener("click", advanceEvent);
+    stage.addEventListener("click", (event) => {
+      if (!event.target.closest("button, select, .runtime-controls")) advanceEvent();
+    });
+    fontCycleButton.addEventListener("click", () => {
+      const values = ["harmony", "noto", "nowar"];
+      const next = values[(values.indexOf(fontSelect.value) + 1) % values.length];
+      fontSelect.value = next;
+      fontSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    fullscreenButton.addEventListener("click", async () => {
+      if (!document.fullscreenElement) {
+        await stage.requestFullscreen?.();
+      } else {
+        await document.exitFullscreen?.();
+      }
+    });
+    closeButton.addEventListener("click", () => {
+      window.parent?.postMessage({ type: "halocue:close-preview" }, "*");
+      status.textContent = "Preview close requested";
+    });
     stage.ownerDocument.addEventListener("keydown", (event) => {
       if (event.key === " " || event.key === "ArrowRight") {
         event.preventDefault();
@@ -159,7 +218,7 @@
       const controller = mount(demoDescriptor);
       const select = document.querySelector("#font-select");
       const stage = document.querySelector("#preview-stage");
-      document.querySelector("#scene-title").textContent = demoDescriptor.scene_id;
+      document.querySelector("#scene-title").textContent = "预览";
       select.addEventListener("change", () => stage.dataset.font = select.value);
       window.HaloCueScenePreview.controller = controller;
     } catch (exception) {

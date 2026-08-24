@@ -113,13 +113,14 @@ def test_validation_reports_duplicate_ids_and_unresolved_references():
     assert all(item["severity"] == "error" for item in diagnostics)
 
 
-def test_aa_preview_is_deterministic_and_uses_six_stable_slots():
+def test_aa_preview_is_deterministic_and_uses_five_stable_slots():
     descriptor = build_aa_scene_descriptor(valid_project(), "scene/classroom")
 
     assert descriptor["schema_version"] == "scene-descriptor/1.0"
     assert descriptor["scene_id"] == "scene/classroom"
-    assert [slot["slot"] for slot in descriptor["actors"]] == [1, 2, 3, 4, 5, 6]
+    assert [slot["slot"] for slot in descriptor["actors"]] == [1, 2, 3, 4, 5]
     assert descriptor["actors"][0]["character_id"] == "character/alice"
+    assert descriptor["actors"][0]["display_name"] == "Alice"
     assert descriptor["actors"][3]["character_id"] == "character/bob"
     assert descriptor["background"]["resource_id"] == "synthetic/background/classroom"
     assert build_aa_scene_descriptor(valid_project(), "scene/classroom") == descriptor
