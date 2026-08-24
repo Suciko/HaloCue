@@ -27,7 +27,17 @@ directory into HaloCue.
 和消费者测试，再回到编辑器分支接入。所有成果通过 PR 进入目标分支，禁止
 force-push、压缩包覆盖和直接复制文件交接。
 
-研究输入的位置如下：
+需要核验的上游/参考仓库如下：
+
+  StoryForge/Studio：https://github.com/Jianmiao/storyforge-studio
+  HaloCue backend：https://github.com/Jianmiao/halocue-backend
+  Blue Archive data importer：https://github.com/arisu-archive/bluearchive-data
+  LingChat（AGPL-3.0，仅作参考）：https://github.com/SlimeBoyOwO/LingChat
+
+先记录每个仓库的 URL、不可变 commit、许可证和实际使用的文件，再决定
+是否能复用代码。没有明确许可证的仓库按参考输入处理，重新实现行为。
+
+本地研究输入的位置如下：
 
   Studio 1.11 解包研究：E:\Studio-1.11.0-win\learning-source\
   AzureArchive 行为研究：E:\AzureArchive_decompiled\
@@ -80,6 +90,10 @@ force-push、压缩包覆盖和直接复制文件交接。
 ## Current coordination record
 
 - Target repository: `Suciko/HaloCue`
+- Collaborator source: [storyforge-studio](https://github.com/Jianmiao/storyforge-studio)
+- Backend reference: [halocue-backend](https://github.com/Jianmiao/halocue-backend)
+- Data reference: [bluearchive-data](https://github.com/arisu-archive/bluearchive-data)
+- Behavior-only reference: [LingChat](https://github.com/SlimeBoyOwO/LingChat)
 - Integration issue: [#24](https://github.com/Suciko/HaloCue/issues/24)
 - Editor branch: `feature/1.1-ba-editor`
 - Shared-contract branch: `chore/contracts`
