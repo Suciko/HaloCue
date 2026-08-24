@@ -58,7 +58,7 @@
   "bgmId": 999,                    // 999 = 静音
   "selectionGroup": 0,             // 分支选项组（本工具尚未支持）
   "additionalPrompt": "#wait;2000",
-  "characters": { "$values": [ /* 恒 6 个 */ ] },
+  "characters": { "$values": [ /* 固定 6 项：0 为无立绘说话槽，1–5 为可见站位 */ ] },
   "speakerSlotNum": 3,
   "highlightedSlotNums": { "$values": [1, 2] },
   "isDialogScript": true,
@@ -108,7 +108,8 @@
 
 ### 位置模型（核心）
 
-`characters` 恒为 **6 个元素**。
+`characters` 在 AAP 中恒为 **6 个数组元素**，但这不是 6 个可见站位：
+第 0 项是无立绘说话槽，第 1–5 项才是五个可见立绘位置。
 
 - **下标 0 是"无立绘说话位"** —— 旁白、只出声的角色走这里。
   `characters[0].name` 为空 = 纯旁白，非空 = 该角色说话但不显示立绘。

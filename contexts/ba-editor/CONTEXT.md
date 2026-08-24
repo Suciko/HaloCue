@@ -23,6 +23,16 @@ maps semantic story lines to AA and MMT presentation fields.
 - Simple mode hides implementation-heavy controls; advanced mode exposes them
   without changing their semantics.
 
+## Stage layout contract
+
+- The editor has five visible portrait positions: `1`, `2`, `3`, `4`, and `5`.
+- Position `0` is reserved for narration or an off-screen speaker with no
+  portrait. It is a compatibility slot, not a visible stage position.
+- AAP compatibility serializes `characters` as six entries (`0..5`), but the
+  user-facing model and all 1.1 copy must say “five visible positions”.
+- A shot may contain at most five visible characters. `@move` and `@stage`
+  validation use the same `1..5` range.
+
 ## Collaboration
 
 The primary implementation stream is `feature/1.1-ba-editor`. Shared model or

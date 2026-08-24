@@ -34,6 +34,16 @@ not the default deliverable.
 - AA/AAP compatibility remains an import, preview, and optional export edge.
   `HaloCueProject` is never shaped around AAP limitations.
 
+### AA-compatible stage layout
+
+The 1.1 editor exposes **five visible portrait positions**, numbered `1` to
+`5`, matching the existing AA runtime and compiler validation. AAP keeps a
+six-entry `characters` array for serialization, but entry `0` is the
+no-portrait narrator/off-screen speaker slot; it is not a sixth visible
+position. Product copy, editor controls, validation, and export documentation
+must call this “five visible positions” and must not describe it as a
+six-position stage.
+
 The ordinary-user workflow should begin with a clear scene, characters, and
 timeline rather than exposing every advanced Studio-style property at once.
 Advanced node, event, resource, and export controls remain available through an
