@@ -1,0 +1,20 @@
+.layout-mode-fieldset {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.layout-mode-fieldset legend {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+@media (max-width: 800px) {
+  .layout-mode-fieldset {
+    grid-template-columns: 1fr;
+  }
+}

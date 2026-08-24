@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>HaloCue 写作工作台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%233f69a7'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-family='serif' font-size='14' fill='white'%3EHC%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/tokens.css?v=20260817-1">
+  <!-- shell.css?v=20260820-37 and shell.css?v=20260824-44 retained for contract compatibility; the resource version below is current. -->
+  <link rel="stylesheet" href="/shell.css?v=20260824-45">
+  <!-- writing-workbench.css?v=20260821-39 retained for contract compatibility; the resource version below is current. -->
+  <link rel="stylesheet" href="/writing-workbench.css?v=20260823-70">
+  <link rel="stylesheet" href="/production-embed.css?v=20260823-9">
+</head>
+<body class="app-loading">
+  <div class="boot-screen" id="bootScreen" role="status" aria-live="polite">
+    <span aria-hidden="true">HC</span>
+    <div><b>正在恢复工作台</b><small>读取作品、当前对话与待决定修改</small></div>
+  </div>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <button class="brand" data-action="home" title="HaloCue 首页">HC</button>
+      <div class="crumb" id="crumb">HaloCue / 写作工作台</div>
+      <div class="panel-controls" aria-label="写作流程与视图控制">
+        <button class="flow-nav-button" type="button" data-flow-nav="previous" aria-label="返回上一步" title="返回上一步"><span aria-hidden="true">&lsaquo;</span></button>
+        <button class="flow-nav-button" type="button" data-flow-nav="next" aria-label="进入下一步" title="进入下一步"><span aria-hidden="true">&rsaquo;</span></button>
+        <button class="panel-toggle-button" type="button" data-panel-toggle="tree" aria-pressed="false" title="收起章节栏">章节栏</button>
+        <button class="panel-toggle-button" type="button" data-panel-toggle="inspector" aria-pressed="false" title="收起 Agent">Agent</button>
+        <button class="focus-toggle" type="button" data-focus-toggle aria-pressed="false" title="收起两侧栏，专注查看正文">专注</button>
+      </div>
+      <div class="top-actions">
+        <span class="save-indicator" id="saveStatus" role="status" aria-live="polite">正在连接</span>
+        <span class="provider-badge" id="providerBadge">模型状态</span>
+        <button class="quiet" data-action="new-work" data-header-new-work hidden>新建作品</button>
+      </div>
+      <span class="sr-only" id="versionStatus">作品版本 -</span>
+      <span class="sr-only" id="taskStatus">后台任务 -</span>
+    </header>
+
+    <nav class="primary-nav" aria-label="主导航">
+      <button class="nav-item" data-section="works"><span class="nav-mark">构</span><span>构思</span></button>
+      <button class="nav-item active" data-section="writing"><span class="nav-mark">写</span><span>写作</span></button>
+      <button class="nav-item" data-section="production"><span class="nav-mark">制</span><span>AA制作</span></button>
+      <button class="nav-item" data-section="assets"><span class="nav-mark">材</span><span>素材</span></button>
+      <button class="nav-item" data-section="references"><span class="nav-mark">资</span><span>资料</span></button>
+      <button class="nav-item" data-section="tasks"><span class="nav-mark">任</span><span>任务</span></button>
+      <span class="nav-spacer"></span>
+      <button class="nav-item nav-feedback" data-action="feedback" title="反馈使用体验或问题"><span class="nav-mark">馈</span><span>反馈</span></button>
+      <button class="nav-item nav-settings" data-action="settings" id="openSettingsButton" title="打开 HaloCue 设置中心"><span class="nav-mark">设</span><span>设置</span></button>
+    </nav>
+
+    <aside class="tree-panel" id="treePanel">
+      <div class="panel-heading">
+        <p>当前作品</p>
+        <h1 id="workTitle">尚未建立作品</h1>
+        <button class="work-switch" type="button" data-open-work-switch>切换作品</button>
+      </div>
+      <section class="work-surface-note">
+        <p>作品栏目</p>
+        <b>全作方向、人物与世界观</b>
+        <small>全局讨论不占用章节写作步骤。</small>
+        <button type="button" class="quiet" data-section="works">打开作品控制台</button>
+      </section>
+      <ol class="stage-list" id="stageList" aria-label="章节写作流程">
+        <li><button data-stage="structure"><span>01</span><b>章节细纲</b><small>只规划当前章节</small></button></li>
+        <li><button data-stage="draft"><span>02</span><b>逐场写作</b><small>候选、Diff 与正文</small></button></li>
+        <li><button data-stage="release"><span>03</span><b>检查并发布</b><small>生成制作定稿</small></button></li>
+      </ol>
+      <section class="workflow-guide" id="workflowGuide" aria-live="polite"></section>
+      <div class="scene-tree" id="sceneTree"></div>
+    </aside>
+
+    <main class="workspace" id="workspace" tabindex="-1"></main>
+
+    <aside class="inspector" id="inspector">
+      <div class="inspector-tabs">
+        <button class="active" data-inspector="decision">当前决定</button>
+        <button data-inspector="context">上下文</button>
+        <button data-inspector="agent">创作导演</button>
+      </div>
+      <div id="inspectorContent"></div>
+    </aside>
+    <nav class="mobile-nav" aria-label="移动导航">
+      <button data-mobile="works">构思</button>
+      <button class="active" data-mobile="writing">写作</button>
+      <button data-section="production">AA制作</button>
+      <button data-mobile="references">资料</button>
+      <details class="mobile-more-menu">
+        <summary>更多</summary>
+        <div>
+          <button type="button" data-open-work-switch>切换作品</button>
+          <button type="button" data-section="assets">素材库</button>
+          <button data-mobile="tasks">任务</button>
+          <button data-action="feedback">反馈问题</button>
+          <button data-action="settings">设置</button>
+        </div>
+      </details>
+    </nav>
+  </div>
+
+  <div id="workDialog" role="dialog" aria-modal="true" aria-labelledby="workDialogTitle" hidden>
+    <form id="workForm">
+      <div class="dialog-head"><div><p>NEW WORK</p><h2 id="workDialogTitle">开始一个新故事</h2></div><button type="button" data-close-work-dialog class="icon-button" title="关闭">×</button></div>
+      <label class="new-work-idea">先说一句你想看的故事<textarea name="idea" required maxlength="600" placeholder="例如：爱丽丝和凯伊发现一台只在深夜回应的旧机器。"></textarea><small>建立后会直接进入多轮讨论；这句话不会自动变成正式设定。</small></label>
+      <label>作品名称（可选）<input name="title" maxlength="80" placeholder="留空时会从想法生成临时名称"></label>
+      <fieldset class="world-seed-picker">
+        <legend>世界观底稿</legend>
+        <label class="world-seed-option"><input type="radio" name="world_seed" value="ba_starter" checked><span><b>从 BA 世界观开始</b><small>创建可编辑的 BA 设定库，所有条目先标为待核对。</small></span></label>
+        <label class="world-seed-option"><input type="radio" name="world_seed" value="blank"><span><b>从原创世界开始</b><small>建立空白资料库，之后自行添加人物、地点、组织与规则。</small></span></label>
+      </fieldset>
+      <p class="form-note">作品、默认卷、第一章和创作主对话会一起保存到本机。BA 底稿不是自动确认的官方设定；Agent 默认采用“审核协作”，不会静默覆盖正式产物。</p>
+      <div class="dialog-actions"><button type="button" data-close-work-dialog class="quiet">取消</button><button type="submit" data-submit="work" class="primary">建立作品</button></div>
+    </form>
+  </div>
+
+  <dialog id="workSwitchDialog">
+    <form method="dialog" class="work-switch-dialog">
+      <div class="dialog-head"><div><p>WORKS</p><h2>切换作品</h2></div><button value="cancel" class="icon-button" title="关闭">×</button></div>
+      <p class="form-note">每部作品拥有独立的人物卡、世界观、正文、版本和发布记录。</p>
+      <div id="workSwitchList" class="work-switch-list"></div>
+      <div class="dialog-actions"><button value="cancel" class="quiet">关闭</button><button type="button" data-action="new-work" class="primary">新建作品</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="structureDialog">
+    <form id="structureForm">
+      <div class="dialog-head"><div><p id="structureDialogKicker">STRUCTURE</p><h2 id="structureDialogTitle">建立章节</h2></div><button type="button" class="icon-button" data-close-structure-dialog title="关闭">×</button></div>
+      <input type="hidden" name="kind">
+      <input type="hidden" name="chapter_id">
+      <input type="hidden" name="volume_id">
+      <label>名称<input name="title" required maxlength="120" placeholder="例如：第一章：未眠的机器"></label>
+      <div id="sceneStructureFields" class="dialog-fields-hidden">
+        <label>发生地点<input name="location" maxlength="160" placeholder="例如：游戏开发部活动室"></label>
+        <label>本场要发生什么变化？<textarea name="goal" placeholder="例如：确认提示灯来自旧机器，而不是普通故障。"></textarea></label>
+        <label>本场起草重心<select name="writing_mode"><option value="bond_short">羁绊与日常互动</option><option value="main_battle">主线冲突与行动</option><option value="long_comedy">轻松喜剧推进</option><option value="text_reading">小说化叙事阅读</option></select><small>作品可以混合推进；这一次场景生成只会使用这里选择的一套规则包。</small></label>
+        <label>本场不能提前揭示的内容<textarea name="forbidden_reveals" placeholder="每行一项，可留空"></textarea></label>
+      </div>
+      <p class="form-note" id="structureDialogNote">章节和场景会保存稳定身份，改名不会改变它们的引用。</p>
+      <div class="dialog-actions"><button type="button" class="quiet" data-close-structure-dialog>取消</button><button type="submit" class="primary">保存结构</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="characterImportDialog" class="character-import-dialog">
+    <form id="characterImportForm">
+      <div class="dialog-head"><div><p>IMPORT CHARACTER</p><h2>导入人物卡</h2></div><button type="button" class="icon-button" data-close-character-import title="关闭">×</button></div>
+      <p class="form-note">系统会验证正式 BA 人物卡结构并无损保留完整 JSON。语义提醒不会被伪装成结构错误，未提供官方语料时也不会冒充已经核验。</p>
+      <input id="characterImportFile" name="file" type="file" accept=".json,application/json" hidden>
+      <label class="character-import-dropzone" for="characterImportFile" data-character-import-dropzone>
+        <span class="character-import-file-mark">JSON</span>
+        <b>拖入人物卡，或点击选择文件</b>
+        <small>单张 UTF-8 JSON，最大 5 MB。验证和保存都只发生在当前作品。</small>
+      </label>
+      <p id="characterImportError" class="character-import-error" role="alert" hidden></p>
+      <section id="characterImportPreview" class="character-import-preview" hidden>
+        <header><div><span>角色</span><b data-character-import-name>尚未读取</b></div><strong data-character-import-status>等待验证</strong></header>
+        <div><span>文件</span><b data-character-import-file>尚未读取</b></div>
+        <div><span>样本覆盖</span><b data-character-import-summary>尚未读取</b></div>
+        <div class="character-import-readiness" data-character-import-readiness></div>
+        <p class="character-import-fixes" data-character-import-fixes></p>
+        <section class="character-import-issues" data-character-import-errors hidden></section>
+        <details class="character-import-warnings" data-character-import-warnings hidden></details>
+        <label>来源说明<input name="source_label" value="用户导入的 BA 正式人物卡" maxlength="160"></label>
+      </section>
+      <div class="dialog-actions"><button type="button" class="quiet" data-close-character-import>取消</button><button type="submit" class="primary" disabled>验证通过后导入</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="worldImportDialog" class="character-import-dialog">
+    <form id="worldImportForm">
+      <div class="dialog-head"><div><p>IMPORT WORLD</p><h2>导入世界观资料</h2></div><button type="button" class="icon-button" data-close-world-import title="关闭">×</button></div>
+      <p class="form-note">导入一份结构化 JSON。原始文件、清理版本、哈希和验证报告都会保留；待核对条目留在资料库，不会自动进入 Agent。</p>
+      <input id="worldImportFile" name="file" type="file" accept=".json,application/json" hidden>
+      <label class="character-import-dropzone" for="worldImportFile" data-world-import-dropzone>
+        <span class="character-import-file-mark">JSON</span>
+        <b>拖入世界观资料，或点击选择文件</b>
+        <small>支持实体、规则和时间线，UTF-8 JSON，最大 5 MB。</small>
+      </label>
+      <p id="worldImportError" class="character-import-error" role="alert" hidden></p>
+      <section id="worldImportPreview" class="character-import-preview" hidden>
+        <header><div><span>资料标题</span><b data-world-import-title>尚未读取</b></div><strong data-world-import-status>等待验证</strong></header>
+        <div><span>文件</span><b data-world-import-file>尚未读取</b></div>
+        <div><span>内容覆盖</span><b data-world-import-summary>尚未读取</b></div>
+        <p class="character-import-fixes" data-world-import-fixes></p>
+        <section class="character-import-issues" data-world-import-errors hidden></section>
+        <details class="character-import-warnings" data-world-import-warnings hidden></details>
+        <label>来源说明<input name="source_label" value="用户导入的 BA 世界观卡" maxlength="160"></label>
+      </section>
+      <div class="dialog-actions"><button type="button" class="quiet" data-close-world-import>取消</button><button type="submit" class="primary" disabled>验证通过后导入</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="revisionCompareDialog" class="revision-compare-dialog">
+    <header>
+      <div>
+        <p class="eyebrow">REVISION COMPARE</p>
+        <h2 id="revisionCompareTitle">比较资料修订</h2>
+        <p id="revisionCompareMeta">读取两个不可变修订之间的差异。</p>
+      </div>
+      <form method="dialog">
+        <button class="quiet" value="cancel" data-close-revision-compare aria-label="关闭修订比较">关闭</button>
+      </form>
+    </header>
+    <div id="revisionCompareBody" class="revision-compare-body" aria-live="polite">
+      <div class="revision-compare-empty">选择一个历史修订后查看与当前版本的差异。</div>
+    </div>
+  </dialog>
+
+  <dialog id="feedbackDialog">
+    <form id="feedbackForm">
+      <div class="dialog-head"><div><p>FEEDBACK</p><h2>反馈问题</h2></div><button type="button" class="icon-button" data-close-feedback title="关闭">×</button></div>
+      <p class="feedback-intro">告诉我们哪里难用、哪里出错，或者你希望怎样改。反馈会先保存在本机写作数据中。</p>
+      <label>反馈类型<select name="category"><option value="usability">不好理解或不好操作</option><option value="bug">功能出错</option><option value="runtime_error">系统报错</option><option value="generation_quality">生成结果质量</option><option value="suggestion">功能建议</option></select></label>
+      <label>影响程度<select name="severity"><option value="minor">有影响，但可以继续</option><option value="major">明显影响当前任务</option><option value="blocker">无法继续</option><option value="cosmetic">轻微显示问题</option></select></label>
+      <label>一句话概述<input name="summary" required maxlength="120" placeholder="例如：章节页面不知道下一步应该点哪里"></label>
+      <label>详细说明<textarea name="details" required maxlength="4000" placeholder="描述你当时想完成什么、看到了什么，以及你期望怎样工作。"></textarea></label>
+      <label class="feedback-context-check"><input type="checkbox" name="attach_context" checked><span>附带当前作品、页面和显示尺寸，便于定位问题</span></label>
+      <div class="dialog-actions"><button type="button" class="quiet" data-close-feedback>取消</button><button type="submit" class="primary">保存反馈</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="agentIntentConfirmDialog" class="agent-intent-confirm-dialog" aria-labelledby="agentConfirmTitle">
+    <form method="dialog">
+      <p class="eyebrow">需要你的确认</p>
+      <h2 id="agentConfirmTitle" data-agent-confirm-title>确认继续这条请求</h2>
+      <p data-agent-confirm-request>确认后 Agent 才会继续处理；正式作品仍会先以候选形式出现。</p>
+      <div class="dialog-actions">
+        <button value="cancel" class="quiet">先不继续</button>
+        <button type="button" class="primary" data-agent-confirm-submit>确认继续</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="settingsDialog" class="settings-modal">
+    <div class="settings-shell">
+      <header class="settings-header">
+        <div>
+          <p class="eyebrow">系统设置与环境</p>
+          <h2>HaloCue 设置中心</h2>
+        </div>
+        <button type="button" class="icon-button" data-close-settings title="关闭 (Esc)">×</button>
+      </header>
+
+      <div class="settings-body">
+        <nav class="settings-nav" aria-label="设置导航">
+          <button type="button" class="settings-nav-btn active" data-tab="models">
+            <span class="settings-nav-mark">模</span>
+            <span>AI 模型服务</span>
+          </button>
+          <button type="button" class="settings-nav-btn" data-tab="aa">
+            <span class="settings-nav-mark">制</span>
+            <span>AA 制作环境</span>
+          </button>
+          <button type="button" class="settings-nav-btn" data-tab="preferences">
+            <span class="settings-nav-mark">风</span>
+            <span>创作与演出偏好</span>
+          </button>
+          <button type="button" class="settings-nav-btn" data-tab="corpus">
+            <span class="settings-nav-mark">资</span>
+            <span>素材与语料索引</span>
+          </button>
+          <button type="button" class="settings-nav-btn" data-tab="conversations">
+            <span class="settings-nav-mark">话</span>
+            <span>对话管理</span>
+          </button>
+          <button type="button" class="settings-nav-btn" data-tab="system">
+            <span class="settings-nav-mark">统</span>
+            <span>系统体检与数据</span>
+          </button>
+        </nav>
+
+        <main class="settings-content">
+          <!-- Tab 1: AI 模型服务 -->
+          <section id="pane-models" class="settings-pane active">
+            <div class="pane-lead">
+              <h3>大语言模型接入与双域协同</h3>
+              <p>支持配置 DeepSeek、OpenAI、Anthropic Claude、智谱 GLM、Kimi、通义千问或本地 Ollama。API Key 采用 Windows DPAPI 本地强加密保护，支持一键双域指派与即时生效。</p>
+            </div>
+
+            <!-- 当前生效大模型运行状态看板 -->
+            <div id="activeModelStatusBoard" class="active-model-card unconfigured">
+              <div class="active-model-header">
+                <div class="active-model-title">
+                  <span class="active-status-dot"></span>
+                  <strong id="activeModelDisplayName">尚未接入外部大模型</strong>
+                  <span id="activeModelRoleBadge" class="model-role-badge">本地规则模拟</span>
+                </div>
+                <span id="activeModelLatencyPill" class="latency-pill">未连接</span>
+              </div>
+              <div class="active-model-details-grid" id="activeModelDetailsGrid">
+                <div class="model-detail-item">
+                  <small>当前生效模型</small>
+                  <span id="activeModelIdText">本地模拟规则 (Fake Provider)</span>
+                </div>
+                <div class="model-detail-item">
+                  <small>接入厂商 / 服务商</small>
+                  <span id="activeModelVendorText">未配置外部接口</span>
+                </div>
+                <div class="model-detail-item">
+                  <small>接口协议与地址</small>
+                  <span id="activeModelEndpointText">内置本地规则引擎</span>
+                </div>
+                <div class="model-detail-item">
+                  <small>密钥安全存储</small>
+                  <span id="activeModelSecretText">Windows DPAPI 加密保护就绪</span>
+                </div>
+                <div class="model-detail-item wide">
+                  <small>已分配生效角色</small>
+                  <span id="activeModelScopeText">当前未接入外部模型。请在下方选择厂商预设或填入 API Key 后点击“保存并立即启用”。</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="model-config-workspace">
+              <aside class="vendor-preset-section" aria-label="模型服务商">
+                <div class="provider-picker-head">
+                  <div>
+                    <span class="section-label">模型服务商</span>
+                    <small id="providerPresetCount">选择后在右侧完成连接配置</small>
+                  </div>
+                  <label class="provider-search-field">
+                    <span class="sr-only">搜索模型服务商</span>
+                    <input id="providerPresetSearch" type="search" placeholder="搜索服务商或模型" autocomplete="off">
+                  </label>
+                </div>
+                <div class="vendor-grid" id="vendorPresetGrid" role="listbox" aria-label="可用模型服务商">
+                <button type="button" class="vendor-card active" data-preset-id="deepseek">
+                  <strong>DeepSeek 官方</strong>
+                  <small>deepseek-chat</small>
+                </button>
+                <button type="button" class="vendor-card" data-preset-id="siliconflow">
+                  <strong>硅基流动</strong>
+                  <small>SiliconFlow 高速代理</small>
+                </button>
+                <button type="button" class="vendor-card" data-preset-id="zhipu">
+                  <strong>智谱 GLM</strong>
+                  <small>glm-4-plus / flash</small>
+                </button>
+                <button type="button" class="vendor-card" data-preset-id="moonshot">
+                  <strong>月之暗面 Kimi</strong>
+                  <small>moonshot-v1-auto</small>
+                </button>
+                <button type="button" class="vendor-card" data-preset-id="qwen">
+                  <strong>通义千问 Qwen</strong>
+                  <small>qwen-max / plus</small>
+                </button>
+                <button type="button" class="vendor-card" data-preset-id="ollama">
+                  <strong>本地 Ollama</strong>
+                  <small>127.0.0.1:11434 (免Key)</small>
+                </button>
+                <button type="button" class="vendor-card" data-preset-id="openai">
+                  <strong>OpenAI 官方</strong>
+                  <small>gpt-4o / o3-mini</small>
+                </button>
+                <button type="button" class="vendor-card" data-preset-id="anthropic">
+                  <strong>Anthropic Claude</strong>
+                  <small>claude-3-5-sonnet</small>
+                </button>
+              </div>
+              </aside>
+
+              <form id="settingsModelForm" class="settings-form model-provider-detail">
+                <header class="provider-detail-head">
+                  <div>
+                    <span class="section-label">当前配置</span>
+                    <h4 id="selectedProviderName">DeepSeek 官方</h4>
+                    <p id="selectedProviderNotes">选择服务商后，这里只显示它的连接、模型与生效范围。</p>
+                  </div>
+                  <span id="selectedProviderProtocol" class="provider-protocol-badge">OpenAI 兼容</span>
+                </header>
+              <div class="field-grid">
+                <label>
+                  接口协议
+                  <select id="settingsProvider" name="provider">
+                    <option value="openai">OpenAI 兼容协议 (Chat Completions)</option>
+                    <option value="anthropic">Anthropic Claude 协议 (Messages)</option>
+                  </select>
+                </label>
+                <label>
+                  接口地址 (Base URL)
+                  <input id="settingsBaseUrl" name="base_url" placeholder="https://api.deepseek.com/v1" autocomplete="off" spellcheck="false">
+                </label>
+              </div>
+
+              <div class="field-grid">
+                <label class="key-field-wrap">
+                  <span>API Key <span class="dpapi-badge" title="Windows DPAPI 本地加密存储，绝不泄露明文">DPAPI 本地保护</span></span>
+                  <div class="password-input-group">
+                    <input id="settingsApiKey" name="api_key" type="password" placeholder="留空保持已有密钥 / 粘贴新密钥" autocomplete="new-password">
+                    <button type="button" class="toggle-password-btn" id="toggleApiKeyVisibility" title="显示/隐藏 Key" aria-label="显示/隐藏 Key">显示</button>
+                  </div>
+                  <small class="field-hint" id="apiKeyStatusHint">支持系统环境变量或 Windows 本地加密存储。</small>
+                </label>
+
+                <label>
+                  <span>选择或输入模型名称</span>
+                  <div class="model-input-group">
+                    <input id="settingsModelName" name="model" placeholder="例如：deepseek-chat" list="settingsModelDatalist" required autocomplete="off">
+                    <button type="button" class="quiet fetch-models-btn" id="fetchModelsBtn" title="从接口拉取可用模型列表">获取模型</button>
+                  </div>
+                  <datalist id="settingsModelDatalist"></datalist>
+                </label>
+              </div>
+
+              <div class="role-allocation-box">
+                <label class="section-label">角色指派与生效范围</label>
+                <div class="role-radios">
+                  <label class="role-option">
+                    <input type="radio" name="apply_scope" value="both" checked>
+                    <span>
+                      <b>双域通用主力（推荐）</b>
+                      <small>同时指派给【剧本写作】与【AA演出制作】，省去重复配置</small>
+                    </span>
+                  </label>
+                  <label class="role-option">
+                    <input type="radio" name="apply_scope" value="writing">
+                    <span>
+                      <b>仅设为写作主力</b>
+                      <small>负责大纲讨论、创作导演、场景起草与修订</small>
+                    </span>
+                  </label>
+                  <label class="role-option">
+                    <input type="radio" name="apply_scope" value="direction">
+                    <span>
+                      <b>仅设为AA演出主力</b>
+                      <small>负责镜头调度、人物站位、表情动作与CG建议</small>
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <details class="advanced-settings-toggle">
+                <summary>高级参数（输出上限、超时与推理思考模式）</summary>
+                <div class="field-grid advanced-grid">
+                  <label>
+                    最大输出 Tokens (max_tokens)
+                    <input id="settingsMaxTokens" type="number" name="max_tokens" value="8192" min="512" max="128000" step="512">
+                  </label>
+                  <label>
+                    请求超时时间 (秒)
+                    <input id="settingsTimeout" type="number" name="timeout" value="120" min="10" max="600" step="5">
+                  </label>
+                  <label>
+                    输入单价 (美元 / 百万 Tokens)
+                    <input id="settingsInputCost" type="number" name="input_cost_per_million" value="0" min="0" max="1000" step="0.01">
+                  </label>
+                  <label>
+                    输出单价 (美元 / 百万 Tokens)
+                    <input id="settingsOutputCost" type="number" name="output_cost_per_million" value="0" min="0" max="1000" step="0.01">
+                  </label>
+                  <label class="wide">
+                    推理 / 思考模式 (Reasoning Mode)
+                    <select id="settingsReasoningMode" name="reasoning_mode">
+                      <option value="balanced">均衡模式 (Balanced - 推荐)</option>
+                      <option value="creative">高创意度 (Creative - 适合日常发散)</option>
+                      <option value="strict">严格精准 (Strict - 适合演出指令校验)</option>
+                    </select>
+                  </label>
+                </div>
+              </details>
+
+              <div id="modelDiagnosticsCard" class="diagnostics-card hidden"></div>
+
+              <div class="settings-actions-footer">
+                <div class="action-status-left">
+                  <span id="modelConfigStatusBadge" class="status-chip">正在检查模型状态</span>
+                </div>
+                <div class="action-buttons-right">
+                  <button type="button" class="quiet" id="testConnectionBtn">测试连通性</button>
+                  <button type="submit" class="primary" id="saveAndApplyModelBtn">保存并立即启用</button>
+                </div>
+              </div>
+            </form>
+            </div>
+          </section>
+
+          <!-- Tab 2: AA 制作环境 -->
+          <section id="pane-aa" class="settings-pane">
+            <div class="pane-lead">
+              <h3>AzureArchive 本地制作环境</h3>
+              <p>检查并绑定 AzureArchive 客户端安装目录或 data 存储区。绑定后，编译好的二创剧本工程可直接安装至 AA 中开箱运行。</p>
+            </div>
+
+            <div class="settings-form">
+              <label>
+                AzureArchive.exe 路径、安装目录或 data 工作区
+                <input id="aaWorkspaceInput" placeholder="例如：E:\AzureArchive 或 D:\AA\存储文件\data">
+                <small class="field-hint">支持输入主程序 EXE、根目录或包含 projects、saves、overrides 的 data 目录。</small>
+              </label>
+
+              <div class="actions">
+                <button type="button" class="quiet" id="inspectAaBtn">检测环境有效性</button>
+                <button type="button" class="primary" id="adoptAaBtn" disabled>采用此工作区</button>
+              </div>
+
+              <div id="aaEnvironmentCard" class="environment-status-card empty">
+                <strong>尚未检测</strong>
+                <p>输入路径后点击“检测环境有效性”。</p>
+              </div>
+            </div>
+          </section>
+
+          <!-- Tab 3: 创作与演出偏好 -->
+          <section id="pane-preferences" class="settings-pane">
+            <div class="pane-lead">
+              <h3>创作与演出默认习惯</h3>
+              <p>定制您的二创剧本写作风格基调、台词警戒阈值以及 AzureArchive 镜头与节奏参数。</p>
+            </div>
+
+            <form id="preferencesForm" class="settings-form">
+              <div class="field-grid">
+                <label>
+                  默认剧本风格基调
+                  <select id="prefWritingTone" name="writing_tone">
+                    <option value="bond_short">羁绊与日常互动 (轻松、细腻对话)</option>
+                    <option value="main_battle">主线冲突与行动 (紧凑战斗与悬疑)</option>
+                    <option value="long_comedy">轻松喜剧推进 (幽默、欢脱闹剧)</option>
+                    <option value="text_reading">小说化叙事阅读 (心理描写与叙述)</option>
+                  </select>
+                </label>
+
+                <label>
+                  单句台词字数警示阈值
+                  <input id="prefCharWarning" type="number" name="char_warning_threshold" value="35" min="15" max="100">
+                  <small class="field-hint">GalGame 单屏台词建议保持在 30-40 字以内。</small>
+                </label>
+              </div>
+
+              <div class="field-grid">
+                <label>
+                  AA 气泡自动等待时间 (毫秒)
+                  <input id="prefAaPacing" type="number" name="aa_pacing_wait_ms" value="2500" min="1000" max="5000" step="100">
+                  <small class="field-hint">AzureArchive 播放对话气泡的停留时间（默认 2500ms）。</small>
+                </label>
+
+                <label>
+                  同屏最多立绘角色数
+                  <input id="prefMaxStageCharacters" type="number" name="max_stage_characters" value="4" min="1" max="5">
+                  <small class="field-hint">超过此数量时自动切镜或清理较早发言的角色。</small>
+                </label>
+              </div>
+
+              <div class="settings-actions-footer">
+                <div class="action-status-left">
+                  <span id="prefSaveHint" class="field-hint">修改后点击保存立即应用于所有新章节。</span>
+                </div>
+                <div class="action-buttons-right">
+                  <button type="button" class="quiet" data-onboarding-start>重新查看界面引导</button>
+                  <button type="submit" class="primary" id="savePreferencesBtn">保存偏好设置</button>
+                </div>
+              </div>
+            </form>
+          </section>
+
+          <!-- Tab 4: 素材与语料索引 -->
+          <section id="pane-corpus" class="settings-pane">
+            <div class="pane-lead">
+              <h3>官方演出语料库与素材索引</h3>
+              <p>HaloCue 依托《蔚蓝档案》官方剧情语料与标准资产索引，为角色立绘、Spine表情、音效与背景提供高保真语义匹配。</p>
+            </div>
+
+            <div class="corpus-grid">
+              <div class="corpus-card">
+                <div class="corpus-card-head">
+                  <span class="corpus-tag">语料</span>
+                  <div>
+                    <strong>官方演出语料库</strong>
+                    <small>05-官方演出语料库 (Records)</small>
+                  </div>
+                </div>
+                <p id="corpusRecordStatus">正在扫描语料库...</p>
+              </div>
+
+              <div class="corpus-card">
+                <div class="corpus-card-head">
+                  <span class="corpus-tag">素材</span>
+                  <div>
+                    <strong>AA 素材索引文件</strong>
+                    <small>aa_resources.json</small>
+                  </div>
+                </div>
+                <p id="corpusResourceStatus">已加载标准游戏素材白名单与别名映射。</p>
+              </div>
+
+              <div class="corpus-card">
+                <div class="corpus-card-head">
+                  <span class="corpus-tag">词典</span>
+                  <div>
+                    <strong>角色命名基准表</strong>
+                    <small>character-name-baseline.json</small>
+                  </div>
+                </div>
+                <p>收录百位基沃托斯学员标准译名、变体与社团归属。</p>
+              </div>
+            </div>
+          </section>
+
+          <section id="pane-conversations" class="settings-pane">
+            <div class="pane-lead">
+              <h3>已归档的创作对话</h3>
+              <p>归档只会把对话移出作品侧栏，不会删除消息、附件、工具记录或 Proposal 来源。</p>
+            </div>
+
+            <label class="archived-conversation-search">
+              <span class="sr-only">搜索已归档对话</span>
+              <input id="archivedConversationSearch" type="search" placeholder="按作品或对话名称搜索" autocomplete="off">
+            </label>
+            <div class="archived-conversation-meta"><span id="archivedConversationCount">正在读取归档对话</span></div>
+            <div id="archivedConversationList" class="archived-conversation-list" aria-live="polite">
+              <div class="archived-conversation-empty"><b>正在读取</b><span>归档内容会集中显示在这里。</span></div>
+            </div>
+          </section>
+
+          <!-- Tab 6: 系统体检与数据 -->
+          <section id="pane-system" class="settings-pane">
+            <div class="pane-lead">
+              <h3>系统运行体检与数据安全</h3>
+              <p>查看 HaloCue 各域微服务端口健康状态，进行本地数据全量备份与缓存维护。</p>
+            </div>
+
+            <div class="system-status-grid" id="systemDiagnosticsGrid">
+              <div class="system-metric">
+                <small>剧本写作服务 (Writing)</small>
+                <strong id="diagWritingPort">端口 8899 · 运行中</strong>
+              </div>
+              <div class="system-metric">
+                <small>AA 制作服务 (Production)</small>
+                <strong id="diagProductionPort">端口 8892 · 检查中</strong>
+              </div>
+              <div class="system-metric">
+                <small>统一集成网关 (Integrated)</small>
+                <strong id="diagGatewayPort">端口 8910 · 当前宿主</strong>
+              </div>
+              <div class="system-metric">
+                <small>Windows DPAPI 加密</small>
+                <strong id="diagDpapiStatus">已启用 (强加密)</strong>
+              </div>
+            </div>
+
+            <div class="data-maintenance-section">
+              <label class="section-label">数据维护与备份</label>
+              <p class="maintenance-copy">备份包含作品、版本、资料、Agent 记录和定稿，不包含 API Key 或模型设置。</p>
+              <div class="maintenance-actions">
+                <button type="button" class="quiet" id="backupDataBtn">导出作品备份</button>
+                <label class="quiet file-action" for="restoreBackupFile">选择备份恢复</label>
+                <input id="restoreBackupFile" class="sr-only" type="file" accept=".halocue,application/vnd.halocue.writing-backup+zip">
+              </div>
+              <div id="backupRestorePreview" class="backup-restore-preview" hidden aria-live="polite">
+                <div>
+                  <b id="backupRestoreTitle">备份已通过校验</b>
+                  <span id="backupRestoreMeta"></span>
+                  <small>恢复会替换当前全部作品。系统会先自动保存一份恢复前备份。</small>
+                </div>
+                <div class="backup-restore-actions">
+                  <button type="button" class="quiet" id="cancelBackupRestoreBtn">取消</button>
+                  <button type="button" class="danger" id="confirmBackupRestoreBtn">确认替换并恢复</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="unsavedManuscriptDialog" class="unsaved-manuscript-dialog" aria-labelledby="unsavedManuscriptTitle">
+    <div class="unsaved-manuscript-copy">
+      <span aria-hidden="true">未</span>
+      <div>
+        <h2 id="unsavedManuscriptTitle">正文修改尚未保存</h2>
+        <p>离开后，本次修改不会建立正文修订，也无法恢复。</p>
+      </div>
+    </div>
+    <div class="unsaved-manuscript-actions">
+      <button type="button" class="quiet" data-unsaved-manuscript-cancel>继续编辑</button>
+      <button type="button" class="danger" data-unsaved-manuscript-discard>放弃修改并离开</button>
+    </div>
+  </dialog>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+  <!-- app.js?v=20260821-83, app.js?v=20260822-99, app.js?v=20260823-106, app.js?v=20260824-115, app.js?v=20260824-116 and app.js?v=20260824-117 retained for contract compatibility; the resource version below is current. -->
+  <script src="/app.js?v=20260824-118" defer></script>
+  <!-- writing-workbench.js?v=20260821-39 retained for contract compatibility; the resource version below is current. -->
+  <script src="/writing-workbench.js?v=20260822-65" defer></script>
+  <script src="/shell.js?v=20260816-2" defer></script>
+  <script src="/production-embed.js?v=20260823-9" defer></script>
+</body>
+</html>
