@@ -6,7 +6,8 @@
 - Source branch: `feature/1.1-ba-editor-scene-preview`
 - Target branch: `feature/1.1-ba-editor`
 - Local commit: `d9d99fa feat(ba-editor): add canonical synthetic scene preview`
-- PR: pending push; GitHub HTTPS reset during two push attempts
+- Handoff commit: `dfa3c82 docs(handoff): record synthetic BA preview slice`
+- PR: [#25](https://github.com/Suciko/HaloCue/pull/25), pushed and open
 
 ## Scope and acceptance
 
@@ -60,9 +61,8 @@ installed. No dependencies were installed implicitly.
 
 ## Known issues and next action
 
-- Push `d9d99fa` and this handoff commit when GitHub HTTPS is available.
-- Open a PR from `feature/1.1-ba-editor-scene-preview` to
-  `feature/1.1-ba-editor` and link Issue #24.
+- PR #25 requires maintainer review before merging into
+  `feature/1.1-ba-editor`.
 - The local clone has no implementation yet for editor UI, persistence store,
   or StudioProject v2 export; these require later bounded slices.
 
