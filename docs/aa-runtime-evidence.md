@@ -1,7 +1,7 @@
 # AA Runtime Compatibility Evidence
 
 HaloCue's scene preview implements the observable AA-style presentation
-contract independently. Authorized AA research files are read-only inputs;
+contract independently. The authorized AA research files are read-only inputs;
 their C# and IL2CPP declarations are not copied into this repository.
 
 ## Stable layout values
@@ -31,7 +31,7 @@ render target. This produces the five stable left percentages exported by
 | Standby luminance | 0.6 multiplier | `Character.standbyLuminanceMultiplier` |
 | Default move duration | 0.5 seconds | `CharacterMoveAnimation` native constructor at RVA `0x798900` |
 | Move easing | tweened, not an instantaneous teleport | `CharacterMoveAnimation.CharacterMoveTask` and `TweenDatas` |
-| Layer promotion | explicit `SetOnTop` operation | `Character.SetOnTop` native metadata |
+| Layer promotion | explicit `SetOnTop` operation | `Character.SetOnTop`, native RVA in the research index |
 | Text animation | queued per-label typewriter | `QueuedTypewriterAnimation` and `TextTypewriterAnimation` |
 | Scenario advance | ordered animation queue | `Test.AdvanceScenario`, native RVA `0x724250` |
 
