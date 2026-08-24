@@ -15,9 +15,11 @@ maps semantic story lines to AA and MMT presentation fields.
   diagnostic codes before preview or export.
 - Importers are explicit and schema-versioned. They do not silently scrape,
   decrypt, or copy private game formats.
-- The editor can reproduce AA-style BA presentation coordinates and resource
-  roles. Real BA/AA images, audio, models, and bundles are loaded from a
-  user-owned or authorized local manifest; public fixtures remain placeholders.
+- The editor can reproduce AA-style BA presentation coordinates, logical
+  resource keys, relative locations, and resource roles. Real BA/AA images,
+  audio, models, and bundles are loaded from a user-owned or authorized local
+  manifest; verified staging stays in user data and public fixtures remain
+  placeholders.
 - Simple mode hides implementation-heavy controls; advanced mode exposes them
   without changing their semantics.
 
