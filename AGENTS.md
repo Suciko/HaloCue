@@ -69,6 +69,11 @@ Record the exact command and result in a handoff when a slice crosses contexts.
 - `chore/contracts` is the shared contract stream.
 - Use `docs/handoffs/` for school-break handoffs: commits, contracts, tests,
   known issues, commands, and decisions needing confirmation.
+- The 1.1 editor is an alternating-time collaboration: the maintainer and
+  collaborator work on separate branches in different time windows. Start a
+  session by fetching and reading the newest handoff; end it by pushing a
+  focused commit/PR and recording the exact handoff. Preserve the other
+  developer's commits and resolve shared-file conflicts in a PR discussion.
 - Use GitHub Issues as the task tracker. Triage labels are defined in
   `docs/agents/triage-labels.md`.
 

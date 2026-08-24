@@ -27,6 +27,13 @@ directory into HaloCue.
 和消费者测试，再回到编辑器分支接入。所有成果通过 PR 进入目标分支，禁止
 force-push、压缩包覆盖和直接复制文件交接。
 
+这是一个错峰并行项目：维护者在白天开发，合作者通常在晚间返校后继续
+开发。请把工作当作连续的异步交接，而不是等待一方完成 1.1 后再一次性
+合并。开始工作前先 fetch 并查看远程最新提交、开放 PR、Issue 和最近一份
+handoff；结束工作时推送分支、打开或更新 PR，并写 handoff。每个工作时段
+只认自己分支上已经提交的内容；不要重写或覆盖另一位开发者尚未合并的
+提交。发现同一文件冲突时，先停在 PR 中说明冲突和选择，不要 force-push。
+
 需要核验的上游/参考仓库如下：
 
   StoryForge/Studio：https://github.com/Jianmiao/storyforge-studio
@@ -103,3 +110,20 @@ force-push、压缩包覆盖和直接复制文件交接。
 The maintainer should ask for the collaborator's PR URL and handoff before
 reviewing or merging a slice. The public repository is not a staging area for
 the unpacked Studio, AzureArchive, ChatArchive, or game resource directories.
+
+## Async operating rhythm
+
+The maintainer and collaborator share the 1.1 stream in alternating time
+windows. A handoff is required at every boundary:
+
+- Start: `git fetch origin --prune`, inspect `git status`, open PRs, Issue #24,
+  and the newest file in `docs/handoffs/`.
+- During work: commit a small vertical slice on the owning branch. Reserve
+  shared contracts for `chore/contracts` and announce touching a shared file in
+  the PR.
+- End: push the branch, update the PR description with tests and remaining
+  work, and add a handoff naming the exact commit. The next developer rebases
+  or merges only after reviewing that handoff.
+- Conflict: preserve both commits, open a coordination note, and ask for a
+  decision when the conflict changes a schema, ownership boundary, or user
+  behavior. Never resolve by replacing an entire directory with an archive.
