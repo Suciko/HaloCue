@@ -96,8 +96,8 @@ h1 { margin: 0; font-size: clamp(20px, 3vw, 30px); font-weight: 600; }
 .actor-slot {
   position: absolute;
   bottom: 23%;
-  width: 14%;
-  min-width: 72px;
+  width: 12.5%;
+  min-width: 54px;
   aspect-ratio: 0.63;
   transform: translateX(-50%);
   transition: opacity 180ms ease, filter 180ms ease, transform 180ms ease;
@@ -110,18 +110,57 @@ h1 { margin: 0; font-size: clamp(20px, 3vw, 30px); font-weight: 600; }
 .actor-slot.is-active { filter: saturate(1.1) brightness(1.05); transform: translateX(-50%) translateY(-5px); }
 
 .actor-portrait {
+  position: relative;
   display: grid;
   place-items: center;
   width: 100%;
   height: 100%;
-  border: 2px solid rgb(255 255 255 / 70%);
-  border-radius: 48% 48% 10% 10%;
-  background: linear-gradient(160deg, #f6f8ff, #87a8d6 58%, #516a8c);
-  color: #253651;
-  font-size: clamp(22px, 5vw, 48px);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgb(224 243 255 / 90%);
+  font-size: clamp(15px, 2.4vw, 28px);
   font-weight: 700;
-  box-shadow: 0 8px 24px rgb(20 31 49 / 45%);
+  text-shadow: 0 1px 3px rgb(3 15 32 / 90%);
+  isolation: isolate;
 }
+
+.actor-portrait::before {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 38%;
+  aspect-ratio: 1;
+  border: 1px solid rgb(204 238 255 / 42%);
+  border-radius: 50%;
+  background: var(--actor-head, rgb(104 169 187 / 70%));
+  box-shadow: 0 4px 12px rgb(6 33 57 / 35%);
+  content: "";
+  transform: translateX(-50%);
+}
+
+.actor-portrait::after {
+  position: absolute;
+  right: 18%;
+  bottom: 0;
+  left: 18%;
+  height: 62%;
+  border: 1px solid rgb(195 235 255 / 35%);
+  border-radius: 5px 5px 2px 2px;
+  background: var(--actor-body, rgb(4 93 117 / 80%));
+  box-shadow: 0 7px 18px rgb(3 22 41 / 48%);
+  content: "";
+  z-index: -1;
+}
+
+.actor-slot:nth-child(1) { --actor-head: rgb(76 134 158 / 76%); --actor-body: rgb(7 78 103 / 86%); }
+.actor-slot:nth-child(2) { --actor-head: rgb(96 158 165 / 76%); --actor-body: rgb(9 94 112 / 86%); }
+.actor-slot:nth-child(3) { --actor-head: rgb(132 215 240 / 92%); --actor-body: rgb(13 126 158 / 92%); }
+.actor-slot:nth-child(4) { --actor-head: rgb(92 151 164 / 76%); --actor-body: rgb(7 85 105 / 86%); }
+.actor-slot:nth-child(5) { --actor-head: rgb(83 145 157 / 76%); --actor-body: rgb(7 77 101 / 86%); }
+.actor-slot:nth-child(6) { --actor-head: rgb(77 137 157 / 76%); --actor-body: rgb(6 73 99 / 86%); }
+
+.actor-slot.is-active { --actor-head: rgb(144 224 255 / 98%); --actor-body: rgb(14 143 180 / 96%); }
 
 .actor-name {
   position: absolute;
@@ -182,6 +221,6 @@ h1 { margin: 0; font-size: clamp(20px, 3vw, 30px); font-weight: 600; }
   .font-picker, .font-picker select { width: 100%; }
   .dialogue-panel { right: 3%; bottom: 2%; left: 3%; padding: 9px 11px 8px; }
   .dialogue-text { min-height: 4.2em; }
-  .actor-slot { bottom: 26%; width: 16%; min-width: 48px; }
+  .actor-slot { bottom: 26%; width: 13.5%; min-width: 42px; }
   .actor-name { bottom: -15px; font-size: 9px; }
 }

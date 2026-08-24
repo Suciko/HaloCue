@@ -61,7 +61,7 @@ def test_preview_renders_six_slots_advances_dialogue_and_switches_font(tmp_path)
             page.wait_for_selector("#preview-stage.has-background-image")
 
             assert page.locator(".actor-slot").count() == 6
-            assert page.locator(".actor-slot.is-visible").count() == 2
+            assert page.locator(".actor-slot.is-visible").count() == 6
 
             page.select_option("#font-select", "nowar")
             assert page.locator("#preview-stage").get_attribute("data-font") == "nowar"
