@@ -7,6 +7,7 @@
 - Target branch: `feature/1.1-ba-editor`
 - UI slice commit: `3d973b6 feat(ba-editor): add synthetic scene preview UI`
 - Background commit: `11ef73b feat(ba-editor): use conference room demo background`
+- Composition commit: `426580a feat(ba-editor): restore six-slot preview composition`
 - PR: [#25](https://github.com/Suciko/HaloCue/pull/25), pushed and open
 
 ## Scope and acceptance
