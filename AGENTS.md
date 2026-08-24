@@ -43,9 +43,10 @@ and an AI GalGame workspace.
 - Prefer deterministic evaluation so preview and offline export agree.
 - Preserve licenses and provenance. Reverse-engineered applications and game
   assets are research inputs, not source code to copy into this MIT repository.
-- AA compatibility may reproduce observable presentation behavior and documented
-  coordinates. Load real BA/AA resources only from user-supplied or authorized
-  local manifests; public fixtures must be synthetic and hashed.
+- AA compatibility may reproduce observable presentation behavior, documented
+  coordinates, logical resource keys, and relative locations. Load real BA/AA
+  bytes only from user-supplied or authorized local manifests; a verified local
+  cache is user data, while public fixtures must be synthetic and hashed.
 
 ## Validation
 

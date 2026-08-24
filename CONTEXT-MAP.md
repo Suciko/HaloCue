@@ -17,7 +17,9 @@ or implementing a cross-context change.
 - User assets, API keys, game data, reverse-engineering output, and generated
   artifacts stay outside the public source tree.
 - AA presentation compatibility is implemented as behavior/coordinate/resource
-  role data; real BA/AA resources are user-supplied or explicitly authorized.
+  role data. Observable logical keys and relative locations may be recorded in
+  the resource contract; real BA/AA bytes are user-supplied or explicitly
+  authorized local data.
 
 ## Contexts
 

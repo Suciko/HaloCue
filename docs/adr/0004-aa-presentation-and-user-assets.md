@@ -12,14 +12,20 @@ and resource lookup semantics. These values are treated as compatibility data
 and are documented with their evidence source.
 
 The runtime accepts resource IDs and local paths supplied by the user or by an
-explicitly authorized asset pack. It verifies hashes and keeps the physical
-asset outside the public source tree. Public fixtures use synthetic placeholders.
+explicitly authorized asset pack. It records observable adapter keys and
+relative resource locations in `resource-manifest/1.0`, verifies hashes, and
+may stage a verified copy in the user's local project/cache directory. Physical
+bytes remain outside the public source tree. Public fixtures use synthetic
+placeholders.
 
 The public repository does not ship Blue Archive or AzureArchive art, audio,
 models, textures, AssetBundles, databases, or private/reverse-engineered source.
 It does not copy AA private project files or reproduce its implementation. A
 future importer must be explicit, opt-in, path-validated, and local-only unless
-separate redistribution permission is documented.
+separate redistribution permission is documented. Copying an observed logical
+key, slot coordinate, or relative location is compatibility data; copying the
+underlying proprietary bytes is a separate provenance and redistribution
+decision.
 
 ## Context
 
