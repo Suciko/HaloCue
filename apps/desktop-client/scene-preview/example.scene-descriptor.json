@@ -7,12 +7,12 @@
     "preview_uri": "./assets/demo-conference-room.jpg"
   },
   "actors": [
-    { "slot": 1, "character_id": null, "resource_id": null, "state": "hidden" },
-    { "slot": 2, "character_id": null, "resource_id": null, "state": "hidden" },
+    { "slot": 1, "character_id": "character/slot-one", "resource_id": "synthetic/character/slot-one/portrait", "state": "visible" },
+    { "slot": 2, "character_id": "character/slot-two", "resource_id": "synthetic/character/slot-two/portrait", "state": "visible" },
     { "slot": 3, "character_id": "character/alice", "resource_id": "synthetic/character/alice/portrait", "state": "visible" },
     { "slot": 4, "character_id": "character/bob", "resource_id": "synthetic/character/bob/portrait", "state": "visible" },
-    { "slot": 5, "character_id": null, "resource_id": null, "state": "hidden" },
-    { "slot": 6, "character_id": null, "resource_id": null, "state": "hidden" }
+    { "slot": 5, "character_id": "character/slot-five", "resource_id": "synthetic/character/slot-five/portrait", "state": "visible" },
+    { "slot": 6, "character_id": "character/slot-six", "resource_id": "synthetic/character/slot-six/portrait", "state": "visible" }
   ],
   "events": [
     { "event_id": "event/background", "kind": "background", "resource_id": "synthetic/background/classroom" },

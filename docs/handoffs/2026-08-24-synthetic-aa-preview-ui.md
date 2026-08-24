@@ -52,17 +52,16 @@ ignored `acceptance-output/` directory when Chromium is installed. The full
 legacy suite remains noisy on this machine: existing 0.9 UI harness failures,
 missing historical fixtures, and browser setup errors are recorded separately
 from this slice. The same page was also opened through the local in-app browser:
-six slots were visible, the Nowar Rounded option applied, and three event
-advances showed Alice's dialogue with the active-slot highlight; the screenshot
-was inspected with the user-provided conference-room background and the
-`Background ready` state.
+six slots were visible, three event advances showed Alice's dialogue with the
+active-slot highlight, and the screenshot was inspected with the user-provided
+conference-room background and the `Background ready` state.
 
 ## Known issues and next action
 
-- The preview currently displays synthetic placeholder portraits and a CSS
-  fallback background. The optional local image is loaded only through the
-  relative `preview_uri` in the descriptor; a future resource-manifest slice
-  can resolve authorized local resources without changing the descriptor API.
+- The preview currently displays synthetic placeholder portraits. The optional
+  local image is loaded only through the relative `preview_uri` in the
+  descriptor; a future resource-manifest slice can resolve authorized local
+  resources without changing the descriptor API.
 - The page is a presentation adapter, not yet a Tauri/React workspace. The next
   bounded slice should add local JSON project persistence or a host bridge that
   feeds descriptors from the canonical model.
