@@ -119,6 +119,7 @@ gate are defined in `docs/agents/long-term-memory.md`,
 ## Documentation routing
 
 - Cross-system context: `CONTEXT-MAP.md`
+- Current repository layout: `docs/architecture/current-layout.md`
 - Product direction: `docs/product-direction-1.x.md`
 - Remote collaboration: `docs/agents/remote-collaboration.md`
 - Issue tracker and triage: `docs/agents/`

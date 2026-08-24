@@ -45,6 +45,7 @@ or implementing a cross-context change.
 - Collaboration handoffs: `docs/handoffs/`
 - GitHub issue conventions: `docs/agents/`
 - Product direction: `docs/product-direction-1.x.md`
+- Current repository layout: `docs/architecture/current-layout.md`
 - Long-term memory and Skill governance: `docs/agents/long-term-memory.md`,
   `docs/agents/skill-proposals.md`
 - Remote collaboration: `docs/agents/remote-collaboration.md`
