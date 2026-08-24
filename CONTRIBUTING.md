@@ -13,6 +13,11 @@ typed, tested, and easy to hand off.
 4. Keep unrelated files and local data out of the commit.
 5. Run the narrowest checks for the changed context and record the commands.
 
+For cross-session work, also follow `docs/agents/long-term-memory.md`. New
+product or architecture ideas go through `.github/ISSUE_TEMPLATE/proposal.yml`;
+repeated workflows go through `docs/agents/skill-proposals.md` before becoming
+an active repository Skill.
+
 ## Pull request requirements
 
 - Explain the user-visible behavior and the owning context.

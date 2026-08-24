@@ -6,6 +6,8 @@ or implementing a cross-context change.
 
 ## System-wide invariants
 
+- Product intent and release boundaries are defined in
+  `docs/product-direction-1.x.md`. Do not infer them from chat history.
 - `HaloCueProject` is the canonical product model.
 - AA and MMT are presentation adapters over the same story, IDs, variables, and
   save state.
@@ -20,6 +22,9 @@ or implementing a cross-context change.
   role data. Observable logical keys and relative locations may be recorded in
   the resource contract; real BA/AA bytes are user-supplied or explicitly
   authorized local data.
+- Durable project truth, collaborator handoffs, feedback, and Skill proposals
+  follow `docs/agents/long-term-memory.md` and ADR-0006. Local agent memory is
+  recall only.
 
 ## Contexts
 
@@ -37,6 +42,9 @@ or implementing a cross-context change.
 - Architectural decisions: `docs/adr/`
 - Collaboration handoffs: `docs/handoffs/`
 - GitHub issue conventions: `docs/agents/`
+- Product direction: `docs/product-direction-1.x.md`
+- Long-term memory and Skill governance: `docs/agents/long-term-memory.md`,
+  `docs/agents/skill-proposals.md`
 
 ## Change routing
 

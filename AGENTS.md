@@ -10,11 +10,14 @@ and an AI GalGame workspace.
 ## Before changing code
 
 1. Read `CONTEXT-MAP.md` and the context file that owns the area being changed.
-2. Read relevant records in `docs/adr/`.
+2. Read `docs/product-direction-1.x.md` for any 1.x planning or product-facing
+   change, then read relevant records in `docs/adr/`.
 3. Check `git status --short --branch` and preserve unrelated user changes.
 4. Search for an existing domain type, adapter, contract, or test before adding one.
 5. Identify the GitHub issue and branch for the change. One issue should describe
    one demonstrable vertical slice.
+6. For a cross-session or collaborator change, follow
+   `docs/agents/long-term-memory.md` and read the newest applicable handoff.
 
 ## Repository boundaries
 
@@ -79,6 +82,11 @@ Record the exact command and result in a handoff when a slice crosses contexts.
   developer's commits and resolve shared-file conflicts in a PR discussion.
 - Use GitHub Issues as the task tracker. Triage labels are defined in
   `docs/agents/triage-labels.md`.
+- New ideas and architecture concerns use `.github/ISSUE_TEMPLATE/proposal.yml`;
+  implemented work is handed over through a focused PR and `docs/handoffs/`.
+- Repeated workflows become Skill proposals under
+  `docs/agents/skill-proposals/`; only reviewed PRs activate a Skill under
+  `.agents/skills/`.
 
 ## Agent skills
 
@@ -97,9 +105,17 @@ Use the five standard Matt Pocock triage labels. See
 This is a multi-context repository. See `docs/agents/domain.md` and
 `CONTEXT-MAP.md`.
 
+### Long-term memory
+
+The source-of-truth hierarchy, collaborator feedback route, and Skill proposal
+gate are defined in `docs/agents/long-term-memory.md`,
+`docs/agents/skill-proposals.md`, and ADR-0006. The approved session Skill is
+`.agents/skills/halocue-session-governance/SKILL.md`.
+
 ## Documentation routing
 
 - Cross-system context: `CONTEXT-MAP.md`
+- Product direction: `docs/product-direction-1.x.md`
 - Issue tracker and triage: `docs/agents/`
 - Architecture decisions: `docs/adr/`
 - Client: `contexts/client/CONTEXT.md`

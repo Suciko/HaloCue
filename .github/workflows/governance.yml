@@ -5,9 +5,11 @@ on:
     paths:
       - 'AGENTS.md'
       - 'CONTEXT-MAP.md'
+      - 'docs/product-direction-1.x.md'
       - 'contexts/**'
       - 'docs/adr/**'
       - 'docs/agents/**'
+      - '.agents/skills/**'
       - 'packages/**'
       - 'apps/**'
       - 'services/**'
@@ -16,9 +18,11 @@ on:
     paths:
       - 'AGENTS.md'
       - 'CONTEXT-MAP.md'
+      - 'docs/product-direction-1.x.md'
       - 'contexts/**'
       - 'docs/adr/**'
       - 'docs/agents/**'
+      - '.agents/skills/**'
       - 'packages/**'
       - 'apps/**'
       - 'services/**'
@@ -38,10 +42,15 @@ jobs:
           set -euo pipefail
           required=(
             AGENTS.md CONTEXT-MAP.md CONTRIBUTING.md
+            docs/product-direction-1.x.md
             docs/adr/README.md
             docs/agents/issue-tracker.md
             docs/agents/triage-labels.md
             docs/agents/domain.md
+            docs/agents/long-term-memory.md
+            docs/agents/skill-proposals.md
+            docs/agents/skill-proposals/TEMPLATE.md
+            .agents/skills/halocue-session-governance/SKILL.md
             contexts/client/CONTEXT.md
             contexts/backend/CONTEXT.md
             contexts/ba-editor/CONTEXT.md
@@ -59,6 +68,16 @@ jobs:
           for label in needs-triage needs-info ready-for-agent ready-for-human wontfix; do
             grep -q "\`$label\`" docs/agents/triage-labels.md
           done
+      - name: Check Skill frontmatter and proposal boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          for skill in .agents/skills/*/SKILL.md; do
+            test -s "$skill"
+            grep -q '^name: ' "$skill"
+            grep -q '^description: ' "$skill"
+          done
+          ! find docs/agents/skill-proposals -mindepth 2 -maxdepth 2 -name SKILL.md -print | grep -q .
       - name: Check clean public-boundary patterns
         shell: bash
         run: |
