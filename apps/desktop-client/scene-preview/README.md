@@ -14,7 +14,8 @@ The preview demonstrates:
 
 The checked-in descriptor uses only synthetic logical resource IDs. Real
 user-owned or authorized resources belong in a future local resource manifest;
-they are not loaded from this directory.
+they are not loaded from this directory. The conference-room image is a
+user-provided demonstration asset and is separate from any AA/BA resource.
 
 For a local smoke check, serve this directory with any static HTTP server and
 open `index.html`. The page fetches `example.scene-descriptor.json` and exposes

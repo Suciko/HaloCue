@@ -34,6 +34,8 @@ def test_synthetic_descriptor_fixture_has_versioned_six_slot_shape():
     )
 
     assert descriptor["schema_version"] == "scene-descriptor/1.0"
+    assert descriptor["background"]["preview_uri"] == "./assets/demo-conference-room.jpg"
+    assert not descriptor["background"]["preview_uri"].startswith("/")
     assert [actor["slot"] for actor in descriptor["actors"]] == [1, 2, 3, 4, 5, 6]
     assert all(
         actor["resource_id"] is None or actor["resource_id"].startswith("synthetic/")
@@ -56,6 +58,7 @@ def test_preview_renders_six_slots_advances_dialogue_and_switches_font(tmp_path)
             page = browser.new_page(viewport={"width": 1280, "height": 720})
             page.goto(f"http://127.0.0.1:{server.server_port}/index.html")
             page.wait_for_selector(".actor-slot")
+            page.wait_for_selector("#preview-stage.has-background-image")
 
             assert page.locator(".actor-slot").count() == 6
             assert page.locator(".actor-slot.is-visible").count() == 2

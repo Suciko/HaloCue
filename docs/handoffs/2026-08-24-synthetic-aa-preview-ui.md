@@ -6,6 +6,7 @@
 - Source branch: `feature/1.1-ba-editor-scene-preview`
 - Target branch: `feature/1.1-ba-editor`
 - UI slice commit: `3d973b6 feat(ba-editor): add synthetic scene preview UI`
+- Background commit: pending in this handoff update
 - PR: [#25](https://github.com/Suciko/HaloCue/pull/25), pushed and open
 
 ## Scope and acceptance
@@ -14,7 +15,8 @@ This slice consumes the existing `scene-descriptor/1.0` output with a minimal
 runnable browser preview. It renders six deterministic slots, keeps state in a
 small presentation controller, advances ordered enter/exit/dialogue events,
 highlights the active speaker, and switches among three named dialogue font
-stacks. The fixture contains synthetic resources only.
+stacks. The fixture uses synthetic logical IDs plus one user-provided
+conference-room image for the local demonstration preview.
 
 The canonical `HaloCueProject` model remains the source of truth. The page does
 not edit the project, resolve physical paths, or import AA/Studio data.
@@ -25,11 +27,12 @@ not edit the project, resolve physical paths, or import AA/Studio data.
 - `apps/desktop-client/scene-preview/preview.css`
 - `apps/desktop-client/scene-preview/preview.js`
 - `apps/desktop-client/scene-preview/example.scene-descriptor.json`
+- `apps/desktop-client/scene-preview/assets/demo-conference-room.jpg`
 - `apps/desktop-client/scene-preview/README.md`
 - `tests/test_ba_scene_preview_ui.py`
 
-No cross-context contract or migration changed. No external source or asset was
-copied.
+No cross-context contract or migration changed. The image is a user-provided
+demo asset, not an AA/BA/Studio resource or recovered source file.
 
 ## Verification
 
@@ -51,13 +54,15 @@ missing historical fixtures, and browser setup errors are recorded separately
 from this slice. The same page was also opened through the local in-app browser:
 six slots were visible, the Nowar Rounded option applied, and three event
 advances showed Alice's dialogue with the active-slot highlight; the screenshot
-was inspected without adding it to the repository.
+was inspected with the user-provided conference-room background and the
+`Background ready` state.
 
 ## Known issues and next action
 
 - The preview currently displays synthetic placeholder portraits and a CSS
-  background. A future resource-manifest slice can resolve authorized local
-  resources without changing the descriptor API.
+  fallback background. The optional local image is loaded only through the
+  relative `preview_uri` in the descriptor; a future resource-manifest slice
+  can resolve authorized local resources without changing the descriptor API.
 - The page is a presentation adapter, not yet a Tauri/React workspace. The next
   bounded slice should add local JSON project persistence or a host bridge that
   feeds descriptors from the canonical model.

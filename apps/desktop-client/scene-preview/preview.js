@@ -22,6 +22,14 @@
     return value.charAt(0).toUpperCase() + value.slice(1);
   }
 
+  function isSafePreviewUri(uri) {
+    return typeof uri === "string"
+      && uri.startsWith("./")
+      && !uri.includes("..")
+      && !uri.includes("\\")
+      && !/^[a-z]+:/i.test(uri);
+  }
+
   function createActor(slot) {
     const element = document.createElement("article");
     element.className = "actor-slot";
@@ -41,6 +49,7 @@
     const progress = stage.querySelector("#event-progress");
     const status = stage.querySelector("#preview-status");
     const advance = stage.querySelector("#advance-button");
+    const stageBackground = stage.querySelector("#stage-background");
     actorLayer.replaceChildren(...descriptor.actors.map((actor) => createActor(actor.slot)));
     const actorElements = new Map(
       [...actorLayer.children].map((element) => [Number(element.dataset.slot), element]),
@@ -109,6 +118,21 @@
       renderEvent(event);
     }
 
+    function loadPreviewBackground() {
+      const previewUri = descriptor.background && descriptor.background.preview_uri;
+      if (!isSafePreviewUri(previewUri)) return;
+      const image = new Image();
+      image.addEventListener("load", () => {
+        stageBackground.style.backgroundImage = `url("${previewUri}")`;
+        stage.classList.add("has-background-image");
+        status.textContent = "Background ready";
+      });
+      image.addEventListener("error", () => {
+        status.textContent = "Background placeholder";
+      });
+      image.src = previewUri;
+    }
+
     advance.addEventListener("click", advanceEvent);
     stage.ownerDocument.addEventListener("keydown", (event) => {
       if (event.key === " " || event.key === "ArrowRight") {
@@ -116,6 +140,7 @@
         advanceEvent();
       }
     });
+    loadPreviewBackground();
     renderEvent(null);
     return { advance: advanceEvent, state };
   }

@@ -3,7 +3,8 @@
   "scene_id": "scene/synthetic-classroom",
   "background": {
     "resource_id": "synthetic/background/classroom",
-    "logical_key": "background/classroom"
+    "logical_key": "background/classroom",
+    "preview_uri": "./assets/demo-conference-room.jpg"
   },
   "actors": [
     { "slot": 1, "character_id": null, "resource_id": null, "state": "hidden" },
