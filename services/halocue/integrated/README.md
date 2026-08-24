@@ -73,12 +73,19 @@ duplicate-install rejection without writing to a user AA workspace.
 
 ```powershell
 $env:PYTHONPATH='services/halocue/integrated/src;services/halocue/writing/src;services/halocue/production/src'
+$env:HALOCUE_BA_WRITING_SKILL_DIR='<LOCAL_BA_WRITING_SKILL_DIR>'
 python -m halocue_integrated.server --port 8910
 ```
 
 The default runtime writes to `.halocue/integrated/writing` and
 `.halocue/integrated/production`. Use `--writing-data-dir` and
 `--production-data-dir` for isolated QA.
+
+`HALOCUE_BA_WRITING_SKILL_DIR` must point to an authorized local Skill checkout.
+The repository does not contain or discover a maintainer-specific absolute
+path. After startup, `GET /api/v1/health` is the authority: its
+`ba_writing_skill.status` must be `ready` and `missing_files` must be empty
+before real BA writing operations are available.
 
 ## Current model boundary
 

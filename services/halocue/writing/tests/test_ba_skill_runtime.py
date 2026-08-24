@@ -71,3 +71,16 @@ def test_materialized_pack_is_immutable_and_prompt_loads_one_mode(tmp_path):
     (skill_root / MODE_SOURCES["bond_short"]).write_text("# 已在外部修改\n", encoding="utf-8")
     pinned = registry.compile("bond_short", task_id="scene.draft.generate")
     assert pinned["source_digest"] == original_digest
+
+
+def test_default_test_skill_is_complete_without_private_local_files(tmp_path):
+    registry = BaWritingSkillRegistry()
+    manifest = registry.materialize(Repository(tmp_path / "data"))
+    assembled = BaWritingPromptAssembler(registry).assemble(
+        "scene.draft.generate", mode_key="bond_short"
+    )
+
+    assert manifest["status"] == "ready"
+    assert assembled["status"] == "ready"
+    assert assembled["missing_files"] == []
+    assert "Only for deterministic contract tests." in assembled["system_prompt"]

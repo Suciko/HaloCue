@@ -186,3 +186,8 @@ POST /api/v1/works/{work_id}/scenes/{scene_id}/manuscript
 ```powershell
 python -m pytest -q
 ```
+
+测试进程会在系统临时目录生成仅含占位规则的完整合成 WritingPack，不读取
+维护者本机的 `ba-writing`、人物资料或官方语料。因而全量测试不要求设置
+`HALOCUE_BA_WRITING_SKILL_DIR`，也不会因协作者电脑上的 Skill 版本不同而改变结果。
+生产运行不使用这份合成夹具，仍按上文要求显式注入真实规则源并失败闭合。
