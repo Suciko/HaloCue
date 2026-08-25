@@ -12,6 +12,11 @@ The slice supports:
 - a deterministic `scene-descriptor/1.0` AA presentation adapter with five
   character slots.
 
+`render_timeline.py` projects a scene descriptor into the independent
+`render-timeline/1.0` contract. It uses explicit end-exclusive frame ranges and
+stable default durations so browser preview and offline video exporters can
+share timing without depending on AUTO playback or wall-clock callbacks.
+
 This is not yet the complete project model. Variables, proposals, revisions,
 MMT cues, and StudioProject v2 export remain later versioned slices. Cross-
 context wire contracts belong in `packages/contracts/` and must land through

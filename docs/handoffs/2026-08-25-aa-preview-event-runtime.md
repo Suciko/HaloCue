@@ -9,12 +9,12 @@ truth for interactive playback:
   metadata when a different character enters an existing slot;
 - `background` events can replace the active background without reloading the
   page;
-- AUTO is an optional editor-preview convenience with a cancellable timer and
-  manual-click protection.
+- The formal preview has no AUTO button or timer-driven playback. Users advance
+  events manually so the canvas remains unobstructed and the product does not
+  inherit an unnecessary AA interaction affordance.
 
-AUTO is not part of the canonical 1.1 video export contract. Deterministic
-video rendering must consume the normalized event timeline directly and must
-not depend on browser timers or user input.
+Deterministic video rendering must consume the normalized event timeline
+directly and must not depend on browser timers or user input.
 
 ## Verification
 
@@ -27,10 +27,9 @@ git diff --check
 
 Result: `10 passed` and both JavaScript syntax checks passed.
 
-The browser regression covers a mid-scene slot replacement, a background
-transition, and toggling the optional AUTO control. The checked-in fixture uses
-synthetic resources only; local AA resources remain resolved through the
-allowlisted preview endpoint.
+The browser regression covers a mid-scene slot replacement and a background
+transition. The checked-in fixture uses synthetic resources only; local AA
+resources remain resolved through the allowlisted preview endpoint.
 
 ## Next slice
 

@@ -259,8 +259,6 @@ h1 {
 }
 
 #menu-button { background: #f5f7fa; }
-.auto-enabled { --auto-accent: #6de5ff; }
-.auto-enabled #auto-button { background: var(--auto-accent); }
 .menu-open::after {
   position: absolute;
   top: 52px;

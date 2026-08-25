@@ -90,12 +90,6 @@ def test_preview_renders_five_slots_advances_dialogue_and_switches_font(tmp_path
                 """() => document.querySelector('#stage-background').style.backgroundImage.includes('demo-conference-room.jpg')"""
             )
 
-            page.locator("#auto-button").click()
-            assert page.locator("#auto-button").get_attribute("aria-pressed") == "true"
-            assert page.evaluate("window.HaloCueScenePreview.controller.state.autoEnabled") is True
-            page.locator("#auto-button").click()
-            assert page.locator("#auto-button").get_attribute("aria-pressed") == "false"
-
             output_dir = REPO_ROOT / "acceptance-output"
             output_dir.mkdir(exist_ok=True)
             page.screenshot(path=str(output_dir / "synthetic-ba-scene-preview.png"), full_page=True)
