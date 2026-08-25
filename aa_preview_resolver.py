@@ -66,11 +66,12 @@ def apply_local_preview_uris(
     *,
     uri_for: Callable[[AssetKind, str], str],
 ) -> dict[str, Any]:
-    """Return a descriptor copy with host-provided local preview URIs.
+    """Return a descriptor copy with host-provided local thumbnail URIs.
 
     ``uri_for`` is supplied by the local app server (for example an allowlisted
-    ``/api/resources/preview`` route).  The resolver itself never exposes a
-    filesystem path to browser code.
+    ``/api/resources/preview`` route).  Backgrounds keep ``preview_uri`` while
+    character avatar results are written as ``thumbnail_*`` metadata. The
+    resolver itself never exposes a filesystem path to browser code.
     """
 
     import copy
@@ -92,6 +93,15 @@ def apply_local_preview_uris(
             spine_key=actor.get("spine_key"),
         )
         if preview:
-            actor["preview_uri"] = uri_for(preview.kind, preview.key)
-            actor["preview_source"] = "aa-local-index"
+            # An AA avatar is an editor/catalog thumbnail.  Keep it explicitly
+            # separate from the stage media contract so a head preview can
+            # never be mistaken for a full-body performance asset.
+            actor["thumbnail_uri"] = uri_for(preview.kind, preview.key)
+            actor["thumbnail_source"] = "aa-local-index"
+            actor["thumbnail_kind"] = "avatar"
+            # Preserve the 1.0 descriptor fields for hosts that have not yet
+            # migrated, but mark them as thumbnail-only compatibility data.
+            actor["preview_uri"] = actor["thumbnail_uri"]
+            actor["preview_source"] = actor["thumbnail_source"]
+            actor["preview_role"] = "thumbnail"
     return result

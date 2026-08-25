@@ -4,6 +4,7 @@
   const AA = window.HaloCueAARuntime;
   const SLOT_X = AA.SLOT_LEFT_PERCENT;
   const SUPPORTED_SCHEMA = "scene-descriptor/1.0";
+  const STAGE_MEDIA_KINDS = new Set(["portrait", "spine-frame"]);
 
   function assertDescriptor(descriptor) {
     if (!descriptor || descriptor.schema_version !== SUPPORTED_SCHEMA) {
@@ -38,6 +39,27 @@
     if (typeof resolver !== "function") return "";
     const resolved = resolver(value);
     return isSafePreviewUri(resolved) ? resolved : "";
+  }
+
+  function clampUnit(value, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : fallback;
+  }
+
+  function stageMediaFor(actor) {
+    const media = actor && actor.stage_media;
+    if (!media || typeof media !== "object" || !STAGE_MEDIA_KINDS.has(media.kind)) {
+      return null;
+    }
+    const previewUri = resolvePreviewUri(media.preview_uri);
+    if (!previewUri) return null;
+    return {
+      ...media,
+      preview_uri: previewUri,
+      anchor_x: clampUnit(media.anchor_x, 0.5),
+      anchor_y: clampUnit(media.anchor_y, 1),
+      scale: Math.max(0.5, Math.min(1.6, Number(media.scale) || 1)),
+    };
   }
 
   function createActor(slot) {
@@ -109,10 +131,34 @@
         const portrait = element.querySelector(".actor-portrait");
         const image = element.querySelector(".actor-image");
         label.textContent = visible ? actorName(actor) : "";
-        const previewUri = resolvePreviewUri(actor.preview_uri);
-        image.src = visible && previewUri ? previewUri : "";
-        image.alt = visible ? actorName(actor) : "";
-        portrait.classList.toggle("has-image", Boolean(visible && previewUri));
+        const stageMedia = visible ? stageMediaFor(actor) : null;
+        const mediaUri = stageMedia?.preview_uri || "";
+        image.onload = () => {
+          if (image.dataset.requestUri !== mediaUri) return;
+          portrait.classList.toggle("has-image", Boolean(mediaUri));
+        };
+        image.onerror = () => {
+          if (image.dataset.requestUri !== mediaUri) return;
+          portrait.classList.remove("has-image");
+        };
+        image.dataset.requestUri = mediaUri;
+        if (mediaUri) image.src = mediaUri;
+        else image.removeAttribute("src");
+        image.alt = mediaUri ? actorName(actor) : "";
+        portrait.classList.remove("has-image");
+        portrait.dataset.mediaKind = stageMedia?.kind || "none";
+        element.dataset.stageMediaKind = actor.stage_media?.kind || "none";
+        element.classList.toggle(
+          "has-stage-media",
+          Boolean(visible && stageMedia),
+        );
+        element.classList.toggle(
+          "stage-media-unavailable",
+          Boolean(visible && actor.stage_media && !stageMedia),
+        );
+        element.style.setProperty("--actor-anchor-x", String(stageMedia?.anchor_x ?? 0.5));
+        element.style.setProperty("--actor-anchor-y", String(stageMedia?.anchor_y ?? 1));
+        element.style.setProperty("--actor-media-scale", String(stageMedia?.scale ?? 1));
         portrait.dataset.initial = visible ? actorName(actor).slice(0, 1) : "";
         element.style.left = `${actor.presentation.leftPercent}%`;
         element.style.opacity = visible ? String(actor.presentation.opacity) : "0";
@@ -172,7 +218,7 @@
         const previous = state.actors[event.slot - 1];
         const catalogActor = actorCatalog.get(event.character_id) || {};
         const actorDetails = {};
-        for (const key of ["display_name", "preview_uri", "preview_source", "avatar_key", "spine_key"]) {
+        for (const key of ["display_name", "thumbnail_uri", "thumbnail_source", "thumbnail_kind", "preview_uri", "preview_source", "preview_role", "avatar_key", "spine_key", "stage_media"]) {
           if (event[key] !== undefined) actorDetails[key] = event[key];
           else if (catalogActor[key] !== undefined) actorDetails[key] = catalogActor[key];
         }
@@ -220,6 +266,10 @@
 
     function loadPreviewBackground(background) {
       const previewUri = resolvePreviewUri(background && background.preview_uri);
+      const focusX = clampUnit(background?.focus_x, 0.5);
+      const focusY = clampUnit(background?.focus_y, 0.5);
+      stageBackground.style.backgroundSize = "cover";
+      stageBackground.style.backgroundPosition = `${focusX * 100}% ${focusY * 100}%`;
       if (!isSafePreviewUri(previewUri)) {
         stageBackground.style.backgroundImage = "";
         stage.classList.remove("has-background-image");

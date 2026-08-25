@@ -13,6 +13,7 @@ from typing import Any
 PROJECT_SCHEMA_VERSION = "halocue-project/1.0"
 SCENE_DESCRIPTOR_SCHEMA_VERSION = "scene-descriptor/1.0"
 AA_SLOT_COUNT = 5
+STAGE_MEDIA_KINDS = frozenset({"portrait", "spine-frame"})
 
 
 def _diagnostic(code: str, path: str, message: str) -> dict[str, str]:
@@ -114,6 +115,35 @@ def validate_project(project: Any) -> list[dict[str, str]]:
     for entity, path, entity_kind in _iter_entities(project):
         if not isinstance(entity, dict):
             continue
+        if entity_kind == "character" and "stage_media" in entity:
+            stage_media = entity.get("stage_media")
+            if not isinstance(stage_media, dict):
+                diagnostics.append(
+                    _diagnostic(
+                        "project.invalid_stage_media",
+                        f"{path}.stage_media",
+                        "stage_media must be an object",
+                    )
+                )
+            else:
+                media_kind = stage_media.get("kind")
+                if media_kind not in STAGE_MEDIA_KINDS:
+                    diagnostics.append(
+                        _diagnostic(
+                            "project.unknown_stage_media_kind",
+                            f"{path}.stage_media.kind",
+                            f"stage_media kind must be one of {sorted(STAGE_MEDIA_KINDS)}",
+                        )
+                    )
+                preview_uri = stage_media.get("preview_uri")
+                if not isinstance(preview_uri, str) or not preview_uri.strip():
+                    diagnostics.append(
+                        _diagnostic(
+                            "project.missing_stage_media_preview",
+                            f"{path}.stage_media.preview_uri",
+                            "stage_media preview_uri is required",
+                        )
+                    )
         resource_id = entity.get("resource_id")
         if resource_id is not None and resource_id not in resources:
             diagnostics.append(
@@ -229,9 +259,9 @@ def build_aa_scene_descriptor(project: dict[str, Any], scene_id: str) -> dict[st
                 "resource_id": character.get("resource_id"),
                 "state": "visible",
             }
-            for key in ("avatar_key", "spine_key", "preview_uri"):
+            for key in ("avatar_key", "spine_key", "preview_uri", "stage_media"):
                 if character.get(key):
-                    actors[slot][key] = character[key]
+                    actors[slot][key] = deepcopy(character[key])
         elif kind == "exit":
             actors[event["slot"]] = {
                 "slot": event["slot"],
@@ -248,6 +278,9 @@ def build_aa_scene_descriptor(project: dict[str, Any], scene_id: str) -> dict[st
             }
             if resource.get("aa_key"):
                 background["aa_key"] = resource["aa_key"]
+            for key in ("focus_x", "focus_y"):
+                if key in resource:
+                    background[key] = resource[key]
             if initial_background is None:
                 initial_background = deepcopy(background)
         event_descriptor = {"event_id": event["event_id"], "kind": kind}

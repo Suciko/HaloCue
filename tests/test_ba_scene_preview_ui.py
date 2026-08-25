@@ -35,6 +35,8 @@ def test_synthetic_descriptor_fixture_has_versioned_five_slot_shape():
 
     assert descriptor["schema_version"] == "scene-descriptor/1.0"
     assert descriptor["background"]["preview_uri"] == "./assets/demo-conference-room.png"
+    assert descriptor["background"]["focus_x"] == 0.42
+    assert descriptor["background"]["focus_y"] == 0.68
     assert not descriptor["background"]["preview_uri"].startswith("/")
     assert [actor["slot"] for actor in descriptor["actors"]] == [1, 2, 3, 4, 5]
     assert all(
@@ -70,6 +72,9 @@ def test_preview_renders_five_slots_advances_dialogue_and_switches_font(tmp_path
             assert page.locator("#event-progress").is_hidden() is True
             assert page.locator("#preview-stage").get_attribute("data-font") == "noto"
             assert round(stage_box["width"] / stage_box["height"], 3) == 1.778
+            assert page.locator("#stage-background").evaluate(
+                "element => element.style.backgroundPosition"
+            ) == "42% 68%"
 
             page.select_option("#font-select", "nowar")
             assert page.locator("#preview-stage").get_attribute("data-font") == "nowar"
@@ -102,6 +107,35 @@ def test_preview_renders_five_slots_advances_dialogue_and_switches_font(tmp_path
             output_dir = REPO_ROOT / "acceptance-output"
             output_dir.mkdir(exist_ok=True)
             page.screenshot(path=str(output_dir / "synthetic-ba-scene-preview.png"), full_page=True)
+
+            avatar_only = {
+                "schema_version": "scene-descriptor/1.0",
+                "scene_id": "scene/avatar-is-thumbnail",
+                "actors": [
+                    {"slot": 1, "character_id": "character/avatar", "display_name": "头像角色", "preview_uri": "./assets/demo-conference-room.png", "state": "hidden"},
+                    *[{"slot": slot, "character_id": None, "display_name": "", "state": "hidden"} for slot in range(2, 6)],
+                ],
+                "events": [{"event_id": "event/enter", "kind": "enter", "character_id": "character/avatar", "slot": 1}],
+            }
+            page.evaluate("descriptor => window.HaloCueScenePreview.mount(descriptor)", avatar_only)
+            page.locator("#preview-stage").click(position={"x": 640, "y": 160})
+            assert page.locator('.actor-slot[data-slot="1"] .actor-image').get_attribute("src") in {"", None}
+
+            stage_media = {
+                **avatar_only,
+                "scene_id": "scene/stage-media",
+                "actors": [
+                    {**avatar_only["actors"][0], "stage_media": {"kind": "spine-frame", "preview_uri": "./assets/demo-conference-room.png"}},
+                    *avatar_only["actors"][1:],
+                ],
+            }
+            page.evaluate("descriptor => window.HaloCueScenePreview.mount(descriptor)", stage_media)
+            page.locator("#preview-stage").click(position={"x": 640, "y": 160})
+            page.wait_for_function(
+                "() => document.querySelector('.actor-slot[data-slot=\"1\"] .actor-image').complete"
+            )
+            assert page.locator('.actor-slot[data-slot="1"]').get_attribute("data-stage-media-kind") == "spine-frame"
+            assert page.locator('.actor-slot[data-slot="1"] .actor-image').get_attribute("src").endswith("demo-conference-room.png")
             browser.close()
     finally:
         server.shutdown()

@@ -4,7 +4,9 @@
   "background": {
     "resource_id": "synthetic/background/classroom",
     "logical_key": "background/classroom",
-    "preview_uri": "./assets/demo-conference-room.png"
+    "preview_uri": "./assets/demo-conference-room.png",
+    "focus_x": 0.42,
+    "focus_y": 0.68
   },
   "actors": [
     { "slot": 1, "character_id": "character/slot-one", "display_name": "成员一", "resource_id": "synthetic/character/slot-one/portrait", "state": "hidden" },

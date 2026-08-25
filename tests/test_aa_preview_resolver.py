@@ -50,5 +50,8 @@ def test_resolver_adds_api_uris_without_exposing_filesystem_paths(tmp_path):
     )
 
     assert result["background"]["preview_uri"].startswith("/api/resources/preview?")
-    assert result["actors"][0]["preview_source"] == "aa-local-index"
+    assert result["actors"][0]["thumbnail_source"] == "aa-local-index"
+    assert result["actors"][0]["thumbnail_kind"] == "avatar"
+    assert result["actors"][0]["preview_role"] == "thumbnail"
+    assert result["actors"][0]["preview_uri"] == result["actors"][0]["thumbnail_uri"]
     assert str(tmp_path) not in str(result)

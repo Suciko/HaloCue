@@ -10,7 +10,11 @@ The slice supports:
 - stable-ID and reference validation with structured diagnostic codes;
 - validated JSON deserialization for persistence and round-trip tests; and
 - a deterministic `scene-descriptor/1.0` AA presentation adapter with five
-  character slots.
+  character slots. Character stage media is explicit: only `portrait` and
+  `spine-frame` previews may be rendered in the formal canvas; AA avatar keys
+  remain catalog metadata and are never used as full-body fallbacks. Background
+  resources may carry normalized `focus_x`/`focus_y` anchors for cover-cropped
+  16:9 presentation.
 
 `render_timeline.py` projects a scene descriptor into the independent
 `render-timeline/1.0` contract. It uses explicit end-exclusive frame ranges and

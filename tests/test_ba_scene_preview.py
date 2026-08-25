@@ -26,11 +26,23 @@ def valid_project() -> dict:
                 "character_id": "character/alice",
                 "name": "Alice",
                 "resource_id": "synthetic/character/alice/portrait",
+                "avatar_key": "Student_Portrait_Alice",
+                "spine_key": "CharacterSpine_alice",
+                "stage_media": {
+                    "kind": "portrait",
+                    "preview_uri": "./assets/synthetic-alice-stage.png",
+                    "anchor_x": 0.5,
+                    "anchor_y": 1,
+                },
             },
             {
                 "character_id": "character/bob",
                 "name": "Bob",
                 "resource_id": "synthetic/character/bob/portrait",
+                "stage_media": {
+                    "kind": "spine-frame",
+                    "preview_uri": "./assets/synthetic-bob-stage.png",
+                },
             },
         ],
         "resources": [
@@ -38,6 +50,8 @@ def valid_project() -> dict:
                 "resource_id": "synthetic/background/classroom",
                 "role": "background",
                 "logical_key": "background/classroom",
+                "focus_x": 0.42,
+                "focus_y": 0.68,
             },
             {
                 "resource_id": "synthetic/character/alice/portrait",
@@ -121,11 +135,32 @@ def test_aa_preview_is_deterministic_and_uses_five_stable_slots():
     assert [slot["slot"] for slot in descriptor["actors"]] == [1, 2, 3, 4, 5]
     assert descriptor["actors"][0]["character_id"] == "character/alice"
     assert descriptor["actors"][0]["display_name"] == "Alice"
+    assert descriptor["actors"][0]["stage_media"]["kind"] == "portrait"
+    assert descriptor["actors"][0]["avatar_key"] == "Student_Portrait_Alice"
     assert descriptor["actors"][3]["character_id"] == "character/bob"
     assert all(actor["state"] == "hidden" for actor in descriptor["initial_actors"])
     assert descriptor["initial_background"] == descriptor["background"]
     assert descriptor["background"]["resource_id"] == "synthetic/background/classroom"
+    assert descriptor["background"]["focus_x"] == 0.42
+    assert descriptor["background"]["focus_y"] == 0.68
     assert build_aa_scene_descriptor(valid_project(), "scene/classroom") == descriptor
+
+
+def test_validation_rejects_avatar_as_stage_media():
+    project = valid_project()
+    project["characters"][0]["stage_media"] = {
+        "kind": "avatar",
+        "preview_uri": "./assets/avatar.png",
+    }
+
+    diagnostics = validate_project(project)
+
+    assert {
+        "code": "project.unknown_stage_media_kind",
+        "severity": "error",
+        "path": "characters[0].stage_media.kind",
+        "message": "stage_media kind must be one of ['portrait', 'spine-frame']",
+    } in diagnostics
 
 
 def test_deserialize_rejects_unknown_project_version():

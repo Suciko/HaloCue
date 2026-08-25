@@ -9,11 +9,11 @@
     "preview_uri": "/api/resources/preview?kind=background&key=bg_gamedevroom"
   },
   "actors": [
-    { "slot": 1, "character_id": "character/alice", "display_name": "天童爱丽丝", "club_name": "游戏开发部", "avatar_key": "Student_Portrait_Aris", "preview_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Aris", "state": "visible" },
+    { "slot": 1, "character_id": "character/alice", "display_name": "天童爱丽丝", "club_name": "游戏开发部", "avatar_key": "Student_Portrait_Aris", "thumbnail_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Aris", "thumbnail_kind": "avatar", "state": "visible" },
     { "slot": 2, "character_id": null, "display_name": "", "state": "hidden" },
     { "slot": 3, "character_id": null, "display_name": "", "state": "hidden" },
     { "slot": 4, "character_id": null, "display_name": "", "state": "hidden" },
-    { "slot": 5, "character_id": "character/momoi", "display_name": "才羽桃井", "club_name": "游戏开发部", "avatar_key": "Student_Portrait_Momoi", "preview_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Momoi", "state": "visible" }
+    { "slot": 5, "character_id": "character/momoi", "display_name": "才羽桃井", "club_name": "游戏开发部", "avatar_key": "Student_Portrait_Momoi", "thumbnail_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Momoi", "thumbnail_kind": "avatar", "state": "visible" }
   ],
   "events": [
     { "event_id": "event/background", "kind": "background", "resource_id": "aa/background/bg_gamedevroom" },
