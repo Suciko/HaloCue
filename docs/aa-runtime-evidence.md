@@ -19,6 +19,13 @@ their C# and IL2CPP declarations are not copied into this repository.
 | Dialogue label | (-1184, 321, 0) | `PreviewScene.unity`, Transform `79` |
 | Separator line | (0, 361, 0) | `PreviewScene.unity`, Transform `123` |
 | Text background | (0, 272, 0), -90 deg | `PreviewScene.unity`, Transform `75` |
+| Location label | (84, -250, 0) under `(-1480, 720, 0)` UI parent | `PreviewScene.unity`, Transform `113` under `134` |
+
+The location label therefore lands about 250 logical pixels from the top of
+the 1440-high design frame (`17.4%`). HaloCue rounds this to a responsive
+`17.5%` anchor. The AA `TextBg` is a separate presentation layer under the
+dialogue container; HaloCue models that layer as a translucent stacked gradient
+so the exported video is not a solid dialogue card.
 
 The preview maps the 2560-wide logical coordinate space to the 1280-wide
 render target. This produces the five stable left percentages exported by

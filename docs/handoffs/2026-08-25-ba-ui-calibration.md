@@ -9,10 +9,12 @@ pixel dimensions.
 
 Current normalized presentation anchors:
 
-- location chip: left edge, top `20%`, with the cyan accent inset inside the
-  chip rather than attached to the canvas edge;
+- location chip: left edge, top `17.5%`, with the cyan accent inset inside the
+  chip rather than attached to the canvas edge. This is the normalized form of
+  the AA `Label_Place` transform (`y=-250` under the `720`-high UI parent);
 - dialogue rule: left `9.7%`, right `10.2%`, and dialogue panel bottom `3%`;
-- lower scene shade: bottom `44%`, layered blue-black translucent gradients so
+- lower scene shade: bottom `44%`, layered blue-black translucent gradients
+  peaking around 66% opacity so
   the background and character silhouettes remain readable through the
   dialogue area;
 - default dialogue font: bundled Noto Sans SC variable font, weight `400`;
