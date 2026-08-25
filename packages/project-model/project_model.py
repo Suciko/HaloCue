@@ -213,6 +213,7 @@ def build_aa_scene_descriptor(project: dict[str, Any], scene_id: str) -> dict[st
         for slot in range(1, AA_SLOT_COUNT + 1)
     }
     background: dict[str, Any] | None = None
+    initial_background: dict[str, Any] | None = None
     events: list[dict[str, Any]] = []
 
     for event in scene.get("events", []):
@@ -247,16 +248,30 @@ def build_aa_scene_descriptor(project: dict[str, Any], scene_id: str) -> dict[st
             }
             if resource.get("aa_key"):
                 background["aa_key"] = resource["aa_key"]
+            if initial_background is None:
+                initial_background = deepcopy(background)
         event_descriptor = {"event_id": event["event_id"], "kind": kind}
         for key in ("character_id", "resource_id", "text", "slot"):
             if key in event:
                 event_descriptor[key] = event[key]
         events.append(event_descriptor)
 
+    # `actors` records the final catalog state for resource lookup, while the
+    # initial stage must begin empty and be populated by ordered enter events.
+    # Keeping both views avoids showing every eventual actor on the first
+    # background frame of a video preview.
+    initial_actors = deepcopy(actors)
+    for actor in initial_actors.values():
+        actor["state"] = "hidden"
+
     return {
         "schema_version": SCENE_DESCRIPTOR_SCHEMA_VERSION,
         "scene_id": scene_id,
         "background": background,
+        "initial_background": initial_background,
         "actors": [actors[slot] for slot in range(1, AA_SLOT_COUNT + 1)],
+        "initial_actors": [
+            initial_actors[slot] for slot in range(1, AA_SLOT_COUNT + 1)
+        ],
         "events": events,
     }

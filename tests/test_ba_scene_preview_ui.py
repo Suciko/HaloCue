@@ -61,9 +61,10 @@ def test_preview_renders_five_slots_advances_dialogue_and_switches_font(tmp_path
             page.wait_for_selector("#preview-stage.has-background-image")
 
             assert page.locator(".actor-slot").count() == 5
-            assert page.locator(".actor-slot.is-visible").count() == 5
+            assert page.locator(".actor-slot.is-visible").count() == 0
             assert page.locator("#menu-button").count() == 0
             assert page.locator("#location-label").bounding_box()["x"] < 32
+            assert page.locator("#event-progress").is_hidden() is True
 
             page.select_option("#font-select", "nowar")
             assert page.locator("#preview-stage").get_attribute("data-font") == "nowar"
@@ -91,6 +92,7 @@ def test_preview_renders_five_slots_advances_dialogue_and_switches_font(tmp_path
             page.wait_for_function(
                 """() => document.querySelector('#stage-background').style.backgroundImage.includes('demo-conference-room.jpg')"""
             )
+            assert page.locator(".dialogue-panel").is_hidden() is True
 
             output_dir = REPO_ROOT / "acceptance-output"
             output_dir.mkdir(exist_ok=True)

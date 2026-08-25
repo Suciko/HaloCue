@@ -7,11 +7,11 @@
     "preview_uri": "./assets/demo-conference-room.png"
   },
   "actors": [
-    { "slot": 1, "character_id": "character/slot-one", "display_name": "成员一", "resource_id": "synthetic/character/slot-one/portrait", "state": "visible" },
-    { "slot": 2, "character_id": "character/slot-two", "display_name": "成员二", "resource_id": "synthetic/character/slot-two/portrait", "state": "visible" },
-    { "slot": 3, "character_id": "character/alice", "display_name": "领航员", "resource_id": "synthetic/character/alice/portrait", "state": "visible" },
-    { "slot": 4, "character_id": "character/bob", "display_name": "成员四", "resource_id": "synthetic/character/bob/portrait", "state": "visible" },
-    { "slot": 5, "character_id": "character/slot-five", "display_name": "成员五", "resource_id": "synthetic/character/slot-five/portrait", "state": "visible" }
+    { "slot": 1, "character_id": "character/slot-one", "display_name": "成员一", "resource_id": "synthetic/character/slot-one/portrait", "state": "hidden" },
+    { "slot": 2, "character_id": "character/slot-two", "display_name": "成员二", "resource_id": "synthetic/character/slot-two/portrait", "state": "hidden" },
+    { "slot": 3, "character_id": "character/alice", "display_name": "领航员", "resource_id": "synthetic/character/alice/portrait", "state": "hidden" },
+    { "slot": 4, "character_id": "character/bob", "display_name": "成员四", "resource_id": "synthetic/character/bob/portrait", "state": "hidden" },
+    { "slot": 5, "character_id": "character/slot-five", "display_name": "成员五", "resource_id": "synthetic/character/slot-five/portrait", "state": "hidden" }
   ],
   "events": [
     { "event_id": "event/background", "kind": "background", "resource_id": "synthetic/background/classroom" },

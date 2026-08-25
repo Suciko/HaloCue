@@ -63,9 +63,17 @@
     const status = stage.querySelector("#preview-status");
     const advance = stage.querySelector("#advance-button");
     const locationLabel = stage.querySelector("#location-label");
+    const speakerLine = stage.querySelector(".speaker-line");
+    const dialoguePanel = stage.querySelector(".dialogue-panel");
     const stageBackground = stage.querySelector("#stage-background");
+    const initialActors = Array.isArray(descriptor.initial_actors)
+      ? descriptor.initial_actors
+      : descriptor.actors;
+    if (initialActors.length !== 5) {
+      throw new Error("Scene descriptor initial_actors must contain exactly five actor slots.");
+    }
     const actorCatalog = new Map(
-      descriptor.actors
+      [...descriptor.actors, ...initialActors]
         .filter((actor) => actor && actor.character_id)
         .map((actor) => [actor.character_id, actor]),
     );
@@ -75,13 +83,13 @@
     );
     const state = {
       eventIndex: -1,
-      actors: descriptor.actors.map((actor) => ({
+      actors: initialActors.map((actor) => ({
         ...actor,
         presentation: AA.createCharacterState(actor.slot, actor),
       })),
       typewriter: null,
       typewriterComplete: false,
-      background: descriptor.background || null,
+      background: descriptor.initial_background || descriptor.background || null,
     };
 
     function renderActors(activeCharacterId) {
@@ -119,19 +127,24 @@
         locationLabel.textContent = descriptor.location_label;
       }
       if (!event) {
-        speaker.textContent = "Scene";
+        speaker.textContent = "";
         club.hidden = true;
         copy.textContent = "Press advance to begin.";
         caret.hidden = true;
+        speakerLine.classList.add("is-narration");
+        dialoguePanel.classList.add("is-hidden");
         status.textContent = "Ready";
         renderActors(null);
       } else {
         const active = event.character_id || null;
         const activeActor = state.actors.find((actor) => actor.character_id === active);
-        speaker.textContent = activeActor ? actorName(activeActor) : "Scene";
-        club.textContent = active ? "StoryForge" : "";
-        club.hidden = !active;
-        const eventText = event.text || (event.kind === "background" ? "Background changed." : `${event.kind}.`);
+        const hasSpeaker = Boolean(activeActor && active);
+        speaker.textContent = hasSpeaker ? actorName(activeActor) : "";
+        club.textContent = hasSpeaker ? "StoryForge" : "";
+        club.hidden = !hasSpeaker;
+        speakerLine.classList.toggle("is-narration", !hasSpeaker);
+        const eventText = event.text || (event.kind === "background" ? "" : `${event.kind}.`);
+        dialoguePanel.classList.toggle("is-hidden", !eventText);
         copy.textContent = eventText;
         caret.hidden = event.kind !== "dialogue";
         state.typewriter = event.kind === "dialogue" ? AA.queueTypewriter(eventText) : null;

@@ -122,6 +122,8 @@ def test_aa_preview_is_deterministic_and_uses_five_stable_slots():
     assert descriptor["actors"][0]["character_id"] == "character/alice"
     assert descriptor["actors"][0]["display_name"] == "Alice"
     assert descriptor["actors"][3]["character_id"] == "character/bob"
+    assert all(actor["state"] == "hidden" for actor in descriptor["initial_actors"])
+    assert descriptor["initial_background"] == descriptor["background"]
     assert descriptor["background"]["resource_id"] == "synthetic/background/classroom"
     assert build_aa_scene_descriptor(valid_project(), "scene/classroom") == descriptor
 
