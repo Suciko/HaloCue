@@ -5,7 +5,7 @@
   const SLOT_X = AA.SLOT_LEFT_PERCENT;
   const SUPPORTED_SCHEMA = "scene-descriptor/1.0";
   const STAGE_MEDIA_KINDS = new Set(["portrait", "spine", "spine-frame"]);
-  const DEFAULT_ACTOR_MEDIA_SCALE = 1.35;
+  const DEFAULT_ACTOR_MEDIA_SCALE = 1.6;
 
   function assertDescriptor(descriptor) {
     if (!descriptor || descriptor.schema_version !== SUPPORTED_SCHEMA) {
@@ -62,6 +62,11 @@
     return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : fallback;
   }
 
+  function clampStageOffset(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(-640, Math.min(640, number)) : 0;
+  }
+
   function installStageScale(stage) {
     const update = () => {
       const width = stage.getBoundingClientRect().width;
@@ -110,7 +115,9 @@
       preview_uri: previewUri,
       anchor_x: clampUnit(media.anchor_x, 0.5),
       anchor_y: clampUnit(media.anchor_y, 1),
-      scale: Math.max(0.5, Math.min(1.6, Number(media.scale) || DEFAULT_ACTOR_MEDIA_SCALE)),
+      scale: Math.max(0.5, Math.min(2, Number(media.scale) || DEFAULT_ACTOR_MEDIA_SCALE)),
+      offset_x: clampStageOffset(media.offset_x),
+      offset_y: clampStageOffset(media.offset_y),
     };
   }
 
@@ -202,6 +209,7 @@
         if (frame.complete) {
           state.typewriterComplete = true;
           state.typewriterFrame = null;
+          caret.hidden = true;
           return;
         }
         state.typewriterFrame = window.requestAnimationFrame(tick);
@@ -237,10 +245,13 @@
           portrait.classList.remove("has-image");
         };
         image.dataset.requestUri = mediaUri;
-        if (mediaUri) image.src = mediaUri;
+        if (mediaUri) {
+          if (image.getAttribute("src") !== mediaUri) image.src = mediaUri;
+          if (image.complete && image.naturalWidth > 0) portrait.classList.add("has-image");
+        }
         else image.removeAttribute("src");
         image.alt = mediaUri ? actorName(actor) : "";
-        portrait.classList.remove("has-image");
+        if (!mediaUri) portrait.classList.remove("has-image");
         portrait.dataset.mediaKind = stageMedia?.kind || "none";
         element.dataset.stageMediaKind = actor.stage_media?.kind || "none";
         element.classList.toggle(
@@ -254,6 +265,8 @@
         element.style.setProperty("--actor-anchor-x", String(stageMedia?.anchor_x ?? 0.5));
         element.style.setProperty("--actor-anchor-y", String(stageMedia?.anchor_y ?? 1));
         element.style.setProperty("--actor-media-scale", String(stageMedia?.scale ?? DEFAULT_ACTOR_MEDIA_SCALE));
+        element.style.setProperty("--actor-offset-x", `${stageMedia?.offset_x ?? 0}px`);
+        element.style.setProperty("--actor-offset-y", `${stageMedia?.offset_y ?? 0}px`);
         portrait.dataset.initial = visible ? actorName(actor).slice(0, 1) : "";
         element.style.left = `${actor.presentation.leftPercent}%`;
         element.style.opacity = visible ? String(actor.presentation.opacity) : "0";
@@ -363,6 +376,7 @@
         cancelTypewriter();
         copy.textContent = state.typewriter.complete();
         state.typewriterComplete = true;
+        caret.hidden = true;
         return;
       }
       if (state.eventIndex >= descriptor.events.length - 1) return;
@@ -408,6 +422,10 @@
       const overlay = descriptor.presentation?.overlay_controls || descriptor.overlay_controls || {};
       autoToggle.checked = Boolean(overlay.auto);
       menuToggle.checked = Boolean(overlay.menu);
+      autoButton.classList.toggle("is-enabled", Boolean(overlay.auto_enabled));
+      menuButton.classList.toggle("is-enabled", Boolean(overlay.menu_enabled));
+      autoButton.setAttribute("aria-pressed", String(autoButton.classList.contains("is-enabled")));
+      menuButton.setAttribute("aria-pressed", String(menuButton.classList.contains("is-enabled")));
       const apply = () => {
         autoButton.hidden = !autoToggle.checked;
         menuButton.hidden = !menuToggle.checked;

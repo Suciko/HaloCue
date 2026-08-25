@@ -2,6 +2,9 @@
   "schema_version": "scene-descriptor/1.0",
   "scene_id": "scene/local-aa-gamedev-resource-check",
   "location_label": "游戏开发部活动室",
+  "presentation": {
+    "overlay_controls": { "auto": true, "menu": true, "auto_enabled": true }
+  },
   "background": {
     "resource_id": "aa/background/bg_gamedevroom",
     "logical_key": "bg_gamedevroom",
@@ -9,15 +12,15 @@
     "preview_uri": "/api/resources/stage/background?key=bg_gamedevroom"
   },
   "actors": [
-    { "slot": 1, "character_id": "character/alice", "display_name": "天童爱丽丝", "dialogue_name": "爱丽丝", "club_name": "游戏开发部", "avatar_key": "Student_Portrait_Aris", "thumbnail_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Aris", "thumbnail_kind": "avatar", "stage_media": { "kind": "spine", "bundle_key": "CharacterSpine_aris", "animation": "03", "anchor_x": 0.5, "anchor_y": 1, "scale": 1.35 }, "state": "visible" },
+    { "slot": 1, "character_id": "character/alice", "display_name": "天童爱丽丝", "dialogue_name": "爱丽丝", "club_name": "游戏开发部", "avatar_key": "Student_Portrait_Aris", "thumbnail_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Aris", "thumbnail_kind": "avatar", "stage_media": { "kind": "spine", "bundle_key": "CharacterSpine_aris", "animation": "03", "anchor_x": 0.5, "anchor_y": 1, "scale": 1.6, "offset_x": -60, "offset_y": 310 }, "state": "visible" },
     { "slot": 2, "character_id": null, "display_name": "", "state": "hidden" },
     { "slot": 3, "character_id": null, "display_name": "", "state": "hidden" },
     { "slot": 4, "character_id": null, "display_name": "", "state": "hidden" },
-    { "slot": 5, "character_id": "character/momoi", "display_name": "才羽桃井", "dialogue_name": "桃井", "club_name": "游戏开发部", "avatar_key": "Student_Portrait_Momoi", "thumbnail_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Momoi", "thumbnail_kind": "avatar", "stage_media": { "kind": "spine", "bundle_key": "CharacterSpine_momoi", "animation": "00_default", "anchor_x": 0.5, "anchor_y": 1, "scale": 1.35 }, "state": "visible" }
+    { "slot": 5, "character_id": "character/momoi", "display_name": "才羽桃井", "dialogue_name": "桃井", "club_name": "游戏开发部", "avatar_key": "Student_Portrait_Momoi", "thumbnail_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Momoi", "thumbnail_kind": "avatar", "stage_media": { "kind": "spine", "bundle_key": "CharacterSpine_momoi", "animation": "00_default", "anchor_x": 0.5, "anchor_y": 1, "scale": 1.6, "offset_x": -60, "offset_y": 310 }, "state": "visible" }
   ],
   "events": [
     { "event_id": "event/background", "kind": "background", "resource_id": "aa/background/bg_gamedevroom" },
-    { "event_id": "event/alice-line", "kind": "dialogue", "character_id": "character/alice", "text": "这里就是游戏开发部的活动室！" },
+    { "event_id": "event/alice-line", "kind": "dialogue", "character_id": "character/alice", "text": "老师，今天的任务是去活动室检查新游戏！" },
     { "event_id": "event/momoi-line", "kind": "dialogue", "character_id": "character/momoi", "text": "桃，准备好开始今天的开发了吗？" }
   ]
 }
