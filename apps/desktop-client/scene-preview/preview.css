@@ -42,10 +42,9 @@ body {
 button, select { font: inherit; }
 
 .preview-shell {
-  display: grid;
+  display: block;
   width: 100vw;
   height: 100vh;
-  grid-template-rows: 34px minmax(0, 1fr);
 }
 
 .preview-toolbar {
@@ -91,13 +90,13 @@ h1 {
 
 .preview-stage {
   position: relative;
-  width: min(100%, calc((100vh - 34px) * 16 / 9));
+  width: min(100%, calc(100vh * 16 / 9));
   max-height: 100%;
   aspect-ratio: 16 / 9;
   align-self: center;
   justify-self: center;
   overflow: hidden;
-  border: 1px solid rgb(137 166 205 / 54%);
+  border: 0;
   background: #172238;
 }
 
@@ -142,6 +141,26 @@ h1 {
   background: transparent;
   color: transparent;
   isolation: isolate;
+}
+
+.actor-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: 50% 100%;
+  filter: drop-shadow(0 12px 16px rgb(0 0 0 / 34%));
+}
+
+.actor-portrait.has-image::before,
+.actor-portrait.has-image::after { display: none; }
+
+.actor-portrait:not(.has-image)::before {
+  content: attr(data-initial);
+  color: rgb(230 248 255 / 86%);
+  font-size: clamp(18px, 2.1vw, 30px);
+  font-weight: 700;
 }
 
 .actor-portrait::before {
@@ -198,21 +217,59 @@ h1 {
   right: 7px;
   z-index: 10;
   display: flex;
-  gap: 5px;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.location-chip {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  padding: 0 18px 0 14px;
+  background: rgb(5 24 53 / 92%);
+  color: #f7fbff;
+  font-size: clamp(12px, 1.05vw, 18px);
+  letter-spacing: .02em;
+  clip-path: polygon(0 0, 100% 0, 92% 100%, 0 100%);
 }
 
 .runtime-control {
   display: grid;
-  width: 30px;
+  width: auto;
+  min-width: 58px;
   height: 30px;
   place-items: center;
   border: 1px solid rgb(255 255 255 / 76%);
-  border-radius: 5px;
-  background: rgb(10 15 27 / 54%);
-  color: #f2f7ff;
+  border: 0;
+  border-radius: 0;
+  background: #f4c72e;
+  color: #10213b;
   cursor: pointer;
   font-size: 13px;
   line-height: 1;
+}
+
+.runtime-control-label {
+  min-height: 32px;
+  padding: 0 13px;
+  clip-path: polygon(10% 0, 100% 0, 90% 100%, 0 100%);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+#menu-button { background: #f5f7fa; }
+.auto-enabled { --auto-accent: #6de5ff; }
+.auto-enabled #auto-button { background: var(--auto-accent); }
+.menu-open::after {
+  position: absolute;
+  top: 52px;
+  right: 18px;
+  width: 160px;
+  height: 90px;
+  border: 1px solid rgb(255 255 255 / 42%);
+  background: rgb(8 20 42 / 90%);
+  content: "";
 }
 
 .runtime-control:hover,
@@ -222,8 +279,16 @@ h1 {
   outline: none;
 }
 
-#font-cycle-button,
-#close-button { display: none; }
+.preview-toolbar { display: none; }
+
+.font-picker-compat {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 
 .dialogue-shade {
   position: absolute;
@@ -316,10 +381,6 @@ h1 {
 [data-font="nowar"] { --dialogue-font: "Nowar Rounded", "Trebuchet MS", sans-serif; }
 
 @media (max-width: 640px) {
-  .preview-shell { grid-template-rows: 32px minmax(0, 1fr); }
-  .preview-toolbar { padding: 0 7px; }
-  .font-picker > span { display: none; }
-  .font-picker select { width: 136px; }
   .preview-stage { width: 100%; border-right: 0; border-left: 0; }
   .runtime-control { width: 27px; height: 27px; }
   .actor-slot { width: 16%; }
@@ -327,4 +388,6 @@ h1 {
   .speaker-line { padding-left: 10px; }
   .speaker-line::before { width: 3px; }
   .dialogue-text { margin-left: 10px; }
+  .location-chip { max-width: 48vw; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .runtime-control-label { min-width: 50px; padding: 0 9px; }
 }

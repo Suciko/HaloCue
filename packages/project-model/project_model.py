@@ -228,6 +228,9 @@ def build_aa_scene_descriptor(project: dict[str, Any], scene_id: str) -> dict[st
                 "resource_id": character.get("resource_id"),
                 "state": "visible",
             }
+            for key in ("avatar_key", "spine_key", "preview_uri"):
+                if character.get(key):
+                    actors[slot][key] = character[key]
         elif kind == "exit":
             actors[event["slot"]] = {
                 "slot": event["slot"],
@@ -242,6 +245,8 @@ def build_aa_scene_descriptor(project: dict[str, Any], scene_id: str) -> dict[st
                 "resource_id": resource["resource_id"],
                 "logical_key": resource["logical_key"],
             }
+            if resource.get("aa_key"):
+                background["aa_key"] = resource["aa_key"]
         event_descriptor = {"event_id": event["event_id"], "kind": kind}
         for key in ("character_id", "resource_id", "text", "slot"):
             if key in event:

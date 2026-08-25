@@ -26,10 +26,18 @@
 
   function isSafePreviewUri(uri) {
     return typeof uri === "string"
-      && uri.startsWith("./")
+      && (uri.startsWith("./") || uri.startsWith("/api/resources/preview?"))
       && !uri.includes("..")
       && !uri.includes("\\")
       && !/^[a-z]+:/i.test(uri);
+  }
+
+  function resolvePreviewUri(value) {
+    if (isSafePreviewUri(value)) return value;
+    const resolver = window.HALO_CUE_ASSET_RESOLVER;
+    if (typeof resolver !== "function") return "";
+    const resolved = resolver(value);
+    return isSafePreviewUri(resolved) ? resolved : "";
   }
 
   function createActor(slot) {
@@ -37,7 +45,7 @@
     element.className = "actor-slot";
     element.dataset.slot = String(slot);
     element.style.left = `${SLOT_X[slot - 1]}%`;
-    element.innerHTML = '<div class="actor-portrait" aria-hidden="true"></div><div class="actor-name"></div>';
+    element.innerHTML = '<div class="actor-portrait" aria-hidden="true"><img class="actor-image" alt="" /></div><div class="actor-name"></div>';
     return element;
   }
 
@@ -54,10 +62,9 @@
     const progress = stage.querySelector("#event-progress");
     const status = stage.querySelector("#preview-status");
     const advance = stage.querySelector("#advance-button");
-    const fontSelect = document.querySelector("#font-select");
-    const fontCycleButton = stage.querySelector("#font-cycle-button");
-    const fullscreenButton = stage.querySelector("#fullscreen-button");
-    const closeButton = stage.querySelector("#close-button");
+    const locationLabel = stage.querySelector("#location-label");
+    const autoButton = stage.querySelector("#auto-button");
+    const menuButton = stage.querySelector("#menu-button");
     const stageBackground = stage.querySelector("#stage-background");
     actorLayer.replaceChildren(...descriptor.actors.map((actor) => createActor(actor.slot)));
     const actorElements = new Map(
@@ -87,8 +94,13 @@
         );
         const label = element.querySelector(".actor-name");
         const portrait = element.querySelector(".actor-portrait");
+        const image = element.querySelector(".actor-image");
         label.textContent = visible ? actorName(actor) : "";
-        portrait.textContent = visible ? actorName(actor).slice(0, 1) : "";
+        const previewUri = resolvePreviewUri(actor.preview_uri);
+        image.src = visible && previewUri ? previewUri : "";
+        image.alt = visible ? actorName(actor) : "";
+        portrait.classList.toggle("has-image", Boolean(visible && previewUri));
+        portrait.dataset.initial = visible ? actorName(actor).slice(0, 1) : "";
         element.style.left = `${actor.presentation.leftPercent}%`;
         element.style.opacity = visible ? String(actor.presentation.opacity) : "0";
         element.style.zIndex = String(actor.presentation.sortingOrder);
@@ -98,6 +110,9 @@
     }
 
     function renderEvent(event) {
+      if (locationLabel && descriptor.location_label) {
+        locationLabel.textContent = descriptor.location_label;
+      }
       if (!event) {
         speaker.textContent = "Scene";
         club.hidden = true;
@@ -158,7 +173,7 @@
     }
 
     function loadPreviewBackground() {
-      const previewUri = descriptor.background && descriptor.background.preview_uri;
+      const previewUri = resolvePreviewUri(descriptor.background && descriptor.background.preview_uri);
       if (!isSafePreviewUri(previewUri)) return;
       const image = new Image();
       image.addEventListener("load", () => {
@@ -176,22 +191,14 @@
     stage.addEventListener("click", (event) => {
       if (!event.target.closest("button, select, .runtime-controls")) advanceEvent();
     });
-    fontCycleButton.addEventListener("click", () => {
-      const values = ["harmony", "noto", "nowar"];
-      const next = values[(values.indexOf(fontSelect.value) + 1) % values.length];
-      fontSelect.value = next;
-      fontSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    autoButton?.addEventListener("click", () => {
+      stage.classList.toggle("auto-enabled");
+      autoButton.setAttribute("aria-pressed", String(stage.classList.contains("auto-enabled")));
+      status.textContent = stage.classList.contains("auto-enabled") ? "Auto" : "Manual";
     });
-    fullscreenButton.addEventListener("click", async () => {
-      if (!document.fullscreenElement) {
-        await stage.requestFullscreen?.();
-      } else {
-        await document.exitFullscreen?.();
-      }
-    });
-    closeButton.addEventListener("click", () => {
-      window.parent?.postMessage({ type: "halocue:close-preview" }, "*");
-      status.textContent = "Preview close requested";
+    menuButton?.addEventListener("click", () => {
+      stage.classList.toggle("menu-open");
+      status.textContent = stage.classList.contains("menu-open") ? "Menu" : "Ready";
     });
     stage.ownerDocument.addEventListener("keydown", (event) => {
       if (event.key === " " || event.key === "ArrowRight") {
@@ -216,10 +223,10 @@
   function boot(demoDescriptor) {
     try {
       const controller = mount(demoDescriptor);
-      const select = document.querySelector("#font-select");
       const stage = document.querySelector("#preview-stage");
+      const fontSelect = document.querySelector("#font-select");
       document.querySelector("#scene-title").textContent = "预览";
-      select.addEventListener("change", () => stage.dataset.font = select.value);
+      fontSelect?.addEventListener("change", () => { stage.dataset.font = fontSelect.value; });
       window.HaloCueScenePreview.controller = controller;
     } catch (exception) {
       showError(exception);

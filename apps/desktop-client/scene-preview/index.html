@@ -8,28 +8,24 @@
   </head>
   <body>
     <main class="preview-shell" aria-label="HaloCue scene preview">
-      <header class="preview-toolbar">
-        <span class="preview-label">预览</span>
-        <h1 id="scene-title">预览</h1>
-        <label class="font-picker">
-          <span>T</span>
-          <select id="font-select" aria-label="Dialogue font">
-            <option value="harmony">HarmonyOS Sans Medium</option>
-            <option value="noto">Noto Sans</option>
-            <option value="nowar">Nowar Rounded</option>
-          </select>
-        </label>
-      </header>
-
+      <h1 id="scene-title">预览</h1>
       <section id="preview-stage" class="preview-stage" data-font="harmony" aria-live="polite">
         <div id="stage-background" class="stage-background" aria-hidden="true"></div>
         <div class="stage-floor" aria-hidden="true"></div>
         <div id="actor-layer" class="actor-layer" aria-label="Character slots"></div>
         <nav class="runtime-controls" aria-label="Presentation controls">
-          <button id="font-cycle-button" class="runtime-control" type="button" title="Switch dialogue font" aria-label="Switch dialogue font">A文</button>
-          <button id="fullscreen-button" class="runtime-control" type="button" title="Toggle fullscreen" aria-label="Toggle fullscreen">◉</button>
-          <button id="close-button" class="runtime-control" type="button" title="Close preview" aria-label="Close preview">×</button>
+          <span class="location-chip" id="location-label">商店街入口・钟塔下</span>
+          <button id="auto-button" class="runtime-control runtime-control-label" type="button" title="Toggle auto play" aria-label="Toggle auto play">AUTO</button>
+          <button id="menu-button" class="runtime-control runtime-control-label" type="button" title="Open menu" aria-label="Open menu">MENU</button>
         </nav>
+        <label class="font-picker-compat" aria-label="Dialogue font">
+          <span>字体</span>
+          <select id="font-select">
+            <option value="harmony">HarmonyOS Sans Medium</option>
+            <option value="noto">Noto Sans</option>
+            <option value="nowar">Nowar Rounded</option>
+          </select>
+        </label>
         <div class="dialogue-shade" aria-hidden="true"></div>
         <section class="dialogue-panel" aria-label="Dialogue">
           <div class="speaker-line">

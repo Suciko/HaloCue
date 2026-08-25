@@ -99,8 +99,11 @@ MODEL_PROFILES = model_profiles.ModelProfileStore(
 )
 THUMBS = os.path.join(STATE_DIR, ".thumbs")
 CHARACTER_CATALOG_METADATA = {"stamp": None, "items": {}}
+_configured_preview_root = str(os.environ.get("HALOCUE_AA_PREVIEW_INDEX") or "").strip()
 OFFICIAL_PREVIEW_INDEX = OfficialPreviewIndex(
-    LAYOUT.out_root / "official-previews"
+    Path(_configured_preview_root).expanduser().resolve()
+    if _configured_preview_root
+    else LAYOUT.out_root / "official-previews"
 )
 STORY_FILE_PICKER = StoryFilePicker(
     roots=windows_host_roots(STORY_ROOT),
