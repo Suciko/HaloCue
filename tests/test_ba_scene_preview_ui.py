@@ -68,13 +68,13 @@ def test_preview_renders_five_slots_advances_dialogue_and_switches_font(tmp_path
 
             for _ in range(3):
                 page.locator("#preview-stage").click(position={"x": 640, "y": 160})
-            assert page.locator("#speaker-name").inner_text() == "Alice"
+            assert page.locator("#speaker-name").inner_text() == "领航员"
             assert "欢迎来到 StoryForge" in page.locator("#dialogue-text").inner_text()
             assert page.locator('.actor-slot.is-active[data-slot="3"]').count() == 1
 
             for _ in range(2):
                 page.locator("#preview-stage").click(position={"x": 640, "y": 160})
-            assert page.locator("#speaker-name").inner_text() == "Bob"
+            assert page.locator("#speaker-name").inner_text() == "成员四"
             assert page.locator('.actor-slot.is-active[data-slot="4"]').count() == 1
 
             output_dir = REPO_ROOT / "acceptance-output"
