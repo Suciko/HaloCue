@@ -14,6 +14,6 @@ def test_public_entrypoints_do_not_show_the_legacy_product_heading():
 def test_ui_shows_the_halocue_release_name_and_chinese_subtitle():
     source = (ROOT / "ui.html").read_text(encoding="utf-8")
 
-    assert "<title>HaloCue 0.9.3</title>" in source
+    assert "<title>HaloCue 0.95</title>" in source
     assert "<h1 id=\"viewTitle\">剧情工作台</h1>" in source
-    assert "HaloCue 0.9.3" in source
+    assert "HaloCue 0.95" in source

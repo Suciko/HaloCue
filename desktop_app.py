@@ -55,7 +55,7 @@ def run_desktop(
                     "缺少桌面窗口组件，HaloCue 发布包可能不完整。"
                 ) from exc
         webview_module.create_window(
-            "HaloCue 0.9.3",
+            "HaloCue 0.95",
             url,
             width=1360,
             height=860,

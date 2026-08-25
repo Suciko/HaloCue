@@ -170,7 +170,7 @@ def test_version_file_accepts_stable_public_versions(tmp_path):
     source.mkdir(parents=True)
     _write_public_source(source)
     (source / "halocue_meta.py").write_text(
-        "PRODUCT_NAME = 'HaloCue'\nVERSION = '0.9.3'\n",
+        "PRODUCT_NAME = 'HaloCue'\nVERSION = '0.95'\n",
         encoding="utf-8",
     )
     work = tmp_path / "releases" / "build"
@@ -178,8 +178,8 @@ def test_version_file_accepts_stable_public_versions(tmp_path):
 
     version_text = public_builder._write_version_file(source, work).read_text(encoding="utf-8")
 
-    assert "filevers=(0, 9, 3, 0)" in version_text
-    assert "StringStruct('FileVersion', '0.9.3')" in version_text
+    assert "filevers=(0, 95, 0, 0)" in version_text
+    assert "StringStruct('FileVersion', '0.95')" in version_text
 
 
 def test_public_spec_uses_only_the_desensitized_database_seed():

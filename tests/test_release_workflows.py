@@ -75,7 +75,8 @@ def test_release_workflow_is_manual_and_public_only():
     assert "tools/check_release_version.py --tag" in workflow
     assert "inputs.release_tag" in workflow
     assert "gh release create" in workflow
-    assert "--draft" in workflow and "--prerelease" in workflow
+    assert "--draft" in workflow
+    assert "--prerelease" not in workflow
     assert PUBLIC_ARCHIVE_NAME in workflow
     assert PUBLIC_ARCHIVE_NAME + ".sha256" in workflow
     assert "github.token" in workflow

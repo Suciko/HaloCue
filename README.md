@@ -1,6 +1,6 @@
 # HaloCue｜AA 剧本自动演出工具
 
-**HaloCue 0.9.3** 是一款面向
+**HaloCue 0.95** 是一款面向
 [AzureArchive](https://github.com/foxxlight/AzureArchive) 的 AA 剧本自动演出工具。它读取用户已经写好的中文剧本，安排表情、动作、站位、镜头、背景与声音，经过人工审查后编译为 AA 工程，同时帮助管理演员和素材。
 
 现版本的 AI 用于提出演出标注，不负责创作或改写剧本正文；用户始终可以在编译前逐项审查和修改结果。
@@ -10,7 +10,7 @@ Esoteric Software 均无隶属关系。HaloCue 不提供游戏资源，也不授
 
 ## 下载与开始
 
-普通 Windows 用户下载 `HaloCue-0.9.3-windows-x64.zip`：
+普通 Windows 用户下载 `HaloCue-0.95-windows-x64.zip`：
 
 1. 完整解压 ZIP，不要直接在压缩包里运行。
 2. 双击 `HaloCue.exe`。
