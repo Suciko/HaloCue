@@ -140,7 +140,9 @@
         const activeActor = state.actors.find((actor) => actor.character_id === active);
         const hasSpeaker = Boolean(activeActor && active);
         speaker.textContent = hasSpeaker ? actorName(activeActor) : "";
-        club.textContent = hasSpeaker ? "StoryForge" : "";
+        club.textContent = hasSpeaker
+          ? (activeActor.club_name || descriptor.club_name || "StoryForge")
+          : "";
         club.hidden = !hasSpeaker;
         speakerLine.classList.toggle("is-narration", !hasSpeaker);
         const eventText = event.text || (event.kind === "background" ? "" : `${event.kind}.`);

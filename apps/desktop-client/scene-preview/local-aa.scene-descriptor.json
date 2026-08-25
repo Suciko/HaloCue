@@ -1,23 +1,23 @@
 {
   "schema_version": "scene-descriptor/1.0",
-  "scene_id": "scene/local-aa-resource-check",
-  "location_label": "阿拜多斯高等学校・会议室",
+  "scene_id": "scene/local-aa-gamedev-resource-check",
+  "location_label": "千年科学学园・游戏开发部活动室",
   "background": {
-    "resource_id": "aa/background/bg_abydoscouncilroom",
-    "logical_key": "bg_abydoscouncilroom",
-    "aa_key": "bg_abydoscouncilroom",
-    "preview_uri": "/api/resources/preview?kind=background&key=bg_abydoscouncilroom"
+    "resource_id": "aa/background/bg_gamedevroom",
+    "logical_key": "bg_gamedevroom",
+    "aa_key": "BG_GameDevRoom",
+    "preview_uri": "/api/resources/preview?kind=background&key=bg_gamedevroom"
   },
   "actors": [
-    { "slot": 1, "character_id": "character/hoshino", "display_name": "小鸟游星野", "avatar_key": "Student_Portrait_Hoshino", "preview_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Hoshino", "state": "visible" },
-    { "slot": 2, "character_id": "character/serika", "display_name": "黑见芹香", "avatar_key": "Student_Portrait_Serika", "preview_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Serika", "state": "visible" },
-    { "slot": 3, "character_id": "character/shiroko", "display_name": "砂狼白子", "avatar_key": "Student_Portrait_Shiroko", "preview_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Shiroko", "state": "visible" },
-    { "slot": 4, "character_id": "character/ayane", "display_name": "奥空绫音", "avatar_key": "Student_Portrait_Ayane", "preview_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Ayane", "state": "visible" },
-    { "slot": 5, "character_id": "character/nonomi", "display_name": "十六夜野乃美", "avatar_key": "Student_Portrait_Nonomi", "preview_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Nonomi", "state": "visible" }
+    { "slot": 1, "character_id": "character/alice", "display_name": "天童爱丽丝", "club_name": "游戏开发部", "avatar_key": "Student_Portrait_Aris", "preview_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Aris", "state": "visible" },
+    { "slot": 2, "character_id": null, "display_name": "", "state": "hidden" },
+    { "slot": 3, "character_id": null, "display_name": "", "state": "hidden" },
+    { "slot": 4, "character_id": null, "display_name": "", "state": "hidden" },
+    { "slot": 5, "character_id": "character/momoi", "display_name": "才羽桃井", "club_name": "游戏开发部", "avatar_key": "Student_Portrait_Momoi", "preview_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Momoi", "state": "visible" }
   ],
   "events": [
-    { "event_id": "event/background", "kind": "background", "resource_id": "aa/background/bg_abydoscouncilroom" },
-    { "event_id": "event/hoshino-line", "kind": "dialogue", "character_id": "character/hoshino", "text": "今天的会议，就从这里开始吧。" },
-    { "event_id": "event/shiroko-line", "kind": "dialogue", "character_id": "character/shiroko", "text": "嗯。大家都已经准备好了。" }
+    { "event_id": "event/background", "kind": "background", "resource_id": "aa/background/bg_gamedevroom" },
+    { "event_id": "event/alice-line", "kind": "dialogue", "character_id": "character/alice", "text": "这里就是游戏开发部的活动室！" },
+    { "event_id": "event/momoi-line", "kind": "dialogue", "character_id": "character/momoi", "text": "桃，准备好开始今天的开发了吗？" }
   ]
 }
