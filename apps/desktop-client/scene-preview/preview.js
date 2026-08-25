@@ -19,6 +19,7 @@
   }
 
   function actorName(actor) {
+    if (actor.dialogue_name) return actor.dialogue_name;
     if (actor.display_name) return actor.display_name;
     if (!actor.character_id) return "";
     const value = actor.character_id.split("/").pop() || actor.character_id;
@@ -256,7 +257,7 @@
         const previous = state.actors[event.slot - 1];
         const catalogActor = actorCatalog.get(event.character_id) || {};
         const actorDetails = {};
-        for (const key of ["display_name", "thumbnail_uri", "thumbnail_source", "thumbnail_kind", "preview_uri", "preview_source", "preview_role", "avatar_key", "spine_key", "stage_media"]) {
+        for (const key of ["display_name", "dialogue_name", "thumbnail_uri", "thumbnail_source", "thumbnail_kind", "preview_uri", "preview_source", "preview_role", "avatar_key", "spine_key", "stage_media"]) {
           if (event[key] !== undefined) actorDetails[key] = event[key];
           else if (catalogActor[key] !== undefined) actorDetails[key] = catalogActor[key];
         }

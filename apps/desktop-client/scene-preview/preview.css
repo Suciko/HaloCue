@@ -192,12 +192,12 @@ h1 {
 .location-chip {
   position: relative;
   display: inline-flex;
-  min-height: calc(66px * var(--stage-scale));
+  min-height: calc(78px * var(--stage-scale));
   align-items: center;
-  padding: 0 calc(64px * var(--stage-scale)) 0 calc(68px * var(--stage-scale));
+  padding: 0 calc(34px * var(--stage-scale)) 0 calc(48px * var(--stage-scale));
   background: rgb(7 28 58 / 91%);
   color: #f7fbff;
-  font-size: calc(34px * var(--stage-scale));
+  font-size: calc(48px * var(--stage-scale));
   letter-spacing: .03em;
   clip-path: polygon(0 0, 100% 0, 92% 100%, 0 100%);
 }
@@ -206,7 +206,7 @@ h1 {
   position: absolute;
   top: 23%;
   bottom: 23%;
-  left: calc(34px * var(--stage-scale));
+  left: calc(42px * var(--stage-scale));
   width: calc(6px * var(--stage-scale));
   background: #72dfff;
   content: "";
@@ -271,8 +271,8 @@ h1 {
 }
 
 .speaker-identity { display: flex; align-items: baseline; min-width: 0; gap: calc(21px * var(--stage-scale)); }
-.speaker-name { color: #fff; font-size: calc(34px * var(--stage-scale)); font-weight: 600; text-shadow: 1px 2px 0 #07111e, 0 2px 5px rgb(0 0 0 / 82%); }
-.club-name { color: #64c9ff; font-size: calc(24px * var(--stage-scale)); font-weight: 500; text-shadow: 1px 2px 0 #07111e, 0 2px 4px rgb(0 0 0 / 78%); }
+.speaker-name { color: #fff; font-size: calc(48px * var(--stage-scale)); font-weight: 600; text-shadow: 1px 2px 0 #07111e, 0 2px 5px rgb(0 0 0 / 82%); }
+.club-name { color: #64c9ff; font-size: calc(36px * var(--stage-scale)); font-weight: 500; text-shadow: 1px 2px 0 #07111e, 0 2px 4px rgb(0 0 0 / 78%); }
 .event-progress { display: none; }
 
 .speaker-line.is-narration::before,
@@ -282,7 +282,7 @@ h1 {
   min-height: 3.2em;
   margin: calc(13px * var(--stage-scale)) 0 0;
   color: #fff;
-  font-size: calc(34px * var(--stage-scale));
+  font-size: calc(44px * var(--stage-scale));
   font-weight: 400;
   line-height: 1.34;
   white-space: pre-line;

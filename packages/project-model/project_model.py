@@ -266,7 +266,14 @@ def build_aa_scene_descriptor(project: dict[str, Any], scene_id: str) -> dict[st
                 "resource_id": character.get("resource_id"),
                 "state": "visible",
             }
-            for key in ("avatar_key", "spine_key", "preview_uri", "stage_media"):
+            for key in (
+                "dialogue_name",
+                "club_name",
+                "avatar_key",
+                "spine_key",
+                "preview_uri",
+                "stage_media",
+            ):
                 if character.get(key):
                     actors[slot][key] = deepcopy(character[key])
         elif kind == "exit":
