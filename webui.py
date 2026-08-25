@@ -61,6 +61,11 @@ import script2aap as S2A                                        # noqa: E402
 import spine_face_analysis                                      # noqa: E402
 import spine_face_labeler                                       # noqa: E402
 from aa_project_assets import assert_aa_closed, validate_windows_path_component  # noqa: E402
+from aa_stage_media import (  # noqa: E402
+    StageMediaError,
+    stage_background_from_catalog,
+    stage_frame_path,
+)
 from aa_registry import AssetRegistrationError, RegistrationConflictError  # noqa: E402
 from build_index import faces_of                                # noqa: E402
 from build_bundle import BuildBundleManager, CompileInputStaleError  # noqa: E402
@@ -1724,6 +1729,31 @@ def background_preview_path(name: str) -> Path | None:
     if custom and Path(custom).is_file():
         return Path(custom)
     return OFFICIAL_PREVIEW_INDEX.resolve("background", str(name))
+
+
+def _stage_catalog_and_cache() -> tuple[Path | None, Path | None]:
+    """Find the catalog/cache adjacent to an explicitly configured AA data dir."""
+
+    discovery = _current_aa_discovery()
+    catalog = discovery.catalog
+    resource_cache = discovery.resource_cache
+    data = discovery.data or (Path(str(CFG.get("aa_data"))) if CFG.get("aa_data") else None)
+    if data is None:
+        return catalog, resource_cache
+    data = data.resolve()
+    workspace = data.parent
+    archive_root = workspace.parent
+    if catalog is None:
+        candidates = (
+            archive_root / "App" / "AzureArchive_Data" / "StreamingAssets" / "aa" / "catalog.json",
+            data.parent / "App" / "AzureArchive_Data" / "StreamingAssets" / "aa" / "catalog.json",
+        )
+        catalog = next((path for path in candidates if path.is_file()), None)
+    if resource_cache is None:
+        candidate = archive_root / "资源文件"
+        if candidate.is_dir():
+            resource_cache = candidate
+    return catalog, resource_cache
 
 
 def _background_preview_available(name: str) -> bool:
@@ -4288,6 +4318,52 @@ class H(BaseHTTPRequestHandler):
                     ".jpeg": "image/jpeg",
                 }.get(preview.suffix.casefold(), "application/octet-stream")
                 return self._send_preview_file(preview, content_type)
+            if p == "/api/resources/stage/spine/frame":
+                try:
+                    catalog, resource_cache = _stage_catalog_and_cache()
+                    frame = stage_frame_path(
+                        CFG.get("overrides"),
+                        q.get("key", ""),
+                        animation=q.get("animation", "00_default"),
+                        cache_root=LAYOUT.out_root / "stage-media",
+                        catalog=catalog,
+                        resource_cache=resource_cache,
+                    )
+                except StageMediaError as exc:
+                    return self._send(404, {
+                        "ok": False,
+                        "code": "stage_spine_frame_unavailable",
+                        "e": str(exc),
+                    })
+                return self._send_preview_file(frame, "image/png")
+            if p == "/api/resources/stage/background":
+                key = q.get("key", "")
+                catalog, resource_cache = _stage_catalog_and_cache()
+                frame = stage_background_from_catalog(
+                    catalog,
+                    LAYOUT.out_root / "stage-media",
+                    key,
+                    resource_cache=resource_cache,
+                )
+                if frame is None:
+                    # Explicit user overrides are allowed, but the generated
+                    # thumbnail index is intentionally not used for stage
+                    # output because it is only 320x180 and may contain bars.
+                    custom = bg_files().get(key)
+                    frame = Path(custom).resolve() if custom else None
+                if frame is None or not frame.is_file():
+                    return self._send(404, {
+                        "ok": False,
+                        "code": "stage_background_unavailable",
+                        "e": "stage background is not available",
+                    })
+                content_type = {
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".webp": "image/webp",
+                }.get(frame.suffix.casefold(), "application/octet-stream")
+                return self._send_preview_file(frame, content_type)
             if p == "/api/browse":
                 return self._send(
                     200,
@@ -4634,6 +4710,33 @@ class H(BaseHTTPRequestHandler):
                 if os.path.commonpath([safe_path, js_dir]) != js_dir or not os.path.isfile(safe_path):
                     return self._send(404, {"e": "js file not found"})
                 return self._send(200, open(safe_path, "r", encoding="utf-8").read(), "application/javascript; charset=utf-8")
+            if p.startswith("/scene-preview/"):
+                rel_path = unquote(p[len("/scene-preview/"):])
+                preview_root = (Path(HERE) / "apps" / "desktop-client" / "scene-preview").resolve()
+                if not rel_path:
+                    rel_path = "index.html"
+                safe_path = (preview_root / rel_path).resolve()
+                try:
+                    safe_path.relative_to(preview_root)
+                except ValueError:
+                    return self._send(404, {"e": "scene preview file not found"})
+                if not safe_path.is_file() or safe_path.suffix.casefold() not in {
+                    ".html", ".css", ".js", ".json", ".png", ".jpg", ".jpeg", ".ttf",
+                }:
+                    return self._send(404, {"e": "scene preview file not found"})
+                content_type = {
+                    ".html": "text/html; charset=utf-8",
+                    ".css": "text/css; charset=utf-8",
+                    ".js": "application/javascript; charset=utf-8",
+                    ".json": "application/json; charset=utf-8",
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".ttf": "font/ttf",
+                }[safe_path.suffix.casefold()]
+                if content_type.startswith("image/") or content_type == "font/ttf":
+                    return self._send_preview_file(safe_path, content_type)
+                return self._send(200, safe_path.read_text(encoding="utf-8"), content_type)
             if p.startswith("/css/"):
                 rel_path = unquote(p[5:])
                 if not rel_path.endswith(".css"):

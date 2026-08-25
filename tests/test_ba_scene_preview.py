@@ -159,7 +159,7 @@ def test_validation_rejects_avatar_as_stage_media():
         "code": "project.unknown_stage_media_kind",
         "severity": "error",
         "path": "characters[0].stage_media.kind",
-        "message": "stage_media kind must be one of ['portrait', 'spine-frame']",
+        "message": "stage_media kind must be one of ['portrait', 'spine', 'spine-frame']",
     } in diagnostics
 
 

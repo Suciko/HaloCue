@@ -4,7 +4,7 @@
   const AA = window.HaloCueAARuntime;
   const SLOT_X = AA.SLOT_LEFT_PERCENT;
   const SUPPORTED_SCHEMA = "scene-descriptor/1.0";
-  const STAGE_MEDIA_KINDS = new Set(["portrait", "spine-frame"]);
+  const STAGE_MEDIA_KINDS = new Set(["portrait", "spine", "spine-frame"]);
 
   function assertDescriptor(descriptor) {
     if (!descriptor || descriptor.schema_version !== SUPPORTED_SCHEMA) {
@@ -27,7 +27,8 @@
 
   function isSafePreviewUri(uri) {
     return typeof uri === "string"
-      && (uri.startsWith("./") || uri.startsWith("/api/resources/preview?"))
+      && (uri.startsWith("./") || uri.startsWith("/api/resources/preview?")
+        || uri.startsWith("/api/resources/stage/"))
       && !uri.includes("..")
       && !uri.includes("\\")
       && !/^[a-z]+:/i.test(uri);
@@ -46,13 +47,49 @@
     return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : fallback;
   }
 
+  function installStageScale(stage) {
+    const update = () => {
+      const width = stage.getBoundingClientRect().width;
+      const designWidth = Number(AA.DESIGN_WIDTH) || 2560;
+      const scale = width > 0 ? width / designWidth : 1;
+      stage.style.setProperty("--stage-scale", String(scale));
+    };
+    const previousObserver = stage.__haloCueStageScaleObserver;
+    if (previousObserver && typeof previousObserver.disconnect === "function") {
+      previousObserver.disconnect();
+    }
+    const previousHandler = stage.__haloCueStageScaleHandler;
+    if (previousHandler) {
+      window.removeEventListener("resize", previousHandler);
+      stage.__haloCueStageScaleHandler = null;
+    }
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver(update);
+      observer.observe(stage);
+      stage.__haloCueStageScaleObserver = observer;
+    } else {
+      stage.__haloCueStageScaleHandler = update;
+      window.addEventListener("resize", update, { passive: true });
+    }
+    update();
+  }
+
   function stageMediaFor(actor) {
     const media = actor && actor.stage_media;
     if (!media || typeof media !== "object" || !STAGE_MEDIA_KINDS.has(media.kind)) {
       return null;
     }
-    const previewUri = resolvePreviewUri(media.preview_uri);
-    if (!previewUri) return null;
+    let previewValue = media.preview_uri;
+    if (media.kind === "spine" && typeof media.bundle_key === "string") {
+      const key = media.bundle_key.trim();
+      const animation = typeof media.animation === "string" && media.animation.trim()
+        ? media.animation.trim() : "00_default";
+      if (/^[A-Za-z0-9_.-]+$/.test(key) && /^[A-Za-z0-9_.-]+$/.test(animation)) {
+        previewValue = `/api/resources/stage/spine/frame?key=${encodeURIComponent(key)}&animation=${encodeURIComponent(animation)}`;
+      }
+    }
+    const previewUri = resolvePreviewUri(previewValue);
+    if (!previewUri && media.kind !== "spine") return null;
     return {
       ...media,
       preview_uri: previewUri,
@@ -75,6 +112,7 @@
     assertDescriptor(descriptor);
     const stage = root || document.querySelector("#preview-stage");
     if (!stage) throw new Error("Preview stage root was not found.");
+    installStageScale(stage);
     const actorLayer = stage.querySelector("#actor-layer");
     const speaker = stage.querySelector("#speaker-name");
     const club = stage.querySelector("#club-name");
@@ -331,7 +369,10 @@
   if (demoDescriptor) {
     boot(demoDescriptor);
   } else if (window.location.protocol !== "file:") {
-    fetch("./example.scene-descriptor.json")
+    const descriptorName = new URLSearchParams(window.location.search).get("descriptor") === "local-aa"
+      ? "./local-aa.scene-descriptor.json"
+      : "./example.scene-descriptor.json";
+    fetch(descriptorName)
       .then((response) => {
         if (!response.ok) throw new Error("Could not load the synthetic scene descriptor.");
         return response.json();

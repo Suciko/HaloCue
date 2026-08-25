@@ -13,7 +13,7 @@ from typing import Any
 PROJECT_SCHEMA_VERSION = "halocue-project/1.0"
 SCENE_DESCRIPTOR_SCHEMA_VERSION = "scene-descriptor/1.0"
 AA_SLOT_COUNT = 5
-STAGE_MEDIA_KINDS = frozenset({"portrait", "spine-frame"})
+STAGE_MEDIA_KINDS = frozenset({"portrait", "spine", "spine-frame"})
 
 
 def _diagnostic(code: str, path: str, message: str) -> dict[str, str]:
@@ -136,7 +136,14 @@ def validate_project(project: Any) -> list[dict[str, str]]:
                         )
                     )
                 preview_uri = stage_media.get("preview_uri")
-                if not isinstance(preview_uri, str) or not preview_uri.strip():
+                has_spine_bundle = (
+                    media_kind == "spine"
+                    and isinstance(stage_media.get("bundle_key"), str)
+                    and bool(stage_media.get("bundle_key", "").strip())
+                )
+                if (
+                    not isinstance(preview_uri, str) or not preview_uri.strip()
+                ) and not has_spine_bundle:
                     diagnostics.append(
                         _diagnostic(
                             "project.missing_stage_media_preview",
