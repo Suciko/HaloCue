@@ -1,4 +1,4 @@
-"""Build and validate the HaloCue 0.9.3 Windows desktop release."""
+"""Build and validate the HaloCue 0.95 Windows desktop release."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-VERSION = "0.9.3"
+VERSION = "0.95"
 RELEASE_BASENAME = f"HaloCue-{VERSION}-windows-x64"
 PRIVATE_RELEASE_BASENAME = f"HaloCue-{VERSION}-private-windows-x64"
 _ABSOLUTE_PATH = re.compile(
@@ -291,7 +291,7 @@ def build_release(
     private_spine_source: str | Path | None = None,
 ) -> tuple[Path, Path]:
     root = Path(project_root).resolve()
-    build_root = root / "build" / "desktop-0.9.3"
+    build_root = root / "build" / "desktop-0.95"
     seed_dir = build_root / "seed"
     work_dir = build_root / "pyinstaller"
     dist_dir = build_root / "dist"

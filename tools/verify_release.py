@@ -35,7 +35,7 @@ from release_smoke import (  # noqa: E402
 
 
 APP_ID = "halocue-local-server-v1"
-VERSION = "0.9.3"
+VERSION = "0.95"
 
 
 class VerificationError(RuntimeError):

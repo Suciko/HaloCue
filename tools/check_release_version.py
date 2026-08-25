@@ -87,12 +87,13 @@ def check_release_version(
     """Validate the exact release tag, archive metadata, and public seed."""
 
     expected_tag = f"v{VERSION}"
-    if not re.fullmatch(r"v\d+\.\d+\.\d+", tag or ""):
-        raise ReleaseVersionError("release tag must use vX.Y.Z")
+    version_pattern = r"\d+\.\d+(?:\.\d+)?"
+    if not re.fullmatch(fr"v{version_pattern}", tag or ""):
+        raise ReleaseVersionError("release tag must use vX.Y or vX.Y.Z")
     if tag != expected_tag:
         raise ReleaseVersionError(f"release tag must be {expected_tag}")
-    if not re.fullmatch(r"\d+\.\d+\.\d+", VERSION):
-        raise ReleaseVersionError("HaloCue version is not a stable semantic version")
+    if not re.fullmatch(version_pattern, VERSION):
+        raise ReleaseVersionError("HaloCue version is not a stable release version")
     expected_archive = f"{PRODUCT_NAME}-{VERSION}-windows-x64.zip"
     if PUBLIC_ARCHIVE_NAME != expected_archive:
         raise ReleaseVersionError("public archive name does not match HaloCue metadata")

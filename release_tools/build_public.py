@@ -257,7 +257,7 @@ def _write_version_file(source_root: Path, work_root: Path) -> Path:
     metadata = _source_constants(source_root)
     product = metadata.get("PRODUCT_NAME")
     version = metadata.get("VERSION")
-    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?", str(version))
+    match = re.fullmatch(r"(\d+)\.(\d+)(?:\.(\d+))?(?:-beta\.(\d+))?", str(version))
     if product != "HaloCue" or match is None:
         raise ValueError("halocue_meta.py has unsupported public version metadata")
     numeric = tuple(int(part or 0) for part in match.groups())

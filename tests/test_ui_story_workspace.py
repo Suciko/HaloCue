@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import os
 import re
 import subprocess
 
@@ -10,8 +11,13 @@ HARNESS = HERE / "tests" / "ui_runtime_harness.js"
 
 
 def run_runtime(script):
+    # The product intentionally displays local time; make the test's local
+    # timezone explicit so the expected value is stable on CI runners.
+    environment = os.environ.copy()
+    environment["TZ"] = "Asia/Shanghai"
     return json.loads(subprocess.check_output(
-        ["node", "-e", script, str(HARNESS)], text=True, encoding="utf-8"
+        ["node", "-e", script, str(HARNESS)], text=True, encoding="utf-8",
+        env=environment,
     ))
 
 

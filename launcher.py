@@ -77,7 +77,7 @@ def build_environment_report(
         missing_files.append(name)
     database_path = (
         LAYOUT.database_path
-        if LAYOUT.frozen and root == PROGRAM_DIR
+        if root == PROGRAM_DIR
         else root / "aa_assets.db"
     )
     database_ready = database_path.is_file()
