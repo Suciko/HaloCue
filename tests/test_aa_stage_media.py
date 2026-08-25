@@ -78,3 +78,75 @@ def test_stage_spine_endpoint_streams_only_the_cached_frame(tmp_path, monkeypatc
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_stage_frame_cache_is_partitioned_by_animation(tmp_path, monkeypatch):
+    import aa_stage_media
+
+    source = tmp_path / "source.png"
+    source.write_bytes(b"PNG-SOURCE")
+    bundle_root = tmp_path / "bundle"
+    bundle_root.mkdir()
+
+    class FakeReport:
+        faces = (type("Face", (), {"portrait_path": source})(),)
+        animation_names = ("00", "03")
+        cache_dir = tmp_path / "renderer-cache"
+
+    class FakeRenderer:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def render(self, _root, *, face_ids, cache_root):
+            FakeReport.cache_dir = Path(cache_root) / "bundle-signature"
+            FakeReport.cache_dir.mkdir(parents=True, exist_ok=True)
+            FakeReport.faces = (type("Face", (), {"portrait_path": source})(),)
+            FakeRenderer.requested = face_ids[0]
+            return FakeReport()
+
+    monkeypatch.setattr(
+        aa_stage_media,
+        "resolve_spine_bundle",
+        lambda *_args, **_kwargs: {"root": bundle_root, "spine_version": "3.8.96"},
+    )
+    monkeypatch.setattr(aa_stage_media, "extract_catalog_spine_bundle", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        __import__("spine_face_web_renderer"), "SpineWebRenderer", FakeRenderer,
+    )
+
+    # The fake source is not a real image, so patch the crop operation at the
+    # module boundary and only assert the animation-specific output paths.
+    class FakeImage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def convert(self, _mode):
+            return self
+
+        def getchannel(self, _channel):
+            return self
+
+        def getbbox(self):
+            return (0, 0, 1, 1)
+
+        def crop(self, _bounds):
+            return self
+
+        def save(self, path, _format, **_kwargs):
+            Path(path).write_bytes(b"PNG-FRAME")
+
+    monkeypatch.setattr("PIL.Image.open", lambda _path: FakeImage())
+    first = aa_stage_media.stage_frame_path(None, "CharacterSpine_aris", animation="00", cache_root=tmp_path)
+    second = aa_stage_media.stage_frame_path(None, "CharacterSpine_aris", animation="03", cache_root=tmp_path)
+    assert first != second
+    assert first.name == "00.png"
+    assert second.name == "03.png"

@@ -24,6 +24,10 @@
             <option value="nowar">Nowar Rounded</option>
           </select>
         </label>
+        <div class="stage-overlay-controls" aria-label="视频叠加按钮">
+          <button id="auto-button" class="stage-overlay-button" type="button" hidden>AUTO</button>
+          <button id="menu-button" class="stage-overlay-button" type="button" hidden>MENU</button>
+        </div>
         <div class="dialogue-shade" aria-hidden="true"></div>
         <section class="dialogue-panel" aria-label="Dialogue">
           <div class="speaker-line">
@@ -40,6 +44,12 @@
           </div>
         </section>
       </section>
+
+      <aside class="render-options" aria-label="直出叠加选项">
+        <span class="render-options-title">直出叠加</span>
+        <label><input id="auto-toggle" type="checkbox" /> AUTO</label>
+        <label><input id="menu-toggle" type="checkbox" /> MENU</label>
+      </aside>
 
       <p id="preview-error" class="preview-error" role="alert" hidden></p>
     </main>

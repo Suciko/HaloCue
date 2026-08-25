@@ -64,7 +64,14 @@ def test_preview_renders_five_slots_advances_dialogue_and_switches_font(tmp_path
 
             assert page.locator(".actor-slot").count() == 5
             assert page.locator(".actor-slot.is-visible").count() == 0
-            assert page.locator("#menu-button").count() == 0
+            assert page.locator("#auto-button").is_hidden() is True
+            assert page.locator("#menu-button").is_hidden() is True
+            page.locator("#auto-toggle").check()
+            assert page.locator("#auto-button").is_hidden() is False
+            page.locator("#auto-toggle").uncheck()
+            page.locator("#menu-toggle").check()
+            assert page.locator("#menu-button").is_hidden() is False
+            page.locator("#menu-toggle").uncheck()
             stage_box = page.locator("#preview-stage").bounding_box()
             scale_probe = page.locator("#preview-stage").evaluate(
                 "element => ({ scale: Number.parseFloat(getComputedStyle(element).getPropertyValue('--stage-scale')), name: parseFloat(getComputedStyle(document.querySelector('#speaker-name')).fontSize), club: parseFloat(getComputedStyle(document.querySelector('#club-name')).fontSize), text: parseFloat(getComputedStyle(document.querySelector('#dialogue-text')).fontSize) })"
@@ -88,9 +95,20 @@ def test_preview_renders_five_slots_advances_dialogue_and_switches_font(tmp_path
 
             for _ in range(3):
                 page.locator("#preview-stage").click(position={"x": 640, "y": 160})
+            page.wait_for_function(
+                "() => document.querySelector('#dialogue-text').innerText.includes('欢迎来到 StoryForge')"
+            )
             assert page.locator("#speaker-name").inner_text() == "领航员"
             assert "欢迎来到 StoryForge" in page.locator("#dialogue-text").inner_text()
             assert page.locator('.actor-slot.is-active[data-slot="3"]').count() == 1
+            dialogue_box = page.locator(".dialogue-panel").bounding_box()
+            assert 0.77 < dialogue_box["y"] / stage_box["height"] < 0.80
+            assert page.locator("#speaker-name").evaluate(
+                "element => getComputedStyle(element).fontWeight"
+            ) in {"600", "700"}
+            assert page.locator("#club-name").evaluate(
+                "element => getComputedStyle(element).color"
+            ) == "rgb(112, 212, 255)"
 
             for _ in range(2):
                 page.locator("#preview-stage").click(position={"x": 640, "y": 160})

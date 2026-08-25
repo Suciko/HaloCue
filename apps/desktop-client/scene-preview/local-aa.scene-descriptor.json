@@ -9,7 +9,7 @@
     "preview_uri": "/api/resources/stage/background?key=bg_gamedevroom"
   },
   "actors": [
-    { "slot": 1, "character_id": "character/alice", "display_name": "天童爱丽丝", "dialogue_name": "爱丽丝", "club_name": "游戏开发部", "avatar_key": "Student_Portrait_Aris", "thumbnail_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Aris", "thumbnail_kind": "avatar", "stage_media": { "kind": "spine", "bundle_key": "CharacterSpine_aris", "animation": "00_default", "anchor_x": 0.5, "anchor_y": 1, "scale": 1.35 }, "state": "visible" },
+    { "slot": 1, "character_id": "character/alice", "display_name": "天童爱丽丝", "dialogue_name": "爱丽丝", "club_name": "游戏开发部", "avatar_key": "Student_Portrait_Aris", "thumbnail_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Aris", "thumbnail_kind": "avatar", "stage_media": { "kind": "spine", "bundle_key": "CharacterSpine_aris", "animation": "03", "anchor_x": 0.5, "anchor_y": 1, "scale": 1.35 }, "state": "visible" },
     { "slot": 2, "character_id": null, "display_name": "", "state": "hidden" },
     { "slot": 3, "character_id": null, "display_name": "", "state": "hidden" },
     { "slot": 4, "character_id": null, "display_name": "", "state": "hidden" },

@@ -9,12 +9,18 @@ can use either generation without relying on a global browser runtime.
 from __future__ import annotations
 
 import re
+import threading
 from pathlib import Path
 
 
 _VERSION_RE = re.compile(rb"(?<!\d)(\d+\.\d+(?:\.\d+)?)(?!\d)")
 _SUPPORTED_FAMILIES = ("3.8", "4.2")
 _SAFE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+# Playwright's sync runtime is process-global in practice.  The preview server
+# is threaded, so serialize WebGL frame extraction as well as browser startup
+# and cache writes.  This keeps two visible stage actors from racing the
+# Playwright context manager and returning a false 404.
+_STAGE_RENDER_LOCK = threading.Lock()
 
 
 class StageMediaError(ValueError):
@@ -287,18 +293,19 @@ def stage_frame_path(
     from spine_face_web_renderer import SpineWebRenderer
 
     cache_dir = Path(cache_root).expanduser().resolve() / "spine-stage"
-    renderer = SpineWebRenderer(
-        spine_version=str(bundle["spine_version"]),
-        canvas_size=2048,
-        headless=True,
-    )
     try:
-        with renderer:
-            report = renderer.render(
-                Path(bundle["root"]),
-                face_ids=(animation_name,),
-                cache_root=cache_dir,
+        with _STAGE_RENDER_LOCK:
+            renderer = SpineWebRenderer(
+                spine_version=str(bundle["spine_version"]),
+                canvas_size=2048,
+                headless=True,
             )
+            with renderer:
+                report = renderer.render(
+                    Path(bundle["root"]),
+                    face_ids=(animation_name,),
+                    cache_root=cache_dir,
+                )
     except Exception as exc:
         raise StageMediaError(f"Spine stage frame rendering failed: {exc}") from exc
     if not report.faces:
@@ -307,7 +314,13 @@ def stage_frame_path(
             f"Spine animation not found: {animation_name}; available={available}"
         )
     source = report.faces[0].portrait_path
-    tight = report.cache_dir / "stage.png"
+    # The renderer cache is keyed by the bundle, while a scene can request
+    # several facial animations from that same bundle. Keep the final stage
+    # crop keyed by animation as well; otherwise the first requested frame
+    # silently wins for every later descriptor.
+    tight_dir = report.cache_dir / "stage-frames"
+    tight_dir.mkdir(parents=True, exist_ok=True)
+    tight = tight_dir / f"{animation_name}.png"
     if not tight.is_file():
         try:
             from PIL import Image

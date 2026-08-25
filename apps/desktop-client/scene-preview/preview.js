@@ -150,8 +150,45 @@
       })),
       typewriter: null,
       typewriterComplete: false,
+      typewriterFrame: null,
+      motion: null,
       background: descriptor.initial_background || descriptor.background || null,
     };
+
+    function pulseMotion(element, className) {
+      if (!element) return;
+      element.classList.remove(className);
+      // Force a new animation cycle when two adjacent events use the same
+      // slot.  This is layout-only and does not change the 16:9 stage math.
+      void element.offsetWidth;
+      element.classList.add(className);
+      element.addEventListener("animationend", () => element.classList.remove(className), { once: true });
+    }
+
+    function cancelTypewriter() {
+      if (state.typewriterFrame !== null) {
+        window.cancelAnimationFrame(state.typewriterFrame);
+        state.typewriterFrame = null;
+      }
+    }
+
+    function startTypewriter() {
+      cancelTypewriter();
+      if (!state.typewriter) return;
+      const startedAt = window.performance.now();
+      const tick = (now) => {
+        if (!state.typewriter) return;
+        const frame = state.typewriter.frame(now - startedAt);
+        copy.textContent = frame.visibleText;
+        if (frame.complete) {
+          state.typewriterComplete = true;
+          state.typewriterFrame = null;
+          return;
+        }
+        state.typewriterFrame = window.requestAnimationFrame(tick);
+      };
+      state.typewriterFrame = window.requestAnimationFrame(tick);
+    }
 
     function renderActors(activeCharacterId) {
       state.actors.forEach((actor) => {
@@ -208,6 +245,7 @@
     }
 
     function renderEvent(event) {
+      cancelTypewriter();
       if (locationLabel && descriptor.location_label) {
         locationLabel.textContent = descriptor.location_label;
       }
@@ -232,11 +270,19 @@
         speakerLine.classList.toggle("is-narration", !hasSpeaker);
         const eventText = event.text || (event.kind === "background" ? "" : `${event.kind}.`);
         dialoguePanel.classList.toggle("is-hidden", !eventText);
-        copy.textContent = eventText;
+        copy.textContent = event.kind === "dialogue" ? "" : eventText;
         caret.hidden = event.kind !== "dialogue";
         state.typewriter = event.kind === "dialogue" ? AA.queueTypewriter(eventText) : null;
+        state.typewriterComplete = event.kind !== "dialogue";
         status.textContent = event.kind === "dialogue" ? "Dialogue" : event.kind;
         renderActors(active);
+        if (eventText) pulseMotion(dialoguePanel, "is-entering");
+        if (state.typewriter) startTypewriter();
+      }
+      if (state.motion) {
+        const motion = state.motion;
+        state.motion = null;
+        pulseMotion(actorElements.get(motion.slot), motion.kind === "exit" ? "is-exiting" : "is-entering");
       }
       progress.textContent = `${Math.max(0, state.eventIndex + 1)} / ${descriptor.events.length}`;
       advance.disabled = state.eventIndex >= descriptor.events.length - 1;
@@ -273,12 +319,14 @@
         AA.setPos(character, AA.slotWorldPosition(event.slot));
         AA.fadeAnimation(character, true).complete();
         AA.setOnTop(character);
+        state.motion = { slot: event.slot, kind: "enter" };
       }
       if (event.kind === "exit" && event.slot) {
         AA.hideAnimation(state.actors[event.slot - 1].presentation);
         state.actors[event.slot - 1] = {
           ...state.actors[event.slot - 1], character_id: null, resource_id: null, state: "hidden",
         };
+        state.motion = { slot: event.slot, kind: "exit" };
       }
       if (event.kind === "background") {
         const nextBackground = backgroundForEvent(event);
@@ -291,6 +339,7 @@
 
     function advanceEvent() {
       if (state.typewriter && state.eventIndex >= 0 && !state.typewriterComplete) {
+        cancelTypewriter();
         copy.textContent = state.typewriter.complete();
         state.typewriterComplete = true;
         return;
@@ -318,6 +367,9 @@
       image.addEventListener("load", () => {
         stageBackground.style.backgroundImage = `url("${previewUri}")`;
         stage.classList.add("has-background-image");
+        stageBackground.classList.remove("is-transitioning");
+        void stageBackground.offsetWidth;
+        stageBackground.classList.add("is-transitioning");
         status.textContent = "Background ready";
       });
       image.addEventListener("error", () => {
@@ -326,9 +378,39 @@
       image.src = previewUri;
     }
 
+    function installOverlayControls() {
+      const autoToggle = document.querySelector("#auto-toggle");
+      const menuToggle = document.querySelector("#menu-toggle");
+      const autoButton = stage.querySelector("#auto-button");
+      const menuButton = stage.querySelector("#menu-button");
+      if (!autoToggle || !menuToggle || !autoButton || !menuButton) return;
+      const overlay = descriptor.presentation?.overlay_controls || descriptor.overlay_controls || {};
+      autoToggle.checked = Boolean(overlay.auto);
+      menuToggle.checked = Boolean(overlay.menu);
+      const apply = () => {
+        autoButton.hidden = !autoToggle.checked;
+        menuButton.hidden = !menuToggle.checked;
+        stage.dataset.overlayAuto = autoToggle.checked ? "on" : "off";
+        stage.dataset.overlayMenu = menuToggle.checked ? "on" : "off";
+      };
+      autoToggle.onchange = apply;
+      menuToggle.onchange = apply;
+      autoButton.onclick = (event) => {
+        event.stopPropagation();
+        autoButton.classList.toggle("is-enabled");
+        autoButton.setAttribute("aria-pressed", String(autoButton.classList.contains("is-enabled")));
+      };
+      menuButton.onclick = (event) => {
+        event.stopPropagation();
+        menuButton.classList.toggle("is-enabled");
+        menuButton.setAttribute("aria-pressed", String(menuButton.classList.contains("is-enabled")));
+      };
+      apply();
+    }
+
     advance.addEventListener("click", advanceEvent);
     stage.addEventListener("click", (event) => {
-      if (!event.target.closest("button, select, .runtime-controls")) advanceEvent();
+      if (!event.target.closest("button, select, .runtime-controls, .stage-overlay-controls")) advanceEvent();
     });
     stage.ownerDocument.addEventListener("keydown", (event) => {
       if (event.key === " " || event.key === "ArrowRight") {
@@ -337,6 +419,7 @@
       }
     });
     loadPreviewBackground(state.background);
+    installOverlayControls();
     renderEvent(null);
     return {
       advance: advanceEvent,
