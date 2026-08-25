@@ -268,6 +268,7 @@ def build_aa_scene_descriptor(project: dict[str, Any], scene_id: str) -> dict[st
             }
             for key in (
                 "dialogue_name",
+                "alias",
                 "club_name",
                 "avatar_key",
                 "spine_key",

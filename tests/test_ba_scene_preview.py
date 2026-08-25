@@ -26,6 +26,7 @@ def valid_project() -> dict:
                 "character_id": "character/alice",
                 "name": "Alice",
                 "dialogue_name": "爱丽丝",
+                "alias": "勇者爱丽丝",
                 "club_name": "游戏开发部",
                 "resource_id": "synthetic/character/alice/portrait",
                 "avatar_key": "Student_Portrait_Alice",
@@ -138,6 +139,7 @@ def test_aa_preview_is_deterministic_and_uses_five_stable_slots():
     assert descriptor["actors"][0]["character_id"] == "character/alice"
     assert descriptor["actors"][0]["display_name"] == "Alice"
     assert descriptor["actors"][0]["dialogue_name"] == "爱丽丝"
+    assert descriptor["actors"][0]["alias"] == "勇者爱丽丝"
     assert descriptor["actors"][0]["club_name"] == "游戏开发部"
     assert descriptor["actors"][0]["stage_media"]["kind"] == "portrait"
     assert descriptor["actors"][0]["avatar_key"] == "Student_Portrait_Alice"

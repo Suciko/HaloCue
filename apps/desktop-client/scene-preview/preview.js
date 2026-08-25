@@ -5,6 +5,7 @@
   const SLOT_X = AA.SLOT_LEFT_PERCENT;
   const SUPPORTED_SCHEMA = "scene-descriptor/1.0";
   const STAGE_MEDIA_KINDS = new Set(["portrait", "spine", "spine-frame"]);
+  const DEFAULT_ACTOR_MEDIA_SCALE = 1.35;
 
   function assertDescriptor(descriptor) {
     if (!descriptor || descriptor.schema_version !== SUPPORTED_SCHEMA) {
@@ -24,6 +25,19 @@
     if (!actor.character_id) return "";
     const value = actor.character_id.split("/").pop() || actor.character_id;
     return value.charAt(0).toUpperCase() + value.slice(1);
+  }
+
+  function actorSecondaryIdentity(actor, descriptor) {
+    const primary = actorName(actor);
+    const candidates = [
+      [actor?.alias, "alias"],
+      [actor?.club_name || descriptor?.club_name, "club"],
+      [actor?.display_name, "full-name"],
+    ];
+    const match = candidates.find(([value]) => (
+      typeof value === "string" && value.trim() && value.trim() !== primary
+    ));
+    return match ? { label: match[0].trim(), kind: match[1] } : { label: "", kind: "none" };
   }
 
   function isSafePreviewUri(uri) {
@@ -96,7 +110,7 @@
       preview_uri: previewUri,
       anchor_x: clampUnit(media.anchor_x, 0.5),
       anchor_y: clampUnit(media.anchor_y, 1),
-      scale: Math.max(0.5, Math.min(1.6, Number(media.scale) || 1)),
+      scale: Math.max(0.5, Math.min(1.6, Number(media.scale) || DEFAULT_ACTOR_MEDIA_SCALE)),
     };
   }
 
@@ -175,6 +189,11 @@
     function startTypewriter() {
       cancelTypewriter();
       if (!state.typewriter) return;
+      if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+        copy.textContent = state.typewriter.complete();
+        state.typewriterComplete = true;
+        return;
+      }
       const startedAt = window.performance.now();
       const tick = (now) => {
         if (!state.typewriter) return;
@@ -234,7 +253,7 @@
         );
         element.style.setProperty("--actor-anchor-x", String(stageMedia?.anchor_x ?? 0.5));
         element.style.setProperty("--actor-anchor-y", String(stageMedia?.anchor_y ?? 1));
-        element.style.setProperty("--actor-media-scale", String(stageMedia?.scale ?? 1));
+        element.style.setProperty("--actor-media-scale", String(stageMedia?.scale ?? DEFAULT_ACTOR_MEDIA_SCALE));
         portrait.dataset.initial = visible ? actorName(actor).slice(0, 1) : "";
         element.style.left = `${actor.presentation.leftPercent}%`;
         element.style.opacity = visible ? String(actor.presentation.opacity) : "0";
@@ -263,10 +282,12 @@
         const activeActor = state.actors.find((actor) => actor.character_id === active);
         const hasSpeaker = Boolean(activeActor && active);
         speaker.textContent = hasSpeaker ? actorName(activeActor) : "";
-        club.textContent = hasSpeaker
-          ? (activeActor.club_name || descriptor.club_name || "StoryForge")
-          : "";
-        club.hidden = !hasSpeaker;
+        const secondaryIdentity = hasSpeaker
+          ? actorSecondaryIdentity(activeActor, descriptor)
+          : { label: "", kind: "none" };
+        club.textContent = secondaryIdentity.label;
+        club.dataset.kind = secondaryIdentity.kind;
+        club.hidden = !secondaryIdentity.label;
         speakerLine.classList.toggle("is-narration", !hasSpeaker);
         const eventText = event.text || (event.kind === "background" ? "" : `${event.kind}.`);
         dialoguePanel.classList.toggle("is-hidden", !eventText);
@@ -303,7 +324,7 @@
         const previous = state.actors[event.slot - 1];
         const catalogActor = actorCatalog.get(event.character_id) || {};
         const actorDetails = {};
-        for (const key of ["display_name", "dialogue_name", "thumbnail_uri", "thumbnail_source", "thumbnail_kind", "preview_uri", "preview_source", "preview_role", "avatar_key", "spine_key", "stage_media"]) {
+        for (const key of ["display_name", "dialogue_name", "alias", "club_name", "thumbnail_uri", "thumbnail_source", "thumbnail_kind", "preview_uri", "preview_source", "preview_role", "avatar_key", "spine_key", "stage_media"]) {
           if (event[key] !== undefined) actorDetails[key] = event[key];
           else if (catalogActor[key] !== undefined) actorDetails[key] = catalogActor[key];
         }
@@ -438,6 +459,8 @@
 
   function boot(demoDescriptor) {
     try {
+      const editorControls = new URLSearchParams(window.location.search).get("editor") === "1";
+      document.querySelector(".preview-shell")?.classList.toggle("has-editor-controls", editorControls);
       const controller = mount(demoDescriptor);
       const stage = document.querySelector("#preview-stage");
       const fontSelect = document.querySelector("#font-select");

@@ -67,12 +67,14 @@ button, select { font: inherit; }
   box-shadow: 0 8px 24px rgb(0 0 0 / 28%);
   font-size: 12px;
   letter-spacing: .04em;
-  opacity: .12;
+  opacity: 0;
   transition: opacity 180ms var(--ease-out);
 }
 
-.render-options:hover,
-.render-options:focus-within { opacity: 1; }
+.preview-shell.has-editor-controls .render-options { opacity: .12; }
+
+.preview-shell.has-editor-controls .render-options:hover,
+.preview-shell.has-editor-controls .render-options:focus-within { opacity: 1; }
 
 .render-options-title { color: #75dfff; font-weight: 600; }
 .render-options label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
@@ -256,6 +258,8 @@ h1 {
   outline: none;
 }
 
+.stage-overlay-button:active { transform: scale(.97); }
+
 #auto-button::before {
   display: inline-grid;
   width: calc(38px * var(--stage-scale));
@@ -281,6 +285,9 @@ h1 {
   font-size: calc(48px * var(--stage-scale));
   letter-spacing: .03em;
   clip-path: polygon(0 0, 100% 0, 92% 100%, 0 100%);
+  animation: location-reveal 2400ms var(--ease-out) both;
+  pointer-events: none;
+  will-change: opacity, transform;
 }
 
 .location-chip::before {
@@ -312,7 +319,7 @@ h1 {
   z-index: 3;
   height: 38%;
   background:
-    linear-gradient(180deg, transparent 0%, rgb(8 25 46 / 5%) 20%, rgb(8 25 46 / 21%) 43%, rgb(7 24 43 / 57%) 73%, rgb(5 18 34 / 88%) 100%),
+    linear-gradient(180deg, transparent 0%, rgb(8 25 46 / 7%) 14%, rgb(8 25 46 / 42%) 32%, rgb(7 24 43 / 68%) 52%, rgb(6 21 38 / 82%) 74%, rgb(5 18 34 / 89%) 100%),
     linear-gradient(90deg, rgb(4 18 35 / 12%), transparent 32%, rgb(6 22 39 / 9%));
   pointer-events: none;
 }
@@ -323,10 +330,10 @@ h1 {
   bottom: calc(43px * var(--stage-scale));
   left: 9.7%;
   z-index: 4;
-  /* AA PreviewScene: container y=-832, name y=426, line y=361.
-     This places the authored name/line/text anchors near 78/83/86% of the
-     1440px design canvas instead of floating above the shade. */
-  min-height: calc(270px * var(--stage-scale));
+  /* AA PreviewScene: container y=-832, name y=426, line y=361. The label
+     metrics add their own ascent/leading, so the painted name/line/text land
+     near 75/81/83% of the exported frame. */
+  min-height: calc(336px * var(--stage-scale));
   padding: 0 calc(261px * var(--stage-scale)) 0 0;
   background: transparent;
   font-family: var(--dialogue-font, inherit);
@@ -340,7 +347,7 @@ h1 {
   align-items: baseline;
   justify-content: space-between;
   gap: calc(12px * var(--stage-scale));
-  padding: 0 0 calc(12px * var(--stage-scale));
+  padding: 0 0 calc(8px * var(--stage-scale));
   border-bottom: max(1px, calc(1px * var(--stage-scale))) solid rgb(217 232 245 / 42%);
 }
 
@@ -356,9 +363,36 @@ h1 {
   transform: translateY(50%);
 }
 
-.speaker-identity { display: flex; align-items: baseline; min-width: 0; gap: calc(24px * var(--stage-scale)); }
-.speaker-name { color: #fff; font-size: calc(48px * var(--stage-scale)); font-weight: 700; letter-spacing: .015em; text-shadow: 1px 2px 0 #07111e, 0 2px 5px rgb(0 0 0 / 82%); }
-.club-name { padding-bottom: calc(2px * var(--stage-scale)); border-bottom: max(1px, calc(2px * var(--stage-scale))) solid rgb(100 201 255 / 34%); color: #70d4ff; font-size: calc(36px * var(--stage-scale)); font-weight: 600; letter-spacing: .03em; text-shadow: 1px 2px 0 #07111e, 0 2px 4px rgb(0 0 0 / 78%); }
+.speaker-identity {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: calc(248px * var(--stage-scale)) minmax(0, 1fr);
+  align-items: baseline;
+}
+
+.speaker-name {
+  color: #fff;
+  font-size: calc(68px * var(--stage-scale));
+  font-weight: 700;
+  letter-spacing: 0;
+  text-shadow: calc(2px * var(--stage-scale)) calc(2px * var(--stage-scale)) 0 #07111e, 0 calc(3px * var(--stage-scale)) calc(5px * var(--stage-scale)) rgb(0 0 0 / 74%);
+}
+
+.club-name {
+  min-width: 0;
+  padding-bottom: calc(2px * var(--stage-scale));
+  overflow: hidden;
+  color: #70d4ff;
+  font-size: calc(48px * var(--stage-scale));
+  font-weight: 600;
+  letter-spacing: .01em;
+  text-overflow: ellipsis;
+  text-shadow: calc(2px * var(--stage-scale)) calc(2px * var(--stage-scale)) 0 #07111e, 0 calc(2px * var(--stage-scale)) calc(4px * var(--stage-scale)) rgb(0 0 0 / 72%);
+  white-space: nowrap;
+}
+
+.club-name[data-kind="alias"] { color: #9ee4ff; }
 .event-progress { display: none; }
 
 .speaker-line.is-narration::before,
@@ -366,14 +400,14 @@ h1 {
 
 .dialogue-text {
   min-height: 3em;
-  margin: calc(23px * var(--stage-scale)) 0 0;
+  margin: 0;
   color: #fff;
-  font-size: calc(44px * var(--stage-scale));
+  font-size: calc(48px * var(--stage-scale));
   font-weight: 450;
   letter-spacing: .012em;
-  line-height: 1.34;
+  line-height: 1.56;
   white-space: pre-line;
-  text-shadow: 2px 2px 0 #07111e, -1px -1px 0 #07111e, 0 3px 6px rgb(0 0 0 / 92%);
+  text-shadow: calc(2px * var(--stage-scale)) calc(2px * var(--stage-scale)) 0 #07111e, calc(-1px * var(--stage-scale)) calc(-1px * var(--stage-scale)) 0 #07111e, 0 calc(3px * var(--stage-scale)) calc(6px * var(--stage-scale)) rgb(0 0 0 / 86%);
 }
 
 .dialogue-caret {
@@ -425,6 +459,12 @@ h1 {
   to { opacity: 1; }
 }
 
+@keyframes location-reveal {
+  0% { opacity: 0; transform: translateX(calc(-36px * var(--stage-scale))); }
+  12%, 66% { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(calc(-18px * var(--stage-scale))); }
+}
+
 @keyframes caret-blink {
   0%, 45% { opacity: 1; }
   46%, 100% { opacity: .15; }
@@ -437,4 +477,5 @@ h1 {
     scroll-behavior: auto !important;
     transition-duration: 1ms !important;
   }
+  .dialogue-caret { opacity: 1; }
 }

@@ -15,6 +15,8 @@ not stage media.
 The preview demonstrates:
 
 - five stable AA foreground character slots with deterministic horizontal positions;
+- camera-correct AA slot projection (the character camera spans 2960 authored
+  units while dialogue typography keeps the 2560x1440 design grid);
 - enter/exit events and active-speaker highlighting;
 - dialogue progression from the descriptor event list; and
 - explicit `stage_media` entries for `portrait` and `spine-frame` raster
@@ -26,6 +28,10 @@ The preview demonstrates:
   controls stay outside the video frame; and
 - selectable HarmonyOS Sans Medium, Noto Sans, and Nowar Rounded CSS font
   stacks.
+
+The export-safe URL renders the editor tray fully transparent. Append
+`?editor=1` while authoring to reveal the AUTO/MENU switches; the descriptor
+still decides whether either button appears inside the video frame.
 
 The checked-in default descriptor uses synthetic logical resource IDs. Real
 user-owned or authorized resources are resolved through `aa_preview_resolver.py`

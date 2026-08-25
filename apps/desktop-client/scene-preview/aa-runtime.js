@@ -8,6 +8,11 @@
   const SLOT_WORLD_Z = Object.freeze([-0.9, -1, -1.1, -1.05, -0.95]);
   const DESIGN_WIDTH = 2560;
   const DESIGN_HEIGHT = 1440;
+  // PreviewScene's orthographic camera and 0.0012012012 UI-root scale
+  // expose 2960 authored units horizontally in its 1280x720 render target.
+  // Character world positions therefore use a wider span than the 2560px
+  // dialogue design canvas.
+  const CHARACTER_VIEW_WIDTH = 2960;
   const MOVE_DURATION_MS = 500;
   const STANDBY_LUMINANCE_MULTIPLIER = 0.6;
   const TYPEWRITER_FRAMES_PER_GRAPHEME = 1;
@@ -35,7 +40,7 @@
   }
 
   function worldXToPercent(x) {
-    return ((Number(x) + DESIGN_WIDTH / 2) / DESIGN_WIDTH) * 100;
+    return ((Number(x) + CHARACTER_VIEW_WIDTH / 2) / CHARACTER_VIEW_WIDTH) * 100;
   }
 
   const SLOT_LEFT_PERCENT = Object.freeze(
@@ -218,6 +223,7 @@
   global.HaloCueAARuntime = Object.freeze({
     DESIGN_WIDTH,
     DESIGN_HEIGHT,
+    CHARACTER_VIEW_WIDTH,
     DIALOGUE_LAYOUT,
     MOVE_DURATION_MS,
     SLOT_WORLD_X,
