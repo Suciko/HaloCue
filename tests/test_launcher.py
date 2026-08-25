@@ -1,10 +1,12 @@
 import json
+import os
 import subprocess
 import sys
 import urllib.error
 from pathlib import Path
 
 import aapaths
+import assetdb
 import launcher
 from aa_install_discovery import AADiscoveryResult, UnityIdentity
 
@@ -217,6 +219,10 @@ def test_launcher_opens_the_app_without_forcing_an_aa_picker(monkeypatch):
 
 def test_check_json_works_from_another_current_directory(tmp_path):
     data = _make_aa_data(tmp_path / "workspace")
+    state = tmp_path / "halocue-state"
+    assetdb.connect(state / "aa_assets.db").close()
+    environment = os.environ.copy()
+    environment["HALOCUE_USER_DATA_DIR"] = str(state)
 
     result = subprocess.run(
         [
@@ -228,6 +234,7 @@ def test_check_json_works_from_another_current_directory(tmp_path):
             str(data),
         ],
         cwd=tmp_path,
+        env=environment,
         capture_output=True,
         text=True,
         encoding="utf-8",

@@ -37,7 +37,14 @@ sys.path.insert(0, HERE)
 def runtime_config_path():
     if RUNTIME_LAYOUT is not LAYOUT:
         return RUNTIME_LAYOUT.config_path
-    return CONFIG_PATH if LAYOUT.frozen else Path(HERE) / "aa_config.json"
+    if LAYOUT.frozen:
+        return CONFIG_PATH
+    # Source-mode tests and embedders may replace HERE with an isolated
+    # program directory; keep their legacy config contract.  A real source
+    # process with an explicit user-state override uses the writable config.
+    if Path(HERE).resolve() != LAYOUT.resource_root.resolve():
+        return Path(HERE) / "aa_config.json"
+    return CONFIG_PATH
 
 import aapaths                                                  # noqa: E402
 import asset_catalog                                            # noqa: E402
