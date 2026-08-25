@@ -263,8 +263,10 @@ h1 {
   bottom: 0;
   left: 0;
   z-index: 3;
-  height: 42%;
-  background: linear-gradient(180deg, transparent 0%, rgb(8 25 46 / 12%) 24%, rgb(8 28 49 / 78%) 100%);
+  height: 44%;
+  background:
+    linear-gradient(180deg, transparent 0%, rgb(8 25 46 / 8%) 17%, rgb(8 25 46 / 27%) 42%, rgb(7 24 43 / 58%) 72%, rgb(5 18 34 / 76%) 100%),
+    linear-gradient(90deg, rgb(4 18 35 / 16%), transparent 32%, rgb(6 22 39 / 10%));
   pointer-events: none;
 }
 
@@ -287,17 +289,19 @@ h1 {
   justify-content: space-between;
   gap: 12px;
   padding: 0 0 9px;
-  border-bottom: 1px solid rgb(217 232 245 / 62%);
+  border-bottom: 1px solid rgb(217 232 245 / 50%);
 }
 
 .speaker-line::before {
   position: absolute;
-  top: -1px;
-  bottom: 0;
+  top: calc(100% - 2px);
   left: 0;
-  width: clamp(4px, .32vw, 8px);
-  background: #70dcff;
+  width: clamp(22px, 2.15vw, 36px);
+  height: 2px;
+  background: linear-gradient(90deg, rgb(105 224 255 / 88%), rgb(105 224 255 / 18%));
+  box-shadow: 0 0 8px rgb(105 224 255 / 30%);
   content: "";
+  transform: translateY(50%);
 }
 
 .speaker-identity { display: flex; align-items: baseline; min-width: 0; gap: clamp(10px, 1.35vw, 21px); }
@@ -305,7 +309,8 @@ h1 {
 .club-name { color: #64c9ff; font-size: clamp(15px, 1.55vw, 24px); font-weight: 500; text-shadow: 1px 2px 0 #07111e, 0 2px 4px rgb(0 0 0 / 78%); }
 .event-progress { display: none; }
 
-.speaker-line.is-narration::before { display: none; }
+.speaker-line.is-narration::before,
+.speaker-line.is-narration .speaker-identity::before { display: none; }
 
 .dialogue-text {
   min-height: 3.2em;
@@ -343,7 +348,7 @@ h1 {
   .preview-stage { width: 100%; border-right: 0; border-left: 0; }
   .actor-slot { width: 16%; }
   .dialogue-panel { right: 0; bottom: 9%; left: 7%; min-height: 31%; padding-right: 5%; }
-  .speaker-line::before { width: 3px; }
+  .speaker-line::before { width: 22px; height: 2px; }
   .dialogue-text { margin-left: 0; }
   .location-chip { max-width: 48vw; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 }

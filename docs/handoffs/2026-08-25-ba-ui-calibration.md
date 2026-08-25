@@ -12,8 +12,12 @@ Current normalized presentation anchors:
 - location chip: left edge, top `20%`, with the cyan accent inset inside the
   chip rather than attached to the canvas edge;
 - dialogue rule: left `9.7%`, right `10.2%`, and dialogue panel bottom `3%`;
-- lower scene shade: bottom `42%`, blue-black translucent gradient;
+- lower scene shade: bottom `44%`, layered blue-black translucent gradients so
+  the background and character silhouettes remain readable through the
+  dialogue area;
 - default dialogue font: bundled Noto Sans SC variable font, weight `400`;
+- speaker decoration: a short, low-contrast cyan horizontal accent aligned to
+  the dialogue rule; do not restore the old full-height blue vertical bar;
 - actor layer is above the lower shade and below the dialogue layer;
 - event progress, frame counters, AUTO, and MENU are not rendered in the
   finished frame.
@@ -21,6 +25,12 @@ Current normalized presentation anchors:
 The canvas still supports local AA background and portrait URIs through the
 allowlisted host endpoint. Missing local portraits remain empty rather than
 showing synthetic head/body placeholders in the formal frame.
+
+The current visual comparison baseline is the supplied BA dialogue capture with
+two character portraits, location chip, speaker identity, rule, and translucent
+bottom dialogue layer. Pixel-perfect window chrome and AUTO/MENU controls are
+not part of the 1.1 exported frame, but the normalized content anchors above
+must remain comparable to that reference.
 
 ## Verification
 
