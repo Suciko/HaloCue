@@ -35,8 +35,28 @@ jobs:
       - name: Run full test suite
         run: python -m pytest -q
 
+  docs-and-boundaries:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Validate version docs and public boundaries
+        shell: pwsh
+        run: |
+          python -m pytest -q tests/test_public_docs.py tests/test_release_workflows.py tests/test_verify_clean_source.py
+          python tools/check_release_version.py --tag v0.95
+          python tools/verify_clean_source.py --source .
+
   package:
-    needs: test
+    needs: [test, docs-and-boundaries]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

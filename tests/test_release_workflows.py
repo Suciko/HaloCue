@@ -50,7 +50,10 @@ def test_ci_workflow_has_windows_matrix_and_complete_public_gates():
     assert "tools/scan_release.py" in workflow
     assert "tools/build_public_release.py" in workflow
     assert "tools/verify_release.py" in workflow
-    assert "needs: test" in workflow
+    assert "docs-and-boundaries:" in workflow
+    assert "tools/check_release_version.py --tag v0.95" in workflow
+    assert "tools/verify_clean_source.py --source ." in workflow
+    assert "needs: [test, docs-and-boundaries]" in workflow
     assert PUBLIC_ARCHIVE_NAME in workflow
 
 
