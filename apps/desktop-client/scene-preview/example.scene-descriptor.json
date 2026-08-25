@@ -18,6 +18,8 @@
     { "event_id": "event/alice-enter", "kind": "enter", "character_id": "character/alice", "slot": 3 },
     { "event_id": "event/alice-line", "kind": "dialogue", "character_id": "character/alice", "text": "欢迎来到 StoryForge，旅人。\n今晚的星光会为你指引方向。\n请准备好，故事现在开始。" },
     { "event_id": "event/bob-enter", "kind": "enter", "character_id": "character/bob", "slot": 4 },
-    { "event_id": "event/bob-line", "kind": "dialogue", "character_id": "character/bob", "text": "The synthetic preview is ready.\nFive stable slots remain visible\nwhile the speaker is highlighted." }
+    { "event_id": "event/bob-line", "kind": "dialogue", "character_id": "character/bob", "text": "The synthetic preview is ready.\nFive stable slots remain visible\nwhile the speaker is highlighted." },
+    { "event_id": "event/guest-enter", "kind": "enter", "character_id": "character/bob", "slot": 5 },
+    { "event_id": "event/background-change", "kind": "background", "preview_uri": "./assets/demo-conference-room.jpg" }
   ]
 }

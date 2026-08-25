@@ -4,6 +4,9 @@
   const AA = window.HaloCueAARuntime;
   const SLOT_X = AA.SLOT_LEFT_PERCENT;
   const SUPPORTED_SCHEMA = "scene-descriptor/1.0";
+  const AUTO_INITIAL_DELAY_MS = 700;
+  const AUTO_EVENT_DELAY_MS = 900;
+  const AUTO_DIALOGUE_BUFFER_MS = 650;
 
   function assertDescriptor(descriptor) {
     if (!descriptor || descriptor.schema_version !== SUPPORTED_SCHEMA) {
@@ -66,6 +69,11 @@
     const autoButton = stage.querySelector("#auto-button");
     const menuButton = stage.querySelector("#menu-button");
     const stageBackground = stage.querySelector("#stage-background");
+    const actorCatalog = new Map(
+      descriptor.actors
+        .filter((actor) => actor && actor.character_id)
+        .map((actor) => [actor.character_id, actor]),
+    );
     actorLayer.replaceChildren(...descriptor.actors.map((actor) => createActor(actor.slot)));
     const actorElements = new Map(
       [...actorLayer.children].map((element) => [Number(element.dataset.slot), element]),
@@ -77,6 +85,10 @@
         presentation: AA.createCharacterState(actor.slot, actor),
       })),
       typewriter: null,
+      typewriterComplete: false,
+      background: descriptor.background || null,
+      autoEnabled: false,
+      autoTimer: null,
     };
 
     function renderActors(activeCharacterId) {
@@ -137,13 +149,57 @@
       advance.disabled = state.eventIndex >= descriptor.events.length - 1;
     }
 
+    function clearAutoTimer() {
+      if (state.autoTimer !== null) {
+        window.clearTimeout(state.autoTimer);
+        state.autoTimer = null;
+      }
+    }
+
+    function scheduleAutoAdvance(delayMs) {
+      clearAutoTimer();
+      if (!state.autoEnabled) return;
+      const delay = Number.isFinite(delayMs) ? Math.max(0, delayMs) : AUTO_EVENT_DELAY_MS;
+      state.autoTimer = window.setTimeout(() => {
+        state.autoTimer = null;
+        advanceEvent();
+        if (state.autoEnabled && state.eventIndex < descriptor.events.length - 1) {
+          scheduleAutoAdvance();
+        } else if (state.autoEnabled) {
+          state.autoEnabled = false;
+          stage.classList.remove("auto-enabled");
+          autoButton?.setAttribute("aria-pressed", "false");
+          status.textContent = "Complete";
+        }
+      }, delay);
+    }
+
+    function backgroundForEvent(event) {
+      if (event && typeof event.background === "object" && event.background !== null) {
+        return event.background;
+      }
+      if (event && event.preview_uri) {
+        return { ...(state.background || {}), preview_uri: event.preview_uri };
+      }
+      return state.background;
+    }
+
     function applyEvent(event) {
       if (event.kind === "enter" && event.slot) {
+        const previous = state.actors[event.slot - 1];
+        const catalogActor = actorCatalog.get(event.character_id) || {};
+        const actorDetails = {};
+        for (const key of ["display_name", "preview_uri", "preview_source", "avatar_key", "spine_key"]) {
+          if (event[key] !== undefined) actorDetails[key] = event[key];
+          else if (catalogActor[key] !== undefined) actorDetails[key] = catalogActor[key];
+        }
         state.actors[event.slot - 1] = {
-          ...state.actors[event.slot - 1],
+          ...previous,
+          ...actorDetails,
           character_id: event.character_id,
-          resource_id: event.resource_id || state.actors[event.slot - 1].resource_id,
+          resource_id: event.resource_id || catalogActor.resource_id || previous.resource_id,
           state: "visible",
+          presentation: previous.presentation,
         };
         const character = state.actors[event.slot - 1].presentation;
         AA.setPos(character, AA.slotWorldPosition(event.slot));
@@ -156,12 +212,21 @@
           ...state.actors[event.slot - 1], character_id: null, resource_id: null, state: "hidden",
         };
       }
+      if (event.kind === "background") {
+        const nextBackground = backgroundForEvent(event);
+        if (nextBackground) {
+          state.background = nextBackground;
+          loadPreviewBackground(nextBackground);
+        }
+      }
     }
 
     function advanceEvent() {
+      if (state.autoEnabled && state.autoTimer !== null) clearAutoTimer();
       if (state.typewriter && state.eventIndex >= 0 && !state.typewriterComplete) {
         copy.textContent = state.typewriter.complete();
         state.typewriterComplete = true;
+        scheduleAutoAdvance(AUTO_EVENT_DELAY_MS);
         return;
       }
       if (state.eventIndex >= descriptor.events.length - 1) return;
@@ -170,11 +235,21 @@
       applyEvent(event);
       state.typewriterComplete = false;
       renderEvent(event);
+      if (state.autoEnabled) {
+        const delay = event.kind === "dialogue" && state.typewriter
+          ? state.typewriter.durationMs + AUTO_DIALOGUE_BUFFER_MS
+          : AUTO_EVENT_DELAY_MS;
+        scheduleAutoAdvance(delay);
+      }
     }
 
-    function loadPreviewBackground() {
-      const previewUri = resolvePreviewUri(descriptor.background && descriptor.background.preview_uri);
-      if (!isSafePreviewUri(previewUri)) return;
+    function loadPreviewBackground(background) {
+      const previewUri = resolvePreviewUri(background && background.preview_uri);
+      if (!isSafePreviewUri(previewUri)) {
+        stageBackground.style.backgroundImage = "";
+        stage.classList.remove("has-background-image");
+        return;
+      }
       const image = new Image();
       image.addEventListener("load", () => {
         stageBackground.style.backgroundImage = `url("${previewUri}")`;
@@ -192,9 +267,12 @@
       if (!event.target.closest("button, select, .runtime-controls")) advanceEvent();
     });
     autoButton?.addEventListener("click", () => {
-      stage.classList.toggle("auto-enabled");
-      autoButton.setAttribute("aria-pressed", String(stage.classList.contains("auto-enabled")));
-      status.textContent = stage.classList.contains("auto-enabled") ? "Auto" : "Manual";
+      state.autoEnabled = !state.autoEnabled;
+      stage.classList.toggle("auto-enabled", state.autoEnabled);
+      autoButton.setAttribute("aria-pressed", String(state.autoEnabled));
+      status.textContent = state.autoEnabled ? "Auto" : "Manual";
+      if (state.autoEnabled) scheduleAutoAdvance(state.eventIndex < 0 ? AUTO_INITIAL_DELAY_MS : undefined);
+      else clearAutoTimer();
     });
     menuButton?.addEventListener("click", () => {
       stage.classList.toggle("menu-open");
@@ -206,9 +284,13 @@
         advanceEvent();
       }
     });
-    loadPreviewBackground();
+    loadPreviewBackground(state.background);
     renderEvent(null);
-    return { advance: advanceEvent, state };
+    return {
+      advance: advanceEvent,
+      state,
+      dispose() { clearAutoTimer(); },
+    };
   }
 
   window.HaloCueScenePreview = { mount, SUPPORTED_SCHEMA };

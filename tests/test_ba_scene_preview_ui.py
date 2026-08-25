@@ -77,6 +77,25 @@ def test_preview_renders_five_slots_advances_dialogue_and_switches_font(tmp_path
             assert page.locator("#speaker-name").inner_text() == "成员四"
             assert page.locator('.actor-slot.is-active[data-slot="4"]').count() == 1
 
+            # A later enter event must inherit the catalog actor metadata even
+            # when the target slot previously contained another character.
+            for _ in range(3):
+                page.locator("#preview-stage").click(position={"x": 640, "y": 160})
+            assert page.locator('.actor-slot[data-slot="5"] .actor-name').inner_text() == "成员四"
+
+            # Background events are part of the same deterministic event
+            # stream and must update the image without reloading the page.
+            page.locator("#preview-stage").click(position={"x": 640, "y": 160})
+            page.wait_for_function(
+                """() => document.querySelector('#stage-background').style.backgroundImage.includes('demo-conference-room.jpg')"""
+            )
+
+            page.locator("#auto-button").click()
+            assert page.locator("#auto-button").get_attribute("aria-pressed") == "true"
+            assert page.evaluate("window.HaloCueScenePreview.controller.state.autoEnabled") is True
+            page.locator("#auto-button").click()
+            assert page.locator("#auto-button").get_attribute("aria-pressed") == "false"
+
             output_dir = REPO_ROOT / "acceptance-output"
             output_dir.mkdir(exist_ok=True)
             page.screenshot(path=str(output_dir / "synthetic-ba-scene-preview.png"), full_page=True)
