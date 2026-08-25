@@ -24,8 +24,9 @@ their C# and IL2CPP declarations are not copied into this repository.
 The location label therefore lands about 250 logical pixels from the top of
 the 1440-high design frame (`17.4%`). HaloCue rounds this to a responsive
 `17.5%` anchor. The AA `TextBg` is a separate presentation layer under the
-dialogue container; HaloCue models that layer as a translucent stacked gradient
-so the exported video is not a solid dialogue card.
+dialogue container. HaloCue models that layer as a stacked gradient with a
+stronger lower alpha (84% at the final stop) so the dialogue reads like the AA
+frame while the upper scene and character silhouettes remain visible.
 
 The preview maps the 2560-wide logical coordinate space to the 1280-wide
 render target. This produces the five stable left percentages exported by

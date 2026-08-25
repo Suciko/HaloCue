@@ -265,8 +265,8 @@ h1 {
   z-index: 3;
   height: 44%;
   background:
-    linear-gradient(180deg, transparent 0%, rgb(8 25 46 / 6%) 17%, rgb(8 25 46 / 20%) 42%, rgb(7 24 43 / 44%) 72%, rgb(5 18 34 / 66%) 100%),
-    linear-gradient(90deg, rgb(4 18 35 / 12%), transparent 32%, rgb(6 22 39 / 8%));
+    linear-gradient(180deg, transparent 0%, rgb(8 25 46 / 10%) 17%, rgb(8 25 46 / 31%) 42%, rgb(7 24 43 / 63%) 72%, rgb(5 18 34 / 84%) 100%),
+    linear-gradient(90deg, rgb(4 18 35 / 16%), transparent 32%, rgb(6 22 39 / 11%));
   pointer-events: none;
 }
 
