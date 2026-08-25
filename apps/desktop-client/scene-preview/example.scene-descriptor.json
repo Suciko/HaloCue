@@ -1,0 +1,23 @@
+{
+  "schema_version": "scene-descriptor/1.0",
+  "scene_id": "scene/synthetic-classroom",
+  "background": {
+    "resource_id": "synthetic/background/classroom",
+    "logical_key": "background/classroom",
+    "preview_uri": "./assets/demo-conference-room.png"
+  },
+  "actors": [
+    { "slot": 1, "character_id": "character/slot-one", "display_name": "成员一", "resource_id": "synthetic/character/slot-one/portrait", "state": "visible" },
+    { "slot": 2, "character_id": "character/slot-two", "display_name": "成员二", "resource_id": "synthetic/character/slot-two/portrait", "state": "visible" },
+    { "slot": 3, "character_id": "character/alice", "display_name": "领航员", "resource_id": "synthetic/character/alice/portrait", "state": "visible" },
+    { "slot": 4, "character_id": "character/bob", "display_name": "成员四", "resource_id": "synthetic/character/bob/portrait", "state": "visible" },
+    { "slot": 5, "character_id": "character/slot-five", "display_name": "成员五", "resource_id": "synthetic/character/slot-five/portrait", "state": "visible" }
+  ],
+  "events": [
+    { "event_id": "event/background", "kind": "background", "resource_id": "synthetic/background/classroom" },
+    { "event_id": "event/alice-enter", "kind": "enter", "character_id": "character/alice", "slot": 3 },
+    { "event_id": "event/alice-line", "kind": "dialogue", "character_id": "character/alice", "text": "欢迎来到 StoryForge，旅人。\n今晚的星光会为你指引方向。\n请准备好，故事现在开始。" },
+    { "event_id": "event/bob-enter", "kind": "enter", "character_id": "character/bob", "slot": 4 },
+    { "event_id": "event/bob-line", "kind": "dialogue", "character_id": "character/bob", "text": "The synthetic preview is ready.\nFive stable slots remain visible\nwhile the speaker is highlighted." }
+  ]
+}

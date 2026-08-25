@@ -1,0 +1,55 @@
+{
+  "schema_version": "halocue-project/1.0",
+  "project_id": "project/synthetic-classroom",
+  "title": "Synthetic classroom scene",
+  "characters": [
+    {
+      "character_id": "character/alice",
+      "name": "Alice",
+      "resource_id": "synthetic/character/alice/portrait"
+    }
+  ],
+  "resources": [
+    {
+      "resource_id": "synthetic/background/classroom",
+      "role": "background",
+      "logical_key": "background/classroom"
+    },
+    {
+      "resource_id": "synthetic/character/alice/portrait",
+      "role": "character_portrait",
+      "logical_key": "character/alice/portrait"
+    }
+  ],
+  "chapters": [
+    {
+      "chapter_id": "chapter/intro",
+      "title": "Intro",
+      "scenes": [
+        {
+          "scene_id": "scene/classroom",
+          "title": "Classroom",
+          "events": [
+            {
+              "event_id": "event/background",
+              "kind": "background",
+              "resource_id": "synthetic/background/classroom"
+            },
+            {
+              "event_id": "event/alice-enter",
+              "kind": "enter",
+              "character_id": "character/alice",
+              "slot": 3
+            },
+            {
+              "event_id": "event/alice-line",
+              "kind": "dialogue",
+              "character_id": "character/alice",
+              "text": "Welcome to the classroom."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

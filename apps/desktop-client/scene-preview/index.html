@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HaloCue scene preview</title>
+    <link rel="stylesheet" href="./preview.css" />
+  </head>
+  <body>
+    <main class="preview-shell" aria-label="HaloCue scene preview">
+      <header class="preview-toolbar">
+        <span class="preview-label">预览</span>
+        <h1 id="scene-title">预览</h1>
+        <label class="font-picker">
+          <span>T</span>
+          <select id="font-select" aria-label="Dialogue font">
+            <option value="harmony">HarmonyOS Sans Medium</option>
+            <option value="noto">Noto Sans</option>
+            <option value="nowar">Nowar Rounded</option>
+          </select>
+        </label>
+      </header>
+
+      <section id="preview-stage" class="preview-stage" data-font="harmony" aria-live="polite">
+        <div id="stage-background" class="stage-background" aria-hidden="true"></div>
+        <div class="stage-floor" aria-hidden="true"></div>
+        <div id="actor-layer" class="actor-layer" aria-label="Character slots"></div>
+        <nav class="runtime-controls" aria-label="Presentation controls">
+          <button id="font-cycle-button" class="runtime-control" type="button" title="Switch dialogue font" aria-label="Switch dialogue font">A文</button>
+          <button id="fullscreen-button" class="runtime-control" type="button" title="Toggle fullscreen" aria-label="Toggle fullscreen">◉</button>
+          <button id="close-button" class="runtime-control" type="button" title="Close preview" aria-label="Close preview">×</button>
+        </nav>
+        <div class="dialogue-shade" aria-hidden="true"></div>
+        <section class="dialogue-panel" aria-label="Dialogue">
+          <div class="speaker-line">
+            <div class="speaker-identity">
+              <span id="speaker-name" class="speaker-name">Scene</span>
+              <span id="club-name" class="club-name" hidden></span>
+            </div>
+            <span id="event-progress" class="event-progress">0 / 0</span>
+          </div>
+          <p id="dialogue-text" class="dialogue-text"><span id="dialogue-copy">Press advance to begin.</span><span id="dialogue-caret" class="dialogue-caret" aria-hidden="true" hidden></span></p>
+          <div class="dialogue-footer">
+            <span id="preview-status" class="preview-status">Ready</span>
+            <button id="advance-button" type="button">Advance</button>
+          </div>
+        </section>
+        <span class="frame-counter" aria-label="Frame">0221 帧</span>
+      </section>
+
+      <p id="preview-error" class="preview-error" role="alert" hidden></p>
+    </main>
+    <script src="./aa-runtime.js"></script>
+    <script src="./preview.js"></script>
+  </body>
+</html>
