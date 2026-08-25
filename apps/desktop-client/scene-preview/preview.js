@@ -63,7 +63,6 @@
     const status = stage.querySelector("#preview-status");
     const advance = stage.querySelector("#advance-button");
     const locationLabel = stage.querySelector("#location-label");
-    const menuButton = stage.querySelector("#menu-button");
     const stageBackground = stage.querySelector("#stage-background");
     const actorCatalog = new Map(
       descriptor.actors
@@ -226,10 +225,6 @@
     advance.addEventListener("click", advanceEvent);
     stage.addEventListener("click", (event) => {
       if (!event.target.closest("button, select, .runtime-controls")) advanceEvent();
-    });
-    menuButton?.addEventListener("click", () => {
-      stage.classList.toggle("menu-open");
-      status.textContent = stage.classList.contains("menu-open") ? "Menu" : "Ready";
     });
     stage.ownerDocument.addEventListener("keydown", (event) => {
       if (event.key === " " || event.key === "ArrowRight") {

@@ -214,7 +214,7 @@ h1 {
 .runtime-controls {
   position: absolute;
   top: 7px;
-  right: 7px;
+  left: 7px;
   z-index: 10;
   display: flex;
   gap: 8px;
@@ -231,50 +231,6 @@ h1 {
   font-size: clamp(12px, 1.05vw, 18px);
   letter-spacing: .02em;
   clip-path: polygon(0 0, 100% 0, 92% 100%, 0 100%);
-}
-
-.runtime-control {
-  display: grid;
-  width: auto;
-  min-width: 58px;
-  height: 30px;
-  place-items: center;
-  border: 1px solid rgb(255 255 255 / 76%);
-  border: 0;
-  border-radius: 0;
-  background: #f4c72e;
-  color: #10213b;
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-}
-
-.runtime-control-label {
-  min-height: 32px;
-  padding: 0 13px;
-  clip-path: polygon(10% 0, 100% 0, 90% 100%, 0 100%);
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: .08em;
-}
-
-#menu-button { background: #f5f7fa; }
-.menu-open::after {
-  position: absolute;
-  top: 52px;
-  right: 18px;
-  width: 160px;
-  height: 90px;
-  border: 1px solid rgb(255 255 255 / 42%);
-  background: rgb(8 20 42 / 90%);
-  content: "";
-}
-
-.runtime-control:hover,
-.runtime-control:focus-visible {
-  border-color: #72d9ff;
-  background: rgb(22 46 68 / 86%);
-  outline: none;
 }
 
 .preview-toolbar { display: none; }
@@ -380,12 +336,10 @@ h1 {
 
 @media (max-width: 640px) {
   .preview-stage { width: 100%; border-right: 0; border-left: 0; }
-  .runtime-control { width: 27px; height: 27px; }
   .actor-slot { width: 16%; }
   .dialogue-panel { left: 5%; min-height: 31%; }
   .speaker-line { padding-left: 10px; }
   .speaker-line::before { width: 3px; }
   .dialogue-text { margin-left: 10px; }
   .location-chip { max-width: 48vw; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .runtime-control-label { min-width: 50px; padding: 0 9px; }
 }

@@ -9,9 +9,11 @@ truth for interactive playback:
   metadata when a different character enters an existing slot;
 - `background` events can replace the active background without reloading the
   page;
-- The formal preview has no AUTO button or timer-driven playback. Users advance
-  events manually so the canvas remains unobstructed and the product does not
-  inherit an unnecessary AA interaction affordance.
+- The formal preview has no AUTO or MENU button and no timer-driven playback.
+  Users advance events manually, while the location chip remains as scene
+  information in the canvas. Editor actions belong in the surrounding
+  workbench, so the canvas remains unobstructed and does not inherit
+  unnecessary AA interaction affordances.
 
 Deterministic video rendering must consume the normalized event timeline
 directly and must not depend on browser timers or user input.
@@ -35,4 +37,4 @@ resources remain resolved through the allowlisted preview endpoint.
 
 Define a deterministic render timeline shared by browser preview and offline
 video export. The render path should use explicit durations and frame/sample
-times, while the AUTO control remains outside that contract.
+times, while interactive controls remain outside that contract.

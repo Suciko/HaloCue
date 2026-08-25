@@ -16,6 +16,8 @@ The preview demonstrates:
 - five stable AA foreground character slots with deterministic horizontal positions;
 - enter/exit events and active-speaker highlighting;
 - dialogue progression from the descriptor event list; and
+- a clean canvas with scene information only; editor actions and export
+  controls stay outside the video frame; and
 - selectable HarmonyOS Sans Medium, Noto Sans, and Nowar Rounded CSS font
   stacks.
 
