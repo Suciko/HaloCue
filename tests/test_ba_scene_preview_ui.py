@@ -65,6 +65,9 @@ def test_preview_renders_five_slots_advances_dialogue_and_switches_font(tmp_path
             assert page.locator("#menu-button").count() == 0
             assert page.locator("#location-label").bounding_box()["x"] < 32
             assert page.locator("#event-progress").is_hidden() is True
+            assert page.locator("#preview-stage").get_attribute("data-font") == "noto"
+            stage_box = page.locator("#preview-stage").bounding_box()
+            assert round(stage_box["width"] / stage_box["height"], 3) == 1.778
 
             page.select_option("#font-select", "nowar")
             assert page.locator("#preview-stage").get_attribute("data-font") == "nowar"
