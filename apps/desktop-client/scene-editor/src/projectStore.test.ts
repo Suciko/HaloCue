@@ -86,4 +86,34 @@ describe("shared dual-mode project store", () => {
     expect(advancedEventCount(cue)).toBe(0);
     expect(descriptor.events.at(-1)?.kind).toBe("halocue.ba:screen-shake");
   });
+
+  it("adds a professional event through the same canonical command path", () => {
+    const state = useProjectStore.getState();
+    state.setMode("professional");
+    state.addEvent("enter");
+
+    const current = useProjectStore.getState();
+    const cue = firstScene(current.project).cues[0];
+    const event = cue.events.at(-1);
+
+    expect(event).toEqual(expect.objectContaining({
+      kind: "enter",
+      slot: 1,
+      character_id: "character/yuuka",
+    }));
+    expect(current.selectedEventId).toBe(event?.event_id);
+  });
+
+  it("deletes a selected professional event and selects its nearest neighbor", () => {
+    const state = useProjectStore.getState();
+    const cue = firstScene(state.project).cues[0];
+    const deletedId = cue.events[1].event_id;
+    const neighborId = cue.events[2].event_id;
+    state.selectEvent(deletedId);
+    state.deleteEvent(deletedId);
+
+    const current = useProjectStore.getState();
+    expect(firstScene(current.project).cues[0].events.some((event) => event.event_id === deletedId)).toBe(false);
+    expect(current.selectedEventId).toBe(neighborId);
+  });
 });

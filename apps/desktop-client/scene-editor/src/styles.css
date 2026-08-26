@@ -222,7 +222,14 @@ svg { width: 16px; height: 16px; flex: none; stroke-width: 1.8; }
 .event-workbench > header span { min-width: 0; display: grid; gap: 1px; }
 .event-workbench > header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .event-workbench > header small { color: var(--subtle); font-size: 8px; }
-.event-workbench > header button { height: 28px; display: flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-2); color: var(--muted); font-size: 9px; cursor: pointer; }
+.event-add-menu { position: relative; }
+.event-add-menu summary { height: 28px; display: flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-2); color: var(--muted); font-size: 9px; cursor: pointer; list-style: none; }
+.event-add-menu summary:hover { color: var(--text); border-color: #47534e; }
+.event-add-menu summary svg { width: 13px; }
+.event-add-options { width: 156px; position: absolute; top: 33px; right: 0; z-index: 4; display: grid; gap: 2px; padding: 5px; border: 1px solid var(--line); border-radius: 5px; background: #151918; box-shadow: 0 12px 24px rgba(0, 0, 0, .35); }
+.event-add-options button { height: 27px; display: flex; align-items: center; gap: 6px; padding: 0 7px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); text-align: left; font-size: 9px; cursor: pointer; }
+.event-add-options button:hover { background: var(--panel-3); color: var(--text); }
+.event-add-options svg { width: 13px; color: var(--accent); }
 .event-list { height: calc(100% - 45px); overflow: auto; padding: 7px; }
 .event-row { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; margin-bottom: 4px; border: 1px solid transparent; border-radius: 6px; background: var(--panel-2); }
 .event-row:hover { border-color: var(--line); }
@@ -255,9 +262,12 @@ svg { width: 16px; height: 16px; flex: none; stroke-width: 1.8; }
 .timeline-panel { min-width: 0; padding: 8px 10px; border-top: 1px solid var(--line); background: #121514; overflow: hidden; }
 .timeline-ruler { height: 20px; display: flex; justify-content: space-between; padding-left: 91px; color: var(--subtle); font-size: 8px; }
 .timeline-track { min-width: 0; display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 8px; align-items: stretch; }
-.track-label { height: 54px; display: flex; align-items: center; gap: 7px; padding-left: 8px; border-radius: 5px; background: var(--panel-2); color: var(--muted); font-size: 9px; }
+.event-timeline-track { margin-top: 4px; }
+.track-label { height: 35px; display: flex; align-items: center; gap: 7px; padding-left: 8px; border-radius: 5px; background: var(--panel-2); color: var(--muted); font-size: 9px; }
 .timeline-segments { min-width: 0; display: flex; gap: 3px; overflow-x: auto; }
-.timeline-segments button { min-width: 130px; flex: 1; display: flex; align-items: center; gap: 6px; padding: 0 8px; overflow: hidden; border: 1px solid #3b4541; border-radius: 5px; background: #202724; color: #bdc6c2; white-space: nowrap; text-overflow: ellipsis; font-size: 9px; cursor: pointer; }
+.timeline-segments button { min-width: 130px; height: 35px; flex: 1; display: flex; align-items: center; gap: 6px; padding: 0 8px; overflow: hidden; border: 1px solid #3b4541; border-radius: 5px; background: #202724; color: #bdc6c2; white-space: nowrap; text-overflow: ellipsis; font-size: 9px; cursor: pointer; }
+.event-timeline-track .timeline-segments button { min-width: 82px; display: grid; align-content: center; justify-items: start; gap: 1px; }
+.event-timeline-track .timeline-segments button small { color: var(--subtle); font-size: 7px; }
 .timeline-segments button.is-active { border-color: var(--accent); background: var(--accent-bg); color: var(--text); }
 .timeline-segments button span { width: 18px; height: 18px; display: grid; place-items: center; flex: none; border-radius: 3px; background: rgba(0,0,0,.22); color: var(--muted); font-size: 8px; }
 

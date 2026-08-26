@@ -18,6 +18,7 @@ import type {
   Scene,
 } from "./types";
 import { isDescriptorRenderable } from "./sceneEventRegistry";
+import { createSceneEvent } from "./sceneEventFactory";
 
 const clone = <T,>(value: T): T => structuredClone(value);
 
@@ -74,12 +75,14 @@ type EditorState = {
   setSlotCharacter: (slot: number, characterId: string | null) => void;
   swapSlots: (source: number, target: number) => void;
   updateCharacterState: (slot: number, patch: Partial<CueEvent>) => void;
+  addEvent: (kind: string) => void;
   addQuickEffect: (kind: QuickEffectKind) => void;
   addCue: (placement: "before" | "after") => void;
   duplicateCue: () => void;
   deleteCue: () => void;
   moveCue: (sourceCueId: string, targetCueId: string) => void;
   updateEvent: (eventId: string, patch: Partial<CueEvent>) => void;
+  deleteEvent: (eventId: string) => void;
   moveEvent: (eventId: string, direction: -1 | 1) => void;
   undo: () => void;
   redo: () => void;
@@ -200,17 +203,26 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       }
       Object.assign(enter, patch);
     }),
+    addEvent: (kind) => {
+      const state = get();
+      const eventId = localId("event");
+      commit((project, cue) => {
+        cue.events.push(createSceneEvent(kind, {
+          eventId,
+          selectedSlot: state.selectedSlot,
+          project,
+        }));
+      }, { selectedEventId: eventId });
+    },
     addQuickEffect: (kind) => {
       const state = get();
-      const effectDefaults: Record<QuickEffectKind, Partial<CueEvent>> = {
-        "halocue.ba:background-pan": { pan_x: 0.035, pan_y: 0 },
-        "halocue.ba:screen-shake": { intensity: 0.35 },
-        "halocue.ba:screen-text": { text: "屏幕文字" },
-        "halocue.ba:hit-effect": { slot: state.selectedSlot, intensity: 0.5 },
-      };
       const eventId = localId("event");
-      commit((_project, cue) => {
-        cue.events.push({ event_id: eventId, kind, ...effectDefaults[kind] });
+      commit((project, cue) => {
+        cue.events.push(createSceneEvent(kind, {
+          eventId,
+          selectedSlot: state.selectedSlot,
+          project,
+        }));
       }, { selectedEventId: eventId });
     },
     addCue: (placement) => {
@@ -261,6 +273,16 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       const event = cue.events.find((item) => item.event_id === eventId);
       if (event) Object.assign(event, patch);
     }),
+    deleteEvent: (eventId) => {
+      const state = get();
+      const cue = firstScene(state.project).cues.find((item) => item.cue_id === state.selectedCueId);
+      if (!cue || !cue.events.some((event) => event.event_id === eventId)) return;
+      const index = cue.events.findIndex((event) => event.event_id === eventId);
+      const nextEvent = cue.events[index + 1] || cue.events[index - 1] || null;
+      commit((_project, draftCue) => {
+        draftCue.events = draftCue.events.filter((event) => event.event_id !== eventId);
+      }, { selectedEventId: nextEvent?.event_id || null });
+    },
     moveEvent: (eventId, direction) => commit((_project, cue) => {
       const index = cue.events.findIndex((event) => event.event_id === eventId);
       const target = index + direction;

@@ -46,6 +46,7 @@ import {
 import { projectFileAdapter } from "./projectRepository";
 import { capabilityStatesFor } from "./capabilities";
 import { evaluateScene } from "./sceneEvaluation";
+import { eventDurationMs } from "./renderTimeline";
 import { sceneEventDefinitions } from "./sceneEventRegistry";
 import {
   advancedEventCount,
@@ -64,6 +65,7 @@ import type {
 type PreviewController = {
   timeline: { total_frames: number };
   seekFrame: (frame: number) => void;
+  play: (options?: { fromFrame?: number }) => void;
 };
 
 type PreviewWindow = Window & {
@@ -204,6 +206,7 @@ function PreviewFrame() {
   const frame = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
+  const controllerRef = useRef<PreviewController | null>(null);
   const evaluation = useMemo(
     () => evaluateScene(project, selectedCueId),
     [project, selectedCueId, revision],
@@ -218,6 +221,7 @@ function PreviewFrame() {
         timeline: evaluation.timeline,
       });
       preview.controller = controller;
+      controllerRef.current = controller;
       controller.seekFrame(Math.max(0, controller.timeline.total_frames - 1));
       setError("");
       setReady(true);
@@ -243,7 +247,7 @@ function PreviewFrame() {
         </div>
         <div className="preview-toolbar-actions">
           <button type="button" onClick={mount}><RotateCcw />刷新</button>
-          <button type="button"><Play />从此处播放</button>
+          <button type="button" disabled={!ready} onClick={() => controllerRef.current?.play({ fromFrame: 0 })}><Play />从头播放</button>
         </div>
       </div>
       <div className="preview-viewport">
@@ -448,6 +452,13 @@ function DialogueInspector({ cue }: { cue: Cue }) {
   const updateDialogue = useProjectStore((state) => state.updateDialogue);
   const dialogue = cue.events.find((event) => event.kind === "dialogue") || { event_id: "", kind: "dialogue", text: "" };
   const auto = dialogue.timing !== "fixed";
+  const resolvedDuration = (() => {
+    try {
+      return eventDurationMs(dialogue);
+    } catch {
+      return 1000;
+    }
+  })();
 
   return (
     <div className="inspector-content">
@@ -468,7 +479,7 @@ function DialogueInspector({ cue }: { cue: Cue }) {
           <button className="resource-input" type="button"><Upload />选择语音<span>未设置</span></button>
         </Field>
         <Field label="时长">
-          <div className="duration-input"><input type="number" disabled={auto} min={100} step={100} value={dialogue.duration_ms || 2400} onChange={(event) => updateDialogue({ duration_ms: Number(event.target.value) })} /><span>ms</span></div>
+          <div className="duration-input"><input type="number" disabled={auto} min={100} step={100} value={dialogue.duration_ms ?? resolvedDuration} onChange={(event) => updateDialogue({ duration_ms: Number(event.target.value) })} /><span>ms</span></div>
         </Field>
       </div>
       <label className="toggle-row">
@@ -563,13 +574,32 @@ function ProfessionalEventList() {
   const selectedEventId = useProjectStore((state) => state.selectedEventId);
   const selectEvent = useProjectStore((state) => state.selectEvent);
   const moveEvent = useProjectStore((state) => state.moveEvent);
+  const deleteEvent = useProjectStore((state) => state.deleteEvent);
+  const addEvent = useProjectStore((state) => state.addEvent);
   const cue = firstScene(project).cues.find((item) => item.cue_id === selectedCueId)!;
 
   return (
     <section className="event-workbench">
       <header>
         <div><Layers3 /><span><strong>{cue.title}</strong><small>{cue.events.length} 个有序事件</small></span></div>
-        <button type="button"><Plus />添加事件</button>
+        <details className="event-add-menu">
+          <summary><Plus />添加事件</summary>
+          <div className="event-add-options">
+            {sceneEventDefinitions().filter((definition) => definition.timeline_supported).map((definition) => (
+              <button
+                type="button"
+                key={definition.kind}
+                onClick={(event) => {
+                  addEvent(definition.kind);
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+              >
+                <EventIcon kind={definition.kind} />
+                {definition.editor_label}
+              </button>
+            ))}
+          </div>
+        </details>
       </header>
       <div className="event-list">
         {cue.events.map((event, index) => (
@@ -587,6 +617,7 @@ function ProfessionalEventList() {
             <div className="event-actions">
               <IconButton label="上移" disabled={index === 0} onClick={() => moveEvent(event.event_id, -1)}><ArrowUp /></IconButton>
               <IconButton label="下移" disabled={index === cue.events.length - 1} onClick={() => moveEvent(event.event_id, 1)}><ArrowDown /></IconButton>
+              <IconButton label="删除事件" tone="danger" onClick={() => deleteEvent(event.event_id)}><Trash2 /></IconButton>
             </div>
           </div>
         ))}
@@ -603,6 +634,13 @@ function ProfessionalInspector() {
   const cue = firstScene(project).cues.find((item) => item.cue_id === selectedCueId)!;
   const event = cue.events.find((item) => item.event_id === selectedEventId) || cue.events[0];
   if (!event) return <aside className="inspector professional-inspector"><div className="empty-state">选择一个事件</div></aside>;
+  const resolvedDuration = (() => {
+    try {
+      return eventDurationMs(event);
+    } catch {
+      return 1000;
+    }
+  })();
 
   return (
     <aside className="inspector professional-inspector">
@@ -619,10 +657,16 @@ function ProfessionalInspector() {
           </Field>
           <Field label="对白文本"><textarea rows={6} value={event.text || ""} onChange={(change) => updateEvent(event.event_id, { text: change.target.value })} /></Field>
         </>}
-        {(event.kind === "enter" || event.kind === "exit") && <Field label="舞台栏位"><input type="number" min={1} max={5} value={event.slot || 1} onChange={(change) => updateEvent(event.event_id, { slot: Number(change.target.value) })} /></Field>}
+        {(event.kind === "enter" || event.kind === "exit") && <>
+          <Field label="舞台栏位"><input type="number" min={1} max={5} value={event.slot || 1} onChange={(change) => updateEvent(event.event_id, { slot: Number(change.target.value) })} /></Field>
+          {event.kind === "enter" && <Field label="角色逻辑键"><select value={event.character_id || ""} onChange={(change) => updateEvent(event.event_id, { character_id: change.target.value || undefined })}>
+            <option value="">选择角色</option>
+            {project.characters.map((character) => <option key={character.character_id} value={character.character_id}>{character.character_id}</option>)}
+          </select></Field>}
+        </>}
         {event.kind === "background" && <Field label="资源逻辑键"><select value={event.resource_id || ""} onChange={(change) => updateEvent(event.event_id, { resource_id: change.target.value })}>{project.resources.filter((resource) => resource.role === "background").map((resource) => <option key={resource.resource_id} value={resource.resource_id}>{resource.resource_id}</option>)}</select></Field>}
         <div className="field-grid two">
-          <Field label="时长"><div className="duration-input"><input type="number" min={1} value={event.duration_ms || 1000} onChange={(change) => updateEvent(event.event_id, { duration_ms: Number(change.target.value) })} /><span>ms</span></div></Field>
+          <Field label="时长"><div className="duration-input"><input type="number" min={1} value={event.duration_ms ?? resolvedDuration} onChange={(change) => updateEvent(event.event_id, { duration_ms: Number(change.target.value) })} /><span>ms</span></div></Field>
           <Field label="开始帧"><input className="mono" value="自动" readOnly /></Field>
         </div>
         <details className="advanced-fields" open={!eventLabels[event.kind]}>
@@ -645,6 +689,13 @@ function Timeline() {
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const selectCue = useProjectStore((state) => state.selectCue);
   const scene = firstScene(project);
+  const evaluation = useMemo(
+    () => evaluateScene(project, selectedCueId),
+    [project, selectedCueId],
+  );
+  const cue = scene.cues.find((item) => item.cue_id === selectedCueId);
+  const cueEventIds = new Set(cue?.events.map((event) => event.event_id));
+  const eventSegments = evaluation.timeline.events.filter((event) => cueEventIds.has(event.event_id));
   return (
     <section className="timeline-panel">
       <div className="timeline-ruler"><span>00:00</span><span>00:05</span><span>00:10</span><span>00:15</span></div>
@@ -652,6 +703,23 @@ function Timeline() {
         <span className="track-label"><Clapperboard />Cue</span>
         <div className="timeline-segments">
           {scene.cues.map((cue, index) => <button type="button" key={cue.cue_id} className={cue.cue_id === selectedCueId ? "is-active" : ""} onClick={() => selectCue(cue.cue_id)}><span>{index + 1}</span>{cue.title}</button>)}
+        </div>
+      </div>
+      <div className="timeline-track event-timeline-track">
+        <span className="track-label"><Layers3 />事件</span>
+        <div className="timeline-segments">
+          {eventSegments.map((event) => (
+            <button
+              type="button"
+              key={event.event_id}
+              title={`${eventLabels[event.kind] || event.kind} · ${event.duration_ms} ms`}
+              style={{ flexGrow: event.duration_frames }}
+              onClick={() => useProjectStore.getState().selectEvent(event.event_id)}
+            >
+              <span>{eventLabels[event.kind] || "扩展演出"}</span>
+              <small>{event.duration_ms} ms</small>
+            </button>
+          ))}
         </div>
       </div>
     </section>

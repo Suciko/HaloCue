@@ -26,14 +26,30 @@ mode and the render adapters continue to operate on the same Cue/event data.
 - Unknown namespaced professional events remain in the canonical project and
   produce warnings; unknown non-namespaced render events remain rejected.
 
+## Professional authoring follow-up
+
+- Added `sceneEventFactory.ts` as the professional command-menu Interface for
+  creating the smallest valid payload for each registry-supported event.
+- Added canonical-store commands for adding and deleting events. Deletion keeps
+  the nearest surviving event selected and both commands remain undoable through
+  the existing repository history.
+- Added an actual professional event menu, per-event delete controls, character
+  selection for enter events, resolved duration fields, and a selected-Cue event
+  track that uses the shared render timeline.
+- The simple mode remains the low-operation-cost task flow; these controls are
+  exposed only in professional mode and edit the same Cue/event objects.
+
 ## Verification
 
-- `22 passed`: scene-editor Vitest suite.
+- `26 passed`: scene-editor Vitest suite.
 - `28 passed`: focused Python registry/timeline/evaluation/contract tests.
 - `11 passed`: browser scene preview UI regression.
 - `2178 passed, 14 skipped`: full Python suite.
 - `npm run build`: TypeScript check and Vite production build passed. Vite
   retained the existing runtime font warning for the unresolved preview font.
+- Playwright browser check: professional event menu opened, a screen-shake event
+  was added, the menu closed automatically, the event appeared in the list and
+  timeline, and the inspector resolved its 360 ms duration.
 - `ruff check` and `git diff --check`: passed for the touched Python/test files.
 - Registry tests compare the browser Adapter manifest field-for-field with the
   canonical JSON and assert the render-timeline schema enum stays in parity.
@@ -49,4 +65,5 @@ changing the Adapter Interface.
 
 - Branch: `feature/1.1-ba-editor-from-1.0`
 - PR: https://github.com/Suciko/HaloCue/pull/27
-- Commit: `68e86d1 refactor(1.1): centralize scene event registry`
+- Commits: `918d198 refactor(1.1): centralize scene event registry`; follow-up
+  professional authoring commit is recorded after publication.
