@@ -64,7 +64,7 @@
 
   function clampStageOffset(value) {
     const number = Number(value);
-    return Number.isFinite(number) ? Math.max(-640, Math.min(640, number)) : 0;
+    return Number.isFinite(number) ? Math.max(-1024, Math.min(1024, number)) : 0;
   }
 
   function installStageScale(stage) {
@@ -152,6 +152,9 @@
     const initialActors = Array.isArray(descriptor.initial_actors)
       ? descriptor.initial_actors
       : descriptor.actors;
+    if (locationLabel) {
+      locationLabel.hidden = descriptor.presentation?.location_mode === "hidden";
+    }
     if (initialActors.length !== 5) {
       throw new Error("Scene descriptor initial_actors must contain exactly five actor slots.");
     }
@@ -175,6 +178,7 @@
       typewriterFrame: null,
       motion: null,
       background: descriptor.initial_background || descriptor.background || null,
+      backgroundPending: true,
       initialMotionPending: true,
     };
 
@@ -183,7 +187,7 @@
     function updateMediaReadiness() {
       const pending = [...actorLayer.querySelectorAll(".actor-slot.is-visible .actor-image")]
         .filter((image) => image.src && !(image.complete && image.naturalWidth > 0));
-      stage.dataset.mediaReady = pending.length ? "loading" : "ready";
+      stage.dataset.mediaReady = pending.length || state.backgroundPending ? "loading" : "ready";
     }
 
     function pulseMotion(element, className) {
@@ -411,10 +415,14 @@
       stageBackground.style.backgroundSize = "cover";
       stageBackground.style.backgroundPosition = `${focusX * 100}% ${focusY * 100}%`;
       if (!isSafePreviewUri(previewUri)) {
+        state.backgroundPending = false;
         stageBackground.style.backgroundImage = "";
         stage.classList.remove("has-background-image");
+        updateMediaReadiness();
         return;
       }
+      state.backgroundPending = true;
+      updateMediaReadiness();
       const image = new Image();
       image.addEventListener("load", () => {
         stageBackground.style.backgroundImage = `url("${previewUri}")`;
@@ -422,9 +430,13 @@
         stageBackground.classList.remove("is-transitioning");
         void stageBackground.offsetWidth;
         stageBackground.classList.add("is-transitioning");
+        state.backgroundPending = false;
+        updateMediaReadiness();
         status.textContent = "Background ready";
       });
       image.addEventListener("error", () => {
+        state.backgroundPending = false;
+        updateMediaReadiness();
         status.textContent = "Background placeholder";
       });
       image.src = previewUri;
@@ -455,11 +467,13 @@
       menuToggle.onchange = apply;
       autoButton.onclick = (event) => {
         event.stopPropagation();
+        pulseMotion(autoButton, "is-pressing");
         autoButton.classList.toggle("is-enabled");
         autoButton.setAttribute("aria-pressed", String(autoButton.classList.contains("is-enabled")));
       };
       menuButton.onclick = (event) => {
         event.stopPropagation();
+        pulseMotion(menuButton, "is-pressing");
         menuButton.classList.toggle("is-enabled");
         menuButton.setAttribute("aria-pressed", String(menuButton.classList.contains("is-enabled")));
       };
@@ -526,8 +540,9 @@
   if (demoDescriptor) {
     boot(demoDescriptor);
   } else if (window.location.protocol !== "file:") {
-    const descriptorName = new URLSearchParams(window.location.search).get("descriptor") === "local-aa"
-      ? "./local-aa.scene-descriptor.json"
+    const requestedDescriptor = new URLSearchParams(window.location.search).get("descriptor") || "example";
+    const descriptorName = /^[a-z0-9-]+$/i.test(requestedDescriptor)
+      ? `./${requestedDescriptor}.scene-descriptor.json`
       : "./example.scene-descriptor.json";
     fetch(descriptorName)
       .then((response) => {

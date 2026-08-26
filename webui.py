@@ -4215,8 +4215,17 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_preview_file(self, path: Path, ctype: str):
+    def _send_preview_file(self, path: Path, ctype: str, *, cache_control="no-store"):
         """Stream one already-scoped preview file; audio understands a single bytes range."""
+        stat = path.stat()
+        etag = f'W/"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+        if not self.headers.get("Range") and self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            self.send_header("Cache-Control", cache_control)
+            self.send_header("ETag", etag)
+            self._apply_security_headers()
+            self.end_headers()
+            return
         with path.open("rb") as handle:
             size = os.fstat(handle.fileno()).st_size
             start, end, code = 0, size - 1, 200
@@ -4239,7 +4248,8 @@ class H(BaseHTTPRequestHandler):
                 end = min(end, size - 1); code = 206
             length = end - start + 1
             self.send_response(code); self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(length)); self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(length)); self.send_header("Cache-Control", cache_control)
+            self.send_header("ETag", etag)
             self.send_header("Accept-Ranges", "bytes")
             if code == 206: self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
             self._apply_security_headers(); self.end_headers(); handle.seek(start)
@@ -4335,7 +4345,7 @@ class H(BaseHTTPRequestHandler):
                         "code": "stage_spine_frame_unavailable",
                         "e": str(exc),
                     })
-                return self._send_preview_file(frame, "image/png")
+                return self._send_preview_file(frame, "image/png", cache_control="private, no-cache")
             if p == "/api/resources/stage/background":
                 key = q.get("key", "")
                 catalog, resource_cache = _stage_catalog_and_cache()
@@ -4363,7 +4373,7 @@ class H(BaseHTTPRequestHandler):
                     ".jpeg": "image/jpeg",
                     ".webp": "image/webp",
                 }.get(frame.suffix.casefold(), "application/octet-stream")
-                return self._send_preview_file(frame, content_type)
+                return self._send_preview_file(frame, content_type, cache_control="private, no-cache")
             if p == "/api/browse":
                 return self._send(
                     200,

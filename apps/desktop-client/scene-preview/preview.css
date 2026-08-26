@@ -172,8 +172,8 @@ h1 {
 }
 
 .actor-slot.is-visible { opacity: 1; }
-.actor-slot.is-dimmed { filter: saturate(0.82) brightness(calc(var(--actor-luminance) * 0.92)); }
-.actor-slot.is-active { filter: saturate(1.06) brightness(calc(var(--actor-luminance) * 1.06)); transform: translateX(-50%) translateY(-5px); }
+.actor-slot.is-dimmed { filter: saturate(0.72) brightness(calc(var(--actor-luminance) * 0.74)); }
+.actor-slot.is-active { filter: saturate(1) brightness(calc(var(--actor-luminance) * 0.99)); transform: translateX(-50%) translateY(-5px); }
 .actor-slot.is-entering { animation: actor-enter 500ms var(--ease-out) both; }
 .actor-slot.is-exiting { animation: actor-exit 180ms var(--ease-out) both; }
 .actor-slot.is-active .actor-portrait { animation: actor-idle 3000ms ease-in-out 520ms 3 both; }
@@ -234,11 +234,11 @@ h1 {
 
 .stage-overlay-controls {
   position: absolute;
-  top: calc(42px * var(--stage-scale));
-  right: calc(20px * var(--stage-scale));
+  top: calc(36px * var(--stage-scale));
+  right: calc(30px * var(--stage-scale));
   z-index: 11;
   display: flex;
-  gap: calc(14px * var(--stage-scale));
+  gap: calc(18px * var(--stage-scale));
   align-items: center;
 }
 
@@ -267,6 +267,7 @@ h1 {
 }
 
 .stage-overlay-button:active { transform: scale(.97); }
+.stage-overlay-button.is-pressing { animation: overlay-button-press 420ms both; }
 
 .stage-overlay-button.is-enabled {
   border-color: rgb(255 226 0 / 94%);
@@ -292,6 +293,7 @@ h1 {
 }
 
 .location-chip.is-dismissed { animation: location-exit 260ms var(--ease-in-out) both; }
+.location-chip[hidden] { display: none; }
 
 .location-chip::before {
   position: absolute;
@@ -320,7 +322,7 @@ h1 {
   bottom: 0;
   left: 0;
   z-index: 5;
-  height: 40%;
+  height: 39%;
   background:
     linear-gradient(180deg, transparent 0%, rgb(8 25 46 / 7%) 14%, rgb(8 25 46 / 42%) 32%, rgb(7 24 43 / 68%) 52%, rgb(6 21 38 / 82%) 74%, rgb(5 18 34 / 89%) 100%),
     linear-gradient(90deg, rgb(4 18 35 / 12%), transparent 32%, rgb(6 22 39 / 9%));
@@ -330,14 +332,14 @@ h1 {
 .dialogue-panel {
   position: absolute;
   right: 0;
-  bottom: calc(70px * var(--stage-scale));
+  bottom: calc(80px * var(--stage-scale));
   left: 10%;
   z-index: 6;
   /* AA PreviewScene: container y=-832, name y=426, line y=361. The label
      metrics add their own ascent/leading, so the painted name/line/text land
      near 75/81/83% of the exported frame. */
   min-height: calc(336px * var(--stage-scale));
-  padding: 0 calc(238px * var(--stage-scale)) 0 0;
+  padding: 0 calc(246px * var(--stage-scale)) 0 0;
   background: transparent;
   font-family: var(--dialogue-font, inherit);
 }
@@ -350,7 +352,7 @@ h1 {
   align-items: baseline;
   justify-content: space-between;
   gap: calc(12px * var(--stage-scale));
-  padding: 0 0 calc(8px * var(--stage-scale));
+  padding: 0;
   border-bottom: max(1px, calc(1px * var(--stage-scale))) solid rgb(217 232 245 / 42%);
 }
 
@@ -408,7 +410,7 @@ h1 {
 
 .dialogue-text {
   min-height: 3em;
-  margin: calc(10px * var(--stage-scale)) 0 0;
+  margin: calc(14px * var(--stage-scale)) 0 0;
   color: #fff;
   font-size: calc(56px * var(--stage-scale));
   font-weight: 450;
@@ -420,8 +422,8 @@ h1 {
 
 .dialogue-next {
   position: absolute;
-  right: calc(174px * var(--stage-scale));
-  bottom: calc(20px * var(--stage-scale));
+  right: calc(198px * var(--stage-scale));
+  bottom: calc(26px * var(--stage-scale));
   width: 0;
   height: 0;
   border-top: calc(10px * var(--stage-scale)) solid transparent;
@@ -489,6 +491,13 @@ h1 {
 @keyframes actor-idle {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(calc(-2px * var(--stage-scale))); }
+}
+
+@keyframes overlay-button-press {
+  0% { transform: scale(1); }
+  18% { transform: scale(.96); }
+  62% { transform: scale(1.015); }
+  100% { transform: scale(1); }
 }
 
 @keyframes background-crossfade {

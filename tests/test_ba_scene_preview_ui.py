@@ -45,6 +45,165 @@ def test_synthetic_descriptor_fixture_has_versioned_five_slot_shape():
     )
 
 
+def test_official_p69_descriptor_locks_reference_frame_and_stage_media():
+    descriptor = json.loads(
+        (PREVIEW_ROOT / "official-p69.scene-descriptor.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert descriptor["schema_version"] == "scene-descriptor/1.0"
+    reference = descriptor["presentation"]["reference_frame"]
+    assert reference["id"] == "official-p69-final-v9"
+    assert reference["viewport"] == {"width": 1280, "height": 720}
+    assert reference["design_canvas"] == {"width": 2560, "height": 1440}
+    assert reference["target_event_index"] == 0
+    assert reference["dialogue_complete"] is True
+    assert reference["overlay_controls_visible"] is True
+    assert reference["anchors"]["auto_button"] == {
+        "x": 0.79375,
+        "y": 0.025,
+        "width": 0.09375,
+        "height": 0.0625,
+    }
+    assert [actor["slot"] for actor in descriptor["actors"]] == [1, 2, 3, 4, 5]
+    assert descriptor["actors"][0]["stage_media"]["animation"] == "06"
+    assert descriptor["actors"][0]["stage_media"]["scale"] == 1.55
+    assert descriptor["actors"][0]["stage_media"]["offset_y"] == 812
+    assert descriptor["actors"][4]["stage_media"]["animation"] == "00"
+    assert descriptor["actors"][4]["stage_media"]["scale"] == 1.62
+    assert descriptor["actors"][4]["stage_media"]["offset_y"] == 216
+    assert descriptor["events"][0]["kind"] == "dialogue"
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize("viewport", [(640, 360), (1280, 720), (1920, 1080)])
+def test_official_p69_reference_frame_keeps_normalized_geometry(
+    viewport,
+):
+    playwright = pytest.importorskip("playwright.sync_api")
+    server, thread = _serve_preview()
+    descriptor = json.loads(
+        (PREVIEW_ROOT / "official-p69.scene-descriptor.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    # The public test uses synthetic raster stand-ins while preserving the
+    # official descriptor's event, typography, overlay, and stage-media shape.
+    descriptor["background"]["preview_uri"] = "./assets/demo-conference-room.jpg"
+    for actor in descriptor["actors"]:
+        media = actor.get("stage_media")
+        if media:
+            media["kind"] = "spine-frame"
+            media["preview_uri"] = "./assets/demo-conference-room.png"
+            media.pop("bundle_key", None)
+            media.pop("animation", None)
+    try:
+        with playwright.sync_playwright() as runtime:
+            try:
+                browser = runtime.chromium.launch(headless=True)
+            except Exception as exc:  # pragma: no cover - depends on local browser install
+                if "Executable doesn't exist" in str(exc):
+                    pytest.skip("Playwright Chromium is not installed")
+                raise
+            page = browser.new_page(viewport={"width": viewport[0], "height": viewport[1]})
+            page.add_init_script(
+                "window.HALO_CUE_SCENE_DESCRIPTOR = "
+                + json.dumps(descriptor, ensure_ascii=False)
+                + ";"
+            )
+            page.goto(f"http://127.0.0.1:{server.server_port}/index.html")
+            page.wait_for_selector(".actor-slot")
+            page.wait_for_selector("#preview-stage.has-background-image")
+            page.wait_for_function(
+                "() => document.querySelector('#preview-stage').dataset.mediaReady === 'ready'"
+            )
+
+            # One advance starts typewriter playback; the next commits the
+            # same event to its deterministic completed frame.
+            page.locator("#preview-stage").click(position={"x": viewport[0] / 2, "y": viewport[1] / 4})
+            page.wait_for_timeout(55)
+            assert page.locator("#dialogue-copy").inner_text() != ""
+            assert page.locator("#dialogue-caret").is_visible()
+            assert page.locator(".dialogue-panel").is_visible()
+            assert page.locator(".actor-slot.is-active").get_attribute("data-slot") == "1"
+            page.locator("#preview-stage").click(position={"x": viewport[0] / 2, "y": viewport[1] / 4})
+            page.wait_for_function(
+                "() => document.querySelector('#dialogue-copy').innerText === '哈？你们这是什么反应？'"
+            )
+            # The completed dialogue frame is measured after the spatial
+            # entrance bridge, not during its 220ms translateY transition.
+            page.wait_for_timeout(300)
+
+            metrics = page.locator("#preview-stage").evaluate(
+                """stage => {
+                    const sr = stage.getBoundingClientRect();
+                    const box = selector => {
+                        const element = document.querySelector(selector);
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            x: (rect.x - sr.x) / sr.width,
+                            y: (rect.y - sr.y) / sr.height,
+                            width: rect.width / sr.width,
+                            height: rect.height / sr.height,
+                        };
+                    };
+                    const center = selector => {
+                        const rect = document.querySelector(selector).getBoundingClientRect();
+                        return (rect.x + rect.width / 2 - sr.x) / sr.width;
+                    };
+                    return {
+                        scale: Number.parseFloat(getComputedStyle(stage).getPropertyValue('--stage-scale')),
+                        panel: box('.dialogue-panel'),
+                        speaker: box('#speaker-name'),
+                        secondary: box('#club-name'),
+                        text: box('#dialogue-text'),
+                        shade: box('.dialogue-shade'),
+                        slot1: center('.actor-slot[data-slot="1"]'),
+                        slot5: center('.actor-slot[data-slot="5"]'),
+                        auto: box('#auto-button'),
+                        menu: box('#menu-button'),
+                        locationHidden: document.querySelector('#location-label').hidden,
+                        caretHidden: document.querySelector('#dialogue-caret').hidden,
+                        activeSlot: document.querySelector('.actor-slot.is-active')?.dataset.slot || null,
+                    };
+                }"""
+            )
+            expected = descriptor["presentation"]["reference_frame"]["anchors"]
+            x_tolerance = 1.1 / viewport[0]
+            y_tolerance = 1.1 / viewport[1]
+            assert abs(metrics["scale"] - viewport[0] / 2560) < 0.002
+            assert abs(metrics["panel"]["x"] - expected["dialogue_panel"]["x"]) < x_tolerance
+            assert abs(metrics["panel"]["y"] - expected["dialogue_panel"]["top"]) < y_tolerance
+            assert abs(metrics["speaker"]["x"] - expected["speaker_name"]["x"]) < x_tolerance
+            assert abs(metrics["speaker"]["y"] - expected["speaker_name"]["top"]) < y_tolerance
+            assert abs(metrics["secondary"]["x"] - expected["secondary_identity"]["x"]) < x_tolerance
+            assert abs(metrics["text"]["x"] - expected["dialogue_text"]["x"]) < x_tolerance
+            assert abs(metrics["text"]["y"] - expected["dialogue_text"]["top"]) < y_tolerance
+            assert abs(metrics["shade"]["y"] - expected["dialogue_shade"]["top"]) < y_tolerance
+            assert abs(metrics["slot1"] - expected["slot_1_center"]["x"]) < x_tolerance
+            assert abs(metrics["slot5"] - expected["slot_5_center"]["x"]) < x_tolerance
+            for key in ("auto", "menu"):
+                for field in ("x", "width"):
+                    assert abs(metrics[key][field] - expected[f"{key}_button"][field]) < x_tolerance
+                for field in ("y", "height"):
+                    assert abs(metrics[key][field] - expected[f"{key}_button"][field]) < y_tolerance
+            assert metrics["locationHidden"] is True
+            assert metrics["caretHidden"] is True
+            assert metrics["activeSlot"] == "1"
+            assert page.locator(".render-options").evaluate(
+                "element => getComputedStyle(element).opacity"
+            ) == "0"
+            assert page.locator("#speaker-name").inner_text() == "优香"
+            assert page.locator("#club-name").inner_text() == "研讨会"
+            assert page.locator("#auto-button").is_visible()
+            assert page.locator("#menu-button").is_visible()
+            browser.close()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
 @pytest.mark.browser
 def test_preview_renders_five_slots_advances_dialogue_and_switches_font(tmp_path):
     playwright = pytest.importorskip("playwright.sync_api")
@@ -116,7 +275,8 @@ def test_preview_renders_five_slots_advances_dialogue_and_switches_font(tmp_path
             assert "欢迎来到 StoryForge" in page.locator("#dialogue-text").inner_text()
             assert page.locator('.actor-slot.is-active[data-slot="3"]').count() == 1
             dialogue_box = page.locator(".dialogue-panel").bounding_box()
-            assert 0.715 < dialogue_box["y"] / stage_box["height"] < 0.725
+            # Calibrated against the official 16:9 AA dialogue baseline.
+            assert 0.707 < dialogue_box["y"] / stage_box["height"] < 0.715
             assert page.locator("#speaker-name").evaluate(
                 "element => getComputedStyle(element).fontWeight"
             ) in {"600", "700"}

@@ -22,10 +22,38 @@ _SAFE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 # and cache writes.  This keeps two visible stage actors from racing the
 # Playwright context manager and returning a false 404.
 _STAGE_RENDER_LOCK = threading.Lock()
+_SIGNATURE_CACHE_LOCK = threading.Lock()
+_SIGNATURE_CACHE: dict[Path, tuple[tuple[tuple[str, int, int], ...], str]] = {}
+_STAGE_FRAME_CACHE_LOCK = threading.Lock()
+_STAGE_FRAME_CACHE: dict[tuple[str, ...], Path] = {}
 
 
 class StageMediaError(ValueError):
     """A user asset cannot be exposed as stage media."""
+
+
+def _cached_web_bundle_signature(root: str | Path) -> str:
+    """Reuse a content signature until one of the local bundle files changes."""
+
+    source = Path(root).expanduser().resolve()
+    try:
+        stamp = tuple(
+            (path.relative_to(source).as_posix(), stat.st_mtime_ns, stat.st_size)
+            for path in sorted(item for item in source.rglob("*") if item.is_file())
+            for stat in (path.stat(),)
+        )
+    except OSError as exc:
+        raise StageMediaError("stage bundle metadata is unavailable") from exc
+    with _SIGNATURE_CACHE_LOCK:
+        cached = _SIGNATURE_CACHE.get(source)
+        if cached and cached[0] == stamp:
+            return cached[1]
+    signature = web_bundle_signature(source)
+    with _SIGNATURE_CACHE_LOCK:
+        if len(_SIGNATURE_CACHE) >= 64 and source not in _SIGNATURE_CACHE:
+            _SIGNATURE_CACHE.pop(next(iter(_SIGNATURE_CACHE)))
+        _SIGNATURE_CACHE[source] = (stamp, signature)
+    return signature
 
 
 def safe_stage_key(value: str | None) -> str:
@@ -280,10 +308,7 @@ def stage_frame_path(
 ) -> Path:
     """Render/cache a transparent stage frame through the matching WebGL runtime."""
 
-    try:
-        bundle = resolve_spine_bundle(overrides, key)
-    except StageMediaError:
-        bundle = extract_catalog_spine_bundle(catalog, resource_cache, key, cache_root)
+    safe_key = safe_stage_key(key)
     animation_name = str(animation or "00_default").strip() or "00_default"
     # AA descriptors use the semantic default name; the renderer's face
     # contract uses the first numeric animation as its stable alias.
@@ -291,13 +316,29 @@ def stage_frame_path(
         animation_name = "00"
     if not _SAFE_COMPONENT_RE.fullmatch(animation_name):
         raise StageMediaError("animation must be one safe path component")
+    request_key = tuple(
+        str(value or "")
+        for value in (overrides, catalog, resource_cache, cache_root, safe_key, animation_name)
+    )
+    with _STAGE_FRAME_CACHE_LOCK:
+        cached_frame = _STAGE_FRAME_CACHE.get(request_key)
+        if cached_frame and cached_frame.is_file():
+            return cached_frame
+        if cached_frame:
+            _STAGE_FRAME_CACHE.pop(request_key, None)
+    try:
+        bundle = resolve_spine_bundle(overrides, safe_key)
+    except StageMediaError:
+        bundle = extract_catalog_spine_bundle(catalog, resource_cache, safe_key, cache_root)
     cache_dir = Path(cache_root).expanduser().resolve() / "spine-stage"
     # Avoid starting a browser/WebGL process for a frame that is already in
     # the deterministic tight-crop cache. This is the hot path on preview
     # reloads and makes repeat loads effectively a disk read.
-    signature = web_bundle_signature(bundle["root"])
+    signature = _cached_web_bundle_signature(bundle["root"])
     tight = cache_dir / signature / "stage-frames" / f"{animation_name}.png"
     if tight.is_file():
+        with _STAGE_FRAME_CACHE_LOCK:
+            _STAGE_FRAME_CACHE[request_key] = tight
         return tight
     from spine_face_web_renderer import SpineWebRenderer
     try:
@@ -342,4 +383,8 @@ def stage_frame_path(
             raise
         except Exception as exc:
             raise StageMediaError(f"Unable to crop Spine stage frame: {exc}") from exc
+    with _STAGE_FRAME_CACHE_LOCK:
+        if len(_STAGE_FRAME_CACHE) >= 256 and request_key not in _STAGE_FRAME_CACHE:
+            _STAGE_FRAME_CACHE.pop(next(iter(_STAGE_FRAME_CACHE)))
+        _STAGE_FRAME_CACHE[request_key] = tight
     return tight

@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import threading
 from http.server import ThreadingHTTPServer
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 import pytest
 from PIL import Image
@@ -74,7 +75,17 @@ def test_stage_spine_endpoint_streams_only_the_cached_frame(tmp_path, monkeypatc
         ) as response:
             assert response.status == 200
             assert response.headers["Content-Type"] == "image/png"
+            assert response.headers["Cache-Control"] == "private, no-cache"
+            assert response.headers["ETag"]
             assert response.read() == b"PNG-FRAME"
+            etag = response.headers["ETag"]
+        request = Request(
+            f"http://127.0.0.1:{server.server_port}/api/resources/stage/spine/frame?key=hero",
+            headers={"If-None-Match": etag},
+        )
+        with pytest.raises(HTTPError) as not_modified:
+            urlopen(request)
+        assert not_modified.value.code == 304
     finally:
         server.shutdown()
         server.server_close()
@@ -175,3 +186,49 @@ def test_stage_frame_returns_tight_cache_before_starting_webgl(tmp_path, monkeyp
     )
 
     assert aa_stage_media.stage_frame_path(None, "hero", animation="03", cache_root=tmp_path) == tight
+
+
+def test_stage_frame_reuses_bundle_signature_until_source_changes(tmp_path, monkeypatch):
+    import aa_stage_media
+
+    bundle_root = tmp_path / "bundle"
+    bundle_root.mkdir()
+    source = bundle_root / "hero.skel"
+    source.write_bytes(b"v1")
+    calls = []
+
+    monkeypatch.setattr(
+        aa_stage_media,
+        "web_bundle_signature",
+        lambda _root: calls.append(source.read_bytes()) or f"sig-{len(calls)}",
+    )
+
+    assert aa_stage_media._cached_web_bundle_signature(bundle_root) == "sig-1"
+    assert aa_stage_media._cached_web_bundle_signature(bundle_root) == "sig-1"
+    source.write_bytes(b"version-two")
+    assert aa_stage_media._cached_web_bundle_signature(bundle_root) == "sig-2"
+    assert calls == [b"v1", b"version-two"]
+
+
+def test_stage_frame_reuses_existing_final_path_without_resolving_again(tmp_path, monkeypatch):
+    import aa_stage_media
+
+    bundle_root = tmp_path / "bundle"
+    bundle_root.mkdir()
+    tight = tmp_path / "spine-stage" / "hot-sig" / "stage-frames" / "06.png"
+    tight.parent.mkdir(parents=True)
+    tight.write_bytes(b"cached")
+    calls = []
+
+    monkeypatch.setattr(
+        aa_stage_media,
+        "resolve_spine_bundle",
+        lambda *_args, **_kwargs: calls.append("resolve")
+        or {"root": bundle_root, "spine_version": "3.8.96"},
+    )
+    monkeypatch.setattr(aa_stage_media, "web_bundle_signature", lambda _root: "hot-sig")
+
+    kwargs = {"animation": "06", "cache_root": tmp_path}
+    assert aa_stage_media.stage_frame_path(None, "hero-hot", **kwargs) == tight
+    assert aa_stage_media.stage_frame_path(None, "hero-hot", **kwargs) == tight
+    assert calls == ["resolve"]
