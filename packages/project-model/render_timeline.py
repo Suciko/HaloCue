@@ -11,41 +11,14 @@ import math
 from copy import deepcopy
 from typing import Any
 
+from scene_events import (
+    SUPPORTED_EVENT_KINDS,
+    scene_event_registry,
+)
+
 
 TIMELINE_SCHEMA_VERSION = "render-timeline/1.0"
 DEFAULT_FRAME_RATE = 30
-SUPPORTED_EVENT_KINDS = frozenset(
-    {
-        "background",
-        "dialogue",
-        "enter",
-        "exit",
-        "wait",
-        "halocue.ba:background-pan",
-        "halocue.ba:screen-shake",
-        "halocue.ba:screen-text",
-        "halocue.ba:hit-effect",
-    }
-)
-
-# These values mirror the independently implemented AA preview typewriter
-# policy. They are product defaults, not a requirement for future exporters.
-TYPEWRITER_GRAPHEME_MS = 32
-TYPEWRITER_PUNCTUATION_PAUSE_MS = 96
-TYPEWRITER_NEWLINE_PAUSE_MS = 192
-DIALOGUE_HOLD_MS = 650
-DEFAULT_EVENT_DURATION_MS = {
-    "background": 500,
-    "enter": 500,
-    "exit": 500,
-    "wait": 1000,
-    "halocue.ba:background-pan": 900,
-    "halocue.ba:screen-shake": 360,
-    "halocue.ba:screen-text": 1800,
-    "halocue.ba:hit-effect": 420,
-}
-PUNCTUATION = frozenset("，。！？；：、,.!?;:")
-
 
 def _require_frame_rate(frame_rate: Any) -> int:
     if isinstance(frame_rate, bool) or not isinstance(frame_rate, int):
@@ -62,39 +35,15 @@ def _duration_frames(duration_ms: int, frame_rate: int) -> int:
 
 
 def dialogue_duration_ms(text: Any) -> int:
-    """Return the default readable duration for one dialogue event."""
+    """Return the shared AA-compatible dialogue duration."""
 
-    value = str(text or "")
-    if not value:
-        return DIALOGUE_HOLD_MS
-    duration = DIALOGUE_HOLD_MS
-    for grapheme in value:
-        duration += TYPEWRITER_GRAPHEME_MS
-        if grapheme == "\n":
-            duration += TYPEWRITER_NEWLINE_PAUSE_MS
-        elif grapheme in PUNCTUATION:
-            duration += TYPEWRITER_PUNCTUATION_PAUSE_MS
-    return duration
+    return scene_event_registry.duration_ms({"kind": "dialogue", "text": text})
 
 
 def event_duration_ms(event: dict[str, Any]) -> int:
     """Resolve an event's explicit duration or its stable kind default."""
 
-    explicit = event.get("duration_ms")
-    if explicit is not None:
-        if isinstance(explicit, bool) or not isinstance(explicit, (int, float)):
-            raise ValueError("event duration_ms must be a finite positive number")
-        if not math.isfinite(explicit) or explicit <= 0:
-            raise ValueError("event duration_ms must be a finite positive number")
-        return max(1, math.ceil(explicit))
-
-    kind = event.get("kind")
-    if kind == "dialogue":
-        return dialogue_duration_ms(event.get("text"))
-    try:
-        return DEFAULT_EVENT_DURATION_MS[kind]
-    except KeyError as exc:
-        raise ValueError(f"unsupported render event kind {kind!r}") from exc
+    return scene_event_registry.duration_ms(event)
 
 
 def build_render_timeline(

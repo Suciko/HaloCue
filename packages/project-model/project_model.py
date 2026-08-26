@@ -11,25 +11,14 @@ import math
 from typing import Any
 from uuid import UUID, uuid5
 
+from scene_events import RENDERABLE_EVENT_KINDS
+
 
 LEGACY_PROJECT_SCHEMA_VERSION = "halocue-project/1.0"
 PROJECT_SCHEMA_VERSION = "halocue-project/1.1"
 SCENE_DESCRIPTOR_SCHEMA_VERSION = "scene-descriptor/1.0"
 AA_SLOT_COUNT = 5
 STAGE_MEDIA_KINDS = frozenset({"portrait", "spine", "spine-frame"})
-RENDERABLE_EVENT_KINDS = frozenset(
-    {
-        "background",
-        "dialogue",
-        "enter",
-        "exit",
-        "wait",
-        "halocue.ba:background-pan",
-        "halocue.ba:screen-shake",
-        "halocue.ba:screen-text",
-        "halocue.ba:hit-effect",
-    }
-)
 CUE_ID_NAMESPACE = UUID("5f24a298-2c02-4ec0-a4c9-b09078060c26")
 
 

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from project_model import RENDERABLE_EVENT_KINDS, build_aa_scene_descriptor, migrate_project
+from project_model import build_aa_scene_descriptor, migrate_project
 from render_timeline import build_render_timeline
+from scene_events import scene_event_registry
 
 
 SCENE_EVALUATION_SCHEMA_VERSION = "scene-evaluation/1.0"
@@ -37,7 +38,7 @@ def evaluate_scene(
                     if (
                         not isinstance(kind, str)
                         or ":" not in kind
-                        or kind in RENDERABLE_EVENT_KINDS
+                        or scene_event_registry.is_descriptor_renderable(kind)
                     ):
                         continue
                     diagnostics.append(

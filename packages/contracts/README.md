@@ -3,7 +3,7 @@
 This package owns versioned JSON contracts shared by the client, backend, BA
 editor, and adapters. A wire-shape change requires a new version or an explicit
 migration plus consumer tests. Current editor/render contracts include
-`halocue-project/1.1`, `character-capabilities/1.0`,
+`halocue-project/1.1`, `character-capabilities/1.0`, `scene-events/1.0`,
 `render-timeline/1.0`, `scene-evaluation/1.0`, and `render-sequence/1.0`.
 Planned contracts include
 `script-release/1.1`, `production-request/1.1`, `performance-draft/1.0`,
@@ -30,6 +30,12 @@ The deterministic `halocue-project/1.0 -> 1.1` migration is owned by
 The `character-capabilities/1.0` schema stores stable expression, motion,
 emoticon, and transition state IDs. Adapter-specific animation names stay in
 namespaced logical fields; local resource paths remain outside the project.
+
+The `scene-events/1.0` manifest is the shared event registry. It records which
+events may enter the descriptor and deterministic timeline, whether an event
+is visual-only, its default duration policy, and its simple-mode label. The
+TypeScript, Python, and browser adapters read this manifest at their seams;
+they do not maintain independent kind or duration tables.
 
 The `render-timeline/1.0` schema lives in
 `render-timeline/1.0.schema.json`. It records deterministic, end-exclusive

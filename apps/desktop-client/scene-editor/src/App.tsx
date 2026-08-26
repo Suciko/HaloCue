@@ -46,6 +46,7 @@ import {
 import { projectFileAdapter } from "./projectRepository";
 import { capabilityStatesFor } from "./capabilities";
 import { evaluateScene } from "./sceneEvaluation";
+import { sceneEventDefinitions } from "./sceneEventRegistry";
 import {
   advancedEventCount,
   firstScene,
@@ -76,17 +77,9 @@ type PreviewWindow = Window & {
   };
 };
 
-const eventLabels: Record<string, string> = {
-  background: "背景",
-  dialogue: "对白",
-  enter: "角色入场",
-  exit: "角色退场",
-  wait: "等待",
-  "halocue.ba:background-pan": "背景移动",
-  "halocue.ba:screen-shake": "画面震动",
-  "halocue.ba:screen-text": "屏幕文字",
-  "halocue.ba:hit-effect": "中弹效果",
-};
+const eventLabels: Record<string, string> = Object.fromEntries(
+  sceneEventDefinitions().map((event) => [event.kind, event.editor_label]),
+);
 
 function IconButton({
   label,

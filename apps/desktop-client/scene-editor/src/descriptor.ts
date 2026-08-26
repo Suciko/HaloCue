@@ -1,12 +1,12 @@
 import type { CueEvent, HaloCueProject, SceneDescriptor } from "./types";
 import { capabilityRegistry, resolveExpressionAnimation, type CapabilityRegistry } from "./capabilities";
 import { firstScene } from "./projectStore";
+import { isDescriptorRenderable, sceneEventDefinitions } from "./sceneEventRegistry";
 
-export const RENDERABLE_EVENT_KINDS = new Set([
-  "background", "dialogue", "enter", "exit", "wait",
-  "halocue.ba:background-pan", "halocue.ba:screen-shake",
-  "halocue.ba:screen-text", "halocue.ba:hit-effect",
-]);
+// Kept as a compatibility export for callers that need the complete derived set.
+export const RENDERABLE_EVENT_KINDS = new Set(
+  sceneEventDefinitions().filter((event) => event.descriptor_renderable).map((event) => event.kind),
+);
 
 export function buildDescriptor(
   project: HaloCueProject,
@@ -17,7 +17,7 @@ export function buildDescriptor(
   const scene = firstScene(project);
   const selectedIndex = Math.max(0, scene.cues.findIndex((cue) => cue.cue_id === selectedCueId));
   const allEvents = scene.cues.slice(0, selectedIndex + 1).flatMap((cue) => cue.events);
-  const events = allEvents.filter((event) => RENDERABLE_EVENT_KINDS.has(event.kind));
+  const events = allEvents.filter((event) => isDescriptorRenderable(event.kind));
   const characters = new Map(project.characters.map((character) => [character.character_id, character]));
   const resources = new Map(project.resources.map((resource) => [resource.resource_id, resource]));
   const slots: Array<string | null> = [null, null, null, null, null];

@@ -19,22 +19,7 @@
   const TYPEWRITER_PUNCTUATION_PAUSE_FRAMES = 3;
   const TYPEWRITER_NEWLINE_PAUSE_FRAMES = 6;
   const DEFAULT_FRAME_RATE = 30;
-  const DIALOGUE_HOLD_MS = 650;
-  const DEFAULT_EVENT_DURATION_MS = Object.freeze({
-    background: 500,
-    enter: 500,
-    exit: 500,
-    wait: 1000,
-    "halocue.ba:background-pan": 900,
-    "halocue.ba:screen-shake": 360,
-    "halocue.ba:screen-text": 1800,
-    "halocue.ba:hit-effect": 420,
-  });
-  const SUPPORTED_EVENT_KINDS = new Set([
-    "background", "dialogue", "enter", "exit", "wait",
-    "halocue.ba:background-pan", "halocue.ba:screen-shake",
-    "halocue.ba:screen-text", "halocue.ba:hit-effect",
-  ]);
+  const EVENT_REGISTRY = global.HaloCueSceneEventRegistry;
   const PUNCTUATION = new Set(Array.from("，。！？；：、,.!?;:"));
 
   const DIALOGUE_LAYOUT = Object.freeze({
@@ -229,19 +214,10 @@
   }
 
   function eventDurationMs(event) {
-    const explicit = event?.duration_ms;
-    if (explicit !== undefined && explicit !== null) {
-      if (!Number.isFinite(explicit) || explicit <= 0) {
-        throw new RangeError("event duration_ms must be a finite positive number");
-      }
-      return Math.max(1, Math.ceil(explicit));
+    if (!EVENT_REGISTRY || typeof EVENT_REGISTRY.durationMs !== "function") {
+      throw new Error("scene event registry adapter is not loaded");
     }
-    if (event?.kind === "dialogue") {
-      return typewriterDuration(event.text, 32) + DIALOGUE_HOLD_MS;
-    }
-    const fallback = DEFAULT_EVENT_DURATION_MS[event?.kind];
-    if (!fallback) throw new RangeError(`unsupported render event kind ${String(event?.kind)}`);
-    return fallback;
+    return EVENT_REGISTRY.durationMs(event);
   }
 
   function buildRenderTimeline(descriptor, options) {
@@ -262,7 +238,7 @@
       if (!eventId) throw new Error(`event ${index} must have a non-empty event_id`);
       if (seenIds.has(eventId)) throw new Error(`duplicate event_id ${eventId}`);
       seenIds.add(eventId);
-      if (!SUPPORTED_EVENT_KINDS.has(source.kind)) {
+      if (!EVENT_REGISTRY || !EVENT_REGISTRY.isTimelineSupported(source.kind)) {
         throw new RangeError(`unsupported render event kind ${String(source.kind)}`);
       }
       const durationMs = eventDurationMs(source);

@@ -13,9 +13,10 @@ from jsonschema import Draft202012Validator
 MODEL_ROOT = Path(__file__).resolve().parents[1] / "packages" / "project-model"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = REPO_ROOT / "apps" / "desktop-client" / "scene-preview" / "aa-runtime.js"
-TIMELINE_SCHEMA = (
-    REPO_ROOT / "packages" / "contracts" / "render-timeline" / "1.0.schema.json"
+EVENT_REGISTRY_RUNTIME = (
+    REPO_ROOT / "apps" / "desktop-client" / "scene-preview" / "scene-events-runtime.js"
 )
+TIMELINE_SCHEMA = REPO_ROOT / "packages" / "contracts" / "render-timeline" / "1.0.schema.json"
 if str(MODEL_ROOT) not in sys.path:
     sys.path.insert(0, str(MODEL_ROOT))
 
@@ -102,7 +103,10 @@ def test_ba_quick_effects_share_the_deterministic_timeline_contract():
 @pytest.mark.parametrize(
     "events, message",
     [
-        ([{"event_id": "event/a", "kind": "wait"}, {"event_id": "event/a", "kind": "wait"}], "duplicate"),
+        (
+            [{"event_id": "event/a", "kind": "wait"}, {"event_id": "event/a", "kind": "wait"}],
+            "duplicate",
+        ),
         ([{"event_id": "event/a", "kind": "camera"}], "unsupported"),
         ([{"event_id": "event/a", "kind": "wait", "duration_ms": 0}], "positive"),
     ],
@@ -154,6 +158,7 @@ def test_browser_runtime_builds_the_same_render_timeline_as_python():
 const fs = require('fs');
 const vm = require('vm');
 const sandbox = {window: {}};
+vm.runInNewContext(fs.readFileSync(process.argv[2], 'utf8'), sandbox);
 vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), sandbox);
 let input = '';
 process.stdin.setEncoding('utf8');
@@ -168,7 +173,7 @@ process.stdin.on('end', () => {
 """
 
     completed = subprocess.run(
-        [node, "-e", script, str(RUNTIME)],
+        [node, "-e", script, str(RUNTIME), str(EVENT_REGISTRY_RUNTIME)],
         input=json.dumps(source, ensure_ascii=False),
         capture_output=True,
         check=True,

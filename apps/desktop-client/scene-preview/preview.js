@@ -7,10 +7,9 @@
   const STAGE_MEDIA_KINDS = new Set(["portrait", "spine", "spine-frame"]);
   const DEFAULT_ACTOR_MEDIA_SCALE = 1.6;
   const SPINE_RENDERER = window.HaloCueSpineRenderer;
-  const VISUAL_ONLY_EVENTS = new Set([
-    "background", "halocue.ba:background-pan", "halocue.ba:screen-shake",
-    "halocue.ba:screen-text", "halocue.ba:hit-effect",
-  ]);
+  const EVENT_REGISTRY = window.HaloCueSceneEventRegistry || {
+    isVisualOnly: () => false,
+  };
   const CAPABILITY_RUNTIME = window.HaloCueCapabilityRuntime || {
     motionClass: () => "",
     emoticon: () => null,
@@ -688,7 +687,7 @@
         club.dataset.kind = secondaryIdentity.kind;
         club.hidden = !secondaryIdentity.label;
         speakerLine.classList.toggle("is-narration", !hasSpeaker);
-        const eventText = VISUAL_ONLY_EVENTS.has(event.kind)
+        const eventText = EVENT_REGISTRY.isVisualOnly(event.kind)
           ? ""
           : event.text || `${event.kind}.`;
         dialogueNext.hidden = !eventText;
