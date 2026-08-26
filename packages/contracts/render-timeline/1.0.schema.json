@@ -55,7 +55,17 @@
         },
         "kind": {
           "type": "string",
-          "enum": ["background", "dialogue", "enter", "exit", "wait"]
+          "enum": [
+            "background",
+            "dialogue",
+            "enter",
+            "exit",
+            "wait",
+            "halocue.ba:background-pan",
+            "halocue.ba:screen-shake",
+            "halocue.ba:screen-text",
+            "halocue.ba:hit-effect"
+          ]
         },
         "start_frame": {
           "type": "integer",

@@ -7,6 +7,15 @@
   const STAGE_MEDIA_KINDS = new Set(["portrait", "spine", "spine-frame"]);
   const DEFAULT_ACTOR_MEDIA_SCALE = 1.6;
   const SPINE_RENDERER = window.HaloCueSpineRenderer;
+  const VISUAL_ONLY_EVENTS = new Set([
+    "background", "halocue.ba:background-pan", "halocue.ba:screen-shake",
+    "halocue.ba:screen-text", "halocue.ba:hit-effect",
+  ]);
+  const CAPABILITY_RUNTIME = window.HaloCueCapabilityRuntime || {
+    motionClass: () => "",
+    emoticon: () => null,
+    stateId: (value) => typeof value === "string" ? value.trim() : "",
+  };
 
   function assertDescriptor(descriptor) {
     if (!descriptor || descriptor.schema_version !== SUPPORTED_SCHEMA) {
@@ -132,7 +141,7 @@
     element.className = "actor-slot";
     element.dataset.slot = String(slot);
     element.style.left = `${SLOT_X[slot - 1]}%`;
-    element.innerHTML = '<div class="actor-portrait" aria-hidden="true"><img class="actor-image" alt="" /><canvas class="actor-canvas" aria-hidden="true"></canvas></div><div class="actor-name"></div>';
+    element.innerHTML = '<div class="actor-portrait" aria-hidden="true"><img class="actor-image" alt="" /><canvas class="actor-canvas" aria-hidden="true"></canvas></div><div class="actor-emoticon" aria-hidden="true" hidden><span class="actor-emoticon-symbol"></span></div><div class="actor-name"></div>';
     return element;
   }
 
@@ -188,6 +197,8 @@
     const dialoguePanel = stage.querySelector(".dialogue-panel");
     const dialogueNext = stage.querySelector("#dialogue-next");
     const stageBackground = stage.querySelector("#stage-background");
+    const screenTextLayer = stage.querySelector("#screen-text-layer");
+    const screenText = stage.querySelector("#screen-text");
     stage.__haloCueSpineManager?.dispose?.();
     const spineManager = rendererMode === "realtime"
       ? SPINE_RENDERER?.createManager?.() || null
@@ -229,9 +240,11 @@
       typewriterComplete: false,
       typewriterFrame: null,
       motion: null,
+      effect: null,
       background: initialBackground ? { ...initialBackground } : null,
       backgroundPending: true,
       backgroundRequestUri: "",
+      screenText: "",
       initialMotionPending: true,
       frame: -1,
       playing: false,
@@ -251,15 +264,18 @@
       return {
         actors: state.actors.map(cloneRuntimeActor),
         background: state.background ? { ...state.background } : null,
+        screenText: state.screenText,
       };
     }
     function restoreSceneSnapshot(snapshot) {
       state.actors = snapshot.actors.map(cloneRuntimeActor);
       state.background = snapshot.background ? { ...snapshot.background } : null;
+      state.screenText = snapshot.screenText || "";
       state.eventIndex = -1;
       state.typewriter = null;
       state.typewriterComplete = false;
       state.motion = null;
+      state.effect = null;
     }
     const seekStateCache = new Map([[0, captureSceneSnapshot()]]);
     stage.dataset.playback = "live";
@@ -342,6 +358,8 @@
           actor.stage_media?.kind,
           actor.stage_media?.bundle_key,
           actor.stage_media?.animation,
+          actor.motion_id,
+          actor.emoticon_id,
         ]),
       });
       if (signature === inspectorRenderSignature) return;
@@ -412,6 +430,9 @@
             character_id: actor.character_id,
             resource_id: actor.resource_id,
             display_name: actor.display_name,
+            expression_id: actor.expression_id,
+            motion_id: actor.motion_id,
+            emoticon_id: actor.emoticon_id,
             stage_media: media ? {
               kind: media.kind,
               bundle_key: media.bundle_key,
@@ -554,7 +575,22 @@
         const portrait = element.querySelector(".actor-portrait");
         const image = element.querySelector(".actor-image");
         const canvas = element.querySelector(".actor-canvas");
+        const emoticonElement = element.querySelector(".actor-emoticon");
+        const emoticonSymbol = element.querySelector(".actor-emoticon-symbol");
         label.textContent = visible ? actorName(actor) : "";
+        const motionId = CAPABILITY_RUNTIME.stateId(actor.motion_id);
+        const emoticonState = CAPABILITY_RUNTIME.emoticon(actor.emoticon_id);
+        element.dataset.motion = visible ? motionId : "";
+        element.dataset.emoticon = visible ? (emoticonState?.id || CAPABILITY_RUNTIME.stateId(actor.emoticon_id)) : "";
+        for (const className of ["is-motion-nod", "is-motion-appear"]) {
+          element.classList.toggle(className, Boolean(visible && className === CAPABILITY_RUNTIME.motionClass(motionId)));
+        }
+        if (emoticonElement && emoticonSymbol) {
+          emoticonElement.hidden = !visible || !emoticonState;
+          emoticonElement.dataset.state = visible ? (emoticonState?.id || "") : "";
+          emoticonElement.setAttribute("aria-label", emoticonState?.label || "");
+          emoticonSymbol.textContent = emoticonState?.symbol || "";
+        }
         const stageMedia = visible ? stageMediaFor(actor) : null;
         const mediaUri = stageMedia?.preview_uri || "";
         const isRealtimeSpine = Boolean(visible && stageMedia?.kind === "spine" && stageMedia?.bundle_key && spineManager);
@@ -623,6 +659,10 @@
 
     function renderEvent(event, options = {}) {
       cancelTypewriter();
+      if (screenTextLayer && screenText) {
+        screenText.textContent = state.screenText;
+        screenTextLayer.hidden = !state.screenText;
+      }
       if (locationLabel && descriptor.location_label) {
         locationLabel.textContent = descriptor.location_label;
       }
@@ -648,7 +688,9 @@
         club.dataset.kind = secondaryIdentity.kind;
         club.hidden = !secondaryIdentity.label;
         speakerLine.classList.toggle("is-narration", !hasSpeaker);
-        const eventText = event.text || (event.kind === "background" ? "" : `${event.kind}.`);
+        const eventText = VISUAL_ONLY_EVENTS.has(event.kind)
+          ? ""
+          : event.text || `${event.kind}.`;
         dialogueNext.hidden = !eventText;
         dialoguePanel.classList.toggle("is-hidden", !eventText);
         state.typewriter = event.kind === "dialogue" ? AA.queueTypewriter(eventText) : null;
@@ -671,7 +713,17 @@
       if (state.motion && !options.suppressMotion) {
         const motion = state.motion;
         state.motion = null;
-        pulseMotion(actorElements.get(motion.slot), motion.kind === "exit" ? "is-exiting" : "is-entering");
+        const element = actorElements.get(motion.slot);
+        pulseMotion(element, motion.kind === "exit" ? "is-exiting" : "is-entering");
+        const capabilityClass = CAPABILITY_RUNTIME.motionClass(motion.capability);
+        if (capabilityClass) pulseMotion(element, capabilityClass);
+      }
+      if (state.effect && !options.suppressMotion) {
+        const effect = state.effect;
+        state.effect = null;
+        if (effect.kind === "halocue.ba:screen-shake") pulseMotion(stage, "is-screen-shaking");
+        if (effect.kind === "halocue.ba:hit-effect") pulseMotion(actorElements.get(effect.slot), "is-hit-effect");
+        if (effect.kind === "halocue.ba:background-pan") pulseMotion(stageBackground, "is-panning");
       }
       progress.textContent = `${Math.max(0, state.eventIndex + 1)} / ${descriptor.events.length}`;
       advance.disabled = state.eventIndex >= descriptor.events.length - 1;
@@ -689,11 +741,16 @@
     }
 
     function applyEvent(event, options = {}) {
+      if (event.kind === "halocue.ba:screen-text") {
+        state.screenText = typeof event.text === "string" ? event.text : "";
+      } else {
+        state.screenText = "";
+      }
       if (event.kind === "enter" && event.slot) {
         const previous = state.actors[event.slot - 1];
         const catalogActor = actorCatalog.get(event.character_id) || {};
         const actorDetails = {};
-        for (const key of ["display_name", "dialogue_name", "alias", "club_name", "thumbnail_uri", "thumbnail_source", "thumbnail_kind", "preview_uri", "preview_source", "preview_role", "avatar_key", "spine_key", "stage_media"]) {
+        for (const key of ["display_name", "dialogue_name", "alias", "club_name", "thumbnail_uri", "thumbnail_source", "thumbnail_kind", "preview_uri", "preview_source", "preview_role", "avatar_key", "spine_key", "stage_media", "expression_id", "motion_id", "emoticon_id", "focus"]) {
           if (event[key] !== undefined) actorDetails[key] = event[key];
           else if (catalogActor[key] !== undefined) actorDetails[key] = catalogActor[key];
         }
@@ -709,7 +766,24 @@
         AA.setPos(character, AA.slotWorldPosition(event.slot));
         AA.fadeAnimation(character, true).complete();
         AA.setOnTop(character);
-        if (options.motion !== false) state.motion = { slot: event.slot, kind: "enter" };
+        if (options.motion !== false) {
+          state.motion = {
+            slot: event.slot,
+            kind: "enter",
+            capability: event.motion_id || state.actors[event.slot - 1].motion_id || "",
+          };
+        }
+      }
+      if (event.kind === "dialogue" && event.character_id) {
+        const actor = state.actors.find((item) => item.character_id === event.character_id);
+        if (actor) {
+          for (const key of ["expression_id", "motion_id", "emoticon_id", "focus"]) {
+            if (event[key] !== undefined) actor[key] = event[key];
+          }
+          if (options.motion !== false && event.motion_id) {
+            state.motion = { slot: actor.slot, kind: "capability", capability: event.motion_id };
+          }
+        }
       }
       if (event.kind === "exit" && event.slot) {
         AA.hideAnimation(state.actors[event.slot - 1].presentation);
@@ -724,6 +798,21 @@
           state.background = nextBackground;
           if (options.loadBackground !== false) loadPreviewBackground(nextBackground);
         }
+      }
+      if (event.kind === "halocue.ba:background-pan") {
+        state.background = {
+          ...(state.background || {}),
+          pan_x: Number(event.pan_x) || 0,
+          pan_y: Number(event.pan_y) || 0,
+        };
+        if (options.loadBackground !== false) loadPreviewBackground(state.background);
+        if (options.motion !== false) state.effect = { kind: "background-pan" };
+      }
+      if (event.kind === "halocue.ba:screen-shake" && options.motion !== false) {
+        state.effect = { kind: "screen-shake" };
+      }
+      if (event.kind === "halocue.ba:hit-effect" && options.motion !== false && event.slot) {
+        state.effect = { kind: "hit-effect", slot: event.slot };
       }
     }
 
@@ -768,6 +857,7 @@
       state.eventIndex = sample.eventIndex;
       state.frame = sample.frame;
       state.motion = null;
+      state.effect = null;
       loadPreviewBackground(state.background, { animate: false });
       renderEvent(sample.item?.event || null, { sample, suppressMotion: true });
       const spineTimeMs = Number.isFinite(options.spineTimeMs)
@@ -861,6 +951,14 @@
       stageBackground.style.setProperty(
         "--background-zoom",
         String(clampBackgroundZoom(background?.zoom)),
+      );
+      stageBackground.style.setProperty(
+        "--background-pan-x",
+        String(Math.max(-0.2, Math.min(0.2, Number(background?.pan_x) || 0))),
+      );
+      stageBackground.style.setProperty(
+        "--background-pan-y",
+        String(Math.max(-0.2, Math.min(0.2, Number(background?.pan_y) || 0))),
       );
       stageBackground.style.backgroundSize = "cover";
       stageBackground.style.backgroundPosition = `${focusX * 100}% ${focusY * 100}%`;

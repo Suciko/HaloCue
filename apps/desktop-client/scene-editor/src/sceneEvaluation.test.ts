@@ -53,4 +53,23 @@ describe("scene evaluation seam", () => {
     expect(timeline.events[0].duration_ms).toBe(dialogueDurationMs("你好。"));
     expect(timeline.events[0].duration_frames).toBe(26);
   });
+
+  it("keeps visual quick effects renderable without advanced diagnostics", () => {
+    const project = structuredClone(demoProject);
+    project.chapters[0].scenes[0].cues[0].events.push({
+      event_id: "event/quick-shake",
+      kind: "halocue.ba:screen-shake",
+      duration_ms: 360,
+      intensity: 0.35,
+    });
+
+    const evaluation = evaluateScene(project, project.chapters[0].scenes[0].cues[0].cue_id);
+
+    expect(evaluation.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+      "scene.advanced_event_omitted",
+    ]);
+    expect(evaluation.diagnostics[0].path).not.toContain("quick-shake");
+    expect(evaluation.descriptor.events.at(-1)?.kind).toBe("halocue.ba:screen-shake");
+    expect(evaluation.timeline.events.at(-1)?.duration_ms).toBe(360);
+  });
 });

@@ -56,4 +56,34 @@ describe("shared dual-mode project store", () => {
     expect(enter?.expression_id).toBe("expression/smile");
     expect((actor.stage_media as { animation: string }).animation).toBe("03");
   });
+
+  it("projects motion and emoticon state without replacing stable IDs", () => {
+    const state = useProjectStore.getState();
+    state.selectCue("cue/conference/002");
+
+    const current = useProjectStore.getState();
+    const descriptor = buildDescriptor(current.project, current.selectedCueId);
+    const actor = descriptor.actors.find((item) => item.character_id === "character/koyuki");
+    const dialogue = descriptor.events.find((event) => event.event_id === "event/dialogue/002");
+
+    expect(actor?.motion_id).toBe("motion/appear");
+    expect(dialogue?.emoticon_id).toBe("emoticon/bulb");
+    expect(current.project.chapters[0].scenes[0].cues[1].events[0].event_id)
+      .toBe("event/enter/koyuki");
+  });
+
+  it("inserts quick effects as typed events with stable IDs", () => {
+    const state = useProjectStore.getState();
+    state.addQuickEffect("halocue.ba:screen-shake");
+
+    const current = useProjectStore.getState();
+    const cue = firstScene(current.project).cues[0];
+    const effect = cue.events.at(-1);
+    const descriptor = buildDescriptor(current.project, cue.cue_id);
+
+    expect(effect?.kind).toBe("halocue.ba:screen-shake");
+    expect(effect?.event_id).toMatch(/^event\//);
+    expect(advancedEventCount(cue)).toBe(0);
+    expect(descriptor.events.at(-1)?.kind).toBe("halocue.ba:screen-shake");
+  });
 });

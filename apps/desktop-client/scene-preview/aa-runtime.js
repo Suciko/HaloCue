@@ -25,8 +25,16 @@
     enter: 500,
     exit: 500,
     wait: 1000,
+    "halocue.ba:background-pan": 900,
+    "halocue.ba:screen-shake": 360,
+    "halocue.ba:screen-text": 1800,
+    "halocue.ba:hit-effect": 420,
   });
-  const SUPPORTED_EVENT_KINDS = new Set(["background", "dialogue", "enter", "exit", "wait"]);
+  const SUPPORTED_EVENT_KINDS = new Set([
+    "background", "dialogue", "enter", "exit", "wait",
+    "halocue.ba:background-pan", "halocue.ba:screen-shake",
+    "halocue.ba:screen-text", "halocue.ba:hit-effect",
+  ]);
   const PUNCTUATION = new Set(Array.from("，。！？；：、,.!?;:"));
 
   const DIALOGUE_LAYOUT = Object.freeze({

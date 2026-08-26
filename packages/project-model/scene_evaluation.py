@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from project_model import build_aa_scene_descriptor, migrate_project
+from project_model import RENDERABLE_EVENT_KINDS, build_aa_scene_descriptor, migrate_project
 from render_timeline import build_render_timeline
 
 
@@ -34,7 +34,11 @@ def evaluate_scene(
             for cue_index, cue in enumerate(scene.get("cues", [])):
                 for event_index, event in enumerate(cue.get("events", [])):
                     kind = event.get("kind") if isinstance(event, dict) else None
-                    if not isinstance(kind, str) or ":" not in kind:
+                    if (
+                        not isinstance(kind, str)
+                        or ":" not in kind
+                        or kind in RENDERABLE_EVENT_KINDS
+                    ):
                         continue
                     diagnostics.append(
                         {

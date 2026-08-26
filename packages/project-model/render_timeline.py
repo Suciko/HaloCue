@@ -14,7 +14,19 @@ from typing import Any
 
 TIMELINE_SCHEMA_VERSION = "render-timeline/1.0"
 DEFAULT_FRAME_RATE = 30
-SUPPORTED_EVENT_KINDS = frozenset({"background", "dialogue", "enter", "exit", "wait"})
+SUPPORTED_EVENT_KINDS = frozenset(
+    {
+        "background",
+        "dialogue",
+        "enter",
+        "exit",
+        "wait",
+        "halocue.ba:background-pan",
+        "halocue.ba:screen-shake",
+        "halocue.ba:screen-text",
+        "halocue.ba:hit-effect",
+    }
+)
 
 # These values mirror the independently implemented AA preview typewriter
 # policy. They are product defaults, not a requirement for future exporters.
@@ -27,6 +39,10 @@ DEFAULT_EVENT_DURATION_MS = {
     "enter": 500,
     "exit": 500,
     "wait": 1000,
+    "halocue.ba:background-pan": 900,
+    "halocue.ba:screen-shake": 360,
+    "halocue.ba:screen-text": 1800,
+    "halocue.ba:hit-effect": 420,
 }
 PUNCTUATION = frozenset("，。！？；：、,.!?;:")
 
@@ -137,4 +153,3 @@ def build_render_timeline(
         "events": timeline_events,
         "total_frames": cursor,
     }
-

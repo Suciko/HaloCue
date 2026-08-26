@@ -1,5 +1,10 @@
 export type EditorMode = "simple" | "professional";
 export type InspectorTab = "character" | "dialogue" | "environment";
+export type QuickEffectKind =
+  | "halocue.ba:background-pan"
+  | "halocue.ba:screen-shake"
+  | "halocue.ba:screen-text"
+  | "halocue.ba:hit-effect";
 
 export type StageMedia = {
   kind: "portrait" | "spine" | "spine-frame";

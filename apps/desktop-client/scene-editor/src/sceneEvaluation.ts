@@ -1,4 +1,4 @@
-import { buildDescriptor } from "./descriptor";
+import { buildDescriptor, RENDERABLE_EVENT_KINDS } from "./descriptor";
 import type { CapabilityRegistry } from "./capabilities";
 import { buildRenderTimeline, DEFAULT_FRAME_RATE } from "./renderTimeline";
 import { firstScene } from "./projectStore";
@@ -9,7 +9,7 @@ function diagnosticsForAdvancedEvents(project: HaloCueProject): EvaluationDiagno
   const diagnostics: EvaluationDiagnostic[] = [];
   scene.cues.forEach((cue, cueIndex) => {
     cue.events.forEach((event, eventIndex) => {
-      if (!event.kind.includes(":")) return;
+      if (!event.kind.includes(":") || RENDERABLE_EVENT_KINDS.has(event.kind)) return;
       diagnostics.push({
         code: "scene.advanced_event_omitted",
         severity: "warning",

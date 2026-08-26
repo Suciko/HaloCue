@@ -58,6 +58,25 @@ def test_scene_evaluation_reports_advanced_events_without_mutating_project():
     assert all(event["event_id"] != "event/advanced-camera" for event in evaluation["descriptor"]["events"])
 
 
+def test_scene_evaluation_keeps_visual_quick_effects_in_the_render_timeline():
+    project = migrate_project(_json(MODEL_ROOT / "example.synthetic.json"))
+    scene = project["chapters"][0]["scenes"][0]
+    scene["cues"][0]["events"].append(
+        {
+            "event_id": "event/quick-shake",
+            "kind": "halocue.ba:screen-shake",
+            "duration_ms": 360,
+            "intensity": 0.35,
+        }
+    )
+
+    evaluation = evaluate_scene(project, scene["scene_id"])
+
+    assert evaluation["diagnostics"] == []
+    assert evaluation["descriptor"]["events"][-1]["event_id"] == "event/quick-shake"
+    assert evaluation["timeline"]["events"][-1]["kind"] == "halocue.ba:screen-shake"
+
+
 def test_scene_evaluation_matches_contract_schema():
     project = _json(MODEL_ROOT / "example.synthetic.json")
     scene_id = project["chapters"][0]["scenes"][0]["scene_id"]

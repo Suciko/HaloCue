@@ -82,6 +82,10 @@ const eventLabels: Record<string, string> = {
   enter: "角色入场",
   exit: "角色退场",
   wait: "等待",
+  "halocue.ba:background-pan": "背景移动",
+  "halocue.ba:screen-shake": "画面震动",
+  "halocue.ba:screen-text": "屏幕文字",
+  "halocue.ba:hit-effect": "中弹效果",
 };
 
 function IconButton({
@@ -485,6 +489,7 @@ function DialogueInspector({ cue }: { cue: Cue }) {
 function EnvironmentInspector({ cue }: { cue: Cue }) {
   const project = useProjectStore((state) => state.project);
   const updateEnvironment = useProjectStore((state) => state.updateEnvironment);
+  const addQuickEffect = useProjectStore((state) => state.addQuickEffect);
   const background = cue.events.find((event) => event.kind === "background");
   const transitionId = typeof background?.transition_id === "string"
     ? background.transition_id
@@ -515,10 +520,10 @@ function EnvironmentInspector({ cue }: { cue: Cue }) {
       <div className="quick-effects">
         <span className="section-label">快速演出</span>
         <div>
-          <button type="button"><Move />背景移动</button>
-          <button type="button"><Zap />画面震动</button>
-          <button type="button"><MessageSquareText />屏幕文字</button>
-          <button type="button"><WandSparkles />中弹效果</button>
+          <button type="button" onClick={() => addQuickEffect("halocue.ba:background-pan")}><Move />背景移动</button>
+          <button type="button" onClick={() => addQuickEffect("halocue.ba:screen-shake")}><Zap />画面震动</button>
+          <button type="button" onClick={() => addQuickEffect("halocue.ba:screen-text")}><MessageSquareText />屏幕文字</button>
+          <button type="button" onClick={() => addQuickEffect("halocue.ba:hit-effect")}><WandSparkles />中弹效果</button>
         </div>
       </div>
     </div>

@@ -78,6 +78,27 @@ def test_explicit_duration_is_rounded_up_to_a_visible_frame():
     assert timeline["events"][0]["duration_frames"] == 1
 
 
+def test_ba_quick_effects_share_the_deterministic_timeline_contract():
+    timeline = build_render_timeline(
+        descriptor(
+            [
+                {
+                    "event_id": "event/shake",
+                    "kind": "halocue.ba:screen-shake",
+                },
+                {
+                    "event_id": "event/text",
+                    "kind": "halocue.ba:screen-text",
+                    "text": "提示",
+                },
+            ]
+        )
+    )
+
+    assert [item["duration_ms"] for item in timeline["events"]] == [360, 1800]
+    assert timeline["events"][1]["start_frame"] == timeline["events"][0]["end_frame"]
+
+
 @pytest.mark.parametrize(
     "events, message",
     [
@@ -124,6 +145,8 @@ def test_browser_runtime_builds_the_same_render_timeline_as_python():
             {"event_id": "event/background", "kind": "background"},
             {"event_id": "event/enter", "kind": "enter", "slot": 3},
             {"event_id": "event/line", "kind": "dialogue", "text": "你好。\n再见！"},
+            {"event_id": "event/shake", "kind": "halocue.ba:screen-shake"},
+            {"event_id": "event/text", "kind": "halocue.ba:screen-text", "text": "提示"},
             {"event_id": "event/exit", "kind": "exit", "slot": 3},
         ]
     )

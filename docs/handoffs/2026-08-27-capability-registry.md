@@ -23,25 +23,36 @@ professional workspace and local resource adapters to grow independently.
   registry and added capability IDs to the demo characters.
 - Kept physical Spine names and local paths in adapter values only; no private
   resource bytes or production bundles were added.
+- Added a renderer-side `capability-runtime.js` adapter. Stable `motion/*` and
+  `emoticon/*` IDs now become independent actor DOM/CSS layers, with
+  `data-motion` and `data-emoticon` state exposed for regression checks.
+- Wired the four common quick effects in the simple Environment panel to typed
+  namespaced events: background pan, screen shake, screen text, and hit effect.
+  They share the same descriptor/timeline path as dialogue and stage events;
+  unknown professional events remain namespaced and diagnostic-bearing.
 
 ## Verification
 
 - Capability registry tests cover injected adapter resolution, fallback states,
   unknown-state preservation, malformed records, and duplicate IDs.
 - Existing editor, scene evaluation, and descriptor tests remain covered.
-- `15 passed`: scene-editor Vitest suite.
+- `18 passed`: scene-editor Vitest suite.
 - `6 passed`: scene evaluation and editor contract Python tests.
 - `npm run build`: TypeScript check and Vite production build passed.
 - Browser smoke against the running editor/preview services passed; the
   registry-backed option lists and `data-timeline-source="supplied"` were
   observed with no page errors.
-- The previous full Python baseline remains `2164 passed, 14 skipped`; this
-  slice changes only TypeScript editor wiring and context documentation.
+- `2167 passed, 14 skipped`: full Python suite with the quick-effect event
+  contract and browser regression.
+- Browser regression confirms motion, emoticon, and screen-text layers remain
+  independent of the dialogue panel in static capture mode; realtime uses the
+  same state path.
 
 ## Follow-up
 
 1. Add a local manifest adapter that reads authorized capability records.
-2. Route motion/emoticon playback through the realtime and offline evaluators.
+2. Replace CSS motion fallbacks with independent Spine animation tracks where
+   the authorized runtime exposes them, keeping the current adapter contract.
 3. Add capability preview trials and diagnostics for missing adapter values.
 
 ## Publication

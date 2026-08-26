@@ -2,7 +2,11 @@ import type { CueEvent, HaloCueProject, SceneDescriptor } from "./types";
 import { capabilityRegistry, resolveExpressionAnimation, type CapabilityRegistry } from "./capabilities";
 import { firstScene } from "./projectStore";
 
-const RENDERABLE = new Set(["background", "dialogue", "enter", "exit", "wait"]);
+export const RENDERABLE_EVENT_KINDS = new Set([
+  "background", "dialogue", "enter", "exit", "wait",
+  "halocue.ba:background-pan", "halocue.ba:screen-shake",
+  "halocue.ba:screen-text", "halocue.ba:hit-effect",
+]);
 
 export function buildDescriptor(
   project: HaloCueProject,
@@ -13,7 +17,7 @@ export function buildDescriptor(
   const scene = firstScene(project);
   const selectedIndex = Math.max(0, scene.cues.findIndex((cue) => cue.cue_id === selectedCueId));
   const allEvents = scene.cues.slice(0, selectedIndex + 1).flatMap((cue) => cue.events);
-  const events = allEvents.filter((event) => RENDERABLE.has(event.kind));
+  const events = allEvents.filter((event) => RENDERABLE_EVENT_KINDS.has(event.kind));
   const characters = new Map(project.characters.map((character) => [character.character_id, character]));
   const resources = new Map(project.resources.map((resource) => [resource.resource_id, resource]));
   const slots: Array<string | null> = [null, null, null, null, null];
@@ -60,6 +64,9 @@ export function buildDescriptor(
       && event.slot === index + 1
       && event.character_id === characterId
     ));
+    for (const key of ["expression_id", "motion_id", "emoticon_id", "focus"]) {
+      if (latestState?.[key] !== undefined) actor[key] = latestState[key];
+    }
     if (character.stage_media) {
       actor.stage_media = {
         ...character.stage_media,

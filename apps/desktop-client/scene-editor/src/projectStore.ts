@@ -14,6 +14,7 @@ import type {
   EditorMode,
   HaloCueProject,
   InspectorTab,
+  QuickEffectKind,
   Scene,
 } from "./types";
 
@@ -47,6 +48,8 @@ export function stageAtCue(scene: Scene, cueId: string): Array<string | null> {
 export function advancedEventCount(cue: Cue): number {
   return cue.events.filter((event) => ![
     "background", "dialogue", "enter", "exit", "wait",
+    "halocue.ba:background-pan", "halocue.ba:screen-shake",
+    "halocue.ba:screen-text", "halocue.ba:hit-effect",
   ].includes(event.kind)).length;
 }
 
@@ -74,6 +77,7 @@ type EditorState = {
   setSlotCharacter: (slot: number, characterId: string | null) => void;
   swapSlots: (source: number, target: number) => void;
   updateCharacterState: (slot: number, patch: Partial<CueEvent>) => void;
+  addQuickEffect: (kind: QuickEffectKind) => void;
   addCue: (placement: "before" | "after") => void;
   duplicateCue: () => void;
   deleteCue: () => void;
@@ -199,6 +203,19 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       }
       Object.assign(enter, patch);
     }),
+    addQuickEffect: (kind) => {
+      const state = get();
+      const effectDefaults: Record<QuickEffectKind, Partial<CueEvent>> = {
+        "halocue.ba:background-pan": { duration_ms: 900, pan_x: 0.035, pan_y: 0 },
+        "halocue.ba:screen-shake": { duration_ms: 360, intensity: 0.35 },
+        "halocue.ba:screen-text": { duration_ms: 1800, text: "屏幕文字" },
+        "halocue.ba:hit-effect": { duration_ms: 420, slot: state.selectedSlot, intensity: 0.5 },
+      };
+      const eventId = localId("event");
+      commit((_project, cue) => {
+        cue.events.push({ event_id: eventId, kind, ...effectDefaults[kind] });
+      }, { selectedEventId: eventId });
+    },
     addCue: (placement) => {
       const state = get();
       const cueId = localId("cue");

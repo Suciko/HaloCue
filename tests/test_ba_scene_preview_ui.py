@@ -383,6 +383,93 @@ def test_controller_seeks_plays_and_pauses_the_multi_event_timeline():
 
 
 @pytest.mark.browser
+def test_capability_motion_and_emoticon_are_independent_preview_layers():
+    playwright = pytest.importorskip("playwright.sync_api")
+    server, thread = _serve_preview()
+    descriptor = {
+        "schema_version": "scene-descriptor/1.0",
+        "scene_id": "scene/capability-layers",
+        "actors": [
+            {
+                "slot": 1,
+                "character_id": "character/alice",
+                "display_name": "爱丽丝",
+                "dialogue_name": "爱丽丝",
+                "state": "hidden",
+            },
+            *[
+                {"slot": slot, "character_id": None, "display_name": "", "state": "hidden"}
+                for slot in range(2, 6)
+            ],
+        ],
+        "events": [
+            {
+                "event_id": "event/alice-enter",
+                "kind": "enter",
+                "character_id": "character/alice",
+                "slot": 1,
+                "motion_id": "motion/nod",
+            },
+            {
+                "event_id": "event/alice-line",
+                "kind": "dialogue",
+                "character_id": "character/alice",
+                "text": "动作和表情符号是独立层。",
+                "emoticon_id": "emoticon/bulb",
+            },
+            {
+                "event_id": "event/screen-text",
+                "kind": "halocue.ba:screen-text",
+                "text": "统一事件模型",
+                "duration_ms": 500,
+            },
+        ],
+    }
+    try:
+        with playwright.sync_playwright() as runtime:
+            try:
+                browser = runtime.chromium.launch(headless=True)
+            except Exception as exc:  # pragma: no cover - depends on local browser install
+                if "Executable doesn't exist" in str(exc):
+                    pytest.skip("Playwright Chromium is not installed")
+                raise
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+            page.add_init_script(
+                "window.HALO_CUE_SCENE_DESCRIPTOR = "
+                + json.dumps(descriptor, ensure_ascii=False)
+                + ";"
+            )
+            page.goto(f"http://127.0.0.1:{server.server_port}/index.html?renderer=static")
+            page.wait_for_selector(".actor-slot")
+
+            page.locator("#preview-stage").click(position={"x": 640, "y": 160})
+            actor = page.locator('.actor-slot[data-slot="1"]')
+            assert actor.get_attribute("data-motion") == "motion/nod"
+            assert actor.get_attribute("data-emoticon") == ""
+            assert actor.locator(".actor-emoticon").is_hidden()
+
+            page.locator("#preview-stage").click(position={"x": 640, "y": 160})
+            assert actor.get_attribute("data-motion") == "motion/nod"
+            assert actor.get_attribute("data-emoticon") == "emoticon/bulb"
+            emoticon = actor.locator(".actor-emoticon")
+            assert not emoticon.is_hidden()
+            assert emoticon.get_attribute("data-state") == "emoticon/bulb"
+            assert emoticon.locator(".actor-emoticon-symbol").inner_text() == "✦"
+
+            # Advance once to finish the typewriter, then once to enter the
+            # following visual-only event.
+            page.locator("#preview-stage").click(position={"x": 640, "y": 160})
+            page.locator("#preview-stage").click(position={"x": 640, "y": 160})
+            assert page.locator("#screen-text-layer").is_visible()
+            assert page.locator("#screen-text").inner_text() == "统一事件模型"
+            assert page.locator(".dialogue-panel").is_hidden()
+            browser.close()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+@pytest.mark.browser
 def test_editor_mode_exposes_resource_locator_and_calibration_guides():
     playwright = pytest.importorskip("playwright.sync_api")
     server, thread = _serve_preview()

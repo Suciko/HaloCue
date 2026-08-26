@@ -17,7 +17,19 @@ PROJECT_SCHEMA_VERSION = "halocue-project/1.1"
 SCENE_DESCRIPTOR_SCHEMA_VERSION = "scene-descriptor/1.0"
 AA_SLOT_COUNT = 5
 STAGE_MEDIA_KINDS = frozenset({"portrait", "spine", "spine-frame"})
-RENDERABLE_EVENT_KINDS = frozenset({"background", "dialogue", "enter", "exit", "wait"})
+RENDERABLE_EVENT_KINDS = frozenset(
+    {
+        "background",
+        "dialogue",
+        "enter",
+        "exit",
+        "wait",
+        "halocue.ba:background-pan",
+        "halocue.ba:screen-shake",
+        "halocue.ba:screen-text",
+        "halocue.ba:hit-effect",
+    }
+)
 CUE_ID_NAMESPACE = UUID("5f24a298-2c02-4ec0-a4c9-b09078060c26")
 
 
@@ -375,6 +387,9 @@ def build_aa_scene_descriptor(project: dict[str, Any], scene_id: str) -> dict[st
             ):
                 if character.get(key):
                     actors[slot][key] = deepcopy(character[key])
+            for key in ("expression_id", "motion_id", "emoticon_id", "focus"):
+                if key in event:
+                    actors[slot][key] = deepcopy(event[key])
         elif kind == "exit":
             actors[event["slot"]] = {
                 "slot": event["slot"],
@@ -396,8 +411,24 @@ def build_aa_scene_descriptor(project: dict[str, Any], scene_id: str) -> dict[st
                     background[key] = resource[key]
             if initial_background is None:
                 initial_background = deepcopy(background)
+        elif kind == "halocue.ba:background-pan" and background is not None:
+            background["pan_x"] = float(event.get("pan_x", 0) or 0)
+            background["pan_y"] = float(event.get("pan_y", 0) or 0)
         event_descriptor = {"event_id": event["event_id"], "kind": kind}
-        for key in ("character_id", "resource_id", "text", "slot", "duration_ms"):
+        for key in (
+            "character_id",
+            "resource_id",
+            "text",
+            "slot",
+            "duration_ms",
+            "expression_id",
+            "motion_id",
+            "emoticon_id",
+            "focus",
+            "pan_x",
+            "pan_y",
+            "intensity",
+        ):
             if key in event:
                 event_descriptor[key] = event[key]
         events.append(event_descriptor)
