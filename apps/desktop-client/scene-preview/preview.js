@@ -147,6 +147,7 @@
     const locationLabel = stage.querySelector("#location-label");
     const speakerLine = stage.querySelector(".speaker-line");
     const dialoguePanel = stage.querySelector(".dialogue-panel");
+    const dialogueNext = stage.querySelector("#dialogue-next");
     const stageBackground = stage.querySelector("#stage-background");
     const initialActors = Array.isArray(descriptor.initial_actors)
       ? descriptor.initial_actors
@@ -174,7 +175,16 @@
       typewriterFrame: null,
       motion: null,
       background: descriptor.initial_background || descriptor.background || null,
+      initialMotionPending: true,
     };
+
+    stage.dataset.mediaReady = "loading";
+
+    function updateMediaReadiness() {
+      const pending = [...actorLayer.querySelectorAll(".actor-slot.is-visible .actor-image")]
+        .filter((image) => image.src && !(image.complete && image.naturalWidth > 0));
+      stage.dataset.mediaReady = pending.length ? "loading" : "ready";
+    }
 
     function pulseMotion(element, className) {
       if (!element) return;
@@ -240,10 +250,12 @@
         image.onload = () => {
           if (image.dataset.requestUri !== mediaUri) return;
           portrait.classList.toggle("has-image", Boolean(mediaUri));
+          updateMediaReadiness();
         };
         image.onerror = () => {
           if (image.dataset.requestUri !== mediaUri) return;
           portrait.classList.remove("has-image");
+          updateMediaReadiness();
         };
         image.dataset.requestUri = mediaUri;
         if (mediaUri) {
@@ -275,6 +287,7 @@
         element.style.setProperty("--actor-luminance", String(actor.presentation.luminance));
         element.setAttribute("aria-label", visible ? `Slot ${actor.slot}: ${actorName(actor)}` : `Slot ${actor.slot}: empty`);
       });
+      updateMediaReadiness();
     }
 
     function renderEvent(event) {
@@ -289,6 +302,7 @@
         caret.hidden = true;
         speakerLine.classList.add("is-narration");
         dialoguePanel.classList.add("is-hidden");
+        dialogueNext.hidden = true;
         status.textContent = "Ready";
         renderActors(null);
       } else {
@@ -304,6 +318,7 @@
         club.hidden = !secondaryIdentity.label;
         speakerLine.classList.toggle("is-narration", !hasSpeaker);
         const eventText = event.text || (event.kind === "background" ? "" : `${event.kind}.`);
+        dialogueNext.hidden = !eventText;
         dialoguePanel.classList.toggle("is-hidden", !eventText);
         copy.textContent = event.kind === "dialogue" ? "" : eventText;
         caret.hidden = event.kind !== "dialogue";
@@ -312,6 +327,7 @@
         status.textContent = event.kind === "dialogue" ? "Dialogue" : event.kind;
         renderActors(active);
         if (eventText) pulseMotion(dialoguePanel, "is-entering");
+        if (eventText) pulseMotion(speakerLine, "is-revealing");
         if (state.typewriter) startTypewriter();
       }
       if (state.motion) {
@@ -425,6 +441,8 @@
       menuToggle.checked = Boolean(overlay.menu);
       autoButton.classList.toggle("is-enabled", Boolean(overlay.auto_enabled));
       menuButton.classList.toggle("is-enabled", Boolean(overlay.menu_enabled));
+      autoButton.textContent = overlay.auto_label || "AUTO";
+      menuButton.textContent = overlay.menu_label || "MENU";
       autoButton.setAttribute("aria-pressed", String(autoButton.classList.contains("is-enabled")));
       menuButton.setAttribute("aria-pressed", String(menuButton.classList.contains("is-enabled")));
       const apply = () => {
@@ -461,6 +479,19 @@
     loadPreviewBackground(state.background);
     installOverlayControls();
     renderEvent(null);
+    if (locationLabel && descriptor.presentation?.location_mode !== "persistent") {
+      window.setTimeout(() => locationLabel.classList.add("is-dismissed"), 2600);
+    }
+    // The first visible cast enters as a restrained, staggered GalGame
+    // entrance instead of appearing fully formed on the first frame.
+    window.requestAnimationFrame(() => {
+      if (!state.initialMotionPending) return;
+      state.initialMotionPending = false;
+      initialActors.filter((actor) => actor && actor.state === "visible")
+        .forEach((actor, index) => {
+          window.setTimeout(() => pulseMotion(actorElements.get(actor.slot), "is-entering"), index * 70);
+        });
+    });
     return {
       advance: advanceEvent,
       state,

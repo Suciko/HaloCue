@@ -116,6 +116,7 @@ def test_stage_frame_cache_is_partitioned_by_animation(tmp_path, monkeypatch):
         lambda *_args, **_kwargs: {"root": bundle_root, "spine_version": "3.8.96"},
     )
     monkeypatch.setattr(aa_stage_media, "extract_catalog_spine_bundle", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(aa_stage_media, "web_bundle_signature", lambda _root: "bundle-signature")
     monkeypatch.setattr(
         __import__("spine_face_web_renderer"), "SpineWebRenderer", FakeRenderer,
     )
@@ -150,3 +151,27 @@ def test_stage_frame_cache_is_partitioned_by_animation(tmp_path, monkeypatch):
     assert first != second
     assert first.name == "00.png"
     assert second.name == "03.png"
+
+
+def test_stage_frame_returns_tight_cache_before_starting_webgl(tmp_path, monkeypatch):
+    import aa_stage_media
+
+    bundle_root = tmp_path / "bundle"
+    bundle_root.mkdir()
+    tight = tmp_path / "spine-stage" / "sig" / "stage-frames" / "03.png"
+    tight.parent.mkdir(parents=True)
+    tight.write_bytes(b"cached")
+
+    monkeypatch.setattr(
+        aa_stage_media,
+        "resolve_spine_bundle",
+        lambda *_args, **_kwargs: {"root": bundle_root, "spine_version": "3.8.96"},
+    )
+    monkeypatch.setattr(aa_stage_media, "web_bundle_signature", lambda _root: "sig")
+    monkeypatch.setattr(
+        __import__("spine_face_web_renderer"),
+        "SpineWebRenderer",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("renderer must not start")),
+    )
+
+    assert aa_stage_media.stage_frame_path(None, "hero", animation="03", cache_root=tmp_path) == tight

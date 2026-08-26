@@ -3,7 +3,8 @@
   "scene_id": "scene/local-aa-gamedev-resource-check",
   "location_label": "游戏开发部活动室",
   "presentation": {
-    "overlay_controls": { "auto": true, "menu": true, "auto_enabled": true }
+    "location_mode": "transient",
+    "overlay_controls": { "auto": true, "menu": true, "auto_enabled": true, "auto_label": "自动", "menu_label": "菜单" }
   },
   "background": {
     "resource_id": "aa/background/bg_gamedevroom",

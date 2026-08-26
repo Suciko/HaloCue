@@ -93,7 +93,7 @@ def test_preview_renders_five_slots_advances_dialogue_and_switches_font(tmp_path
             assert abs(scale_probe["scale"] - stage_box["width"] / 2560) < 0.002
             assert abs(scale_probe["name"] - 68 * scale_probe["scale"]) < 0.2
             assert abs(scale_probe["club"] - 48 * scale_probe["scale"]) < 0.2
-            assert abs(scale_probe["text"] - 50 * scale_probe["scale"]) < 0.2
+            assert abs(scale_probe["text"] - 56 * scale_probe["scale"]) < 0.2
             assert page.locator("#location-label").bounding_box()["x"] < 32
             location_box = page.locator("#location-label").bounding_box()
             assert 0.16 < location_box["y"] / stage_box["height"] < 0.19

@@ -176,6 +176,7 @@ h1 {
 .actor-slot.is-active { filter: saturate(1.06) brightness(calc(var(--actor-luminance) * 1.06)); transform: translateX(-50%) translateY(-5px); }
 .actor-slot.is-entering { animation: actor-enter 500ms var(--ease-out) both; }
 .actor-slot.is-exiting { animation: actor-exit 180ms var(--ease-out) both; }
+.actor-slot.is-active .actor-portrait { animation: actor-idle 3000ms ease-in-out 520ms 3 both; }
 
 .actor-portrait {
   position: relative;
@@ -290,6 +291,8 @@ h1 {
   will-change: opacity, transform;
 }
 
+.location-chip.is-dismissed { animation: location-exit 260ms var(--ease-in-out) both; }
+
 .location-chip::before {
   position: absolute;
   top: 23%;
@@ -363,16 +366,19 @@ h1 {
   transform: translateY(50%);
 }
 
+.speaker-line.is-revealing { animation: identity-reveal 280ms var(--ease-out) both; }
+
 .speaker-identity {
-  display: grid;
+  display: flex;
   width: 100%;
   min-width: 0;
-  grid-template-columns: calc(238px * var(--stage-scale)) minmax(0, 1fr);
+  gap: calc(28px * var(--stage-scale));
   align-items: baseline;
   transform: translateY(calc(-16px * var(--stage-scale)));
 }
 
 .speaker-name {
+  flex: 0 0 auto;
   color: #fff;
   font-size: calc(68px * var(--stage-scale));
   font-weight: 700;
@@ -381,6 +387,7 @@ h1 {
 }
 
 .club-name {
+  flex: 0 1 auto;
   min-width: 0;
   padding-bottom: calc(2px * var(--stage-scale));
   overflow: hidden;
@@ -401,14 +408,33 @@ h1 {
 
 .dialogue-text {
   min-height: 3em;
-  margin: calc(26px * var(--stage-scale)) 0 0;
+  margin: calc(10px * var(--stage-scale)) 0 0;
   color: #fff;
-  font-size: calc(50px * var(--stage-scale));
+  font-size: calc(56px * var(--stage-scale));
   font-weight: 450;
   letter-spacing: .012em;
   line-height: 1.56;
   white-space: pre-line;
   text-shadow: calc(2px * var(--stage-scale)) calc(2px * var(--stage-scale)) 0 #07111e, calc(-1px * var(--stage-scale)) calc(-1px * var(--stage-scale)) 0 #07111e, 0 calc(3px * var(--stage-scale)) calc(6px * var(--stage-scale)) rgb(0 0 0 / 86%);
+}
+
+.dialogue-next {
+  position: absolute;
+  right: calc(174px * var(--stage-scale));
+  bottom: calc(20px * var(--stage-scale));
+  width: 0;
+  height: 0;
+  border-top: calc(10px * var(--stage-scale)) solid transparent;
+  border-bottom: calc(10px * var(--stage-scale)) solid transparent;
+  border-left: calc(15px * var(--stage-scale)) solid #69ddff;
+  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 68%));
+  opacity: 0;
+  transform: translateY(3px);
+  pointer-events: none;
+}
+
+.dialogue-panel:not(.is-hidden) .dialogue-next {
+  animation: next-indicator 1200ms ease-in-out 280ms 4 both;
 }
 
 .dialogue-caret {
@@ -455,6 +481,16 @@ h1 {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes identity-reveal {
+  from { opacity: 0; transform: translateY(calc(-22px * var(--stage-scale))); }
+  to { opacity: 1; transform: translateY(calc(-16px * var(--stage-scale))); }
+}
+
+@keyframes actor-idle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(calc(-2px * var(--stage-scale))); }
+}
+
 @keyframes background-crossfade {
   from { opacity: .18; }
   to { opacity: 1; }
@@ -463,6 +499,16 @@ h1 {
 @keyframes location-enter {
   from { opacity: 0; transform: translateX(calc(-36px * var(--stage-scale))); }
   to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes location-exit {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(calc(-24px * var(--stage-scale))); }
+}
+
+@keyframes next-indicator {
+  0%, 100% { opacity: 0; transform: translateY(3px); }
+  24%, 76% { opacity: .95; transform: translateY(0); }
 }
 
 @keyframes caret-blink {

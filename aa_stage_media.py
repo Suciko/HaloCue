@@ -12,6 +12,7 @@ import re
 import threading
 from pathlib import Path
 
+from spine_face_web_renderer import web_bundle_signature
 
 _VERSION_RE = re.compile(rb"(?<!\d)(\d+\.\d+(?:\.\d+)?)(?!\d)")
 _SUPPORTED_FAMILIES = ("3.8", "4.2")
@@ -290,9 +291,15 @@ def stage_frame_path(
         animation_name = "00"
     if not _SAFE_COMPONENT_RE.fullmatch(animation_name):
         raise StageMediaError("animation must be one safe path component")
-    from spine_face_web_renderer import SpineWebRenderer
-
     cache_dir = Path(cache_root).expanduser().resolve() / "spine-stage"
+    # Avoid starting a browser/WebGL process for a frame that is already in
+    # the deterministic tight-crop cache. This is the hot path on preview
+    # reloads and makes repeat loads effectively a disk read.
+    signature = web_bundle_signature(bundle["root"])
+    tight = cache_dir / signature / "stage-frames" / f"{animation_name}.png"
+    if tight.is_file():
+        return tight
+    from spine_face_web_renderer import SpineWebRenderer
     try:
         with _STAGE_RENDER_LOCK:
             renderer = SpineWebRenderer(
