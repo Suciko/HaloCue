@@ -1,6 +1,13 @@
 import { create } from "zustand";
 
 import { demoProject } from "./demoProject";
+import {
+  isProject,
+  loadEditorMode,
+  projectRepository,
+  saveEditorMode,
+  type ProjectRepository,
+} from "./projectRepository";
 import type {
   Cue,
   CueEvent,
@@ -10,33 +17,13 @@ import type {
   Scene,
 } from "./types";
 
-const DRAFT_KEY = "halocue.scene-editor.draft.v1";
-const MODE_KEY = "halocue.scene-editor.mode";
-
 const clone = <T,>(value: T): T => structuredClone(value);
 
 function localId(prefix: string): string {
   return `${prefix}/${crypto.randomUUID()}`;
 }
 
-export function isProject(value: unknown): value is HaloCueProject {
-  if (!value || typeof value !== "object") return false;
-  const project = value as Partial<HaloCueProject>;
-  return project.schema_version === "halocue-project/1.1"
-    && typeof project.project_id === "string"
-    && Array.isArray(project.characters)
-    && Array.isArray(project.resources)
-    && Array.isArray(project.chapters);
-}
-
-function loadDraft(): HaloCueProject {
-  try {
-    const value = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
-    return isProject(value) ? value : clone(demoProject);
-  } catch {
-    return clone(demoProject);
-  }
-}
+export { isProject } from "./projectRepository";
 
 export function firstScene(project: HaloCueProject): Scene {
   const scene = project.chapters[0]?.scenes[0];
@@ -107,10 +94,11 @@ function initialSelection(project: HaloCueProject) {
   return { cueId: cue.cue_id, eventId: cue.events[0]?.event_id || null };
 }
 
-const initialProject = loadDraft();
-const initial = initialSelection(initialProject);
+export function createProjectStore(repository: ProjectRepository = projectRepository) {
+  const initialProject = repository.loadDraft();
+  const initial = initialSelection(initialProject);
 
-export const useProjectStore = create<EditorState>((set, get) => {
+  return create<EditorState>((set, get) => {
   const commit = (
     mutator: (project: HaloCueProject, cue: Cue, scene: Scene) => void,
     selection?: Partial<Pick<EditorState, "selectedCueId" | "selectedEventId">>,
@@ -121,7 +109,7 @@ export const useProjectStore = create<EditorState>((set, get) => {
     const cue = scene.cues.find((item) => item.cue_id === state.selectedCueId);
     if (!cue) return;
     mutator(project, cue, scene);
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(project));
+    repository.saveDraft(project);
     set({
       project,
       selectedCueId: selection?.selectedCueId ?? state.selectedCueId,
@@ -140,7 +128,7 @@ export const useProjectStore = create<EditorState>((set, get) => {
 
   return {
     project: initialProject,
-    mode: localStorage.getItem(MODE_KEY) === "professional" ? "professional" : "simple",
+    mode: loadEditorMode(),
     inspectorTab: "dialogue",
     selectedCueId: initial.cueId,
     selectedSlot: 1,
@@ -150,7 +138,7 @@ export const useProjectStore = create<EditorState>((set, get) => {
     dirty: false,
     revision: 0,
     setMode: (mode) => {
-      localStorage.setItem(MODE_KEY, mode);
+      saveEditorMode(mode);
       set({ mode });
     },
     setInspectorTab: (inspectorTab) => set({ inspectorTab }),
@@ -270,7 +258,7 @@ export const useProjectStore = create<EditorState>((set, get) => {
       const state = get();
       const previous = state.history.at(-1);
       if (!previous) return;
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(previous.project));
+      repository.saveDraft(previous.project);
       set({
         ...previous,
         history: state.history.slice(0, -1),
@@ -287,7 +275,7 @@ export const useProjectStore = create<EditorState>((set, get) => {
       const state = get();
       const next = state.future[0];
       if (!next) return;
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(next.project));
+      repository.saveDraft(next.project);
       set({
         ...next,
         history: [...state.history, {
@@ -301,10 +289,11 @@ export const useProjectStore = create<EditorState>((set, get) => {
       });
     },
     replaceProject: (project) => {
-      const selection = initialSelection(project);
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(project));
+      const normalized = repository.parseProject(project);
+      const selection = initialSelection(normalized);
+      repository.saveDraft(normalized);
       set({
-        project: clone(project),
+        project: normalized,
         selectedCueId: selection.cueId,
         selectedEventId: selection.eventId,
         history: [],
@@ -316,4 +305,7 @@ export const useProjectStore = create<EditorState>((set, get) => {
     markSaved: () => set({ dirty: false }),
     resetDemo: () => get().replaceProject(clone(demoProject)),
   };
-});
+  });
+}
+
+export const useProjectStore = createProjectStore();

@@ -47,6 +47,10 @@ production bundle, UI resource, or proprietary asset was copied.
   coalesces text edits; it does not maintain a second renderer.
 - Stable expression state IDs resolve through a local capability adapter and
   update realtime Spine. Missing avatar thumbnails fall back to initials.
+- `ProjectRepository` now owns validated draft snapshots and browser file
+  serialization. The store receives an injected repository, so Memory and
+  LocalStorage adapters share the same save/replace/undo contract and a future
+  Tauri repository will not require panel changes.
 
 ## Video
 
@@ -70,6 +74,8 @@ production bundle, UI resource, or proprietary asset was copied.
   asset workbench, and responsive story picker in one pytest process.
 - `4 passed`: editor store tests for mode preservation, advanced fields, five
   slots, and capability resolution.
+- `9 passed`: editor tests including repository round-trip, pending recovery,
+  atomic write failure, and failed mutation isolation.
 - `npm run build`: TypeScript no-emit check and Vite production build passed.
 - Python compile checks passed for the touched runtime, model, sequence
   renderer, CLI, services, and tests. The repository-wide Ruff command still

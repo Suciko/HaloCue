@@ -44,10 +44,10 @@ import {
 } from "react";
 
 import { buildDescriptor } from "./descriptor";
+import { projectFileAdapter } from "./projectRepository";
 import {
   advancedEventCount,
   firstScene,
-  isProject,
   stageAtCue,
   useProjectStore,
 } from "./projectStore";
@@ -677,13 +677,10 @@ export default function App() {
   const [notice, setNotice] = useState("");
 
   const save = () => {
-    const payload = new Blob([JSON.stringify(project, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(payload);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${(project.title || "halocue-project").replace(/[\\/:*?\"<>|]/g, "-")}.halocue-project`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    projectFileAdapter.download(
+      project,
+      `${(project.title || "halocue-project").replace(/[\\/:*?\"<>|]/g, "-")}.halocue-project`,
+    );
     markSaved();
     setNotice("项目文件已导出");
   };
@@ -693,9 +690,7 @@ export default function App() {
     event.target.value = "";
     if (!file) return;
     try {
-      const value = JSON.parse(await file.text());
-      if (!isProject(value)) throw new Error("当前编辑器需要 halocue-project/1.1；1.0 项目请先通过迁移服务打开");
-      replaceProject(value);
+      replaceProject(await projectFileAdapter.read(file));
       setNotice(`已打开 ${file.name}`);
     } catch (exception) {
       setNotice(exception instanceof Error ? exception.message : "无法打开项目");

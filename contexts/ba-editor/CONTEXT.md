@@ -29,6 +29,19 @@ maps semantic story lines to AA and MMT presentation fields.
   secondary evidence for BA-specific concepts; its navigation and dense
   single-screen layout are not requirements.
 
+## Editor persistence seam
+
+- `ProjectRepository` owns draft loading, validated project snapshots, atomic
+  browser persistence, and project-file serialization at the editor seam.
+- The Zustand editor store owns interaction state and canonical edit commands;
+  it does not access browser storage or implement file Blob I/O directly.
+- `LocalStorageProjectRepository` is the browser adapter and
+  `MemoryProjectRepository` is the deterministic test adapter. A future Tauri
+  repository can replace the adapter without changing simple or professional
+  panels.
+- A failed snapshot write must leave the published editor state unchanged;
+  pending browser snapshots remain recoverable on the next load.
+
 ## Stage layout contract
 
 - The editor has five visible portrait positions: `1`, `2`, `3`, `4`, and `5`.
