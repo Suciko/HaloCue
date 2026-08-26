@@ -42,6 +42,18 @@ maps semantic story lines to AA and MMT presentation fields.
 - A failed snapshot write must leave the published editor state unchanged;
   pending browser snapshots remain recoverable on the next load.
 
+## Capability registry seam
+
+- `CapabilityRegistry` resolves stable expression, motion, emoticon, and
+  transition state IDs to labels and namespaced adapter values.
+- The editor stores only stable state IDs. It does not embed Spine animation
+  names, attachment names, or local resource paths in the canonical project.
+- `MapCapabilityRegistry` is the deterministic in-memory adapter used by the
+  demo and tests; a local manifest adapter can replace it without changing the
+  simple/professional panels or descriptor evaluator.
+- Unknown authored states remain selectable and visible as unregistered values;
+  loading a capability record never deletes project state.
+
 ## Stage layout contract
 
 - The editor has five visible portrait positions: `1`, `2`, `3`, `4`, and `5`.

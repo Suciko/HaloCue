@@ -1,10 +1,15 @@
 import type { CueEvent, HaloCueProject, SceneDescriptor } from "./types";
-import { resolveExpressionAnimation } from "./capabilities";
+import { capabilityRegistry, resolveExpressionAnimation, type CapabilityRegistry } from "./capabilities";
 import { firstScene } from "./projectStore";
 
 const RENDERABLE = new Set(["background", "dialogue", "enter", "exit", "wait"]);
 
-export function buildDescriptor(project: HaloCueProject, selectedCueId: string): SceneDescriptor {
+export function buildDescriptor(
+  project: HaloCueProject,
+  selectedCueId: string,
+  options: { capabilityRegistry?: CapabilityRegistry } = {},
+): SceneDescriptor {
+  const registry = options.capabilityRegistry || capabilityRegistry;
   const scene = firstScene(project);
   const selectedIndex = Math.max(0, scene.cues.findIndex((cue) => cue.cue_id === selectedCueId));
   const allEvents = scene.cues.slice(0, selectedIndex + 1).flatMap((cue) => cue.events);
@@ -62,6 +67,8 @@ export function buildDescriptor(project: HaloCueProject, selectedCueId: string):
           character.character_id,
           latestState?.expression_id,
           character.stage_media.animation,
+          character.capability_id,
+          registry,
         ),
       };
     }

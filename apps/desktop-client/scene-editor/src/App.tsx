@@ -44,6 +44,7 @@ import {
 } from "react";
 
 import { projectFileAdapter } from "./projectRepository";
+import { capabilityStatesFor } from "./capabilities";
 import { evaluateScene } from "./sceneEvaluation";
 import {
   advancedEventCount,
@@ -400,7 +401,11 @@ function CharacterInspector({ cue }: { cue: Cue }) {
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const slots = stageAtCue(firstScene(project), selectedCueId);
   const characterId = slots[selectedSlot - 1];
+  const character = project.characters.find((item) => item.character_id === characterId);
   const stateEvent = [...cue.events].reverse().find((event) => event.kind === "enter" && event.slot === selectedSlot);
+  const expressionStates = capabilityStatesFor(character, "expression", stateEvent?.expression_id);
+  const motionStates = capabilityStatesFor(character, "motion", stateEvent?.motion_id);
+  const emoticonStates = capabilityStatesFor(character, "emoticon", stateEvent?.emoticon_id);
 
   return (
     <div className="inspector-content">
@@ -418,25 +423,18 @@ function CharacterInspector({ cue }: { cue: Cue }) {
         <div className="field-grid two">
           <Field label="表情">
             <select value={String(stateEvent?.expression_id || "expression/neutral")} onChange={(event) => updateCharacterState(selectedSlot, { expression_id: event.target.value })}>
-              <option value="expression/neutral">平静</option>
-              <option value="expression/smile">微笑</option>
-              <option value="expression/serious">认真</option>
+              {expressionStates.map((item) => <option key={item.state_id} value={item.state_id}>{item.label}</option>)}
             </select>
           </Field>
           <Field label="动作">
             <select value={String(stateEvent?.motion_id || "motion/idle")} onChange={(event) => updateCharacterState(selectedSlot, { motion_id: event.target.value })}>
-              <option value="motion/idle">待机</option>
-              <option value="motion/nod">点头</option>
-              <option value="motion/appear">出现</option>
+              {motionStates.map((item) => <option key={item.state_id} value={item.state_id}>{item.label}</option>)}
             </select>
           </Field>
         </div>
         <Field label="表情符号" hint="角色上方的独立叠加层">
           <select value={String(stateEvent?.emoticon_id || "emoticon/none")} onChange={(event) => updateCharacterState(selectedSlot, { emoticon_id: event.target.value })}>
-            <option value="emoticon/none">无</option>
-            <option value="emoticon/bulb">灵光</option>
-            <option value="emoticon/ellipsis">省略号</option>
-            <option value="emoticon/steam">蒸汽</option>
+            {emoticonStates.map((item) => <option key={item.state_id} value={item.state_id}>{item.label}</option>)}
           </select>
         </Field>
         <label className="toggle-row">
@@ -488,6 +486,10 @@ function EnvironmentInspector({ cue }: { cue: Cue }) {
   const project = useProjectStore((state) => state.project);
   const updateEnvironment = useProjectStore((state) => state.updateEnvironment);
   const background = cue.events.find((event) => event.kind === "background");
+  const transitionId = typeof background?.transition_id === "string"
+    ? background.transition_id
+    : undefined;
+  const transitionStates = capabilityStatesFor(undefined, "transition", transitionId);
 
   return (
     <div className="inspector-content">
@@ -500,9 +502,7 @@ function EnvironmentInspector({ cue }: { cue: Cue }) {
       <div className="field-grid two">
         <Field label="过渡">
           <select value={String(background?.transition_id || "transition/cut")} onChange={(event) => updateEnvironment({ transition_id: event.target.value })}>
-            <option value="transition/cut">直接切换</option>
-            <option value="transition/fade">淡入淡出</option>
-            <option value="transition/white">闪白</option>
+            {transitionStates.map((item) => <option key={item.state_id} value={item.state_id}>{item.label}</option>)}
           </select>
         </Field>
         <Field label="BGM">

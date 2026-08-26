@@ -1,4 +1,5 @@
 import { buildDescriptor } from "./descriptor";
+import type { CapabilityRegistry } from "./capabilities";
 import { buildRenderTimeline, DEFAULT_FRAME_RATE } from "./renderTimeline";
 import { firstScene } from "./projectStore";
 import type { EvaluationDiagnostic, HaloCueProject, SceneEvaluation } from "./types";
@@ -20,8 +21,12 @@ function diagnosticsForAdvancedEvents(project: HaloCueProject): EvaluationDiagno
   return diagnostics;
 }
 
-export function evaluateScene(project: HaloCueProject, selectedCueId: string): SceneEvaluation {
-  const descriptor = buildDescriptor(project, selectedCueId);
+export function evaluateScene(
+  project: HaloCueProject,
+  selectedCueId: string,
+  options: { capabilityRegistry?: CapabilityRegistry } = {},
+): SceneEvaluation {
+  const descriptor = buildDescriptor(project, selectedCueId, options);
   const frameRate = Number(descriptor.presentation.frame_rate) || DEFAULT_FRAME_RATE;
   return {
     schema_version: "scene-evaluation/1.0",

@@ -25,6 +25,27 @@ export type Character = {
   [key: string]: unknown;
 };
 
+export type CapabilityStateKind = "expression" | "motion" | "emoticon" | "transition";
+
+export type CapabilityAdapterValue = string | number | boolean | null;
+
+export type CapabilityState = {
+  state_id: string;
+  label: string;
+  adapter_state?: Record<string, CapabilityAdapterValue>;
+};
+
+export type CharacterCapabilities = {
+  schema_version: "character-capabilities/1.0";
+  capability_id: string;
+  character_id: string;
+  expression: CapabilityState[];
+  motion: CapabilityState[];
+  emoticon: CapabilityState[];
+  transition: CapabilityState[];
+  extensions?: Record<string, unknown>;
+};
+
 export type Resource = {
   resource_id: string;
   role: string;

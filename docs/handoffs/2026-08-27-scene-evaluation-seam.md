@@ -37,7 +37,7 @@ secondary evidence for five visible slots and Cue-sized beats.
 
 ## Follow-up
 
-1. Replace the demo capability map with generated local
+1. Replace the default in-memory capability records with generated local
    `character-capabilities/1.0` records and add non-destructive preview trials.
 2. Route quick-effect events through the same descriptor/timeline seam.
 3. Add the Tauri repository adapter and resumable export job state.

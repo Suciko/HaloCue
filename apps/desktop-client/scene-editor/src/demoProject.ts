@@ -7,6 +7,7 @@ export const demoProject: HaloCueProject = {
   characters: [
     {
       character_id: "character/yuuka",
+      capability_id: "capability/yuuka/default",
       name: "早濑优香",
       dialogue_name: "优香",
       club_name: "研讨会",
@@ -24,6 +25,7 @@ export const demoProject: HaloCueProject = {
     },
     {
       character_id: "character/noa",
+      capability_id: "capability/noa/default",
       name: "生盐诺亚",
       dialogue_name: "诺亚",
       club_name: "研讨会",
@@ -41,6 +43,7 @@ export const demoProject: HaloCueProject = {
     },
     {
       character_id: "character/koyuki",
+      capability_id: "capability/koyuki/default",
       name: "黑崎小雪",
       dialogue_name: "小雪",
       club_name: "研讨会",
