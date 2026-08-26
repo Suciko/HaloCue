@@ -199,6 +199,7 @@
       if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
         copy.textContent = state.typewriter.complete();
         state.typewriterComplete = true;
+        caret.hidden = true;
         return;
       }
       const startedAt = window.performance.now();
