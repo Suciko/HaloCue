@@ -37,7 +37,9 @@ sys.path.insert(0, HERE)
 def runtime_config_path():
     if RUNTIME_LAYOUT is not LAYOUT:
         return RUNTIME_LAYOUT.config_path
-    return CONFIG_PATH if LAYOUT.frozen else Path(HERE) / "aa_config.json"
+    if not LAYOUT.frozen and Path(HERE) != LAYOUT.resource_root:
+        return Path(HERE) / "aa_config.json"
+    return CONFIG_PATH
 
 import aapaths                                                  # noqa: E402
 import asset_catalog                                            # noqa: E402

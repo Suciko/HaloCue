@@ -150,7 +150,7 @@ function TopBar({ onOpen, onSave }: { onOpen: () => void; onSave: () => void }) 
   );
 }
 
-function ProjectRail() {
+function ProjectRail({ showCues }: { showCues: boolean }) {
   const project = useProjectStore((state) => state.project);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const selectCue = useProjectStore((state) => state.selectCue);
@@ -160,14 +160,14 @@ function ProjectRail() {
   return (
     <aside className="project-rail">
       <div className="rail-heading">
-        <span>项目</span>
+        <span>{showCues ? "项目" : "场景"}</span>
         <IconButton label="项目菜单"><MoreHorizontal /></IconButton>
       </div>
-      <nav className="project-tree" aria-label="项目结构">
+      <nav className="project-tree" aria-label={showCues ? "完整项目结构" : "场景导航"}>
         <div className="tree-row root"><ChevronDown /><Box />{project.title}</div>
         <div className="tree-row depth-1"><ChevronDown /><Layers3 />{chapter?.title || "章节"}</div>
         <div className="tree-row depth-2 is-open"><ChevronDown /><Clapperboard />{scene.title || "场景"}</div>
-        <div className="tree-cues">
+        {showCues && <div className="tree-cues">
           {scene.cues.map((cue, index) => (
             <button
               type="button"
@@ -179,7 +179,7 @@ function ProjectRail() {
               <span>{cue.title || "未命名演出"}</span>
             </button>
           ))}
-        </div>
+        </div>}
       </nav>
       <div className="rail-footer">
         <span><UsersRound />{project.characters.length} 名角色</span>
@@ -651,7 +651,7 @@ function Timeline() {
 function SimpleWorkspace() {
   return (
     <div className="workspace-grid simple-grid">
-      <ProjectRail />
+      <ProjectRail showCues={false} />
       <main className="simple-main"><PreviewFrame /><StageSlots /><CueStrip /></main>
       <SimpleInspector />
     </div>
@@ -661,7 +661,7 @@ function SimpleWorkspace() {
 function ProfessionalWorkspace() {
   return (
     <div className="workspace-grid professional-grid">
-      <ProjectRail />
+      <ProjectRail showCues />
       <main className="professional-main"><div className="professional-upper"><PreviewFrame /><ProfessionalEventList /></div><Timeline /></main>
       <ProfessionalInspector />
     </div>

@@ -9,7 +9,7 @@ from contextlib import contextmanager
 
 from halocue_production.app import create_server
 from halocue_production.service import ProductionService
-from test_service import configured_resource_settings
+from .test_service import configured_resource_settings
 from PIL import Image
 from io import BytesIO
 

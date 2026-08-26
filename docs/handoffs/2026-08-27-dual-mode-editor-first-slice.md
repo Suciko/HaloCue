@@ -33,9 +33,12 @@ production bundle, UI resource, or proprietary asset was copied.
 
 - Added `apps/desktop-client/scene-editor`, built with React, TypeScript,
   Zustand, Vite, and Lucide icons.
-- Quick mode provides project/Cue navigation, deterministic realtime preview,
+- Quick mode provides project and scene navigation, deterministic realtime preview,
   five visible draggable slots, Cue insertion/copy/delete/reorder, and
   contextual character/dialogue/environment tabs.
+- Quick mode keeps Cue navigation and ordering in one contextual strip below
+  the preview; the left rail does not duplicate the Cue list. Professional mode
+  retains the full project/Cue tree for event-oriented work.
 - Professional mode expands the same Cue into ordered events, exact IDs,
   logical resource keys, durations, advanced fields, and a timeline.
 - The project store supports local recovery drafts, undo/redo, import/export,
@@ -60,25 +63,31 @@ production bundle, UI resource, or proprietary asset was copied.
 
 ## Verification
 
-- `43 passed`: AA runtime, render timeline, BA project/descriptor, editor
-  contracts, stage media, CSP, and scene frame/sequence/video tests.
-- `10 passed`: standalone browser UI suite, including P69 normalized geometry.
+- `2161 passed, 14 skipped`: complete Python suite after fixing pytest module
+  collection isolation, Windows gateway CRLF normalization, and the saved AA
+  executable config path used by the story picker.
+- `41 passed`: combined browser modules for scene preview, frame rendering,
+  asset workbench, and responsive story picker in one pytest process.
 - `4 passed`: editor store tests for mode preservation, advanced fields, five
   slots, and capability resolution.
 - `npm run build`: TypeScript no-emit check and Vite production build passed.
-- Ruff and Python compile checks passed for the new model, sequence renderer,
-  CLI, and tests.
+- Python compile checks passed for the touched runtime, model, sequence
+  renderer, CLI, services, and tests. The repository-wide Ruff command still
+  reports 12 pre-existing style findings in `webui.py` (E401/F401/E701/E702);
+  no new lint category was introduced by this slice.
 - Noto Sans SC static font metadata declares SIL OFL 1.1, matching the license
   text already stored beside the preview fonts.
 - Browser QA passed at 1440x900 and 800x900: no horizontal page overflow,
-  preview/dialogue edits synchronize, advanced `intensity: 0.35` survives
-  mode switching, and expression `expression/smile` resolves to Spine `03`.
+  quick mode has no duplicated Cue tree, professional mode restores the full
+  Cue tree, preview/dialogue edits synchronize, advanced `intensity: 0.35`
+  survives mode switching, and expression `expression/smile` resolves to
+  Spine `03`. Narrow mode scrolls the inspector below the preview without
+  clipping.
 - A four-frame reused-page sequence resumed with 4/4 frames reused and encoded
   successfully through the detected FFmpeg.
 
-The two Playwright suites must currently run as separate pytest commands. The
-older standalone UI suite starts its own sync runtime and conflicts with the
-session-scoped browser fixture when both are placed in one pytest invocation.
+The browser modules now run together in one pytest invocation; browser fixtures
+are module-scoped to keep independent Playwright sync runtimes isolated.
 
 ## Local run
 
@@ -93,6 +102,8 @@ bytes are not contracts and must not be committed.
 
 - Implementation commit: `eb1023c`
 - Target-branch synchronization merge: `41b4cd1`
+- Follow-up maintenance is uncommitted on this branch and will be published as
+  the next focused commit after final checks.
 - Pull request: https://github.com/Suciko/HaloCue/pull/27
 - Issues: partial progress on #11, #14, and #24; none are closed by this slice.
 

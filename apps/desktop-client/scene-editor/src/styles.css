@@ -80,7 +80,7 @@ svg { width: 16px; height: 16px; flex: none; stroke-width: 1.8; }
 .primary-button { border: 1px solid #88debb; background: var(--accent); color: #102019; font-weight: 700; }
 
 .workspace-grid { height: calc(100% - var(--topbar-height)); display: grid; overflow: hidden; }
-.simple-grid { grid-template-columns: 210px minmax(620px, 1fr) 326px; }
+.simple-grid { grid-template-columns: 176px minmax(620px, 1fr) 326px; }
 .professional-grid { grid-template-columns: 210px minmax(720px, 1fr) 342px; }
 
 .project-rail, .inspector { min-width: 0; background: var(--panel); overflow: hidden; }

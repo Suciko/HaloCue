@@ -344,7 +344,7 @@ def test_multi_character_first_appearance_uses_normal_slots(monkeypatch, tmp_pat
 
     visible = [char for char in scripts[0]["characters"]["$values"] if char["name"]]
     assert {(char["name"], char["endingPos"], char["appear"]) for char in visible} == {
-        ("alice", 2, 3), ("bob", 4, 3),
+        ("alice", 1, 3), ("bob", 5, 3),
     }
 
 

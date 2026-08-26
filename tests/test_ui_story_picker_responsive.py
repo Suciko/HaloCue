@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Real Chromium checks for the cross-device story picker."""
 
+import json
+import os
 import socket
 import subprocess
 import sys
@@ -9,6 +11,8 @@ from contextlib import closing
 from pathlib import Path
 
 import pytest
+
+from .release_smoke import create_synthetic_aa_workspace
 
 sync_playwright = pytest.importorskip("playwright.sync_api").sync_playwright
 
@@ -27,15 +31,29 @@ def app_url(tmp_path_factory):
     port = _free_port()
     sample = HERE.parent.parent / "story-picker-browser-sample.txt"
     sample.write_text("凯伊：浏览器测试", encoding="utf-8")
-    aa_data = tmp_path_factory.mktemp("story-picker-aa") / "data"
-    for name in ("projects", "saves", "overrides", "settings"):
-        (aa_data / name).mkdir(parents=True)
+    workspace = create_synthetic_aa_workspace(
+        tmp_path_factory.mktemp("story-picker-aa")
+    )
+    user_data = tmp_path_factory.mktemp("story-picker-state")
+    (user_data / "aa_config.json").write_text(
+        json.dumps(
+            {
+                "aa_executable": str(workspace.executable),
+                "aa_data": str(workspace.data),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    process_env = dict(os.environ)
+    process_env["HALOCUE_USER_DATA_DIR"] = str(user_data)
     process = subprocess.Popen(
         [
             sys.executable, "webui.py", "--no-browser", "--port", str(port),
-            "--aa-data", str(aa_data),
+            "--aa-data", str(workspace.data),
         ],
         cwd=HERE,
+        env=process_env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,

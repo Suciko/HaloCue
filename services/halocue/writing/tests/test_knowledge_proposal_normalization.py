@@ -8,7 +8,7 @@ import pytest
 from halocue_writing.errors import DomainError
 from halocue_writing.providers import FakeWritingProvider
 from halocue_writing.service import WritingService
-from test_agent_presentation import _assert_json_schema_instance
+from .test_agent_presentation import _assert_json_schema_instance
 
 
 CONTRACTS = Path(__file__).resolve().parents[1] / "docs" / "contracts"

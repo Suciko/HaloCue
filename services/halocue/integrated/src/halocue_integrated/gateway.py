@@ -85,7 +85,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _embed_production_script(body: bytes) -> bytes:
-        text = body.decode("utf-8")
+        text = body.decode("utf-8").replace("\r\n", "\n")
         api_marker = (
             'const API_ROOT = location.port === "8891"\n'
             '    ? "http://127.0.0.1:8892/api/v1"\n'
@@ -125,6 +125,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 1,
             )
         if target == "production" and clean_path == "/app.js" and "javascript" in content_type:
+            body = body.replace(b"\r\n", b"\n")
             marker = (
                 b'const API_ROOT = location.port === "8891"\n'
                 b'    ? "http://127.0.0.1:8892/api/v1"\n'

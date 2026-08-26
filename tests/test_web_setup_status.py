@@ -174,6 +174,17 @@ def test_setup_status_refreshes_from_saved_executable_after_restart(
     }
 
 
+def test_runtime_config_path_uses_resolved_user_state_by_default(
+    tmp_path,
+    monkeypatch,
+):
+    config = tmp_path / "state" / "aa_config.json"
+    monkeypatch.setattr(webui, "CONFIG_PATH", config)
+    monkeypatch.setattr(webui, "HERE", str(webui.LAYOUT.resource_root))
+
+    assert webui.runtime_config_path() == config
+
+
 def test_settings_config_updates_preserve_the_other_runtime_path(tmp_path, monkeypatch):
     monkeypatch.setattr(webui, "HERE", str(tmp_path))
     config = tmp_path / "aa_config.json"
