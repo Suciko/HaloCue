@@ -43,15 +43,21 @@ import {
   useState,
 } from "react";
 
-import { buildDescriptor } from "./descriptor";
 import { projectFileAdapter } from "./projectRepository";
+import { evaluateScene } from "./sceneEvaluation";
 import {
   advancedEventCount,
   firstScene,
   stageAtCue,
   useProjectStore,
 } from "./projectStore";
-import type { Cue, CueEvent, InspectorTab, SceneDescriptor } from "./types";
+import type {
+  Cue,
+  CueEvent,
+  InspectorTab,
+  RenderTimeline,
+  SceneDescriptor,
+} from "./types";
 
 type PreviewController = {
   timeline: { total_frames: number };
@@ -60,7 +66,11 @@ type PreviewController = {
 
 type PreviewWindow = Window & {
   HaloCueScenePreview?: {
-    mount: (descriptor: SceneDescriptor) => PreviewController;
+    mount: (
+      descriptor: SceneDescriptor,
+      root?: Element | null,
+      options?: { timeline?: RenderTimeline },
+    ) => PreviewController;
     controller?: PreviewController;
   };
 };
@@ -196,8 +206,8 @@ function PreviewFrame() {
   const frame = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
-  const descriptor = useMemo(
-    () => buildDescriptor(project, selectedCueId),
+  const evaluation = useMemo(
+    () => evaluateScene(project, selectedCueId),
     [project, selectedCueId, revision],
   );
 
@@ -206,7 +216,9 @@ function PreviewFrame() {
     const preview = previewWindow?.HaloCueScenePreview;
     if (!preview) return;
     try {
-      const controller = preview.mount(descriptor);
+      const controller = preview.mount(evaluation.descriptor, undefined, {
+        timeline: evaluation.timeline,
+      });
       preview.controller = controller;
       controller.seekFrame(Math.max(0, controller.timeline.total_frames - 1));
       setError("");
@@ -221,7 +233,7 @@ function PreviewFrame() {
     setReady(false);
     const timer = window.setTimeout(mount, 140);
     return () => window.clearTimeout(timer);
-  }, [descriptor]);
+  }, [evaluation]);
 
   return (
     <section className="preview-region" aria-label="实时预览">

@@ -4,7 +4,8 @@ This package owns versioned JSON contracts shared by the client, backend, BA
 editor, and adapters. A wire-shape change requires a new version or an explicit
 migration plus consumer tests. Current editor/render contracts include
 `halocue-project/1.1`, `character-capabilities/1.0`,
-`render-timeline/1.0`, and `render-sequence/1.0`. Planned contracts include
+`render-timeline/1.0`, `scene-evaluation/1.0`, and `render-sequence/1.0`.
+Planned contracts include
 `script-release/1.1`, `production-request/1.1`, `performance-draft/1.0`,
 `build-bundle/1.0`, and `scene-descriptor/1.0`.
 
@@ -35,6 +36,13 @@ The `render-timeline/1.0` schema lives in
 frame ranges generated from a validated scene descriptor. Browser preview and
 offline export consume the same event IDs, durations, and frame boundaries;
 wall-clock callbacks are presentation controls, not part of this contract.
+
+The `scene-evaluation/1.0` schema lives in
+`scene-evaluation/1.0.schema.json`. It binds a descriptor and its timeline
+evaluation to one scene and carries non-fatal diagnostics for namespaced
+professional events that a presentation adapter does not render yet. The
+editor, browser preview, and offline adapters can therefore share one explicit
+intermediate result without duplicating canonical project data.
 
 The `render-sequence/1.0` manifest binds a resumable numbered PNG sequence to
 the SHA-256 of its descriptor and timeline. A sequence can reuse verified

@@ -94,3 +94,36 @@ export type SceneDescriptor = {
   initial_actors: Array<Record<string, unknown>>;
   events: CueEvent[];
 };
+
+export type RenderTimelineEvent = {
+  event_id: string;
+  kind: string;
+  start_frame: number;
+  end_frame: number;
+  duration_frames: number;
+  duration_ms: number;
+  event: CueEvent;
+};
+
+export type RenderTimeline = {
+  schema_version: "render-timeline/1.0";
+  frame_rate: number;
+  scene_id: string | null;
+  events: RenderTimelineEvent[];
+  total_frames: number;
+};
+
+export type EvaluationDiagnostic = {
+  code: string;
+  severity: "info" | "warning" | "error";
+  path: string;
+  message: string;
+};
+
+export type SceneEvaluation = {
+  schema_version: "scene-evaluation/1.0";
+  scene_id: string;
+  descriptor: SceneDescriptor;
+  timeline: RenderTimeline;
+  diagnostics: EvaluationDiagnostic[];
+};
