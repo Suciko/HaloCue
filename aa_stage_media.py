@@ -8,6 +8,8 @@ can use either generation without relying on a global browser runtime.
 
 from __future__ import annotations
 
+import base64
+import mimetypes
 import re
 import threading
 from pathlib import Path
@@ -295,6 +297,70 @@ def stage_background_from_catalog(
     except Exception:
         return None
     return None
+
+
+def stage_bundle_data(
+    overrides: str | Path | None,
+    key: str,
+    *,
+    cache_root: str | Path,
+    catalog: str | Path | None = None,
+    resource_cache: str | Path | None = None,
+) -> dict[str, object]:
+    """Return one authorized Spine bundle as browser-safe data URIs.
+
+    The stage preview is allowed to consume user-owned or explicitly cached
+    assets, but browser code must never receive the source filesystem path.
+    Returning a single manifest also avoids three network round trips per
+    character and lets the browser reuse its own in-memory bundle cache.
+    """
+
+    safe_key = safe_stage_key(key)
+    try:
+        bundle = resolve_spine_bundle(overrides, safe_key)
+    except StageMediaError:
+        bundle = extract_catalog_spine_bundle(catalog, resource_cache, safe_key, cache_root)
+    root = Path(bundle["root"]).resolve()
+    skeleton = Path(bundle["skeleton"]).resolve()
+    atlas = Path(bundle["atlas"]).resolve()
+    textures = tuple(Path(path).resolve() for path in bundle["textures"])
+    try:
+        skeleton.relative_to(root)
+        atlas.relative_to(root)
+        for texture in textures:
+            texture.relative_to(root)
+    except ValueError as exc:
+        raise StageMediaError("stage bundle contains a file outside its root") from exc
+
+    def data_uri(path: Path, mime: str | None = None) -> str:
+        content_type = mime or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        encoded = base64.standard_b64encode(path.read_bytes()).decode("ascii")
+        return f"data:{content_type};base64,{encoded}"
+
+    # Atlas page identifiers must match the names embedded in the atlas text,
+    # including a possible relative subdirectory.  Relative paths are safe to
+    # expose and are the only names the browser-side AssetManager needs.
+    texture_entries = []
+    for texture in textures:
+        texture_entries.append({
+            "name": texture.relative_to(root).as_posix(),
+            "uri": data_uri(texture),
+        })
+    family = str(bundle["spine_family"])
+    atlas_text = atlas.read_text(encoding="utf-8-sig", errors="replace")
+    pma = family == "3.8" or bool(re.search(
+        r"(?:^|\n)\s*pma:\s*true\s*(?:\n|$)", atlas_text, re.IGNORECASE
+    ))
+    return {
+        "ok": True,
+        "key": safe_key,
+        "spine_version": str(bundle["spine_version"]),
+        "spine_family": family,
+        "pma": pma,
+        "skeleton": data_uri(skeleton),
+        "atlas": data_uri(atlas, "text/plain;charset=utf-8"),
+        "textures": texture_entries,
+    }
 
 
 def stage_frame_path(

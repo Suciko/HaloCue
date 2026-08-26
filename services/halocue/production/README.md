@@ -39,6 +39,16 @@ explicit `HALOCUE_LEGACY_ROOT` boundary (or the repository default). Runtime
 data defaults to the repository `.halocue/production` user-data directory.
 No AA resource bytes or runtime data are committed here.
 
+The optional `render` dependency exposes the 1.1 deterministic frame and video
+adapters in `halocue_production.scene_frame_renderer` and
+`halocue_production.scene_video_renderer`. They accept an already validated
+`scene-descriptor/1.0` plus `render-timeline/1.0`, connect only to a localhost
+preview, and capture atomic 16:9 PNGs. A complete sequence reuses one Chromium
+page, records a resumable `render-sequence/1.0` manifest, and can be encoded as
+a silent H.264/yuv420p MP4 through FFmpeg. Repository entry points are
+`tools/render_scene_frame.py` and `tools/render_scene_video.py`; durable
+background export jobs and audio muxing remain later service slices.
+
 ## Run
 
 ```powershell
@@ -209,3 +219,13 @@ The production API verifies the upstream release content hash, preserves its
 identity separately from the production-local frozen release, and returns the
 existing run when the same upstream release is submitted again. The complete
 compatibility contract is documented in [WRITING_HANDOFF_CONTRACT.md](WRITING_HANDOFF_CONTRACT.md).
+## Deterministic scene video export
+
+`tools/render_scene_video.py` reuses one Chromium page to render a numbered PNG
+sequence, records a resumable `render-sequence/1.0` manifest, and encodes a
+silent H.264/yuv420p MP4 through FFmpeg. Preview, individual frames, sequences,
+and video all consume the same `SceneDescriptor` and `RenderTimeline`.
+
+```powershell
+python tools/render_scene_video.py descriptor.json output.mp4 --renderer realtime
+```

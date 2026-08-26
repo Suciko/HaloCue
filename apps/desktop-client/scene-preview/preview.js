@@ -6,6 +6,7 @@
   const SUPPORTED_SCHEMA = "scene-descriptor/1.0";
   const STAGE_MEDIA_KINDS = new Set(["portrait", "spine", "spine-frame"]);
   const DEFAULT_ACTOR_MEDIA_SCALE = 1.6;
+  const SPINE_RENDERER = window.HaloCueSpineRenderer;
 
   function assertDescriptor(descriptor) {
     if (!descriptor || descriptor.schema_version !== SUPPORTED_SCHEMA) {
@@ -62,9 +63,14 @@
     return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : fallback;
   }
 
+  function clampBackgroundZoom(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(0.75, Math.min(1.5, number)) : 1;
+  }
+
   function clampStageOffset(value) {
     const number = Number(value);
-    return Number.isFinite(number) ? Math.max(-1024, Math.min(1024, number)) : 0;
+    return Number.isFinite(number) ? Math.max(-2048, Math.min(2048, number)) : 0;
   }
 
   function installStageScale(stage) {
@@ -115,7 +121,7 @@
       preview_uri: previewUri,
       anchor_x: clampUnit(media.anchor_x, 0.5),
       anchor_y: clampUnit(media.anchor_y, 1),
-      scale: Math.max(0.5, Math.min(2, Number(media.scale) || DEFAULT_ACTOR_MEDIA_SCALE)),
+      scale: Math.max(0.5, Math.min(4, Number(media.scale) || DEFAULT_ACTOR_MEDIA_SCALE)),
       offset_x: clampStageOffset(media.offset_x),
       offset_y: clampStageOffset(media.offset_y),
     };
@@ -126,15 +132,48 @@
     element.className = "actor-slot";
     element.dataset.slot = String(slot);
     element.style.left = `${SLOT_X[slot - 1]}%`;
-    element.innerHTML = '<div class="actor-portrait" aria-hidden="true"><img class="actor-image" alt="" /></div><div class="actor-name"></div>';
+    element.innerHTML = '<div class="actor-portrait" aria-hidden="true"><img class="actor-image" alt="" /><canvas class="actor-canvas" aria-hidden="true"></canvas></div><div class="actor-name"></div>';
     return element;
   }
 
-  function mount(descriptor, root) {
+  function canonicalJson(value) {
+    if (Array.isArray(value)) return value.map(canonicalJson);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.keys(value).sort().map((key) => [key, canonicalJson(value[key])]),
+      );
+    }
+    return value;
+  }
+
+  function resolveRenderTimeline(descriptor, suppliedTimeline) {
+    const expected = AA.buildRenderTimeline(descriptor, {
+      frameRate: descriptor.presentation?.frame_rate ?? AA.DEFAULT_FRAME_RATE,
+    });
+    if (suppliedTimeline === undefined) {
+      return { timeline: expected, source: "derived" };
+    }
+    if (!suppliedTimeline || suppliedTimeline.schema_version !== "render-timeline/1.0") {
+      throw new Error("unsupported supplied render timeline schema");
+    }
+    if (JSON.stringify(canonicalJson(suppliedTimeline)) !== JSON.stringify(canonicalJson(expected))) {
+      throw new Error("supplied render timeline does not match the scene descriptor");
+    }
+    return {
+      timeline: JSON.parse(JSON.stringify(suppliedTimeline)),
+      source: "supplied",
+    };
+  }
+
+  function mount(descriptor, root, options = {}) {
     assertDescriptor(descriptor);
     const stage = root || document.querySelector("#preview-stage");
     if (!stage) throw new Error("Preview stage root was not found.");
+    stage.__haloCueController?.dispose?.();
     installStageScale(stage);
+    const rendererMode = new URLSearchParams(window.location.search).get("renderer") === "static"
+      ? "static" : "realtime";
+    stage.dataset.renderer = rendererMode;
     const actorLayer = stage.querySelector("#actor-layer");
     const speaker = stage.querySelector("#speaker-name");
     const club = stage.querySelector("#club-name");
@@ -149,9 +188,19 @@
     const dialoguePanel = stage.querySelector(".dialogue-panel");
     const dialogueNext = stage.querySelector("#dialogue-next");
     const stageBackground = stage.querySelector("#stage-background");
+    stage.__haloCueSpineManager?.dispose?.();
+    const spineManager = rendererMode === "realtime"
+      ? SPINE_RENDERER?.createManager?.() || null
+      : null;
+    stage.__haloCueSpineManager = spineManager;
     const initialActors = Array.isArray(descriptor.initial_actors)
       ? descriptor.initial_actors
       : descriptor.actors;
+    const resolvedTimeline = resolveRenderTimeline(descriptor, options.timeline);
+    const timeline = resolvedTimeline.timeline;
+    const captureMode = options.capture === true;
+    stage.dataset.timelineSource = resolvedTimeline.source;
+    stage.dataset.capture = captureMode ? "deterministic" : "preview";
     if (locationLabel) {
       locationLabel.hidden = descriptor.presentation?.location_mode === "hidden";
     }
@@ -167,20 +216,70 @@
     const actorElements = new Map(
       [...actorLayer.children].map((element) => [Number(element.dataset.slot), element]),
     );
+    const createInitialActorState = (actor) => ({
+      ...actor,
+      stage_media: actor?.stage_media ? { ...actor.stage_media } : actor?.stage_media,
+      presentation: AA.createCharacterState(actor.slot, actor),
+    });
+    const initialBackground = descriptor.initial_background || descriptor.background || null;
     const state = {
       eventIndex: -1,
-      actors: initialActors.map((actor) => ({
-        ...actor,
-        presentation: AA.createCharacterState(actor.slot, actor),
-      })),
+      actors: initialActors.map(createInitialActorState),
       typewriter: null,
       typewriterComplete: false,
       typewriterFrame: null,
       motion: null,
-      background: descriptor.initial_background || descriptor.background || null,
+      background: initialBackground ? { ...initialBackground } : null,
       backgroundPending: true,
+      backgroundRequestUri: "",
       initialMotionPending: true,
+      frame: -1,
+      playing: false,
+      playbackFrame: null,
     };
+    function cloneRuntimeActor(actor) {
+      return {
+        ...actor,
+        stage_media: actor?.stage_media ? { ...actor.stage_media } : actor?.stage_media,
+        presentation: {
+          ...actor.presentation,
+          position: { ...actor.presentation.position },
+        },
+      };
+    }
+    function captureSceneSnapshot() {
+      return {
+        actors: state.actors.map(cloneRuntimeActor),
+        background: state.background ? { ...state.background } : null,
+      };
+    }
+    function restoreSceneSnapshot(snapshot) {
+      state.actors = snapshot.actors.map(cloneRuntimeActor);
+      state.background = snapshot.background ? { ...snapshot.background } : null;
+      state.eventIndex = -1;
+      state.typewriter = null;
+      state.typewriterComplete = false;
+      state.motion = null;
+    }
+    const seekStateCache = new Map([[0, captureSceneSnapshot()]]);
+    stage.dataset.playback = "live";
+    stage.dataset.currentFrame = "";
+    stage.dataset.currentEvent = "";
+    const previewShell = stage.closest(".preview-shell");
+    const editorMode = Boolean(previewShell?.classList.contains("has-editor-controls"));
+    const assetInspector = document.querySelector("#asset-inspector");
+    const inspectorSummary = document.querySelector("#inspector-summary");
+    const inspectorList = document.querySelector("#inspector-list");
+    const inspectorSelection = document.querySelector("#inspector-selection");
+    const inspectorCopyStatus = document.querySelector("#inspector-copy-status");
+    const guides = stage.querySelector("#calibration-guides");
+    const timelineTransport = document.querySelector("#timeline-transport");
+    const timelinePlay = document.querySelector("#timeline-play");
+    const timelineScrubber = document.querySelector("#timeline-scrubber");
+    const timelinePosition = document.querySelector("#timeline-position");
+    const timelineReference = document.querySelector("#timeline-reference");
+    let inspectedSlot = null;
+    let inspectorRenderSignature = "";
 
     stage.dataset.mediaReady = "loading";
 
@@ -188,6 +287,202 @@
       const pending = [...actorLayer.querySelectorAll(".actor-slot.is-visible .actor-image")]
         .filter((image) => image.src && !(image.complete && image.naturalWidth > 0));
       stage.dataset.mediaReady = pending.length || state.backgroundPending ? "loading" : "ready";
+    }
+
+    function inspectorValue(value) {
+      if (value === undefined || value === null || value === "") return "-";
+      return String(value);
+    }
+
+    function appendInspectorField(list, label, value) {
+      const row = document.createElement("div");
+      const key = document.createElement("dt");
+      const valueNode = document.createElement("dd");
+      key.textContent = label;
+      valueNode.textContent = inspectorValue(value);
+      row.append(key, valueNode);
+      list.append(row);
+    }
+
+    function inspectorActors() {
+      return [...new Map(
+        [...state.actors, ...actorCatalog.values()]
+          .filter((actor) => actor && actor.character_id)
+          .map((actor) => [actor.character_id, actor]),
+      ).values()].sort((left, right) => Number(left.slot) - Number(right.slot));
+    }
+
+    function setInspectedSlot(slot) {
+      inspectedSlot = Number.isInteger(slot) ? slot : null;
+      actorElements.forEach((element, actorSlot) => {
+        element.classList.toggle("is-inspected", actorSlot === inspectedSlot);
+      });
+      inspectorList?.querySelectorAll("[data-resource-slot]").forEach((row) => {
+        row.classList.toggle("is-selected", Number(row.dataset.resourceSlot) === inspectedSlot);
+      });
+      const selected = inspectorActors().find((actor) => Number(actor.slot) === inspectedSlot);
+      if (inspectorSelection) {
+        inspectorSelection.textContent = selected
+          ? `已选 SLOT ${selected.slot} · ${actorName(selected)}`
+          : "未选择槽位";
+      }
+    }
+
+    function renderResourceInspector() {
+      if (!inspectorList) return;
+      const actors = inspectorActors();
+      const background = state.background || descriptor.background || {};
+      const event = state.eventIndex >= 0 ? descriptor.events[state.eventIndex] : null;
+      const signature = JSON.stringify({
+        eventIndex: state.eventIndex,
+        background: background.preview_uri || background.logical_key || background.aa_key || null,
+        actors: actors.map((actor) => [
+          actor.slot,
+          actor.character_id,
+          actor.stage_media?.kind,
+          actor.stage_media?.bundle_key,
+          actor.stage_media?.animation,
+        ]),
+      });
+      if (signature === inspectorRenderSignature) return;
+      inspectorRenderSignature = signature;
+      if (inspectorSummary) {
+        const eventLabel = event ? `${state.eventIndex + 1}/${descriptor.events.length} · ${event.kind}` : "未开始";
+        const backgroundLabel = background.logical_key || background.aa_key || "未解析";
+        inspectorSummary.textContent = `事件 ${eventLabel} · 背景 ${backgroundLabel}`;
+      }
+      inspectorList.replaceChildren();
+      actors.forEach((actor) => {
+        const row = document.createElement("button");
+        const title = document.createElement("strong");
+        const kind = document.createElement("span");
+        const details = document.createElement("dl");
+        const media = actor.stage_media && typeof actor.stage_media === "object"
+          ? actor.stage_media : null;
+        const resolved = media ? stageMediaFor(actor) : null;
+        const transform = media
+          ? `scale ${inspectorValue(media.scale)} · x ${inspectorValue(media.offset_x)} · y ${inspectorValue(media.offset_y)}`
+          : "-";
+        row.type = "button";
+        row.className = "asset-resource-row";
+        row.dataset.resourceSlot = String(actor.slot);
+        title.className = "asset-resource-title";
+        title.textContent = `SLOT ${actor.slot} · ${actorName(actor) || "未命名角色"}`;
+        kind.className = "asset-resource-kind";
+        kind.textContent = media?.kind ? `STAGE ${String(media.kind).toUpperCase()}` : "无正式舞台资源";
+        appendInspectorField(details, "character_id", actor.character_id);
+        appendInspectorField(details, "resource_id", actor.resource_id);
+        appendInspectorField(details, "bundle_key", media?.bundle_key);
+        appendInspectorField(details, "animation", media?.animation);
+        appendInspectorField(details, "预览路由", resolved?.preview_uri);
+        appendInspectorField(details, "变换", transform);
+        row.append(title, kind, details);
+        row.addEventListener("click", () => setInspectedSlot(Number(actor.slot)));
+        inspectorList.append(row);
+      });
+      if (!actors.length) {
+        const empty = document.createElement("p");
+        empty.className = "asset-inspector-summary";
+        empty.textContent = "当前场景没有已定位的角色资源。";
+        inspectorList.append(empty);
+      }
+      setInspectedSlot(inspectedSlot);
+    }
+
+    function resourceMapPayload() {
+      const background = state.background || descriptor.background || null;
+      return {
+        schema_version: descriptor.schema_version,
+        scene_id: descriptor.scene_id,
+        background: background ? {
+          resource_id: background.resource_id,
+          logical_key: background.logical_key,
+          aa_key: background.aa_key,
+          preview_uri: isSafePreviewUri(background.preview_uri) ? background.preview_uri : undefined,
+          focus_x: background.focus_x,
+          focus_y: background.focus_y,
+          zoom: background.zoom,
+        } : null,
+        actors: inspectorActors().map((actor) => {
+          const media = actor.stage_media && typeof actor.stage_media === "object"
+            ? actor.stage_media : null;
+          const resolved = media ? stageMediaFor(actor) : null;
+          return {
+            slot: actor.slot,
+            character_id: actor.character_id,
+            resource_id: actor.resource_id,
+            display_name: actor.display_name,
+            stage_media: media ? {
+              kind: media.kind,
+              bundle_key: media.bundle_key,
+              animation: media.animation,
+              anchor_x: media.anchor_x,
+              anchor_y: media.anchor_y,
+              scale: media.scale,
+              offset_x: media.offset_x,
+              offset_y: media.offset_y,
+              preview_uri: resolved?.preview_uri,
+            } : null,
+          };
+        }),
+      };
+    }
+
+    function installCalibrationGuides() {
+      if (!guides) return;
+      guides.replaceChildren(...SLOT_X.map((left, index) => {
+        const line = document.createElement("span");
+        line.className = "calibration-slot-guide";
+        line.dataset.slot = `SLOT ${index + 1}`;
+        line.style.setProperty("--guide-x", `${left}%`);
+        return line;
+      }));
+      const toggle = document.querySelector("#guides-toggle");
+      toggle?.addEventListener("change", () => {
+        guides.classList.toggle("is-visible", toggle.checked);
+        guides.setAttribute("aria-hidden", String(!toggle.checked));
+      });
+    }
+
+    function installResourceInspector() {
+      if (!assetInspector || !editorMode) return;
+      const copy = document.querySelector("#copy-resource-map");
+      copy?.addEventListener("click", async () => {
+        const payload = JSON.stringify(resourceMapPayload(), null, 2);
+        try {
+          if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+          await navigator.clipboard.writeText(payload);
+          if (inspectorCopyStatus) inspectorCopyStatus.textContent = "资源定位 JSON 已复制";
+        } catch (_error) {
+          if (inspectorCopyStatus) inspectorCopyStatus.textContent = "当前浏览器不允许直接复制";
+        }
+      });
+      renderResourceInspector();
+    }
+
+    function updateTimelineTransport() {
+      if (!timelineTransport) return;
+      const lastFrame = Math.max(0, timeline.total_frames - 1);
+      const currentFrame = state.frame >= 0 ? Math.min(lastFrame, state.frame) : 0;
+      if (timelineScrubber) {
+        timelineScrubber.max = String(lastFrame);
+        timelineScrubber.value = String(currentFrame);
+      }
+      if (timelinePosition) timelinePosition.value = `${currentFrame} / ${lastFrame}`;
+      if (timelinePlay) {
+        timelinePlay.textContent = state.playing ? "Ⅱ" : "▶";
+        timelinePlay.title = state.playing ? "暂停" : "播放";
+        timelinePlay.setAttribute("aria-label", timelinePlay.title);
+      }
+      if (timelineReference) timelineReference.disabled = !descriptor.presentation?.reference_frame;
+    }
+
+    function installTimelineTransport() {
+      if (!editorMode || !timelineTransport) return;
+      timelinePlay.onclick = () => { if (state.playing) pause(); else play(); };
+      timelineScrubber.oninput = () => seekFrame(Number(timelineScrubber.value));
+      timelineReference.onclick = () => seekReference();
+      updateTimelineTransport();
     }
 
     function pulseMotion(element, className) {
@@ -205,6 +500,16 @@
         window.cancelAnimationFrame(state.typewriterFrame);
         state.typewriterFrame = null;
       }
+    }
+
+    function cancelPlayback() {
+      if (state.playbackFrame !== null) {
+        window.cancelAnimationFrame(state.playbackFrame);
+        state.playbackFrame = null;
+      }
+      state.playing = false;
+      stage.dataset.playback = "paused";
+      updateTimelineTransport();
     }
 
     function startTypewriter() {
@@ -248,9 +553,11 @@
         const label = element.querySelector(".actor-name");
         const portrait = element.querySelector(".actor-portrait");
         const image = element.querySelector(".actor-image");
+        const canvas = element.querySelector(".actor-canvas");
         label.textContent = visible ? actorName(actor) : "";
         const stageMedia = visible ? stageMediaFor(actor) : null;
         const mediaUri = stageMedia?.preview_uri || "";
+        const isRealtimeSpine = Boolean(visible && stageMedia?.kind === "spine" && stageMedia?.bundle_key && spineManager);
         image.onload = () => {
           if (image.dataset.requestUri !== mediaUri) return;
           portrait.classList.toggle("has-image", Boolean(mediaUri));
@@ -270,7 +577,26 @@
         image.alt = mediaUri ? actorName(actor) : "";
         if (!mediaUri) portrait.classList.remove("has-image");
         portrait.dataset.mediaKind = stageMedia?.kind || "none";
+        portrait.classList.toggle("has-realtime-media", isRealtimeSpine);
+        if (isRealtimeSpine) {
+          spineManager.attach(canvas, stageMedia, {
+            ready: () => {
+              if (canvas.closest(".actor-slot") === element) {
+                portrait.classList.add("realtime-ready");
+                updateMediaReadiness();
+              }
+            },
+            error: () => {
+              portrait.classList.remove("has-realtime-media", "realtime-ready");
+              updateMediaReadiness();
+            },
+          });
+        } else {
+          spineManager?.detach(canvas);
+          portrait.classList.remove("realtime-ready", "has-realtime-media");
+        }
         element.dataset.stageMediaKind = actor.stage_media?.kind || "none";
+        element.dataset.stageAnimation = stageMedia?.animation || "";
         element.classList.toggle(
           "has-stage-media",
           Boolean(visible && stageMedia),
@@ -291,10 +617,11 @@
         element.style.setProperty("--actor-luminance", String(actor.presentation.luminance));
         element.setAttribute("aria-label", visible ? `Slot ${actor.slot}: ${actorName(actor)}` : `Slot ${actor.slot}: empty`);
       });
+      if (editorMode) renderResourceInspector();
       updateMediaReadiness();
     }
 
-    function renderEvent(event) {
+    function renderEvent(event, options = {}) {
       cancelTypewriter();
       if (locationLabel && descriptor.location_label) {
         locationLabel.textContent = descriptor.location_label;
@@ -324,23 +651,31 @@
         const eventText = event.text || (event.kind === "background" ? "" : `${event.kind}.`);
         dialogueNext.hidden = !eventText;
         dialoguePanel.classList.toggle("is-hidden", !eventText);
-        copy.textContent = event.kind === "dialogue" ? "" : eventText;
-        caret.hidden = event.kind !== "dialogue";
         state.typewriter = event.kind === "dialogue" ? AA.queueTypewriter(eventText) : null;
-        state.typewriterComplete = event.kind !== "dialogue";
+        if (state.typewriter && options.sample) {
+          const typewriterFrame = state.typewriter.frame(options.sample.localMs);
+          copy.textContent = typewriterFrame.visibleText;
+          state.typewriterComplete = typewriterFrame.complete;
+          caret.hidden = typewriterFrame.complete;
+        } else {
+          copy.textContent = event.kind === "dialogue" ? "" : eventText;
+          caret.hidden = event.kind !== "dialogue";
+          state.typewriterComplete = event.kind !== "dialogue";
+        }
         status.textContent = event.kind === "dialogue" ? "Dialogue" : event.kind;
         renderActors(active);
-        if (eventText) pulseMotion(dialoguePanel, "is-entering");
-        if (eventText) pulseMotion(speakerLine, "is-revealing");
-        if (state.typewriter) startTypewriter();
+        if (!options.suppressMotion && eventText) pulseMotion(dialoguePanel, "is-entering");
+        if (!options.suppressMotion && eventText) pulseMotion(speakerLine, "is-revealing");
+        if (state.typewriter && !options.sample) startTypewriter();
       }
-      if (state.motion) {
+      if (state.motion && !options.suppressMotion) {
         const motion = state.motion;
         state.motion = null;
         pulseMotion(actorElements.get(motion.slot), motion.kind === "exit" ? "is-exiting" : "is-entering");
       }
       progress.textContent = `${Math.max(0, state.eventIndex + 1)} / ${descriptor.events.length}`;
       advance.disabled = state.eventIndex >= descriptor.events.length - 1;
+      updateTimelineTransport();
     }
 
     function backgroundForEvent(event) {
@@ -353,7 +688,7 @@
       return state.background;
     }
 
-    function applyEvent(event) {
+    function applyEvent(event, options = {}) {
       if (event.kind === "enter" && event.slot) {
         const previous = state.actors[event.slot - 1];
         const catalogActor = actorCatalog.get(event.character_id) || {};
@@ -374,25 +709,136 @@
         AA.setPos(character, AA.slotWorldPosition(event.slot));
         AA.fadeAnimation(character, true).complete();
         AA.setOnTop(character);
-        state.motion = { slot: event.slot, kind: "enter" };
+        if (options.motion !== false) state.motion = { slot: event.slot, kind: "enter" };
       }
       if (event.kind === "exit" && event.slot) {
         AA.hideAnimation(state.actors[event.slot - 1].presentation);
         state.actors[event.slot - 1] = {
           ...state.actors[event.slot - 1], character_id: null, resource_id: null, state: "hidden",
         };
-        state.motion = { slot: event.slot, kind: "exit" };
+        if (options.motion !== false) state.motion = { slot: event.slot, kind: "exit" };
       }
       if (event.kind === "background") {
         const nextBackground = backgroundForEvent(event);
         if (nextBackground) {
           state.background = nextBackground;
-          loadPreviewBackground(nextBackground);
+          if (options.loadBackground !== false) loadPreviewBackground(nextBackground);
         }
       }
     }
 
+    function applySampledEvent(sample) {
+      const event = sample.item?.event;
+      if (!event) return;
+      if (event.kind === "exit" && event.slot) {
+        const actor = state.actors[event.slot - 1];
+        actor.presentation.opacity = AA.fadeAnimation(
+          actor.presentation,
+          false,
+          sample.item.duration_ms,
+        ).sample(sample.progress);
+        return;
+      }
+      applyEvent(event, { motion: false, loadBackground: false });
+      if (event.kind === "enter" && event.slot) {
+        const actor = state.actors[event.slot - 1];
+        actor.presentation.opacity = AA.fadeAnimation(
+          actor.presentation,
+          true,
+          sample.item.duration_ms,
+        ).sample(sample.progress);
+      }
+    }
+
+    function seekFrame(frame, options = {}) {
+      if (!options.fromPlayback) cancelPlayback();
+      const sample = AA.sampleRenderTimeline(timeline, frame);
+      cancelTypewriter();
+      const checkpoint = sample.eventIndex < 0
+        ? 0
+        : Math.max(...[...seekStateCache.keys()].filter((index) => index <= sample.eventIndex));
+      restoreSceneSnapshot(seekStateCache.get(checkpoint));
+      for (let index = checkpoint; index < sample.eventIndex; index += 1) {
+        applyEvent(timeline.events[index].event, { motion: false, loadBackground: false });
+        if (!seekStateCache.has(index + 1)) {
+          seekStateCache.set(index + 1, captureSceneSnapshot());
+        }
+      }
+      applySampledEvent(sample);
+      state.eventIndex = sample.eventIndex;
+      state.frame = sample.frame;
+      state.motion = null;
+      loadPreviewBackground(state.background, { animate: false });
+      renderEvent(sample.item?.event || null, { sample, suppressMotion: true });
+      const spineTimeMs = Number.isFinite(options.spineTimeMs)
+        ? Math.max(0, options.spineTimeMs)
+        : sample.frame * 1000 / timeline.frame_rate;
+      spineManager?.seek(spineTimeMs / 1000);
+      stage.dataset.currentFrame = String(sample.frame);
+      stage.dataset.currentEvent = sample.item?.event_id || "";
+      updateTimelineTransport();
+      return sample;
+    }
+
+    function seekEvent(eventIndex, options = {}) {
+      const frame = AA.timelineFrameForEvent(timeline, eventIndex, options.complete !== false);
+      return seekFrame(frame, options);
+    }
+
+    function seekReference() {
+      const reference = descriptor.presentation?.reference_frame;
+      if (!reference) return null;
+      const spineTimeMs = Number(reference.spine_time_ms);
+      return seekEvent(reference.target_event_index, {
+        complete: reference.dialogue_complete !== false,
+        spineTimeMs: Number.isFinite(spineTimeMs) ? spineTimeMs : undefined,
+      });
+    }
+
+    function pause() {
+      cancelPlayback();
+      spineManager?.pause();
+    }
+
+    function play(options = {}) {
+      if (!timeline.total_frames) return;
+      cancelPlayback();
+      cancelTypewriter();
+      const requested = Number(options.fromFrame);
+      const startFrame = Number.isFinite(requested)
+        ? Math.max(0, Math.min(timeline.total_frames - 1, Math.floor(requested)))
+        : state.frame >= 0 && state.frame < timeline.total_frames - 1 ? state.frame : 0;
+      const startedAt = window.performance.now() - startFrame * 1000 / timeline.frame_rate;
+      state.playing = true;
+      stage.dataset.playback = "playing";
+      updateTimelineTransport();
+      spineManager?.pause();
+      let lastRenderedFrame = -1;
+      const tick = (now) => {
+        if (!state.playing) return;
+        const nextFrame = Math.floor((now - startedAt) * timeline.frame_rate / 1000);
+        if (nextFrame >= timeline.total_frames) {
+          seekFrame(timeline.total_frames - 1, { fromPlayback: true });
+          cancelPlayback();
+          return;
+        }
+        if (nextFrame !== lastRenderedFrame) {
+          seekFrame(nextFrame, { fromPlayback: true });
+          lastRenderedFrame = nextFrame;
+        }
+        state.playbackFrame = window.requestAnimationFrame(tick);
+      };
+      state.playbackFrame = window.requestAnimationFrame(tick);
+    }
+
     function advanceEvent() {
+      cancelPlayback();
+      spineManager?.resume();
+      stage.dataset.playback = "live";
+      state.frame = -1;
+      stage.dataset.currentFrame = "";
+      stage.dataset.currentEvent = "";
+      updateTimelineTransport();
       if (state.typewriter && state.eventIndex >= 0 && !state.typewriterComplete) {
         cancelTypewriter();
         copy.textContent = state.typewriter.complete();
@@ -408,33 +854,51 @@
       renderEvent(event);
     }
 
-    function loadPreviewBackground(background) {
+    function loadPreviewBackground(background, options = {}) {
       const previewUri = resolvePreviewUri(background && background.preview_uri);
       const focusX = clampUnit(background?.focus_x, 0.5);
       const focusY = clampUnit(background?.focus_y, 0.5);
+      stageBackground.style.setProperty(
+        "--background-zoom",
+        String(clampBackgroundZoom(background?.zoom)),
+      );
       stageBackground.style.backgroundSize = "cover";
       stageBackground.style.backgroundPosition = `${focusX * 100}% ${focusY * 100}%`;
       if (!isSafePreviewUri(previewUri)) {
+        state.backgroundRequestUri = "";
         state.backgroundPending = false;
         stageBackground.style.backgroundImage = "";
+        delete stageBackground.dataset.previewUri;
         stage.classList.remove("has-background-image");
         updateMediaReadiness();
         return;
       }
+      if (stageBackground.dataset.previewUri === previewUri) {
+        state.backgroundRequestUri = previewUri;
+        state.backgroundPending = false;
+        updateMediaReadiness();
+        return;
+      }
+      state.backgroundRequestUri = previewUri;
       state.backgroundPending = true;
       updateMediaReadiness();
       const image = new Image();
       image.addEventListener("load", () => {
+        if (state.backgroundRequestUri !== previewUri) return;
         stageBackground.style.backgroundImage = `url("${previewUri}")`;
+        stageBackground.dataset.previewUri = previewUri;
         stage.classList.add("has-background-image");
         stageBackground.classList.remove("is-transitioning");
-        void stageBackground.offsetWidth;
-        stageBackground.classList.add("is-transitioning");
+        if (options.animate !== false) {
+          void stageBackground.offsetWidth;
+          stageBackground.classList.add("is-transitioning");
+        }
         state.backgroundPending = false;
         updateMediaReadiness();
         status.textContent = "Background ready";
       });
       image.addEventListener("error", () => {
+        if (state.backgroundRequestUri !== previewUri) return;
         state.backgroundPending = false;
         updateMediaReadiness();
         status.textContent = "Background placeholder";
@@ -453,8 +917,14 @@
       menuToggle.checked = Boolean(overlay.menu);
       autoButton.classList.toggle("is-enabled", Boolean(overlay.auto_enabled));
       menuButton.classList.toggle("is-enabled", Boolean(overlay.menu_enabled));
-      autoButton.textContent = overlay.auto_label || "AUTO";
-      menuButton.textContent = overlay.menu_label || "MENU";
+      const setLabel = (button, value, fallback) => {
+        const label = document.createElement("span");
+        label.className = "stage-overlay-label";
+        label.textContent = value || fallback;
+        button.replaceChildren(label);
+      };
+      setLabel(autoButton, overlay.auto_label, "AUTO");
+      setLabel(menuButton, overlay.menu_label, "MENU");
       autoButton.setAttribute("aria-pressed", String(autoButton.classList.contains("is-enabled")));
       menuButton.setAttribute("aria-pressed", String(menuButton.classList.contains("is-enabled")));
       const apply = () => {
@@ -470,6 +940,8 @@
         pulseMotion(autoButton, "is-pressing");
         autoButton.classList.toggle("is-enabled");
         autoButton.setAttribute("aria-pressed", String(autoButton.classList.contains("is-enabled")));
+        if (autoButton.classList.contains("is-enabled")) play();
+        else pause();
       };
       menuButton.onclick = (event) => {
         event.stopPropagation();
@@ -480,36 +952,89 @@
       apply();
     }
 
-    advance.addEventListener("click", advanceEvent);
-    stage.addEventListener("click", (event) => {
+    const onStageClick = (event) => {
+      const actorTarget = event.target.closest(".actor-slot");
+      if (editorMode && actorTarget) {
+        event.stopPropagation();
+        setInspectedSlot(Number(actorTarget.dataset.slot));
+        return;
+      }
       if (!event.target.closest("button, select, .runtime-controls, .stage-overlay-controls")) advanceEvent();
-    });
-    stage.ownerDocument.addEventListener("keydown", (event) => {
+    };
+    const onKeyDown = (event) => {
       if (event.key === " " || event.key === "ArrowRight") {
         event.preventDefault();
         advanceEvent();
       }
-    });
+    };
+    const onVisibilityChange = () => {
+      if (stage.ownerDocument.visibilityState === "hidden" && state.playing) pause();
+    };
+    advance.addEventListener("click", advanceEvent);
+    stage.addEventListener("click", onStageClick);
+    stage.ownerDocument.addEventListener("keydown", onKeyDown);
+    stage.ownerDocument.addEventListener("visibilitychange", onVisibilityChange);
     loadPreviewBackground(state.background);
+    installCalibrationGuides();
+    installResourceInspector();
     installOverlayControls();
+    installTimelineTransport();
     renderEvent(null);
-    if (locationLabel && descriptor.presentation?.location_mode !== "persistent") {
-      window.setTimeout(() => locationLabel.classList.add("is-dismissed"), 2600);
-    }
+    const locationTimer = !captureMode
+      && locationLabel
+      && descriptor.presentation?.location_mode !== "persistent"
+      ? window.setTimeout(() => locationLabel.classList.add("is-dismissed"), 2600)
+      : null;
     // The first visible cast enters as a restrained, staggered GalGame
     // entrance instead of appearing fully formed on the first frame.
-    window.requestAnimationFrame(() => {
+    const initialMotionTimers = [];
+    const initialMotionFrame = captureMode ? null : window.requestAnimationFrame(() => {
       if (!state.initialMotionPending) return;
       state.initialMotionPending = false;
       initialActors.filter((actor) => actor && actor.state === "visible")
         .forEach((actor, index) => {
-          window.setTimeout(() => pulseMotion(actorElements.get(actor.slot), "is-entering"), index * 70);
+          initialMotionTimers.push(window.setTimeout(
+            () => pulseMotion(actorElements.get(actor.slot), "is-entering"),
+            index * 70,
+          ));
         });
     });
-    return {
+    if (captureMode) state.initialMotionPending = false;
+    const controller = {
       advance: advanceEvent,
+      pause,
+      play,
+      seekEvent,
+      seekFrame,
+      seekReference,
       state,
+      timeline,
+      dispose() {
+        cancelPlayback();
+        cancelTypewriter();
+        state.initialMotionPending = false;
+        if (initialMotionFrame !== null) window.cancelAnimationFrame(initialMotionFrame);
+        initialMotionTimers.forEach((timer) => window.clearTimeout(timer));
+        if (locationTimer !== null) window.clearTimeout(locationTimer);
+        advance.removeEventListener("click", advanceEvent);
+        stage.removeEventListener("click", onStageClick);
+        stage.ownerDocument.removeEventListener("keydown", onKeyDown);
+        stage.ownerDocument.removeEventListener("visibilitychange", onVisibilityChange);
+        if (timelinePlay) timelinePlay.onclick = null;
+        if (timelineScrubber) timelineScrubber.oninput = null;
+        if (timelineReference) timelineReference.onclick = null;
+        stage.__haloCueStageScaleObserver?.disconnect?.();
+        if (stage.__haloCueStageScaleHandler) {
+          window.removeEventListener("resize", stage.__haloCueStageScaleHandler);
+          stage.__haloCueStageScaleHandler = null;
+        }
+        spineManager?.dispose();
+        if (stage.__haloCueSpineManager === spineManager) stage.__haloCueSpineManager = null;
+        if (stage.__haloCueController === controller) stage.__haloCueController = null;
+      },
     };
+    stage.__haloCueController = controller;
+    return controller;
   }
 
   window.HaloCueScenePreview = { mount, SUPPORTED_SCHEMA };
@@ -523,13 +1048,25 @@
 
   function boot(demoDescriptor) {
     try {
-      const editorControls = new URLSearchParams(window.location.search).get("editor") === "1";
-      document.querySelector(".preview-shell")?.classList.toggle("has-editor-controls", editorControls);
-      const controller = mount(demoDescriptor);
+      const params = new URLSearchParams(window.location.search);
+      const editorControls = params.get("editor") === "1";
+      const embedded = params.get("embedded") === "1";
+      const captureMode = params.get("capture") === "1";
+      const previewShell = document.querySelector(".preview-shell");
+      previewShell?.classList.toggle("has-editor-controls", editorControls);
+      previewShell?.classList.toggle("is-embedded", embedded);
+      previewShell?.classList.toggle("is-capture", captureMode);
+      const controller = mount(demoDescriptor, null, {
+        capture: captureMode,
+        timeline: window.HALO_CUE_RENDER_TIMELINE,
+      });
       const stage = document.querySelector("#preview-stage");
       const fontSelect = document.querySelector("#font-select");
       document.querySelector("#scene-title").textContent = "预览";
       fontSelect?.addEventListener("change", () => { stage.dataset.font = fontSelect.value; });
+      if (params.get("reference") === "1") controller.seekReference();
+      else if (/^\d+$/.test(params.get("frame") || "")) controller.seekFrame(Number(params.get("frame")));
+      if (params.get("play") === "1") controller.play({ fromFrame: Math.max(0, controller.state.frame) });
       window.HaloCueScenePreview.controller = controller;
     } catch (exception) {
       showError(exception);

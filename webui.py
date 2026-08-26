@@ -64,6 +64,7 @@ from aa_project_assets import assert_aa_closed, validate_windows_path_component 
 from aa_stage_media import (  # noqa: E402
     StageMediaError,
     stage_background_from_catalog,
+    stage_bundle_data,
     stage_frame_path,
 )
 from aa_registry import AssetRegistrationError, RegistrationConflictError  # noqa: E402
@@ -4127,7 +4128,7 @@ def get_draft_detail_data(token, store=None):
     }
 
 
-def build_csp_headers() -> Dict[str, str]:
+def build_csp_headers(*, frame_ancestors: str = "'none'") -> Dict[str, str]:
     return {
         "Content-Security-Policy": (
             "default-src 'none'; "
@@ -4135,11 +4136,13 @@ def build_csp_headers() -> Dict[str, str]:
             "style-src 'self'; "
             "img-src 'self' data:; "
             "media-src 'self' blob:; "
-            "connect-src 'self'; "
+            # Spine's browser AssetManager reads the authorized in-memory
+            # bundle through data/blob URLs; no remote origin is permitted.
+            "connect-src 'self' data: blob:; "
             "font-src 'self'; "
             "object-src 'none'; "
             "base-uri 'none'; "
-            "frame-ancestors 'none'; "
+            f"frame-ancestors {frame_ancestors}; "
             "form-action 'self'"
         ),
         "X-Content-Type-Options": "nosniff",
@@ -4265,7 +4268,10 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
 
     def _apply_security_headers(self):
-        for name, value in build_csp_headers().items():
+        # The scene preview is framed only by HaloCue's same-origin editor.
+        # Every other route keeps the stricter no-framing default.
+        frame_ancestors = "'self'" if self.path.startswith("/scene-preview/") else "'none'"
+        for name, value in build_csp_headers(frame_ancestors=frame_ancestors).items():
             self.send_header(name, value)
 
     def do_GET(self):
@@ -4346,6 +4352,23 @@ class H(BaseHTTPRequestHandler):
                         "e": str(exc),
                     })
                 return self._send_preview_file(frame, "image/png", cache_control="private, no-cache")
+            if p == "/api/resources/stage/spine/data":
+                try:
+                    catalog, resource_cache = _stage_catalog_and_cache()
+                    payload = stage_bundle_data(
+                        CFG.get("overrides"),
+                        q.get("key", ""),
+                        cache_root=LAYOUT.out_root / "stage-media",
+                        catalog=catalog,
+                        resource_cache=resource_cache,
+                    )
+                except StageMediaError as exc:
+                    return self._send(404, {
+                        "ok": False,
+                        "code": "stage_spine_bundle_unavailable",
+                        "e": str(exc),
+                    })
+                return self._send(200, payload)
             if p == "/api/resources/stage/background":
                 key = q.get("key", "")
                 catalog, resource_cache = _stage_catalog_and_cache()

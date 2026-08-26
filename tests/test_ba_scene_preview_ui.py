@@ -55,9 +55,12 @@ def test_official_p69_descriptor_locks_reference_frame_and_stage_media():
     assert descriptor["schema_version"] == "scene-descriptor/1.0"
     reference = descriptor["presentation"]["reference_frame"]
     assert reference["id"] == "official-p69-final-v9"
+    assert reference["timeline_schema_version"] == "render-timeline/1.0"
     assert reference["viewport"] == {"width": 1280, "height": 720}
     assert reference["design_canvas"] == {"width": 2560, "height": 1440}
     assert reference["target_event_index"] == 0
+    assert reference["resolved_frame"] == 35
+    assert reference["spine_time_ms"] == 1166.667
     assert reference["dialogue_complete"] is True
     assert reference["overlay_controls_visible"] is True
     assert reference["anchors"]["auto_button"] == {
@@ -68,12 +71,38 @@ def test_official_p69_descriptor_locks_reference_frame_and_stage_media():
     }
     assert [actor["slot"] for actor in descriptor["actors"]] == [1, 2, 3, 4, 5]
     assert descriptor["actors"][0]["stage_media"]["animation"] == "06"
-    assert descriptor["actors"][0]["stage_media"]["scale"] == 1.55
-    assert descriptor["actors"][0]["stage_media"]["offset_y"] == 812
+    assert descriptor["actors"][0]["stage_media"]["scale"] == 1.704
+    assert descriptor["actors"][0]["stage_media"]["offset_y"] == 1038
     assert descriptor["actors"][4]["stage_media"]["animation"] == "00"
-    assert descriptor["actors"][4]["stage_media"]["scale"] == 1.62
-    assert descriptor["actors"][4]["stage_media"]["offset_y"] == 216
+    assert descriptor["actors"][4]["stage_media"]["scale"] == 2.266
+    assert descriptor["actors"][4]["stage_media"]["offset_y"] == 766
     assert descriptor["events"][0]["kind"] == "dialogue"
+    assert descriptor["background"]["zoom"] == 1.068
+    assert descriptor["presentation"]["overlay_controls"]["auto_label"] == "自动"
+    assert descriptor["presentation"]["overlay_controls"]["menu_label"] == "菜单"
+    assert descriptor["presentation"]["frame_rate"] == 30
+
+
+def test_realtime_spine_measures_the_selected_animation_pose():
+    source = (PREVIEW_ROOT / "spine-preview.js").read_text(encoding="utf-8")
+    select_start = source.index("    selectAnimation() {")
+    measure_start = source.index("    resizeAndMeasure() {")
+    resolution_start = source.index("    applyCanvasResolution(")
+    render_start = source.index("    render() {")
+    dispose_start = source.index("    dispose() {")
+
+    select_body = source[select_start:measure_start]
+    measure_body = source[measure_start:resolution_start]
+    render_body = source[render_start:dispose_start]
+
+    assert "state.setAnimation(0, name, true);" in select_body
+    assert "state.update(0);" in select_body
+    assert "state.apply(skeleton);" in select_body
+    assert "setToSetupPose" not in measure_body
+    assert "const pad = 1;" in render_body
+    assert "setPaused(paused)" in source
+    assert "seek(seconds)" in source
+    assert 'document.addEventListener("visibilitychange"' in source
 
 
 @pytest.mark.browser
@@ -122,7 +151,9 @@ def test_official_p69_reference_frame_keeps_normalized_geometry(
             # One advance starts typewriter playback; the next commits the
             # same event to its deterministic completed frame.
             page.locator("#preview-stage").click(position={"x": viewport[0] / 2, "y": viewport[1] / 4})
-            page.wait_for_timeout(55)
+            page.wait_for_function(
+                "() => document.querySelector('#dialogue-copy').innerText !== ''"
+            )
             assert page.locator("#dialogue-copy").inner_text() != ""
             assert page.locator("#dialogue-caret").is_visible()
             assert page.locator(".dialogue-panel").is_visible()
@@ -152,6 +183,9 @@ def test_official_p69_reference_frame_keeps_normalized_geometry(
                         const rect = document.querySelector(selector).getBoundingClientRect();
                         return (rect.x + rect.width / 2 - sr.x) / sr.width;
                     };
+                    const speakerLine = document.querySelector('.speaker-line');
+                    const speakerLineRect = speakerLine.getBoundingClientRect();
+                    const speakerLineStyle = getComputedStyle(speakerLine, '::after');
                     return {
                         scale: Number.parseFloat(getComputedStyle(stage).getPropertyValue('--stage-scale')),
                         panel: box('.dialogue-panel'),
@@ -159,10 +193,21 @@ def test_official_p69_reference_frame_keeps_normalized_geometry(
                         secondary: box('#club-name'),
                         text: box('#dialogue-text'),
                         shade: box('.dialogue-shade'),
+                        shadeBackground: getComputedStyle(document.querySelector('.dialogue-shade')).backgroundImage,
                         slot1: center('.actor-slot[data-slot="1"]'),
                         slot5: center('.actor-slot[data-slot="5"]'),
                         auto: box('#auto-button'),
                         menu: box('#menu-button'),
+                        speakerLineBefore: getComputedStyle(document.querySelector('.speaker-line'), '::before').content,
+                        speakerLineAfter: getComputedStyle(document.querySelector('.speaker-line'), '::after').content,
+                        speakerDivider: {
+                            x: (speakerLineRect.x + Number.parseFloat(speakerLineStyle.left) - sr.x) / sr.width,
+                            y: (speakerLineRect.y + Number.parseFloat(speakerLineStyle.top) - sr.y) / sr.height,
+                            right: (speakerLineRect.right - Number.parseFloat(speakerLineStyle.right) - sr.x) / sr.width,
+                            height: Number.parseFloat(speakerLineStyle.height) / sr.height,
+                            color: speakerLineStyle.backgroundColor,
+                        },
+                        overlayLabelFilter: getComputedStyle(document.querySelector('#auto-button .stage-overlay-label')).filter,
                         locationHidden: document.querySelector('#location-label').hidden,
                         caretHidden: document.querySelector('#dialogue-caret').hidden,
                         activeSlot: document.querySelector('.actor-slot.is-active')?.dataset.slot || null,
@@ -191,13 +236,238 @@ def test_official_p69_reference_frame_keeps_normalized_geometry(
             assert metrics["locationHidden"] is True
             assert metrics["caretHidden"] is True
             assert metrics["activeSlot"] == "1"
+            assert metrics["speakerLineBefore"] == '\"\"'
+            assert metrics["speakerLineAfter"] == '\"\"'
+            assert abs(metrics["speakerDivider"]["x"] - 0.1) < x_tolerance
+            assert abs(metrics["speakerDivider"]["y"] - 376 / 478) < y_tolerance
+            assert abs(metrics["speakerDivider"]["right"] - 2335 / 2560) < x_tolerance
+            assert abs(metrics["speakerDivider"]["height"] - 3 / 1440) < y_tolerance
+            assert metrics["speakerDivider"]["color"] == "rgba(217, 232, 245, 0.2)"
+            assert metrics["overlayLabelFilter"] == "none"
+            assert metrics["shadeBackground"].count("linear-gradient") == 1
+            assert "0.84" in metrics["shadeBackground"]
             assert page.locator(".render-options").evaluate(
                 "element => getComputedStyle(element).opacity"
             ) == "0"
             assert page.locator("#speaker-name").inner_text() == "优香"
             assert page.locator("#club-name").inner_text() == "研讨会"
+            assert page.locator("#auto-button .stage-overlay-label").inner_text() == "自动"
+            assert page.locator("#menu-button .stage-overlay-label").inner_text() == "菜单"
+            assert page.locator("#dialogue-copy").evaluate(
+                "element => getComputedStyle(element).filter"
+            ).startswith("blur(")
             assert page.locator("#auto-button").is_visible()
             assert page.locator("#menu-button").is_visible()
+            browser.close()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+@pytest.mark.browser
+def test_reference_query_seeks_the_completed_p69_frame_without_clicks():
+    playwright = pytest.importorskip("playwright.sync_api")
+    server, thread = _serve_preview()
+    descriptor = json.loads(
+        (PREVIEW_ROOT / "official-p69.scene-descriptor.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    descriptor["background"]["preview_uri"] = "./assets/demo-conference-room.jpg"
+    for actor in descriptor["actors"]:
+        media = actor.get("stage_media")
+        if media:
+            media["kind"] = "spine-frame"
+            media["preview_uri"] = "./assets/demo-conference-room.png"
+            media.pop("bundle_key", None)
+            media.pop("animation", None)
+    try:
+        with playwright.sync_playwright() as runtime:
+            try:
+                browser = runtime.chromium.launch(headless=True)
+            except Exception as exc:  # pragma: no cover - depends on local browser install
+                if "Executable doesn't exist" in str(exc):
+                    pytest.skip("Playwright Chromium is not installed")
+                raise
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+            page.add_init_script(
+                "window.HALO_CUE_SCENE_DESCRIPTOR = "
+                + json.dumps(descriptor, ensure_ascii=False)
+                + ";"
+            )
+            page.goto(
+                f"http://127.0.0.1:{server.server_port}/index.html"
+                "?renderer=static&reference=1"
+            )
+            page.wait_for_function(
+                "() => document.querySelector('#preview-stage').dataset.currentEvent === 'event/yuuka-line'"
+            )
+
+            metrics = page.evaluate(
+                """() => {
+                    const controller = window.HaloCueScenePreview.controller;
+                    const item = controller.timeline.events[0];
+                    return {
+                        frame: controller.state.frame,
+                        expectedFrame: item.end_frame - 1,
+                        schema: controller.timeline.schema_version,
+                        playback: document.querySelector('#preview-stage').dataset.playback,
+                    };
+                }"""
+            )
+            assert metrics == {
+                "frame": metrics["expectedFrame"],
+                "expectedFrame": metrics["expectedFrame"],
+                "schema": "render-timeline/1.0",
+                "playback": "paused",
+            }
+            assert page.locator("#dialogue-copy").inner_text() == "哈？你们这是什么反应？"
+            assert page.locator("#dialogue-caret").is_hidden()
+            assert page.locator('.actor-slot.is-active[data-slot="1"]').count() == 1
+            browser.close()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+@pytest.mark.browser
+def test_controller_seeks_plays_and_pauses_the_multi_event_timeline():
+    playwright = pytest.importorskip("playwright.sync_api")
+    server, thread = _serve_preview()
+    try:
+        with playwright.sync_playwright() as runtime:
+            try:
+                browser = runtime.chromium.launch(headless=True)
+            except Exception as exc:  # pragma: no cover - depends on local browser install
+                if "Executable doesn't exist" in str(exc):
+                    pytest.skip("Playwright Chromium is not installed")
+                raise
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+            page.goto(
+                f"http://127.0.0.1:{server.server_port}/index.html?renderer=static"
+            )
+            page.wait_for_function("() => Boolean(window.HaloCueScenePreview.controller)")
+
+            page.evaluate("() => window.HaloCueScenePreview.controller.seekEvent(4)")
+            assert page.locator("#dialogue-copy").inner_text().startswith(
+                "The synthetic preview is ready."
+            )
+            assert page.locator('.actor-slot.is-active[data-slot="4"]').count() == 1
+            assert page.locator('.actor-slot.is-visible[data-slot="3"]').count() == 1
+
+            page.evaluate(
+                "() => window.HaloCueScenePreview.controller.seekEvent(2, {complete: false})"
+            )
+            assert page.locator("#dialogue-copy").inner_text() == ""
+            assert page.locator("#dialogue-caret").is_visible()
+            assert page.locator('.actor-slot.is-active[data-slot="3"]').count() == 1
+            start_frame = int(page.locator("#preview-stage").get_attribute("data-current-frame"))
+
+            page.evaluate(
+                "frame => window.HaloCueScenePreview.controller.play({fromFrame: frame})",
+                start_frame,
+            )
+            page.wait_for_function(
+                "start => Number(document.querySelector('#preview-stage').dataset.currentFrame) > start",
+                arg=start_frame,
+            )
+            page.evaluate("() => window.HaloCueScenePreview.controller.pause()")
+            paused_frame = page.locator("#preview-stage").get_attribute("data-current-frame")
+            page.wait_for_timeout(100)
+            assert page.locator("#preview-stage").get_attribute("data-current-frame") == paused_frame
+            assert page.locator("#preview-stage").get_attribute("data-playback") == "paused"
+            browser.close()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+@pytest.mark.browser
+def test_editor_mode_exposes_resource_locator_and_calibration_guides():
+    playwright = pytest.importorskip("playwright.sync_api")
+    server, thread = _serve_preview()
+    descriptor = json.loads(
+        (PREVIEW_ROOT / "official-p69.scene-descriptor.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    descriptor["background"]["preview_uri"] = "./assets/demo-conference-room.jpg"
+    for actor in descriptor["actors"]:
+        media = actor.get("stage_media")
+        if media:
+            media["kind"] = "spine-frame"
+            media["preview_uri"] = "./assets/demo-conference-room.png"
+            media.pop("bundle_key", None)
+            media.pop("animation", None)
+    try:
+        with playwright.sync_playwright() as runtime:
+            try:
+                browser = runtime.chromium.launch(headless=True)
+            except Exception as exc:  # pragma: no cover - depends on local browser install
+                if "Executable doesn't exist" in str(exc):
+                    pytest.skip("Playwright Chromium is not installed")
+                raise
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+            page.add_init_script(
+                "window.HALO_CUE_SCENE_DESCRIPTOR = "
+                + json.dumps(descriptor, ensure_ascii=False)
+                + ";"
+            )
+            page.goto(f"http://127.0.0.1:{server.server_port}/index.html?editor=1")
+            page.wait_for_selector("#asset-inspector")
+            page.wait_for_selector("#preview-stage.has-background-image")
+
+            inspector = page.locator("#asset-inspector")
+            assert inspector.evaluate("element => getComputedStyle(element).opacity") == "1"
+            transport = page.locator("#timeline-transport")
+            assert transport.evaluate("element => getComputedStyle(element).opacity") == "1"
+            assert page.locator("#timeline-scrubber").get_attribute("max") == "35"
+            page.locator("#timeline-reference").click()
+            assert page.locator("#preview-stage").get_attribute("data-current-frame") == "35"
+            assert page.locator("#timeline-position").inner_text() == "35 / 35"
+            layout = page.evaluate(
+                """() => {
+                    const box = selector => document.querySelector(selector).getBoundingClientRect();
+                    const overlaps = (left, right) => !(
+                        left.right <= right.left || right.right <= left.left
+                        || left.bottom <= right.top || right.bottom <= left.top
+                    );
+                    const stage = box('#preview-stage');
+                    const inspector = box('#asset-inspector');
+                    const timeline = box('#timeline-transport');
+                    const options = box('.render-options');
+                    return {
+                        stageInspector: overlaps(stage, inspector),
+                        stageTimeline: overlaps(stage, timeline),
+                        timelineOptions: overlaps(timeline, options),
+                    };
+                }"""
+            )
+            assert layout == {
+                "stageInspector": False,
+                "stageTimeline": False,
+                "timelineOptions": False,
+            }
+            page.locator("#timeline-play").click()
+            page.wait_for_function(
+                "() => document.querySelector('#preview-stage').dataset.playback === 'playing'"
+            )
+            page.locator("#timeline-play").click()
+            assert page.locator("#preview-stage").get_attribute("data-playback") == "paused"
+            rows = inspector.locator(".asset-resource-row")
+            assert rows.count() == 2
+            assert "character/yuuka" in rows.filter(has_text="优香").inner_text()
+            assert "SPINE-FRAME" in rows.filter(has_text="优香").inner_text()
+            assert "character/alice" in rows.filter(has_text="爱丽丝").inner_text()
+
+            page.locator("#guides-toggle").check()
+            assert page.locator("#calibration-guides").get_attribute("aria-hidden") == "false"
+            assert page.locator(".calibration-slot-guide").count() == 5
+
+            page.locator('.actor-slot[data-slot="5"]').click()
+            assert page.locator("#inspector-selection").inner_text() == "已选 SLOT 5 · 爱丽丝"
+            assert rows.filter(has_text="爱丽丝").get_attribute("class").find("is-selected") >= 0
+            assert page.locator("#event-progress").inner_text() == "1 / 1"
             browser.close()
     finally:
         server.shutdown()
@@ -226,6 +496,12 @@ def test_preview_renders_five_slots_advances_dialogue_and_switches_font(tmp_path
             assert page.locator("#auto-button").is_hidden() is True
             assert page.locator("#menu-button").is_hidden() is True
             assert page.locator(".render-options").evaluate(
+                "element => getComputedStyle(element).opacity"
+            ) == "0"
+            assert page.locator("#asset-inspector").evaluate(
+                "element => getComputedStyle(element).opacity"
+            ) == "0"
+            assert page.locator("#timeline-transport").evaluate(
                 "element => getComputedStyle(element).opacity"
             ) == "0"
             page.locator("#auto-toggle").check()

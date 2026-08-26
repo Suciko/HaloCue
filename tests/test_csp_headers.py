@@ -32,6 +32,21 @@ def test_csp_and_security_headers():
     assert headers.get("Referrer-Policy") == "no-referrer"
 
 
+def test_scene_preview_allows_only_same_origin_editor_embedding():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        with urlopen(base + "/scene-preview/index.html?embedded=1") as response:
+            csp = response.headers["Content-Security-Policy"]
+        assert "frame-ancestors 'self'" in csp
+        assert "frame-ancestors 'none'" not in csp
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_static_runtime_files_have_safe_mime_headers_and_reject_traversal():
     """The browser must be able to load modules without exposing adjacent files."""
     server = ThreadingHTTPServer(("127.0.0.1", 0), H)

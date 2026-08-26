@@ -49,3 +49,45 @@ The next fidelity pass should calibrate per-skeleton origin offsets/idle
 animation selection against a matched official frame. The current stage adapter
 uses tight transparent Spine crops, so skeleton-specific local origins remain
 the main remaining visual variable.
+
+## Latest raster-fidelity pass
+
+- The local AA font inventory confirms `NotoSansSC-Medium` for dialogue copy and
+  `NotoSansSC-Bold` for the primary speaker label. Those static files are bundled
+  under `apps/desktop-client/scene-preview/assets/fonts` so Chromium does not
+  interpolate the variable font differently at the 720p reference scale.
+- The speaker and club labels use small scale corrections to match the official
+  glyph box without moving their normalized layout anchors. Body text is
+  narrowed slightly and rendered with a symmetric soft outline, removing the
+  visible right/down duplicate shadow.
+- The dialogue shade now eases in continuously at its upper edge. The separator
+  is a lower, dim 2px soft line with the cyan accent aligned to it, matching the
+  official frame without a bright one-pixel rule.
+
+Validation: `32 passed` across the AA runtime, stage-media, BA preview, and
+render-timeline suites; JavaScript syntax checks and `git diff --check` pass.
+
+## Realtime Spine follow-up
+
+- `apps/desktop-client/scene-preview/spine-preview.js` now loads Spine 3.8 or
+  4.2 lazily in the browser, plays the descriptor animation, and renders a
+  transparent Canvas per visible `stage_media.kind = "spine"` actor.
+- `webui.py` exposes `/api/resources/stage/spine/data` using the existing
+  authorized bundle resolver. It returns data URIs only; physical AA paths stay
+  server-side. The CSP permits only same-origin, `data:`, and `blob:` asset
+  reads needed by the local Spine AssetManager.
+- The existing `/api/resources/stage/spine/frame` PNG route remains the visual
+  fallback when WebGL, runtime loading, or bundle data is unavailable. Canvas
+  and PNG share the existing anchor, scale, and offset CSS variables.
+- Canvas backing resolution follows the actual stage size at a capped 1.75x
+  sample (maximum 2048px), so small previews do not pay the full-size render
+  cost while the reference viewport remains sharp.
+- `?descriptor=official-p69&renderer=static` disables the Canvas layer while
+  retaining the exact P69 descriptor transforms. It is the valid static/runtime
+  comparison pair. `local-aa` remains an uncalibrated Alice/Momoi resource
+  availability fixture and must not be presented as an official visual target.
+- Browser smoke check at 1280x720 confirmed two P69 Canvas actors reach
+  `realtime-ready`, no console errors occur, and two captures 280ms apart differ
+  in actor pixels (animation loop active). Related tests: 11 stage-media,
+  4 CSP, and 17 BA preview UI tests passed; one transient Playwright run hit
+  an OS unsafe-port allocation and was rerun successfully.

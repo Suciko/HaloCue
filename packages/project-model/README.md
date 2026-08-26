@@ -1,17 +1,21 @@
 # HaloCueProject model
 
-`project_model.py` contains the first `halocue-project/1.0` canonical model
-slice. It is deliberately plain JSON data and remains independent of React,
+`project_model.py` contains the cue-based `halocue-project/1.1` canonical model
+slice plus the deterministic `1.0 -> 1.1` migration. It is deliberately plain
+JSON data and remains independent of React,
 Tauri, PixiJS, Unity, Studio, AA private formats, and local resource bytes.
 
 The slice supports:
 
-- chapters, scenes, ordered events, characters, and logical resource IDs;
+- chapters, scenes, ordered Cues/events, characters, and logical resource IDs;
+- preservation of namespaced advanced events while simple presentation
+  adapters project only the event kinds they understand;
 - stable-ID and reference validation with structured diagnostic codes;
 - validated JSON deserialization for persistence and round-trip tests; and
 - a deterministic `scene-descriptor/1.0` AA presentation adapter with five
-  character slots. Character stage media is explicit: only `portrait` and
-  `spine-frame` previews may be rendered in the formal canvas; AA avatar keys
+  character slots. Character stage media is explicit: `portrait`,
+  `spine-frame`, and authorized realtime `spine` media may be rendered in the
+  formal canvas; AA avatar keys
   remain catalog metadata and are never used as full-body fallbacks. Background
   resources may carry normalized `focus_x`/`focus_y` anchors for cover-cropped
   16:9 presentation.

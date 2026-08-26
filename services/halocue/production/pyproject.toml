@@ -12,6 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<9"]
+render = ["playwright>=1.49,<2"]
 
 [project.scripts]
 halocue-production = "halocue_production.server:main"

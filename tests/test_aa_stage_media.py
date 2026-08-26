@@ -15,6 +15,7 @@ from aa_stage_media import (
     resolve_spine_bundle,
     safe_stage_key,
     spine_family,
+    stage_bundle_data,
 )
 
 
@@ -58,6 +59,49 @@ def test_resolve_spine_bundle_rejects_unsupported_version(tmp_path):
     _bundle(tmp_path, b"binary Spine 4.0.00 data")
     with pytest.raises(StageMediaError, match="unsupported Spine"):
         resolve_spine_bundle(tmp_path, "hero")
+
+
+def test_stage_bundle_data_returns_manifest_without_physical_paths(tmp_path):
+    root = _bundle(tmp_path)
+    payload = stage_bundle_data(tmp_path, "hero", cache_root=tmp_path / "cache")
+    assert payload["ok"] is True
+    assert payload["spine_family"] == "4.2"
+    assert payload["skeleton"].startswith("data:application/octet-stream;base64,")
+    assert payload["atlas"].startswith("data:text/plain;charset=utf-8;base64,")
+    assert payload["textures"][0]["name"] == "hero.png"
+    assert payload["textures"][0]["uri"].startswith("data:image/png;base64,")
+    assert str(root) not in str(payload)
+
+
+def test_stage_spine_data_endpoint_uses_stage_bundle_adapter(tmp_path, monkeypatch):
+    import webui
+
+    manifest = {
+        "ok": True,
+        "key": "hero",
+        "spine_family": "4.2",
+        "spine_version": "4.2.33",
+        "pma": False,
+        "skeleton": "data:application/octet-stream;base64,AA==",
+        "atlas": "data:text/plain;base64,YWJj",
+        "textures": [{"name": "hero.png", "uri": "data:image/png;base64,AA=="}],
+    }
+    monkeypatch.setattr(webui, "stage_bundle_data", lambda *args, **kwargs: manifest)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), webui.H)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with urlopen(
+            f"http://127.0.0.1:{server.server_port}/api/resources/stage/spine/data?key=hero"
+        ) as response:
+            body = response.read().decode("utf-8")
+            assert response.status == 200
+            assert response.headers["Content-Type"].startswith("application/json")
+            assert '"spine_family": "4.2"' in body
+            assert "hero.png" in body
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_stage_spine_endpoint_streams_only_the_cached_frame(tmp_path, monkeypatch):

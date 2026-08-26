@@ -12,6 +12,7 @@ if str(MODEL_ROOT) not in sys.path:
 from project_model import (  # noqa: E402
     build_aa_scene_descriptor,
     deserialize_project,
+    migrate_project,
     validate_project,
 )
 
@@ -107,13 +108,38 @@ def valid_project() -> dict:
     }
 
 
-def test_valid_project_has_no_diagnostics_and_round_trips_without_losing_ids():
+def test_valid_legacy_project_migrates_to_cues_without_losing_event_ids():
     project = valid_project()
 
     assert validate_project(project) == []
 
     restored = deserialize_project(json.loads(json.dumps(project, ensure_ascii=False)))
-    assert restored == project
+    assert restored == migrate_project(project)
+    assert restored["schema_version"] == "halocue-project/1.1"
+    cues = restored["chapters"][0]["scenes"][0]["cues"]
+    assert [cue["events"][0]["event_id"] for cue in cues] == [
+        "event/background",
+        "event/alice-enter",
+        "event/alice-line",
+        "event/bob-enter",
+    ]
+    assert migrate_project(project) == migrate_project(project)
+
+
+def test_current_project_supports_multiple_events_in_one_cue():
+    project = migrate_project(valid_project())
+    cues = project["chapters"][0]["scenes"][0]["cues"]
+    cues[0]["events"].extend(cue["events"][0] for cue in cues[1:3])
+    del cues[1:3]
+
+    assert validate_project(project) == []
+    descriptor = build_aa_scene_descriptor(project, "scene/classroom")
+    assert [event["event_id"] for event in descriptor["events"]] == [
+        "event/background",
+        "event/alice-enter",
+        "event/alice-line",
+        "event/bob-enter",
+    ]
 
 
 def test_validation_reports_duplicate_ids_and_unresolved_references():

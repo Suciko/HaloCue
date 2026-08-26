@@ -25,9 +25,10 @@
           </select>
         </label>
         <div class="stage-overlay-controls" aria-label="视频叠加按钮">
-          <button id="auto-button" class="stage-overlay-button" type="button" hidden>AUTO</button>
-          <button id="menu-button" class="stage-overlay-button" type="button" hidden>MENU</button>
+          <button id="auto-button" class="stage-overlay-button" type="button" hidden><span class="stage-overlay-label">AUTO</span></button>
+          <button id="menu-button" class="stage-overlay-button" type="button" hidden><span class="stage-overlay-label">MENU</span></button>
         </div>
+        <div id="calibration-guides" class="calibration-guides" aria-hidden="true"></div>
         <div class="dialogue-shade" aria-hidden="true"></div>
         <section class="dialogue-panel" aria-label="Dialogue">
           <div class="speaker-line">
@@ -46,15 +47,40 @@
         </section>
       </section>
 
+      <aside id="timeline-transport" class="timeline-transport" aria-label="确定性时间线">
+        <button id="timeline-play" class="timeline-icon-button" type="button" title="播放" aria-label="播放">▶</button>
+        <input id="timeline-scrubber" class="timeline-scrubber" type="range" min="0" max="0" step="1" value="0" aria-label="时间线帧" />
+        <output id="timeline-position" class="timeline-position" for="timeline-scrubber">0 / 0</output>
+        <button id="timeline-reference" class="timeline-icon-button" type="button" title="跳到参考帧" aria-label="跳到参考帧">⌖</button>
+      </aside>
+
       <aside class="render-options" aria-label="直出叠加选项">
         <span class="render-options-title">直出叠加</span>
         <label><input id="auto-toggle" type="checkbox" /> AUTO</label>
         <label><input id="menu-toggle" type="checkbox" /> MENU</label>
       </aside>
 
+      <aside id="asset-inspector" class="asset-inspector" aria-label="制作资源定位">
+        <header class="asset-inspector-header">
+          <div>
+            <span class="asset-inspector-kicker">制作模式</span>
+            <strong>资源定位</strong>
+          </div>
+          <button id="copy-resource-map" class="asset-inspector-icon" type="button" title="复制资源定位 JSON" aria-label="复制资源定位 JSON">⧉</button>
+        </header>
+        <div class="asset-inspector-toolbar">
+          <label><input id="guides-toggle" type="checkbox" /> 校准线</label>
+          <span id="inspector-selection" class="asset-inspector-selection">未选择槽位</span>
+        </div>
+        <p id="inspector-summary" class="asset-inspector-summary">等待场景资源。</p>
+        <div id="inspector-list" class="asset-inspector-list"></div>
+        <p id="inspector-copy-status" class="asset-inspector-copy-status" role="status" aria-live="polite"></p>
+      </aside>
+
       <p id="preview-error" class="preview-error" role="alert" hidden></p>
     </main>
     <script src="./aa-runtime.js"></script>
+    <script src="./spine-preview.js"></script>
     <script src="./preview.js"></script>
   </body>
 </html>

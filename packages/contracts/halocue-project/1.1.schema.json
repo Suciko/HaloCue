@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Suciko/HaloCue/contracts/halocue-project/1.1.schema.json",
+  "title": "HaloCueProject 1.1",
+  "description": "Canonical cue-based project edited by both simple and professional workspaces.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "project_id", "characters", "resources", "chapters"],
+  "properties": {
+    "schema_version": { "const": "halocue-project/1.1" },
+    "project_id": { "$ref": "#/$defs/stableId" },
+    "title": { "type": "string", "maxLength": 512 },
+    "characters": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/character" }
+    },
+    "resources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/resource" }
+    },
+    "chapters": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/chapter" }
+    }
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "character": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["character_id", "name"],
+      "properties": {
+        "character_id": { "$ref": "#/$defs/stableId" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "resource_id": { "$ref": "#/$defs/stableId" },
+        "capability_id": { "$ref": "#/$defs/stableId" }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["resource_id", "role", "logical_key"],
+      "properties": {
+        "resource_id": { "$ref": "#/$defs/stableId" },
+        "role": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "logical_key": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "preview_uri": {
+          "type": "string",
+          "pattern": "^(?:\\./|/api/resources/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$",
+          "maxLength": 2048
+        }
+      }
+    },
+    "chapter": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["chapter_id", "scenes"],
+      "properties": {
+        "chapter_id": { "$ref": "#/$defs/stableId" },
+        "title": { "type": "string", "maxLength": 512 },
+        "scenes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/scene" }
+        }
+      }
+    },
+    "scene": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["scene_id", "cues"],
+      "properties": {
+        "scene_id": { "$ref": "#/$defs/stableId" },
+        "title": { "type": "string", "maxLength": 512 },
+        "cues": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/cue" }
+        }
+      }
+    },
+    "cue": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["cue_id", "events"],
+      "properties": {
+        "cue_id": { "$ref": "#/$defs/stableId" },
+        "title": { "type": "string", "maxLength": 512 },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/event" }
+        }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["event_id", "kind"],
+      "properties": {
+        "event_id": { "$ref": "#/$defs/stableId" },
+        "kind": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "character_id": { "$ref": "#/$defs/stableId" },
+        "resource_id": { "$ref": "#/$defs/stableId" },
+        "slot": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "text": { "type": "string", "maxLength": 20000 },
+        "duration_ms": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    }
+  }
+}

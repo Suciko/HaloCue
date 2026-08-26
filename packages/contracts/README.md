@@ -2,7 +2,9 @@
 
 This package owns versioned JSON contracts shared by the client, backend, BA
 editor, and adapters. A wire-shape change requires a new version or an explicit
-migration plus consumer tests. Planned contracts include `halocue-project/1.0`,
+migration plus consumer tests. Current editor/render contracts include
+`halocue-project/1.1`, `character-capabilities/1.0`,
+`render-timeline/1.0`, and `render-sequence/1.0`. Planned contracts include
 `script-release/1.1`, `production-request/1.1`, `performance-draft/1.0`,
 `build-bundle/1.0`, and `scene-descriptor/1.0`.
 
@@ -16,6 +18,27 @@ adapter data such as an AA logical key and relative resource location. This is
 the compatibility boundary needed for an official-looking presentation; it is
 not a copy of an application implementation or a machine-specific absolute
 path.
+
+The cue-based canonical project schema lives in
+`halocue-project/1.1.schema.json`. Both editor modes operate directly on this
+shape: simple mode projects one Cue into a low-cost task flow, while
+professional mode exposes the same Cue's ordered events and advanced fields.
+The deterministic `halocue-project/1.0 -> 1.1` migration is owned by
+`packages/project-model`.
+
+The `character-capabilities/1.0` schema stores stable expression, motion,
+emoticon, and transition state IDs. Adapter-specific animation names stay in
+namespaced logical fields; local resource paths remain outside the project.
+
+The `render-timeline/1.0` schema lives in
+`render-timeline/1.0.schema.json`. It records deterministic, end-exclusive
+frame ranges generated from a validated scene descriptor. Browser preview and
+offline export consume the same event IDs, durations, and frame boundaries;
+wall-clock callbacks are presentation controls, not part of this contract.
+
+The `render-sequence/1.0` manifest binds a resumable numbered PNG sequence to
+the SHA-256 of its descriptor and timeline. A sequence can reuse verified
+frames after interruption, but never mix frames from different render inputs.
 
 At runtime a user may select an AA installation or an explicitly authorized
 pack. The importer verifies the selected file's SHA-256 and may stage a copy in

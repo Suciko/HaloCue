@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 
 
 MODEL_ROOT = Path(__file__).resolve().parents[1] / "packages" / "project-model"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+RUNTIME = REPO_ROOT / "apps" / "desktop-client" / "scene-preview" / "aa-runtime.js"
+TIMELINE_SCHEMA = (
+    REPO_ROOT / "packages" / "contracts" / "render-timeline" / "1.0.schema.json"
+)
 if str(MODEL_ROOT) not in sys.path:
     sys.path.insert(0, str(MODEL_ROOT))
 
@@ -89,3 +97,60 @@ def test_default_frame_rate_is_explicit_and_bounded():
         build_render_timeline(descriptor([]), frame_rate=0)
     with pytest.raises(ValueError, match="integer"):
         build_render_timeline(descriptor([]), frame_rate=29.97)
+
+
+def test_render_timeline_contract_accepts_the_model_projection():
+    schema = json.loads(TIMELINE_SCHEMA.read_text(encoding="utf-8"))
+    timeline = build_render_timeline(
+        descriptor(
+            [
+                {"event_id": "event/enter", "kind": "enter", "slot": 1},
+                {"event_id": "event/line", "kind": "dialogue", "text": "你好。"},
+                {"event_id": "event/wait", "kind": "wait", "duration_ms": 250},
+            ]
+        )
+    )
+
+    Draft202012Validator.check_schema(schema)
+    Draft202012Validator(schema).validate(timeline)
+
+
+def test_browser_runtime_builds_the_same_render_timeline_as_python():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is not installed")
+    source = descriptor(
+        [
+            {"event_id": "event/background", "kind": "background"},
+            {"event_id": "event/enter", "kind": "enter", "slot": 3},
+            {"event_id": "event/line", "kind": "dialogue", "text": "你好。\n再见！"},
+            {"event_id": "event/exit", "kind": "exit", "slot": 3},
+        ]
+    )
+    script = r"""
+const fs = require('fs');
+const vm = require('vm');
+const sandbox = {window: {}};
+vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), sandbox);
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => { input += chunk; });
+process.stdin.on('end', () => {
+  const timeline = sandbox.window.HaloCueAARuntime.buildRenderTimeline(
+    JSON.parse(input),
+    {frameRate: 30},
+  );
+  process.stdout.write(JSON.stringify(timeline));
+});
+"""
+
+    completed = subprocess.run(
+        [node, "-e", script, str(RUNTIME)],
+        input=json.dumps(source, ensure_ascii=False),
+        capture_output=True,
+        check=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert json.loads(completed.stdout) == build_render_timeline(source, frame_rate=30)

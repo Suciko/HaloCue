@@ -19,8 +19,10 @@ The preview demonstrates:
   units while dialogue typography keeps the 2560x1440 design grid);
 - enter/exit events and active-speaker highlighting;
 - dialogue progression from the descriptor event list; and
-- explicit `stage_media` entries for `portrait` and `spine-frame` raster
-  renders; unsupported or missing stage media leaves the slot empty instead
+- explicit `stage_media` entries for `portrait`, `spine`, and `spine-frame`;
+  `spine` entries load the authorized local `.skel/.atlas/texture` bundle into
+  a browser WebGL canvas and keep the deterministic `spine-frame` PNG route as
+  a fallback; unsupported or missing stage media leaves the slot empty instead
   of scaling an avatar thumbnail into a character;
 - background `focus_x`/`focus_y` anchors applied inside a cover-cropped 16:9
   frame; and
@@ -33,10 +35,56 @@ The export-safe URL renders the editor tray fully transparent. Append
 `?editor=1` while authoring to reveal the AUTO/MENU switches; the descriptor
 still decides whether either button appears inside the video frame.
 
+The preview controller consumes the deterministic `render-timeline/1.0`
+contract. `window.HaloCueScenePreview.controller` exposes `seekFrame`,
+`seekEvent`, `seekReference`, `play`, `pause`, and `dispose`. These methods keep
+the browser preview on the same end-exclusive frame ranges used by the Python
+offline timeline adapter. The default page remains a live realtime preview.
+
+Useful deterministic URLs:
+
+- `?descriptor=official-p69&reference=1` seeks and freezes the descriptor's
+  recorded reference frame with realtime Spine canvases;
+- add `&renderer=static` for the matching raster fallback comparison;
+- `?frame=35` seeks an explicit timeline frame; and
+- `?play=1` starts deterministic timeline playback.
+
+`?capture=1&frame=N` is the headless export surface. It disables wall-clock CSS
+transitions and transient entrance/location timers before the stage is sampled.
+An export host may inject `window.HALO_CUE_RENDER_TIMELINE`; the preview accepts
+it only when its canonical JSON content exactly matches the timeline derived
+from the injected `scene-descriptor/1.0` payload.
+
+The repository CLI builds the Python timeline, injects both contracts into the
+localhost preview, waits for fonts/backgrounds/realtime Spine canvases, and
+atomically writes one 16:9 PNG:
+
+```powershell
+python tools/render_scene_frame.py `
+  apps/desktop-client/scene-preview/official-p69.scene-descriptor.json `
+  C:\path\outside\the\repository\p69-frame-35.png `
+  --reference --renderer realtime
+```
+
+The output JSON records the resolved frame, event ID, frame rate, dimensions,
+renderer, timeline schema, and SHA-256. The CLI only connects to a localhost
+preview URL; authorized AA bytes continue to flow through the existing local
+resource endpoints and are never embedded in the source tree.
+
+Realtime Spine players stop ticking while deterministically paused or while
+the document is hidden. Only visible actors stay attached, and canvas backing
+resolution remains capped for preview performance.
+
 The checked-in default descriptor uses synthetic logical resource IDs. Real
 user-owned or authorized resources are resolved through `aa_preview_resolver.py`
 and a local user-data manifest; absolute Windows paths and extracted game
 resources are never exposed to browser code.
+
+The host client serves the authorized Spine bundle through
+`/api/resources/stage/spine/data`. The response contains only in-memory data
+URIs, never source filesystem paths. Spine 3.8 and 4.2 runtimes are loaded
+lazily from the host's `/js/` allowlist, and each bundle is cached in the
+browser for the duration of the preview session.
 
 For a local smoke check, serve this directory with any static HTTP server and
 open `index.html`. The page fetches `example.scene-descriptor.json` and exposes

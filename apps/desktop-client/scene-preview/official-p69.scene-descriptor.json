@@ -3,12 +3,16 @@
   "scene_id": "scene/official-p69-yuuka-aris-calibration",
   "location_label": "",
   "presentation": {
+    "frame_rate": 30,
     "location_mode": "hidden",
     "reference_frame": {
       "id": "official-p69-final-v9",
+      "timeline_schema_version": "render-timeline/1.0",
       "viewport": { "width": 1280, "height": 720 },
       "design_canvas": { "width": 2560, "height": 1440 },
       "target_event_index": 0,
+      "resolved_frame": 35,
+      "spine_time_ms": 1166.667,
       "dialogue_complete": true,
       "overlay_controls_visible": true,
       "anchors": {
@@ -27,14 +31,15 @@
       "auto": true,
       "menu": true,
       "auto_enabled": true,
-      "auto_label": "AUTO",
-      "menu_label": "MENU"
+      "auto_label": "自动",
+      "menu_label": "菜单"
     }
   },
   "background": {
     "resource_id": "aa/background/bg_gamedevroom",
     "logical_key": "bg_gamedevroom",
     "aa_key": "BG_GameDevRoom",
+    "zoom": 1.068,
     "preview_uri": "/api/resources/stage/background?key=bg_gamedevroom"
   },
   "actors": [
@@ -53,9 +58,9 @@
         "animation": "06",
         "anchor_x": 0.5,
         "anchor_y": 1,
-        "scale": 1.55,
-        "offset_x": -20,
-        "offset_y": 812
+        "scale": 1.704,
+        "offset_x": -32,
+        "offset_y": 1038
       },
       "state": "visible"
     },
@@ -77,9 +82,9 @@
         "animation": "00",
         "anchor_x": 0.5,
         "anchor_y": 1,
-        "scale": 1.62,
-        "offset_x": -25,
-        "offset_y": 216
+        "scale": 2.266,
+        "offset_x": -48,
+        "offset_y": 766
       },
       "state": "visible"
     }
