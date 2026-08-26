@@ -46,4 +46,4 @@ professional workspace and local resource adapters to grow independently.
 
 - Branch: `feature/1.1-ba-editor-from-1.0`
 - PR: https://github.com/Suciko/HaloCue/pull/27
-- This handoff is pending the publication commit hash.
+- Commit: `c73b9bb feat(1.1): add character capability registry seam`
