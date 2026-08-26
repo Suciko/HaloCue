@@ -20,8 +20,14 @@ maps semantic story lines to AA and MMT presentation fields.
   audio, models, and bundles are loaded from a user-owned or authorized local
   manifest; verified staging stays in user data and public fixtures remain
   placeholders.
-- Simple mode hides implementation-heavy controls; advanced mode exposes them
-  without changing their semantics.
+- Simple and professional modes edit the same canonical entities, stable IDs,
+  event order, and advanced fields without conversion or duplication.
+- Simple mode reduces operation count with task-focused contextual panels,
+  direct manipulation, useful defaults, and progressive disclosure. It is not
+  an AA UI clone or a professional property grid with fields hidden.
+- Studio is the primary reference for project/editing semantics. AA is
+  secondary evidence for BA-specific concepts; its navigation and dense
+  single-screen layout are not requirements.
 
 ## Stage layout contract
 

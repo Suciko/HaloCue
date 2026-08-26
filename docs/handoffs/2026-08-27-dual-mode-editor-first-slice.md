@@ -89,6 +89,13 @@ session-scoped browser fixture when both are placed in one pytest invocation.
 The running server uses maintainer-local authorized resources. Those paths and
 bytes are not contracts and must not be committed.
 
+## Publication
+
+- Implementation commit: `eb1023c`
+- Target-branch synchronization merge: `41b4cd1`
+- Pull request: https://github.com/Suciko/HaloCue/pull/27
+- Issues: partial progress on #11, #14, and #24; none are closed by this slice.
+
 ## Next bounded slice
 
 1. Move the standalone file import/export and recovery draft behind the Tauri
