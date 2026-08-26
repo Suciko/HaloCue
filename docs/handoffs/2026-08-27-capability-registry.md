@@ -15,6 +15,8 @@ professional workspace and local resource adapters to grow independently.
 - Descriptor and scene evaluation now accept an injected registry, so a future
   local manifest adapter can be selected at the composition root without
   changing either editor mode.
+- Registry parsing enforces the capability contract's stable IDs, non-empty
+  labels, namespaced adapter keys, and primitive adapter values.
 - Replaced hard-coded simple-mode selects with registry-backed options. An
   unknown authored state stays visible as `未注册` instead of being discarded.
 - Updated descriptor evaluation to resolve expression animation through the

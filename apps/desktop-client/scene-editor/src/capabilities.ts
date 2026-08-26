@@ -6,6 +6,9 @@ import type {
   CharacterCapabilities,
 } from "./types";
 
+const STABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
+const ADAPTER_KEY = /^[a-z0-9][a-z0-9.-]*:[A-Za-z0-9._/-]+$/;
+
 export interface CapabilityRegistry {
   getForCharacter(characterId: string, capabilityId?: string): CharacterCapabilities | undefined;
   statesFor(
@@ -30,6 +33,7 @@ function isAdapterState(value: unknown): value is Record<string, CapabilityAdapt
   return !!value
     && typeof value === "object"
     && !Array.isArray(value)
+    && Object.keys(value).every((key) => ADAPTER_KEY.test(key))
     && Object.values(value).every(isAdapterValue);
 }
 
@@ -37,7 +41,7 @@ function isState(value: unknown): value is CapabilityState {
   if (!value || typeof value !== "object") return false;
   const state = value as Partial<CapabilityState>;
   return typeof state.state_id === "string"
-    && state.state_id.trim().length > 0
+    && STABLE_ID.test(state.state_id)
     && typeof state.label === "string"
     && state.label.trim().length > 0
     && (state.adapter_state === undefined || isAdapterState(state.adapter_state));
@@ -48,9 +52,9 @@ function isCapability(value: unknown): value is CharacterCapabilities {
   const record = value as Partial<CharacterCapabilities>;
   return record.schema_version === "character-capabilities/1.0"
     && typeof record.capability_id === "string"
-    && record.capability_id.trim().length > 0
+    && STABLE_ID.test(record.capability_id)
     && typeof record.character_id === "string"
-    && record.character_id.trim().length > 0
+    && STABLE_ID.test(record.character_id)
     && (["expression", "motion", "emoticon", "transition"] as const).every((kind) => (
       Array.isArray(record[kind]) && record[kind].every(isState)
     ));

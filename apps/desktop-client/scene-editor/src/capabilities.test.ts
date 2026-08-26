@@ -61,6 +61,10 @@ describe("character capability registry", () => {
         adapter_state: { "aa:animation": { invalid: true } as never },
       }],
     }])).toThrow("invalid");
+    expect(() => parseCapabilityRecords([{
+      ...customCapabilities[0],
+      capability_id: "not valid",
+    }])).toThrow("invalid");
     expect(() => new MapCapabilityRegistry([...customCapabilities, ...customCapabilities]))
       .toThrow("duplicate capability_id");
     expect(parseCapabilityRecords(customCapabilities)).toEqual(customCapabilities);
