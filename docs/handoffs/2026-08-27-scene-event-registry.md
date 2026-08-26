@@ -50,6 +50,11 @@ mode and the render adapters continue to operate on the same Cue/event data.
 - Playwright browser check: professional event menu opened, a screen-shake event
   was added, the menu closed automatically, the event appeared in the list and
   timeline, and the inspector resolved its 360 ms duration.
+- Remote PR run `33018762065` currently reports failures only in existing
+  environment-sensitive coverage on Python 3.13: the runner has no `ffprobe`,
+  the offline preview media wait timed out, and one UI snapshot differs by
+  timezone. None of the failures touch the TypeScript editor files in this
+  slice; rerun with the repository's media dependencies and timezone fixture.
 - `ruff check` and `git diff --check`: passed for the touched Python/test files.
 - Registry tests compare the browser Adapter manifest field-for-field with the
   canonical JSON and assert the render-timeline schema enum stays in parity.
