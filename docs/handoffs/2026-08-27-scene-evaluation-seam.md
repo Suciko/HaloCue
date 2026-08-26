@@ -46,4 +46,4 @@ secondary evidence for five visible slots and Cue-sized beats.
 
 - Branch: `feature/1.1-ba-editor-from-1.0`
 - PR: https://github.com/Suciko/HaloCue/pull/27
-- This handoff must be updated with the final commit hash after publication.
+- Commit: `9e2c0c4 feat(1.1): add shared scene evaluation seam`
