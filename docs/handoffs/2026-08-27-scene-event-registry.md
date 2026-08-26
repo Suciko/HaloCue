@@ -65,5 +65,5 @@ changing the Adapter Interface.
 
 - Branch: `feature/1.1-ba-editor-from-1.0`
 - PR: https://github.com/Suciko/HaloCue/pull/27
-- Commits: `918d198 refactor(1.1): centralize scene event registry`; follow-up
-  professional authoring commit is recorded after publication.
+- Commits: `918d198 refactor(1.1): centralize scene event registry` and
+  `a283821 feat(1.1): complete professional event authoring`.
