@@ -31,6 +31,8 @@ function transactionSnapshot(store: ReturnType<typeof createProjectStore>) {
     future: state.future,
     dirty: state.dirty,
     revision: state.revision,
+    previewRevision: state.previewRevision,
+    activeTransaction: state.activeTransaction,
     projectDiagnostics: state.projectDiagnostics,
   };
 }
@@ -171,6 +173,91 @@ describe("project repository seam", () => {
     expect(result).toEqual({ status: "no-op", revision: before.revision });
     expect(repository.saves).toBe(savesBefore);
     expect(transactionSnapshot(store)).toEqual(before);
+  });
+
+  it("previews many gesture values but commits one save and one undo entry", () => {
+    const repository = new CountingProjectRepository(demoProject);
+    const store = createProjectStore(repository);
+    const key = "environment.zoom:test";
+    const base = structuredClone(store.getState().project);
+
+    store.getState().beginTransaction(key);
+    store.getState().previewEnvironment(key, { zoom: 1.1 });
+    store.getState().previewEnvironment(key, { zoom: 1.2 });
+
+    let state = store.getState();
+    expect(state.project.chapters[0].scenes[0].cues[0].events[0].zoom).toBe(1.2);
+    expect(state.previewRevision).toBe(2);
+    expect(state.revision).toBe(0);
+    expect(state.history).toEqual([]);
+    expect(state.dirty).toBe(false);
+    expect(repository.saves).toBe(0);
+
+    expect(state.commitTransaction(key)).toEqual({ status: "committed", revision: 1 });
+    state = store.getState();
+    expect(state.activeTransaction).toBeNull();
+    expect(state.history).toHaveLength(1);
+    expect(state.dirty).toBe(true);
+    expect(repository.saves).toBe(1);
+
+    state.undo();
+    expect(store.getState().project).toEqual(base);
+  });
+
+  it("rolls a preview gesture back when its single commit save fails", () => {
+    const repository = new CountingProjectRepository(demoProject);
+    const store = createProjectStore(repository);
+    const key = "environment.zoom:failure";
+    const base = transactionSnapshot(store);
+
+    store.getState().beginTransaction(key);
+    store.getState().previewEnvironment(key, { zoom: 1.25 });
+    repository.rejectNextSave();
+
+    expect(() => store.getState().commitTransaction(key)).toThrow("项目草稿保存失败");
+    const restored = transactionSnapshot(store);
+    expect(restored.project).toEqual(base.project);
+    expect(restored.history).toEqual(base.history);
+    expect(restored.future).toEqual(base.future);
+    expect(restored.dirty).toBe(base.dirty);
+    expect(restored.revision).toBe(base.revision);
+    expect(restored.activeTransaction).toBeNull();
+    expect(repository.saves).toBe(0);
+  });
+
+  it("cancels a gesture without making its preview durable", () => {
+    const repository = new CountingProjectRepository(demoProject);
+    const store = createProjectStore(repository);
+    const key = "environment.zoom:cancel";
+    const base = structuredClone(store.getState().project);
+
+    store.getState().beginTransaction(key);
+    store.getState().previewEnvironment(key, { zoom: 1.3 });
+    store.getState().cancelTransaction(key);
+
+    const state = store.getState();
+    expect(state.project).toEqual(base);
+    expect(state.activeTransaction).toBeNull();
+    expect(state.history).toEqual([]);
+    expect(state.revision).toBe(0);
+    expect(repository.saves).toBe(0);
+  });
+
+  it("commits a gesture that returns to its baseline as a no-op", () => {
+    const repository = new CountingProjectRepository(demoProject);
+    const store = createProjectStore(repository);
+    const key = "environment.zoom:baseline";
+    const background = store.getState().project.chapters[0].scenes[0].cues[0].events[0];
+
+    store.getState().beginTransaction(key);
+    store.getState().previewEnvironment(key, { zoom: 1.4 });
+    store.getState().previewEnvironment(key, { zoom: background.zoom });
+    const result = store.getState().commitTransaction(key);
+
+    expect(result).toEqual({ status: "no-op", revision: 0 });
+    expect(store.getState().history).toEqual([]);
+    expect(store.getState().activeTransaction).toBeNull();
+    expect(repository.saves).toBe(0);
   });
 
   it("validates replacement before changing the editor state", () => {

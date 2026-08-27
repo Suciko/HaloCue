@@ -132,6 +132,7 @@ function TopBar({ onOpen, onSave }: { onOpen: () => void; onSave: () => void }) 
   const project = useProjectStore((state) => state.project);
   const mode = useProjectStore((state) => state.mode);
   const dirty = useProjectStore((state) => state.dirty);
+  const activeTransaction = useProjectStore((state) => state.activeTransaction);
   const history = useProjectStore((state) => state.history);
   const future = useProjectStore((state) => state.future);
   const setMode = useProjectStore((state) => state.setMode);
@@ -150,8 +151,14 @@ function TopBar({ onOpen, onSave }: { onOpen: () => void; onSave: () => void }) 
       </div>
       <div className="project-heading">
         <strong>{project.title || "未命名项目"}</strong>
-        <span className={dirty ? "save-state is-dirty" : "save-state"}>
-          {hasProjectError ? "项目有待修复项" : hasProjectWarning ? "项目有校验警告" : dirty ? "草稿已自动保存" : "已保存"}
+        <span className={dirty || activeTransaction ? "save-state is-dirty" : "save-state"}>
+          {hasProjectError
+            ? "项目有待修复项"
+            : hasProjectWarning
+              ? "项目有校验警告"
+              : activeTransaction
+                ? "正在预览调整"
+                : dirty ? "草稿已自动保存" : "已保存"}
         </span>
       </div>
       <div className="mode-switch" role="group" aria-label="编辑模式">
@@ -587,6 +594,10 @@ function EnvironmentInspector() {
   const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const updateEnvironment = useProjectStore((state) => state.updateEnvironment);
+  const beginTransaction = useProjectStore((state) => state.beginTransaction);
+  const previewEnvironment = useProjectStore((state) => state.previewEnvironment);
+  const commitTransaction = useProjectStore((state) => state.commitTransaction);
+  const cancelTransaction = useProjectStore((state) => state.cancelTransaction);
   const addQuickEffect = useProjectStore((state) => state.addQuickEffect);
   const projection = projectCueState(project, selectedCueId, { sceneId: selectedSceneId });
   const background = projection.cueBackgroundEvent || projection.beforeCue.backgroundEvent;
@@ -594,6 +605,19 @@ function EnvironmentInspector() {
     ? background.transition_id
     : undefined;
   const transitionStates = capabilityStatesFor(undefined, "transition", transitionId);
+  const zoomTransactionKey = `environment.zoom:${selectedSceneId}:${selectedCueId}`;
+  const updateZoom = (zoom: number) => {
+    if (useProjectStore.getState().activeTransaction?.key === zoomTransactionKey) {
+      previewEnvironment(zoomTransactionKey, { zoom });
+    } else {
+      updateEnvironment({ zoom });
+    }
+  };
+  const commitZoom = () => {
+    if (useProjectStore.getState().activeTransaction?.key === zoomTransactionKey) {
+      commitTransaction(zoomTransactionKey);
+    }
+  };
 
   return (
     <div className="inspector-content">
@@ -614,7 +638,32 @@ function EnvironmentInspector() {
         </Field>
       </div>
       <Field label="镜头缩放">
-        <div className="range-field"><input type="range" min="0.75" max="1.5" step="0.01" value={Number(background?.zoom || 1)} onChange={(event) => updateEnvironment({ zoom: Number(event.target.value) })} /><output>{Number(background?.zoom || 1).toFixed(2)}×</output></div>
+        <div className="range-field">
+          <input
+            type="range"
+            min="0.75"
+            max="1.5"
+            step="0.01"
+            value={Number(background?.zoom || 1)}
+            onPointerDown={() => beginTransaction(zoomTransactionKey)}
+            onPointerUp={commitZoom}
+            onPointerCancel={() => cancelTransaction(zoomTransactionKey)}
+            onBlur={commitZoom}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cancelTransaction(zoomTransactionKey);
+                return;
+              }
+              if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(event.key)) {
+                beginTransaction(zoomTransactionKey);
+              }
+            }}
+            onKeyUp={commitZoom}
+            onChange={(event) => updateZoom(Number(event.target.value))}
+          />
+          <output>{Number(background?.zoom || 1).toFixed(2)}×</output>
+        </div>
       </Field>
       <div className="quick-effects">
         <span className="section-label">快速演出</span>
@@ -914,9 +963,14 @@ export default function App() {
   const [notice, setNotice] = useState("");
 
   const save = () => {
+    const state = useProjectStore.getState();
+    if (state.activeTransaction) {
+      state.commitTransaction(state.activeTransaction.key);
+    }
+    const currentProject = useProjectStore.getState().project;
     projectFileAdapter.download(
-      project,
-      `${(project.title || "halocue-project").replace(/[\\/:*?\"<>|]/g, "-")}.halocue-project`,
+      currentProject,
+      `${(currentProject.title || "halocue-project").replace(/[\\/:*?\"<>|]/g, "-")}.halocue-project`,
     );
     markSaved();
     setNotice("项目文件已导出");

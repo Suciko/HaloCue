@@ -307,6 +307,15 @@ publish project, selection, history, dirty state, diagnostics, and revision
 only after persistence succeeds. Begin/preview/commit gesture sessions and
 independent autosave/preview coalescing remain later slices.
 
+The gesture-session tracer is recorded in
+`docs/handoffs/2026-08-27-editor-gesture-transaction-tracer.md`. Environment
+zoom now uses an explicit begin/preview/commit/cancel lifecycle: intermediate
+values update the working project and live preview without saving or extending
+history, while pointer/key release creates one durable edit and one undo entry.
+The transaction auto-finishes before another command or canonical selection
+change, and failed persistence rolls the trial back. Autosave scheduling and
+preview-compilation coalescing remain separate follow-up slices.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure

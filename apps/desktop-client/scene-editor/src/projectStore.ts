@@ -43,6 +43,12 @@ export function advancedEventCount(cue: Cue): number {
 }
 
 type HistoryEntry = { project: HaloCueProject } & EditorSelection;
+type ActiveEditorTransaction = {
+  key: string;
+  base: HistoryEntry;
+  dirty: boolean;
+  projectDiagnostics: ProjectDiagnostic[];
+};
 
 type EditorState = {
   project: HaloCueProject;
@@ -57,6 +63,8 @@ type EditorState = {
   future: HistoryEntry[];
   dirty: boolean;
   revision: number;
+  previewRevision: number;
+  activeTransaction: ActiveEditorTransaction | null;
   projectDiagnostics: ProjectDiagnostic[];
   setMode: (mode: EditorMode) => void;
   setInspectorTab: (tab: InspectorTab) => void;
@@ -65,6 +73,10 @@ type EditorState = {
   selectCue: (cueId: string) => void;
   selectSlot: (slot: number) => void;
   selectEvent: (eventId: string | null) => void;
+  beginTransaction: (key: string) => void;
+  previewEnvironment: (key: string, patch: Partial<CueEvent>) => void;
+  commitTransaction: (key: string) => EditorTransactionResult;
+  cancelTransaction: (key: string) => void;
   updateProjectTitle: (title: string) => EditorTransactionResult;
   updateDialogue: (patch: Partial<CueEvent>) => EditorTransactionResult;
   updateEnvironment: (patch: Partial<CueEvent>) => EditorTransactionResult;
@@ -157,15 +169,70 @@ function repairTransactionSelection(
   return selection;
 }
 
+function applyEnvironmentPatch(
+  cue: Cue,
+  scene: Scene,
+  patch: Partial<CueEvent>,
+): void {
+  let background = cue.events.find((event) => event.kind === "background");
+  if (!background) {
+    const inherited = projectSceneAtCue(scene, cue.cue_id).beforeCue.backgroundEvent;
+    background = {
+      ...(inherited || {}),
+      event_id: localId("event/background"),
+      kind: "background",
+    };
+    cue.events.unshift(background);
+  }
+  Object.assign(background, patch);
+}
+
 export function createProjectStore(repository: ProjectRepository = projectRepository) {
   const initialProject = repository.loadDraft();
   const initial = initialSelection(initialProject);
 
   return create<EditorState>((set, get) => {
+  const commitActiveTransaction = (key?: string): EditorTransactionResult => {
+    const state = get();
+    const active = state.activeTransaction;
+    if (!active || (key !== undefined && active.key !== key)) return noOp(state);
+    if (sameProject(state.project, active.base.project)) {
+      set({
+        ...active.base,
+        activeTransaction: null,
+        previewRevision: state.previewRevision + 1,
+      });
+      return noOp(state);
+    }
+    try {
+      repository.saveDraft(state.project);
+    } catch (error) {
+      set({
+        ...active.base,
+        dirty: active.dirty,
+        projectDiagnostics: active.projectDiagnostics,
+        activeTransaction: null,
+        previewRevision: state.previewRevision + 1,
+      });
+      throw error;
+    }
+    const revision = state.revision + 1;
+    set({
+      history: [...state.history.slice(-59), active.base],
+      future: [],
+      dirty: true,
+      revision,
+      activeTransaction: null,
+      projectDiagnostics: [...repository.getDiagnostics()],
+    });
+    return { status: "committed", revision };
+  };
+
   const commit = (
     mutator: (project: HaloCueProject, cue: Cue, scene: Scene) => void,
     selection?: Partial<EditorSelection>,
   ): EditorTransactionResult => {
+    commitActiveTransaction();
     const state = get();
     const project = clone(state.project);
     const scene = sceneById(project, state.selectedSceneId);
@@ -211,13 +278,17 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     future: [],
     dirty: false,
     revision: 0,
+    previewRevision: 0,
+    activeTransaction: null,
     projectDiagnostics: [...repository.getDiagnostics()],
     setMode: (mode) => {
+      commitActiveTransaction();
       saveEditorMode(mode);
       set({ mode });
     },
     setInspectorTab: (inspectorTab) => set({ inspectorTab }),
     selectChapter: (chapterId) => {
+      commitActiveTransaction();
       const state = get();
       if (chapterId === state.selectedChapterId) return;
       const chapter = state.project.chapters.find((item) => item.chapter_id === chapterId);
@@ -226,6 +297,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       set(selectionForScene(state.project, scene.scene_id));
     },
     selectScene: (sceneId) => {
+      commitActiveTransaction();
       const state = get();
       if (sceneId === state.selectedSceneId) return;
       try {
@@ -235,6 +307,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       }
     },
     selectCue: (selectedCueId) => {
+      commitActiveTransaction();
       const state = get();
       if (selectedCueId === state.selectedCueId) return;
       const cue = sceneById(state.project, state.selectedSceneId)
@@ -244,6 +317,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     },
     selectSlot: (selectedSlot) => set({ selectedSlot, inspectorTab: "character" }),
     selectEvent: (selectedEventId) => {
+      commitActiveTransaction();
       if (selectedEventId === null) {
         set({ selectedEventId: null });
         return;
@@ -255,6 +329,57 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         set({ selectedEventId });
       }
     },
+    beginTransaction: (key) => {
+      if (!key) throw new Error("编辑事务需要稳定的 key");
+      const current = get().activeTransaction;
+      if (current?.key === key) return;
+      if (current) commitActiveTransaction(current.key);
+      const state = get();
+      set({
+        activeTransaction: {
+          key,
+          base: {
+            project: state.project,
+            ...selectionSnapshot(state),
+          },
+          dirty: state.dirty,
+          projectDiagnostics: state.projectDiagnostics,
+        },
+      });
+    },
+    previewEnvironment: (key, patch) => {
+      const state = get();
+      const active = state.activeTransaction;
+      if (!active || active.key !== key) {
+        throw new Error(`编辑事务 ${key} 尚未开始`);
+      }
+      if (
+        state.selectedSceneId !== active.base.selectedSceneId
+        || state.selectedCueId !== active.base.selectedCueId
+      ) {
+        throw new Error(`编辑事务 ${key} 的目标选区已改变`);
+      }
+      const project = clone(state.project);
+      const scene = sceneById(project, state.selectedSceneId);
+      const cue = scene.cues.find((item) => item.cue_id === state.selectedCueId);
+      if (!cue) throw new Error(`编辑事务 ${key} 的 Cue 已不存在`);
+      applyEnvironmentPatch(cue, scene, patch);
+      if (sameProject(project, state.project)) return;
+      set({ project, previewRevision: state.previewRevision + 1 });
+    },
+    commitTransaction: (key) => commitActiveTransaction(key),
+    cancelTransaction: (key) => {
+      const state = get();
+      const active = state.activeTransaction;
+      if (!active || active.key !== key) return;
+      set({
+        ...active.base,
+        dirty: active.dirty,
+        projectDiagnostics: active.projectDiagnostics,
+        activeTransaction: null,
+        previewRevision: state.previewRevision + 1,
+      });
+    },
     updateProjectTitle: (title) => commit((project) => { project.title = title; }),
     updateDialogue: (patch) => commit((_project, cue) => {
       let dialogue = cue.events.find((event) => event.kind === "dialogue");
@@ -265,19 +390,10 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       Object.assign(dialogue, patch);
     }),
     updateEnvironment: (patch) => commit((_project, cue, scene) => {
-      let background = cue.events.find((event) => event.kind === "background");
-      if (!background) {
-        const inherited = projectSceneAtCue(scene, cue.cue_id).beforeCue.backgroundEvent;
-        background = {
-          ...(inherited || {}),
-          event_id: localId("event/background"),
-          kind: "background",
-        };
-        cue.events.unshift(background);
-      }
-      Object.assign(background, patch);
+      applyEnvironmentPatch(cue, scene, patch);
     }),
     setSlotCharacter: (slot, characterId) => {
+      commitActiveTransaction();
       const state = get();
       const scene = sceneById(state.project, state.selectedSceneId);
       const currentCharacterId = projectSceneAtCue(scene, state.selectedCueId)
@@ -293,6 +409,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       });
     },
     swapSlots: (source, target) => {
+      commitActiveTransaction();
       const state = get();
       if (source === target) return noOp(state);
       const scene = sceneById(state.project, state.selectedSceneId);
@@ -370,6 +487,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       }, { selectedCueId: cueId, selectedEventId: null });
     },
     deleteCue: () => {
+      commitActiveTransaction();
       const state = get();
       const scene = sceneById(state.project, state.selectedSceneId);
       if (scene.cues.length <= 1) return noOp(state);
@@ -391,6 +509,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       if (event) Object.assign(event, patch);
     }),
     deleteEvent: (eventId) => {
+      commitActiveTransaction();
       const state = get();
       const cue = sceneById(state.project, state.selectedSceneId)
         .cues.find((item) => item.cue_id === state.selectedCueId);
@@ -409,6 +528,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       cue.events.splice(target, 0, event);
     }),
     undo: () => {
+      commitActiveTransaction();
       const state = get();
       const previous = state.history.at(-1);
       if (!previous) return noOp(state);
@@ -428,6 +548,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       return { status: "committed", revision };
     },
     redo: () => {
+      commitActiveTransaction();
       const state = get();
       const next = state.future[0];
       if (!next) return noOp(state);
@@ -458,6 +579,8 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         future: [],
         dirty: false,
         revision,
+        previewRevision: get().previewRevision + 1,
+        activeTransaction: null,
         projectDiagnostics: [...repository.getDiagnostics()],
       });
       return { status: "committed", revision };
