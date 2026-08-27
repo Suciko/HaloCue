@@ -194,6 +194,17 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .field input:read-only { color: var(--muted); background: #141817; }
 .field-grid { display: grid; gap: 8px; }
 .field-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.capability-trial-picker { display: grid; gap: 7px; margin-bottom: 13px; }
+.capability-trial-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: #c8d0cd; font-size: 10px; }
+.capability-trial-heading small { color: var(--subtle); font-size: 8px; }
+.capability-trial-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(68px, 1fr)); gap: 5px; }
+.capability-trial-options button { min-width: 0; min-height: 38px; display: grid; place-content: center; gap: 2px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 5px; background: #111514; color: var(--muted); font-size: 9px; cursor: pointer; transition: border-color 120ms ease, background 120ms ease, color 120ms ease; }
+.capability-trial-options button:hover, .capability-trial-options button:focus-visible { border-color: #50635b; color: var(--text); outline: none; }
+.capability-trial-options button.is-current { border-color: rgba(111, 207, 151, .68); background: var(--accent-bg); color: #d9f6e5; }
+.capability-trial-options button.is-authored { box-shadow: inset 0 -2px 0 rgba(111, 207, 151, .72); }
+.capability-trial-options button small { overflow: hidden; color: var(--accent); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.capability-trial-options button.is-unavailable { border-style: dashed; color: var(--warning); cursor: not-allowed; opacity: .78; }
+.capability-trial-options button.is-unavailable small { color: var(--warning); }
 .toggle-row { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 2px 0 13px; padding: 8px 9px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--panel-2); cursor: pointer; }
 .toggle-row span { display: grid; gap: 2px; }
 .toggle-row strong { font-size: 10px; }

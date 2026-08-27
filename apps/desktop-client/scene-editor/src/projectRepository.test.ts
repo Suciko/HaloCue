@@ -250,6 +250,62 @@ describe("project repository seam", () => {
     expect(store.getState().project).toEqual(base);
   });
 
+  it("cancels a capability trial when another editor action interrupts it", () => {
+    const repository = new CountingProjectRepository(demoProject);
+    const store = createProjectStore(repository);
+    const key = "capability-trial:slot-1:expression";
+    const base = structuredClone(store.getState().project);
+    const autosaveBefore = store.getState().autosave;
+
+    store.getState().beginTransaction(key, { interruption: "cancel" });
+    store.getState().previewCharacterState(key, 1, { expression_id: "expression/smile" });
+
+    let state = store.getState();
+    expect(state.project.chapters[0].scenes[0].cues[0].events
+      .find((event) => event.kind === "enter" && event.slot === 1)?.expression_id)
+      .toBe("expression/smile");
+    expect(state.revision).toBe(0);
+    expect(state.history).toEqual([]);
+    expect(state.autosave).toEqual(autosaveBefore);
+    expect(repository.saves).toBe(0);
+
+    state.selectCue("cue/conference/002");
+    state = store.getState();
+    expect(state.project).toEqual(base);
+    expect(state.selectedCueId).toBe("cue/conference/002");
+    expect(state.activeTransaction).toBeNull();
+    expect(state.revision).toBe(0);
+    expect(state.history).toEqual([]);
+    expect(state.autosave).toEqual(autosaveBefore);
+    expect(repository.saves).toBe(0);
+  });
+
+  it("commits an explicitly confirmed capability trial once", () => {
+    const repository = new CountingProjectRepository(demoProject);
+    const store = createProjectStore(repository);
+    const key = "capability-trial:slot-1:motion";
+    const base = structuredClone(store.getState().project);
+    const autosaveBefore = store.getState().autosave;
+
+    store.getState().beginTransaction(key, { interruption: "cancel" });
+    store.getState().previewCharacterState(key, 1, { motion_id: "motion/nod" });
+    expect(store.getState().autosave).toEqual(autosaveBefore);
+
+    expect(store.getState().commitTransaction(key))
+      .toEqual({ status: "committed", revision: 1 });
+    let state = store.getState();
+    expect(state.project.chapters[0].scenes[0].cues[0].events
+      .find((event) => event.kind === "enter" && event.slot === 1)?.motion_id)
+      .toBe("motion/nod");
+    expect(state.history).toHaveLength(1);
+    expect(state.autosave.pendingRevision).toBe(1);
+    expect(repository.saves).toBe(0);
+
+    state.undo();
+    state = store.getState();
+    expect(state.project).toEqual(base);
+  });
+
   it("commits professional event field previews as one revision", () => {
     const repository = new CountingProjectRepository(demoProject);
     const store = createProjectStore(repository);

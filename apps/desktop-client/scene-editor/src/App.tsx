@@ -47,7 +47,11 @@ import {
 } from "react";
 
 import { projectFileAdapter } from "./projectRepository";
-import { capabilityStatesFor } from "./capabilities";
+import {
+  capabilityStateOptionsFor,
+  capabilityStatesFor,
+  type CapabilityStateOption,
+} from "./capabilities";
 import { evaluateScene } from "./sceneEvaluation";
 import {
   compilePreview,
@@ -80,6 +84,7 @@ import {
 import type {
   Cue,
   CueEvent,
+  CapabilityStateKind,
   InspectorTab,
   RenderTimeline,
   SceneDescriptor,
@@ -668,10 +673,115 @@ function TransactionalNumberControl({
   );
 }
 
+function CapabilityTrialPicker({
+  label,
+  kind,
+  slot,
+  value,
+  authoredValue,
+  options,
+  transactionKey,
+}: {
+  label: string;
+  kind: Exclude<CapabilityStateKind, "transition">;
+  slot: number;
+  value: string;
+  authoredValue: string;
+  options: CapabilityStateOption[];
+  transactionKey: string;
+}) {
+  const activeTransaction = useProjectStore((state) => state.activeTransaction);
+  const beginTransaction = useProjectStore((state) => state.beginTransaction);
+  const previewCharacterState = useProjectStore((state) => state.previewCharacterState);
+  const commitTransaction = useProjectStore((state) => state.commitTransaction);
+  const cancelTransaction = useProjectStore((state) => state.cancelTransaction);
+  const [notice, setNotice] = useState("");
+  const trialActive = activeTransaction?.key === transactionKey;
+  const field = `${kind}_id`;
+  const trial = (option: CapabilityStateOption) => {
+    if (option.availability !== "available") return;
+    beginTransaction(transactionKey, { interruption: "cancel" });
+    previewCharacterState(transactionKey, slot, { [field]: option.state_id });
+    setNotice(`${label} ${option.label} 正在试演`);
+  };
+  const cancel = () => {
+    if (useProjectStore.getState().activeTransaction?.key !== transactionKey) return;
+    cancelTransaction(transactionKey);
+    setNotice(`${label}试演已取消`);
+  };
+  const commit = (option: CapabilityStateOption) => {
+    trial(option);
+    const result = commitTransaction(transactionKey);
+    setNotice(result.status === "committed"
+      ? `${label}已设为 ${option.label}`
+      : `${label}保持 ${option.label}`);
+  };
+
+  return (
+    <div
+      className="capability-trial-picker"
+      role="group"
+      aria-label={`${label}能力`}
+      onPointerLeave={(event) => {
+        if (useProjectStore.getState().activeTransaction?.key !== transactionKey) return;
+        const focused = event.currentTarget.querySelector<HTMLButtonElement>("button:focus");
+        const focusedOption = options.find((option) => option.state_id === focused?.dataset.stateId);
+        if (focusedOption) trial(focusedOption);
+        else cancel();
+      }}
+      onBlur={(event) => {
+        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+        cancel();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        cancel();
+      }}
+    >
+      <div className="capability-trial-heading">
+        <span>{label}</span>
+        <small>{trialActive ? "试演中 · 单击确认" : "悬停或聚焦试演"}</small>
+      </div>
+      <div className="capability-trial-options">
+        {options.map((option) => {
+          const isCurrent = value === option.state_id;
+          const isAuthored = authoredValue === option.state_id;
+          return (
+            <button
+              type="button"
+              key={option.state_id}
+              data-state-id={option.state_id}
+              className={`${isCurrent ? "is-current" : ""}${isAuthored ? " is-authored" : ""}${option.availability !== "available" ? " is-unavailable" : ""}`.trim()}
+              aria-pressed={isCurrent}
+              disabled={option.availability !== "available"}
+              title={option.diagnostic || `${option.label} · ${option.state_id}`}
+              onPointerEnter={() => trial(option)}
+              onFocus={() => trial(option)}
+              onClick={() => commit(option)}
+            >
+              <span>{option.label}</span>
+              {option.availability !== "available"
+                ? <small>不可试演</small>
+                : isCurrent && trialActive && !isAuthored
+                  ? <small>试演</small>
+                  : isAuthored
+                    ? <small>已选</small>
+                    : null}
+            </button>
+          );
+        })}
+      </div>
+      <p className="sr-only" aria-live="polite">{notice}</p>
+    </div>
+  );
+}
+
 function CharacterInspector() {
   const project = useProjectStore((state) => state.project);
   const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedSlot = useProjectStore((state) => state.selectedSlot);
+  const activeTransaction = useProjectStore((state) => state.activeTransaction);
   const setSlotCharacter = useProjectStore((state) => state.setSlotCharacter);
   const updateCharacterState = useProjectStore((state) => state.updateCharacterState);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
@@ -679,9 +789,21 @@ function CharacterInspector() {
   const characterId = projection.afterCue.slots[selectedSlot - 1];
   const character = project.characters.find((item) => item.character_id === characterId);
   const stateEvent = projection.afterCue.actorStateEvents[selectedSlot - 1];
-  const expressionStates = capabilityStatesFor(character, "expression", stateEvent?.expression_id);
-  const motionStates = capabilityStatesFor(character, "motion", stateEvent?.motion_id);
-  const emoticonStates = capabilityStatesFor(character, "emoticon", stateEvent?.emoticon_id);
+  const trialPrefix = `capability-trial:${selectedSceneId}:${selectedCueId}:${selectedSlot}:`;
+  const authoredProject = activeTransaction?.key.startsWith(trialPrefix)
+    ? activeTransaction.base.project
+    : project;
+  const authoredEvent = projectCueState(authoredProject, selectedCueId, { sceneId: selectedSceneId })
+    .afterCue.actorStateEvents[selectedSlot - 1];
+  const expressionId = String(stateEvent?.expression_id || "expression/neutral");
+  const motionId = String(stateEvent?.motion_id || "motion/idle");
+  const emoticonId = String(stateEvent?.emoticon_id || "emoticon/none");
+  const authoredExpressionId = String(authoredEvent?.expression_id || "expression/neutral");
+  const authoredMotionId = String(authoredEvent?.motion_id || "motion/idle");
+  const authoredEmoticonId = String(authoredEvent?.emoticon_id || "emoticon/none");
+  const expressionStates = capabilityStateOptionsFor(character, "expression", authoredExpressionId);
+  const motionStates = capabilityStateOptionsFor(character, "motion", authoredMotionId);
+  const emoticonStates = capabilityStateOptionsFor(character, "emoticon", authoredEmoticonId);
 
   return (
     <div className="inspector-content">
@@ -696,23 +818,33 @@ function CharacterInspector() {
         </select>
       </Field>
       {characterId && <>
-        <div className="field-grid two">
-          <Field label="表情">
-            <select value={String(stateEvent?.expression_id || "expression/neutral")} onChange={(event) => updateCharacterState(selectedSlot, { expression_id: event.target.value })}>
-              {expressionStates.map((item) => <option key={item.state_id} value={item.state_id}>{item.label}</option>)}
-            </select>
-          </Field>
-          <Field label="动作">
-            <select value={String(stateEvent?.motion_id || "motion/idle")} onChange={(event) => updateCharacterState(selectedSlot, { motion_id: event.target.value })}>
-              {motionStates.map((item) => <option key={item.state_id} value={item.state_id}>{item.label}</option>)}
-            </select>
-          </Field>
-        </div>
-        <Field label="表情符号" hint="角色上方的独立叠加层">
-          <select value={String(stateEvent?.emoticon_id || "emoticon/none")} onChange={(event) => updateCharacterState(selectedSlot, { emoticon_id: event.target.value })}>
-            {emoticonStates.map((item) => <option key={item.state_id} value={item.state_id}>{item.label}</option>)}
-          </select>
-        </Field>
+        <CapabilityTrialPicker
+          label="表情"
+          kind="expression"
+          slot={selectedSlot}
+          value={expressionId}
+          authoredValue={authoredExpressionId}
+          options={expressionStates}
+          transactionKey={`${trialPrefix}expression`}
+        />
+        <CapabilityTrialPicker
+          label="动作"
+          kind="motion"
+          slot={selectedSlot}
+          value={motionId}
+          authoredValue={authoredMotionId}
+          options={motionStates}
+          transactionKey={`${trialPrefix}motion`}
+        />
+        <CapabilityTrialPicker
+          label="表情符号"
+          kind="emoticon"
+          slot={selectedSlot}
+          value={emoticonId}
+          authoredValue={authoredEmoticonId}
+          options={emoticonStates}
+          transactionKey={`${trialPrefix}emoticon`}
+        />
         <label className="toggle-row">
           <span><strong>聚焦当前角色</strong><small>发言时压暗其他角色</small></span>
           <input type="checkbox" checked={stateEvent?.focus !== false} onChange={(event) => updateCharacterState(selectedSlot, { focus: event.target.checked })} />
@@ -1520,7 +1652,11 @@ export default function App() {
   const save = () => {
     const state = useProjectStore.getState();
     if (state.activeTransaction) {
-      state.commitTransaction(state.activeTransaction.key);
+      if (state.activeTransaction.interruption === "cancel") {
+        state.cancelTransaction(state.activeTransaction.key);
+      } else {
+        state.commitTransaction(state.activeTransaction.key);
+      }
     }
     useProjectStore.getState().flushAutosave();
     const currentProject = useProjectStore.getState().project;

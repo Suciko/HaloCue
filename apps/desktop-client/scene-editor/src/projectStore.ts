@@ -54,8 +54,10 @@ export function advancedEventCount(cue: Cue): number {
 }
 
 type HistoryEntry = { project: HaloCueProject } & EditorSelection;
+export type EditorTransactionInterruption = "commit" | "cancel";
 type ActiveEditorTransaction = {
   key: string;
+  interruption: EditorTransactionInterruption;
   base: HistoryEntry;
   dirty: boolean;
   projectDiagnostics: ProjectDiagnostic[];
@@ -89,10 +91,11 @@ type EditorState = {
   selectSlot: (slot: number) => void;
   selectEvent: (eventId: string | null, mode?: EventSelectionMode) => void;
   setPreviewPlayheadFrame: (frame: number | null) => void;
-  beginTransaction: (key: string) => void;
+  beginTransaction: (key: string, options?: { interruption?: EditorTransactionInterruption }) => void;
   previewDialogue: (key: string, patch: Partial<CueEvent>) => void;
   previewEnvironment: (key: string, patch: Partial<CueEvent>) => void;
   previewEvent: (key: string, eventId: string, patch: Partial<CueEvent>) => void;
+  previewCharacterState: (key: string, slot: number, patch: Partial<CueEvent>) => void;
   commitTransaction: (key: string) => EditorTransactionResult;
   cancelTransaction: (key: string) => void;
   flushAutosave: () => void;
@@ -220,6 +223,26 @@ function applyEventPatch(cue: Cue, eventId: string, patch: Partial<CueEvent>): b
   return true;
 }
 
+function applyCharacterStatePatch(
+  cue: Cue,
+  scene: Scene,
+  slot: number,
+  patch: Partial<CueEvent>,
+): void {
+  const projection = projectSceneAtCue(scene, cue.cue_id);
+  const characterId = projection.afterCue.slots[slot - 1];
+  if (!characterId) return;
+  const currentState = projection.afterCue.actorStateEvents[slot - 1];
+  if (Object.entries(patch).every(([key, value]) => currentState?.[key] === value)) return;
+  let enter = [...cue.events].reverse()
+    .find((event) => event.kind === "enter" && event.slot === slot);
+  if (!enter) {
+    enter = { event_id: localId("event/enter"), kind: "enter", slot, character_id: characterId };
+    cue.events.unshift(enter);
+  }
+  Object.assign(enter, patch);
+}
+
 export function createProjectStore(repository: ProjectRepository = projectRepository) {
   const initialProject = repository.loadDraft();
   const initial = initialSelection(initialProject);
@@ -268,6 +291,30 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     return { status: "committed", revision };
   };
 
+  const cancelActiveTransaction = (key?: string): void => {
+    const state = get();
+    const active = state.activeTransaction;
+    if (!active || (key !== undefined && active.key !== key)) return;
+    set({
+      ...active.base,
+      dirty: active.dirty,
+      projectDiagnostics: active.projectDiagnostics,
+      activeTransaction: null,
+      previewRevision: state.previewRevision + 1,
+    });
+  };
+
+  const finishActiveTransaction = (): EditorTransactionResult => {
+    const state = get();
+    const active = state.activeTransaction;
+    if (!active) return noOp(state);
+    if (active.interruption === "cancel") {
+      cancelActiveTransaction(active.key);
+      return noOp(get());
+    }
+    return commitActiveTransaction(active.key);
+  };
+
   const previewActiveTransaction = (
     key: string,
     mutator: (project: HaloCueProject, cue: Cue, scene: Scene) => void,
@@ -296,7 +343,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     mutator: (project: HaloCueProject, cue: Cue, scene: Scene) => void,
     selection?: Partial<EditorSelection>,
   ): EditorTransactionResult => {
-    commitActiveTransaction();
+    finishActiveTransaction();
     const state = get();
     const project = clone(state.project);
     const scene = sceneById(project, state.selectedSceneId);
@@ -340,7 +387,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
   };
 
   const deleteEvents = (eventIds: Iterable<string>): EditorTransactionResult => {
-    commitActiveTransaction();
+    finishActiveTransaction();
     const state = get();
     const cue = sceneById(state.project, state.selectedSceneId)
       .cues.find((item) => item.cue_id === state.selectedCueId);
@@ -378,16 +425,19 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     autosave: autosaveCoordinator.currentState(),
     projectDiagnostics: [...repository.getDiagnostics()],
     setMode: (mode) => {
-      commitActiveTransaction();
+      finishActiveTransaction();
       saveEditorMode(mode);
       set({
         mode,
         previewPlayheadFrame: mode === "simple" ? null : get().previewPlayheadFrame,
       });
     },
-    setInspectorTab: (inspectorTab) => set({ inspectorTab }),
+    setInspectorTab: (inspectorTab) => {
+      finishActiveTransaction();
+      set({ inspectorTab });
+    },
     selectChapter: (chapterId) => {
-      commitActiveTransaction();
+      finishActiveTransaction();
       const state = get();
       if (chapterId === state.selectedChapterId) return;
       const chapter = state.project.chapters.find((item) => item.chapter_id === chapterId);
@@ -396,7 +446,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       set({ ...selectionForScene(state.project, scene.scene_id), previewPlayheadFrame: null });
     },
     selectScene: (sceneId) => {
-      commitActiveTransaction();
+      finishActiveTransaction();
       const state = get();
       if (sceneId === state.selectedSceneId) return;
       try {
@@ -406,7 +456,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       }
     },
     selectCue: (selectedCueId) => {
-      commitActiveTransaction();
+      finishActiveTransaction();
       const state = get();
       if (selectedCueId === state.selectedCueId) {
         if (state.previewPlayheadFrame !== null) set({ previewPlayheadFrame: null });
@@ -423,9 +473,12 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         previewPlayheadFrame: null,
       });
     },
-    selectSlot: (selectedSlot) => set({ selectedSlot, inspectorTab: "character" }),
+    selectSlot: (selectedSlot) => {
+      finishActiveTransaction();
+      set({ selectedSlot, inspectorTab: "character" });
+    },
     selectEvent: (selectedEventId, mode = "replace") => {
-      commitActiveTransaction();
+      finishActiveTransaction();
       if (selectedEventId === null) {
         set({
           selectedEventId: null,
@@ -453,15 +506,16 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       }
       set({ previewPlayheadFrame: frame });
     },
-    beginTransaction: (key) => {
+    beginTransaction: (key, options) => {
       if (!key) throw new Error("编辑事务需要稳定的 key");
       const current = get().activeTransaction;
       if (current?.key === key) return;
-      if (current) commitActiveTransaction(current.key);
+      if (current) finishActiveTransaction();
       const state = get();
       set({
         activeTransaction: {
           key,
+          interruption: options?.interruption ?? "commit",
           base: {
             project: state.project,
             ...selectionSnapshot(state),
@@ -482,19 +536,12 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         throw new Error(`编辑事务 ${key} 的事件 ${eventId} 已不存在`);
       }
     }),
+    previewCharacterState: (key, slot, patch) => previewActiveTransaction(
+      key,
+      (_project, cue, scene) => applyCharacterStatePatch(cue, scene, slot, patch),
+    ),
     commitTransaction: (key) => commitActiveTransaction(key),
-    cancelTransaction: (key) => {
-      const state = get();
-      const active = state.activeTransaction;
-      if (!active || active.key !== key) return;
-      set({
-        ...active.base,
-        dirty: active.dirty,
-        projectDiagnostics: active.projectDiagnostics,
-        activeTransaction: null,
-        previewRevision: state.previewRevision + 1,
-      });
-    },
+    cancelTransaction: (key) => cancelActiveTransaction(key),
     flushAutosave: () => autosaveCoordinator.flush(),
     retryAutosave: () => autosaveCoordinator.retry(),
     updateProjectTitle: (title) => commit((project) => { project.title = title; }),
@@ -505,7 +552,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       applyEnvironmentPatch(cue, scene, patch);
     }),
     setSlotCharacter: (slot, characterId) => {
-      commitActiveTransaction();
+      finishActiveTransaction();
       const state = get();
       const scene = sceneById(state.project, state.selectedSceneId);
       const currentCharacterId = projectSceneAtCue(scene, state.selectedCueId)
@@ -521,7 +568,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       });
     },
     swapSlots: (source, target) => {
-      commitActiveTransaction();
+      finishActiveTransaction();
       const state = get();
       if (source === target) return noOp(state);
       const scene = sceneById(state.project, state.selectedSceneId);
@@ -538,17 +585,9 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         cue.events.unshift(eventFor(target, slots[source - 1]), eventFor(source, slots[target - 1]));
       });
     },
-    updateCharacterState: (slot, patch) => commit((_project, cue, scene) => {
-      const projection = projectSceneAtCue(scene, cue.cue_id);
-      const characterId = projection.afterCue.slots[slot - 1];
-      if (!characterId) return;
-      let enter = [...cue.events].reverse().find((event) => event.kind === "enter" && event.slot === slot);
-      if (!enter) {
-        enter = { event_id: localId("event/enter"), kind: "enter", slot, character_id: characterId };
-        cue.events.unshift(enter);
-      }
-      Object.assign(enter, patch);
-    }),
+    updateCharacterState: (slot, patch) => commit(
+      (_project, cue, scene) => applyCharacterStatePatch(cue, scene, slot, patch),
+    ),
     addEvent: (kind, insertion) => {
       const state = get();
       const eventId = localId("event");
@@ -600,7 +639,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       }, { selectedCueId: cueId, selectedEventId: null });
     },
     deleteCue: () => {
-      commitActiveTransaction();
+      finishActiveTransaction();
       const state = get();
       const scene = sceneById(state.project, state.selectedSceneId);
       if (scene.cues.length <= 1) return noOp(state);
@@ -623,7 +662,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     deleteEvent: (eventId) => deleteEvents([eventId]),
     deleteSelectedEvents: () => deleteEvents(get().selectedEventIds),
     duplicateSelectedEvents: () => {
-      commitActiveTransaction();
+      finishActiveTransaction();
       const state = get();
       const cue = sceneById(state.project, state.selectedSceneId)
         .cues.find((item) => item.cue_id === state.selectedCueId);
@@ -662,7 +701,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       });
     },
     undo: () => {
-      commitActiveTransaction();
+      finishActiveTransaction();
       const state = get();
       const previous = state.history.at(-1);
       if (!previous) return noOp(state);
@@ -685,7 +724,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       return { status: "committed", revision };
     },
     redo: () => {
-      commitActiveTransaction();
+      finishActiveTransaction();
       const state = get();
       const next = state.future[0];
       if (!next) return noOp(state);

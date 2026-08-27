@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  capabilityStateOptionsFor,
   capabilityStatesFor,
   MapCapabilityRegistry,
   parseCapabilityRecords,
@@ -49,6 +50,20 @@ describe("character capability registry", () => {
 
     expect(states[0]).toEqual({ state_id: "expression/legacy", label: "未注册 · expression/legacy" });
     expect(states.some((item) => item.state_id === "expression/glow")).toBe(true);
+
+    const options = capabilityStateOptionsFor(
+      { character_id: "character/custom", capability_id: "capability/custom/default" },
+      "expression",
+      "expression/legacy",
+      registry,
+    );
+    expect(options[0]).toEqual(expect.objectContaining({
+      state_id: "expression/legacy",
+      availability: "unregistered",
+      diagnostic: expect.stringContaining("能力目录未注册"),
+    }));
+    expect(options.find((item) => item.state_id === "expression/glow")?.availability)
+      .toBe("available");
   });
 
   it("rejects malformed and duplicate capability records at the seam", () => {

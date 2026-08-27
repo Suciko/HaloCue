@@ -151,15 +151,39 @@ const DEFAULT_CAPABILITIES: CharacterCapabilities[] = [
 
 export const capabilityRegistry: CapabilityRegistry = new MapCapabilityRegistry(DEFAULT_CAPABILITIES);
 
+export type CapabilityStateOption = CapabilityState & {
+  availability: "available" | "unregistered";
+  diagnostic?: string;
+};
+
+export function capabilityStateOptionsFor(
+  character: Pick<Character, "character_id" | "capability_id"> | undefined,
+  kind: CapabilityStateKind,
+  currentStateId?: string,
+  registry: CapabilityRegistry = capabilityRegistry,
+): CapabilityStateOption[] {
+  const registered = registry.statesFor(character?.character_id, character?.capability_id, kind);
+  const options: CapabilityStateOption[] = registered.map((item) => ({
+    ...item,
+    availability: "available",
+  }));
+  if (!currentStateId || registered.some((item) => item.state_id === currentStateId)) return options;
+  return [{
+    state_id: currentStateId,
+    label: `未注册 · ${currentStateId}`,
+    availability: "unregistered",
+    diagnostic: `当前项目引用 ${currentStateId}，但所选角色的能力目录未注册该状态。`,
+  }, ...options];
+}
+
 export function capabilityStatesFor(
   character: Pick<Character, "character_id" | "capability_id"> | undefined,
   kind: CapabilityStateKind,
   currentStateId?: string,
   registry: CapabilityRegistry = capabilityRegistry,
 ): CapabilityState[] {
-  const states = registry.statesFor(character?.character_id, character?.capability_id, kind);
-  if (!currentStateId || states.some((item) => item.state_id === currentStateId)) return states;
-  return [state(currentStateId, `未注册 · ${currentStateId}`), ...states];
+  return capabilityStateOptionsFor(character, kind, currentStateId, registry)
+    .map(({ availability: _availability, diagnostic: _diagnostic, ...item }) => item);
 }
 
 export function resolveExpressionAnimation(
