@@ -374,6 +374,8 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .shot-clip:hover { border-color: var(--accent); background: #28513f; transform: translateY(-1px); }
 .shot-clip.is-selected { border-color: var(--accent-strong); background: #2e654c; box-shadow: 0 0 0 1px rgba(146, 232, 197, .18); }
 .shot-clip.is-parallel { border-color: #9b7d3b; background: #4b3b1e; color: #f4d995; }
+.shot-clip.is-active { border-color: var(--accent); filter: brightness(1.1); box-shadow: 0 0 0 1px rgba(119, 214, 176, .28), inset 0 0 0 1px rgba(119, 214, 176, .12); }
+.shot-clip.is-parallel.is-active { border-color: #e4ba59; box-shadow: 0 0 0 1px rgba(228, 186, 89, .28), inset 0 0 0 1px rgba(228, 186, 89, .12); }
 .shot-clip span { overflow: hidden; text-overflow: ellipsis; font-size: 8px; }
 .shot-clip small { flex: none; color: inherit; font-size: 7px; opacity: .8; }
 .timeline-event-main { width: 100%; height: 100%; display: grid; align-content: center; justify-items: start; gap: 1px; padding: 0 15px 0 8px; overflow: hidden; border: 0; background: transparent; color: #bdc6c2; white-space: nowrap; text-align: left; font-size: 9px; cursor: pointer; }

@@ -81,6 +81,28 @@ describe("professional shot timeline workspace", () => {
     expect(legend?.querySelector(".is-parallel")).not.toBeNull();
   });
 
+  it("marks every clip active at the shared playhead, including overlapping events", () => {
+    const shotTab = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"))
+      .find((button) => button.textContent?.includes("镜头时间轴"));
+    act(() => shotTab?.click());
+
+    const state = useProjectStore.getState();
+    const evaluation = evaluateScene(state.project, state.selectedCueId, {
+      sceneId: state.selectedSceneId,
+    });
+    const motion = evaluation.timeline.events.find((event) => event.event_id === "event/yuuka-nod")!;
+    const dialogue = evaluation.timeline.events.find((event) => event.event_id === "event/dialogue/001")!;
+    expect(motion.start_frame).toBe(dialogue.start_frame);
+
+    act(() => state.setPreviewPlayheadFrame(motion.start_frame));
+    expect(container.querySelector(`.shot-clip.is-active[data-event-id="${motion.event_id}"]`)).not.toBeNull();
+    expect(container.querySelector(`.shot-clip.is-active[data-event-id="${dialogue.event_id}"]`)).not.toBeNull();
+
+    act(() => state.setPreviewPlayheadFrame(motion.end_frame));
+    expect(container.querySelector(`.shot-clip.is-active[data-event-id="${motion.event_id}"]`)).toBeNull();
+    expect(container.querySelector(`.shot-clip.is-active[data-event-id="${dialogue.event_id}"]`)).not.toBeNull();
+  });
+
   it("keeps the shared selection and playhead while keyboard navigation moves professional tabs", () => {
     const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"));
     const scriptTab = tabs.find((button) => button.textContent?.includes("脚本"))!;

@@ -1890,15 +1890,17 @@ function ShotTimelineWorkspace() {
                   onPointerDown={(event) => scrubAt(event.clientX, event.currentTarget)}
                   onClick={(event) => scrubAt(event.clientX, event.currentTarget)}
                 >
-                  {track.clips.map((clip) => (
-                    <button
+                  {track.clips.map((clip) => {
+                    const isActive = visibleFrame >= clip.start_frame && visibleFrame < clip.end_frame;
+                    return <button
                       ref={(element) => {
                         if (element) clipRefs.current[clip.event_id] = element;
                         else delete clipRefs.current[clip.event_id];
                       }}
                       type="button"
-                      className={`shot-clip${clip.event_id === selectedEventId ? " is-selected" : ""}${clip.wait_for_completion ? "" : " is-parallel"}`}
+                      className={`shot-clip${clip.event_id === selectedEventId ? " is-selected" : ""}${clip.wait_for_completion ? "" : " is-parallel"}${isActive ? " is-active" : ""}`}
                       data-shot-clip
+                      data-shot-active={isActive ? "true" : undefined}
                       data-event-id={clip.event_id}
                       aria-pressed={clip.event_id === selectedEventId}
                       key={clip.event_id}
@@ -1914,8 +1916,8 @@ function ShotTimelineWorkspace() {
                     >
                       <span>{shotTimelineClipLabel(clip)}</span>
                       {!clip.wait_for_completion && <small>并行</small>}
-                    </button>
-                  ))}
+                    </button>;
+                  })}
                 </div>
               </div>
             ))}
