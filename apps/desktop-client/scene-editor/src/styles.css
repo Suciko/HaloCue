@@ -279,11 +279,18 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .event-timeline-track { margin-top: 4px; }
 .track-label { height: 35px; display: flex; align-items: center; gap: 7px; padding-left: 8px; border-radius: 5px; background: var(--panel-2); color: var(--muted); font-size: 9px; }
 .timeline-segments { min-width: 0; display: flex; gap: 3px; overflow-x: auto; }
-.timeline-segments button { min-width: 130px; height: 35px; flex: 1; display: flex; align-items: center; gap: 6px; padding: 0 8px; overflow: hidden; border: 1px solid #3b4541; border-radius: 5px; background: #202724; color: #bdc6c2; white-space: nowrap; text-overflow: ellipsis; font-size: 9px; cursor: pointer; }
-.event-timeline-track .timeline-segments button { min-width: 82px; display: grid; align-content: center; justify-items: start; gap: 1px; }
-.event-timeline-track .timeline-segments button small { color: var(--subtle); font-size: 7px; }
-.timeline-segments button.is-active { border-color: var(--accent); background: var(--accent-bg); color: var(--text); }
-.timeline-segments button span { width: 18px; height: 18px; display: grid; place-items: center; flex: none; border-radius: 3px; background: rgba(0,0,0,.22); color: var(--muted); font-size: 8px; }
+.timeline-segments > button { min-width: 130px; height: 35px; flex: 1; display: flex; align-items: center; gap: 6px; padding: 0 8px; overflow: hidden; border: 1px solid #3b4541; border-radius: 5px; background: #202724; color: #bdc6c2; white-space: nowrap; text-overflow: ellipsis; font-size: 9px; cursor: pointer; }
+.timeline-segments > button.is-active { border-color: var(--accent); background: var(--accent-bg); color: var(--text); }
+.timeline-segments > button span { width: 18px; height: 18px; display: grid; place-items: center; flex: none; border-radius: 3px; background: rgba(0,0,0,.22); color: var(--muted); font-size: 8px; }
+.timeline-event-segment { position: relative; min-width: 82px; height: 35px; flex: 1; overflow: hidden; border: 1px solid #3b4541; border-radius: 5px; background: #202724; }
+.timeline-event-segment.is-active { border-color: var(--accent); background: var(--accent-bg); }
+.timeline-event-main { width: 100%; height: 100%; display: grid; align-content: center; justify-items: start; gap: 1px; padding: 0 15px 0 8px; overflow: hidden; border: 0; background: transparent; color: #bdc6c2; white-space: nowrap; text-align: left; font-size: 9px; cursor: pointer; }
+.timeline-event-main span, .timeline-event-main small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.timeline-event-main small { color: var(--subtle); font-size: 7px; }
+.timeline-duration-handle { position: absolute; inset: 0 0 0 auto; width: 12px; padding: 0; border: 0; border-left: 1px solid rgba(255,255,255,.08); background: rgba(0,0,0,.12); cursor: ew-resize; touch-action: none; }
+.timeline-duration-handle::before { content: ""; position: absolute; top: 9px; bottom: 9px; left: 4px; width: 2px; border-left: 1px solid #77857f; border-right: 1px solid #77857f; }
+.timeline-duration-handle:hover, .timeline-duration-handle:focus-visible { background: rgba(99,223,166,.2); }
+.timeline-duration-handle:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
 
 .toast { position: fixed; right: 18px; bottom: 18px; z-index: 10; max-width: 420px; display: flex; align-items: center; gap: 8px; padding: 10px 13px; border: 1px solid #436454; border-radius: 6px; background: #1a2923; box-shadow: 0 10px 28px rgba(0,0,0,.35); color: #dce7e2; font-size: 11px; }
 .toast svg { color: var(--accent); }

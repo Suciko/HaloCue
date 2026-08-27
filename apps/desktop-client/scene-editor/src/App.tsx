@@ -57,6 +57,7 @@ import {
 import { eventDurationMs } from "./renderTimeline";
 import { parseNumericDraft } from "./fieldTransactions";
 import { projectCueState, sceneById } from "./cueStateProjection";
+import { TimelineEventSegment } from "./TimelineEventSegment";
 import {
   eventEditorDefinition,
   eventEditorDefinitions,
@@ -1219,17 +1220,12 @@ function Timeline() {
         <span className="track-label"><Layers3 />事件</span>
         <div className="timeline-segments">
           {eventSegments.map((event) => (
-            <button
-              type="button"
+            <TimelineEventSegment
               key={event.event_id}
-              className={event.event_id === selectedEventId ? "is-active" : ""}
-              title={`${eventLabel(event.kind) || event.kind} · ${event.duration_ms} ms`}
-              style={{ flexGrow: event.duration_frames }}
-              onClick={() => useProjectStore.getState().selectEvent(event.event_id)}
-            >
-              <span>{eventLabel(event.kind) || "扩展演出"}</span>
-              <small>{event.duration_ms} ms</small>
-            </button>
+              event={event}
+              frameRate={evaluation.timeline.frame_rate}
+              selected={event.event_id === selectedEventId}
+            />
           ))}
         </div>
       </div>

@@ -8,6 +8,7 @@ import {
 } from "./projectRepository";
 import { migratedCueId } from "./projectCodec";
 import { createProjectStore } from "./projectStore";
+import { durationMsForFrames } from "./timelineResize";
 import type { HaloCueProject } from "./types";
 
 class CountingProjectRepository extends MemoryProjectRepository {
@@ -279,6 +280,40 @@ describe("project repository seam", () => {
     state = store.getState();
     expect(state.history).toHaveLength(historyBefore + 1);
     expect(state.autosave.pendingRevision).toBe(revisionBefore + 1);
+  });
+
+  it("commits a frame-snapped timeline resize as one revision", () => {
+    const repository = new CountingProjectRepository(demoProject);
+    const store = createProjectStore(repository);
+    const cue = store.getState().project.chapters[0].scenes[0].cues[0];
+    const background = cue.events[0];
+    const key = `timeline.duration:${background.event_id}`;
+    const baseDuration = background.duration_ms;
+
+    store.getState().beginTransaction(key);
+    store.getState().previewEvent(key, background.event_id, {
+      duration_ms: durationMsForFrames(18, 30),
+    });
+    store.getState().previewEvent(key, background.event_id, {
+      duration_ms: durationMsForFrames(19, 30),
+    });
+    store.getState().previewEvent(key, background.event_id, {
+      duration_ms: durationMsForFrames(20, 30),
+    });
+
+    let state = store.getState();
+    expect(state.project.chapters[0].scenes[0].cues[0].events[0].duration_ms).toBe(666);
+    expect(state.revision).toBe(0);
+    expect(state.history).toEqual([]);
+    expect(repository.saves).toBe(0);
+
+    expect(state.commitTransaction(key)).toEqual({ status: "committed", revision: 1 });
+    state = store.getState();
+    expect(state.history).toHaveLength(1);
+    expect(state.autosave.pendingRevision).toBe(1);
+    state.undo();
+    expect(store.getState().project.chapters[0].scenes[0].cues[0].events[0].duration_ms)
+      .toBe(baseDuration);
   });
 
   it("previews many gesture values but commits one save and one undo entry", () => {
