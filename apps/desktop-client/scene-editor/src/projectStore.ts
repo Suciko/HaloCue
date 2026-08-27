@@ -25,6 +25,12 @@ import { isDescriptorRenderable } from "./sceneEventRegistry";
 import { createSceneEvent } from "./sceneEventFactory";
 import { reorderEvents, type EventMove } from "./eventReorder";
 import { eventInsertionIndex, type EventInsertion } from "./eventInsertion";
+import {
+  repairEventSelection,
+  selectEventIds,
+  selectionAfterEventDeletion,
+  type EventSelectionMode,
+} from "./eventSelection";
 import { projectSceneAtCue, sceneById } from "./cueStateProjection";
 import type { ProjectDiagnostic } from "./projectCodec";
 
@@ -63,6 +69,8 @@ type EditorState = {
   selectedCueId: string;
   selectedSlot: number;
   selectedEventId: string | null;
+  selectedEventIds: string[];
+  eventSelectionAnchorId: string | null;
   previewPlayheadFrame: number | null;
   history: HistoryEntry[];
   future: HistoryEntry[];
@@ -78,7 +86,7 @@ type EditorState = {
   selectScene: (sceneId: string) => void;
   selectCue: (cueId: string) => void;
   selectSlot: (slot: number) => void;
-  selectEvent: (eventId: string | null) => void;
+  selectEvent: (eventId: string | null, mode?: EventSelectionMode) => void;
   setPreviewPlayheadFrame: (frame: number | null) => void;
   beginTransaction: (key: string) => void;
   previewDialogue: (key: string, patch: Partial<CueEvent>) => void;
@@ -102,6 +110,7 @@ type EditorState = {
   moveCue: (sourceCueId: string, targetCueId: string) => EditorTransactionResult;
   updateEvent: (eventId: string, patch: Partial<CueEvent>) => EditorTransactionResult;
   deleteEvent: (eventId: string) => EditorTransactionResult;
+  deleteSelectedEvents: () => EditorTransactionResult;
   moveEvent: (eventId: string, move: EventMove) => EditorTransactionResult;
   undo: () => EditorTransactionResult;
   redo: () => EditorTransactionResult;
@@ -124,6 +133,8 @@ function selectionForScene(
       selectedSceneId: scene.scene_id,
       selectedCueId: cue.cue_id,
       selectedEventId: cue.events[0]?.event_id || null,
+      selectedEventIds: cue.events[0] ? [cue.events[0].event_id] : [],
+      eventSelectionAnchorId: cue.events[0]?.event_id || null,
     };
   }
   throw new Error(`项目中不存在场景 ${sceneId}`);
@@ -143,6 +154,8 @@ function selectionSnapshot(state: EditorState): EditorSelection {
     selectedSceneId: state.selectedSceneId,
     selectedCueId: state.selectedCueId,
     selectedEventId: state.selectedEventId,
+    selectedEventIds: [...state.selectedEventIds],
+    eventSelectionAnchorId: state.eventSelectionAnchorId,
   };
 }
 
@@ -168,16 +181,7 @@ function repairTransactionSelection(
   if (!chapter || !scene || !cue) {
     throw new Error("编辑事务生成了无效的 Chapter/Scene/Cue 选区");
   }
-  if (
-    selection.selectedEventId !== null
-    && !cue.events.some((event) => event.event_id === selection.selectedEventId)
-  ) {
-    return {
-      ...selection,
-      selectedEventId: cue.events[0]?.event_id || null,
-    };
-  }
-  return selection;
+  return { ...selection, ...repairEventSelection(cue.events, selection) };
 }
 
 function applyEnvironmentPatch(
@@ -298,12 +302,19 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     if (!cue) return noOp(state);
     mutator(project, cue, scene);
     if (sameProject(project, state.project)) return noOp(state);
+    const selectedEventId = selection?.selectedEventId === undefined
+      ? state.selectedEventId : selection.selectedEventId;
+    const eventSelectionWasExplicit = selection?.selectedEventId !== undefined;
     const requestedSelection: EditorSelection = {
       selectedChapterId: selection?.selectedChapterId ?? state.selectedChapterId,
       selectedSceneId: selection?.selectedSceneId ?? state.selectedSceneId,
       selectedCueId: selection?.selectedCueId ?? state.selectedCueId,
-      selectedEventId: selection?.selectedEventId === undefined
-        ? state.selectedEventId : selection.selectedEventId,
+      selectedEventId,
+      selectedEventIds: selection?.selectedEventIds
+        ?? (eventSelectionWasExplicit ? selectedEventId ? [selectedEventId] : [] : state.selectedEventIds),
+      eventSelectionAnchorId: selection?.eventSelectionAnchorId === undefined
+        ? eventSelectionWasExplicit ? selectedEventId : state.eventSelectionAnchorId
+        : selection.eventSelectionAnchorId,
     };
     const nextSelection = repairTransactionSelection(project, requestedSelection);
     repository.serializeProject(project);
@@ -326,6 +337,24 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     return { status: "committed", revision };
   };
 
+  const deleteEvents = (eventIds: Iterable<string>): EditorTransactionResult => {
+    commitActiveTransaction();
+    const state = get();
+    const cue = sceneById(state.project, state.selectedSceneId)
+      .cues.find((item) => item.cue_id === state.selectedCueId);
+    if (!cue) return noOp(state);
+    const requested = new Set(eventIds);
+    const deletedIds = cue.events
+      .filter((event) => requested.has(event.event_id))
+      .map((event) => event.event_id);
+    if (deletedIds.length === 0) return noOp(state);
+    const nextSelection = selectionAfterEventDeletion(cue.events, deletedIds);
+    return commit((_project, draftCue) => {
+      const deleted = new Set(deletedIds);
+      draftCue.events = draftCue.events.filter((event) => !deleted.has(event.event_id));
+    }, nextSelection);
+  };
+
   return {
     project: initialProject,
     mode: loadEditorMode(),
@@ -335,6 +364,8 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     selectedCueId: initial.selectedCueId,
     selectedSlot: 1,
     selectedEventId: initial.selectedEventId,
+    selectedEventIds: initial.selectedEventIds,
+    eventSelectionAnchorId: initial.eventSelectionAnchorId,
     previewPlayheadFrame: null,
     history: [],
     future: [],
@@ -385,22 +416,30 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       set({
         selectedCueId,
         selectedEventId: cue.events[0]?.event_id || null,
+        selectedEventIds: cue.events[0] ? [cue.events[0].event_id] : [],
+        eventSelectionAnchorId: cue.events[0]?.event_id || null,
         previewPlayheadFrame: null,
       });
     },
     selectSlot: (selectedSlot) => set({ selectedSlot, inspectorTab: "character" }),
-    selectEvent: (selectedEventId) => {
+    selectEvent: (selectedEventId, mode = "replace") => {
       commitActiveTransaction();
       if (selectedEventId === null) {
-        set({ selectedEventId: null, previewPlayheadFrame: null });
+        set({
+          selectedEventId: null,
+          selectedEventIds: [],
+          eventSelectionAnchorId: null,
+          previewPlayheadFrame: null,
+        });
         return;
       }
       const state = get();
       const cue = sceneById(state.project, state.selectedSceneId)
         .cues.find((item) => item.cue_id === state.selectedCueId);
-      if (cue?.events.some((event) => event.event_id === selectedEventId)) {
-        set({ selectedEventId, previewPlayheadFrame: null });
-      }
+      if (!cue) return;
+      const selection = selectEventIds(cue.events, state, selectedEventId, mode);
+      if (selection === state) return;
+      set({ ...selection, previewPlayheadFrame: null });
     },
     setPreviewPlayheadFrame: (frame) => {
       if (frame === null) {
@@ -579,18 +618,8 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     updateEvent: (eventId, patch) => commit((_project, cue) => {
       applyEventPatch(cue, eventId, patch);
     }),
-    deleteEvent: (eventId) => {
-      commitActiveTransaction();
-      const state = get();
-      const cue = sceneById(state.project, state.selectedSceneId)
-        .cues.find((item) => item.cue_id === state.selectedCueId);
-      if (!cue || !cue.events.some((event) => event.event_id === eventId)) return noOp(state);
-      const index = cue.events.findIndex((event) => event.event_id === eventId);
-      const nextEvent = cue.events[index + 1] || cue.events[index - 1] || null;
-      return commit((_project, draftCue) => {
-        draftCue.events = draftCue.events.filter((event) => event.event_id !== eventId);
-      }, { selectedEventId: nextEvent?.event_id || null });
-    },
+    deleteEvent: (eventId) => deleteEvents([eventId]),
+    deleteSelectedEvents: () => deleteEvents(get().selectedEventIds),
     moveEvent: (eventId, move) => commit((_project, cue) => {
       cue.events = reorderEvents(cue.events, eventId, move).slice();
     }),

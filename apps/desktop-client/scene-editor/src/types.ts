@@ -5,6 +5,8 @@ export type EditorSelection = {
   selectedSceneId: string;
   selectedCueId: string;
   selectedEventId: string | null;
+  selectedEventIds: string[];
+  eventSelectionAnchorId: string | null;
 };
 export type EditorTransactionResult = {
   status: "committed" | "no-op";

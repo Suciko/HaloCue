@@ -981,9 +981,11 @@ function ProfessionalEventList() {
   const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const selectedEventId = useProjectStore((state) => state.selectedEventId);
+  const selectedEventIds = useProjectStore((state) => state.selectedEventIds);
   const selectEvent = useProjectStore((state) => state.selectEvent);
   const moveEvent = useProjectStore((state) => state.moveEvent);
   const deleteEvent = useProjectStore((state) => state.deleteEvent);
+  const deleteSelectedEvents = useProjectStore((state) => state.deleteSelectedEvents);
   const addEvent = useProjectStore((state) => state.addEvent);
   const cue = sceneById(project, selectedSceneId)
     .cues.find((item) => item.cue_id === selectedCueId)!;
@@ -1019,12 +1021,25 @@ function ProfessionalEventList() {
     setDraggedEventId(null);
     setDropTarget(null);
   };
+  const deleteSelection = () => {
+    const count = selectedEventIds.length;
+    const result = deleteSelectedEvents();
+    if (result.status === "committed") setReorderNotice(`${count} 个事件已删除`);
+  };
 
   return (
     <section className="event-workbench">
       <header>
-        <div><Layers3 /><span><strong>{cue.title}</strong><small>{cue.events.length} 个有序事件</small></span></div>
-        <details className="event-add-menu">
+        <div><Layers3 /><span><strong>{cue.title}</strong><small>{cue.events.length} 个有序事件{selectedEventIds.length > 1 ? ` · 已选 ${selectedEventIds.length} 项` : ""}</small></span></div>
+        <div className="event-workbench-actions">
+          {selectedEventIds.length > 1 && (
+            <button
+              className="event-batch-delete"
+              type="button"
+              onClick={deleteSelection}
+            ><Trash2 />删除 {selectedEventIds.length} 项</button>
+          )}
+          <details className="event-add-menu">
           <summary><Plus />{addSummary}</summary>
           <div className="event-add-options">
             {cue.events.length > 0 && selectedEventIndex >= 0 && (
@@ -1063,14 +1078,15 @@ function ProfessionalEventList() {
               </button>
             ))}
           </div>
-        </details>
+          </details>
+        </div>
       </header>
       <div className="event-list">
         <p className="sr-only" aria-live="polite">{reorderNotice}</p>
         {cue.events.map((event, index) => (
           <div
             key={event.event_id}
-            className={`${event.event_id === selectedEventId ? "event-row is-active" : "event-row"}${draggedEventId === event.event_id ? " is-dragging" : ""}${dropTarget?.eventId === event.event_id ? ` is-drop-${dropTarget.placement}` : ""}`}
+            className={`${event.event_id === selectedEventId ? "event-row is-active" : "event-row"}${selectedEventIds.includes(event.event_id) ? " is-selected" : ""}${draggedEventId === event.event_id ? " is-dragging" : ""}${dropTarget?.eventId === event.event_id ? ` is-drop-${dropTarget.placement}` : ""}`}
             onDragOver={(dragEvent) => {
               const sourceId = draggedEventIdRef.current;
               if (!sourceId || sourceId === event.event_id) return;
@@ -1132,7 +1148,24 @@ function ProfessionalEventList() {
             >
               <GripVertical />
             </button>
-            <button className="event-main" type="button" onClick={() => selectEvent(event.event_id)}>
+            <button
+              className="event-main"
+              type="button"
+              aria-pressed={selectedEventIds.includes(event.event_id)}
+              aria-keyshortcuts="Delete"
+              onClick={(selectionEvent) => {
+                const mode = selectionEvent.shiftKey
+                  ? selectionEvent.ctrlKey || selectionEvent.metaKey ? "add-range" : "range"
+                  : selectionEvent.ctrlKey || selectionEvent.metaKey ? "toggle" : "replace";
+                selectEvent(event.event_id, mode);
+              }}
+              onKeyDown={(keyEvent) => {
+                if (keyEvent.key !== "Delete") return;
+                keyEvent.preventDefault();
+                if (selectedEventIds.includes(event.event_id)) deleteSelection();
+                else deleteEvent(event.event_id);
+              }}
+            >
               <span className="event-icon"><EventIcon kind={event.kind} /></span>
               <span className="event-order">{String(index + 1).padStart(2, "0")}</span>
               <span className="event-copy">
@@ -1144,7 +1177,14 @@ function ProfessionalEventList() {
             <div className="event-actions">
               <IconButton label="上移" disabled={index === 0} onClick={() => moveAndAnnounce(event.event_id, -1)}><ArrowUp /></IconButton>
               <IconButton label="下移" disabled={index === cue.events.length - 1} onClick={() => moveAndAnnounce(event.event_id, 1)}><ArrowDown /></IconButton>
-              <IconButton label="删除事件" tone="danger" onClick={() => deleteEvent(event.event_id)}><Trash2 /></IconButton>
+              <IconButton
+                label={selectedEventIds.length > 1 && selectedEventIds.includes(event.event_id) ? `删除已选 ${selectedEventIds.length} 个事件` : "删除事件"}
+                tone="danger"
+                onClick={() => {
+                  if (selectedEventIds.length > 1 && selectedEventIds.includes(event.event_id)) deleteSelection();
+                  else deleteEvent(event.event_id);
+                }}
+              ><Trash2 /></IconButton>
             </div>
           </div>
         ))}

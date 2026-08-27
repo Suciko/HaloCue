@@ -293,6 +293,40 @@ describe("shared dual-mode project store", () => {
     expect(current.history).toEqual(historyBefore);
   });
 
+  it("deletes a stable multi-selection as one revision and restores it on undo", () => {
+    const state = useProjectStore.getState();
+    const cue = firstScene(state.project).cues[0];
+    const originalOrder = cue.events.map((event) => event.event_id);
+    const revisionBefore = state.revision;
+    const historyBefore = state.history.length;
+
+    state.selectEvent(originalOrder[1]);
+    useProjectStore.getState().selectEvent(originalOrder[2], "toggle");
+    let current = useProjectStore.getState();
+    expect(current.selectedEventId).toBe(originalOrder[2]);
+    expect(current.selectedEventIds).toEqual(originalOrder.slice(1, 3));
+    expect(current.eventSelectionAnchorId).toBe(originalOrder[2]);
+    expect(current.revision).toBe(revisionBefore);
+    expect(current.history).toHaveLength(historyBefore);
+
+    expect(current.deleteSelectedEvents())
+      .toEqual({ status: "committed", revision: revisionBefore + 1 });
+    current = useProjectStore.getState();
+    expect(firstScene(current.project).cues[0].events.map((event) => event.event_id))
+      .toEqual([originalOrder[0], originalOrder[3]]);
+    expect(current.selectedEventId).toBe(originalOrder[3]);
+    expect(current.selectedEventIds).toEqual([originalOrder[3]]);
+    expect(current.history).toHaveLength(historyBefore + 1);
+
+    current.undo();
+    current = useProjectStore.getState();
+    expect(firstScene(current.project).cues[0].events.map((event) => event.event_id))
+      .toEqual(originalOrder);
+    expect(current.selectedEventId).toBe(originalOrder[2]);
+    expect(current.selectedEventIds).toEqual(originalOrder.slice(1, 3));
+    expect(current.eventSelectionAnchorId).toBe(originalOrder[2]);
+  });
+
   it("targets edits, evaluation, undo, and redo at the selected Scene", () => {
     const store = useProjectStore.getState();
     store.replaceProject(multiSceneProject());
