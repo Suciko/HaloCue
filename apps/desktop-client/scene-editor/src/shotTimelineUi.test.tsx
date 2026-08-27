@@ -68,6 +68,46 @@ describe("professional shot timeline workspace", () => {
     expect(JSON.stringify(after.project)).toBe(project);
   });
 
+  it("keeps the shared selection and playhead while keyboard navigation moves professional tabs", () => {
+    const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"));
+    const scriptTab = tabs.find((button) => button.textContent?.includes("脚本"))!;
+    const shotTab = tabs.find((button) => button.textContent?.includes("镜头时间轴"))!;
+
+    expect(scriptTab.tabIndex).toBe(0);
+    expect(shotTab.tabIndex).toBe(-1);
+    expect(scriptTab.getAttribute("aria-controls")).toBe("professional-panel-script");
+    expect(container.querySelector("#professional-panel-script[role=tabpanel]")).not.toBeNull();
+
+    act(() => {
+      useProjectStore.getState().selectEvent("event/dialogue/001");
+      useProjectStore.getState().setPreviewPlayheadFrame(37);
+      scriptTab.focus();
+      scriptTab.dispatchEvent(new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "ArrowRight",
+      }));
+    });
+
+    expect(shotTab.getAttribute("aria-selected")).toBe("true");
+    expect(shotTab.tabIndex).toBe(0);
+    expect(document.activeElement).toBe(shotTab);
+    expect(useProjectStore.getState().selectedEventId).toBe("event/dialogue/001");
+    expect(useProjectStore.getState().previewPlayheadFrame).toBe(37);
+    expect(container.querySelector("#professional-panel-shot[role=tabpanel]")).not.toBeNull();
+
+    act(() => shotTab.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Home",
+    })));
+
+    expect(document.activeElement).toBe(scriptTab);
+    expect(scriptTab.getAttribute("aria-selected")).toBe("true");
+    expect(useProjectStore.getState().selectedEventId).toBe("event/dialogue/001");
+    expect(useProjectStore.getState().previewPlayheadFrame).toBe(37);
+  });
+
   it("selects a clip and locates preview to its start frame", () => {
     const scene = firstScene(useProjectStore.getState().project);
     const cue = scene.cues[0];

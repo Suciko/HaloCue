@@ -1894,19 +1894,63 @@ function SimpleWorkspace() {
 }
 
 function ProfessionalWorkspace() {
-  const [workspaceView, setWorkspaceView] = useState<"script" | "shot">("script");
+  type ProfessionalView = "script" | "shot";
+  const [workspaceView, setWorkspaceView] = useState<ProfessionalView>("script");
+  const tabRefs = useRef<Partial<Record<ProfessionalView, HTMLButtonElement>>>({});
+  const views: ProfessionalView[] = ["script", "shot"];
+  const focusView = (view: ProfessionalView) => {
+    setWorkspaceView(view);
+    tabRefs.current[view]?.focus();
+  };
+  const onTabKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, current: ProfessionalView) => {
+    const index = views.indexOf(current);
+    const nextIndex = event.key === "ArrowRight" || event.key === "ArrowDown"
+      ? (index + 1) % views.length
+      : event.key === "ArrowLeft" || event.key === "ArrowUp"
+        ? (index - 1 + views.length) % views.length
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? views.length - 1
+            : -1;
+    if (nextIndex < 0) return;
+    event.preventDefault();
+    focusView(views[nextIndex]);
+  };
   return (
     <div className="workspace-grid professional-grid">
       <ProjectRail showCues />
       <main className="professional-main">
         <div className="professional-view-tabs" role="tablist" aria-label="专业工作区">
-          <button type="button" role="tab" aria-selected={workspaceView === "script"} className={workspaceView === "script" ? "is-active" : ""} onClick={() => setWorkspaceView("script")}><MessageSquareText />脚本</button>
-          <button type="button" role="tab" aria-selected={workspaceView === "shot"} className={workspaceView === "shot" ? "is-active" : ""} onClick={() => setWorkspaceView("shot")}><Clapperboard />镜头时间轴</button>
+          <button
+            ref={(element) => { tabRefs.current.script = element || undefined; }}
+            id="professional-tab-script"
+            type="button"
+            role="tab"
+            aria-selected={workspaceView === "script"}
+            aria-controls="professional-panel-script"
+            tabIndex={workspaceView === "script" ? 0 : -1}
+            className={workspaceView === "script" ? "is-active" : ""}
+            onClick={() => focusView("script")}
+            onKeyDown={(event) => onTabKeyDown(event, "script")}
+          ><MessageSquareText />脚本</button>
+          <button
+            ref={(element) => { tabRefs.current.shot = element || undefined; }}
+            id="professional-tab-shot"
+            type="button"
+            role="tab"
+            aria-selected={workspaceView === "shot"}
+            aria-controls="professional-panel-shot"
+            tabIndex={workspaceView === "shot" ? 0 : -1}
+            className={workspaceView === "shot" ? "is-active" : ""}
+            onClick={() => focusView("shot")}
+            onKeyDown={(event) => onTabKeyDown(event, "shot")}
+          ><Clapperboard />镜头时间轴</button>
         </div>
         <div className="professional-view-content">
           {workspaceView === "script"
-            ? <div className="professional-script-layout"><div className="professional-upper"><PreviewFrame /><ProfessionalEventList /></div><Timeline /></div>
-            : <div className="professional-shot-layout"><PreviewFrame /><ShotTimelineWorkspace /></div>}
+            ? <div id="professional-panel-script" className="professional-script-layout" role="tabpanel" aria-labelledby="professional-tab-script" tabIndex={0}><div className="professional-upper"><PreviewFrame /><ProfessionalEventList /></div><Timeline /></div>
+            : <div id="professional-panel-shot" className="professional-shot-layout" role="tabpanel" aria-labelledby="professional-tab-shot" tabIndex={0}><PreviewFrame /><ShotTimelineWorkspace /></div>}
         </div>
       </main>
       <ProfessionalInspector />

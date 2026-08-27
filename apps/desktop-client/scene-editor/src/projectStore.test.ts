@@ -111,6 +111,25 @@ describe("shared dual-mode project store", () => {
     expect(current.previewPlayheadFrame).toBeNull();
   });
 
+  it("resets event selection and the preview playhead when the Cue changes", () => {
+    const state = useProjectStore.getState();
+    const revisionBefore = state.revision;
+    const historyBefore = state.history.length;
+
+    state.selectEvent("event/dialogue/001");
+    state.setPreviewPlayheadFrame(37);
+    state.selectCue("cue/conference/002");
+
+    const current = useProjectStore.getState();
+    expect(current.selectedCueId).toBe("cue/conference/002");
+    expect(current.selectedEventId).toBe("event/enter/koyuki");
+    expect(current.selectedEventIds).toEqual(["event/enter/koyuki"]);
+    expect(current.eventSelectionAnchorId).toBe("event/enter/koyuki");
+    expect(current.previewPlayheadFrame).toBeNull();
+    expect(current.revision).toBe(revisionBefore);
+    expect(current.history).toHaveLength(historyBefore);
+  });
+
   it("stores a stable expression state while the adapter resolves a Spine animation", () => {
     const state = useProjectStore.getState();
     state.updateCharacterState(1, { expression_id: "expression/smile" });
