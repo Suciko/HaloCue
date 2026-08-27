@@ -358,6 +358,10 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .shot-timeline-heading strong { font-size: 11px; }
 .shot-timeline-heading small, .shot-timeline-heading output { color: var(--subtle); font-size: 9px; }
 .shot-timeline-heading output { flex: none; font-family: "Cascadia Code", "Consolas", monospace; }
+.shot-timeline-controls { flex: none; }
+.shot-cue-picker { min-width: 0; display: flex; align-items: center; gap: 5px; color: var(--subtle); font-size: 8px; }
+.shot-cue-picker select { width: 150px; min-width: 0; height: 27px; padding: 0 23px 0 7px; border: 1px solid var(--line); border-radius: 4px; background: #171c1a; color: var(--text); font-size: 9px; }
+.shot-cue-picker select:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .shot-timeline-legend { min-height: 28px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 4px 12px; border-bottom: 1px solid var(--line-soft); color: var(--subtle); font-size: 9px; }
 .shot-timeline-legend > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .shot-legend-swatch { width: 8px; height: 8px; display: inline-block; border-radius: 2px; background: #4f9a78; }
@@ -443,4 +447,8 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
   .preview-toolbar strong { font-size: 10px; white-space: nowrap; }
   .preview-meta { line-height: 1.2; }
   .preview-toolbar-actions button { padding: 0 5px; font-size: 9px; white-space: nowrap; }
+  .shot-timeline-heading { align-items: flex-start; flex-direction: column; padding-block: 7px; }
+  .shot-timeline-controls { width: 100%; justify-content: space-between; }
+  .shot-cue-picker { flex: 1; }
+  .shot-cue-picker select { width: min(190px, 65vw); }
 }

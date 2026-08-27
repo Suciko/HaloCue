@@ -68,6 +68,35 @@ describe("professional shot timeline workspace", () => {
     expect(JSON.stringify(after.project)).toBe(project);
   });
 
+  it("switches the active Cue inside Shot Timeline without project history", () => {
+    const shotTab = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"))
+      .find((button) => button.textContent?.includes("镜头时间轴"));
+    act(() => shotTab?.click());
+    const before = useProjectStore.getState();
+    const revision = before.revision;
+    const historyLength = before.history.length;
+    const project = JSON.stringify(before.project);
+    const cueSelect = container.querySelector<HTMLSelectElement>("[data-shot-cue-select]");
+    expect(cueSelect).not.toBeNull();
+    expect(cueSelect?.value).toBe("cue/conference/001");
+
+    act(() => {
+      if (!cueSelect) return;
+      cueSelect.value = "cue/conference/002";
+      cueSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const after = useProjectStore.getState();
+    expect(after.selectedCueId).toBe("cue/conference/002");
+    expect(after.selectedEventId).toBe("event/enter/koyuki");
+    expect(after.previewPlayheadFrame).toBeNull();
+    expect(container.querySelector("[data-shot-selection-context]")?.textContent)
+      .toContain("角色入场");
+    expect(after.revision).toBe(revision);
+    expect(after.history).toHaveLength(historyLength);
+    expect(JSON.stringify(after.project)).toBe(project);
+  });
+
   it("shows a derived legend for sequential and non-blocking clips", () => {
     const shotTab = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"))
       .find((button) => button.textContent?.includes("镜头时间轴"));

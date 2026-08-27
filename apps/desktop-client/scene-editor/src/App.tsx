@@ -2013,6 +2013,7 @@ function ShotTimelineWorkspace() {
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const selectedEventId = useProjectStore((state) => state.selectedEventId);
   const playheadFrame = useProjectStore((state) => state.previewPlayheadFrame);
+  const selectCue = useProjectStore((state) => state.selectCue);
   const selectEvent = useProjectStore((state) => state.selectEvent);
   const setPlayheadFrame = useProjectStore((state) => state.setPreviewPlayheadFrame);
   const clipRefs = useRef<Record<string, HTMLButtonElement>>({});
@@ -2101,7 +2102,24 @@ function ShotTimelineWorkspace() {
             <small data-shot-active-context aria-live="polite" aria-atomic="true">{activeContext}</small>
           </span>
         </div>
-        <output aria-live="polite">{formatTimelineFrame(visibleFrame, projection.frame_rate)} · F{visibleFrame}</output>
+        <div className="shot-timeline-controls">
+          <label className="shot-cue-picker">
+            <span>Cue</span>
+            <select
+              data-shot-cue-select
+              aria-label="当前镜头 Cue"
+              value={selectedCueId}
+              onChange={(event) => selectCue(event.target.value)}
+            >
+              {scene.cues.map((item, index) => (
+                <option key={item.cue_id} value={item.cue_id}>
+                  {String(index + 1).padStart(2, "0")} · {item.title || "未命名演出"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <output aria-live="polite">{formatTimelineFrame(visibleFrame, projection.frame_rate)} · F{visibleFrame}</output>
+        </div>
       </header>
       <div className="shot-timeline-legend" data-shot-timeline-legend aria-label="执行语义图例">
         <span><i className="shot-legend-swatch is-sequential" aria-hidden="true" />顺序执行</span>
