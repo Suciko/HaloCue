@@ -1101,12 +1101,44 @@ function SimpleInspector() {
     ["dialogue", <MessageSquareText key="dialogue" />, "对白"],
     ["environment", <Image key="environment" />, "环境"],
   ];
+  const tabRefs = useRef<Partial<Record<InspectorTab, HTMLButtonElement>>>({});
+  const focusTab = (value: InspectorTab) => {
+    setTab(value);
+    tabRefs.current[value]?.focus();
+  };
+  const navigateTab = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
+    const nextIndex = event.key === "ArrowRight" || event.key === "ArrowDown"
+      ? Math.min(tabs.length - 1, index + 1)
+      : event.key === "ArrowLeft" || event.key === "ArrowUp"
+        ? Math.max(0, index - 1)
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? tabs.length - 1
+            : -1;
+    if (nextIndex < 0 || nextIndex === index) return;
+    event.preventDefault();
+    focusTab(tabs[nextIndex][0]);
+  };
 
   return (
     <aside className="inspector simple-inspector">
       <div className="inspector-heading"><span><CircleGauge />当前演出</span><IconButton label="更多设置"><MoreHorizontal /></IconButton></div>
-      <div className="inspector-tabs" role="tablist">
-        {tabs.map(([value, icon, label]) => <button key={value} type="button" role="tab" aria-selected={tab === value} className={tab === value ? "is-active" : ""} onClick={() => setTab(value)}>{icon}{label}</button>)}
+      <div className="inspector-tabs" role="tablist" aria-label="当前演出属性">
+        {tabs.map(([value, icon, label], index) => <button
+          ref={(element) => {
+            if (element) tabRefs.current[value] = element;
+            else delete tabRefs.current[value];
+          }}
+          key={value}
+          type="button"
+          role="tab"
+          aria-selected={tab === value}
+          tabIndex={tab === value ? 0 : -1}
+          className={tab === value ? "is-active" : ""}
+          onClick={() => setTab(value)}
+          onKeyDown={(event) => navigateTab(event, index)}
+        >{icon}{label}</button>)}
       </div>
       {tab === "character" && <CharacterInspector />}
       {tab === "dialogue" && <DialogueInspector />}
