@@ -1749,6 +1749,7 @@ function ShotTimelineWorkspace() {
   const playheadFrame = useProjectStore((state) => state.previewPlayheadFrame);
   const selectEvent = useProjectStore((state) => state.selectEvent);
   const setPlayheadFrame = useProjectStore((state) => state.setPreviewPlayheadFrame);
+  const clipRefs = useRef<Record<string, HTMLButtonElement>>({});
   const scene = sceneById(project, selectedSceneId);
   const cue = scene.cues.find((item) => item.cue_id === selectedCueId);
   const evaluation = useMemo(
@@ -1764,8 +1765,8 @@ function ShotTimelineWorkspace() {
   const rangeStart = projection.start_frame;
   const rangeEnd = Math.max(rangeStart + 1, projection.end_frame);
   const span = rangeEnd - rangeStart;
-  const selectedClip = projection.tracks.flatMap((track) => track.clips)
-    .find((clip) => clip.event_id === selectedEventId);
+  const orderedClips = projection.tracks.flatMap((track) => track.clips);
+  const selectedClip = orderedClips.find((clip) => clip.event_id === selectedEventId);
   const visibleFrame = Math.max(
     rangeStart,
     Math.min(rangeEnd - 1, playheadFrame ?? selectedClip?.start_frame ?? rangeStart),
@@ -1785,6 +1786,26 @@ function ShotTimelineWorkspace() {
     left: `${Math.max(0, ((clip.start_frame - rangeStart) / span) * 100)}%`,
     width: `${Math.max(1.5, ((clip.end_frame - clip.start_frame) / span) * 100)}%`,
   });
+  const focusClip = (clip: ShotTimelineClip) => {
+    selectEvent(clip.event_id);
+    setPlayheadFrame(clip.start_frame);
+    clipRefs.current[clip.event_id]?.focus();
+  };
+  const navigateClip = (event: ReactKeyboardEvent<HTMLButtonElement>, clip: ShotTimelineClip) => {
+    const index = orderedClips.findIndex((item) => item.event_id === clip.event_id);
+    const nextIndex = event.key === "ArrowRight" || event.key === "ArrowDown"
+      ? Math.min(orderedClips.length - 1, index + 1)
+      : event.key === "ArrowLeft" || event.key === "ArrowUp"
+        ? Math.max(0, index - 1)
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? orderedClips.length - 1
+            : -1;
+    if (nextIndex < 0 || nextIndex === index) return;
+    event.preventDefault();
+    focusClip(orderedClips[nextIndex]);
+  };
 
   return (
     <section className="shot-timeline-panel" aria-label="镜头时间轴">
@@ -1862,10 +1883,15 @@ function ShotTimelineWorkspace() {
                 >
                   {track.clips.map((clip) => (
                     <button
+                      ref={(element) => {
+                        if (element) clipRefs.current[clip.event_id] = element;
+                        else delete clipRefs.current[clip.event_id];
+                      }}
                       type="button"
                       className={`shot-clip${clip.event_id === selectedEventId ? " is-selected" : ""}${clip.wait_for_completion ? "" : " is-parallel"}`}
                       data-shot-clip
                       data-event-id={clip.event_id}
+                      aria-pressed={clip.event_id === selectedEventId}
                       key={clip.event_id}
                       style={clipPosition(clip)}
                       title={`${shotTimelineClipLabel(clip)} · ${clip.start_frame}–${clip.end_frame} · ${clip.wait_for_completion ? "顺序执行" : "与后续事件并行"}`}
@@ -1873,9 +1899,9 @@ function ShotTimelineWorkspace() {
                       onPointerDown={(event) => event.stopPropagation()}
                       onClick={(event) => {
                         event.stopPropagation();
-                        selectEvent(clip.event_id);
-                        setPlayheadFrame(clip.start_frame);
+                        focusClip(clip);
                       }}
+                      onKeyDown={(event) => navigateClip(event, clip)}
                     >
                       <span>{shotTimelineClipLabel(clip)}</span>
                       {!clip.wait_for_completion && <small>并行</small>}

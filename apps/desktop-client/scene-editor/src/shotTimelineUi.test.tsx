@@ -196,6 +196,51 @@ describe("professional shot timeline workspace", () => {
       .toContain("已选");
   });
 
+  it("navigates shot clips by keyboard order and keeps selection editor-only", () => {
+    const shotTab = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"))
+      .find((button) => button.textContent?.includes("镜头时间轴"));
+    act(() => shotTab?.click());
+
+    const clips = Array.from(container.querySelectorAll<HTMLButtonElement>(".shot-clip"));
+    expect(clips.length).toBeGreaterThan(2);
+    const first = clips[0];
+    const second = clips[1];
+    const last = clips.at(-1)!;
+    const revision = useProjectStore.getState().revision;
+    const historyLength = useProjectStore.getState().history.length;
+
+    act(() => {
+      first.focus();
+      first.dispatchEvent(new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "ArrowRight",
+      }));
+    });
+    expect(document.activeElement).toBe(second);
+    expect(second.getAttribute("aria-pressed")).toBe("true");
+    expect(useProjectStore.getState().selectedEventId).toBe(second.dataset.eventId);
+    expect(useProjectStore.getState().previewPlayheadFrame).not.toBeNull();
+
+    act(() => second.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "End",
+    })));
+    expect(document.activeElement).toBe(last);
+    expect(last.getAttribute("aria-pressed")).toBe("true");
+
+    act(() => last.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Home",
+    })));
+    expect(document.activeElement).toBe(first);
+    expect(first.getAttribute("aria-pressed")).toBe("true");
+    expect(useProjectStore.getState().revision).toBe(revision);
+    expect(useProjectStore.getState().history).toHaveLength(historyLength);
+  });
+
   it("shows selected event timing as a read-only timeline projection", () => {
     const scene = firstScene(useProjectStore.getState().project);
     const cue = scene.cues[0];
