@@ -1791,7 +1791,15 @@ function ShotTimelineWorkspace() {
       <header className="shot-timeline-heading">
         <div>
           <Clapperboard />
-          <span><strong>镜头时间轴</strong><small>{cue.title || "未命名演出"} · {projection.total_frames} 帧</small></span>
+          <span>
+            <strong>镜头时间轴</strong>
+            <small>{cue.title || "未命名演出"} · {projection.total_frames} 帧</small>
+            <small data-shot-selection-context>
+              {selectedClip
+                ? `已选 ${shotTimelineClipLabel(selectedClip)} · F${selectedClip.start_frame}-${selectedClip.end_frame}`
+                : "未选择可渲染事件"}
+            </small>
+          </span>
         </div>
         <output aria-live="polite">{formatTimelineFrame(visibleFrame, projection.frame_rate)} · F{visibleFrame}</output>
       </header>

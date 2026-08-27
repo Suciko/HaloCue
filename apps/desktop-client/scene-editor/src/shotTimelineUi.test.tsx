@@ -167,6 +167,35 @@ describe("professional shot timeline workspace", () => {
     expect(useProjectStore.getState().revision).toBe(revision);
   });
 
+  it("updates selected-clip context and removes stale highlights when the Cue changes", () => {
+    const shotTab = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"))
+      .find((button) => button.textContent?.includes("镜头时间轴"));
+    act(() => shotTab?.click());
+
+    const oldClip = container.querySelector<HTMLButtonElement>(
+      '.shot-clip[data-event-id="event/yuuka-nod"]',
+    );
+    expect(oldClip).not.toBeNull();
+    act(() => oldClip?.click());
+    expect(container.querySelector("[data-shot-selection-context]")?.textContent)
+      .toContain("已选");
+
+    const nextCue = Array.from(container.querySelectorAll<HTMLButtonElement>(".tree-cue"))
+      .find((button) => button.textContent?.includes("意外来客"));
+    expect(nextCue).not.toBeNull();
+    act(() => nextCue?.click());
+
+    const state = useProjectStore.getState();
+    expect(state.selectedCueId).toBe("cue/conference/002");
+    expect(state.selectedEventId).toBe("event/enter/koyuki");
+    expect(state.previewPlayheadFrame).toBeNull();
+    expect(container.querySelector('.shot-clip[data-event-id="event/yuuka-nod"]')).toBeNull();
+    expect(container.querySelector(".shot-clip.is-selected[data-event-id=\"event/enter/koyuki\"]"))
+      .not.toBeNull();
+    expect(container.querySelector("[data-shot-selection-context]")?.textContent)
+      .toContain("已选");
+  });
+
   it("shows selected event timing as a read-only timeline projection", () => {
     const scene = firstScene(useProjectStore.getState().project);
     const cue = scene.cues[0];
