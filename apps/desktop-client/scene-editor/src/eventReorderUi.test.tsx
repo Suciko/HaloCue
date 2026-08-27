@@ -153,6 +153,7 @@ describe("professional event list interactions", () => {
     act(() => handles[1].dispatchEvent(new KeyboardEvent("keydown", {
       bubbles: true,
       cancelable: true,
+      altKey: true,
       key: "End",
     })));
 
@@ -178,6 +179,83 @@ describe("professional event list interactions", () => {
       .toBe("2 个事件已移动到第 1–2 项");
     handles = Array.from(container.querySelectorAll<HTMLButtonElement>(".event-drag-handle"));
     expect(handles[0].getAttribute("aria-label")).toContain("重排已选 2 个事件");
+  });
+
+  it("dispatches selection shortcuts once from the event-list boundary", () => {
+    const originalOrder = firstScene(useProjectStore.getState().project).cues[0].events
+      .map((event) => event.event_id);
+    const historyBefore = useProjectStore.getState().history.length;
+    let mains = Array.from(container.querySelectorAll<HTMLButtonElement>(".event-main"));
+    act(() => mains[1].click());
+    act(() => mains[2].dispatchEvent(new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      shiftKey: true,
+    })));
+
+    act(() => mains[2].dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+      key: "d",
+    })));
+    let state = useProjectStore.getState();
+    const duplicatedOrder = firstScene(state.project).cues[0].events.map((event) => event.event_id);
+    expect(duplicatedOrder).toHaveLength(6);
+    expect(state.selectedEventIds).toEqual(duplicatedOrder.slice(3, 5));
+    expect(state.history).toHaveLength(historyBefore + 1);
+    expect(container.querySelector(".sr-only")?.textContent).toBe("2 个事件已复制");
+
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+      key: "z",
+    })));
+    state = useProjectStore.getState();
+    expect(firstScene(state.project).cues[0].events.map((event) => event.event_id))
+      .toEqual(originalOrder);
+    expect(state.selectedEventIds).toEqual(originalOrder.slice(1, 3));
+
+    mains = Array.from(container.querySelectorAll<HTMLButtonElement>(".event-main"));
+    act(() => mains[2].dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      altKey: true,
+      key: "ArrowUp",
+    })));
+    state = useProjectStore.getState();
+    expect(firstScene(state.project).cues[0].events.map((event) => event.event_id))
+      .toEqual([originalOrder[1], originalOrder[2], originalOrder[0], originalOrder[3]]);
+    expect(state.selectedEventIds).toEqual(originalOrder.slice(1, 3));
+    expect(container.querySelector(".sr-only")?.textContent)
+      .toBe("2 个事件已移动到第 1–2 项");
+  });
+
+  it("leaves native text undo untouched outside the event list", () => {
+    const state = useProjectStore.getState();
+    const dialogueId = firstScene(state.project).cues[0].events.at(-1)!.event_id;
+    const historyBefore = state.history.length;
+    act(() => state.updateEvent(dialogueId, { text: "保留输入框自己的撤销" }));
+    act(() => useProjectStore.getState().selectEvent(dialogueId));
+    const historyAfterEdit = useProjectStore.getState().history.length;
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="对白文本"]');
+    expect(textarea).toBeDefined();
+    const undoEvent = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+      key: "z",
+    });
+
+    act(() => textarea?.dispatchEvent(undoEvent));
+
+    const current = useProjectStore.getState();
+    expect(undoEvent.defaultPrevented).toBe(false);
+    expect(current.history).toHaveLength(historyAfterEdit);
+    expect(historyAfterEdit).toBe(historyBefore + 1);
+    expect(firstScene(current.project).cues[0].events.at(-1)?.text)
+      .toBe("保留输入框自己的撤销");
   });
 
   it("inserts before the selected stable event and restores the anchor on undo", () => {
@@ -238,7 +316,11 @@ describe("professional event list interactions", () => {
     );
     expect(batchDelete).toBeDefined();
 
-    act(() => batchDelete?.click());
+    act(() => eventRows[3].dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Delete",
+    })));
     state = useProjectStore.getState();
     expect(firstScene(state.project).cues[0].events.map((event) => event.event_id))
       .toEqual([originalOrder[0]]);

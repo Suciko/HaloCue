@@ -56,6 +56,7 @@ import {
 } from "./previewCompilation";
 import { eventDurationMs } from "./renderTimeline";
 import { parseNumericDraft } from "./fieldTransactions";
+import { editorKeyboardCommand, isTextEditingTarget } from "./editorCommands";
 import {
   eventDropPlacement,
   type EventDropPlacement,
@@ -998,6 +999,7 @@ function ProfessionalEventList() {
     placement: EventDropPlacement;
   } | null>(null);
   const [reorderNotice, setReorderNotice] = useState("");
+  const eventListRef = useRef<HTMLDivElement>(null);
   const [insertPlacement, setInsertPlacement] = useState<EventInsertPlacement>("after");
   const selectedEventIndex = cue.events.findIndex((event) => event.event_id === selectedEventId);
   const selectionFirstIndex = cue.events.findIndex((event) => selectedEventIds.includes(event.event_id));
@@ -1048,6 +1050,69 @@ function ProfessionalEventList() {
     if (result.status === "committed") setReorderNotice(`${count} 个事件已复制`);
   };
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      const command = editorKeyboardCommand({
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        composing: event.isComposing,
+        textEditing: isTextEditingTarget(target),
+        eventListActive: target instanceof Node && Boolean(eventListRef.current?.contains(target)),
+      });
+      if (!command || command === "save") return;
+      event.preventDefault();
+
+      if (command === "undo") {
+        const result = useProjectStore.getState().undo();
+        if (result.status === "committed") setReorderNotice("已撤销上一步编辑");
+        return;
+      }
+      if (command === "redo") {
+        const result = useProjectStore.getState().redo();
+        if (result.status === "committed") setReorderNotice("已重做上一步编辑");
+        return;
+      }
+      if (command === "duplicate-selection") {
+        duplicateSelection();
+        return;
+      }
+      if (command === "delete-selection") {
+        deleteSelection();
+        return;
+      }
+
+      const state = useProjectStore.getState();
+      const eventId = state.selectedEventId;
+      if (!eventId) return;
+      if (command === "move-selection-up" || command === "move-selection-down") {
+        moveAndAnnounce(eventId, command === "move-selection-up" ? -1 : 1);
+        return;
+      }
+
+      const currentCue = sceneById(state.project, state.selectedSceneId)
+        .cues.find((item) => item.cue_id === state.selectedCueId);
+      if (!currentCue) return;
+      const sourceIds = new Set(state.selectedEventIds.includes(eventId)
+        ? state.selectedEventIds
+        : [eventId]);
+      const externalEvents = currentCue.events.filter((item) => !sourceIds.has(item.event_id));
+      const targetEvent = command === "move-selection-start"
+        ? externalEvents[0]
+        : externalEvents.at(-1);
+      if (!targetEvent) return;
+      moveAndAnnounce(eventId, {
+        targetEventId: targetEvent.event_id,
+        placement: command === "move-selection-start" ? "before" : "after",
+      });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
   return (
     <section className="event-workbench">
       <header>
@@ -1095,7 +1160,7 @@ function ProfessionalEventList() {
           </details>
         </div>
       </header>
-      <div className="event-list">
+      <div className="event-list" ref={eventListRef}>
         <p className="sr-only" aria-live="polite">{reorderNotice}</p>
         {selectedEventIds.length > 1 && (
           <div className="event-selection-toolbar" role="toolbar" aria-label={`${selectedEventIds.length} 个已选事件的批量操作`}>
@@ -1144,10 +1209,10 @@ function ProfessionalEventList() {
               aria-label={selectedEventIds.length > 1 && selectedEventIds.includes(event.event_id)
                 ? `重排已选 ${selectedEventIds.length} 个事件，当前主项第 ${index + 1} 项，共 ${cue.events.length} 项`
                 : `重排${eventLabel(event.kind) || "扩展演出"}，当前第 ${index + 1} 项，共 ${cue.events.length} 项`}
-              aria-keyshortcuts="ArrowUp ArrowDown Home End"
+              aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+Home Alt+End"
               title={selectedEventIds.length > 1 && selectedEventIds.includes(event.event_id)
-                ? `拖动或按键重排已选 ${selectedEventIds.length} 个事件`
-                : "拖动重排；方向键逐项移动，Home/End 移到首尾"}
+                ? `拖动或按 Alt+方向键重排已选 ${selectedEventIds.length} 个事件`
+                : "拖动重排；Alt+方向键逐项移动，Alt+Home/End 移到首尾"}
               onClick={() => {
                 if (!selectedEventIds.includes(event.event_id)) selectEvent(event.event_id);
               }}
@@ -1164,35 +1229,6 @@ function ProfessionalEventList() {
                 if (!selectedEventIds.includes(event.event_id)) selectEvent(event.event_id);
               }}
               onDragEnd={clearDrag}
-              onKeyDown={(keyEvent) => {
-                const sourceIds = selectedEventIds.includes(event.event_id)
-                  ? selectedEventIds
-                  : [event.event_id];
-                const sourceIdSet = new Set(sourceIds);
-                const firstExternalEvent = cue.events.find((item) => !sourceIdSet.has(item.event_id));
-                const lastExternalEvent = [...cue.events].reverse()
-                  .find((item) => !sourceIdSet.has(item.event_id));
-                const move = {
-                  ArrowUp: -1,
-                  ArrowDown: 1,
-                  Home: firstExternalEvent
-                    ? {
-                      targetEventId: firstExternalEvent.event_id,
-                      placement: "before",
-                    }
-                    : null,
-                  End: lastExternalEvent
-                    ? {
-                      targetEventId: lastExternalEvent.event_id,
-                      placement: "after",
-                    }
-                    : null,
-                }[keyEvent.key] as EventMove | null | undefined;
-                if (move === undefined) return;
-                keyEvent.preventDefault();
-                if (move === null) return;
-                moveAndAnnounce(event.event_id, move);
-              }}
             >
               <GripVertical />
             </button>
@@ -1206,17 +1242,6 @@ function ProfessionalEventList() {
                   ? selectionEvent.ctrlKey || selectionEvent.metaKey ? "add-range" : "range"
                   : selectionEvent.ctrlKey || selectionEvent.metaKey ? "toggle" : "replace";
                 selectEvent(event.event_id, mode);
-              }}
-              onKeyDown={(keyEvent) => {
-                if ((keyEvent.ctrlKey || keyEvent.metaKey) && keyEvent.key.toLowerCase() === "d") {
-                  keyEvent.preventDefault();
-                  if (!selectedEventIds.includes(event.event_id)) selectEvent(event.event_id);
-                  duplicateSelection();
-                } else if (keyEvent.key === "Delete") {
-                  keyEvent.preventDefault();
-                  if (selectedEventIds.includes(event.event_id)) deleteSelection();
-                  else deleteEvent(event.event_id);
-                }
               }}
             >
               <span className="event-icon"><EventIcon kind={event.kind} /></span>
@@ -1527,21 +1552,28 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey)) return;
-      if (event.key.toLowerCase() === "s") { event.preventDefault(); save(); }
-      if (event.key.toLowerCase() === "z") {
-        const target = event.target instanceof HTMLElement ? event.target : null;
-        const isTextEditing = target?.matches("input, textarea, [contenteditable='true']")
-          && Boolean(useProjectStore.getState().activeTransaction);
-        if (isTextEditing) return;
+      if (event.defaultPrevented) return;
+      const command = editorKeyboardCommand({
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        composing: event.isComposing,
+        textEditing: isTextEditingTarget(event.target),
+      });
+      if (command === "save") {
         event.preventDefault();
-        if (event.shiftKey) useProjectStore.getState().redo();
+        save();
+      } else if (mode === "simple" && (command === "undo" || command === "redo")) {
+        event.preventDefault();
+        if (command === "redo") useProjectStore.getState().redo();
         else useProjectStore.getState().undo();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [project]);
+  }, [mode, project]);
 
   useEffect(() => {
     if (!notice) return;
