@@ -18,11 +18,12 @@ from .scene_frame_renderer import (
     _atomic_write,
     _require_int,
     _validate_dimensions,
+    _validate_performance,
     _validate_timeline,
 )
 
 
-SEQUENCE_SCHEMA_VERSION = "render-sequence/1.0"
+SEQUENCE_SCHEMA_VERSION = "render-sequence/1.1"
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,7 @@ def _sequence_identity(
     *,
     descriptor: dict[str, Any],
     timeline: dict[str, Any],
+    performance: dict[str, Any],
     width: int,
     height: int,
     renderer: str,
@@ -104,6 +106,7 @@ def _sequence_identity(
     return {
         "descriptor_sha256": _canonical_hash(descriptor),
         "timeline_sha256": _canonical_hash(timeline),
+        "performance_sha256": _canonical_hash(performance),
         "scene_id": timeline.get("scene_id"),
         "frame_rate": timeline.get("frame_rate"),
         "total_frames": timeline.get("total_frames"),
@@ -118,6 +121,7 @@ def render_scene_sequence(
     preview_url: str,
     descriptor: dict[str, Any],
     timeline: dict[str, Any],
+    performance: dict[str, Any],
     output_dir: str | Path,
     width: int = 1280,
     height: int = 720,
@@ -132,6 +136,7 @@ def render_scene_sequence(
 
     resolved_width, resolved_height = _validate_dimensions(width, height)
     frame_rate, _ = _validate_timeline(descriptor, timeline, 0)
+    _validate_performance(descriptor, timeline, performance)
     total_frames = timeline["total_frames"]
     target_dir = Path(output_dir).expanduser().resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -139,6 +144,7 @@ def render_scene_sequence(
     identity = _sequence_identity(
         descriptor=descriptor,
         timeline=timeline,
+        performance=performance,
         width=resolved_width,
         height=resolved_height,
         renderer=renderer,
@@ -207,6 +213,7 @@ def render_scene_sequence(
         preview_url=preview_url,
         descriptor=descriptor,
         timeline=timeline,
+        performance=performance,
         width=resolved_width,
         height=resolved_height,
         renderer=renderer,

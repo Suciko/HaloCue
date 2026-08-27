@@ -27,10 +27,11 @@ def test_scene_evaluation_binds_descriptor_and_timeline():
 
     evaluation = evaluate_scene(project, scene_id)
 
-    assert evaluation["schema_version"] == "scene-evaluation/1.0"
+    assert evaluation["schema_version"] == "scene-evaluation/1.1"
     assert evaluation["scene_id"] == scene_id
     assert evaluation["timeline"]["scene_id"] == scene_id
     assert evaluation["timeline"]["events"][-1]["end_frame"] == evaluation["timeline"]["total_frames"]
+    assert evaluation["performance"]["total_frames"] == evaluation["timeline"]["total_frames"]
 
 
 def test_scene_evaluation_reports_advanced_events_without_mutating_project():
@@ -75,17 +76,22 @@ def test_scene_evaluation_keeps_visual_quick_effects_in_the_render_timeline():
     assert evaluation["diagnostics"] == []
     assert evaluation["descriptor"]["events"][-1]["event_id"] == "event/quick-shake"
     assert evaluation["timeline"]["events"][-1]["kind"] == "halocue.ba:screen-shake"
+    assert evaluation["performance"]["operations"][-1]["source_event_id"] == "event/quick-shake"
 
 
 def test_scene_evaluation_matches_contract_schema():
     project = _json(MODEL_ROOT / "example.synthetic.json")
     scene_id = project["chapters"][0]["scenes"][0]["scene_id"]
-    schema = _json(ROOT / "packages" / "contracts" / "scene-evaluation" / "1.0.schema.json")
+    schema = _json(ROOT / "packages" / "contracts" / "scene-evaluation" / "1.1.schema.json")
     timeline_schema = _json(ROOT / "packages" / "contracts" / "render-timeline" / "1.0.schema.json")
+    performance_schema = _json(ROOT / "packages" / "contracts" / "scene-performance" / "1.0.schema.json")
     evaluation = evaluate_scene(project, scene_id)
 
     Draft202012Validator.check_schema(schema)
     registry = Registry().with_resource(
         timeline_schema["$id"], Resource.from_contents(timeline_schema)
+    )
+    registry = registry.with_resource(
+        performance_schema["$id"], Resource.from_contents(performance_schema)
     )
     Draft202012Validator(schema, registry=registry).validate(evaluation)

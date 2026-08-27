@@ -85,6 +85,12 @@ button, select { font: inherit; }
   background: #071321;
 }
 
+.preview-stage > * {
+  translate:
+    calc(var(--performance-offset-x, 0px) * var(--stage-scale, 1))
+    calc(var(--performance-offset-y, 0px) * var(--stage-scale, 1));
+}
+
 .render-options {
   position: fixed;
   right: 18px;

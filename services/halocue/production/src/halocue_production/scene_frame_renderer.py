@@ -14,6 +14,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 TIMELINE_SCHEMA_VERSION = "render-timeline/1.0"
+PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.0"
 LOCAL_PREVIEW_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
@@ -32,6 +33,7 @@ class SceneFrameResult:
     sha256: str
     renderer: str
     timeline_schema_version: str = TIMELINE_SCHEMA_VERSION
+    performance_schema_version: str = PERFORMANCE_SCHEMA_VERSION
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -44,6 +46,7 @@ class SceneFrameResult:
             "sha256": self.sha256,
             "renderer": self.renderer,
             "timeline_schema_version": self.timeline_schema_version,
+            "performance_schema_version": self.performance_schema_version,
         }
 
 
@@ -123,6 +126,44 @@ def _validate_timeline(
     return frame_rate, item
 
 
+def _validate_performance(
+    descriptor: dict[str, Any],
+    timeline: dict[str, Any],
+    performance: dict[str, Any],
+) -> None:
+    if not isinstance(performance, dict) or performance.get("schema_version") != PERFORMANCE_SCHEMA_VERSION:
+        raise SceneFrameRenderError("unsupported scene performance schema")
+    if performance.get("scene_id") != descriptor.get("scene_id"):
+        raise SceneFrameRenderError("scene performance scene_id does not match the descriptor")
+    if performance.get("frame_rate") != timeline.get("frame_rate"):
+        raise SceneFrameRenderError("scene performance frame_rate does not match the timeline")
+    if performance.get("total_frames") != timeline.get("total_frames"):
+        raise SceneFrameRenderError("scene performance total_frames does not match the timeline")
+    operations = performance.get("operations")
+    source_map = performance.get("source_map")
+    if not isinstance(operations, list) or not isinstance(source_map, list):
+        raise SceneFrameRenderError("scene performance operations and source_map must be arrays")
+    source_ids = {
+        event.get("event_id")
+        for event in descriptor.get("events", [])
+        if isinstance(event, dict)
+    }
+    operation_ids: set[str] = set()
+    for index, operation in enumerate(operations):
+        if not isinstance(operation, dict) or operation.get("kind") != "shake":
+            raise SceneFrameRenderError(f"scene performance operation {index} is invalid")
+        operation_id = operation.get("operation_id")
+        if not isinstance(operation_id, str) or not operation_id or operation_id in operation_ids:
+            raise SceneFrameRenderError("scene performance operation IDs must be unique")
+        operation_ids.add(operation_id)
+        if operation.get("source_event_id") not in source_ids:
+            raise SceneFrameRenderError("scene performance operation source event is missing")
+        start = _require_int(operation.get("start_frame"), f"operations[{index}].start_frame")
+        end = _require_int(operation.get("end_frame"), f"operations[{index}].end_frame", minimum=1)
+        if end <= start or end > timeline["total_frames"]:
+            raise SceneFrameRenderError("scene performance operation frame range is invalid")
+
+
 def _capture_url(preview_url: str, frame: int, renderer: str) -> str:
     parsed = urlsplit(preview_url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
@@ -171,6 +212,7 @@ class SceneRenderSession:
         preview_url: str,
         descriptor: dict[str, Any],
         timeline: dict[str, Any],
+        performance: dict[str, Any],
         width: int = 1280,
         height: int = 720,
         renderer: str = "realtime",
@@ -180,8 +222,10 @@ class SceneRenderSession:
         self.preview_url = _validate_preview_url(preview_url)
         self.width, self.height = _validate_dimensions(width, height)
         self.frame_rate, _ = _validate_timeline(descriptor, timeline, 0)
+        _validate_performance(descriptor, timeline, performance)
         self.descriptor = descriptor
         self.timeline = timeline
+        self.performance = performance
         self.total_frames = timeline["total_frames"]
         self.renderer = renderer
         self.timeout_ms = _require_int(timeout_ms, "timeout_ms", minimum=1)
@@ -215,7 +259,11 @@ class SceneRenderSession:
             self.browser = self._runtime.chromium.launch(headless=True)
 
         injected = json.dumps(
-            {"descriptor": self.descriptor, "timeline": self.timeline},
+            {
+                "descriptor": self.descriptor,
+                "timeline": self.timeline,
+                "performance": self.performance,
+            },
             ensure_ascii=True,
             separators=(",", ":"),
         )
@@ -223,6 +271,7 @@ class SceneRenderSession:
             f"const payload={injected};"
             "window.HALO_CUE_SCENE_DESCRIPTOR=payload.descriptor;"
             "window.HALO_CUE_RENDER_TIMELINE=payload.timeline;"
+            "window.HALO_CUE_SCENE_PERFORMANCE=payload.performance;"
         )
         try:
             self._context = self.browser.new_context(
@@ -261,12 +310,18 @@ class SceneRenderSession:
                     stage && controller
                     && stage.dataset.capture === 'deterministic'
                     && stage.dataset.timelineSource === 'supplied'
+                    && stage.dataset.performanceSource === 'supplied'
                     && Number(stage.dataset.currentFrame) === expected.frame
                     && stage.dataset.mediaReady === 'ready'
                     && controller.timeline.schema_version === expected.schema
+                    && controller.performance.schema_version === expected.performanceSchema
                 );
             }""",
-            arg={"frame": frame, "schema": TIMELINE_SCHEMA_VERSION},
+            arg={
+                "frame": frame,
+                "schema": TIMELINE_SCHEMA_VERSION,
+                "performanceSchema": PERFORMANCE_SCHEMA_VERSION,
+            },
             timeout=self.timeout_ms,
         )
         preview_error = self._page.locator("#preview-error")
@@ -347,6 +402,7 @@ def render_scene_frame(
     preview_url: str,
     descriptor: dict[str, Any],
     timeline: dict[str, Any],
+    performance: dict[str, Any],
     frame: int,
     output_path: str | Path,
     width: int = 1280,
@@ -365,6 +421,7 @@ def render_scene_frame(
     resolved_url = _validate_preview_url(preview_url)
     resolved_width, resolved_height = _validate_dimensions(width, height)
     frame_rate, timeline_item = _validate_timeline(descriptor, timeline, frame)
+    _validate_performance(descriptor, timeline, performance)
     resolved_timeout = _require_int(timeout_ms, "timeout_ms", minimum=1)
     target = Path(output_path).expanduser().resolve()
     if target.suffix.casefold() != ".png":
@@ -373,7 +430,7 @@ def render_scene_frame(
         raise SceneFrameRenderError("renderer must be 'realtime' or 'static'")
 
     injected = json.dumps(
-        {"descriptor": descriptor, "timeline": timeline},
+        {"descriptor": descriptor, "timeline": timeline, "performance": performance},
         ensure_ascii=True,
         separators=(",", ":"),
     )
@@ -381,6 +438,7 @@ def render_scene_frame(
         f"const payload={injected};"
         "window.HALO_CUE_SCENE_DESCRIPTOR=payload.descriptor;"
         "window.HALO_CUE_RENDER_TIMELINE=payload.timeline;"
+        "window.HALO_CUE_SCENE_PERFORMANCE=payload.performance;"
     )
     capture_url = _capture_url(resolved_url, frame, renderer)
     runtime = None
@@ -421,11 +479,17 @@ def render_scene_frame(
                     stage && controller
                     && stage.dataset.capture === 'deterministic'
                     && stage.dataset.timelineSource === 'supplied'
+                    && stage.dataset.performanceSource === 'supplied'
                     && Number(stage.dataset.currentFrame) === expected.frame
                     && controller.timeline.schema_version === expected.schema
+                    && controller.performance.schema_version === expected.performanceSchema
                 );
             }""",
-            arg={"frame": frame, "schema": TIMELINE_SCHEMA_VERSION},
+            arg={
+                "frame": frame,
+                "schema": TIMELINE_SCHEMA_VERSION,
+                "performanceSchema": PERFORMANCE_SCHEMA_VERSION,
+            },
             timeout=resolved_timeout,
         )
         preview_error = page.locator("#preview-error")

@@ -31,6 +31,7 @@ from halocue_production.scene_video_renderer import (  # noqa: E402
     render_scene_sequence,
 )
 from render_timeline import build_render_timeline  # noqa: E402
+from scene_performance import build_scene_performance  # noqa: E402
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
@@ -77,6 +78,7 @@ def _synthetic_p69() -> dict:
 def test_renderer_rejects_remote_urls_mismatched_timelines_and_non_video_frames(tmp_path):
     descriptor = _descriptor("example")
     timeline = build_render_timeline(descriptor)
+    performance = build_scene_performance(descriptor, timeline)
     output = tmp_path / "frame.png"
 
     with pytest.raises(SceneFrameRenderError, match="localhost"):
@@ -84,6 +86,7 @@ def test_renderer_rejects_remote_urls_mismatched_timelines_and_non_video_frames(
             preview_url="https://example.com/index.html",
             descriptor=descriptor,
             timeline=timeline,
+            performance=performance,
             frame=0,
             output_path=output,
         )
@@ -95,6 +98,7 @@ def test_renderer_rejects_remote_urls_mismatched_timelines_and_non_video_frames(
             preview_url="http://127.0.0.1:8898/index.html",
             descriptor=descriptor,
             timeline=mismatched,
+            performance=performance,
             frame=0,
             output_path=output,
         )
@@ -104,6 +108,7 @@ def test_renderer_rejects_remote_urls_mismatched_timelines_and_non_video_frames(
             preview_url="http://127.0.0.1:8898/index.html",
             descriptor=descriptor,
             timeline=timeline,
+            performance=performance,
             frame=0,
             output_path=output,
             width=1280,
@@ -119,6 +124,7 @@ def test_offline_renderer_repeats_one_frame_and_handles_a_second_scene(
 ):
     descriptor = _descriptor("example")
     timeline = build_render_timeline(descriptor)
+    performance = build_scene_performance(descriptor, timeline)
     reordered_timeline = json.loads(json.dumps(timeline, sort_keys=True))
     alice_frame = timeline["events"][2]["end_frame"] - 1
     bob_frame = timeline["events"][4]["end_frame"] - 1
@@ -127,6 +133,7 @@ def test_offline_renderer_repeats_one_frame_and_handles_a_second_scene(
         preview_url=preview_url,
         descriptor=descriptor,
         timeline=reordered_timeline,
+        performance=performance,
         frame=alice_frame,
         output_path=tmp_path / "alice-a.png",
         renderer="static",
@@ -136,6 +143,7 @@ def test_offline_renderer_repeats_one_frame_and_handles_a_second_scene(
         preview_url=preview_url,
         descriptor=descriptor,
         timeline=timeline,
+        performance=performance,
         frame=alice_frame,
         output_path=tmp_path / "alice-b.png",
         renderer="static",
@@ -145,6 +153,7 @@ def test_offline_renderer_repeats_one_frame_and_handles_a_second_scene(
         preview_url=preview_url,
         descriptor=descriptor,
         timeline=timeline,
+        performance=performance,
         frame=bob_frame,
         output_path=tmp_path / "bob.png",
         renderer="static",
@@ -171,12 +180,14 @@ def test_reused_page_renders_resumable_sequence_and_silent_mp4(
     for event in descriptor["events"]:
         event["duration_ms"] = 34
     timeline = build_render_timeline(descriptor)
+    performance = build_scene_performance(descriptor, timeline)
     sequence_dir = tmp_path / "frames"
 
     first = render_scene_sequence(
         preview_url=preview_url,
         descriptor=descriptor,
         timeline=timeline,
+        performance=performance,
         output_dir=sequence_dir,
         width=640,
         height=360,
@@ -185,7 +196,7 @@ def test_reused_page_renders_resumable_sequence_and_silent_mp4(
     )
     manifest = json.loads(first.manifest_path.read_text(encoding="utf-8"))
     schema = json.loads(
-        (REPO_ROOT / "packages" / "contracts" / "render-sequence" / "1.0.schema.json")
+        (REPO_ROOT / "packages" / "contracts" / "render-sequence" / "1.1.schema.json")
         .read_text(encoding="utf-8")
     )
     Draft202012Validator.check_schema(schema)
@@ -202,6 +213,7 @@ def test_reused_page_renders_resumable_sequence_and_silent_mp4(
         preview_url=preview_url,
         descriptor=descriptor,
         timeline=timeline,
+        performance=performance,
         output_dir=sequence_dir,
         width=640,
         height=360,
@@ -232,11 +244,13 @@ def test_resume_rejects_sequence_from_different_render_inputs(browser, preview_u
     descriptor["events"] = descriptor["events"][:1]
     descriptor["events"][0]["duration_ms"] = 34
     timeline = build_render_timeline(descriptor)
+    performance = build_scene_performance(descriptor, timeline)
     sequence_dir = tmp_path / "frames"
     render_scene_sequence(
         preview_url=preview_url,
         descriptor=descriptor,
         timeline=timeline,
+        performance=performance,
         output_dir=sequence_dir,
         width=640,
         height=360,
@@ -247,11 +261,13 @@ def test_resume_rejects_sequence_from_different_render_inputs(browser, preview_u
     changed = json.loads(json.dumps(descriptor))
     changed["scene_id"] = "scene/changed"
     changed_timeline = build_render_timeline(changed)
+    changed_performance = build_scene_performance(changed, changed_timeline)
     with pytest.raises(SceneFrameRenderError, match="different render inputs"):
         render_scene_sequence(
             preview_url=preview_url,
             descriptor=changed,
             timeline=changed_timeline,
+            performance=changed_performance,
             output_dir=sequence_dir,
             width=640,
             height=360,
@@ -272,10 +288,12 @@ def test_offline_p69_frame_35_is_pixel_equivalent_to_the_browser_derived_timelin
         descriptor,
         frame_rate=descriptor["presentation"]["frame_rate"],
     )
+    performance = build_scene_performance(descriptor, timeline)
     result = render_scene_frame(
         preview_url=preview_url,
         descriptor=descriptor,
         timeline=timeline,
+        performance=performance,
         frame=frame,
         output_path=tmp_path / "offline-p69-frame-35.png",
         renderer="static",
@@ -329,3 +347,42 @@ def test_offline_p69_frame_35_is_pixel_equivalent_to_the_browser_derived_timelin
     assert changed_pixels / (result.width * result.height) < 0.002
     assert max(statistics.mean) < 0.003
     assert max(statistics.rms) < 0.2
+
+
+@pytest.mark.browser
+def test_compiled_screen_shake_has_deterministic_exported_intermediate_frames(
+    browser,
+    preview_url,
+    tmp_path,
+):
+    descriptor = _descriptor("example")
+    descriptor["events"] = [{
+        "event_id": "event/shake",
+        "kind": "halocue.ba:screen-shake",
+        "duration_ms": 360,
+        "intensity": 0.35,
+    }]
+    timeline = build_render_timeline(descriptor)
+    performance = build_scene_performance(descriptor, timeline)
+    start = timeline["events"][0]["start_frame"]
+    middle = start + 2
+    end = timeline["events"][0]["end_frame"] - 1
+
+    results = [
+        render_scene_frame(
+            preview_url=preview_url,
+            descriptor=descriptor,
+            timeline=timeline,
+            performance=performance,
+            frame=frame,
+            output_path=tmp_path / f"shake-{frame}.png",
+            renderer="static",
+            browser=browser,
+        )
+        for frame in (start, middle, end)
+    ]
+
+    assert performance["source_map"][0]["source_event_id"] == "event/shake"
+    assert results[0].performance_schema_version == "scene-performance/1.0"
+    assert results[0].sha256 == results[2].sha256
+    assert results[1].sha256 != results[0].sha256

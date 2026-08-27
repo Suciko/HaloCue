@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Suciko/HaloCue/contracts/render-sequence/1.1.schema.json",
+  "title": "HaloCue resumable render sequence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "descriptor_sha256",
+    "timeline_sha256",
+    "performance_sha256",
+    "scene_id",
+    "frame_rate",
+    "total_frames",
+    "width",
+    "height",
+    "renderer",
+    "complete",
+    "frames"
+  ],
+  "properties": {
+    "schema_version": { "const": "render-sequence/1.1" },
+    "descriptor_sha256": { "$ref": "#/$defs/sha256" },
+    "timeline_sha256": { "$ref": "#/$defs/sha256" },
+    "performance_sha256": { "$ref": "#/$defs/sha256" },
+    "scene_id": { "type": ["string", "null"] },
+    "frame_rate": { "type": "integer", "minimum": 1, "maximum": 240 },
+    "total_frames": { "type": "integer", "minimum": 1 },
+    "width": { "type": "integer", "minimum": 16, "maximum": 8192 },
+    "height": { "type": "integer", "minimum": 9, "maximum": 8192 },
+    "renderer": { "type": "string", "enum": ["realtime", "static"] },
+    "complete": { "type": "boolean" },
+    "frames": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["frame", "file", "event_id", "sha256"],
+        "properties": {
+          "frame": { "type": "integer", "minimum": 0 },
+          "file": { "type": "string", "pattern": "^frame-[0-9]{6}\\.png$" },
+          "event_id": { "type": ["string", "null"] },
+          "sha256": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

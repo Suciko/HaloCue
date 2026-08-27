@@ -1,6 +1,7 @@
 import { buildDescriptor } from "./descriptor";
 import type { CapabilityRegistry } from "./capabilities";
 import { buildRenderTimeline, DEFAULT_FRAME_RATE } from "./renderTimeline";
+import { buildScenePerformance } from "./scenePerformance";
 import { firstScene } from "./cueStateProjection";
 import { diagnoseProject } from "./projectCodec";
 import type { EvaluationDiagnostic, HaloCueProject, SceneEvaluation } from "./types";
@@ -33,11 +34,13 @@ export function evaluateScene(
   const projectDiagnostics = diagnoseProject(project)
     // Advanced namespaced events have a dedicated presentation warning below.
     .filter((diagnostic) => diagnostic.code !== "project.unknown_event_kind");
+  const timeline = buildRenderTimeline(descriptor, frameRate);
   return {
-    schema_version: "scene-evaluation/1.0",
+    schema_version: "scene-evaluation/1.1",
     scene_id: descriptor.scene_id,
     descriptor,
-    timeline: buildRenderTimeline(descriptor, frameRate),
+    timeline,
+    performance: buildScenePerformance(descriptor, timeline),
     diagnostics: [
       ...projectDiagnostics,
       ...diagnosticsForAdvancedEvents(project),

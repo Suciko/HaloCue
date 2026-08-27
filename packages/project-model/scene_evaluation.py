@@ -6,10 +6,11 @@ from typing import Any
 
 from project_model import build_aa_scene_descriptor, migrate_project
 from render_timeline import build_render_timeline
+from scene_performance import build_scene_performance
 from scene_events import scene_event_registry
 
 
-SCENE_EVALUATION_SCHEMA_VERSION = "scene-evaluation/1.0"
+SCENE_EVALUATION_SCHEMA_VERSION = "scene-evaluation/1.1"
 
 
 def evaluate_scene(
@@ -50,10 +51,12 @@ def evaluate_scene(
                         }
                     )
             break
+    timeline = build_render_timeline(descriptor, frame_rate=frame_rate)
     return {
         "schema_version": SCENE_EVALUATION_SCHEMA_VERSION,
         "scene_id": scene_id,
         "descriptor": descriptor,
-        "timeline": build_render_timeline(descriptor, frame_rate=frame_rate),
+        "timeline": timeline,
+        "performance": build_scene_performance(descriptor, timeline),
         "diagnostics": diagnostics,
     }

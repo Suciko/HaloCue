@@ -42,9 +42,9 @@ No AA resource bytes or runtime data are committed here.
 The optional `render` dependency exposes the 1.1 deterministic frame and video
 adapters in `halocue_production.scene_frame_renderer` and
 `halocue_production.scene_video_renderer`. They accept an already validated
-`scene-descriptor/1.0` plus `render-timeline/1.0`, connect only to a localhost
+`scene-descriptor/1.0`, `render-timeline/1.0`, and `scene-performance/1.0`, connect only to a localhost
 preview, and capture atomic 16:9 PNGs. A complete sequence reuses one Chromium
-page, records a resumable `render-sequence/1.0` manifest, and can be encoded as
+page, records a resumable `render-sequence/1.1` manifest, and can be encoded as
 a silent H.264/yuv420p MP4 through FFmpeg. Repository entry points are
 `tools/render_scene_frame.py` and `tools/render_scene_video.py`; durable
 background export jobs and audio muxing remain later service slices.
@@ -222,9 +222,10 @@ compatibility contract is documented in [WRITING_HANDOFF_CONTRACT.md](WRITING_HA
 ## Deterministic scene video export
 
 `tools/render_scene_video.py` reuses one Chromium page to render a numbered PNG
-sequence, records a resumable `render-sequence/1.0` manifest, and encodes a
+sequence, records a resumable `render-sequence/1.1` manifest, and encodes a
 silent H.264/yuv420p MP4 through FFmpeg. Preview, individual frames, sequences,
-and video all consume the same `SceneDescriptor` and `RenderTimeline`.
+and video all consume the same `SceneDescriptor`, `RenderTimeline`, and
+`ScenePerformance` plan.
 
 ```powershell
 python tools/render_scene_video.py descriptor.json output.mp4 --renderer realtime

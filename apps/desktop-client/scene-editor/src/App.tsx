@@ -68,10 +68,12 @@ import type {
   InspectorTab,
   RenderTimeline,
   SceneDescriptor,
+  ScenePerformancePlan,
 } from "./types";
 
 type PreviewController = {
   timeline: { total_frames: number };
+  performance: ScenePerformancePlan;
   seekFrame: (frame: number) => void;
   play: (options?: { fromFrame?: number }) => void;
 };
@@ -81,7 +83,7 @@ type PreviewWindow = Window & {
     mount: (
       descriptor: SceneDescriptor,
       root?: Element | null,
-      options?: { timeline?: RenderTimeline },
+      options?: { timeline?: RenderTimeline; performance?: ScenePerformancePlan },
     ) => PreviewController;
     controller?: PreviewController;
   };
@@ -226,6 +228,7 @@ function PreviewFrame() {
     try {
       const controller = preview.mount(evaluation.descriptor, undefined, {
         timeline: evaluation.timeline,
+        performance: evaluation.performance,
       });
       preview.controller = controller;
       controllerRef.current = controller;

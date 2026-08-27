@@ -139,6 +139,45 @@ export type RenderTimeline = {
   total_frames: number;
 };
 
+export type PerformanceExecutionMode = "play" | "sample" | "skip" | "reduced-motion";
+
+export type StageShakeOperation = {
+  operation_id: string;
+  source_event_id: string;
+  kind: "shake";
+  target: { kind: "stage"; target_id: "stage/global" };
+  channel: "geometry.offset";
+  value_space: "relative-to-baseline";
+  start_frame: number;
+  end_frame: number;
+  amplitude_x_px: number;
+  amplitude_y_px: number;
+  frequency_hz: number;
+};
+
+export type PerformanceSourceMapEntry = {
+  source_event_id: string;
+  operation_ids: string[];
+  primary_operation_id: string;
+};
+
+export type ScenePerformancePlan = {
+  schema_version: "scene-performance/1.0";
+  frame_rate: number;
+  scene_id: string | null;
+  total_frames: number;
+  operations: StageShakeOperation[];
+  source_map: PerformanceSourceMapEntry[];
+};
+
+export type ScenePerformanceSample = {
+  schema_version: "scene-performance-sample/1.0";
+  frame: number;
+  mode: PerformanceExecutionMode;
+  active_operation_ids: string[];
+  stage: { offset_x_px: number; offset_y_px: number };
+};
+
 export type EvaluationDiagnostic = {
   code: string;
   severity: "info" | "warning" | "error";
@@ -147,9 +186,10 @@ export type EvaluationDiagnostic = {
 };
 
 export type SceneEvaluation = {
-  schema_version: "scene-evaluation/1.0";
+  schema_version: "scene-evaluation/1.1";
   scene_id: string;
   descriptor: SceneDescriptor;
   timeline: RenderTimeline;
+  performance: ScenePerformancePlan;
   diagnostics: EvaluationDiagnostic[];
 };

@@ -35,8 +35,9 @@ The export-safe URL renders the editor tray fully transparent. Append
 `?editor=1` while authoring to reveal the AUTO/MENU switches; the descriptor
 still decides whether either button appears inside the video frame.
 
-The preview controller consumes the deterministic `render-timeline/1.0`
-contract. `window.HaloCueScenePreview.controller` exposes `seekFrame`,
+The preview controller consumes the deterministic `render-timeline/1.0` and
+`scene-performance/1.0` contracts. `window.HaloCueScenePreview.controller`
+exposes `seekFrame`,
 `seekEvent`, `seekReference`, `play`, `pause`, and `dispose`. These methods keep
 the browser preview on the same end-exclusive frame ranges used by the Python
 offline timeline adapter. The default page remains a live realtime preview.
@@ -53,9 +54,13 @@ Useful deterministic URLs:
 transitions and transient entrance/location timers before the stage is sampled.
 An export host may inject `window.HALO_CUE_RENDER_TIMELINE`; the preview accepts
 it only when its canonical JSON content exactly matches the timeline derived
-from the injected `scene-descriptor/1.0` payload.
+from the injected `scene-descriptor/1.0` payload. The matching
+`window.HALO_CUE_SCENE_PERFORMANCE` plan is validated the same way. Deterministic
+stage shake is applied as sampled geometry rather than a CSS keyframe, so its
+intermediate frames survive capture with browser animations disabled.
 
-The repository CLI builds the Python timeline, injects both contracts into the
+The repository CLI builds the Python timeline and performance plan, injects all
+three contracts into the
 localhost preview, waits for fonts/backgrounds/realtime Spine canvases, and
 atomically writes one 16:9 PNG:
 
@@ -67,7 +72,7 @@ python tools/render_scene_frame.py `
 ```
 
 The output JSON records the resolved frame, event ID, frame rate, dimensions,
-renderer, timeline schema, and SHA-256. The CLI only connects to a localhost
+renderer, timeline/performance schemas, and SHA-256. The CLI only connects to a localhost
 preview URL; authorized AA bytes continue to flow through the existing local
 resource endpoints and are never embedded in the source tree.
 

@@ -25,8 +25,13 @@ The slice supports:
 stable default durations so browser preview and offline video exporters can
 share timing without depending on AUTO playback or wall-clock callbacks.
 
-`scene_evaluation.py` binds the descriptor and timeline into the
-`scene-evaluation/1.0` intermediate result consumed by offline adapters. It
+`scene_performance.py` compiles supported authored effects into the independent
+`scene-performance/1.0` animation plan and samples exact frames under play,
+sample, skip, and reduced-motion execution modes. The first operation is a
+deterministic stage shake with stable source mapping.
+
+`scene_evaluation.py` binds the descriptor, timeline, and performance plan into
+the `scene-evaluation/1.1` intermediate result consumed by offline adapters. It
 also reports namespaced events that remain in the canonical project but are
 not yet rendered by the AA presentation adapter.
 

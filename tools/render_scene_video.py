@@ -20,6 +20,7 @@ from halocue_production.scene_video_renderer import (  # noqa: E402
     render_scene_sequence,
 )
 from render_timeline import build_render_timeline  # noqa: E402
+from scene_performance import build_scene_performance  # noqa: E402
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -65,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     descriptor = json.loads(args.descriptor.read_text(encoding="utf-8"))
     frame_rate = descriptor.get("presentation", {}).get("frame_rate", 30)
     timeline = build_render_timeline(descriptor, frame_rate=frame_rate)
+    performance = build_scene_performance(descriptor, timeline)
     frames_dir = args.frames_dir or args.output.with_suffix(args.output.suffix + ".frames")
 
     def report(completed: int, total: int) -> None:
@@ -74,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         preview_url=args.preview_url,
         descriptor=descriptor,
         timeline=timeline,
+        performance=performance,
         output_dir=frames_dir,
         width=args.width,
         height=args.height,

@@ -7,6 +7,7 @@
   const STAGE_MEDIA_KINDS = new Set(["portrait", "spine", "spine-frame"]);
   const DEFAULT_ACTOR_MEDIA_SCALE = 1.6;
   const SPINE_RENDERER = window.HaloCueSpineRenderer;
+  const PERFORMANCE_RUNTIME = window.HaloCueScenePerformanceRuntime;
   const EVENT_REGISTRY = window.HaloCueSceneEventRegistry || {
     isVisualOnly: () => false,
   };
@@ -173,6 +174,26 @@
     };
   }
 
+  function resolveScenePerformance(descriptor, timeline, suppliedPerformance) {
+    if (!PERFORMANCE_RUNTIME?.buildScenePerformance) {
+      throw new Error("scene performance runtime is not loaded");
+    }
+    const expected = PERFORMANCE_RUNTIME.buildScenePerformance(descriptor, timeline);
+    if (suppliedPerformance === undefined) {
+      return { performance: expected, source: "derived" };
+    }
+    if (!suppliedPerformance || suppliedPerformance.schema_version !== "scene-performance/1.0") {
+      throw new Error("unsupported supplied scene performance schema");
+    }
+    if (JSON.stringify(canonicalJson(suppliedPerformance)) !== JSON.stringify(canonicalJson(expected))) {
+      throw new Error("supplied scene performance does not match the descriptor and timeline");
+    }
+    return {
+      performance: JSON.parse(JSON.stringify(suppliedPerformance)),
+      source: "supplied",
+    };
+  }
+
   function mount(descriptor, root, options = {}) {
     assertDescriptor(descriptor);
     const stage = root || document.querySelector("#preview-stage");
@@ -208,8 +229,11 @@
       : descriptor.actors;
     const resolvedTimeline = resolveRenderTimeline(descriptor, options.timeline);
     const timeline = resolvedTimeline.timeline;
+    const resolvedPerformance = resolveScenePerformance(descriptor, timeline, options.performance);
+    const performance = resolvedPerformance.performance;
     const captureMode = options.capture === true;
     stage.dataset.timelineSource = resolvedTimeline.source;
+    stage.dataset.performanceSource = resolvedPerformance.source;
     stage.dataset.capture = captureMode ? "deterministic" : "preview";
     if (locationLabel) {
       locationLabel.hidden = descriptor.presentation?.location_mode === "hidden";
@@ -495,6 +519,17 @@
         timelinePlay.setAttribute("aria-label", timelinePlay.title);
       }
       if (timelineReference) timelineReference.disabled = !descriptor.presentation?.reference_frame;
+    }
+
+    function applyPerformanceFrame(frame, mode = "sample") {
+      const sample = PERFORMANCE_RUNTIME.sampleScenePerformance(performance, frame, mode);
+      stage.style.setProperty("--performance-offset-x", `${sample.stage.offset_x_px}px`);
+      stage.style.setProperty("--performance-offset-y", `${sample.stage.offset_y_px}px`);
+      stage.dataset.performanceOffsetX = String(sample.stage.offset_x_px);
+      stage.dataset.performanceOffsetY = String(sample.stage.offset_y_px);
+      stage.dataset.performanceOperations = sample.active_operation_ids.join(" ");
+      stage.dataset.performanceMode = sample.mode;
+      return sample;
     }
 
     function installTimelineTransport() {
@@ -859,6 +894,7 @@
       state.effect = null;
       loadPreviewBackground(state.background, { animate: false });
       renderEvent(sample.item?.event || null, { sample, suppressMotion: true });
+      applyPerformanceFrame(sample.frame, options.fromPlayback ? "play" : (options.mode || "sample"));
       const spineTimeMs = Number.isFinite(options.spineTimeMs)
         ? Math.max(0, options.spineTimeMs)
         : sample.frame * 1000 / timeline.frame_rate;
@@ -1077,6 +1113,12 @@
     installOverlayControls();
     installTimelineTransport();
     renderEvent(null);
+    stage.style.setProperty("--performance-offset-x", "0px");
+    stage.style.setProperty("--performance-offset-y", "0px");
+    stage.dataset.performanceOffsetX = "0";
+    stage.dataset.performanceOffsetY = "0";
+    stage.dataset.performanceOperations = "";
+    stage.dataset.performanceMode = "sample";
     const locationTimer = !captureMode
       && locationLabel
       && descriptor.presentation?.location_mode !== "persistent"
@@ -1106,6 +1148,7 @@
       seekReference,
       state,
       timeline,
+      performance,
       dispose() {
         cancelPlayback();
         cancelTypewriter();
@@ -1156,6 +1199,7 @@
       const controller = mount(demoDescriptor, null, {
         capture: captureMode,
         timeline: window.HALO_CUE_RENDER_TIMELINE,
+        performance: window.HALO_CUE_SCENE_PERFORMANCE,
       });
       const stage = document.querySelector("#preview-stage");
       const fontSelect = document.querySelector("#font-select");

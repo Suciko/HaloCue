@@ -16,12 +16,15 @@ describe("scene evaluation seam", () => {
     const scene = firstScene(demoProject);
     const evaluation = evaluateScene(demoProject, scene.cues[1].cue_id);
 
-    expect(evaluation.schema_version).toBe("scene-evaluation/1.0");
+    expect(evaluation.schema_version).toBe("scene-evaluation/1.1");
     expect(evaluation.scene_id).toBe(scene.scene_id);
     expect(evaluation.timeline.events.map((event) => event.event_id)).toEqual(
       evaluation.descriptor.events.map((event) => event.event_id),
     );
     expect(evaluation.timeline.events.at(-1)?.end_frame).toBe(evaluation.timeline.total_frames);
+    expect(evaluation.schema_version).toBe("scene-evaluation/1.1");
+    expect(evaluation.performance.scene_id).toBe(evaluation.scene_id);
+    expect(evaluation.performance.total_frames).toBe(evaluation.timeline.total_frames);
   });
 
   it("reports advanced events without dropping them from the project", () => {
@@ -71,6 +74,7 @@ describe("scene evaluation seam", () => {
     expect(evaluation.diagnostics[0].path).not.toContain("quick-shake");
     expect(evaluation.descriptor.events.at(-1)?.kind).toBe("halocue.ba:screen-shake");
     expect(evaluation.timeline.events.at(-1)?.duration_ms).toBe(360);
+    expect(evaluation.performance.operations.at(-1)?.source_event_id).toBe("event/quick-shake");
   });
 
   it("reports structural project errors through the evaluation seam", () => {

@@ -4,7 +4,8 @@ This package owns versioned JSON contracts shared by the client, backend, BA
 editor, and adapters. A wire-shape change requires a new version or an explicit
 migration plus consumer tests. Current editor/render contracts include
 `halocue-project/1.1`, `character-capabilities/1.0`, `scene-events/1.0`,
-`render-timeline/1.0`, `scene-evaluation/1.0`, and `render-sequence/1.0`.
+`render-timeline/1.0`, `scene-performance/1.0`, `scene-evaluation/1.1`, and
+`render-sequence/1.1`.
 Planned contracts include
 `script-release/1.1`, `production-request/1.1`, `performance-draft/1.0`,
 `build-bundle/1.0`, and `scene-descriptor/1.0`.
@@ -43,16 +44,24 @@ frame ranges generated from a validated scene descriptor. Browser preview and
 offline export consume the same event IDs, durations, and frame boundaries;
 wall-clock callbacks are presentation controls, not part of this contract.
 
-The `scene-evaluation/1.0` schema lives in
-`scene-evaluation/1.0.schema.json`. It binds a descriptor and its timeline
-evaluation to one scene and carries non-fatal diagnostics for namespaced
+The `scene-performance/1.0` schema lives in
+`scene-performance/1.0.schema.json`. It is the renderer-independent animation
+plan compiled from authored scene events. The first tracer bullet defines a
+stable stage shake operation, target/channel/value-space metadata, exact frame
+ranges, and source-event mapping. Preview and export sample this plan even when
+wall-clock CSS animation is disabled.
+
+The `scene-evaluation/1.1` schema lives in
+`scene-evaluation/1.1.schema.json`. It binds a descriptor, timeline, performance
+plan, and non-fatal diagnostics for namespaced
 professional events that a presentation adapter does not render yet. The
 editor, browser preview, and offline adapters can therefore share one explicit
 intermediate result without duplicating canonical project data.
 
-The `render-sequence/1.0` manifest binds a resumable numbered PNG sequence to
-the SHA-256 of its descriptor and timeline. A sequence can reuse verified
-frames after interruption, but never mix frames from different render inputs.
+The `render-sequence/1.1` manifest binds a resumable numbered PNG sequence to
+the SHA-256 of its descriptor, timeline, and performance plan. A sequence can
+reuse verified frames after interruption, but never mix frames from different
+render inputs.
 
 At runtime a user may select an AA installation or an explicitly authorized
 pack. The importer verifies the selected file's SHA-256 and may stage a copy in
