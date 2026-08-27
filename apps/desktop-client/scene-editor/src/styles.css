@@ -233,10 +233,16 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .event-add-menu summary { height: 28px; display: flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-2); color: var(--muted); font-size: 9px; cursor: pointer; list-style: none; }
 .event-add-menu summary:hover { color: var(--text); border-color: #47534e; }
 .event-add-menu summary svg { width: 13px; }
-.event-add-options { width: 156px; position: absolute; top: 33px; right: 0; z-index: 4; display: grid; gap: 2px; padding: 5px; border: 1px solid var(--line); border-radius: 5px; background: #151918; box-shadow: 0 12px 24px rgba(0, 0, 0, .35); }
-.event-add-options button { height: 27px; display: flex; align-items: center; gap: 6px; padding: 0 7px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); text-align: left; font-size: 9px; cursor: pointer; }
-.event-add-options button:hover { background: var(--panel-3); color: var(--text); }
+.event-add-options { width: 190px; position: absolute; top: 33px; right: 0; z-index: 4; display: grid; gap: 2px; padding: 5px; border: 1px solid var(--line); border-radius: 5px; background: #151918; box-shadow: 0 12px 24px rgba(0, 0, 0, .35); }
+.event-add-options > button { height: 27px; display: flex; align-items: center; gap: 6px; padding: 0 7px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); text-align: left; font-size: 9px; cursor: pointer; }
+.event-add-options > button:hover { background: var(--panel-3); color: var(--text); }
 .event-add-options svg { width: 13px; color: var(--accent); }
+.event-insert-position { display: grid; gap: 5px; margin-bottom: 3px; padding: 4px 4px 7px; border-bottom: 1px solid var(--line-soft); }
+.event-insert-position > span { color: var(--subtle); font-size: 8px; }
+.event-insert-position > div { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+.event-insert-position button { height: 25px; display: flex; align-items: center; justify-content: center; gap: 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); color: var(--muted); font-size: 8px; cursor: pointer; }
+.event-insert-position button:hover { color: var(--text); }
+.event-insert-position button.is-active { border-color: var(--accent); background: var(--accent-bg); color: var(--text); }
 .event-list { height: calc(100% - 45px); overflow: auto; padding: 7px; }
 .sr-only { width: 1px; height: 1px; position: absolute; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; }
 .event-row { min-width: 0; position: relative; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; margin-bottom: 4px; border: 1px solid transparent; border-radius: 6px; background: var(--panel-2); }

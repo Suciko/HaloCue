@@ -23,7 +23,7 @@ function dragEvent(type: string, dataTransfer: MutableDataTransfer, clientY = 0)
   return event;
 }
 
-describe("professional event pointer reorder", () => {
+describe("professional event list interactions", () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -87,5 +87,39 @@ describe("professional event pointer reorder", () => {
     expect(container.querySelector(".event-row.is-dragging")).toBeNull();
     expect(container.querySelector(".event-row.is-drop-after")).toBeNull();
     expect(container.querySelector(".sr-only")?.textContent).toBe("角色入场 已移动到第 3 项");
+  });
+
+  it("inserts before the selected stable event and restores the anchor on undo", () => {
+    const originalOrder = firstScene(useProjectStore.getState().project).cues[0].events
+      .map((event) => event.event_id);
+    const anchorId = originalOrder[1];
+    const historyBefore = useProjectStore.getState().history.length;
+    const eventRows = Array.from(container.querySelectorAll<HTMLButtonElement>(".event-main"));
+    const placementButtons = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".event-insert-position button"),
+    );
+    const waitButton = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".event-add-options > button"),
+    ).find((button) => button.textContent?.trim() === "等待");
+
+    act(() => eventRows[1].click());
+    act(() => placementButtons[0].click());
+    expect(container.querySelector(".event-add-menu summary")?.textContent).toContain("在 02 前添加");
+    expect(waitButton).toBeDefined();
+    act(() => waitButton?.click());
+
+    let state = useProjectStore.getState();
+    const insertedId = state.selectedEventId;
+    const events = firstScene(state.project).cues[0].events;
+    expect(events.map((event) => event.event_id))
+      .toEqual([originalOrder[0], insertedId, ...originalOrder.slice(1)]);
+    expect(events[1]).toEqual(expect.objectContaining({ event_id: insertedId, kind: "wait" }));
+    expect(state.history).toHaveLength(historyBefore + 1);
+
+    act(() => state.undo());
+    state = useProjectStore.getState();
+    expect(firstScene(state.project).cues[0].events.map((event) => event.event_id))
+      .toEqual(originalOrder);
+    expect(state.selectedEventId).toBe(anchorId);
   });
 });

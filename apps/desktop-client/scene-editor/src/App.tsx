@@ -61,6 +61,7 @@ import {
   type EventDropPlacement,
   type EventMove,
 } from "./eventReorder";
+import type { EventInsertPlacement } from "./eventInsertion";
 import { projectCueState, sceneById } from "./cueStateProjection";
 import { TimelineEventSegment } from "./TimelineEventSegment";
 import {
@@ -993,6 +994,13 @@ function ProfessionalEventList() {
     placement: EventDropPlacement;
   } | null>(null);
   const [reorderNotice, setReorderNotice] = useState("");
+  const [insertPlacement, setInsertPlacement] = useState<EventInsertPlacement>("after");
+  const selectedEventIndex = cue.events.findIndex((event) => event.event_id === selectedEventId);
+  const addSummary = cue.events.length === 0
+    ? "添加第一个事件"
+    : selectedEventIndex < 0
+      ? "添加到末尾"
+      : `在 ${String(selectedEventIndex + 1).padStart(2, "0")} ${insertPlacement === "before" ? "前" : "后"}添加`;
   const moveAndAnnounce = (eventId: string, move: EventMove) => {
     selectEvent(eventId);
     const result = moveEvent(eventId, move);
@@ -1017,14 +1025,36 @@ function ProfessionalEventList() {
       <header>
         <div><Layers3 /><span><strong>{cue.title}</strong><small>{cue.events.length} 个有序事件</small></span></div>
         <details className="event-add-menu">
-          <summary><Plus />添加事件</summary>
+          <summary><Plus />{addSummary}</summary>
           <div className="event-add-options">
+            {cue.events.length > 0 && selectedEventIndex >= 0 && (
+              <div className="event-insert-position">
+                <span>相对所选事件</span>
+                <div role="group" aria-label="新事件插入位置">
+                  <button
+                    type="button"
+                    className={insertPlacement === "before" ? "is-active" : ""}
+                    aria-pressed={insertPlacement === "before"}
+                    onClick={() => setInsertPlacement("before")}
+                  ><ArrowUp />之前</button>
+                  <button
+                    type="button"
+                    className={insertPlacement === "after" ? "is-active" : ""}
+                    aria-pressed={insertPlacement === "after"}
+                    onClick={() => setInsertPlacement("after")}
+                  ><ArrowDown />之后</button>
+                </div>
+              </div>
+            )}
             {eventEditorDefinitions().filter((definition) => definition.timelineSupported).map((definition) => (
               <button
                 type="button"
                 key={definition.kind}
                 onClick={(event) => {
-                  addEvent(definition.kind);
+                  addEvent(definition.kind, {
+                    anchorEventId: selectedEventId,
+                    placement: insertPlacement,
+                  });
                   event.currentTarget.closest("details")?.removeAttribute("open");
                 }}
               >

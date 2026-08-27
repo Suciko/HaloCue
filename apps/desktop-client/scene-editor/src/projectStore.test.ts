@@ -206,6 +206,36 @@ describe("shared dual-mode project store", () => {
     expect(current.selectedEventId).toBe(event?.event_id);
   });
 
+  it("inserts a professional event relative to the selected stable event", () => {
+    const state = useProjectStore.getState();
+    const cue = firstScene(state.project).cues[0];
+    const originalOrder = cue.events.map((event) => event.event_id);
+    const anchorId = originalOrder[1];
+    const revisionBefore = state.revision;
+    const historyBefore = state.history.length;
+    state.selectEvent(anchorId);
+
+    expect(state.addEvent("wait", {
+      anchorEventId: anchorId,
+      placement: "before",
+    })).toEqual({ status: "committed", revision: revisionBefore + 1 });
+
+    let current = useProjectStore.getState();
+    const insertedId = current.selectedEventId;
+    const events = firstScene(current.project).cues[0].events;
+    expect(insertedId).toMatch(/^event\//);
+    expect(events.map((event) => event.event_id))
+      .toEqual([originalOrder[0], insertedId, ...originalOrder.slice(1)]);
+    expect(events[1]).toEqual(expect.objectContaining({ event_id: insertedId, kind: "wait" }));
+    expect(current.history).toHaveLength(historyBefore + 1);
+
+    current.undo();
+    current = useProjectStore.getState();
+    expect(firstScene(current.project).cues[0].events.map((event) => event.event_id))
+      .toEqual(originalOrder);
+    expect(current.selectedEventId).toBe(anchorId);
+  });
+
   it("deletes a selected professional event and selects its nearest neighbor", () => {
     const state = useProjectStore.getState();
     const cue = firstScene(state.project).cues[0];

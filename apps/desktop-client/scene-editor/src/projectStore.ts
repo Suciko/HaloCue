@@ -24,6 +24,7 @@ import { AutosaveCoordinator } from "./autosave";
 import { isDescriptorRenderable } from "./sceneEventRegistry";
 import { createSceneEvent } from "./sceneEventFactory";
 import { reorderEvents, type EventMove } from "./eventReorder";
+import { eventInsertionIndex, type EventInsertion } from "./eventInsertion";
 import { projectSceneAtCue, sceneById } from "./cueStateProjection";
 import type { ProjectDiagnostic } from "./projectCodec";
 
@@ -93,7 +94,7 @@ type EditorState = {
   setSlotCharacter: (slot: number, characterId: string | null) => EditorTransactionResult;
   swapSlots: (source: number, target: number) => EditorTransactionResult;
   updateCharacterState: (slot: number, patch: Partial<CueEvent>) => EditorTransactionResult;
-  addEvent: (kind: string) => EditorTransactionResult;
+  addEvent: (kind: string, insertion?: EventInsertion) => EditorTransactionResult;
   addQuickEffect: (kind: QuickEffectKind) => EditorTransactionResult;
   addCue: (placement: "before" | "after") => EditorTransactionResult;
   duplicateCue: () => EditorTransactionResult;
@@ -507,15 +508,16 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       }
       Object.assign(enter, patch);
     }),
-    addEvent: (kind) => {
+    addEvent: (kind, insertion) => {
       const state = get();
       const eventId = localId("event");
       return commit((project, cue) => {
-        cue.events.push(createSceneEvent(kind, {
+        const event = createSceneEvent(kind, {
           eventId,
           selectedSlot: state.selectedSlot,
           project,
-        }));
+        });
+        cue.events.splice(eventInsertionIndex(cue.events, insertion), 0, event);
       }, { selectedEventId: eventId });
     },
     addQuickEffect: (kind) => {
