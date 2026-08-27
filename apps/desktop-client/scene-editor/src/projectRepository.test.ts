@@ -8,6 +8,32 @@ import {
 } from "./projectRepository";
 import { migratedCueId } from "./projectCodec";
 import { createProjectStore } from "./projectStore";
+import type { HaloCueProject } from "./types";
+
+class CountingProjectRepository extends MemoryProjectRepository {
+  saves = 0;
+
+  override saveDraft(project: HaloCueProject): void {
+    super.saveDraft(project);
+    this.saves += 1;
+  }
+}
+
+function transactionSnapshot(store: ReturnType<typeof createProjectStore>) {
+  const state = store.getState();
+  return {
+    project: state.project,
+    selectedChapterId: state.selectedChapterId,
+    selectedSceneId: state.selectedSceneId,
+    selectedCueId: state.selectedCueId,
+    selectedEventId: state.selectedEventId,
+    history: state.history,
+    future: state.future,
+    dirty: state.dirty,
+    revision: state.revision,
+    projectDiagnostics: state.projectDiagnostics,
+  };
+}
 
 function storage(initial: Record<string, string> = {}) {
   const values = new Map(Object.entries(initial));
@@ -102,15 +128,49 @@ describe("project repository seam", () => {
     expect(values.has(`${DRAFT_KEY}.pending`)).toBe(true);
   });
 
-  it("does not publish an editor mutation when the repository rejects the save", () => {
+  it("does not publish any editor transaction state when a commit save fails", () => {
     const repository = new MemoryProjectRepository(demoProject);
     const store = createProjectStore(repository);
-    const before = store.getState().project;
+    store.getState().updateProjectTitle("可撤销标题");
+    store.getState().undo();
+    const before = transactionSnapshot(store);
     repository.rejectNextSave();
 
     expect(() => store.getState().updateProjectTitle("不可写入")).toThrow("项目草稿保存失败");
-    expect(store.getState().project).toEqual(before);
-    expect(repository.loadDraft()).toEqual(before);
+    expect(transactionSnapshot(store)).toEqual(before);
+    expect(repository.loadDraft()).toEqual(before.project);
+  });
+
+  it("keeps undo and redo atomic when their save fails", () => {
+    const repository = new MemoryProjectRepository(demoProject);
+    const store = createProjectStore(repository);
+    store.getState().updateProjectTitle("已编辑");
+
+    let before = transactionSnapshot(store);
+    repository.rejectNextSave();
+    expect(() => store.getState().undo()).toThrow("项目草稿保存失败");
+    expect(transactionSnapshot(store)).toEqual(before);
+
+    store.getState().undo();
+    before = transactionSnapshot(store);
+    repository.rejectNextSave();
+    expect(() => store.getState().redo()).toThrow("项目草稿保存失败");
+    expect(transactionSnapshot(store)).toEqual(before);
+  });
+
+  it("does not save or disturb history when a transaction changes nothing", () => {
+    const repository = new CountingProjectRepository(demoProject);
+    const store = createProjectStore(repository);
+    store.getState().updateProjectTitle("临时标题");
+    store.getState().undo();
+    const before = transactionSnapshot(store);
+    const savesBefore = repository.saves;
+
+    const result = store.getState().updateProjectTitle(before.project.title || "");
+
+    expect(result).toEqual({ status: "no-op", revision: before.revision });
+    expect(repository.saves).toBe(savesBefore);
+    expect(transactionSnapshot(store)).toEqual(before);
   });
 
   it("validates replacement before changing the editor state", () => {

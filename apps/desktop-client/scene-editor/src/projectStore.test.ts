@@ -79,6 +79,22 @@ describe("shared dual-mode project store", () => {
     ]);
   });
 
+  it("treats equivalent slot commands as no-op transactions", () => {
+    const before = useProjectStore.getState();
+
+    const sameCharacter = before.setSlotCharacter(1, "character/yuuka");
+    const sameEmptyOccupant = useProjectStore.getState().swapSlots(2, 4);
+    const current = useProjectStore.getState();
+
+    expect(sameCharacter).toEqual({ status: "no-op", revision: before.revision });
+    expect(sameEmptyOccupant).toEqual({ status: "no-op", revision: before.revision });
+    expect(current.project).toEqual(before.project);
+    expect(current.history).toEqual(before.history);
+    expect(current.future).toEqual(before.future);
+    expect(current.dirty).toBe(before.dirty);
+    expect(current.revision).toBe(before.revision);
+  });
+
   it("stores a stable expression state while the adapter resolves a Spine animation", () => {
     const state = useProjectStore.getState();
     state.updateCharacterState(1, { expression_id: "expression/smile" });

@@ -6,6 +6,10 @@ export type EditorSelection = {
   selectedCueId: string;
   selectedEventId: string | null;
 };
+export type EditorTransactionResult = {
+  status: "committed" | "no-op";
+  revision: number;
+};
 export type QuickEffectKind =
   | "halocue.ba:background-pan"
   | "halocue.ba:screen-shake"

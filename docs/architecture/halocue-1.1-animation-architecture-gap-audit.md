@@ -299,6 +299,14 @@ the visible editor panels address the selected Scene instead of assuming the
 first Scene. The remaining `firstScene` helper is only a compatibility default
 for callers that do not yet supply scene identity.
 
+The first Editor Transaction slice is recorded in
+`docs/handoffs/2026-08-27-editor-transaction-noop-atomicity-tracer.md`. Shared
+commands now report committed versus no-op outcomes, suppress semantically
+equivalent writes, repair event selection inside the same transaction, and
+publish project, selection, history, dirty state, diagnostics, and revision
+only after persistence succeeds. Begin/preview/commit gesture sessions and
+independent autosave/preview coalescing remain later slices.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure

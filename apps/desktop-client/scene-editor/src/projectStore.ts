@@ -12,6 +12,7 @@ import type {
   Cue,
   CueEvent,
   EditorSelection,
+  EditorTransactionResult,
   EditorMode,
   HaloCueProject,
   InspectorTab,
@@ -64,24 +65,24 @@ type EditorState = {
   selectCue: (cueId: string) => void;
   selectSlot: (slot: number) => void;
   selectEvent: (eventId: string | null) => void;
-  updateProjectTitle: (title: string) => void;
-  updateDialogue: (patch: Partial<CueEvent>) => void;
-  updateEnvironment: (patch: Partial<CueEvent>) => void;
-  setSlotCharacter: (slot: number, characterId: string | null) => void;
-  swapSlots: (source: number, target: number) => void;
-  updateCharacterState: (slot: number, patch: Partial<CueEvent>) => void;
-  addEvent: (kind: string) => void;
-  addQuickEffect: (kind: QuickEffectKind) => void;
-  addCue: (placement: "before" | "after") => void;
-  duplicateCue: () => void;
-  deleteCue: () => void;
-  moveCue: (sourceCueId: string, targetCueId: string) => void;
-  updateEvent: (eventId: string, patch: Partial<CueEvent>) => void;
-  deleteEvent: (eventId: string) => void;
-  moveEvent: (eventId: string, direction: -1 | 1) => void;
-  undo: () => void;
-  redo: () => void;
-  replaceProject: (project: HaloCueProject) => void;
+  updateProjectTitle: (title: string) => EditorTransactionResult;
+  updateDialogue: (patch: Partial<CueEvent>) => EditorTransactionResult;
+  updateEnvironment: (patch: Partial<CueEvent>) => EditorTransactionResult;
+  setSlotCharacter: (slot: number, characterId: string | null) => EditorTransactionResult;
+  swapSlots: (source: number, target: number) => EditorTransactionResult;
+  updateCharacterState: (slot: number, patch: Partial<CueEvent>) => EditorTransactionResult;
+  addEvent: (kind: string) => EditorTransactionResult;
+  addQuickEffect: (kind: QuickEffectKind) => EditorTransactionResult;
+  addCue: (placement: "before" | "after") => EditorTransactionResult;
+  duplicateCue: () => EditorTransactionResult;
+  deleteCue: () => EditorTransactionResult;
+  moveCue: (sourceCueId: string, targetCueId: string) => EditorTransactionResult;
+  updateEvent: (eventId: string, patch: Partial<CueEvent>) => EditorTransactionResult;
+  deleteEvent: (eventId: string) => EditorTransactionResult;
+  moveEvent: (eventId: string, direction: -1 | 1) => EditorTransactionResult;
+  undo: () => EditorTransactionResult;
+  redo: () => EditorTransactionResult;
+  replaceProject: (project: HaloCueProject) => EditorTransactionResult;
   markSaved: () => void;
   resetDemo: () => void;
 };
@@ -122,6 +123,40 @@ function selectionSnapshot(state: EditorState): EditorSelection {
   };
 }
 
+function noOp(state: Pick<EditorState, "revision">): EditorTransactionResult {
+  return { status: "no-op", revision: state.revision };
+}
+
+function sameProject(left: HaloCueProject, right: HaloCueProject): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function repairTransactionSelection(
+  project: HaloCueProject,
+  selection: EditorSelection,
+): EditorSelection {
+  const chapter = project.chapters.find(
+    (item) => item.chapter_id === selection.selectedChapterId,
+  );
+  const scene = chapter?.scenes.find(
+    (item) => item.scene_id === selection.selectedSceneId,
+  );
+  const cue = scene?.cues.find((item) => item.cue_id === selection.selectedCueId);
+  if (!chapter || !scene || !cue) {
+    throw new Error("编辑事务生成了无效的 Chapter/Scene/Cue 选区");
+  }
+  if (
+    selection.selectedEventId !== null
+    && !cue.events.some((event) => event.event_id === selection.selectedEventId)
+  ) {
+    return {
+      ...selection,
+      selectedEventId: cue.events[0]?.event_id || null,
+    };
+  }
+  return selection;
+}
+
 export function createProjectStore(repository: ProjectRepository = projectRepository) {
   const initialProject = repository.loadDraft();
   const initial = initialSelection(initialProject);
@@ -130,30 +165,37 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
   const commit = (
     mutator: (project: HaloCueProject, cue: Cue, scene: Scene) => void,
     selection?: Partial<EditorSelection>,
-  ) => {
+  ): EditorTransactionResult => {
     const state = get();
     const project = clone(state.project);
     const scene = sceneById(project, state.selectedSceneId);
     const cue = scene.cues.find((item) => item.cue_id === state.selectedCueId);
-    if (!cue) return;
+    if (!cue) return noOp(state);
     mutator(project, cue, scene);
-    repository.saveDraft(project);
-    set({
-      project,
+    if (sameProject(project, state.project)) return noOp(state);
+    const requestedSelection: EditorSelection = {
       selectedChapterId: selection?.selectedChapterId ?? state.selectedChapterId,
       selectedSceneId: selection?.selectedSceneId ?? state.selectedSceneId,
       selectedCueId: selection?.selectedCueId ?? state.selectedCueId,
       selectedEventId: selection?.selectedEventId === undefined
         ? state.selectedEventId : selection.selectedEventId,
+    };
+    const nextSelection = repairTransactionSelection(project, requestedSelection);
+    repository.saveDraft(project);
+    const revision = state.revision + 1;
+    set({
+      project,
+      ...nextSelection,
       history: [...state.history.slice(-59), {
         project: state.project,
         ...selectionSnapshot(state),
       }],
       future: [],
       dirty: true,
-      revision: state.revision + 1,
+      revision,
       projectDiagnostics: [...repository.getDiagnostics()],
     });
+    return { status: "committed", revision };
   };
 
   return {
@@ -235,20 +277,28 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       }
       Object.assign(background, patch);
     }),
-    setSlotCharacter: (slot, characterId) => commit((_project, cue) => {
-      cue.events = cue.events.filter((event) => !(
-        (event.kind === "enter" || event.kind === "exit") && event.slot === slot
-      ));
-      cue.events.unshift(characterId
-        ? { event_id: localId("event/enter"), kind: "enter", slot, character_id: characterId }
-        : { event_id: localId("event/exit"), kind: "exit", slot });
-    }),
-    swapSlots: (source, target) => {
-      if (source === target) return;
+    setSlotCharacter: (slot, characterId) => {
       const state = get();
       const scene = sceneById(state.project, state.selectedSceneId);
+      const currentCharacterId = projectSceneAtCue(scene, state.selectedCueId)
+        .afterCue.slots[slot - 1];
+      if (currentCharacterId === characterId) return noOp(state);
+      return commit((_project, cue) => {
+        cue.events = cue.events.filter((event) => !(
+          (event.kind === "enter" || event.kind === "exit") && event.slot === slot
+        ));
+        cue.events.unshift(characterId
+          ? { event_id: localId("event/enter"), kind: "enter", slot, character_id: characterId }
+          : { event_id: localId("event/exit"), kind: "exit", slot });
+      });
+    },
+    swapSlots: (source, target) => {
+      const state = get();
+      if (source === target) return noOp(state);
+      const scene = sceneById(state.project, state.selectedSceneId);
       const slots = projectSceneAtCue(scene, state.selectedCueId).afterCue.slots;
-      commit((_project, cue) => {
+      if (slots[source - 1] === slots[target - 1]) return noOp(state);
+      return commit((_project, cue) => {
         cue.events = cue.events.filter((event) => !(
           (event.kind === "enter" || event.kind === "exit")
           && (event.slot === source || event.slot === target)
@@ -273,7 +323,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     addEvent: (kind) => {
       const state = get();
       const eventId = localId("event");
-      commit((project, cue) => {
+      return commit((project, cue) => {
         cue.events.push(createSceneEvent(kind, {
           eventId,
           selectedSlot: state.selectedSlot,
@@ -284,7 +334,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     addQuickEffect: (kind) => {
       const state = get();
       const eventId = localId("event");
-      commit((project, cue) => {
+      return commit((project, cue) => {
         cue.events.push(createSceneEvent(kind, {
           eventId,
           selectedSlot: state.selectedSlot,
@@ -295,7 +345,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     addCue: (placement) => {
       const state = get();
       const cueId = localId("cue");
-      commit((_project, cue, scene) => {
+      return commit((_project, cue, scene) => {
         const index = scene.cues.indexOf(cue) + (placement === "after" ? 1 : 0);
         scene.cues.splice(index, 0, {
           cue_id: cueId,
@@ -311,7 +361,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     },
     duplicateCue: () => {
       const cueId = localId("cue");
-      commit((_project, cue, scene) => {
+      return commit((_project, cue, scene) => {
         const duplicate = clone(cue);
         duplicate.cue_id = cueId;
         duplicate.title = `${cue.title || "演出"} 副本`;
@@ -322,10 +372,10 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     deleteCue: () => {
       const state = get();
       const scene = sceneById(state.project, state.selectedSceneId);
-      if (scene.cues.length <= 1) return;
+      if (scene.cues.length <= 1) return noOp(state);
       const index = scene.cues.findIndex((cue) => cue.cue_id === state.selectedCueId);
       const next = scene.cues[Math.max(0, index - 1)];
-      commit((_project, cue, draftScene) => {
+      return commit((_project, cue, draftScene) => {
         draftScene.cues.splice(draftScene.cues.indexOf(cue), 1);
       }, { selectedCueId: next.cue_id, selectedEventId: next.events[0]?.event_id || null });
     },
@@ -344,10 +394,10 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       const state = get();
       const cue = sceneById(state.project, state.selectedSceneId)
         .cues.find((item) => item.cue_id === state.selectedCueId);
-      if (!cue || !cue.events.some((event) => event.event_id === eventId)) return;
+      if (!cue || !cue.events.some((event) => event.event_id === eventId)) return noOp(state);
       const index = cue.events.findIndex((event) => event.event_id === eventId);
       const nextEvent = cue.events[index + 1] || cue.events[index - 1] || null;
-      commit((_project, draftCue) => {
+      return commit((_project, draftCue) => {
         draftCue.events = draftCue.events.filter((event) => event.event_id !== eventId);
       }, { selectedEventId: nextEvent?.event_id || null });
     },
@@ -361,8 +411,9 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     undo: () => {
       const state = get();
       const previous = state.history.at(-1);
-      if (!previous) return;
+      if (!previous) return noOp(state);
       repository.saveDraft(previous.project);
+      const revision = state.revision + 1;
       set({
         ...previous,
         history: state.history.slice(0, -1),
@@ -371,15 +422,17 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
           ...selectionSnapshot(state),
         }, ...state.future.slice(0, 59)],
         dirty: true,
-        revision: state.revision + 1,
+        revision,
         projectDiagnostics: [...repository.getDiagnostics()],
       });
+      return { status: "committed", revision };
     },
     redo: () => {
       const state = get();
       const next = state.future[0];
-      if (!next) return;
+      if (!next) return noOp(state);
       repository.saveDraft(next.project);
+      const revision = state.revision + 1;
       set({
         ...next,
         history: [...state.history, {
@@ -388,23 +441,26 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         }],
         future: state.future.slice(1),
         dirty: true,
-        revision: state.revision + 1,
+        revision,
         projectDiagnostics: [...repository.getDiagnostics()],
       });
+      return { status: "committed", revision };
     },
     replaceProject: (project) => {
       const normalized = repository.parseProject(project);
       const selection = initialSelection(normalized);
       repository.saveDraft(normalized);
+      const revision = get().revision + 1;
       set({
         project: normalized,
         ...selection,
         history: [],
         future: [],
         dirty: false,
-        revision: get().revision + 1,
+        revision,
         projectDiagnostics: [...repository.getDiagnostics()],
       });
+      return { status: "committed", revision };
     },
     markSaved: () => set({ dirty: false }),
     resetDemo: () => get().replaceProject(clone(demoProject)),
