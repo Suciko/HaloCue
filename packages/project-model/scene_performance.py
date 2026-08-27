@@ -11,7 +11,7 @@ import math
 from typing import Any, Literal
 
 
-PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.2"
+PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.3"
 PERFORMANCE_SAMPLE_SCHEMA_VERSION = "scene-performance-sample/1.0"
 DEFAULT_SHAKE_INTENSITY = 0.35
 SHAKE_FREQUENCY_HZ = 12
@@ -32,6 +32,21 @@ NOD_ROTATION_KEYFRAMES = (
     {"offset": 0.32, "value": 1.5},
     {"offset": 0.68, "value": -1},
     {"offset": 1, "value": 0},
+)
+APPEAR_OPACITY_KEYFRAMES = (
+    {"offset": 0, "value": 0.55},
+    {"offset": 0.55, "value": 1},
+    {"offset": 1, "value": 1},
+)
+APPEAR_OFFSET_Y_KEYFRAMES = (
+    {"offset": 0, "value": 10},
+    {"offset": 0.55, "value": -3},
+    {"offset": 1, "value": 0},
+)
+APPEAR_SCALE_KEYFRAMES = (
+    {"offset": 0, "value": 0.985},
+    {"offset": 0.55, "value": 1.01},
+    {"offset": 1, "value": 1},
 )
 ExecutionMode = Literal["play", "sample", "skip", "reduced-motion"]
 
@@ -66,19 +81,25 @@ def _cubic_bezier_derivative(t: float, first: float, second: float) -> float:
     )
 
 
-def _ease_in_out_strong(progress: float) -> float:
+def _cubic_bezier_easing(
+    progress: float,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+) -> float:
     target = max(0.0, min(1.0, progress))
     parameter = target
     for _ in range(8):
-        error = _cubic_bezier_coordinate(parameter, 0.77, 0.175) - target
-        derivative = _cubic_bezier_derivative(parameter, 0.77, 0.175)
+        error = _cubic_bezier_coordinate(parameter, x1, x2) - target
+        derivative = _cubic_bezier_derivative(parameter, x1, x2)
         if abs(error) < 1e-7 or abs(derivative) < 1e-7:
             break
         parameter = max(0.0, min(1.0, parameter - error / derivative))
     lower = 0.0
     upper = 1.0
     for _ in range(12):
-        current = _cubic_bezier_coordinate(parameter, 0.77, 0.175)
+        current = _cubic_bezier_coordinate(parameter, x1, x2)
         if abs(current - target) < 1e-7:
             break
         if current < target:
@@ -86,10 +107,14 @@ def _ease_in_out_strong(progress: float) -> float:
         else:
             upper = parameter
         parameter = (lower + upper) / 2.0
-    return _cubic_bezier_coordinate(parameter, 0.0, 1.0)
+    return _cubic_bezier_coordinate(parameter, y1, y2)
 
 
-def _sample_keyframes(keyframes: list[dict[str, Any]], progress: float) -> float:
+def _sample_keyframes(
+    keyframes: list[dict[str, Any]],
+    progress: float,
+    easing: str,
+) -> float:
     if not keyframes:
         return 0.0
     terminal = keyframes[-1]
@@ -105,7 +130,11 @@ def _sample_keyframes(keyframes: list[dict[str, Any]], progress: float) -> float
     following = keyframes[next_index]
     span = following["offset"] - previous["offset"]
     local_progress = 1.0 if span <= 0 else (progress - previous["offset"]) / span
-    eased = _ease_in_out_strong(local_progress)
+    eased = (
+        _cubic_bezier_easing(local_progress, 0.77, 0.0, 0.175, 1.0)
+        if easing == "ease-in-out-strong"
+        else _cubic_bezier_easing(local_progress, 0.23, 1.0, 0.32, 1.0)
+    )
     return float(previous["value"]) + (
         float(following["value"]) - float(previous["value"])
     ) * eased
@@ -114,7 +143,7 @@ def _sample_keyframes(keyframes: list[dict[str, Any]], progress: float) -> float
 def _validate_inputs(descriptor: dict[str, Any], timeline: dict[str, Any]) -> None:
     if not isinstance(descriptor, dict) or descriptor.get("schema_version") != "scene-descriptor/1.0":
         raise ValueError("unsupported scene descriptor schema")
-    if not isinstance(timeline, dict) or timeline.get("schema_version") != "render-timeline/1.0":
+    if not isinstance(timeline, dict) or timeline.get("schema_version") != "render-timeline/1.1":
         raise ValueError("unsupported render timeline schema")
     if timeline.get("scene_id") != descriptor.get("scene_id"):
         raise ValueError("scene performance timeline scene_id does not match the descriptor")
@@ -190,7 +219,9 @@ def build_scene_performance(
         slot: int,
         suffix: str,
         channel: str,
+        value_space: str,
         keyframes: tuple[dict[str, float | int], ...],
+        easing: str,
     ) -> None:
         operations.append(
             {
@@ -203,23 +234,48 @@ def build_scene_performance(
                     "slot": slot,
                 },
                 "channel": channel,
-                "value_space": "relative-to-baseline",
+                "value_space": value_space,
                 "start_frame": item["start_frame"],
                 "end_frame": item["end_frame"],
                 "keyframes": [dict(keyframe) for keyframe in keyframes],
-                "easing": "ease-in-out-strong",
+                "easing": easing,
             }
         )
 
     def add_nod(item: dict[str, Any], character_id: str, slot: int) -> None:
         add_character_keyframes(
             item, character_id, slot, "motion-nod-offset-y",
-            "layout.offset-y", NOD_OFFSET_Y_KEYFRAMES,
+            "layout.offset-y", "relative-to-baseline",
+            NOD_OFFSET_Y_KEYFRAMES, "ease-in-out-strong",
         )
         add_character_keyframes(
             item, character_id, slot, "motion-nod-rotation",
-            "presentation.rotation", NOD_ROTATION_KEYFRAMES,
+            "presentation.rotation", "relative-to-baseline",
+            NOD_ROTATION_KEYFRAMES, "ease-in-out-strong",
         )
+
+    def add_appear(item: dict[str, Any], character_id: str, slot: int) -> None:
+        add_character_keyframes(
+            item, character_id, slot, "motion-appear-opacity",
+            "presentation.opacity", "factor-from-baseline",
+            APPEAR_OPACITY_KEYFRAMES, "ease-out-emphasized",
+        )
+        add_character_keyframes(
+            item, character_id, slot, "motion-appear-offset-y",
+            "layout.offset-y", "relative-to-baseline",
+            APPEAR_OFFSET_Y_KEYFRAMES, "ease-out-emphasized",
+        )
+        add_character_keyframes(
+            item, character_id, slot, "motion-appear-scale",
+            "presentation.scale", "factor-from-baseline",
+            APPEAR_SCALE_KEYFRAMES, "ease-out-emphasized",
+        )
+
+    def add_capability_motion(item: dict[str, Any], character_id: str, slot: int) -> None:
+        if item.get("event", {}).get("motion_id") == "motion/nod":
+            add_nod(item, character_id, slot)
+        if item.get("event", {}).get("motion_id") == "motion/appear":
+            add_appear(item, character_id, slot)
 
     for item in timeline["events"]:
         event = item.get("event", {})
@@ -267,10 +323,9 @@ def build_scene_performance(
                     item, character_id, slot, "scale",
                     "presentation.scale", "factor-from-baseline", CHARACTER_ENTER_SCALE, 1,
                 )
-            if event.get("motion_id") == "motion/nod":
-                add_nod(item, character_id, slot)
+            add_capability_motion(item, character_id, slot)
             slot_characters[slot] = character_id
-        if kind == "dialogue" and event.get("motion_id") == "motion/nod":
+        if kind == "dialogue" and event.get("motion_id") in {"motion/nod", "motion/appear"}:
             character_id = event.get("character_id")
             slot = next(
                 (
@@ -281,7 +336,22 @@ def build_scene_performance(
                 None,
             )
             if isinstance(character_id, str) and character_id and slot is not None:
-                add_nod(item, character_id, slot)
+                add_capability_motion(item, character_id, slot)
+        if kind == "character-motion":
+            slot = event.get("slot")
+            if (
+                not isinstance(slot, int)
+                or isinstance(slot, bool)
+                or not 1 <= slot <= 5
+            ):
+                continue
+            occupied_character_id = slot_characters.get(slot)
+            character_id = event.get("character_id")
+            if not isinstance(character_id, str) or not character_id:
+                character_id = occupied_character_id
+            if not occupied_character_id or character_id != occupied_character_id:
+                continue
+            add_capability_motion(item, character_id, slot)
         if kind == "exit":
             slot = event.get("slot")
             character_id = event.get("character_id")
@@ -379,7 +449,7 @@ def sample_scene_performance(
             offset_y += operation["amplitude_y_px"] * math.sin(phase * 1.7) * envelope
             continue
         if operation["kind"] == "numeric-keyframes":
-            value = _sample_keyframes(operation["keyframes"], progress)
+            value = _sample_keyframes(operation["keyframes"], progress, operation["easing"])
         else:
             eased = 1.0 - (1.0 - progress) ** 3
             use_final = mode == "skip" or (
@@ -402,13 +472,23 @@ def sample_scene_performance(
             },
         )
         if operation["channel"] == "presentation.opacity":
-            sample["opacity"] = _quantize(value, 6)
+            sample["opacity"] = _quantize(
+                (sample["opacity"] if sample["opacity"] is not None else 1) * value
+                if operation["value_space"] == "factor-from-baseline"
+                else value,
+                6,
+            )
         elif operation["channel"] == "layout.offset-y":
             sample["offset_y_px"] = _quantize(sample["offset_y_px"] + value, 6)
         elif operation["channel"] == "presentation.rotation":
             sample["rotation_deg"] = _quantize(sample["rotation_deg"] + value, 6)
         elif operation["channel"] == "presentation.scale":
-            sample["scale"] = _quantize(value, 6)
+            sample["scale"] = _quantize(
+                sample["scale"] * value
+                if operation["value_space"] == "factor-from-baseline"
+                else value,
+                6,
+            )
     return {
         "schema_version": PERFORMANCE_SAMPLE_SCHEMA_VERSION,
         "frame": frame,

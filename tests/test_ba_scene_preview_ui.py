@@ -62,7 +62,7 @@ def test_official_p69_descriptor_locks_reference_frame_and_stage_media():
     assert descriptor["schema_version"] == "scene-descriptor/1.0"
     reference = descriptor["presentation"]["reference_frame"]
     assert reference["id"] == "official-p69-final-v9"
-    assert reference["timeline_schema_version"] == "render-timeline/1.0"
+    assert reference["timeline_schema_version"] == "render-timeline/1.1"
     assert reference["viewport"] == {"width": 1280, "height": 720}
     assert reference["design_canvas"] == {"width": 2560, "height": 1440}
     assert reference["target_event_index"] == 0
@@ -325,7 +325,7 @@ def test_reference_query_seeks_the_completed_p69_frame_without_clicks():
             assert metrics == {
                 "frame": metrics["expectedFrame"],
                 "expectedFrame": metrics["expectedFrame"],
-                "schema": "render-timeline/1.0",
+                "schema": "render-timeline/1.1",
                 "playback": "paused",
             }
             assert page.locator("#dialogue-copy").inner_text() == "哈？你们这是什么反应？"
@@ -770,7 +770,7 @@ def test_nod_performance_is_seekable_in_deterministic_capture_mode():
         ],
         "events": [{
             "event_id": "event/alice-nod",
-            "kind": "enter",
+            "kind": "character-motion",
             "character_id": "character/alice",
             "slot": 1,
             "motion_id": "motion/nod",
@@ -815,7 +815,7 @@ def test_nod_performance_is_seekable_in_deterministic_capture_mode():
                     };
                 }"""
             )
-            assert sampled["schema"] == "scene-performance/1.2"
+            assert sampled["schema"] == "scene-performance/1.3"
             assert sampled["kinds"] == ["numeric-keyframes", "numeric-keyframes"]
             assert sampled["channels"] == ["layout.offset-y", "presentation.rotation"]
             assert sampled["offsetY"] > 3.9
@@ -849,6 +849,120 @@ def test_nod_performance_is_seekable_in_deterministic_capture_mode():
                 """() => document.querySelector('#preview-stage').dataset.playback === 'paused'"""
             )
             assert int(page.locator("#preview-stage").get_attribute("data-current-frame")) == stop_frame
+            browser.close()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+@pytest.mark.browser
+def test_appear_performance_is_seekable_and_does_not_leave_stale_inline_state():
+    playwright = pytest.importorskip("playwright.sync_api")
+    server, thread = _serve_preview()
+    descriptor = {
+        "schema_version": "scene-descriptor/1.0",
+        "scene_id": "scene/seekable-appear",
+        "presentation": {"frame_rate": 30},
+        "actors": [
+            {
+                "slot": 1,
+                "character_id": "character/alice",
+                "display_name": "爱丽丝",
+                "state": "visible",
+            },
+            *[
+                {"slot": slot, "character_id": None, "display_name": "", "state": "hidden"}
+                for slot in range(2, 6)
+            ],
+        ],
+        "initial_actors": [
+            {
+                "slot": 1,
+                "character_id": "character/alice",
+                "display_name": "爱丽丝",
+                "state": "visible",
+            },
+            *[
+                {"slot": slot, "character_id": None, "display_name": "", "state": "hidden"}
+                for slot in range(2, 6)
+            ],
+        ],
+        "events": [
+            {
+                "event_id": "event/alice-appear",
+                "kind": "character-motion",
+                "character_id": "character/alice",
+                "slot": 1,
+                "motion_id": "motion/appear",
+                "duration_ms": 500,
+            },
+            {"event_id": "event/after", "kind": "wait", "duration_ms": 100},
+        ],
+    }
+    try:
+        with playwright.sync_playwright() as runtime:
+            try:
+                browser = runtime.chromium.launch(headless=True)
+            except Exception as exc:  # pragma: no cover - depends on local browser install
+                if "Executable doesn't exist" in str(exc):
+                    pytest.skip("Playwright Chromium is not installed")
+                raise
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+            page.add_init_script(
+                "window.HALO_CUE_SCENE_DESCRIPTOR = "
+                + json.dumps(descriptor, ensure_ascii=False)
+                + ";"
+            )
+            page.goto(
+                f"http://127.0.0.1:{server.server_port}/index.html"
+                "?renderer=static&capture=1"
+            )
+            page.wait_for_function("() => Boolean(window.HaloCueScenePreview.controller)")
+
+            samples = page.evaluate(
+                """() => {
+                    const controller = window.HaloCueScenePreview.controller;
+                    const item = controller.timeline.events[0];
+                    const actor = document.querySelector('.actor-slot[data-slot="1"]');
+                    const read = () => ({
+                      opacity: Number(actor.dataset.performanceOpacity),
+                      offsetY: Number(actor.dataset.performanceOffsetY),
+                      scale: Number(actor.dataset.performanceScale),
+                      inlineOpacity: actor.style.opacity,
+                    });
+                    controller.seekFrame(item.start_frame);
+                    const start = read();
+                    controller.seekFrame(item.start_frame
+                      + Math.round((item.end_frame - item.start_frame - 1) * 0.55));
+                    const peak = read();
+                    controller.seekFrame(item.end_frame - 1);
+                    const terminal = read();
+                    controller.seekFrame(controller.timeline.events[1].start_frame);
+                    const after = read();
+                    return {start, peak, terminal, after};
+                }"""
+            )
+            assert samples["start"] == {
+                "opacity": 0.55,
+                "offsetY": 10,
+                "scale": 0.985,
+                "inlineOpacity": "0.55",
+            }
+            assert samples["peak"]["opacity"] == 1
+            assert samples["peak"]["offsetY"] < 0
+            assert samples["peak"]["scale"] > 1
+            assert samples["terminal"] == {
+                "opacity": 1,
+                "offsetY": 0,
+                "scale": 1,
+                "inlineOpacity": "1",
+            }
+            assert samples["after"] == {
+                "opacity": 0,
+                "offsetY": 0,
+                "scale": 1,
+                "inlineOpacity": "",
+            }
             browser.close()
     finally:
         server.shutdown()

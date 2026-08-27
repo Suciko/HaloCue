@@ -27,7 +27,7 @@ describe("scene performance compiler", () => {
     const shakeRange = timeline.events[1];
 
     expect(plan).toEqual({
-      schema_version: "scene-performance/1.2",
+      schema_version: "scene-performance/1.3",
       frame_rate: 30,
       scene_id: "scene/performance",
       total_frames: timeline.total_frames,
@@ -117,14 +117,14 @@ describe("scene performance compiler", () => {
     });
   });
 
-  it("compiles a same-character nod as seek-safe keyframes instead of another entrance", () => {
+  it("compiles an explicit character motion as seek-safe keyframes", () => {
     const source = descriptor();
     source.initial_actors = [
       { slot: 2, character_id: "character/alice", state: "visible" },
     ];
     source.events = [{
       event_id: "event/nod",
-      kind: "enter",
+      kind: "character-motion",
       slot: 2,
       character_id: "character/alice",
       motion_id: "motion/nod",
@@ -167,6 +167,42 @@ describe("scene performance compiler", () => {
       offset_y_px: 0,
       rotation_deg: 0,
     });
+  });
+
+  it("samples appear as a seek-safe rise and returns to the clean baseline", () => {
+    const source = descriptor();
+    source.initial_actors = [
+      { slot: 2, character_id: "character/alice", state: "visible" },
+    ];
+    source.events = [{
+      event_id: "event/appear",
+      kind: "character-motion",
+      slot: 2,
+      character_id: "character/alice",
+      motion_id: "motion/appear",
+      duration_ms: 500,
+    }];
+    const timeline = buildRenderTimeline(source);
+    const plan = buildScenePerformance(source, timeline);
+    const event = timeline.events[0];
+
+    expect(plan.operations.map((operation) => operation.channel)).toEqual([
+      "presentation.opacity",
+      "layout.offset-y",
+      "presentation.scale",
+    ]);
+    expect(sampleScenePerformance(plan, event.start_frame, "sample").characters[0])
+      .toMatchObject({ opacity: 0.55, offset_y_px: 10, scale: 0.985 });
+
+    const peakFrame = event.start_frame + Math.round((event.end_frame - event.start_frame - 1) * 0.55);
+    const peak = sampleScenePerformance(plan, peakFrame, "sample").characters[0];
+    expect(peak.opacity).toBe(1);
+    expect(peak.offset_y_px).toBeLessThan(0);
+    expect(peak.scale).toBeGreaterThan(1);
+    expect(sampleScenePerformance(plan, event.start_frame, "skip").characters).toEqual([]);
+    expect(sampleScenePerformance(plan, event.start_frame, "reduced-motion").characters).toEqual([]);
+    expect(sampleScenePerformance(plan, event.end_frame - 1, "sample").characters[0])
+      .toMatchObject({ opacity: 1, offset_y_px: 0, scale: 1 });
   });
 
   it("composes a requested nod with a real first placement", () => {
@@ -224,5 +260,19 @@ describe("scene performance compiler", () => {
     const source = descriptor();
     const timeline = buildRenderTimeline(source);
     expect(() => buildScenePerformance({ ...source, scene_id: "scene/other" }, timeline)).toThrow(/scene_id/);
+
+    const invalidMotion = descriptor();
+    invalidMotion.initial_actors = [
+      { slot: 1, character_id: "character/alice", state: "visible" },
+    ];
+    invalidMotion.events = [{
+      event_id: "event/wrong-motion-target",
+      kind: "character-motion",
+      slot: 1,
+      character_id: "character/bob",
+      motion_id: "motion/nod",
+    }];
+    expect(buildScenePerformance(invalidMotion, buildRenderTimeline(invalidMotion)).operations)
+      .toEqual([]);
   });
 });

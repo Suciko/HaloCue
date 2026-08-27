@@ -10,7 +10,65 @@ from scene_performance import build_scene_performance
 from scene_events import scene_event_registry
 
 
-SCENE_EVALUATION_SCHEMA_VERSION = "scene-evaluation/1.3"
+SCENE_EVALUATION_SCHEMA_VERSION = "scene-evaluation/1.4"
+
+
+def _character_motion_diagnostics(descriptor: dict[str, Any]) -> list[dict[str, str]]:
+    slots: dict[int, str] = {}
+    for actor in descriptor.get("initial_actors", []):
+        if not isinstance(actor, dict) or actor.get("state") != "visible":
+            continue
+        slot = actor.get("slot")
+        character_id = actor.get("character_id")
+        if (
+            isinstance(slot, int)
+            and not isinstance(slot, bool)
+            and 1 <= slot <= 5
+            and isinstance(character_id, str)
+            and character_id
+        ):
+            slots[slot] = character_id
+    diagnostics: list[dict[str, str]] = []
+    for event in descriptor.get("events", []):
+        if not isinstance(event, dict):
+            continue
+        kind = event.get("kind")
+        slot = event.get("slot")
+        if kind == "enter":
+            character_id = event.get("character_id")
+            if (
+                isinstance(slot, int)
+                and not isinstance(slot, bool)
+                and isinstance(character_id, str)
+                and character_id
+            ):
+                slots[slot] = character_id
+            continue
+        if kind == "exit":
+            if isinstance(slot, int) and not isinstance(slot, bool):
+                slots.pop(slot, None)
+            continue
+        if kind != "character-motion":
+            continue
+        occupied = slots.get(slot) if isinstance(slot, int) and not isinstance(slot, bool) else None
+        character_id = event.get("character_id")
+        if (
+            isinstance(slot, int)
+            and not isinstance(slot, bool)
+            and 1 <= slot <= 5
+            and occupied
+            and (not character_id or character_id == occupied)
+        ):
+            continue
+        diagnostics.append(
+            {
+                "code": "scene.character_motion_target_unavailable",
+                "severity": "error",
+                "path": f"event:{event.get('event_id', '')}",
+                "message": f"角色动作 {event.get('event_id', '')} 必须位于目标角色入场之后、退场之前。",
+            }
+        )
+    return diagnostics
 
 
 def evaluate_scene(
@@ -52,6 +110,7 @@ def evaluate_scene(
                     )
             break
     timeline = build_render_timeline(descriptor, frame_rate=frame_rate)
+    diagnostics.extend(_character_motion_diagnostics(descriptor))
     return {
         "schema_version": SCENE_EVALUATION_SCHEMA_VERSION,
         "scene_id": scene_id,

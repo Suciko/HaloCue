@@ -12,6 +12,7 @@ import { sceneEventDefinitions } from "./sceneEventRegistry";
 const context = {
   eventId: "event/catalog-test",
   selectedSlot: 3,
+  selectedCharacterId: "character/koyuki",
   project: demoProject,
 };
 
@@ -35,11 +36,23 @@ describe("event editor catalog seam", () => {
       pan_x: 0.035,
       pan_y: 0,
     }));
+    expect(createEditorEvent("character-motion", context)).toEqual(expect.objectContaining({
+      kind: "character-motion",
+      slot: 3,
+      character_id: "character/koyuki",
+      motion_id: "motion/nod",
+    }));
   });
 
   it("keeps summaries stable and does not mutate event payloads", () => {
     const event = { event_id: "event/summary", kind: "dialogue", text: "你好" };
     expect(eventSummary(event)).toBe("你好");
+    expect(eventSummary({
+      event_id: "event/nod",
+      kind: "character-motion",
+      slot: 2,
+      motion_id: "motion/nod",
+    })).toBe("#2 · motion/nod");
     expect(event).toEqual({ event_id: "event/summary", kind: "dialogue", text: "你好" });
   });
 

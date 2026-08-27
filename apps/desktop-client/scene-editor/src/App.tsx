@@ -67,7 +67,11 @@ import {
   type EventMove,
 } from "./eventReorder";
 import type { EventInsertPlacement } from "./eventInsertion";
-import { projectCueState, sceneById } from "./cueStateProjection";
+import {
+  characterMotionEventForCue,
+  projectCueState,
+  sceneById,
+} from "./cueStateProjection";
 import { TimelineEventSegment } from "./TimelineEventSegment";
 import {
   eventEditorDefinition,
@@ -386,14 +390,14 @@ function PreviewFrame() {
   useEffect(() => {
     const controller = controllerRef.current;
     if (!ready || !motionTrialKey || !controller?.isCurrent()) return;
-    const nodOperation = [...evaluation.performance.operations].reverse().find((operation) => (
+    const motionOperation = [...evaluation.performance.operations].reverse().find((operation) => (
       operation.kind === "numeric-keyframes"
-      && operation.operation_id.endsWith("/operation/motion-nod-offset-y")
+      && operation.operation_id.includes("/operation/motion-")
     ));
-    if (!nodOperation) return;
+    if (!motionOperation) return;
     controller.play({
-      fromFrame: nodOperation.start_frame,
-      toFrame: nodOperation.end_frame - 1,
+      fromFrame: motionOperation.start_frame,
+      toFrame: motionOperation.end_frame - 1,
     });
   }, [evaluation, motionTrialKey, ready]);
 
@@ -806,17 +810,23 @@ function CharacterInspector() {
   const characterId = projection.afterCue.slots[selectedSlot - 1];
   const character = project.characters.find((item) => item.character_id === characterId);
   const stateEvent = projection.afterCue.actorStateEvents[selectedSlot - 1];
+  const motionEvent = characterMotionEventForCue(projection.cue, selectedSlot, characterId);
   const trialPrefix = `capability-trial:${selectedSceneId}:${selectedCueId}:${selectedSlot}:`;
   const authoredProject = activeTransaction?.key.startsWith(trialPrefix)
     ? activeTransaction.base.project
     : project;
-  const authoredEvent = projectCueState(authoredProject, selectedCueId, { sceneId: selectedSceneId })
-    .afterCue.actorStateEvents[selectedSlot - 1];
+  const authoredProjection = projectCueState(authoredProject, selectedCueId, { sceneId: selectedSceneId });
+  const authoredEvent = authoredProjection.afterCue.actorStateEvents[selectedSlot - 1];
+  const authoredMotionEvent = characterMotionEventForCue(
+    authoredProjection.cue,
+    selectedSlot,
+    characterId,
+  );
   const expressionId = String(stateEvent?.expression_id || "expression/neutral");
-  const motionId = String(stateEvent?.motion_id || "motion/idle");
+  const motionId = String(motionEvent?.motion_id || "motion/idle");
   const emoticonId = String(stateEvent?.emoticon_id || "emoticon/none");
   const authoredExpressionId = String(authoredEvent?.expression_id || "expression/neutral");
-  const authoredMotionId = String(authoredEvent?.motion_id || "motion/idle");
+  const authoredMotionId = String(authoredMotionEvent?.motion_id || "motion/idle");
   const authoredEmoticonId = String(authoredEvent?.emoticon_id || "emoticon/none");
   const expressionStates = capabilityStateOptionsFor(character, "expression", authoredExpressionId);
   const motionStates = capabilityStateOptionsFor(character, "motion", authoredMotionId);
@@ -1092,6 +1102,30 @@ function ProfessionalEventFields({
             value={typeof value === "number" ? value : field.min}
             preview={(key, nextValue) => previewEvent(key, event.event_id, { [field.key]: nextValue })}
           />
+        </Field>;
+      }
+      if (field.control === "motion") {
+        const character = project.characters.find((item) => item.character_id === event.character_id);
+        const options = capabilityStateOptionsFor(
+          character,
+          "motion",
+          String(value || "motion/idle"),
+        ).filter((option) => option.state_id !== "motion/idle" || value === "motion/idle");
+        return <Field key={field.key} label={field.label} hint={field.hint}>
+          <select
+            value={String(value || "motion/idle")}
+            onChange={(change) => updateEvent(event.event_id, { motion_id: change.target.value })}
+          >
+            {options.map((option) => (
+              <option
+                key={option.state_id}
+                value={option.state_id}
+                disabled={option.availability !== "available"}
+              >
+                {option.label}{option.availability !== "available" ? "（不可用）" : ""}
+              </option>
+            ))}
+          </select>
         </Field>;
       }
       if (field.control === "background") {
@@ -1464,7 +1498,9 @@ function ProfessionalInspector() {
   );
   const eventIndex = cue.events.findIndex((item) => item.event_id === event.event_id);
   const eventDiagnostics = evaluation.diagnostics.filter((item) => (
-    item.path.includes(`events[${eventIndex}]`) || item.severity === "error"
+    item.path.includes(`events[${eventIndex}]`)
+    || item.path === `event:${event.event_id}`
+    || item.severity === "error"
   ));
   const errorCount = eventDiagnostics.filter((item) => item.severity === "error").length;
   const warningCount = eventDiagnostics.filter((item) => item.severity === "warning").length;

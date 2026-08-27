@@ -158,7 +158,7 @@ describe("shared dual-mode project store", () => {
       .toBe("aa/background/bg_conference_room");
   });
 
-  it("updates the latest local actor state after a character carries into a later Cue", () => {
+  it("separates inherited actor state from an explicit local motion event", () => {
     const state = useProjectStore.getState();
     state.selectCue("cue/conference/002");
     state.updateCharacterState(1, { expression_id: "expression/smile" });
@@ -166,12 +166,44 @@ describe("shared dual-mode project store", () => {
 
     const cue = firstScene(useProjectStore.getState().project).cues[1];
     const localStateEvents = cue.events.filter((event) => event.kind === "enter" && event.slot === 1);
+    const motionEvents = cue.events.filter((event) => event.kind === "character-motion" && event.slot === 1);
     expect(localStateEvents).toHaveLength(1);
     expect(localStateEvents[0]).toEqual(expect.objectContaining({
       character_id: "character/yuuka",
       expression_id: "expression/smile",
+    }));
+    expect(localStateEvents[0].motion_id).toBeUndefined();
+    expect(motionEvents).toHaveLength(1);
+    expect(motionEvents[0]).toEqual(expect.objectContaining({
+      character_id: "character/yuuka",
       motion_id: "motion/nod",
     }));
+    expect(cue.events.indexOf(motionEvents[0])).toBeLessThan(
+      cue.events.findIndex((event) => event.kind === "dialogue"),
+    );
+  });
+
+  it("treats idle as removal of the local transient motion", () => {
+    const state = useProjectStore.getState();
+    state.updateCharacterState(1, { motion_id: "motion/nod" });
+    const authored = useProjectStore.getState();
+    const authoredMotion = firstScene(authored.project).cues[0].events
+      .find((event) => event.kind === "character-motion" && event.slot === 1);
+    expect(authoredMotion?.motion_id).toBe("motion/nod");
+
+    authored.updateCharacterState(1, { motion_id: "motion/idle" });
+    const cleared = useProjectStore.getState();
+    expect(firstScene(cleared.project).cues[0].events.some((event) => (
+      event.kind === "character-motion" && event.slot === 1
+    ))).toBe(false);
+    expect(firstScene(cleared.project).cues[0].events
+      .find((event) => event.kind === "enter" && event.slot === 1)?.motion_id)
+      .toBeUndefined();
+
+    cleared.undo();
+    expect(firstScene(useProjectStore.getState().project).cues[0].events
+      .find((event) => event.kind === "character-motion" && event.slot === 1)?.event_id)
+      .toBe(authoredMotion?.event_id);
   });
 
   it("inserts quick effects as typed events with stable IDs", () => {

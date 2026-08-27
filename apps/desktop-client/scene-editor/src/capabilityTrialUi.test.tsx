@@ -1,9 +1,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import { demoProject } from "./demoProject";
+import { evaluateScene } from "./sceneEvaluation";
 import { firstScene, useProjectStore } from "./projectStore";
 
 const actEnvironment = globalThis as typeof globalThis & {
@@ -86,8 +87,11 @@ describe("character capability trials", () => {
     state = useProjectStore.getState();
     expect(state.activeTransaction).toBeNull();
     expect(firstScene(state.project).cues[0].events
-      .find((event) => event.kind === "enter" && event.slot === 1)?.motion_id)
+      .find((event) => event.kind === "character-motion" && event.slot === 1)?.motion_id)
       .toBe("motion/nod");
+    expect(firstScene(state.project).cues[0].events
+      .find((event) => event.kind === "enter" && event.slot === 1)?.motion_id)
+      .toBeUndefined();
     expect(state.history).toHaveLength(historyBefore + 1);
     expect(state.revision).toBe(revisionBefore + 1);
     expect(state.autosave.pendingRevision).toBe(revisionBefore + 1);
@@ -111,5 +115,60 @@ describe("character capability trials", () => {
     expect(unknown?.disabled).toBe(true);
     expect(unknown?.title).toContain("能力目录未注册");
     expect(unknown?.textContent).toContain("不可试演");
+  });
+
+  it("replays the compiled explicit motion range during hover trial", () => {
+    vi.useFakeTimers();
+    try {
+      const play = vi.fn();
+      const controller = {
+        applyIntent: vi.fn(),
+        generation: 1,
+        isCurrent: () => true,
+        scene_id: "scene/conference",
+        timeline: null,
+        performance: null,
+        seekFrame: vi.fn(),
+        play,
+        dispose: vi.fn(),
+      };
+      const iframe = container.querySelector<HTMLIFrameElement>("iframe")!;
+      Object.assign(iframe.contentWindow!, {
+        HaloCueScenePreview: {
+          mount: vi.fn((_descriptor, _root, options) => {
+            controller.timeline = options?.timeline || null;
+            controller.performance = options?.performance || null;
+            return controller;
+          }),
+        },
+      });
+      act(() => iframe.dispatchEvent(new Event("load")));
+      const motionGroup = container.querySelector<HTMLDivElement>(
+        '[role="group"][aria-label="动作能力"]',
+      )!;
+      const nod = Array.from(motionGroup.querySelectorAll<HTMLButtonElement>("button"))
+        .find((button) => button.textContent?.includes("点头"))!;
+
+      act(() => nod.dispatchEvent(new MouseEvent("pointerover", {
+        bubbles: true,
+        cancelable: true,
+      })));
+      act(() => vi.advanceTimersByTime(100));
+
+      const state = useProjectStore.getState();
+      const evaluation = evaluateScene(state.project, state.selectedCueId, {
+        sceneId: state.selectedSceneId,
+      });
+      const operation = evaluation.performance.operations.find((item) => (
+        item.operation_id.endsWith("/operation/motion-nod-offset-y")
+      ));
+      expect(operation).toBeDefined();
+      expect(play).toHaveBeenCalledWith({
+        fromFrame: operation?.start_frame,
+        toFrame: (operation?.end_frame || 1) - 1,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -27,7 +27,7 @@ def test_scene_evaluation_binds_descriptor_and_timeline():
 
     evaluation = evaluate_scene(project, scene_id)
 
-    assert evaluation["schema_version"] == "scene-evaluation/1.3"
+    assert evaluation["schema_version"] == "scene-evaluation/1.4"
     assert evaluation["scene_id"] == scene_id
     assert evaluation["timeline"]["scene_id"] == scene_id
     assert evaluation["timeline"]["events"][-1]["end_frame"] == evaluation["timeline"]["total_frames"]
@@ -79,12 +79,46 @@ def test_scene_evaluation_keeps_visual_quick_effects_in_the_render_timeline():
     assert evaluation["performance"]["operations"][-1]["source_event_id"] == "event/quick-shake"
 
 
+def test_scene_evaluation_reports_motion_outside_the_occupied_range():
+    project = migrate_project(_json(MODEL_ROOT / "example.synthetic.json"))
+    scene = project["chapters"][0]["scenes"][0]
+    enter = next(
+        event
+        for cue in scene["cues"]
+        for event in cue["events"]
+        if event["kind"] == "enter"
+    )
+    scene["cues"][0]["events"].insert(
+        0,
+        {
+            "event_id": "event/invalid-motion",
+            "kind": "character-motion",
+            "slot": enter["slot"],
+            "character_id": enter["character_id"],
+            "motion_id": "motion/nod",
+        },
+    )
+
+    evaluation = evaluate_scene(project, scene["scene_id"])
+
+    assert {
+        "code": "scene.character_motion_target_unavailable",
+        "severity": "error",
+        "path": "event:event/invalid-motion",
+        "message": "角色动作 event/invalid-motion 必须位于目标角色入场之后、退场之前。",
+    } in evaluation["diagnostics"]
+    assert all(
+        entry["source_event_id"] != "event/invalid-motion"
+        for entry in evaluation["performance"]["source_map"]
+    )
+
+
 def test_scene_evaluation_matches_contract_schema():
     project = _json(MODEL_ROOT / "example.synthetic.json")
     scene_id = project["chapters"][0]["scenes"][0]["scene_id"]
-    schema = _json(ROOT / "packages" / "contracts" / "scene-evaluation" / "1.3.schema.json")
-    timeline_schema = _json(ROOT / "packages" / "contracts" / "render-timeline" / "1.0.schema.json")
-    performance_schema = _json(ROOT / "packages" / "contracts" / "scene-performance" / "1.2.schema.json")
+    schema = _json(ROOT / "packages" / "contracts" / "scene-evaluation" / "1.4.schema.json")
+    timeline_schema = _json(ROOT / "packages" / "contracts" / "render-timeline" / "1.1.schema.json")
+    performance_schema = _json(ROOT / "packages" / "contracts" / "scene-performance" / "1.3.schema.json")
     evaluation = evaluate_scene(project, scene_id)
 
     Draft202012Validator.check_schema(schema)

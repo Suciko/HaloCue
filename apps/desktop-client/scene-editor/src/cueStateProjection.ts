@@ -133,3 +133,22 @@ export function projectCueState(
 ): CueStateProjection {
   return projectSceneAtCue(sceneById(project, options.sceneId), cueId);
 }
+
+export function characterMotionEventForCue(
+  cue: Cue,
+  slot: number,
+  characterId?: string | null,
+): CueEvent | null {
+  const reversed = [...cue.events].reverse();
+  const explicit = reversed.find((event) => (
+    event.kind === "character-motion"
+    && event.slot === slot
+    && (!characterId || !event.character_id || event.character_id === characterId)
+  ));
+  if (explicit) return explicit;
+  return reversed.find((event) => (
+    (event.kind === "enter" && event.slot === slot && event.motion_id !== undefined)
+    || (event.kind === "dialogue" && Boolean(characterId)
+      && event.character_id === characterId && event.motion_id !== undefined)
+  )) || null;
+}

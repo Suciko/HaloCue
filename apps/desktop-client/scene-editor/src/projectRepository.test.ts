@@ -295,8 +295,11 @@ describe("project repository seam", () => {
       .toEqual({ status: "committed", revision: 1 });
     let state = store.getState();
     expect(state.project.chapters[0].scenes[0].cues[0].events
-      .find((event) => event.kind === "enter" && event.slot === 1)?.motion_id)
+      .find((event) => event.kind === "character-motion" && event.slot === 1)?.motion_id)
       .toBe("motion/nod");
+    expect(state.project.chapters[0].scenes[0].cues[0].events
+      .find((event) => event.kind === "enter" && event.slot === 1)?.motion_id)
+      .toBeUndefined();
     expect(state.history).toHaveLength(1);
     expect(state.autosave.pendingRevision).toBe(1);
     expect(repository.saves).toBe(0);

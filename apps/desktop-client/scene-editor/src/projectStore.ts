@@ -223,24 +223,107 @@ function applyEventPatch(cue: Cue, eventId: string, patch: Partial<CueEvent>): b
   return true;
 }
 
+function applyCharacterMotionPatch(
+  cue: Cue,
+  scene: Scene,
+  slot: number,
+  motionId: unknown,
+): void {
+  const projection = projectSceneAtCue(scene, cue.cue_id);
+  const characterId = projection.afterCue.slots[slot - 1];
+  if (!characterId) return;
+  const normalizedMotionId = typeof motionId === "string" && motionId
+    ? motionId
+    : "motion/idle";
+  const isLegacyMotionCarrier = (event: CueEvent) => (
+    (event.kind === "enter" && event.slot === slot)
+    || (event.kind === "dialogue" && event.character_id === characterId)
+  );
+  cue.events.forEach((event) => {
+    if (isLegacyMotionCarrier(event)) delete event.motion_id;
+  });
+  const existingIndex = cue.events.findIndex((event) => (
+    event.kind === "character-motion" && event.slot === slot
+  ));
+  if (normalizedMotionId === "motion/idle") {
+    cue.events = cue.events.filter((event) => !(
+      event.kind === "character-motion" && event.slot === slot
+    ));
+    return;
+  }
+  if (existingIndex >= 0) {
+    Object.assign(cue.events[existingIndex], {
+      character_id: characterId,
+      motion_id: normalizedMotionId,
+    });
+    return;
+  }
+  const motionEvent: CueEvent = {
+    event_id: localId("event/character-motion"),
+    kind: "character-motion",
+    slot,
+    character_id: characterId,
+    motion_id: normalizedMotionId,
+  };
+  const lastPlacementIndex = cue.events.reduce((found, event, index) => (
+    event.kind === "enter" && event.slot === slot ? index : found
+  ), -1);
+  const dialogueIndex = cue.events.findIndex((event) => event.kind === "dialogue");
+  const insertionIndex = lastPlacementIndex >= 0
+    ? lastPlacementIndex + 1
+    : dialogueIndex >= 0 ? dialogueIndex : cue.events.length;
+  cue.events.splice(insertionIndex, 0, motionEvent);
+}
+
+function characterMotionInsertionIndex(
+  cue: Cue,
+  beforeSlots: Array<string | null>,
+  event: CueEvent,
+  requestedIndex: number,
+): number {
+  const slot = Number(event.slot);
+  const characterId = event.character_id;
+  if (!Number.isInteger(slot) || slot < 1 || slot > 5 || !characterId) return requestedIndex;
+  let occupant = beforeSlots[slot - 1];
+  const validPositions: number[] = [];
+  for (let position = 0; position <= cue.events.length; position += 1) {
+    if (occupant === characterId) validPositions.push(position);
+    const current = cue.events[position];
+    if (current?.kind === "enter" && current.slot === slot) {
+      occupant = current.character_id || null;
+    } else if (current?.kind === "exit" && current.slot === slot) {
+      occupant = null;
+    }
+  }
+  return validPositions.find((position) => position >= requestedIndex)
+    ?? validPositions.at(-1)
+    ?? requestedIndex;
+}
+
 function applyCharacterStatePatch(
   cue: Cue,
   scene: Scene,
   slot: number,
   patch: Partial<CueEvent>,
 ): void {
+  const statePatch = { ...patch };
+  if (Object.prototype.hasOwnProperty.call(statePatch, "motion_id")) {
+    applyCharacterMotionPatch(cue, scene, slot, statePatch.motion_id);
+    delete statePatch.motion_id;
+  }
+  if (Object.keys(statePatch).length === 0) return;
   const projection = projectSceneAtCue(scene, cue.cue_id);
   const characterId = projection.afterCue.slots[slot - 1];
   if (!characterId) return;
   const currentState = projection.afterCue.actorStateEvents[slot - 1];
-  if (Object.entries(patch).every(([key, value]) => currentState?.[key] === value)) return;
+  if (Object.entries(statePatch).every(([key, value]) => currentState?.[key] === value)) return;
   let enter = [...cue.events].reverse()
     .find((event) => event.kind === "enter" && event.slot === slot);
   if (!enter) {
     enter = { event_id: localId("event/enter"), kind: "enter", slot, character_id: characterId };
     cue.events.unshift(enter);
   }
-  Object.assign(enter, patch);
+  Object.assign(enter, statePatch);
 }
 
 export function createProjectStore(repository: ProjectRepository = projectRepository) {
@@ -560,7 +643,8 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       if (currentCharacterId === characterId) return noOp(state);
       return commit((_project, cue) => {
         cue.events = cue.events.filter((event) => !(
-          (event.kind === "enter" || event.kind === "exit") && event.slot === slot
+          (event.kind === "enter" || event.kind === "exit" || event.kind === "character-motion")
+          && event.slot === slot
         ));
         cue.events.unshift(characterId
           ? { event_id: localId("event/enter"), kind: "enter", slot, character_id: characterId }
@@ -576,7 +660,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       if (slots[source - 1] === slots[target - 1]) return noOp(state);
       return commit((_project, cue) => {
         cue.events = cue.events.filter((event) => !(
-          (event.kind === "enter" || event.kind === "exit")
+          (event.kind === "enter" || event.kind === "exit" || event.kind === "character-motion")
           && (event.slot === source || event.slot === target)
         ));
         const eventFor = (slot: number, characterId: string | null): CueEvent => characterId
@@ -591,13 +675,30 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     addEvent: (kind, insertion) => {
       const state = get();
       const eventId = localId("event");
+      const selectedCharacterId = projectSceneAtCue(
+        sceneById(state.project, state.selectedSceneId),
+        state.selectedCueId,
+      ).afterCue.slots[state.selectedSlot - 1];
       return commit((project, cue) => {
         const event = createSceneEvent(kind, {
           eventId,
           selectedSlot: state.selectedSlot,
+          selectedCharacterId,
           project,
         });
-        cue.events.splice(eventInsertionIndex(cue.events, insertion), 0, event);
+        const requestedIndex = eventInsertionIndex(cue.events, insertion);
+        const insertionIndex = kind === "character-motion"
+          ? characterMotionInsertionIndex(
+            cue,
+            projectSceneAtCue(
+              sceneById(project, state.selectedSceneId),
+              state.selectedCueId,
+            ).beforeCue.slots,
+            event,
+            requestedIndex,
+          )
+          : requestedIndex;
+        cue.events.splice(insertionIndex, 0, event);
       }, { selectedEventId: eventId });
     },
     addQuickEffect: (kind) => {

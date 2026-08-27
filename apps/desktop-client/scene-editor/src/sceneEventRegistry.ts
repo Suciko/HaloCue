@@ -1,4 +1,4 @@
-import rawManifest from "../../../../packages/contracts/scene-events/1.0.json";
+import rawManifest from "../../../../packages/contracts/scene-events/1.1.json";
 
 export type SceneEventDefinition = {
   kind: string;
@@ -18,7 +18,7 @@ export type SceneEventDurationInput = {
 };
 
 type SceneEventManifest = {
-  schema_version: "scene-events/1.0";
+  schema_version: "scene-events/1.1";
   events: SceneEventDefinition[];
 };
 
@@ -41,7 +41,7 @@ function validateManifest(value: unknown): SceneEventManifest {
   if (!value || typeof value !== "object") throw new Error("scene event manifest must be an object");
   const manifest = value as Partial<SceneEventManifest>;
   if (
-    manifest.schema_version !== "scene-events/1.0"
+    manifest.schema_version !== "scene-events/1.1"
     || !Array.isArray(manifest.events)
     || manifest.events.length === 0
   ) {

@@ -142,6 +142,32 @@ def test_current_project_supports_multiple_events_in_one_cue():
     ]
 
 
+def test_current_project_preserves_explicit_character_motion_in_the_descriptor():
+    project = migrate_project(valid_project())
+    cue = project["chapters"][0]["scenes"][0]["cues"][1]
+    cue["events"].append(
+        {
+            "event_id": "event/alice-nod",
+            "kind": "character-motion",
+            "slot": 1,
+            "character_id": "character/alice",
+            "motion_id": "motion/nod",
+        }
+    )
+
+    assert validate_project(project) == []
+    descriptor = build_aa_scene_descriptor(project, "scene/classroom")
+    assert next(
+        event for event in descriptor["events"] if event["event_id"] == "event/alice-nod"
+    ) == {
+        "event_id": "event/alice-nod",
+        "kind": "character-motion",
+        "character_id": "character/alice",
+        "slot": 1,
+        "motion_id": "motion/nod",
+    }
+
+
 def test_validation_reports_duplicate_ids_and_unresolved_references():
     project = valid_project()
     project["characters"].append(project["characters"][0].copy())

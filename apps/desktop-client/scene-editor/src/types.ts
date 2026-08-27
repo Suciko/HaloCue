@@ -150,7 +150,7 @@ export type RenderTimelineEvent = {
 };
 
 export type RenderTimeline = {
-  schema_version: "render-timeline/1.0";
+  schema_version: "render-timeline/1.1";
   frame_rate: number;
   scene_id: string | null;
   events: RenderTimelineEvent[];
@@ -192,7 +192,11 @@ export type CharacterTweenOperation = {
   easing: "ease-out-cubic";
 };
 
-export type CharacterKeyframeChannel = "layout.offset-y" | "presentation.rotation";
+export type CharacterKeyframeChannel =
+  | "presentation.opacity"
+  | "layout.offset-y"
+  | "presentation.scale"
+  | "presentation.rotation";
 
 export type CharacterKeyframeOperation = {
   operation_id: string;
@@ -200,11 +204,11 @@ export type CharacterKeyframeOperation = {
   kind: "numeric-keyframes";
   target: { kind: "character"; character_id: string; slot: number };
   channel: CharacterKeyframeChannel;
-  value_space: "relative-to-baseline";
+  value_space: "absolute" | "relative-to-baseline" | "factor-from-baseline";
   start_frame: number;
   end_frame: number;
   keyframes: Array<{ offset: number; value: number }>;
-  easing: "ease-in-out-strong";
+  easing: "ease-in-out-strong" | "ease-out-emphasized";
 };
 
 export type ScenePerformanceOperation =
@@ -219,7 +223,7 @@ export type PerformanceSourceMapEntry = {
 };
 
 export type ScenePerformancePlan = {
-  schema_version: "scene-performance/1.2";
+  schema_version: "scene-performance/1.3";
   frame_rate: number;
   scene_id: string | null;
   total_frames: number;
@@ -272,7 +276,7 @@ export type EvaluationDiagnostic = {
 };
 
 export type SceneEvaluation = {
-  schema_version: "scene-evaluation/1.3";
+  schema_version: "scene-evaluation/1.4";
   scene_id: string;
   descriptor: SceneDescriptor;
   timeline: RenderTimeline;

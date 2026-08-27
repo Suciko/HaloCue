@@ -6,7 +6,7 @@ export type EventIconKey = "dialogue" | "background" | "actor" | "wait" | "effec
 export type EventEditorField = {
   key: string;
   label: string;
-  control: "character" | "slot" | "text" | "background" | "number";
+  control: "character" | "slot" | "motion" | "text" | "background" | "number";
   hint?: string;
   multiline?: boolean;
   min?: number;
@@ -18,6 +18,7 @@ export type EventEditorField = {
 export type EventEditorContext = {
   eventId: string;
   selectedSlot: number;
+  selectedCharacterId?: string | null;
   project: HaloCueProject;
 };
 
@@ -45,6 +46,11 @@ const fields = {
   exit: Object.freeze([
     field({ key: "slot", label: "舞台栏位", control: "slot", min: 1, max: 5, step: 1 }),
   ]),
+  characterMotion: Object.freeze([
+    field({ key: "slot", label: "目标栏位", control: "slot", min: 1, max: 5, step: 1 }),
+    field({ key: "character_id", label: "角色逻辑键", control: "character" }),
+    field({ key: "motion_id", label: "动作能力", control: "motion" }),
+  ]),
   background: Object.freeze([
     field({ key: "resource_id", label: "资源逻辑键", control: "background" }),
   ]),
@@ -65,6 +71,9 @@ const fields = {
 } as const;
 
 function textSummary(event: CueEvent): string {
+  if (event.kind === "character-motion") {
+    return `#${event.slot || "?"} · ${event.motion_id || "未选择动作"}`;
+  }
   const value = event.text || event.character_id || event.resource_id || event.kind;
   return typeof value === "string" ? value : String(value);
 }
@@ -112,6 +121,20 @@ const CATALOG: Record<string, EventEditorDefinition> = {
     kind: "exit",
     slot: selectedSlot,
   })),
+  "character-motion": registered(
+    "character-motion",
+    "actor",
+    fields.characterMotion,
+    ({ eventId, selectedSlot, selectedCharacterId, project }) => ({
+      event_id: eventId,
+      kind: "character-motion",
+      slot: selectedSlot,
+      ...(selectedCharacterId || project.characters[0]?.character_id
+        ? { character_id: selectedCharacterId || project.characters[0]?.character_id }
+        : {}),
+      motion_id: "motion/nod",
+    }),
+  ),
   wait: registered("wait", "wait", [], ({ eventId }) => ({ event_id: eventId, kind: "wait" })),
   "halocue.ba:background-pan": registered("halocue.ba:background-pan", "effect", fields.backgroundPan, ({ eventId }) => ({
     event_id: eventId,

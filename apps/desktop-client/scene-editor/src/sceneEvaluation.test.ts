@@ -16,13 +16,13 @@ describe("scene evaluation seam", () => {
     const scene = firstScene(demoProject);
     const evaluation = evaluateScene(demoProject, scene.cues[1].cue_id);
 
-    expect(evaluation.schema_version).toBe("scene-evaluation/1.3");
+    expect(evaluation.schema_version).toBe("scene-evaluation/1.4");
     expect(evaluation.scene_id).toBe(scene.scene_id);
     expect(evaluation.timeline.events.map((event) => event.event_id)).toEqual(
       evaluation.descriptor.events.map((event) => event.event_id),
     );
     expect(evaluation.timeline.events.at(-1)?.end_frame).toBe(evaluation.timeline.total_frames);
-    expect(evaluation.schema_version).toBe("scene-evaluation/1.3");
+    expect(evaluation.schema_version).toBe("scene-evaluation/1.4");
     expect(evaluation.performance.scene_id).toBe(evaluation.scene_id);
     expect(evaluation.performance.total_frames).toBe(evaluation.timeline.total_frames);
   });
@@ -86,5 +86,30 @@ describe("scene evaluation seam", () => {
     expect(evaluation.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "project.invalid_slot", severity: "error" }),
     ]));
+  });
+
+  it("reports a motion placed outside the target character's occupied range", () => {
+    const project = structuredClone(demoProject);
+    const cue = project.chapters[0].scenes[0].cues[0];
+    cue.events.unshift({
+      event_id: "event/invalid-motion",
+      kind: "character-motion",
+      slot: 1,
+      character_id: "character/yuuka",
+      motion_id: "motion/nod",
+    });
+
+    const evaluation = evaluateScene(project, cue.cue_id);
+
+    expect(evaluation.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "scene.character_motion_target_unavailable",
+        severity: "error",
+        path: "event:event/invalid-motion",
+      }),
+    ]));
+    expect(evaluation.performance.source_map.some((entry) => (
+      entry.source_event_id === "event/invalid-motion"
+    ))).toBe(false);
   });
 });

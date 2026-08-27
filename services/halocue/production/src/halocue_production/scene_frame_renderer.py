@@ -13,8 +13,8 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
-TIMELINE_SCHEMA_VERSION = "render-timeline/1.0"
-PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.2"
+TIMELINE_SCHEMA_VERSION = "render-timeline/1.1"
+PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.3"
 LOCAL_PREVIEW_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 

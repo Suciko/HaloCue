@@ -27,6 +27,47 @@ function diagnosticsForAdvancedEvents(
   return diagnostics;
 }
 
+function diagnosticsForCharacterMotionTargets(
+  descriptor: SceneEvaluation["descriptor"],
+): EvaluationDiagnostic[] {
+  const slots = new Map<number, string>();
+  for (const actor of descriptor.initial_actors || []) {
+    if (
+      actor.state === "visible"
+      && typeof actor.slot === "number"
+      && Number.isInteger(actor.slot)
+      && typeof actor.character_id === "string"
+      && actor.character_id
+    ) {
+      slots.set(actor.slot, actor.character_id);
+    }
+  }
+  const diagnostics: EvaluationDiagnostic[] = [];
+  descriptor.events.forEach((event) => {
+    const slot = Number(event.slot);
+    if (event.kind === "enter" && Number.isInteger(slot) && event.character_id) {
+      slots.set(slot, event.character_id);
+      return;
+    }
+    if (event.kind === "exit" && Number.isInteger(slot)) {
+      slots.delete(slot);
+      return;
+    }
+    if (event.kind !== "character-motion") return;
+    const occupied = Number.isInteger(slot) ? slots.get(slot) : undefined;
+    if (slot >= 1 && slot <= 5 && occupied && (!event.character_id || event.character_id === occupied)) {
+      return;
+    }
+    diagnostics.push({
+      code: "scene.character_motion_target_unavailable",
+      severity: "error",
+      path: `event:${event.event_id}`,
+      message: `角色动作 ${event.event_id} 必须位于目标角色入场之后、退场之前。`,
+    });
+  });
+  return diagnostics;
+}
+
 export function evaluateScene(
   project: HaloCueProject,
   selectedCueId: string,
@@ -39,7 +80,7 @@ export function evaluateScene(
     .filter((diagnostic) => diagnostic.code !== "project.unknown_event_kind");
   const timeline = buildRenderTimeline(descriptor, frameRate);
   return {
-    schema_version: "scene-evaluation/1.3",
+    schema_version: "scene-evaluation/1.4",
     scene_id: descriptor.scene_id,
     descriptor,
     timeline,
@@ -47,6 +88,7 @@ export function evaluateScene(
     diagnostics: [
       ...projectDiagnostics,
       ...diagnosticsForAdvancedEvents(project, descriptor.scene_id),
+      ...diagnosticsForCharacterMotionTargets(descriptor),
     ],
   };
 }

@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Any
 
 
-MANIFEST_PATH = Path(__file__).resolve().parents[1] / "contracts" / "scene-events" / "1.0.json"
-MANIFEST_SCHEMA_VERSION = "scene-events/1.0"
+MANIFEST_PATH = Path(__file__).resolve().parents[1] / "contracts" / "scene-events" / "1.1.json"
+MANIFEST_SCHEMA_VERSION = "scene-events/1.1"
 TYPEWRITER_GRAPHEME_MS = 32
 TYPEWRITER_PUNCTUATION_PAUSE_MS = 96
 TYPEWRITER_NEWLINE_PAUSE_MS = 192

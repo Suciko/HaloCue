@@ -375,4 +375,36 @@ describe("professional event list interactions", () => {
     eventRows = Array.from(container.querySelectorAll<HTMLButtonElement>(".event-main"));
     expect(eventRows).toHaveLength(4);
   });
+
+  it("adds a typed character motion with capability-aware professional fields", () => {
+    const addMotion = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".event-add-options > button"),
+    ).find((button) => button.textContent?.trim() === "角色动作");
+    expect(addMotion).toBeDefined();
+
+    act(() => addMotion?.click());
+
+    const state = useProjectStore.getState();
+    const events = firstScene(state.project).cues[0].events;
+    const event = events
+      .find((item) => item.event_id === state.selectedEventId);
+    expect(event).toEqual(expect.objectContaining({
+      kind: "character-motion",
+      slot: 1,
+      character_id: "character/yuuka",
+      motion_id: "motion/nod",
+    }));
+    expect(state.selectedEventId).toBe(event?.event_id);
+    expect(events.indexOf(event!)).toBeGreaterThan(
+      events.findIndex((item) => item.kind === "enter" && item.slot === 1),
+    );
+    const motionSelect = Array.from(container.querySelectorAll<HTMLLabelElement>("label.field"))
+      .find((label) => label.textContent?.includes("动作能力"))
+      ?.querySelector<HTMLSelectElement>("select");
+    expect(motionSelect?.value).toBe("motion/nod");
+    expect(Array.from(motionSelect?.options || []).map((option) => option.textContent))
+      .toContain("点头");
+    expect(Array.from(motionSelect?.options || []).some((option) => option.value === "motion/idle"))
+      .toBe(false);
+  });
 });

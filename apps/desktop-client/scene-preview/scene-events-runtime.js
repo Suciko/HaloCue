@@ -1,15 +1,16 @@
 (function (global) {
   "use strict";
 
-  // Browser Adapter for packages/contracts/scene-events/1.0.json. Keep this
+  // Browser Adapter for packages/contracts/scene-events/1.1.json. Keep this
   // generated-shaped data-only file free of renderer or DOM behavior.
   const manifest = {
-    schema_version: "scene-events/1.0",
+    schema_version: "scene-events/1.1",
     events: [
       { kind: "background", descriptor_renderable: true, timeline_supported: true, visual_only: true, duration_policy: "fixed", default_duration_ms: 500, simple_action: null, editor_label: "背景" },
       { kind: "dialogue", descriptor_renderable: true, timeline_supported: true, visual_only: false, duration_policy: "dialogue-aa-v1", default_duration_ms: null, simple_action: null, editor_label: "对白" },
       { kind: "enter", descriptor_renderable: true, timeline_supported: true, visual_only: false, duration_policy: "fixed", default_duration_ms: 500, simple_action: null, editor_label: "角色入场" },
       { kind: "exit", descriptor_renderable: true, timeline_supported: true, visual_only: false, duration_policy: "fixed", default_duration_ms: 500, simple_action: null, editor_label: "角色退场" },
+      { kind: "character-motion", descriptor_renderable: true, timeline_supported: true, visual_only: true, duration_policy: "fixed", default_duration_ms: 500, simple_action: null, editor_label: "角色动作" },
       { kind: "wait", descriptor_renderable: true, timeline_supported: true, visual_only: true, duration_policy: "fixed", default_duration_ms: 1000, simple_action: null, editor_label: "等待" },
       { kind: "halocue.ba:background-pan", descriptor_renderable: true, timeline_supported: true, visual_only: true, duration_policy: "fixed", default_duration_ms: 900, simple_action: "background-pan", editor_label: "背景移动" },
       { kind: "halocue.ba:screen-shake", descriptor_renderable: true, timeline_supported: true, visual_only: true, duration_policy: "fixed", default_duration_ms: 360, simple_action: "screen-shake", editor_label: "画面震动" },

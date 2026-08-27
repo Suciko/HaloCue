@@ -25,6 +25,10 @@ describe("scene event registry seam", () => {
     expect(new Set(definitions.map((event) => event.kind)).size).toBe(definitions.length);
     expect(definitions.every((event) => sceneEventRegistry.isTimelineSupported(event.kind))).toBe(true);
     expect(definitions.every((event) => sceneEventRegistry.isDescriptorRenderable(event.kind))).toBe(true);
+    expect(sceneEventRegistry.definition("character-motion")).toEqual(expect.objectContaining({
+      visual_only: true,
+      default_duration_ms: 500,
+    }));
   });
 
   it("drives fixed defaults and the dialogue policy", () => {
@@ -46,6 +50,6 @@ describe("scene event registry seam", () => {
   });
 
   it("rejects malformed injected manifests before callers can use them", () => {
-    expect(() => createSceneEventRegistry({ schema_version: "scene-events/1.0", events: [] })).toThrow(/schema|non-empty/);
+    expect(() => createSceneEventRegistry({ schema_version: "scene-events/1.0", events: [] })).toThrow(/schema/);
   });
 });

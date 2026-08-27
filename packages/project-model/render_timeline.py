@@ -17,7 +17,7 @@ from scene_events import (
 )
 
 
-TIMELINE_SCHEMA_VERSION = "render-timeline/1.0"
+TIMELINE_SCHEMA_VERSION = "render-timeline/1.1"
 DEFAULT_FRAME_RATE = 30
 
 def _require_frame_rate(frame_rate: Any) -> int:

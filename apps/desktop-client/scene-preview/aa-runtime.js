@@ -257,7 +257,7 @@
       };
     });
     return {
-      schema_version: "render-timeline/1.0",
+      schema_version: "render-timeline/1.1",
       frame_rate: frameRate,
       scene_id: descriptor.scene_id ?? null,
       events,
@@ -266,7 +266,7 @@
   }
 
   function sampleRenderTimeline(timeline, frame) {
-    if (!timeline || timeline.schema_version !== "render-timeline/1.0") {
+    if (!timeline || timeline.schema_version !== "render-timeline/1.1") {
       throw new Error("unsupported render timeline schema");
     }
     if (!timeline.total_frames || !timeline.events.length) {

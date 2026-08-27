@@ -1,7 +1,7 @@
 (function (global) {
   "use strict";
 
-  const PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.2";
+  const PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.3";
   const PERFORMANCE_SAMPLE_SCHEMA_VERSION = "scene-performance-sample/1.0";
   const DEFAULT_SHAKE_INTENSITY = 0.35;
   const SHAKE_FREQUENCY_HZ = 12;
@@ -22,6 +22,21 @@
     { offset: 0.32, value: 1.5 },
     { offset: 0.68, value: -1 },
     { offset: 1, value: 0 },
+  ]);
+  const APPEAR_OPACITY_KEYFRAMES = Object.freeze([
+    { offset: 0, value: 0.55 },
+    { offset: 0.55, value: 1 },
+    { offset: 1, value: 1 },
+  ]);
+  const APPEAR_OFFSET_Y_KEYFRAMES = Object.freeze([
+    { offset: 0, value: 10 },
+    { offset: 0.55, value: -3 },
+    { offset: 1, value: 0 },
+  ]);
+  const APPEAR_SCALE_KEYFRAMES = Object.freeze([
+    { offset: 0, value: 0.985 },
+    { offset: 0.55, value: 1.01 },
+    { offset: 1, value: 1 },
   ]);
   const EXECUTION_MODES = new Set(["play", "sample", "skip", "reduced-motion"]);
 
@@ -44,7 +59,7 @@
     if (!descriptor || descriptor.schema_version !== "scene-descriptor/1.0") {
       throw new Error("unsupported scene descriptor schema");
     }
-    if (!timeline || timeline.schema_version !== "render-timeline/1.0") {
+    if (!timeline || timeline.schema_version !== "render-timeline/1.1") {
       throw new Error("unsupported render timeline schema");
     }
     if (timeline.scene_id !== descriptor.scene_id) {
@@ -90,26 +105,46 @@
       easing: "ease-out-cubic",
     });
     const addCharacterKeyframes = (
-      item, characterId, slot, suffix, channel, keyframes,
+      item, characterId, slot, suffix, channel, valueSpace, keyframes, easing,
     ) => operations.push({
       operation_id: `${item.event_id}/operation/${suffix}`,
       source_event_id: item.event_id,
       kind: "numeric-keyframes",
       target: { kind: "character", character_id: characterId, slot },
       channel,
-      value_space: "relative-to-baseline",
+      value_space: valueSpace,
       start_frame: item.start_frame,
       end_frame: item.end_frame,
       keyframes: keyframes.map((keyframe) => ({ ...keyframe })),
-      easing: "ease-in-out-strong",
+      easing,
     });
     const addNod = (item, characterId, slot) => {
       addCharacterKeyframes(
-        item, characterId, slot, "motion-nod-offset-y", "layout.offset-y", NOD_OFFSET_Y_KEYFRAMES,
+        item, characterId, slot, "motion-nod-offset-y", "layout.offset-y",
+        "relative-to-baseline", NOD_OFFSET_Y_KEYFRAMES, "ease-in-out-strong",
       );
       addCharacterKeyframes(
-        item, characterId, slot, "motion-nod-rotation", "presentation.rotation", NOD_ROTATION_KEYFRAMES,
+        item, characterId, slot, "motion-nod-rotation", "presentation.rotation",
+        "relative-to-baseline", NOD_ROTATION_KEYFRAMES, "ease-in-out-strong",
       );
+    };
+    const addAppear = (item, characterId, slot) => {
+      addCharacterKeyframes(
+        item, characterId, slot, "motion-appear-opacity", "presentation.opacity",
+        "factor-from-baseline", APPEAR_OPACITY_KEYFRAMES, "ease-out-emphasized",
+      );
+      addCharacterKeyframes(
+        item, characterId, slot, "motion-appear-offset-y", "layout.offset-y",
+        "relative-to-baseline", APPEAR_OFFSET_Y_KEYFRAMES, "ease-out-emphasized",
+      );
+      addCharacterKeyframes(
+        item, characterId, slot, "motion-appear-scale", "presentation.scale",
+        "factor-from-baseline", APPEAR_SCALE_KEYFRAMES, "ease-out-emphasized",
+      );
+    };
+    const addCapabilityMotion = (item, characterId, slot) => {
+      if (item.event?.motion_id === "motion/nod") addNod(item, characterId, slot);
+      if (item.event?.motion_id === "motion/appear") addAppear(item, characterId, slot);
     };
     for (const item of timeline.events) {
       if (item.kind === "halocue.ba:screen-shake") {
@@ -139,14 +174,26 @@
           addCharacterTween(item, characterId, slot, "offset-y", "layout.offset-y", "relative-to-baseline", CHARACTER_ENTER_OFFSET_Y_PX, 0);
           addCharacterTween(item, characterId, slot, "scale", "presentation.scale", "factor-from-baseline", CHARACTER_ENTER_SCALE, 1);
         }
-        if (item.event?.motion_id === "motion/nod") addNod(item, characterId, slot);
+        addCapabilityMotion(item, characterId, slot);
         slotCharacters.set(slot, characterId);
       }
-      if (item.kind === "dialogue" && item.event?.motion_id === "motion/nod") {
+      if (item.kind === "dialogue" && ["motion/nod", "motion/appear"].includes(String(item.event?.motion_id))) {
         const characterId = typeof item.event?.character_id === "string" ? item.event.character_id : "";
         const slot = [...slotCharacters.entries()]
           .find(([, currentCharacterId]) => currentCharacterId === characterId)?.[0];
-        if (slot) addNod(item, characterId, slot);
+        if (slot) addCapabilityMotion(item, characterId, slot);
+      }
+      if (item.kind === "character-motion") {
+        const slot = Number(item.event?.slot);
+        if (!Number.isInteger(slot) || slot < 1 || slot > 5) continue;
+        const occupiedCharacterId = slotCharacters.get(slot) || "";
+        const characterId = typeof item.event?.character_id === "string"
+          ? item.event.character_id
+          : occupiedCharacterId;
+        if (!occupiedCharacterId || characterId !== occupiedCharacterId) {
+          continue;
+        }
+        addCapabilityMotion(item, characterId, slot);
       }
       if (item.kind === "exit") {
         const slot = Number(item.event?.slot);
@@ -193,28 +240,28 @@
       + 3 * t * t * (1 - second);
   }
 
-  function easeInOutStrong(progress) {
+  function cubicBezierEasing(progress, x1, y1, x2, y2) {
     const target = clamp(progress, 0, 1);
     let parameter = target;
     for (let iteration = 0; iteration < 8; iteration += 1) {
-      const error = cubicBezierCoordinate(parameter, 0.77, 0.175) - target;
-      const derivative = cubicBezierDerivative(parameter, 0.77, 0.175);
+      const error = cubicBezierCoordinate(parameter, x1, x2) - target;
+      const derivative = cubicBezierDerivative(parameter, x1, x2);
       if (Math.abs(error) < 1e-7 || Math.abs(derivative) < 1e-7) break;
       parameter = clamp(parameter - error / derivative, 0, 1);
     }
     let lower = 0;
     let upper = 1;
     for (let iteration = 0; iteration < 12; iteration += 1) {
-      const current = cubicBezierCoordinate(parameter, 0.77, 0.175);
+      const current = cubicBezierCoordinate(parameter, x1, x2);
       if (Math.abs(current - target) < 1e-7) break;
       if (current < target) lower = parameter;
       else upper = parameter;
       parameter = (lower + upper) / 2;
     }
-    return cubicBezierCoordinate(parameter, 0, 1);
+    return cubicBezierCoordinate(parameter, y1, y2);
   }
 
-  function sampleKeyframes(keyframes, progress) {
+  function sampleKeyframes(keyframes, progress, easing) {
     const terminal = keyframes.at(-1);
     if (!terminal) return 0;
     if (progress >= terminal.offset) return terminal.value;
@@ -224,7 +271,9 @@
     const next = keyframes[nextIndex];
     const span = next.offset - previous.offset;
     const localProgress = span <= 0 ? 1 : (progress - previous.offset) / span;
-    const eased = easeInOutStrong(localProgress);
+    const eased = easing === "ease-in-out-strong"
+      ? cubicBezierEasing(localProgress, 0.77, 0, 0.175, 1)
+      : cubicBezierEasing(localProgress, 0.23, 1, 0.32, 1);
     return previous.value + (next.value - previous.value) * eased;
   }
 
@@ -259,7 +308,7 @@
         continue;
       }
       const value = operation.kind === "numeric-keyframes"
-        ? sampleKeyframes(operation.keyframes, progress)
+        ? sampleKeyframes(operation.keyframes, progress, operation.easing)
         : (() => {
           const eased = 1 - (1 - progress) ** 3;
           const useFinal = mode === "skip"
@@ -275,14 +324,22 @@
         rotation_deg: 0,
         scale: 1,
       };
-      if (operation.channel === "presentation.opacity") sample.opacity = quantize(value, 6);
+      if (operation.channel === "presentation.opacity") {
+        sample.opacity = quantize(operation.value_space === "factor-from-baseline"
+          ? (sample.opacity ?? 1) * value
+          : value, 6);
+      }
       if (operation.channel === "layout.offset-y") {
         sample.offset_y_px = quantize(sample.offset_y_px + value, 6);
       }
       if (operation.channel === "presentation.rotation") {
         sample.rotation_deg = quantize(sample.rotation_deg + value, 6);
       }
-      if (operation.channel === "presentation.scale") sample.scale = quantize(value, 6);
+      if (operation.channel === "presentation.scale") {
+        sample.scale = quantize(operation.value_space === "factor-from-baseline"
+          ? sample.scale * value
+          : value, 6);
+      }
       characterSamples.set(key, sample);
     }
     return {

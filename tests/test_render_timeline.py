@@ -16,7 +16,7 @@ RUNTIME = REPO_ROOT / "apps" / "desktop-client" / "scene-preview" / "aa-runtime.
 EVENT_REGISTRY_RUNTIME = (
     REPO_ROOT / "apps" / "desktop-client" / "scene-preview" / "scene-events-runtime.js"
 )
-TIMELINE_SCHEMA = REPO_ROOT / "packages" / "contracts" / "render-timeline" / "1.0.schema.json"
+TIMELINE_SCHEMA = REPO_ROOT / "packages" / "contracts" / "render-timeline" / "1.1.schema.json"
 if str(MODEL_ROOT) not in sys.path:
     sys.path.insert(0, str(MODEL_ROOT))
 

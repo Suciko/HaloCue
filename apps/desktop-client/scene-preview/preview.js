@@ -166,7 +166,7 @@
     if (suppliedTimeline === undefined) {
       return { timeline: expected, source: "derived" };
     }
-    if (!suppliedTimeline || suppliedTimeline.schema_version !== "render-timeline/1.0") {
+    if (!suppliedTimeline || suppliedTimeline.schema_version !== "render-timeline/1.1") {
       throw new Error("unsupported supplied render timeline schema");
     }
     if (JSON.stringify(canonicalJson(suppliedTimeline)) !== JSON.stringify(canonicalJson(expected))) {
@@ -186,7 +186,7 @@
     if (suppliedPerformance === undefined) {
       return { performance: expected, source: "derived" };
     }
-    if (!suppliedPerformance || suppliedPerformance.schema_version !== "scene-performance/1.2") {
+    if (!suppliedPerformance || suppliedPerformance.schema_version !== "scene-performance/1.3") {
       throw new Error("unsupported supplied scene performance schema");
     }
     if (JSON.stringify(canonicalJson(suppliedPerformance)) !== JSON.stringify(canonicalJson(expected))) {
@@ -622,6 +622,7 @@
       stage.dataset.performanceOperations = sample.active_operation_ids.join(" ");
       stage.dataset.performanceMode = sample.mode;
       actorElements.forEach((element) => {
+        element.style.opacity = "";
         element.style.setProperty("--performance-character-offset-y", "0px");
         element.style.setProperty("--performance-character-rotation", "0deg");
         element.style.setProperty("--performance-character-scale", "1");
@@ -732,11 +733,7 @@
         const emoticonState = CAPABILITY_RUNTIME.emoticon(actor.emoticon_id);
         element.dataset.motion = visible ? motionId : "";
         element.dataset.emoticon = visible ? (emoticonState?.id || CAPABILITY_RUNTIME.stateId(actor.emoticon_id)) : "";
-        element.classList.remove("is-motion-nod");
-        element.classList.toggle(
-          "is-motion-appear",
-          Boolean(visible && CAPABILITY_RUNTIME.motionClass(motionId) === "is-motion-appear"),
-        );
+        element.classList.remove("is-motion-nod", "is-motion-appear");
         if (emoticonElement && emoticonSymbol) {
           emoticonElement.hidden = !visible || !emoticonState;
           emoticonElement.dataset.state = visible ? (emoticonState?.id || "") : "";
@@ -936,6 +933,13 @@
           if (options.motion !== false && event.motion_id) {
             state.motion = { slot: actor.slot, kind: "capability", capability: event.motion_id };
           }
+        }
+      }
+      if (event.kind === "character-motion" && event.slot) {
+        const actor = state.actors[event.slot - 1];
+        const matchesCharacter = !event.character_id || actor?.character_id === event.character_id;
+        if (options.motion !== false && matchesCharacter && event.motion_id) {
+          state.motion = { slot: event.slot, kind: "capability", capability: event.motion_id };
         }
       }
       if (event.kind === "exit" && event.slot) {

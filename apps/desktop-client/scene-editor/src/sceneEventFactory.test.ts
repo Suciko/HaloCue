@@ -24,6 +24,18 @@ describe("scene event factory", () => {
       kind: "halocue.ba:screen-shake",
       intensity: 0.35,
     });
+    expect(createSceneEvent("character-motion", {
+      eventId: "event/new-motion",
+      selectedSlot: 3,
+      selectedCharacterId: "character/koyuki",
+      project: demoProject,
+    })).toEqual({
+      event_id: "event/new-motion",
+      kind: "character-motion",
+      slot: 3,
+      character_id: "character/koyuki",
+      motion_id: "motion/nod",
+    });
   });
 
   it("rejects an event that the shared registry cannot render", () => {
@@ -34,4 +46,3 @@ describe("scene event factory", () => {
     })).toThrow(/unsupported/);
   });
 });
-

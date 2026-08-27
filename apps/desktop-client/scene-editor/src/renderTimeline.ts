@@ -1,7 +1,7 @@
 import type { CueEvent, RenderTimeline, RenderTimelineEvent, SceneDescriptor } from "./types";
 import { durationMs, isTimelineSupported } from "./sceneEventRegistry";
 
-export const TIMELINE_SCHEMA_VERSION = "render-timeline/1.0" as const;
+export const TIMELINE_SCHEMA_VERSION = "render-timeline/1.1" as const;
 export const DEFAULT_FRAME_RATE = 30;
 
 function clone<T>(value: T): T {
