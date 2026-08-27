@@ -1,7 +1,7 @@
 import { buildDescriptor } from "./descriptor";
 import type { CapabilityRegistry } from "./capabilities";
 import { buildRenderTimeline, DEFAULT_FRAME_RATE } from "./renderTimeline";
-import { firstScene } from "./projectStore";
+import { firstScene } from "./cueStateProjection";
 import type { EvaluationDiagnostic, HaloCueProject, SceneEvaluation } from "./types";
 import { isDescriptorRenderable } from "./sceneEventRegistry";
 

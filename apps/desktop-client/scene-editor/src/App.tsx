@@ -48,10 +48,9 @@ import { capabilityStatesFor } from "./capabilities";
 import { evaluateScene } from "./sceneEvaluation";
 import { eventDurationMs } from "./renderTimeline";
 import { sceneEventDefinitions } from "./sceneEventRegistry";
+import { firstScene, projectCueState } from "./cueStateProjection";
 import {
   advancedEventCount,
-  firstScene,
-  stageAtCue,
   useProjectStore,
 } from "./projectStore";
 import type {
@@ -271,8 +270,7 @@ function StageSlots() {
   const selectSlot = useProjectStore((state) => state.selectSlot);
   const swapSlots = useProjectStore((state) => state.swapSlots);
   const [dragged, setDragged] = useState<number | null>(null);
-  const scene = firstScene(project);
-  const slots = stageAtCue(scene, selectedCueId);
+  const slots = projectCueState(project, selectedCueId).afterCue.slots;
   const characters = new Map(project.characters.map((character) => [character.character_id, character]));
 
   const drop = (event: DragEvent, slot: number) => {
@@ -353,7 +351,7 @@ function CueStrip() {
       </div>
       <div className="cue-list">
         {scene.cues.map((cue, index) => {
-          const dialogue = cue.events.find((event) => event.kind === "dialogue");
+          const dialogue = projectCueState(project, cue.cue_id).dialogueEvent;
           const advanced = advancedEventCount(cue);
           return (
             <button
@@ -394,16 +392,16 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-function CharacterInspector({ cue }: { cue: Cue }) {
+function CharacterInspector() {
   const project = useProjectStore((state) => state.project);
   const selectedSlot = useProjectStore((state) => state.selectedSlot);
   const setSlotCharacter = useProjectStore((state) => state.setSlotCharacter);
   const updateCharacterState = useProjectStore((state) => state.updateCharacterState);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
-  const slots = stageAtCue(firstScene(project), selectedCueId);
-  const characterId = slots[selectedSlot - 1];
+  const projection = projectCueState(project, selectedCueId);
+  const characterId = projection.afterCue.slots[selectedSlot - 1];
   const character = project.characters.find((item) => item.character_id === characterId);
-  const stateEvent = [...cue.events].reverse().find((event) => event.kind === "enter" && event.slot === selectedSlot);
+  const stateEvent = projection.afterCue.actorStateEvents[selectedSlot - 1];
   const expressionStates = capabilityStatesFor(character, "expression", stateEvent?.expression_id);
   const motionStates = capabilityStatesFor(character, "motion", stateEvent?.motion_id);
   const emoticonStates = capabilityStatesFor(character, "emoticon", stateEvent?.emoticon_id);
@@ -447,10 +445,12 @@ function CharacterInspector({ cue }: { cue: Cue }) {
   );
 }
 
-function DialogueInspector({ cue }: { cue: Cue }) {
+function DialogueInspector() {
   const project = useProjectStore((state) => state.project);
+  const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const updateDialogue = useProjectStore((state) => state.updateDialogue);
-  const dialogue = cue.events.find((event) => event.kind === "dialogue") || { event_id: "", kind: "dialogue", text: "" };
+  const dialogue = projectCueState(project, selectedCueId).dialogueEvent
+    || { event_id: "", kind: "dialogue", text: "" };
   const auto = dialogue.timing !== "fixed";
   const resolvedDuration = (() => {
     try {
@@ -490,11 +490,13 @@ function DialogueInspector({ cue }: { cue: Cue }) {
   );
 }
 
-function EnvironmentInspector({ cue }: { cue: Cue }) {
+function EnvironmentInspector() {
   const project = useProjectStore((state) => state.project);
+  const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const updateEnvironment = useProjectStore((state) => state.updateEnvironment);
   const addQuickEffect = useProjectStore((state) => state.addQuickEffect);
-  const background = cue.events.find((event) => event.kind === "background");
+  const projection = projectCueState(project, selectedCueId);
+  const background = projection.cueBackgroundEvent || projection.beforeCue.backgroundEvent;
   const transitionId = typeof background?.transition_id === "string"
     ? background.transition_id
     : undefined;
@@ -552,9 +554,9 @@ function SimpleInspector() {
       <div className="inspector-tabs" role="tablist">
         {tabs.map(([value, icon, label]) => <button key={value} type="button" role="tab" aria-selected={tab === value} className={tab === value ? "is-active" : ""} onClick={() => setTab(value)}>{icon}{label}</button>)}
       </div>
-      {tab === "character" && <CharacterInspector cue={cue} />}
-      {tab === "dialogue" && <DialogueInspector cue={cue} />}
-      {tab === "environment" && <EnvironmentInspector cue={cue} />}
+      {tab === "character" && <CharacterInspector />}
+      {tab === "dialogue" && <DialogueInspector />}
+      {tab === "environment" && <EnvironmentInspector />}
       <div className="inspector-footer"><Check />所有修改已写入统一项目</div>
     </aside>
   );

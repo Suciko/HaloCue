@@ -72,6 +72,40 @@ describe("shared dual-mode project store", () => {
       .toBe("event/enter/koyuki");
   });
 
+  it("authors inherited environment changes as a local Cue override", () => {
+    const state = useProjectStore.getState();
+    state.selectCue("cue/conference/002");
+    state.updateEnvironment({ zoom: 1.12 });
+
+    const current = useProjectStore.getState();
+    const cue = firstScene(current.project).cues[1];
+    const background = cue.events.find((event) => event.kind === "background");
+
+    expect(background).toEqual(expect.objectContaining({
+      resource_id: "aa/background/bg_conference_room",
+      zoom: 1.12,
+    }));
+    expect(background?.event_id).not.toBe("event/background/001");
+    expect(buildDescriptor(current.project, current.selectedCueId).background?.resource_id)
+      .toBe("aa/background/bg_conference_room");
+  });
+
+  it("updates the latest local actor state after a character carries into a later Cue", () => {
+    const state = useProjectStore.getState();
+    state.selectCue("cue/conference/002");
+    state.updateCharacterState(1, { expression_id: "expression/smile" });
+    state.updateCharacterState(1, { motion_id: "motion/nod" });
+
+    const cue = firstScene(useProjectStore.getState().project).cues[1];
+    const localStateEvents = cue.events.filter((event) => event.kind === "enter" && event.slot === 1);
+    expect(localStateEvents).toHaveLength(1);
+    expect(localStateEvents[0]).toEqual(expect.objectContaining({
+      character_id: "character/yuuka",
+      expression_id: "expression/smile",
+      motion_id: "motion/nod",
+    }));
+  });
+
   it("inserts quick effects as typed events with stable IDs", () => {
     const state = useProjectStore.getState();
     state.addQuickEffect("halocue.ba:screen-shake");

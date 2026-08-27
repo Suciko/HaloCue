@@ -1,7 +1,7 @@
 import type { CueEvent, HaloCueProject, SceneDescriptor } from "./types";
 import { capabilityRegistry, resolveExpressionAnimation, type CapabilityRegistry } from "./capabilities";
-import { firstScene } from "./projectStore";
-import { isDescriptorRenderable, sceneEventDefinitions } from "./sceneEventRegistry";
+import { projectCueState } from "./cueStateProjection";
+import { sceneEventDefinitions } from "./sceneEventRegistry";
 
 // Kept as a compatibility export for callers that need the complete derived set.
 export const RENDERABLE_EVENT_KINDS = new Set(
@@ -14,36 +14,29 @@ export function buildDescriptor(
   options: { capabilityRegistry?: CapabilityRegistry } = {},
 ): SceneDescriptor {
   const registry = options.capabilityRegistry || capabilityRegistry;
-  const scene = firstScene(project);
-  const selectedIndex = Math.max(0, scene.cues.findIndex((cue) => cue.cue_id === selectedCueId));
-  const allEvents = scene.cues.slice(0, selectedIndex + 1).flatMap((cue) => cue.events);
-  const events = allEvents.filter((event) => isDescriptorRenderable(event.kind));
+  const projection = projectCueState(project, selectedCueId);
+  const { scene } = projection;
+  const events = projection.renderableEvents;
   const characters = new Map(project.characters.map((character) => [character.character_id, character]));
   const resources = new Map(project.resources.map((resource) => [resource.resource_id, resource]));
-  const slots: Array<string | null> = [null, null, null, null, null];
-  let background: Record<string, unknown> | null = null;
-  let initialBackground: Record<string, unknown> | null = null;
+  const backgroundFor = (event: CueEvent | null): Record<string, unknown> | null => {
+    const resource = event?.resource_id ? resources.get(event.resource_id) : undefined;
+    return resource ? {
+      resource_id: resource.resource_id,
+      logical_key: resource.logical_key,
+      aa_key: resource.aa_key,
+      preview_uri: resource.preview_uri,
+      focus_x: resource.focus_x,
+      focus_y: resource.focus_y,
+    } : null;
+  };
+  const background = backgroundFor(projection.afterCue.backgroundEvent);
+  const initialBackgroundEvent = events.find((event) => (
+    event.kind === "background" && event.resource_id && resources.has(event.resource_id)
+  )) || null;
+  const initialBackground = backgroundFor(initialBackgroundEvent);
 
-  for (const event of events) {
-    if (event.kind === "enter" && event.slot) slots[event.slot - 1] = event.character_id || null;
-    if (event.kind === "exit" && event.slot) slots[event.slot - 1] = null;
-    if (event.kind === "background" && event.resource_id) {
-      const resource = resources.get(event.resource_id);
-      if (resource) {
-        background = {
-          resource_id: resource.resource_id,
-          logical_key: resource.logical_key,
-          aa_key: resource.aa_key,
-          preview_uri: resource.preview_uri,
-          focus_x: resource.focus_x,
-          focus_y: resource.focus_y,
-        };
-        if (!initialBackground) initialBackground = structuredClone(background);
-      }
-    }
-  }
-
-  const actors = slots.map((characterId, index) => {
+  const actors = projection.afterCue.slots.map((characterId, index) => {
     const character = characterId ? characters.get(characterId) : undefined;
     if (!character) {
       return { slot: index + 1, character_id: null, display_name: "", state: "hidden" };
@@ -59,11 +52,7 @@ export function buildDescriptor(
       stage_media: character.stage_media,
       state: "visible",
     };
-    const latestState = [...allEvents].reverse().find((event) => (
-      event.kind === "enter"
-      && event.slot === index + 1
-      && event.character_id === characterId
-    ));
+    const latestState = projection.afterCue.actorStateEvents[index];
     for (const key of ["expression_id", "motion_id", "emoticon_id", "focus"]) {
       if (latestState?.[key] !== undefined) actor[key] = latestState[key];
     }

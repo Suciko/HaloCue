@@ -19,6 +19,7 @@ import type {
 } from "./types";
 import { isDescriptorRenderable } from "./sceneEventRegistry";
 import { createSceneEvent } from "./sceneEventFactory";
+import { firstScene, projectSceneAtCue } from "./cueStateProjection";
 
 const clone = <T,>(value: T): T => structuredClone(value);
 
@@ -28,23 +29,10 @@ function localId(prefix: string): string {
 
 export { isProject } from "./projectRepository";
 
-export function firstScene(project: HaloCueProject): Scene {
-  const scene = project.chapters[0]?.scenes[0];
-  if (!scene) throw new Error("项目至少需要一个场景");
-  return scene;
-}
+export { firstScene } from "./cueStateProjection";
 
 export function stageAtCue(scene: Scene, cueId: string): Array<string | null> {
-  const slots: Array<string | null> = [null, null, null, null, null];
-  for (const cue of scene.cues) {
-    for (const event of cue.events) {
-      if ((event.kind === "enter" || event.kind === "exit") && event.slot) {
-        slots[event.slot - 1] = event.kind === "enter" ? event.character_id || null : null;
-      }
-    }
-    if (cue.cue_id === cueId) break;
-  }
-  return slots;
+  return projectSceneAtCue(scene, cueId).afterCue.slots;
 }
 
 export function advancedEventCount(cue: Cue): number {
@@ -161,10 +149,15 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       }
       Object.assign(dialogue, patch);
     }),
-    updateEnvironment: (patch) => commit((_project, cue) => {
+    updateEnvironment: (patch) => commit((_project, cue, scene) => {
       let background = cue.events.find((event) => event.kind === "background");
       if (!background) {
-        background = { event_id: localId("event/background"), kind: "background" };
+        const inherited = projectSceneAtCue(scene, cue.cue_id).beforeCue.backgroundEvent;
+        background = {
+          ...(inherited || {}),
+          event_id: localId("event/background"),
+          kind: "background",
+        };
         cue.events.unshift(background);
       }
       Object.assign(background, patch);
@@ -181,7 +174,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       if (source === target) return;
       const state = get();
       const scene = firstScene(state.project);
-      const slots = stageAtCue(scene, state.selectedCueId);
+      const slots = projectSceneAtCue(scene, state.selectedCueId).afterCue.slots;
       commit((_project, cue) => {
         cue.events = cue.events.filter((event) => !(
           (event.kind === "enter" || event.kind === "exit")
@@ -194,9 +187,10 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       });
     },
     updateCharacterState: (slot, patch) => commit((_project, cue, scene) => {
-      const characterId = stageAtCue(scene, cue.cue_id)[slot - 1];
+      const projection = projectSceneAtCue(scene, cue.cue_id);
+      const characterId = projection.afterCue.slots[slot - 1];
       if (!characterId) return;
-      let enter = cue.events.find((event) => event.kind === "enter" && event.slot === slot);
+      let enter = [...cue.events].reverse().find((event) => event.kind === "enter" && event.slot === slot);
       if (!enter) {
         enter = { event_id: localId("event/enter"), kind: "enter", slot, character_id: characterId };
         cue.events.unshift(enter);
