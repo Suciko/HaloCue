@@ -110,6 +110,10 @@ describe("simple Inspector tabs", () => {
   });
 
   it("associates the active Inspector tab with its property panel", () => {
+    const context = container.querySelector<HTMLElement>("[data-simple-cue-context]");
+    expect(context?.id).toBe("simple-inspector-cue-context");
+    const tablist = container.querySelector<HTMLElement>('.inspector-tabs[role="tablist"]');
+    expect(tablist?.getAttribute("aria-describedby")).toBe(context?.id);
     const activeTab = container.querySelector<HTMLButtonElement>(
       '.inspector-tabs [role="tab"][aria-selected="true"]',
     );
@@ -119,6 +123,7 @@ describe("simple Inspector tabs", () => {
     const panel = panelId ? container.querySelector<HTMLElement>(`#${panelId}`) : null;
     expect(panel?.getAttribute("role")).toBe("tabpanel");
     expect(panel?.getAttribute("aria-labelledby")).toBe(activeTab?.id);
+    expect(panel?.getAttribute("aria-describedby")).toBe(context?.id);
     expect(panel?.getAttribute("data-simple-inspector-panel")).toBe("true");
   });
 });

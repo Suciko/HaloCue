@@ -1293,14 +1293,24 @@ function SimpleInspector() {
           <CircleGauge />
           <span>
             <strong>当前演出</strong>
-            <small data-simple-cue-context aria-live="polite" aria-atomic="true">
+            <small
+              id="simple-inspector-cue-context"
+              data-simple-cue-context
+              aria-live="polite"
+              aria-atomic="true"
+            >
               {cue.title || "未命名演出"} · F{cueRange.start_frame}-{cueRange.end_frame}
             </small>
           </span>
         </span>
         <IconButton label="更多设置"><MoreHorizontal /></IconButton>
       </div>
-      <div className="inspector-tabs" role="tablist" aria-label="当前演出属性">
+      <div
+        className="inspector-tabs"
+        role="tablist"
+        aria-label="当前演出属性"
+        aria-describedby="simple-inspector-cue-context"
+      >
         {tabs.map(([value, icon, label], index) => <button
           ref={(element) => {
             if (element) tabRefs.current[value] = element;
@@ -1323,6 +1333,7 @@ function SimpleInspector() {
         className="simple-inspector-panel"
         role="tabpanel"
         aria-labelledby={`simple-inspector-tab-${tab}`}
+        aria-describedby="simple-inspector-cue-context"
         data-simple-inspector-panel="true"
         tabIndex={0}
       >
