@@ -40,6 +40,8 @@ resources.
 - Full editor: `npm test -- --run` -> **30 files, 161 tests passed**.
 - Build: `npm run build` -> passed with the known external preview-font URL
   warning.
+- Full Python: `python -m pytest -q` -> **2200 passed, 14 skipped in
+  709.16s**.
 - Browser narrow (390x844): DOM inspection confirmed identical context,
   tablist, and panel references; body width remained exactly 390px. Screenshot:
   `output/playwright/simple-inspector-described-context-narrow.png`.
@@ -55,7 +57,7 @@ and was verified independently of preview pixels.
 
 ## Next bounded slice
 
-Run the full Python regression required by the release gate, then choose the
-next Studio-informed tracer from the long-term plan. Prefer an editor-state
-selection/preview behavior or a bounded professional-workspace refinement;
-keep absolute clip starts, audio tracks, and theme migration separate.
+Choose the next Studio-informed tracer from the long-term plan. Prefer an
+editor-state selection/preview behavior or a bounded professional-workspace
+refinement; keep absolute clip starts, audio tracks, and theme migration
+separate.
