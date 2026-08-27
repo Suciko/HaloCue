@@ -82,6 +82,44 @@ def test_non_finite_duration_is_rejected():
     assert any(item["code"] == "project.invalid_duration" for item in validate_project(project))
 
 
+def test_validation_rejects_invalid_wait_flags_and_unsupported_non_blocking_events():
+    project = _json(MODEL_ROOT / "example.synthetic.json")
+    events = project["chapters"][0]["scenes"][0]["cues"][0]["events"]
+    events.extend(
+        [
+            {
+                "event_id": "event/invalid-wait",
+                "kind": "character-motion",
+                "character_id": "character/alice",
+                "slot": 1,
+                "wait_for_completion": "false",
+            },
+            {
+                "event_id": "event/parallel-dialogue",
+                "kind": "dialogue",
+                "character_id": "character/alice",
+                "text": "并行对白",
+                "wait_for_completion": False,
+            },
+        ]
+    )
+
+    diagnostics = validate_project(project)
+
+    assert {
+        "code": "project.invalid_wait_for_completion",
+        "severity": "error",
+        "path": "chapters[0].scenes[0].cues[0].events[3].wait_for_completion",
+        "message": "wait_for_completion must be a boolean",
+    } in diagnostics
+    assert {
+        "code": "project.unsupported_non_blocking_event",
+        "severity": "error",
+        "path": "chapters[0].scenes[0].cues[0].events[4].wait_for_completion",
+        "message": "event kind 'dialogue' does not support non-blocking timing",
+    } in diagnostics
+
+
 def test_preview_intent_contract_accepts_an_explicit_event_playhead_target():
     schema = _json(
         ROOT / "packages" / "contracts" / "preview-intent" / "1.0.schema.json"

@@ -264,6 +264,7 @@ function applyCharacterMotionPatch(
     slot,
     character_id: characterId,
     motion_id: normalizedMotionId,
+    wait_for_completion: true,
   };
   const lastPlacementIndex = cue.events.reduce((found, event, index) => (
     event.kind === "enter" && event.slot === slot ? index : found

@@ -1128,6 +1128,20 @@ function ProfessionalEventFields({
           </select>
         </Field>;
       }
+      if (field.control === "boolean") {
+        return <Field key={field.key} label={field.label} hint={field.hint}>
+          <span className="boolean-field">
+            <input
+              type="checkbox"
+              checked={value !== false}
+              onChange={(change) => updateEvent(event.event_id, {
+                [field.key]: change.target.checked,
+              })}
+            />
+            <span>{value !== false ? "顺序执行" : "与后续事件并行"}</span>
+          </span>
+        </Field>;
+      }
       if (field.control === "background") {
         return <Field key={field.key} label={field.label} hint={field.hint}>
           <select value={String(value || "")} onChange={(change) => updateEvent(event.event_id, { resource_id: change.target.value || undefined })}>

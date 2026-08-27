@@ -1,4 +1,4 @@
-import { isDescriptorRenderable } from "./sceneEventRegistry";
+import { isDescriptorRenderable, supportsNonBlocking } from "./sceneEventRegistry";
 import type { HaloCueProject } from "./types";
 
 export const LEGACY_PROJECT_SCHEMA_VERSION = "halocue-project/1.0" as const;
@@ -312,6 +312,19 @@ export function diagnoseProject(value: unknown): ProjectDiagnostic[] {
         if (typeof duration !== "number" || !Number.isFinite(duration) || duration <= 0) {
           diagnostics.push(diagnostic("project.invalid_duration", `${record.path}.duration_ms`, "duration_ms must be a finite positive number"));
         }
+      }
+      if (entity.wait_for_completion !== undefined && typeof entity.wait_for_completion !== "boolean") {
+        diagnostics.push(diagnostic(
+          "project.invalid_wait_for_completion",
+          `${record.path}.wait_for_completion`,
+          "wait_for_completion must be a boolean",
+        ));
+      } else if (entity.wait_for_completion === false && !supportsNonBlocking(eventKind)) {
+        diagnostics.push(diagnostic(
+          "project.unsupported_non_blocking_event",
+          `${record.path}.wait_for_completion`,
+          `event kind ${String(eventKind)} does not support non-blocking timing`,
+        ));
       }
     }
   }

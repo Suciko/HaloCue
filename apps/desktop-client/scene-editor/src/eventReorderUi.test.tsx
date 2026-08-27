@@ -393,6 +393,7 @@ describe("professional event list interactions", () => {
       slot: 1,
       character_id: "character/yuuka",
       motion_id: "motion/nod",
+      wait_for_completion: true,
     }));
     expect(state.selectedEventId).toBe(event?.event_id);
     expect(events.indexOf(event!)).toBeGreaterThan(
@@ -405,6 +406,15 @@ describe("professional event list interactions", () => {
     expect(Array.from(motionSelect?.options || []).map((option) => option.textContent))
       .toContain("点头");
     expect(Array.from(motionSelect?.options || []).some((option) => option.value === "motion/idle"))
+      .toBe(false);
+
+    const waitToggle = Array.from(container.querySelectorAll<HTMLLabelElement>("label.field"))
+      .find((label) => label.textContent?.includes("等待动作完成"))
+      ?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(waitToggle?.checked).toBe(true);
+    act(() => waitToggle?.click());
+    expect(firstScene(useProjectStore.getState().project).cues[0].events
+      .find((item) => item.event_id === event?.event_id)?.wait_for_completion)
       .toBe(false);
   });
 });

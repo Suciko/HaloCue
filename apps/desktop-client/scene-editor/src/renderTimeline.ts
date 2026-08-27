@@ -1,7 +1,7 @@
 import type { CueEvent, RenderTimeline, RenderTimelineEvent, SceneDescriptor } from "./types";
-import { durationMs, isTimelineSupported } from "./sceneEventRegistry";
+import { durationMs, isTimelineSupported, supportsNonBlocking } from "./sceneEventRegistry";
 
-export const TIMELINE_SCHEMA_VERSION = "render-timeline/1.1" as const;
+export const TIMELINE_SCHEMA_VERSION = "render-timeline/1.2" as const;
 export const DEFAULT_FRAME_RATE = 30;
 
 function clone<T>(value: T): T {
@@ -34,6 +34,7 @@ export function buildRenderTimeline(
   const fps = requireFrameRate(frameRate);
   const seenIds = new Set<string>();
   let cursor = 0;
+  let totalFrames = 0;
   const events = descriptor.events.map((source, index): RenderTimelineEvent => {
     const eventId = typeof source.event_id === "string" ? source.event_id.trim() : "";
     if (!eventId) throw new Error(`event ${index} must have a non-empty event_id`);
@@ -42,8 +43,12 @@ export function buildRenderTimeline(
     if (!isTimelineSupported(source.kind)) {
       throw new RangeError(`unsupported render event kind ${String(source.kind)}`);
     }
+    if (source.wait_for_completion === false && !supportsNonBlocking(source.kind)) {
+      throw new RangeError(`event kind ${String(source.kind)} does not support non-blocking timing`);
+    }
     const durationMs = eventDurationMs(source);
     const durationFrames = Math.max(1, Math.ceil(durationMs * fps / 1000));
+    const waitForCompletion = source.wait_for_completion !== false;
     const item: RenderTimelineEvent = {
       event_id: eventId,
       kind: source.kind,
@@ -51,9 +56,11 @@ export function buildRenderTimeline(
       end_frame: cursor + durationFrames,
       duration_frames: durationFrames,
       duration_ms: durationMs,
+      wait_for_completion: waitForCompletion,
       event: clone(source),
     };
-    cursor = item.end_frame;
+    if (waitForCompletion) cursor = item.end_frame;
+    totalFrames = Math.max(totalFrames, item.end_frame);
     return item;
   });
   return {
@@ -61,6 +68,6 @@ export function buildRenderTimeline(
     frame_rate: fps,
     scene_id: descriptor.scene_id ?? null,
     events,
-    total_frames: cursor,
+    total_frames: totalFrames,
   };
 }

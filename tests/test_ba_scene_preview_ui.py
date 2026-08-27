@@ -62,7 +62,7 @@ def test_official_p69_descriptor_locks_reference_frame_and_stage_media():
     assert descriptor["schema_version"] == "scene-descriptor/1.0"
     reference = descriptor["presentation"]["reference_frame"]
     assert reference["id"] == "official-p69-final-v9"
-    assert reference["timeline_schema_version"] == "render-timeline/1.1"
+    assert reference["timeline_schema_version"] == "render-timeline/1.2"
     assert reference["viewport"] == {"width": 1280, "height": 720}
     assert reference["design_canvas"] == {"width": 2560, "height": 1440}
     assert reference["target_event_index"] == 0
@@ -325,7 +325,7 @@ def test_reference_query_seeks_the_completed_p69_frame_without_clicks():
             assert metrics == {
                 "frame": metrics["expectedFrame"],
                 "expectedFrame": metrics["expectedFrame"],
-                "schema": "render-timeline/1.1",
+                "schema": "render-timeline/1.2",
                 "playback": "paused",
             }
             assert page.locator("#dialogue-copy").inner_text() == "哈？你们这是什么反应？"
@@ -815,7 +815,7 @@ def test_nod_performance_is_seekable_in_deterministic_capture_mode():
                     };
                 }"""
             )
-            assert sampled["schema"] == "scene-performance/1.3"
+            assert sampled["schema"] == "scene-performance/1.4"
             assert sampled["kinds"] == ["numeric-keyframes", "numeric-keyframes"]
             assert sampled["channels"] == ["layout.offset-y", "presentation.rotation"]
             assert sampled["offsetY"] > 3.9
@@ -849,6 +849,100 @@ def test_nod_performance_is_seekable_in_deterministic_capture_mode():
                 """() => document.querySelector('#preview-stage').dataset.playback === 'paused'"""
             )
             assert int(page.locator("#preview-stage").get_attribute("data-current-frame")) == stop_frame
+            browser.close()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+@pytest.mark.browser
+def test_non_blocking_motion_remains_visible_while_dialogue_is_primary():
+    playwright = pytest.importorskip("playwright.sync_api")
+    server, thread = _serve_preview()
+    visible = {
+        "slot": 1,
+        "character_id": "character/alice",
+        "display_name": "爱丽丝",
+        "dialogue_name": "爱丽丝",
+        "state": "visible",
+    }
+    hidden = [
+        {"slot": slot, "character_id": None, "display_name": "", "state": "hidden"}
+        for slot in range(2, 6)
+    ]
+    descriptor = {
+        "schema_version": "scene-descriptor/1.0",
+        "scene_id": "scene/overlap-motion-dialogue",
+        "presentation": {"frame_rate": 30},
+        "actors": [visible, *hidden],
+        "initial_actors": [visible, *hidden],
+        "events": [
+            {
+                "event_id": "event/alice-nod",
+                "kind": "character-motion",
+                "character_id": "character/alice",
+                "slot": 1,
+                "motion_id": "motion/nod",
+                "duration_ms": 500,
+                "wait_for_completion": False,
+            },
+            {
+                "event_id": "event/alice-line",
+                "kind": "dialogue",
+                "character_id": "character/alice",
+                "text": "动作和对白同时发生。",
+                "duration_ms": 500,
+            },
+        ],
+    }
+    try:
+        with playwright.sync_playwright() as runtime:
+            try:
+                browser = runtime.chromium.launch(headless=True)
+            except Exception as exc:  # pragma: no cover - depends on local browser install
+                if "Executable doesn't exist" in str(exc):
+                    pytest.skip("Playwright Chromium is not installed")
+                raise
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+            page.add_init_script(
+                "window.HALO_CUE_SCENE_DESCRIPTOR = "
+                + json.dumps(descriptor, ensure_ascii=False)
+                + ";"
+            )
+            page.goto(
+                f"http://127.0.0.1:{server.server_port}/index.html"
+                "?renderer=static&capture=1"
+            )
+            page.wait_for_function("() => Boolean(window.HaloCueScenePreview.controller)")
+
+            sampled = page.evaluate(
+                """() => {
+                    const controller = window.HaloCueScenePreview.controller;
+                    const motion = controller.timeline.events[0];
+                    const frame = motion.start_frame
+                      + Math.round((motion.end_frame - motion.start_frame - 1) * 0.32);
+                    const sample = controller.seekFrame(frame);
+                    const actor = document.querySelector('.actor-slot[data-slot="1"]');
+                    return {
+                      starts: controller.timeline.events.map(item => item.start_frame),
+                      waits: controller.timeline.events.map(item => item.wait_for_completion),
+                      primary: sample.item.event_id,
+                      active: sample.activeItems.map(item => item.event_id),
+                      current: document.querySelector('#preview-stage').dataset.currentEvent,
+                      offsetY: Number(actor.dataset.performanceOffsetY),
+                      dialogueVisible: !document.querySelector('.dialogue-panel').classList.contains('is-hidden'),
+                      speaker: document.querySelector('#speaker-name').textContent,
+                    };
+                }"""
+            )
+            assert sampled["starts"] == [0, 0]
+            assert sampled["waits"] == [False, True]
+            assert sampled["primary"] == "event/alice-line"
+            assert sampled["active"] == ["event/alice-nod", "event/alice-line"]
+            assert sampled["current"] == "event/alice-line"
+            assert sampled["offsetY"] > 3.9
+            assert sampled["dialogueVisible"] is True
+            assert sampled["speaker"] == "爱丽丝"
             browser.close()
     finally:
         server.shutdown()

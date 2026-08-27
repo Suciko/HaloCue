@@ -81,4 +81,37 @@ describe("ProjectCodec seam", () => {
       expect.objectContaining({ code: "project.unknown_event_kind", severity: "warning" }),
     ]));
   });
+
+  it("diagnoses invalid wait flags and unsupported non-blocking event kinds", () => {
+    const project = structuredClone(demoProject) as Record<string, any>;
+    const events = project.chapters[0].scenes[0].cues[0].events;
+    events.push({
+      event_id: "event/invalid-wait",
+      kind: "character-motion",
+      character_id: "character/yuuka",
+      slot: 1,
+      wait_for_completion: "false",
+    });
+    events.push({
+      event_id: "event/parallel-dialogue",
+      kind: "dialogue",
+      character_id: "character/yuuka",
+      text: "并行对白",
+      wait_for_completion: false,
+    });
+
+    const diagnostics = diagnoseProject(project);
+    expect(diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "project.invalid_wait_for_completion",
+        path: "chapters[0].scenes[0].cues[0].events[4].wait_for_completion",
+        severity: "error",
+      }),
+      expect.objectContaining({
+        code: "project.unsupported_non_blocking_event",
+        path: "chapters[0].scenes[0].cues[0].events[5].wait_for_completion",
+        severity: "error",
+      }),
+    ]));
+  });
 });

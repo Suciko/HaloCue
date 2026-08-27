@@ -16,7 +16,7 @@ RUNTIME = REPO_ROOT / "apps" / "desktop-client" / "scene-preview" / "aa-runtime.
 EVENT_REGISTRY_RUNTIME = (
     REPO_ROOT / "apps" / "desktop-client" / "scene-preview" / "scene-events-runtime.js"
 )
-TIMELINE_SCHEMA = REPO_ROOT / "packages" / "contracts" / "render-timeline" / "1.1.schema.json"
+TIMELINE_SCHEMA = REPO_ROOT / "packages" / "contracts" / "render-timeline" / "1.2.schema.json"
 if str(MODEL_ROOT) not in sys.path:
     sys.path.insert(0, str(MODEL_ROOT))
 
@@ -56,6 +56,30 @@ def test_timeline_uses_end_exclusive_contiguous_frame_ranges():
         (45, 46),
     ]
     assert timeline["total_frames"] == 46
+
+
+def test_non_blocking_character_motion_overlaps_the_following_event():
+    timeline = build_render_timeline(
+        descriptor(
+            [
+                {
+                    "event_id": "event/nod",
+                    "kind": "character-motion",
+                    "motion_id": "motion/nod",
+                    "duration_ms": 500,
+                    "wait_for_completion": False,
+                },
+                {"event_id": "event/beat", "kind": "wait", "duration_ms": 100},
+            ]
+        ),
+        frame_rate=30,
+    )
+
+    assert [
+        (item["start_frame"], item["end_frame"], item["wait_for_completion"])
+        for item in timeline["events"]
+    ] == [(0, 15, False), (0, 3, True)]
+    assert timeline["total_frames"] == 15
 
 
 def test_dialogue_duration_is_deterministic_and_preserves_source_event():
@@ -148,6 +172,14 @@ def test_browser_runtime_builds_the_same_render_timeline_as_python():
         [
             {"event_id": "event/background", "kind": "background"},
             {"event_id": "event/enter", "kind": "enter", "slot": 3},
+            {
+                "event_id": "event/nod",
+                "kind": "character-motion",
+                "slot": 3,
+                "motion_id": "motion/nod",
+                "duration_ms": 500,
+                "wait_for_completion": False,
+            },
             {"event_id": "event/line", "kind": "dialogue", "text": "你好。\n再见！"},
             {"event_id": "event/shake", "kind": "halocue.ba:screen-shake"},
             {"event_id": "event/text", "kind": "halocue.ba:screen-text", "text": "提示"},
@@ -182,3 +214,51 @@ process.stdin.on('end', () => {
     )
 
     assert json.loads(completed.stdout) == build_render_timeline(source, frame_rate=30)
+
+
+def test_browser_sample_prefers_the_latest_authored_event_during_overlap():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is not installed")
+    source = descriptor(
+        [
+            {
+                "event_id": "event/nod",
+                "kind": "character-motion",
+                "duration_ms": 500,
+                "wait_for_completion": False,
+            },
+            {
+                "event_id": "event/line",
+                "kind": "dialogue",
+                "text": "动作中说话",
+                "duration_ms": 500,
+            },
+        ]
+    )
+    script = r"""
+const fs = require('fs');
+const vm = require('vm');
+const sandbox = {window: {}};
+vm.runInNewContext(fs.readFileSync(process.argv[2], 'utf8'), sandbox);
+vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), sandbox);
+const source = JSON.parse(process.argv[3]);
+const runtime = sandbox.window.HaloCueAARuntime;
+const sample = runtime.sampleRenderTimeline(runtime.buildRenderTimeline(source), 1);
+process.stdout.write(JSON.stringify({
+  item: sample.item?.event_id,
+  active: sample.activeItems.map(item => item.event_id),
+}));
+"""
+    completed = subprocess.run(
+        [node, "-e", script, str(RUNTIME), str(EVENT_REGISTRY_RUNTIME), json.dumps(source)],
+        capture_output=True,
+        check=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert json.loads(completed.stdout) == {
+        "item": "event/line",
+        "active": ["event/nod", "event/line"],
+    }

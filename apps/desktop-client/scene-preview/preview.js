@@ -166,7 +166,7 @@
     if (suppliedTimeline === undefined) {
       return { timeline: expected, source: "derived" };
     }
-    if (!suppliedTimeline || suppliedTimeline.schema_version !== "render-timeline/1.1") {
+    if (!suppliedTimeline || suppliedTimeline.schema_version !== "render-timeline/1.2") {
       throw new Error("unsupported supplied render timeline schema");
     }
     if (JSON.stringify(canonicalJson(suppliedTimeline)) !== JSON.stringify(canonicalJson(expected))) {
@@ -186,7 +186,7 @@
     if (suppliedPerformance === undefined) {
       return { performance: expected, source: "derived" };
     }
-    if (!suppliedPerformance || suppliedPerformance.schema_version !== "scene-performance/1.3") {
+    if (!suppliedPerformance || suppliedPerformance.schema_version !== "scene-performance/1.4") {
       throw new Error("unsupported supplied scene performance schema");
     }
     if (JSON.stringify(canonicalJson(suppliedPerformance)) !== JSON.stringify(canonicalJson(expected))) {

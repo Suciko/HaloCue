@@ -13,8 +13,8 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
-TIMELINE_SCHEMA_VERSION = "render-timeline/1.1"
-PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.3"
+TIMELINE_SCHEMA_VERSION = "render-timeline/1.2"
+PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.4"
 LOCAL_PREVIEW_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
@@ -99,6 +99,7 @@ def _validate_timeline(
         raise SceneFrameRenderError("render timeline event count does not match the descriptor")
 
     cursor = 0
+    total_frames = 0
     for index, (item, source) in enumerate(zip(events, source_events)):
         if not isinstance(item, dict) or not isinstance(source, dict):
             raise SceneFrameRenderError(f"render timeline event {index} is invalid")
@@ -107,22 +108,33 @@ def _validate_timeline(
         duration = _require_int(
             item.get("duration_frames"), f"events[{index}].duration_frames", minimum=1
         )
+        wait_for_completion = item.get("wait_for_completion")
+        if not isinstance(wait_for_completion, bool):
+            raise SceneFrameRenderError(
+                "render timeline wait_for_completion must be a boolean"
+            )
         if start != cursor or end <= start or duration != end - start:
             raise SceneFrameRenderError("render timeline frame ranges must be contiguous and end-exclusive")
         if item.get("event_id") != source.get("event_id") or item.get("event") != source:
             raise SceneFrameRenderError("render timeline event payload does not match the descriptor")
-        cursor = end
+        if wait_for_completion:
+            cursor = end
+        total_frames = max(total_frames, end)
 
-    total_frames = _require_int(timeline.get("total_frames"), "total_frames")
-    if total_frames != cursor or total_frames == 0:
+    declared_total_frames = _require_int(timeline.get("total_frames"), "total_frames")
+    if declared_total_frames != total_frames or total_frames == 0:
         raise SceneFrameRenderError("render timeline must contain at least one complete frame range")
     resolved_frame = _require_int(frame, "frame")
-    if resolved_frame >= total_frames:
-        raise SceneFrameRenderError(f"frame must be between 0 and {total_frames - 1}")
-    item = next(
-        event for event in events
+    if resolved_frame >= declared_total_frames:
+        raise SceneFrameRenderError(f"frame must be between 0 and {declared_total_frames - 1}")
+    active_items = [
+        event
+        for event in events
         if event["start_frame"] <= resolved_frame < event["end_frame"]
-    )
+    ]
+    if not active_items:
+        raise SceneFrameRenderError("render timeline has no active event at the requested frame")
+    item = active_items[-1]
     return frame_rate, item
 
 
@@ -151,7 +163,7 @@ def _validate_performance(
     operation_ids: set[str] = set()
     for index, operation in enumerate(operations):
         if not isinstance(operation, dict) or operation.get("kind") not in {
-            "shake", "numeric-tween"
+            "shake", "numeric-tween", "numeric-keyframes"
         }:
             raise SceneFrameRenderError(f"scene performance operation {index} is invalid")
         operation_id = operation.get("operation_id")
@@ -164,7 +176,7 @@ def _validate_performance(
         end = _require_int(operation.get("end_frame"), f"operations[{index}].end_frame", minimum=1)
         if end <= start or end > timeline["total_frames"]:
             raise SceneFrameRenderError("scene performance operation frame range is invalid")
-        if operation["kind"] == "numeric-tween":
+        if operation["kind"] in {"numeric-tween", "numeric-keyframes"}:
             target = operation.get("target")
             if (
                 not isinstance(target, dict)
@@ -176,10 +188,31 @@ def _validate_performance(
                 or not 1 <= target["slot"] <= 5
             ):
                 raise SceneFrameRenderError("scene performance character target is invalid")
-            if operation.get("channel") not in {
+            channels = {
                 "presentation.opacity", "layout.offset-y", "presentation.scale"
-            }:
+            }
+            if operation["kind"] == "numeric-keyframes":
+                channels.add("presentation.rotation")
+            if operation.get("channel") not in channels:
                 raise SceneFrameRenderError("scene performance tween channel is invalid")
+            if operation["kind"] == "numeric-keyframes":
+                keyframes = operation.get("keyframes")
+                if (
+                    not isinstance(keyframes, list)
+                    or len(keyframes) < 2
+                    or any(
+                        not isinstance(keyframe, dict)
+                        or not isinstance(keyframe.get("offset"), (int, float))
+                        or isinstance(keyframe.get("offset"), bool)
+                        or not 0 <= keyframe["offset"] <= 1
+                        or not isinstance(keyframe.get("value"), (int, float))
+                        or isinstance(keyframe.get("value"), bool)
+                        for keyframe in keyframes
+                    )
+                    or operation.get("easing")
+                    not in {"ease-in-out-strong", "ease-out-emphasized"}
+                ):
+                    raise SceneFrameRenderError("scene performance keyframes are invalid")
 
     mapped_operation_ids: set[str] = set()
     mapped_source_ids: set[str] = set()

@@ -230,6 +230,7 @@
     const frameRate = requireFrameRate(options?.frameRate ?? DEFAULT_FRAME_RATE);
     const seenIds = new Set();
     let cursor = 0;
+    let totalFrames = 0;
     const events = descriptor.events.map((source, index) => {
       if (!source || typeof source !== "object" || Array.isArray(source)) {
         throw new TypeError(`event ${index} must be an object`);
@@ -241,11 +242,16 @@
       if (!EVENT_REGISTRY || !EVENT_REGISTRY.isTimelineSupported(source.kind)) {
         throw new RangeError(`unsupported render event kind ${String(source.kind)}`);
       }
+      if (source.wait_for_completion === false && !EVENT_REGISTRY.supportsNonBlocking(source.kind)) {
+        throw new RangeError(`event kind ${String(source.kind)} does not support non-blocking timing`);
+      }
       const durationMs = eventDurationMs(source);
       const durationFrames = Math.max(1, Math.ceil(durationMs * frameRate / 1000));
       const startFrame = cursor;
       const endFrame = startFrame + durationFrames;
-      cursor = endFrame;
+      const waitForCompletion = source.wait_for_completion !== false;
+      if (waitForCompletion) cursor = endFrame;
+      totalFrames = Math.max(totalFrames, endFrame);
       return {
         event_id: eventId,
         kind: source.kind,
@@ -253,39 +259,50 @@
         end_frame: endFrame,
         duration_frames: durationFrames,
         duration_ms: durationMs,
+        wait_for_completion: waitForCompletion,
         event: JSON.parse(JSON.stringify(source)),
       };
     });
     return {
-      schema_version: "render-timeline/1.1",
+      schema_version: "render-timeline/1.2",
       frame_rate: frameRate,
       scene_id: descriptor.scene_id ?? null,
       events,
-      total_frames: cursor,
+      total_frames: totalFrames,
     };
   }
 
   function sampleRenderTimeline(timeline, frame) {
-    if (!timeline || timeline.schema_version !== "render-timeline/1.1") {
+    if (!timeline || timeline.schema_version !== "render-timeline/1.2") {
       throw new Error("unsupported render timeline schema");
     }
     if (!timeline.total_frames || !timeline.events.length) {
-      return { frame: 0, eventIndex: -1, item: null, localFrame: 0, localMs: 0, progress: 0 };
+      return {
+        frame: 0,
+        eventIndex: -1,
+        item: null,
+        activeItems: [],
+        localFrame: 0,
+        localMs: 0,
+        progress: 0,
+      };
     }
     const requested = Number.isFinite(Number(frame)) ? Math.floor(Number(frame)) : 0;
     const resolvedFrame = Math.max(0, Math.min(timeline.total_frames - 1, requested));
-    const eventIndex = timeline.events.findIndex((item) => (
+    const activeItems = timeline.events.filter((item) => (
       resolvedFrame >= item.start_frame && resolvedFrame < item.end_frame
     ));
-    const item = timeline.events[eventIndex];
-    const localFrame = resolvedFrame - item.start_frame;
+    const item = activeItems.at(-1) || null;
+    const eventIndex = item ? timeline.events.indexOf(item) : -1;
+    const localFrame = item ? resolvedFrame - item.start_frame : 0;
     return {
       frame: resolvedFrame,
       eventIndex,
       item,
+      activeItems,
       localFrame,
       localMs: localFrame * 1000 / timeline.frame_rate,
-      progress: item.duration_frames <= 1 ? 1 : localFrame / (item.duration_frames - 1),
+      progress: !item || item.duration_frames <= 1 ? 1 : localFrame / (item.duration_frames - 1),
     };
   }
 

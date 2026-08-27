@@ -1,10 +1,11 @@
-import rawManifest from "../../../../packages/contracts/scene-events/1.1.json";
+import rawManifest from "../../../../packages/contracts/scene-events/1.2.json";
 
 export type SceneEventDefinition = {
   kind: string;
   descriptor_renderable: boolean;
   timeline_supported: boolean;
   visual_only: boolean;
+  supports_non_blocking: boolean;
   duration_policy: "fixed" | "dialogue-aa-v1";
   default_duration_ms: number | null;
   simple_action: string | null;
@@ -18,7 +19,7 @@ export type SceneEventDurationInput = {
 };
 
 type SceneEventManifest = {
-  schema_version: "scene-events/1.1";
+  schema_version: "scene-events/1.2";
   events: SceneEventDefinition[];
 };
 
@@ -28,6 +29,7 @@ export type SceneEventRegistry = {
   isTimelineSupported: (kind: unknown) => boolean;
   isDescriptorRenderable: (kind: unknown) => boolean;
   isVisualOnly: (kind: unknown) => boolean;
+  supportsNonBlocking: (kind: unknown) => boolean;
   durationMs: (event: SceneEventDurationInput) => number;
 };
 
@@ -41,7 +43,7 @@ function validateManifest(value: unknown): SceneEventManifest {
   if (!value || typeof value !== "object") throw new Error("scene event manifest must be an object");
   const manifest = value as Partial<SceneEventManifest>;
   if (
-    manifest.schema_version !== "scene-events/1.1"
+    manifest.schema_version !== "scene-events/1.2"
     || !Array.isArray(manifest.events)
     || manifest.events.length === 0
   ) {
@@ -59,6 +61,7 @@ function validateManifest(value: unknown): SceneEventManifest {
       typeof event.descriptor_renderable !== "boolean"
       || typeof event.timeline_supported !== "boolean"
       || typeof event.visual_only !== "boolean"
+      || typeof event.supports_non_blocking !== "boolean"
       || typeof event.editor_label !== "string"
       || !event.editor_label.trim()
       || (event.simple_action !== null && typeof event.simple_action !== "string")
@@ -100,6 +103,7 @@ export function createSceneEventRegistry(value: unknown = rawManifest): SceneEve
     isTimelineSupported: (kind) => Boolean(definition(kind)?.timeline_supported),
     isDescriptorRenderable: (kind) => Boolean(definition(kind)?.descriptor_renderable),
     isVisualOnly: (kind) => Boolean(definition(kind)?.visual_only),
+    supportsNonBlocking: (kind) => Boolean(definition(kind)?.supports_non_blocking),
     durationMs: (event) => {
       const definitionValue = definition(event.kind);
       if (!definitionValue?.timeline_supported) {
@@ -124,4 +128,5 @@ export const definition = sceneEventRegistry.definition;
 export const isTimelineSupported = sceneEventRegistry.isTimelineSupported;
 export const isDescriptorRenderable = sceneEventRegistry.isDescriptorRenderable;
 export const isVisualOnly = sceneEventRegistry.isVisualOnly;
+export const supportsNonBlocking = sceneEventRegistry.supportsNonBlocking;
 export const durationMs = sceneEventRegistry.durationMs;

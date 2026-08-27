@@ -27,7 +27,7 @@ describe("scene performance compiler", () => {
     const shakeRange = timeline.events[1];
 
     expect(plan).toEqual({
-      schema_version: "scene-performance/1.3",
+      schema_version: "scene-performance/1.4",
       frame_rate: 30,
       scene_id: "scene/performance",
       total_frames: timeline.total_frames,

@@ -10,7 +10,7 @@ from scene_performance import build_scene_performance
 from scene_events import scene_event_registry
 
 
-SCENE_EVALUATION_SCHEMA_VERSION = "scene-evaluation/1.4"
+SCENE_EVALUATION_SCHEMA_VERSION = "scene-evaluation/1.5"
 
 
 def _character_motion_diagnostics(descriptor: dict[str, Any]) -> list[dict[str, str]]:

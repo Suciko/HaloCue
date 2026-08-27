@@ -182,6 +182,42 @@ def test_offline_renderer_repeats_one_frame_and_handles_a_second_scene(
 
 
 @pytest.mark.browser
+def test_offline_renderer_accepts_overlapping_timeline_and_uses_latest_active_event(
+    browser,
+    preview_url,
+    tmp_path,
+):
+    descriptor = _descriptor("example")
+    descriptor["events"].insert(
+        2,
+        {
+            "event_id": "event/alice-nod",
+            "kind": "character-motion",
+            "character_id": "character/alice",
+            "slot": 3,
+            "motion_id": "motion/nod",
+            "duration_ms": 500,
+            "wait_for_completion": False,
+        },
+    )
+    timeline = build_render_timeline(descriptor)
+    performance = build_scene_performance(descriptor, timeline)
+
+    result = render_scene_frame(
+        preview_url=preview_url,
+        descriptor=descriptor,
+        timeline=timeline,
+        performance=performance,
+        frame=timeline["events"][2]["start_frame"],
+        output_path=tmp_path / "overlap.png",
+        renderer="static",
+        browser=browser,
+    )
+
+    assert result.event_id == "event/alice-line"
+
+
+@pytest.mark.browser
 def test_reused_page_renders_resumable_sequence_and_silent_mp4(
     browser,
     preview_url,
@@ -395,7 +431,7 @@ def test_compiled_screen_shake_has_deterministic_exported_intermediate_frames(
     ]
 
     assert performance["source_map"][0]["source_event_id"] == "event/shake"
-    assert results[0].performance_schema_version == "scene-performance/1.3"
+    assert results[0].performance_schema_version == "scene-performance/1.4"
     assert results[0].sha256 == results[2].sha256
     assert results[1].sha256 != results[0].sha256
 

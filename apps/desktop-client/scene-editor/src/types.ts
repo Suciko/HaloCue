@@ -89,6 +89,7 @@ export type CueEvent = {
   text?: string;
   display_name?: string;
   duration_ms?: number;
+  wait_for_completion?: boolean;
   expression_id?: string;
   motion_id?: string;
   emoticon_id?: string;
@@ -146,11 +147,12 @@ export type RenderTimelineEvent = {
   end_frame: number;
   duration_frames: number;
   duration_ms: number;
+  wait_for_completion: boolean;
   event: CueEvent;
 };
 
 export type RenderTimeline = {
-  schema_version: "render-timeline/1.1";
+  schema_version: "render-timeline/1.2";
   frame_rate: number;
   scene_id: string | null;
   events: RenderTimelineEvent[];
@@ -223,7 +225,7 @@ export type PerformanceSourceMapEntry = {
 };
 
 export type ScenePerformancePlan = {
-  schema_version: "scene-performance/1.3";
+  schema_version: "scene-performance/1.4";
   frame_rate: number;
   scene_id: string | null;
   total_frames: number;
@@ -276,7 +278,7 @@ export type EvaluationDiagnostic = {
 };
 
 export type SceneEvaluation = {
-  schema_version: "scene-evaluation/1.4";
+  schema_version: "scene-evaluation/1.5";
   scene_id: string;
   descriptor: SceneDescriptor;
   timeline: RenderTimeline;

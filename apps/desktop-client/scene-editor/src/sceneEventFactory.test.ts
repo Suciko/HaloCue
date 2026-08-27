@@ -35,6 +35,7 @@ describe("scene event factory", () => {
       slot: 3,
       character_id: "character/koyuki",
       motion_id: "motion/nod",
+      wait_for_completion: true,
     });
   });
 

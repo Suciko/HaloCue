@@ -11,7 +11,7 @@ import math
 from typing import Any
 from uuid import UUID, uuid5
 
-from scene_events import RENDERABLE_EVENT_KINDS
+from scene_events import RENDERABLE_EVENT_KINDS, scene_event_registry
 
 
 LEGACY_PROJECT_SCHEMA_VERSION = "halocue-project/1.0"
@@ -277,6 +277,26 @@ def validate_project(project: Any) -> list[dict[str, str]]:
                         "duration_ms must be a finite positive number",
                     )
                 )
+        if entity_kind == "event" and "wait_for_completion" in entity:
+            wait_for_completion = entity.get("wait_for_completion")
+            if not isinstance(wait_for_completion, bool):
+                diagnostics.append(
+                    _diagnostic(
+                        "project.invalid_wait_for_completion",
+                        f"{path}.wait_for_completion",
+                        "wait_for_completion must be a boolean",
+                    )
+                )
+            elif wait_for_completion is False and not scene_event_registry.supports_non_blocking(
+                entity.get("kind")
+            ):
+                diagnostics.append(
+                    _diagnostic(
+                        "project.unsupported_non_blocking_event",
+                        f"{path}.wait_for_completion",
+                        f"event kind {entity.get('kind')!r} does not support non-blocking timing",
+                    )
+                )
 
     for chapter_index, chapter in enumerate(project.get("chapters", [])):
         if not isinstance(chapter, dict):
@@ -410,6 +430,7 @@ def build_aa_scene_descriptor(project: dict[str, Any], scene_id: str) -> dict[st
             "text",
             "slot",
             "duration_ms",
+            "wait_for_completion",
             "expression_id",
             "motion_id",
             "emoticon_id",

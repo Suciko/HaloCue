@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Any
 
 
-MANIFEST_PATH = Path(__file__).resolve().parents[1] / "contracts" / "scene-events" / "1.1.json"
-MANIFEST_SCHEMA_VERSION = "scene-events/1.1"
+MANIFEST_PATH = Path(__file__).resolve().parents[1] / "contracts" / "scene-events" / "1.2.json"
+MANIFEST_SCHEMA_VERSION = "scene-events/1.2"
 TYPEWRITER_GRAPHEME_MS = 32
 TYPEWRITER_PUNCTUATION_PAUSE_MS = 96
 TYPEWRITER_NEWLINE_PAUSE_MS = 192
@@ -60,6 +60,7 @@ class JsonSceneEventRegistry:
                 not isinstance(event.get("descriptor_renderable"), bool)
                 or not isinstance(event.get("timeline_supported"), bool)
                 or not isinstance(event.get("visual_only"), bool)
+                or not isinstance(event.get("supports_non_blocking"), bool)
                 or not isinstance(event.get("editor_label"), str)
                 or not event["editor_label"].strip()
                 or (
@@ -107,6 +108,10 @@ class JsonSceneEventRegistry:
     def is_visual_only(self, kind: Any) -> bool:
         item = self._by_kind.get(kind) if isinstance(kind, str) else None
         return bool(item and item.get("visual_only"))
+
+    def supports_non_blocking(self, kind: Any) -> bool:
+        item = self._by_kind.get(kind) if isinstance(kind, str) else None
+        return bool(item and item.get("supports_non_blocking"))
 
     @staticmethod
     def _dialogue_duration_ms(text: Any) -> int:

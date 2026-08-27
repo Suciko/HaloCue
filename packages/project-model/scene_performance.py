@@ -11,7 +11,7 @@ import math
 from typing import Any, Literal
 
 
-PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.3"
+PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.4"
 PERFORMANCE_SAMPLE_SCHEMA_VERSION = "scene-performance-sample/1.0"
 DEFAULT_SHAKE_INTENSITY = 0.35
 SHAKE_FREQUENCY_HZ = 12
@@ -143,7 +143,7 @@ def _sample_keyframes(
 def _validate_inputs(descriptor: dict[str, Any], timeline: dict[str, Any]) -> None:
     if not isinstance(descriptor, dict) or descriptor.get("schema_version") != "scene-descriptor/1.0":
         raise ValueError("unsupported scene descriptor schema")
-    if not isinstance(timeline, dict) or timeline.get("schema_version") != "render-timeline/1.1":
+    if not isinstance(timeline, dict) or timeline.get("schema_version") != "render-timeline/1.2":
         raise ValueError("unsupported render timeline schema")
     if timeline.get("scene_id") != descriptor.get("scene_id"):
         raise ValueError("scene performance timeline scene_id does not match the descriptor")

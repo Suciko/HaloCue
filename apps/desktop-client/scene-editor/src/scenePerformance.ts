@@ -7,7 +7,7 @@ import type {
   ScenePerformanceSample,
 } from "./types";
 
-export const PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.3" as const;
+export const PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.4" as const;
 export const PERFORMANCE_SAMPLE_SCHEMA_VERSION = "scene-performance-sample/1.0" as const;
 export const DEFAULT_SHAKE_INTENSITY = 0.35;
 export const SHAKE_FREQUENCY_HZ = 12;
@@ -64,7 +64,7 @@ function validateInputs(descriptor: SceneDescriptor, timeline: RenderTimeline): 
   if (!descriptor || descriptor.schema_version !== "scene-descriptor/1.0") {
     throw new Error("unsupported scene descriptor schema");
   }
-  if (!timeline || timeline.schema_version !== "render-timeline/1.1") {
+  if (!timeline || timeline.schema_version !== "render-timeline/1.2") {
     throw new Error("unsupported render timeline schema");
   }
   if (timeline.scene_id !== descriptor.scene_id) {

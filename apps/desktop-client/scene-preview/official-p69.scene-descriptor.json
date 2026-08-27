@@ -7,7 +7,7 @@
     "location_mode": "hidden",
     "reference_frame": {
       "id": "official-p69-final-v9",
-      "timeline_schema_version": "render-timeline/1.1",
+      "timeline_schema_version": "render-timeline/1.2",
       "viewport": { "width": 1280, "height": 720 },
       "design_canvas": { "width": 2560, "height": 1440 },
       "target_event_index": 0,

@@ -28,7 +28,11 @@ describe("scene event registry seam", () => {
     expect(sceneEventRegistry.definition("character-motion")).toEqual(expect.objectContaining({
       visual_only: true,
       default_duration_ms: 500,
+      supports_non_blocking: true,
     }));
+    expect(sceneEventDefinitions()
+      .filter((event) => event.kind !== "character-motion")
+      .every((event) => event.supports_non_blocking === false)).toBe(true);
   });
 
   it("drives fixed defaults and the dialogue policy", () => {

@@ -13,7 +13,7 @@ from jsonschema import Draft202012Validator
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_ROOT = ROOT / "packages" / "project-model"
 RUNTIME = ROOT / "apps" / "desktop-client" / "scene-preview" / "scene-performance-runtime.js"
-SCHEMA = ROOT / "packages" / "contracts" / "scene-performance" / "1.3.schema.json"
+SCHEMA = ROOT / "packages" / "contracts" / "scene-performance" / "1.4.schema.json"
 if str(MODEL_ROOT) not in sys.path:
     sys.path.insert(0, str(MODEL_ROOT))
 
@@ -47,7 +47,7 @@ def test_performance_plan_normalizes_shake_and_matches_contract():
     plan = build_scene_performance(descriptor, timeline)
     operation = plan["operations"][0]
 
-    assert plan["schema_version"] == "scene-performance/1.3"
+    assert plan["schema_version"] == "scene-performance/1.4"
     assert operation == {
         "operation_id": "event/shake/operation/shake",
         "source_event_id": "event/shake",

@@ -1,0 +1,15 @@
+{
+  "schema_version": "scene-events/1.2",
+  "events": [
+    { "kind": "background", "descriptor_renderable": true, "timeline_supported": true, "visual_only": true, "supports_non_blocking": false, "duration_policy": "fixed", "default_duration_ms": 500, "simple_action": null, "editor_label": "背景" },
+    { "kind": "dialogue", "descriptor_renderable": true, "timeline_supported": true, "visual_only": false, "supports_non_blocking": false, "duration_policy": "dialogue-aa-v1", "default_duration_ms": null, "simple_action": null, "editor_label": "对白" },
+    { "kind": "enter", "descriptor_renderable": true, "timeline_supported": true, "visual_only": false, "supports_non_blocking": false, "duration_policy": "fixed", "default_duration_ms": 500, "simple_action": null, "editor_label": "角色入场" },
+    { "kind": "exit", "descriptor_renderable": true, "timeline_supported": true, "visual_only": false, "supports_non_blocking": false, "duration_policy": "fixed", "default_duration_ms": 500, "simple_action": null, "editor_label": "角色退场" },
+    { "kind": "character-motion", "descriptor_renderable": true, "timeline_supported": true, "visual_only": true, "supports_non_blocking": true, "duration_policy": "fixed", "default_duration_ms": 500, "simple_action": null, "editor_label": "角色动作" },
+    { "kind": "wait", "descriptor_renderable": true, "timeline_supported": true, "visual_only": true, "supports_non_blocking": false, "duration_policy": "fixed", "default_duration_ms": 1000, "simple_action": null, "editor_label": "等待" },
+    { "kind": "halocue.ba:background-pan", "descriptor_renderable": true, "timeline_supported": true, "visual_only": true, "supports_non_blocking": false, "duration_policy": "fixed", "default_duration_ms": 900, "simple_action": "background-pan", "editor_label": "背景移动" },
+    { "kind": "halocue.ba:screen-shake", "descriptor_renderable": true, "timeline_supported": true, "visual_only": true, "supports_non_blocking": false, "duration_policy": "fixed", "default_duration_ms": 360, "simple_action": "screen-shake", "editor_label": "画面震动" },
+    { "kind": "halocue.ba:screen-text", "descriptor_renderable": true, "timeline_supported": true, "visual_only": true, "supports_non_blocking": false, "duration_policy": "fixed", "default_duration_ms": 1800, "simple_action": "screen-text", "editor_label": "屏幕文字" },
+    { "kind": "halocue.ba:hit-effect", "descriptor_renderable": true, "timeline_supported": true, "visual_only": true, "supports_non_blocking": false, "duration_policy": "fixed", "default_duration_ms": 420, "simple_action": "hit-effect", "editor_label": "中弹效果" }
+  ]
+}

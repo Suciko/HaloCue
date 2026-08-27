@@ -17,7 +17,7 @@ from scene_events import (
 )
 
 
-TIMELINE_SCHEMA_VERSION = "render-timeline/1.1"
+TIMELINE_SCHEMA_VERSION = "render-timeline/1.2"
 DEFAULT_FRAME_RATE = 30
 
 def _require_frame_rate(frame_rate: Any) -> int:
@@ -65,6 +65,7 @@ def build_render_timeline(
     timeline_events: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     cursor = 0
+    total_frames = 0
     for index, source in enumerate(events):
         if not isinstance(source, dict):
             raise ValueError(f"event {index} must be an object")
@@ -77,11 +78,17 @@ def build_render_timeline(
         kind = source.get("kind")
         if kind not in SUPPORTED_EVENT_KINDS:
             raise ValueError(f"unsupported render event kind {kind!r}")
+        if (
+            source.get("wait_for_completion") is False
+            and not scene_event_registry.supports_non_blocking(kind)
+        ):
+            raise ValueError(f"event kind {kind!r} does not support non-blocking timing")
 
         duration_ms = event_duration_ms(source)
         duration_frames = _duration_frames(duration_ms, fps)
         start_frame = cursor
         end_frame = start_frame + duration_frames
+        wait_for_completion = source.get("wait_for_completion") is not False
         timeline_events.append(
             {
                 "event_id": event_id,
@@ -90,15 +97,18 @@ def build_render_timeline(
                 "end_frame": end_frame,
                 "duration_frames": duration_frames,
                 "duration_ms": duration_ms,
+                "wait_for_completion": wait_for_completion,
                 "event": deepcopy(source),
             }
         )
-        cursor = end_frame
+        if wait_for_completion:
+            cursor = end_frame
+        total_frames = max(total_frames, end_frame)
 
     return {
         "schema_version": TIMELINE_SCHEMA_VERSION,
         "frame_rate": fps,
         "scene_id": descriptor.get("scene_id"),
         "events": timeline_events,
-        "total_frames": cursor,
+        "total_frames": total_frames,
     }

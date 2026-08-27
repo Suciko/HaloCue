@@ -27,8 +27,8 @@ def _json(path: Path) -> dict:
 
 
 def test_manifest_schema_and_registry_are_consistent():
-    manifest = _json(ROOT / "packages" / "contracts" / "scene-events" / "1.1.json")
-    schema = _json(ROOT / "packages" / "contracts" / "scene-events" / "1.1.schema.json")
+    manifest = _json(ROOT / "packages" / "contracts" / "scene-events" / "1.2.json")
+    schema = _json(ROOT / "packages" / "contracts" / "scene-events" / "1.2.schema.json")
     Draft202012Validator.check_schema(schema)
     Draft202012Validator(schema).validate(manifest)
     definitions = scene_event_registry.definitions()
@@ -39,7 +39,13 @@ def test_manifest_schema_and_registry_are_consistent():
     assert set(SUPPORTED_EVENT_KINDS) == {
         event["kind"] for event in definitions if event["timeline_supported"]
     }
-    timeline_schema = _json(ROOT / "packages" / "contracts" / "render-timeline" / "1.1.schema.json")
+    assert scene_event_registry.supports_non_blocking("character-motion") is True
+    assert all(
+        not event["supports_non_blocking"]
+        for event in definitions
+        if event["kind"] != "character-motion"
+    )
+    timeline_schema = _json(ROOT / "packages" / "contracts" / "render-timeline" / "1.2.schema.json")
     assert set(timeline_schema["$defs"]["timelineEvent"]["properties"]["kind"]["enum"]) == set(
         SUPPORTED_EVENT_KINDS
     )
@@ -64,7 +70,7 @@ process.stdout.write(JSON.stringify(sandbox.window.HaloCueSceneEventRegistry.man
         text=True,
         encoding="utf-8",
     )
-    manifest = _json(ROOT / "packages" / "contracts" / "scene-events" / "1.1.json")
+    manifest = _json(ROOT / "packages" / "contracts" / "scene-events" / "1.2.json")
     assert json.loads(completed.stdout) == manifest
 
 
