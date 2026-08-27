@@ -316,6 +316,15 @@ The transaction auto-finishes before another command or canonical selection
 change, and failed persistence rolls the trial back. Autosave scheduling and
 preview-compilation coalescing remain separate follow-up slices.
 
+The preview-compilation scheduler is recorded in
+`docs/handoffs/2026-08-27-preview-compilation-coalescing-tracer.md`. Working
+project changes now enter a latest-only 72 ms compilation window, while
+canonical Scene/Cue/mode/event address changes compile immediately. Finishing
+a gesture flushes its final snapshot. Intent-only changes reuse the existing
+Scene Evaluation, and generation-checked timers cannot publish superseded
+snapshots. Independent autosave scheduling remains the next Editor Transaction
+follow-up.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure

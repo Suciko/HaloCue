@@ -48,7 +48,11 @@ import {
 import { projectFileAdapter } from "./projectRepository";
 import { capabilityStatesFor } from "./capabilities";
 import { evaluateScene } from "./sceneEvaluation";
-import { buildPreviewIntent } from "./previewIntent";
+import {
+  compilePreview,
+  PreviewCompilationCoordinator,
+  type PreviewCompilationRequest,
+} from "./previewCompilation";
 import { eventDurationMs } from "./renderTimeline";
 import { projectCueState, sceneById } from "./cueStateProjection";
 import {
@@ -255,24 +259,28 @@ function PreviewFrame() {
   const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const selectedEventId = useProjectStore((state) => state.selectedEventId);
-  const revision = useProjectStore((state) => state.revision);
+  const activeTransaction = useProjectStore((state) => state.activeTransaction);
   const frame = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const controllerRef = useRef<PreviewController | null>(null);
   const mountedEvaluationRef = useRef<SceneEvaluation | null>(null);
-  const evaluation = useMemo(
-    () => evaluateScene(project, selectedCueId, { sceneId: selectedSceneId }),
-    [project, selectedCueId, selectedSceneId, revision],
-  );
-  const intent = useMemo(
-    () => buildPreviewIntent(project, evaluation, {
-      cueId: selectedCueId,
-      kind: mode === "professional" ? "event" : "cue",
-      eventId: mode === "professional" ? selectedEventId : null,
-    }),
-    [evaluation, mode, project, selectedCueId, selectedEventId],
-  );
+  const request = useMemo<PreviewCompilationRequest>(() => ({
+    project,
+    mode,
+    selectedSceneId,
+    selectedCueId,
+    selectedEventId,
+  }), [mode, project, selectedCueId, selectedEventId, selectedSceneId]);
+  const [compilation, setCompilation] = useState(() => compilePreview(request));
+  const coordinatorRef = useRef<PreviewCompilationCoordinator | null>(null);
+  if (!coordinatorRef.current) {
+    coordinatorRef.current = new PreviewCompilationCoordinator(compilation, setCompilation);
+  }
+  const addressRef = useRef({ mode, selectedSceneId, selectedCueId, selectedEventId });
+  const wasTransactionActiveRef = useRef(Boolean(activeTransaction));
+  const evaluation = compilation.evaluation;
+  const intent = compilation.intent;
   const intentRef = useRef(intent);
   intentRef.current = intent;
   const intentLabel = {
@@ -281,6 +289,24 @@ function PreviewFrame() {
     "prior-renderable": "扩展事件前一画面",
     "scene-start": "场景起始画面",
   }[intent.target.resolution];
+
+  useEffect(() => {
+    const previous = addressRef.current;
+    const addressChanged = previous.mode !== mode
+      || previous.selectedSceneId !== selectedSceneId
+      || previous.selectedCueId !== selectedCueId
+      || previous.selectedEventId !== selectedEventId;
+    addressRef.current = { mode, selectedSceneId, selectedCueId, selectedEventId };
+    coordinatorRef.current?.request(request, addressChanged ? "immediate" : "coalesced");
+  }, [mode, request, selectedCueId, selectedEventId, selectedSceneId]);
+
+  useEffect(() => {
+    const active = Boolean(activeTransaction);
+    if (wasTransactionActiveRef.current && !active) {
+      coordinatorRef.current?.flush();
+    }
+    wasTransactionActiveRef.current = active;
+  }, [activeTransaction]);
 
   const mount = () => {
     const previewWindow = frame.current?.contentWindow as PreviewWindow | null;
@@ -305,8 +331,7 @@ function PreviewFrame() {
 
   useEffect(() => {
     setReady(false);
-    const timer = window.setTimeout(mount, 140);
-    return () => window.clearTimeout(timer);
+    mount();
   }, [evaluation]);
 
   useEffect(() => {
@@ -325,6 +350,7 @@ function PreviewFrame() {
   }, [evaluation, intent, ready]);
 
   useEffect(() => () => {
+    coordinatorRef.current?.dispose();
     mountedEvaluationRef.current = null;
     controllerRef.current?.dispose();
   }, []);
