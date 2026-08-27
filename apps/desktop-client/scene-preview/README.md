@@ -35,8 +35,8 @@ The export-safe URL renders the editor tray fully transparent. Append
 `?editor=1` while authoring to reveal the AUTO/MENU switches; the descriptor
 still decides whether either button appears inside the video frame.
 
-The preview controller consumes the deterministic `render-timeline/1.0` and
-`scene-performance/1.2` contracts. `window.HaloCueScenePreview.controller`
+The preview controller consumes the deterministic `render-timeline/1.1` and
+`scene-performance/1.3` contracts. `window.HaloCueScenePreview.controller`
 exposes `applyIntent`, `seekFrame`, `seekEvent`, `seekReference`, `play`,
 `pause`, and `dispose`. These methods keep
 the browser preview on the same end-exclusive frame ranges used by the Python
@@ -84,6 +84,9 @@ intermediate frames survive capture with browser animations disabled.
 Character enter/exit is sampled from the same plan as opacity, vertical-offset,
 and scale contributions. Skip commits their final state; reduced motion keeps
 the opacity fade while committing positional and scale motion immediately.
+Explicit `motion/nod` and `motion/appear` events use seek-safe numeric
+keyframes. Skip and reduced motion omit those transient contributions, and
+arbitrary seeks restore the actor baseline before applying the addressed frame.
 
 The repository CLI builds the Python timeline and performance plan, injects all
 three contracts into the

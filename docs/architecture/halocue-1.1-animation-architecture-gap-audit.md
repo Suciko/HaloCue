@@ -47,7 +47,7 @@ deterministic performance system.
 - `packages/project-model/scene_evaluation.py`
 - `packages/project-model/render_timeline.py`
 - `packages/contracts/scene-evaluation/1.0.schema.json`
-- `packages/contracts/render-timeline/1.0.schema.json`
+- `packages/contracts/render-timeline/1.1.schema.json`
 - `apps/desktop-client/scene-preview/aa-runtime.js`
 
 ### Problem
@@ -147,7 +147,7 @@ iframe renderer and deterministic capture become Adapters behind this Seam.
 
 ### Files
 
-- `packages/contracts/scene-events/1.0.json`
+- `packages/contracts/scene-events/1.1.json`
 - `apps/desktop-client/scene-editor/src/sceneEventRegistry.ts`
 - `apps/desktop-client/scene-editor/src/eventEditorCatalog.ts`
 - `apps/desktop-client/scene-editor/src/capabilities.ts`
@@ -285,6 +285,15 @@ into seek-safe vertical-offset and rotation keyframes. Browser preview, Python,
 and headless capture now sample the same motion, while skip and reduced-motion
 return to the clean baseline. Other capability motions and CSS-only effects
 remain future slices.
+
+The explicit authoring follow-up is recorded in
+`docs/handoffs/2026-08-27-explicit-character-motion-event.md`. It introduces
+`scene-events/1.1`, `render-timeline/1.1`, `scene-performance/1.3`, and
+`scene-evaluation/1.4`. New motion choices are stored as ordered
+`character-motion` events, invalid occupied-range targets receive stable
+diagnostics, and both `motion/nod` and `motion/appear` are sampled identically
+in TypeScript, Python, browser preview, and deterministic capture. Legacy
+`enter`/`dialogue.motion_id` remains readable for existing projects.
 
 The first Preview Session slice is recorded in
 `docs/handoffs/2026-08-27-preview-session-generation-tracer.md`. It adds an

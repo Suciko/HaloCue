@@ -42,7 +42,7 @@ No AA resource bytes or runtime data are committed here.
 The optional `render` dependency exposes the 1.1 deterministic frame and video
 adapters in `halocue_production.scene_frame_renderer` and
 `halocue_production.scene_video_renderer`. They accept an already validated
-`scene-descriptor/1.0`, `render-timeline/1.0`, and `scene-performance/1.2`, connect only to a localhost
+`scene-descriptor/1.0`, `render-timeline/1.1`, and `scene-performance/1.3`, connect only to a localhost
 preview, and capture atomic 16:9 PNGs. A complete sequence reuses one Chromium
 page, records a resumable `render-sequence/1.1` manifest, and can be encoded as
 a silent H.264/yuv420p MP4 through FFmpeg. Repository entry points are
