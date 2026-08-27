@@ -79,6 +79,7 @@ type EditorState = {
   selectEvent: (eventId: string | null) => void;
   setPreviewPlayheadFrame: (frame: number | null) => void;
   beginTransaction: (key: string) => void;
+  previewDialogue: (key: string, patch: Partial<CueEvent>) => void;
   previewEnvironment: (key: string, patch: Partial<CueEvent>) => void;
   commitTransaction: (key: string) => EditorTransactionResult;
   cancelTransaction: (key: string) => void;
@@ -194,6 +195,15 @@ function applyEnvironmentPatch(
   Object.assign(background, patch);
 }
 
+function applyDialoguePatch(cue: Cue, patch: Partial<CueEvent>): void {
+  let dialogue = cue.events.find((event) => event.kind === "dialogue");
+  if (!dialogue) {
+    dialogue = { event_id: localId("event/dialogue"), kind: "dialogue", text: "" };
+    cue.events.push(dialogue);
+  }
+  Object.assign(dialogue, patch);
+}
+
 export function createProjectStore(repository: ProjectRepository = projectRepository) {
   const initialProject = repository.loadDraft();
   const initial = initialSelection(initialProject);
@@ -240,6 +250,30 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       projectDiagnostics: [...repository.getDiagnostics()],
     });
     return { status: "committed", revision };
+  };
+
+  const previewActiveTransaction = (
+    key: string,
+    mutator: (project: HaloCueProject, cue: Cue, scene: Scene) => void,
+  ): void => {
+    const state = get();
+    const active = state.activeTransaction;
+    if (!active || active.key !== key) {
+      throw new Error(`编辑事务 ${key} 尚未开始`);
+    }
+    if (
+      state.selectedSceneId !== active.base.selectedSceneId
+      || state.selectedCueId !== active.base.selectedCueId
+    ) {
+      throw new Error(`编辑事务 ${key} 的目标选区已改变`);
+    }
+    const project = clone(state.project);
+    const scene = sceneById(project, state.selectedSceneId);
+    const cue = scene.cues.find((item) => item.cue_id === state.selectedCueId);
+    if (!cue) throw new Error(`编辑事务 ${key} 的 Cue 已不存在`);
+    mutator(project, cue, scene);
+    if (sameProject(project, state.project)) return;
+    set({ project, previewRevision: state.previewRevision + 1 });
   };
 
   const commit = (
@@ -386,26 +420,12 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         },
       });
     },
-    previewEnvironment: (key, patch) => {
-      const state = get();
-      const active = state.activeTransaction;
-      if (!active || active.key !== key) {
-        throw new Error(`编辑事务 ${key} 尚未开始`);
-      }
-      if (
-        state.selectedSceneId !== active.base.selectedSceneId
-        || state.selectedCueId !== active.base.selectedCueId
-      ) {
-        throw new Error(`编辑事务 ${key} 的目标选区已改变`);
-      }
-      const project = clone(state.project);
-      const scene = sceneById(project, state.selectedSceneId);
-      const cue = scene.cues.find((item) => item.cue_id === state.selectedCueId);
-      if (!cue) throw new Error(`编辑事务 ${key} 的 Cue 已不存在`);
+    previewDialogue: (key, patch) => previewActiveTransaction(key, (_project, cue) => {
+      applyDialoguePatch(cue, patch);
+    }),
+    previewEnvironment: (key, patch) => previewActiveTransaction(key, (_project, cue, scene) => {
       applyEnvironmentPatch(cue, scene, patch);
-      if (sameProject(project, state.project)) return;
-      set({ project, previewRevision: state.previewRevision + 1 });
-    },
+    }),
     commitTransaction: (key) => commitActiveTransaction(key),
     cancelTransaction: (key) => {
       const state = get();
@@ -423,12 +443,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     retryAutosave: () => autosaveCoordinator.retry(),
     updateProjectTitle: (title) => commit((project) => { project.title = title; }),
     updateDialogue: (patch) => commit((_project, cue) => {
-      let dialogue = cue.events.find((event) => event.kind === "dialogue");
-      if (!dialogue) {
-        dialogue = { event_id: localId("event/dialogue"), kind: "dialogue", text: "" };
-        cue.events.push(dialogue);
-      }
-      Object.assign(dialogue, patch);
+      applyDialoguePatch(cue, patch);
     }),
     updateEnvironment: (patch) => commit((_project, cue, scene) => {
       applyEnvironmentPatch(cue, scene, patch);

@@ -217,6 +217,38 @@ describe("project repository seam", () => {
     });
   });
 
+  it("commits a dialogue composition session as one revision", () => {
+    const repository = new CountingProjectRepository(demoProject);
+    const store = createProjectStore(repository);
+    const key = "dialogue.text:test";
+    const base = structuredClone(store.getState().project);
+    const autosaveBefore = store.getState().autosave;
+
+    store.getState().beginTransaction(key);
+    store.getState().previewDialogue(key, { text: "中" });
+    store.getState().previewDialogue(key, { text: "中文" });
+    store.getState().previewDialogue(key, { text: "中文输入完成" });
+
+    let state = store.getState();
+    expect(state.project.chapters[0].scenes[0].cues[0].events.at(-1)?.text)
+      .toBe("中文输入完成");
+    expect(state.revision).toBe(0);
+    expect(state.history).toEqual([]);
+    expect(state.autosave).toEqual(autosaveBefore);
+    expect(repository.saves).toBe(0);
+
+    expect(state.commitTransaction(key)).toEqual({ status: "committed", revision: 1 });
+    state = store.getState();
+    expect(state.history).toHaveLength(1);
+    expect(state.autosave.pendingRevision).toBe(1);
+    expect(repository.saves).toBe(0);
+    state.flushAutosave();
+    expect(repository.saves).toBe(1);
+
+    state.undo();
+    expect(store.getState().project).toEqual(base);
+  });
+
   it("previews many gesture values but commits one save and one undo entry", () => {
     const repository = new CountingProjectRepository(demoProject);
     const store = createProjectStore(repository);

@@ -38,6 +38,7 @@ import {
 import {
   type ChangeEvent,
   type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useEffect,
   useMemo,
@@ -531,6 +532,51 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
+function TransactionalTextControl({
+  transactionKey,
+  value,
+  placeholder,
+  rows,
+  preview,
+}: {
+  transactionKey: string;
+  value: string;
+  placeholder?: string;
+  rows?: number;
+  preview: (key: string, value: string) => void;
+}) {
+  const beginTransaction = useProjectStore((state) => state.beginTransaction);
+  const commitTransaction = useProjectStore((state) => state.commitTransaction);
+  const cancelTransaction = useProjectStore((state) => state.cancelTransaction);
+  const change = (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    beginTransaction(transactionKey);
+    preview(transactionKey, event.target.value);
+  };
+  const finish = () => {
+    if (useProjectStore.getState().activeTransaction?.key === transactionKey) {
+      commitTransaction(transactionKey);
+    }
+  };
+  const keyDown = (event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    cancelTransaction(transactionKey);
+    event.currentTarget.blur();
+  };
+  const common = {
+    value,
+    placeholder,
+    onFocus: () => beginTransaction(transactionKey),
+    onCompositionStart: () => beginTransaction(transactionKey),
+    onChange: change,
+    onBlur: finish,
+    onKeyDown: keyDown,
+  };
+  return rows
+    ? <textarea {...common} rows={rows} />
+    : <input {...common} />;
+}
+
 function CharacterInspector() {
   const project = useProjectStore((state) => state.project);
   const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
@@ -590,6 +636,7 @@ function DialogueInspector() {
   const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const updateDialogue = useProjectStore((state) => state.updateDialogue);
+  const previewDialogue = useProjectStore((state) => state.previewDialogue);
   const dialogue = projectCueState(project, selectedCueId, { sceneId: selectedSceneId }).dialogueEvent
     || { event_id: "", kind: "dialogue", text: "" };
   const auto = dialogue.timing !== "fixed";
@@ -610,10 +657,21 @@ function DialogueInspector() {
         </select>
       </Field>
       <Field label="显示名称">
-        <input value={String(dialogue.display_name || "")} placeholder="默认使用角色名称" onChange={(event) => updateDialogue({ display_name: event.target.value })} />
+        <TransactionalTextControl
+          transactionKey={`dialogue.display-name:${selectedSceneId}:${selectedCueId}`}
+          value={String(dialogue.display_name || "")}
+          placeholder="默认使用角色名称"
+          preview={(key, value) => previewDialogue(key, { display_name: value })}
+        />
       </Field>
       <Field label="对白">
-        <textarea rows={7} value={dialogue.text || ""} placeholder="输入这一拍的对白…" onChange={(event) => updateDialogue({ text: event.target.value })} />
+        <TransactionalTextControl
+          transactionKey={`dialogue.text:${selectedSceneId}:${selectedCueId}`}
+          rows={7}
+          value={dialogue.text || ""}
+          placeholder="输入这一拍的对白…"
+          preview={(key, value) => previewDialogue(key, { text: value })}
+        />
       </Field>
       <div className="field-grid two">
         <Field label="语音">
@@ -1128,6 +1186,10 @@ export default function App() {
       if (!(event.ctrlKey || event.metaKey)) return;
       if (event.key.toLowerCase() === "s") { event.preventDefault(); save(); }
       if (event.key.toLowerCase() === "z") {
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        const isTextEditing = target?.matches("input, textarea, [contenteditable='true']")
+          && Boolean(useProjectStore.getState().activeTransaction);
+        if (isTextEditing) return;
         event.preventDefault();
         if (event.shiftKey) useProjectStore.getState().redo();
         else useProjectStore.getState().undo();

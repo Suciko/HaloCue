@@ -340,6 +340,14 @@ deterministic animation intermediates through the existing Preview Session,
 without remounting media, mutating project data, appending history, or queuing
 autosave.
 
+The dialogue composition tracer is recorded in
+`docs/handoffs/2026-08-27-dialogue-composition-transaction-tracer.md`. Display
+name and dialogue text now use focus-scoped begin/preview/commit sessions.
+Every IME/input intermediate updates working preview state, while blur creates
+one project revision, one undo entry, and one autosave request. Escape cancels,
+and native text undo is no longer intercepted by the global project shortcut
+during an active text session.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure

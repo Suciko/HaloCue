@@ -57,3 +57,5 @@ motion when those controls become interactive.
 Preview compilation and autosave now have independent revision-aware
 coordinators in later tracer slices. Further work should adopt the gesture
 boundary for additional continuous controls without weakening these semantics.
+The dialogue-composition tracer now applies it to focus-scoped display-name and
+dialogue text editing, including IME intermediate values and native text undo.
