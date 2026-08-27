@@ -126,4 +126,24 @@ describe("professional shot timeline workspace", () => {
     expect(useProjectStore.getState().previewPlayheadFrame).toBe(selected.start_frame);
     expect(useProjectStore.getState().revision).toBe(revision);
   });
+
+  it("shows selected event timing as a read-only timeline projection", () => {
+    const scene = firstScene(useProjectStore.getState().project);
+    const cue = scene.cues[0];
+    const evaluation = evaluateScene(useProjectStore.getState().project, cue.cue_id, { sceneId: scene.scene_id });
+    const selected = evaluation.timeline.events.find((event) => event.event_id === "event/yuuka-nod")!;
+    const shotTab = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]")
+      .values()).find((button) => button.textContent?.includes("镜头时间轴"));
+    act(() => shotTab?.click());
+    const clip = container.querySelector<HTMLButtonElement>('.shot-clip[data-event-id="event/yuuka-nod"]');
+    act(() => clip?.click());
+
+    const timing = container.querySelector<HTMLElement>("[data-event-timing-projection]");
+    expect(timing?.textContent).toContain("Character");
+    expect(timing?.textContent).toContain(`F${selected.start_frame}`);
+    expect(timing?.textContent).toContain(`F${selected.end_frame}`);
+    expect(timing?.textContent).toContain(`${selected.duration_frames} 帧`);
+    expect(timing?.textContent).toContain("与后续事件并行");
+    expect(timing?.querySelector("input, select, textarea, button")).toBeNull();
+  });
 });

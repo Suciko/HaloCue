@@ -25,6 +25,7 @@ import {
   Redo2,
   RotateCcw,
   Save,
+  ScanLine,
   Sparkles,
   Trash2,
   Undo2,
@@ -1541,6 +1542,15 @@ function ProfessionalInspector() {
   ));
   const errorCount = eventDiagnostics.filter((item) => item.severity === "error").length;
   const warningCount = eventDiagnostics.filter((item) => item.severity === "warning").length;
+  const timelineProjection = buildShotTimeline({
+    sceneId: selectedSceneId,
+    cue,
+    timeline: evaluation.timeline,
+  });
+  const timelineTrack = timelineProjection.tracks.find((track) => (
+    track.clips.some((clip) => clip.event_id === event.event_id)
+  ));
+  const timelineClip = timelineTrack?.clips.find((clip) => clip.event_id === event.event_id);
 
   return (
     <aside className="inspector professional-inspector">
@@ -1565,8 +1575,23 @@ function ProfessionalInspector() {
             />
             <span>ms</span>
           </div></Field>
-          <Field label="开始帧"><input className="mono" value="自动" readOnly /></Field>
+          <Field label="开始帧">
+            <output className="derived-field-value mono">{timelineClip ? `F${timelineClip.start_frame}` : "未映射"}</output>
+          </Field>
         </div>
+        {timelineClip && timelineTrack && (
+          <section className="event-timing-projection" data-event-timing-projection aria-label="时间轴投影">
+            <header><span><ScanLine />时间轴投影</span><strong>{timelineTrack.label}</strong></header>
+            <dl>
+              <div><dt>开始</dt><dd>F{timelineClip.start_frame}</dd></div>
+              <div><dt>结束</dt><dd>F{timelineClip.end_frame}</dd></div>
+              <div><dt>帧长</dt><dd>{timelineClip.duration_frames} 帧</dd></div>
+            </dl>
+            <p className={timelineClip.wait_for_completion ? "is-sequential" : "is-parallel"}>
+              {timelineClip.wait_for_completion ? "顺序执行" : "与后续事件并行"}
+            </p>
+          </section>
+        )}
         <details className="advanced-fields" open={!editorDefinition}>
           <summary><ChevronRight />高级字段</summary>
           <div className="property-table">

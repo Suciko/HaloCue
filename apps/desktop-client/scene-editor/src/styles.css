@@ -218,6 +218,18 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .resource-input span { margin-left: auto; color: var(--subtle); }
 .duration-input { display: grid; grid-template-columns: 1fr auto; align-items: center; position: relative; }
 .duration-input span { margin-left: -28px; padding-right: 8px; color: var(--subtle); font-size: 8px; pointer-events: none; }
+.derived-field-value { min-height: 32px; display: flex; align-items: center; padding: 0 9px; border: 1px solid var(--line-soft); border-radius: 5px; background: #141817; color: var(--muted); }
+.event-timing-projection { margin: 2px 0 13px; padding: 10px 0; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+.event-timing-projection header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
+.event-timing-projection header span { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 9px; }
+.event-timing-projection header svg { width: 12px; color: var(--accent); }
+.event-timing-projection header strong { color: #cbd5d1; font-size: 9px; font-weight: 600; }
+.event-timing-projection dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; margin: 0; }
+.event-timing-projection dl > div { min-width: 0; display: grid; gap: 3px; padding: 6px 7px; background: #111514; }
+.event-timing-projection dt { color: var(--subtle); font-size: 8px; }
+.event-timing-projection dd { margin: 0; color: #c9d2ce; font: 9px "Cascadia Code", "Consolas", monospace; }
+.event-timing-projection p { margin: 6px 0 0; padding: 5px 7px; color: var(--muted); background: var(--panel-2); font-size: 8px; }
+.event-timing-projection p.is-parallel { color: var(--warning); background: rgba(239, 199, 109, .08); }
 .range-field { display: grid; grid-template-columns: 1fr 42px; align-items: center; gap: 9px; }
 .range-field input[type="range"] { height: 4px; padding: 0; border: 0; accent-color: var(--accent); }
 .range-field output { height: 26px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 4px; background: #111514; color: var(--muted); font-size: 9px; }
