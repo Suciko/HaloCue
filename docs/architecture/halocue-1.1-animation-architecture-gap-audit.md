@@ -380,6 +380,14 @@ selects its new stable ID, and restores the prior anchor on one-step undo. Empty
 Cues and stale/missing anchors use an explicit append fallback instead of a
 component-local index guess.
 
+The event multi-selection tracer is recorded in
+`docs/handoffs/2026-08-27-event-multiselect-batch-delete-tracer.md`. Professional
+selection now carries an ordered stable-ID set, one primary event for the
+inspector/preview, and a stable range anchor. Ctrl/Cmd toggle and Shift range
+selection remain history-free editor state; deleting the visible selection is
+one validated project revision. Undo restores both the complete event payloads
+and the prior multi-selection snapshot.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure

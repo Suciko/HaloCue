@@ -79,8 +79,8 @@ Insertion is scoped to the currently selected Cue. It does not yet duplicate an
 existing event, insert from the timeline track, or paste a copied event payload.
 Those operations should reuse the same stable insertion intent when added.
 
-The next bounded professional slice should introduce multi-event selection with
-a primary anchor and one atomic batch delete command. Ctrl/Cmd-click should
-toggle stable IDs, Shift-click should select a contiguous range in canonical
-order, the inspector should continue to use the primary event, and one Undo
-should restore the complete batch.
+The multi-selection and atomic batch-delete follow-up is delivered in
+implementation commit `43d5725` and documented by
+`docs/handoffs/2026-08-27-event-multiselect-batch-delete-tracer.md`. The next
+batch command should duplicate the selected stable payloads with fresh IDs and
+reuse the existing insertion boundary.
