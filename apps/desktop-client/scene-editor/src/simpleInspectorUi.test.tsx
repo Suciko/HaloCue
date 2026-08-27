@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import App from "./App";
 import { demoProject } from "./demoProject";
+import { evaluateScene } from "./sceneEvaluation";
 import { useProjectStore } from "./projectStore";
 
 const actEnvironment = globalThis as typeof globalThis & {
@@ -86,6 +87,15 @@ describe("simple Inspector tabs", () => {
   it("keeps the selected Cue title visible in the Inspector context", () => {
     const before = useProjectStore.getState();
     const revision = before.revision;
+    const scene = before.project.chapters[0].scenes[0];
+    const selectedCue = scene.cues[1];
+    const evaluation = evaluateScene(before.project, selectedCue.cue_id, {
+      sceneId: scene.scene_id,
+    });
+    const eventIds = new Set(selectedCue.events.map((event) => event.event_id));
+    const segments = evaluation.timeline.events.filter((event) => eventIds.has(event.event_id));
+    const start = Math.min(...segments.map((event) => event.start_frame));
+    const end = Math.max(...segments.map((event) => event.end_frame));
     const cue = Array.from(container.querySelectorAll<HTMLButtonElement>(".cue-item"))
       .find((button) => button.textContent?.includes("意外来客"));
     expect(cue).not.toBeNull();
@@ -93,8 +103,9 @@ describe("simple Inspector tabs", () => {
     act(() => cue?.click());
 
     const context = container.querySelector<HTMLElement>("[data-simple-cue-context]");
-    expect(context?.textContent).toBe("意外来客");
+    expect(context?.textContent).toBe(`意外来客 · F${start}-${end}`);
     expect(context?.getAttribute("aria-live")).toBe("polite");
+    expect(context?.getAttribute("aria-atomic")).toBe("true");
     expect(useProjectStore.getState().revision).toBe(revision);
   });
 

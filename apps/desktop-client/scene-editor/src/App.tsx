@@ -1252,6 +1252,15 @@ function SimpleInspector() {
   const setTab = useProjectStore((state) => state.setInspectorTab);
   const cue = sceneById(project, selectedSceneId)
     .cues.find((item) => item.cue_id === selectedCueId)!;
+  const evaluation = useMemo(
+    () => evaluateScene(project, selectedCueId, { sceneId: selectedSceneId }),
+    [project, selectedCueId, selectedSceneId],
+  );
+  const cueRange = useMemo(() => buildShotTimeline({
+    sceneId: selectedSceneId,
+    cue,
+    timeline: evaluation.timeline,
+  }), [cue, evaluation.timeline, selectedSceneId]);
   const tabs: Array<[InspectorTab, ReactNode, string]> = [
     ["character", <UserRound key="character" />, "角色"],
     ["dialogue", <MessageSquareText key="dialogue" />, "对白"],
@@ -1284,7 +1293,9 @@ function SimpleInspector() {
           <CircleGauge />
           <span>
             <strong>当前演出</strong>
-            <small data-simple-cue-context aria-live="polite">{cue.title || "未命名演出"}</small>
+            <small data-simple-cue-context aria-live="polite" aria-atomic="true">
+              {cue.title || "未命名演出"} · F{cueRange.start_frame}-{cueRange.end_frame}
+            </small>
           </span>
         </span>
         <IconButton label="更多设置"><MoreHorizontal /></IconButton>
