@@ -549,6 +549,18 @@ function PreviewFrame() {
               onClick={() => setPlayheadFrame(selectedPreviewRange.start_frame)}
             ><LocateFixed />定位</button>
           )}
+          {selectedPreviewRange && (
+            <button
+              type="button"
+              data-preview-play-selection
+              title={`播放所选${mode === "professional" ? "事件" : "Cue"}`}
+              disabled={!ready}
+              onClick={() => controllerRef.current?.play({
+                fromFrame: selectedPreviewRange.start_frame,
+                toFrame: Math.max(selectedPreviewRange.start_frame, selectedPreviewRange.end_frame - 1),
+              })}
+            ><Play />播放所选</button>
+          )}
           <button type="button" disabled={!ready} onClick={() => controllerRef.current?.play({ fromFrame: 0 })}><Play />从头播放</button>
         </div>
       </div>
