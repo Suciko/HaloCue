@@ -24,9 +24,10 @@ The slice supports:
 `render-timeline/1.2` contract. It uses explicit end-exclusive frame ranges and
 stable default durations so browser preview and offline video exporters can
 share timing without depending on AUTO playback or wall-clock callbacks.
-Registry-supported `character-motion` and `halocue.ba:background-pan` events may
-set `wait_for_completion` to false; the following event then starts at the same
-sequential cursor and `total_frames` is the maximum end frame.
+Registry-supported `character-motion`, `halocue.ba:background-pan`, and
+`halocue.ba:screen-shake` events may set `wait_for_completion` to false; the
+following event then starts at the same sequential cursor and `total_frames` is
+the maximum end frame.
 
 `scene_performance.py` compiles supported authored effects into the independent
 `scene-performance/1.4` animation plan and samples exact frames under play,

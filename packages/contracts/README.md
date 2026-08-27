@@ -39,8 +39,9 @@ duration policy, and its simple-mode label. The TypeScript, Python, and browser
 adapters read this manifest at their seams; they do not maintain independent
 kind or duration tables. Version 1.2 adds the explicit non-blocking capability
 while preserving the ordered event list as the source of truth. The current
-manifest enables it for `character-motion` and the camera-like
-`halocue.ba:background-pan`; every other registered event remains sequential.
+manifest enables it for `character-motion`, the camera-like
+`halocue.ba:background-pan`, and `halocue.ba:screen-shake`; every other
+registered event remains sequential.
 
 The `render-timeline/1.2` schema lives in
 `render-timeline/1.2.schema.json`. It records deterministic, end-exclusive
