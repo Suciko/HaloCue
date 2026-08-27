@@ -23,6 +23,7 @@ describe("scene event factory", () => {
       event_id: "event/new-shake",
       kind: "halocue.ba:screen-shake",
       intensity: 0.35,
+      wait_for_completion: true,
     });
     expect(createSceneEvent("character-motion", {
       eventId: "event/new-motion",

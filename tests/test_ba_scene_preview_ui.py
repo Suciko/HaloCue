@@ -791,10 +791,7 @@ def test_nod_performance_is_seekable_in_deterministic_capture_mode():
                 + json.dumps(descriptor, ensure_ascii=False)
                 + ";"
             )
-            page.goto(
-                f"http://127.0.0.1:{server.server_port}/index.html"
-                "?renderer=static&capture=1"
-            )
+            page.goto(f"http://127.0.0.1:{server.server_port}/index.html?renderer=static&capture=1")
             page.wait_for_function("() => Boolean(window.HaloCueScenePreview.controller)")
 
             sampled = page.evaluate(
@@ -856,7 +853,7 @@ def test_nod_performance_is_seekable_in_deterministic_capture_mode():
 
 
 @pytest.mark.browser
-def test_non_blocking_motion_and_pan_remain_visible_while_dialogue_is_primary():
+def test_non_blocking_motion_pan_and_shake_remain_visible_while_dialogue_is_primary():
     playwright = pytest.importorskip("playwright.sync_api")
     server, thread = _serve_preview()
     visible = {
@@ -872,7 +869,7 @@ def test_non_blocking_motion_and_pan_remain_visible_while_dialogue_is_primary():
     ]
     descriptor = {
         "schema_version": "scene-descriptor/1.0",
-        "scene_id": "scene/overlap-motion-pan-dialogue",
+        "scene_id": "scene/overlap-motion-pan-shake-dialogue",
         "presentation": {"frame_rate": 30},
         "actors": [visible, *hidden],
         "initial_actors": [visible, *hidden],
@@ -897,6 +894,13 @@ def test_non_blocking_motion_and_pan_remain_visible_while_dialogue_is_primary():
                 "pan_x": 0.12,
                 "pan_y": -0.04,
                 "duration_ms": 900,
+                "wait_for_completion": False,
+            },
+            {
+                "event_id": "event/shake",
+                "kind": "halocue.ba:screen-shake",
+                "intensity": 0.35,
+                "duration_ms": 360,
                 "wait_for_completion": False,
             },
             {
@@ -937,14 +941,23 @@ def test_non_blocking_motion_and_pan_remain_visible_while_dialogue_is_primary():
                     const sample = controller.seekFrame(frame);
                     const actor = document.querySelector('.actor-slot[data-slot="1"]');
                     const background = document.querySelector('.stage-background');
+                    const stage = document.querySelector('#preview-stage');
                     const overlapPan = [
                       background.style.getPropertyValue('--background-pan-x'),
                       background.style.getPropertyValue('--background-pan-y'),
+                    ];
+                    const overlapShake = [
+                      Number(stage.dataset.performanceOffsetX),
+                      Number(stage.dataset.performanceOffsetY),
                     ];
                     controller.seekFrame(0);
                     const baselinePan = [
                       background.style.getPropertyValue('--background-pan-x'),
                       background.style.getPropertyValue('--background-pan-y'),
+                    ];
+                    const baselineShake = [
+                      Number(stage.dataset.performanceOffsetX),
+                      Number(stage.dataset.performanceOffsetY),
                     ];
                     controller.seekFrame(frame);
                     return {
@@ -958,19 +971,26 @@ def test_non_blocking_motion_and_pan_remain_visible_while_dialogue_is_primary():
                       speaker: document.querySelector('#speaker-name').textContent,
                       overlapPan,
                       baselinePan,
+                      overlapShake,
+                      baselineShake,
                       restoredPan: [
                         background.style.getPropertyValue('--background-pan-x'),
                         background.style.getPropertyValue('--background-pan-y'),
                       ],
+                      restoredShake: [
+                        Number(stage.dataset.performanceOffsetX),
+                        Number(stage.dataset.performanceOffsetY),
+                      ],
                     };
                 }"""
             )
-            assert sampled["starts"] == [0, 1, 1, 1]
-            assert sampled["waits"] == [True, False, False, True]
+            assert sampled["starts"] == [0, 1, 1, 1, 1]
+            assert sampled["waits"] == [True, False, False, False, True]
             assert sampled["primary"] == "event/alice-line"
             assert sampled["active"] == [
                 "event/alice-nod",
                 "event/pan",
+                "event/shake",
                 "event/alice-line",
             ]
             assert sampled["current"] == "event/alice-line"
@@ -980,6 +1000,9 @@ def test_non_blocking_motion_and_pan_remain_visible_while_dialogue_is_primary():
             assert sampled["overlapPan"] == ["0.12", "-0.04"]
             assert sampled["baselinePan"] == ["0", "0"]
             assert sampled["restoredPan"] == ["0.12", "-0.04"]
+            assert any(abs(value) > 0.01 for value in sampled["overlapShake"])
+            assert sampled["baselineShake"] == [0, 0]
+            assert sampled["restoredShake"] == sampled["overlapShake"]
             browser.close()
     finally:
         server.shutdown()

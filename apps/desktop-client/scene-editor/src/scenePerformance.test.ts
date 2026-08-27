@@ -52,6 +52,32 @@ describe("scene performance compiler", () => {
     });
   });
 
+  it("keeps a non-blocking shake operation active across following dialogue timing", () => {
+    const source = descriptor();
+    source.events = [
+      {
+        event_id: "event/shake",
+        kind: "halocue.ba:screen-shake",
+        duration_ms: 360,
+        intensity: 0.35,
+        wait_for_completion: false,
+      },
+      { event_id: "event/line", kind: "dialogue", text: "震屏时继续对白。", duration_ms: 300 },
+    ];
+    const timeline = buildRenderTimeline(source);
+    const plan = buildScenePerformance(source, timeline);
+
+    expect(timeline.events.map((event) => [event.start_frame, event.end_frame]))
+      .toEqual([[0, 11], [0, 9]]);
+    expect(plan.operations[0]).toEqual(expect.objectContaining({
+      source_event_id: "event/shake",
+      start_frame: 0,
+      end_frame: 11,
+    }));
+    expect(sampleScenePerformance(plan, 2, "sample").active_operation_ids)
+      .toEqual(["event/shake/operation/shake"]);
+  });
+
   it("compiles enter and exit into shared character contribution channels", () => {
     const source = descriptor();
     source.initial_actors = [

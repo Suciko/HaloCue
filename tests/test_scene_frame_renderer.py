@@ -211,10 +211,31 @@ def test_offline_renderer_accepts_overlapping_timeline_and_uses_latest_active_ev
             "wait_for_completion": False,
         },
     )
+    descriptor["events"].insert(
+        4,
+        {
+            "event_id": "event/screen-shake",
+            "kind": "halocue.ba:screen-shake",
+            "intensity": 0.35,
+            "duration_ms": 360,
+            "wait_for_completion": False,
+        },
+    )
     timeline = build_render_timeline(descriptor)
     performance = build_scene_performance(descriptor, timeline)
 
-    assert [timeline["events"][index]["start_frame"] for index in (2, 3, 4)] == [30, 30, 30]
+    assert [timeline["events"][index]["start_frame"] for index in (2, 3, 4, 5)] == [
+        30,
+        30,
+        30,
+        30,
+    ]
+    shake_source = next(
+        source
+        for source in performance["source_map"]
+        if source["source_event_id"] == "event/screen-shake"
+    )
+    assert shake_source["operation_ids"] == ["event/screen-shake/operation/shake"]
 
     result = render_scene_frame(
         preview_url=preview_url,

@@ -77,6 +77,39 @@ describe("render timeline overlap semantics", () => {
     expect(timeline.total_frames).toBe(27);
   });
 
+  it("keeps a non-blocking screen shake active behind the following dialogue", () => {
+    const timeline = buildRenderTimeline(descriptor([
+      {
+        event_id: "event/shake",
+        kind: "halocue.ba:screen-shake",
+        duration_ms: 360,
+        wait_for_completion: false,
+      },
+      {
+        event_id: "event/line",
+        kind: "dialogue",
+        text: "震屏时继续对白。",
+        duration_ms: 300,
+      },
+    ]));
+
+    expect(timeline.events).toEqual([
+      expect.objectContaining({
+        event_id: "event/shake",
+        start_frame: 0,
+        end_frame: 11,
+        wait_for_completion: false,
+      }),
+      expect.objectContaining({
+        event_id: "event/line",
+        start_frame: 0,
+        end_frame: 9,
+        wait_for_completion: true,
+      }),
+    ]);
+    expect(timeline.total_frames).toBe(11);
+  });
+
   it("rejects non-blocking timing on an event without that capability", () => {
     expect(() => buildRenderTimeline(descriptor([{
       event_id: "event/wait",

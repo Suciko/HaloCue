@@ -72,6 +72,12 @@ const fields = {
   ]),
   screenShake: Object.freeze([
     field({ key: "intensity", label: "震动强度", control: "number", min: 0, max: 1, step: 0.05 }),
+    field({
+      key: "wait_for_completion",
+      label: "等待震动完成",
+      control: "boolean",
+      hint: "关闭后，下一事件会与画面震动同时开始",
+    }),
   ]),
   screenText: Object.freeze([
     field({ key: "text", label: "屏幕文字", control: "text" }),
@@ -160,6 +166,7 @@ const CATALOG: Record<string, EventEditorDefinition> = {
     event_id: eventId,
     kind: "halocue.ba:screen-shake",
     intensity: 0.35,
+    wait_for_completion: true,
   })),
   "halocue.ba:screen-text": registered("halocue.ba:screen-text", "effect", fields.screenText, ({ eventId }) => ({
     event_id: eventId,

@@ -66,6 +66,37 @@ def test_performance_plan_normalizes_shake_and_matches_contract():
     Draft202012Validator(schema).validate(plan)
 
 
+def test_non_blocking_shake_operation_overlaps_following_dialogue():
+    descriptor = _descriptor()
+    descriptor["events"] = [
+        {
+            "event_id": "event/shake",
+            "kind": "halocue.ba:screen-shake",
+            "duration_ms": 360,
+            "intensity": 0.35,
+            "wait_for_completion": False,
+        },
+        {
+            "event_id": "event/line",
+            "kind": "dialogue",
+            "text": "震屏时继续对白。",
+            "duration_ms": 300,
+        },
+    ]
+    timeline = build_render_timeline(descriptor)
+    plan = build_scene_performance(descriptor, timeline)
+
+    assert [(event["start_frame"], event["end_frame"]) for event in timeline["events"]] == [
+        (0, 11),
+        (0, 9),
+    ]
+    assert plan["operations"][0]["start_frame"] == 0
+    assert plan["operations"][0]["end_frame"] == 11
+    assert sample_scene_performance(plan, 2)["active_operation_ids"] == [
+        "event/shake/operation/shake"
+    ]
+
+
 def test_performance_sampling_is_deterministic_and_modes_share_final_state():
     descriptor = _descriptor()
     timeline = build_render_timeline(descriptor)

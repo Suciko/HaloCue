@@ -37,6 +37,11 @@ describe("event editor catalog seam", () => {
       pan_y: 0,
       wait_for_completion: true,
     }));
+    expect(createEditorEvent("halocue.ba:screen-shake", context)).toEqual(expect.objectContaining({
+      kind: "halocue.ba:screen-shake",
+      intensity: 0.35,
+      wait_for_completion: true,
+    }));
     expect(createEditorEvent("character-motion", context)).toEqual(expect.objectContaining({
       kind: "character-motion",
       slot: 3,
