@@ -975,7 +975,7 @@ function ProfessionalEventFields({
   </>;
 }
 
-export function ProfessionalEventList() {
+function ProfessionalEventList() {
   const project = useProjectStore((state) => state.project);
   const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);

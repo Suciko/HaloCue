@@ -2,7 +2,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ProfessionalEventList } from "./App";
+import App from "./App";
 import { demoProject } from "./demoProject";
 import { firstScene, useProjectStore } from "./projectStore";
 
@@ -38,10 +38,11 @@ describe("professional event pointer reorder", () => {
   beforeEach(() => {
     localStorage.clear();
     useProjectStore.getState().replaceProject(structuredClone(demoProject));
+    useProjectStore.getState().setMode("professional");
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
-    act(() => root.render(<ProfessionalEventList />));
+    act(() => root.render(<App />));
   });
 
   afterEach(() => {
