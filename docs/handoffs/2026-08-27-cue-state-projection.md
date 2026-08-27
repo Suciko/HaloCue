@@ -50,6 +50,13 @@ round-trip behavior.
   `/scene-preview/assets/fonts/NotoSansSC-Variable.ttf` browser asset path;
   this is a deployment/runtime asset lookup issue, not a TypeScript failure.
 
+## Publication
+
+- Cue projection commit: `fd206ce`
+- Event editor catalog commit: `e91eb14`
+- Branch: `feature/1.1-ba-editor-from-1.0`
+- Pull request: `https://github.com/Suciko/HaloCue/pull/27`
+
 ## Font clarification
 
 The current realtime BA dialogue renderer does not use
