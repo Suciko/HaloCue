@@ -856,7 +856,7 @@ def test_nod_performance_is_seekable_in_deterministic_capture_mode():
 
 
 @pytest.mark.browser
-def test_non_blocking_motion_remains_visible_while_dialogue_is_primary():
+def test_non_blocking_motion_and_pan_remain_visible_while_dialogue_is_primary():
     playwright = pytest.importorskip("playwright.sync_api")
     server, thread = _serve_preview()
     visible = {
@@ -872,11 +872,16 @@ def test_non_blocking_motion_remains_visible_while_dialogue_is_primary():
     ]
     descriptor = {
         "schema_version": "scene-descriptor/1.0",
-        "scene_id": "scene/overlap-motion-dialogue",
+        "scene_id": "scene/overlap-motion-pan-dialogue",
         "presentation": {"frame_rate": 30},
         "actors": [visible, *hidden],
         "initial_actors": [visible, *hidden],
         "events": [
+            {
+                "event_id": "event/background",
+                "kind": "background",
+                "duration_ms": 1,
+            },
             {
                 "event_id": "event/alice-nod",
                 "kind": "character-motion",
@@ -884,6 +889,14 @@ def test_non_blocking_motion_remains_visible_while_dialogue_is_primary():
                 "slot": 1,
                 "motion_id": "motion/nod",
                 "duration_ms": 500,
+                "wait_for_completion": False,
+            },
+            {
+                "event_id": "event/pan",
+                "kind": "halocue.ba:background-pan",
+                "pan_x": 0.12,
+                "pan_y": -0.04,
+                "duration_ms": 900,
                 "wait_for_completion": False,
             },
             {
@@ -918,11 +931,22 @@ def test_non_blocking_motion_remains_visible_while_dialogue_is_primary():
             sampled = page.evaluate(
                 """() => {
                     const controller = window.HaloCueScenePreview.controller;
-                    const motion = controller.timeline.events[0];
+                    const motion = controller.timeline.events[1];
                     const frame = motion.start_frame
                       + Math.round((motion.end_frame - motion.start_frame - 1) * 0.32);
                     const sample = controller.seekFrame(frame);
                     const actor = document.querySelector('.actor-slot[data-slot="1"]');
+                    const background = document.querySelector('.stage-background');
+                    const overlapPan = [
+                      background.style.getPropertyValue('--background-pan-x'),
+                      background.style.getPropertyValue('--background-pan-y'),
+                    ];
+                    controller.seekFrame(0);
+                    const baselinePan = [
+                      background.style.getPropertyValue('--background-pan-x'),
+                      background.style.getPropertyValue('--background-pan-y'),
+                    ];
+                    controller.seekFrame(frame);
                     return {
                       starts: controller.timeline.events.map(item => item.start_frame),
                       waits: controller.timeline.events.map(item => item.wait_for_completion),
@@ -932,17 +956,30 @@ def test_non_blocking_motion_remains_visible_while_dialogue_is_primary():
                       offsetY: Number(actor.dataset.performanceOffsetY),
                       dialogueVisible: !document.querySelector('.dialogue-panel').classList.contains('is-hidden'),
                       speaker: document.querySelector('#speaker-name').textContent,
+                      overlapPan,
+                      baselinePan,
+                      restoredPan: [
+                        background.style.getPropertyValue('--background-pan-x'),
+                        background.style.getPropertyValue('--background-pan-y'),
+                      ],
                     };
                 }"""
             )
-            assert sampled["starts"] == [0, 0]
-            assert sampled["waits"] == [False, True]
+            assert sampled["starts"] == [0, 1, 1, 1]
+            assert sampled["waits"] == [True, False, False, True]
             assert sampled["primary"] == "event/alice-line"
-            assert sampled["active"] == ["event/alice-nod", "event/alice-line"]
+            assert sampled["active"] == [
+                "event/alice-nod",
+                "event/pan",
+                "event/alice-line",
+            ]
             assert sampled["current"] == "event/alice-line"
             assert sampled["offsetY"] > 3.9
             assert sampled["dialogueVisible"] is True
             assert sampled["speaker"] == "爱丽丝"
+            assert sampled["overlapPan"] == ["0.12", "-0.04"]
+            assert sampled["baselinePan"] == ["0", "0"]
+            assert sampled["restoredPan"] == ["0.12", "-0.04"]
             browser.close()
     finally:
         server.shutdown()

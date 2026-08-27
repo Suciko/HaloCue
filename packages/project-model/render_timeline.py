@@ -20,6 +20,7 @@ from scene_events import (
 TIMELINE_SCHEMA_VERSION = "render-timeline/1.2"
 DEFAULT_FRAME_RATE = 30
 
+
 def _require_frame_rate(frame_rate: Any) -> int:
     if isinstance(frame_rate, bool) or not isinstance(frame_rate, int):
         raise ValueError("frame_rate must be an integer")
@@ -78,10 +79,9 @@ def build_render_timeline(
         kind = source.get("kind")
         if kind not in SUPPORTED_EVENT_KINDS:
             raise ValueError(f"unsupported render event kind {kind!r}")
-        if (
-            source.get("wait_for_completion") is False
-            and not scene_event_registry.supports_non_blocking(kind)
-        ):
+        if source.get(
+            "wait_for_completion"
+        ) is False and not scene_event_registry.supports_non_blocking(kind):
             raise ValueError(f"event kind {kind!r} does not support non-blocking timing")
 
         duration_ms = event_duration_ms(source)

@@ -44,6 +44,39 @@ describe("render timeline overlap semantics", () => {
     expect(timeline.total_frames).toBe(15);
   });
 
+  it("keeps a non-blocking background pan active behind the following dialogue", () => {
+    const timeline = buildRenderTimeline(descriptor([
+      {
+        event_id: "event/pan",
+        kind: "halocue.ba:background-pan",
+        duration_ms: 900,
+        wait_for_completion: false,
+      },
+      {
+        event_id: "event/line",
+        kind: "dialogue",
+        text: "镜头移动时继续对白。",
+        duration_ms: 300,
+      },
+    ]));
+
+    expect(timeline.events).toEqual([
+      expect.objectContaining({
+        event_id: "event/pan",
+        start_frame: 0,
+        end_frame: 27,
+        wait_for_completion: false,
+      }),
+      expect.objectContaining({
+        event_id: "event/line",
+        start_frame: 0,
+        end_frame: 9,
+        wait_for_completion: true,
+      }),
+    ]);
+    expect(timeline.total_frames).toBe(27);
+  });
+
   it("rejects non-blocking timing on an event without that capability", () => {
     expect(() => buildRenderTimeline(descriptor([{
       event_id: "event/wait",

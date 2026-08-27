@@ -30,8 +30,11 @@ describe("scene event registry seam", () => {
       default_duration_ms: 500,
       supports_non_blocking: true,
     }));
+    expect(sceneEventRegistry.definition("halocue.ba:background-pan")).toEqual(expect.objectContaining({
+      supports_non_blocking: true,
+    }));
     expect(sceneEventDefinitions()
-      .filter((event) => event.kind !== "character-motion")
+      .filter((event) => !["character-motion", "halocue.ba:background-pan"].includes(event.kind))
       .every((event) => event.supports_non_blocking === false)).toBe(true);
   });
 

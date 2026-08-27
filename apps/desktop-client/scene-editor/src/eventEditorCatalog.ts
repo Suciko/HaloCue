@@ -63,6 +63,12 @@ const fields = {
   backgroundPan: Object.freeze([
     field({ key: "pan_x", label: "水平移动", control: "number", min: -1, max: 1, step: 0.01 }),
     field({ key: "pan_y", label: "垂直移动", control: "number", min: -1, max: 1, step: 0.01 }),
+    field({
+      key: "wait_for_completion",
+      label: "等待镜头完成",
+      control: "boolean",
+      hint: "关闭后，下一事件会与镜头移动同时开始",
+    }),
   ]),
   screenShake: Object.freeze([
     field({ key: "intensity", label: "震动强度", control: "number", min: 0, max: 1, step: 0.05 }),
@@ -148,6 +154,7 @@ const CATALOG: Record<string, EventEditorDefinition> = {
     kind: "halocue.ba:background-pan",
     pan_x: 0.035,
     pan_y: 0,
+    wait_for_completion: true,
   })),
   "halocue.ba:screen-shake": registered("halocue.ba:screen-shake", "effect", fields.screenShake, ({ eventId }) => ({
     event_id: eventId,

@@ -417,4 +417,32 @@ describe("professional event list interactions", () => {
       .find((item) => item.event_id === event?.event_id)?.wait_for_completion)
       .toBe(false);
   });
+
+  it("authors background pans as sequential by default and can make them parallel", () => {
+    const addPan = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".event-add-options > button"),
+    ).find((button) => button.textContent?.trim() === "背景移动");
+    expect(addPan).toBeDefined();
+
+    act(() => addPan?.click());
+
+    const state = useProjectStore.getState();
+    const event = firstScene(state.project).cues[0].events
+      .find((item) => item.event_id === state.selectedEventId);
+    expect(event).toEqual(expect.objectContaining({
+      kind: "halocue.ba:background-pan",
+      pan_x: 0.035,
+      pan_y: 0,
+      wait_for_completion: true,
+    }));
+
+    const waitToggle = Array.from(container.querySelectorAll<HTMLLabelElement>("label.field"))
+      .find((label) => label.textContent?.includes("等待镜头完成"))
+      ?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(waitToggle?.checked).toBe(true);
+    act(() => waitToggle?.click());
+    expect(firstScene(useProjectStore.getState().project).cues[0].events
+      .find((item) => item.event_id === event?.event_id)?.wait_for_completion)
+      .toBe(false);
+  });
 });

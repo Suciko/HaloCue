@@ -82,6 +82,27 @@ def test_non_finite_duration_is_rejected():
     assert any(item["code"] == "project.invalid_duration" for item in validate_project(project))
 
 
+def test_validation_accepts_non_blocking_background_pan():
+    project = _json(MODEL_ROOT / "example.synthetic.json")
+    events = project["chapters"][0]["scenes"][0]["cues"][0]["events"]
+    events.append(
+        {
+            "event_id": "event/parallel-pan",
+            "kind": "halocue.ba:background-pan",
+            "pan_x": 0.2,
+            "pan_y": 0,
+            "wait_for_completion": False,
+        }
+    )
+
+    assert validate_project(project) == []
+    restored = deserialize_project(project)
+    assert (
+        restored["chapters"][0]["scenes"][0]["cues"][0]["events"][-1]["wait_for_completion"]
+        is False
+    )
+
+
 def test_validation_rejects_invalid_wait_flags_and_unsupported_non_blocking_events():
     project = _json(MODEL_ROOT / "example.synthetic.json")
     events = project["chapters"][0]["scenes"][0]["cues"][0]["events"]

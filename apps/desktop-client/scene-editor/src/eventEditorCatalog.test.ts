@@ -35,6 +35,7 @@ describe("event editor catalog seam", () => {
       kind: "halocue.ba:background-pan",
       pan_x: 0.035,
       pan_y: 0,
+      wait_for_completion: true,
     }));
     expect(createEditorEvent("character-motion", context)).toEqual(expect.objectContaining({
       kind: "character-motion",

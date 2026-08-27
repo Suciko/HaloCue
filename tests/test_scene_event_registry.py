@@ -40,10 +40,11 @@ def test_manifest_schema_and_registry_are_consistent():
         event["kind"] for event in definitions if event["timeline_supported"]
     }
     assert scene_event_registry.supports_non_blocking("character-motion") is True
+    assert scene_event_registry.supports_non_blocking("halocue.ba:background-pan") is True
     assert all(
         not event["supports_non_blocking"]
         for event in definitions
-        if event["kind"] != "character-motion"
+        if event["kind"] not in {"character-motion", "halocue.ba:background-pan"}
     )
     timeline_schema = _json(ROOT / "packages" / "contracts" / "render-timeline" / "1.2.schema.json")
     assert set(timeline_schema["$defs"]["timelineEvent"]["properties"]["kind"]["enum"]) == set(

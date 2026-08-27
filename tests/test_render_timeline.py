@@ -82,6 +82,34 @@ def test_non_blocking_character_motion_overlaps_the_following_event():
     assert timeline["total_frames"] == 15
 
 
+def test_non_blocking_background_pan_overlaps_the_following_dialogue():
+    timeline = build_render_timeline(
+        descriptor(
+            [
+                {
+                    "event_id": "event/pan",
+                    "kind": "halocue.ba:background-pan",
+                    "duration_ms": 900,
+                    "wait_for_completion": False,
+                },
+                {
+                    "event_id": "event/line",
+                    "kind": "dialogue",
+                    "text": "镜头移动时继续对白。",
+                    "duration_ms": 300,
+                },
+            ]
+        ),
+        frame_rate=30,
+    )
+
+    assert [
+        (item["start_frame"], item["end_frame"], item["wait_for_completion"])
+        for item in timeline["events"]
+    ] == [(0, 27, False), (0, 9, True)]
+    assert timeline["total_frames"] == 27
+
+
 def test_dialogue_duration_is_deterministic_and_preserves_source_event():
     source = {"event_id": "event/line", "kind": "dialogue", "text": "你好。\n再见"}
     first = build_render_timeline(descriptor([source]))
@@ -180,6 +208,12 @@ def test_browser_runtime_builds_the_same_render_timeline_as_python():
                 "duration_ms": 500,
                 "wait_for_completion": False,
             },
+            {
+                "event_id": "event/pan",
+                "kind": "halocue.ba:background-pan",
+                "duration_ms": 900,
+                "wait_for_completion": False,
+            },
             {"event_id": "event/line", "kind": "dialogue", "text": "你好。\n再见！"},
             {"event_id": "event/shake", "kind": "halocue.ba:screen-shake"},
             {"event_id": "event/text", "kind": "halocue.ba:screen-text", "text": "提示"},
@@ -229,6 +263,12 @@ def test_browser_sample_prefers_the_latest_authored_event_during_overlap():
                 "wait_for_completion": False,
             },
             {
+                "event_id": "event/pan",
+                "kind": "halocue.ba:background-pan",
+                "duration_ms": 900,
+                "wait_for_completion": False,
+            },
+            {
                 "event_id": "event/line",
                 "kind": "dialogue",
                 "text": "动作中说话",
@@ -260,5 +300,5 @@ process.stdout.write(JSON.stringify({
 
     assert json.loads(completed.stdout) == {
         "item": "event/line",
-        "active": ["event/nod", "event/line"],
+        "active": ["event/nod", "event/pan", "event/line"],
     }

@@ -200,8 +200,21 @@ def test_offline_renderer_accepts_overlapping_timeline_and_uses_latest_active_ev
             "wait_for_completion": False,
         },
     )
+    descriptor["events"].insert(
+        3,
+        {
+            "event_id": "event/background-pan",
+            "kind": "halocue.ba:background-pan",
+            "pan_x": 0.12,
+            "pan_y": -0.04,
+            "duration_ms": 900,
+            "wait_for_completion": False,
+        },
+    )
     timeline = build_render_timeline(descriptor)
     performance = build_scene_performance(descriptor, timeline)
+
+    assert [timeline["events"][index]["start_frame"] for index in (2, 3, 4)] == [30, 30, 30]
 
     result = render_scene_frame(
         preview_url=preview_url,
