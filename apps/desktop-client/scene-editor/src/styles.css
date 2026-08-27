@@ -115,6 +115,7 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .preview-toolbar > div, .preview-toolbar-actions { display: flex; align-items: center; gap: 8px; }
 .preview-toolbar strong { font-size: 12px; }
 .preview-meta { color: var(--subtle); font-size: 10px; }
+.preview-selection-range { flex: none; padding: 2px 5px; border: 1px solid #3d5b4c; border-radius: 3px; color: var(--accent); font: 8px/1 "Cascadia Code", "Consolas", monospace; }
 .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px rgba(119, 214, 176, .1); }
 .preview-toolbar-actions button { height: 27px; display: flex; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--muted); font-size: 10px; cursor: pointer; }
 .preview-toolbar-actions button:hover { color: var(--text); }

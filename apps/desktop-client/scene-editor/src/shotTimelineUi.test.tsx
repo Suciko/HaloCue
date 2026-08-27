@@ -105,4 +105,25 @@ describe("professional shot timeline workspace", () => {
       projection.start_frame + (projection.end_frame - projection.start_frame) / 2,
     ));
   });
+
+  it("exposes the selected event range and an explicit preview locate action", () => {
+    const scene = firstScene(useProjectStore.getState().project);
+    const cue = scene.cues[0];
+    const evaluation = evaluateScene(useProjectStore.getState().project, cue.cue_id, { sceneId: scene.scene_id });
+    const selected = evaluation.timeline.events.find((event) => event.event_id === "event/yuuka-nod")!;
+    const shotTab = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]")
+      .values()).find((button) => button.textContent?.includes("镜头时间轴"));
+    act(() => shotTab?.click());
+    const clip = container.querySelector<HTMLButtonElement>('.shot-clip[data-event-id="event/yuuka-nod"]');
+    act(() => clip?.click());
+
+    const range = container.querySelector<HTMLElement>("[data-preview-selection-range]");
+    const locate = container.querySelector<HTMLButtonElement>("[data-preview-locate]");
+    expect(range?.textContent).toContain(`F${selected.start_frame}-${selected.end_frame}`);
+    expect(locate).not.toBeNull();
+    const revision = useProjectStore.getState().revision;
+    act(() => locate?.click());
+    expect(useProjectStore.getState().previewPlayheadFrame).toBe(selected.start_frame);
+    expect(useProjectStore.getState().revision).toBe(revision);
+  });
 });

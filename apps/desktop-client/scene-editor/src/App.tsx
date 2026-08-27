@@ -15,6 +15,7 @@ import {
   GripVertical,
   Image,
   Layers3,
+  LocateFixed,
   Menu,
   MessageSquareText,
   MoreHorizontal,
@@ -296,6 +297,7 @@ function PreviewFrame() {
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const selectedEventId = useProjectStore((state) => state.selectedEventId);
   const playheadFrame = useProjectStore((state) => state.previewPlayheadFrame);
+  const setPlayheadFrame = useProjectStore((state) => state.setPreviewPlayheadFrame);
   const activeTransaction = useProjectStore((state) => state.activeTransaction);
   const frame = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
@@ -319,6 +321,9 @@ function PreviewFrame() {
   const wasTransactionActiveRef = useRef(Boolean(activeTransaction));
   const evaluation = compilation.evaluation;
   const intent = compilation.intent;
+  const selectedTimelineEvent = evaluation.timeline.events.find(
+    (event) => event.event_id === selectedEventId,
+  );
   const intentRef = useRef(intent);
   intentRef.current = intent;
   const motionTrialKey = activeTransaction?.key.endsWith(":motion")
@@ -421,9 +426,22 @@ function PreviewFrame() {
           <span className="preview-meta" aria-live="polite">
             1280 × 720 · Spine · {intentLabel}
           </span>
+          {selectedTimelineEvent && (
+            <span className="preview-selection-range" data-preview-selection-range>
+              F{selectedTimelineEvent.start_frame}-{selectedTimelineEvent.end_frame}
+            </span>
+          )}
         </div>
         <div className="preview-toolbar-actions">
           <button type="button" onClick={mount}><RotateCcw />刷新</button>
+          {selectedTimelineEvent && (
+            <button
+              type="button"
+              data-preview-locate
+              title="定位到所选事件起点"
+              onClick={() => setPlayheadFrame(selectedTimelineEvent.start_frame)}
+            ><LocateFixed />定位</button>
+          )}
           <button type="button" disabled={!ready} onClick={() => controllerRef.current?.play({ fromFrame: 0 })}><Play />从头播放</button>
         </div>
       </div>
