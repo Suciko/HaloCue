@@ -85,8 +85,8 @@ This is a single-track event-duration tracer, not the multi-track shot timeline
 promised later in the 1.1 plan. It does not add timeline zoom, audio tracks,
 clip trimming from the left edge, or overlapping events.
 
-The next bounded professional-interaction slice should make the existing event
-grips functional: pointer reorder with a clear insertion target, keyboard
-reorder parity, canonical event-order preservation, one revision per drop, and
-one-step undo. It should reuse `moveEvent` semantics rather than introduce a
-second ordering model.
+The event-grip follow-up is delivered in implementation commit `8befda3` and
+documented by
+`docs/handoffs/2026-08-27-professional-event-reorder-tracer.md`. The next
+professional skeleton gap is insertion placement: adding an event still appends
+to the Cue rather than inserting before or after the selected stable event.

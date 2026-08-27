@@ -364,6 +364,14 @@ revision. Returning to the baseline frame preserves the originally authored
 millisecond value, so a sub-frame move remains a true no-op instead of silently
 normalizing project data.
 
+The professional event-reorder tracer is recorded in
+`docs/handoffs/2026-08-27-professional-event-reorder-tracer.md`. The event grip
+now owns pointer drag and keyboard reorder, renders a before/after insertion
+line, preserves the moved stable event ID and selection, and announces the new
+position. Direction buttons, keyboard movement, and pointer drops all resolve
+through the same relative-target `moveEvent` command; an equivalent placement
+remains a no-op and one completed move creates one undo entry.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure
