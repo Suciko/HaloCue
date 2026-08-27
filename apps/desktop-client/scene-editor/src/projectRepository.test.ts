@@ -249,6 +249,38 @@ describe("project repository seam", () => {
     expect(store.getState().project).toEqual(base);
   });
 
+  it("commits professional event field previews as one revision", () => {
+    const repository = new CountingProjectRepository(demoProject);
+    const store = createProjectStore(repository);
+    const cue = store.getState().project.chapters[0].scenes[0].cues[2];
+    const effect = cue.events.find((event) => event.kind === "halocue.ba:reaction-beat")!;
+    const key = `event.field:${effect.event_id}:intensity`;
+    store.getState().selectCue(cue.cue_id);
+    const revisionBefore = store.getState().revision;
+    const historyBefore = store.getState().history.length;
+
+    store.getState().beginTransaction(key);
+    store.getState().previewEvent(key, effect.event_id, { intensity: 0.4 });
+    store.getState().previewEvent(key, effect.event_id, { intensity: 0.55 });
+    store.getState().previewEvent(key, effect.event_id, { intensity: 0.7 });
+
+    let state = store.getState();
+    const previewed = state.project.chapters[0].scenes[0].cues[2].events
+      .find((event) => event.event_id === effect.event_id);
+    expect(previewed?.intensity).toBe(0.7);
+    expect(state.revision).toBe(revisionBefore);
+    expect(state.history).toHaveLength(historyBefore);
+    expect(repository.saves).toBe(0);
+
+    expect(state.commitTransaction(key)).toEqual({
+      status: "committed",
+      revision: revisionBefore + 1,
+    });
+    state = store.getState();
+    expect(state.history).toHaveLength(historyBefore + 1);
+    expect(state.autosave.pendingRevision).toBe(revisionBefore + 1);
+  });
+
   it("previews many gesture values but commits one save and one undo entry", () => {
     const repository = new CountingProjectRepository(demoProject);
     const store = createProjectStore(repository);

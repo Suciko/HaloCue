@@ -81,6 +81,7 @@ type EditorState = {
   beginTransaction: (key: string) => void;
   previewDialogue: (key: string, patch: Partial<CueEvent>) => void;
   previewEnvironment: (key: string, patch: Partial<CueEvent>) => void;
+  previewEvent: (key: string, eventId: string, patch: Partial<CueEvent>) => void;
   commitTransaction: (key: string) => EditorTransactionResult;
   cancelTransaction: (key: string) => void;
   flushAutosave: () => void;
@@ -202,6 +203,13 @@ function applyDialoguePatch(cue: Cue, patch: Partial<CueEvent>): void {
     cue.events.push(dialogue);
   }
   Object.assign(dialogue, patch);
+}
+
+function applyEventPatch(cue: Cue, eventId: string, patch: Partial<CueEvent>): boolean {
+  const event = cue.events.find((item) => item.event_id === eventId);
+  if (!event) return false;
+  Object.assign(event, patch);
+  return true;
 }
 
 export function createProjectStore(repository: ProjectRepository = projectRepository) {
@@ -426,6 +434,11 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     previewEnvironment: (key, patch) => previewActiveTransaction(key, (_project, cue, scene) => {
       applyEnvironmentPatch(cue, scene, patch);
     }),
+    previewEvent: (key, eventId, patch) => previewActiveTransaction(key, (_project, cue) => {
+      if (!applyEventPatch(cue, eventId, patch)) {
+        throw new Error(`编辑事务 ${key} 的事件 ${eventId} 已不存在`);
+      }
+    }),
     commitTransaction: (key) => commitActiveTransaction(key),
     cancelTransaction: (key) => {
       const state = get();
@@ -561,8 +574,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       scene.cues.splice(target, 0, item);
     }),
     updateEvent: (eventId, patch) => commit((_project, cue) => {
-      const event = cue.events.find((item) => item.event_id === eventId);
-      if (event) Object.assign(event, patch);
+      applyEventPatch(cue, eventId, patch);
     }),
     deleteEvent: (eventId) => {
       commitActiveTransaction();

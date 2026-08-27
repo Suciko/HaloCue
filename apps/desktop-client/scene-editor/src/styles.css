@@ -190,6 +190,7 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .field input, .field select { height: 32px; padding: 0 9px; }
 .field textarea { resize: vertical; min-height: 82px; padding: 8px 9px; line-height: 1.65; }
 .field input:hover, .field select:hover, .field textarea:hover { border-color: #46514d; }
+.field input[aria-invalid="true"] { border-color: #a85b4b; box-shadow: 0 0 0 2px rgba(216, 91, 72, .09); }
 .field input:read-only { color: var(--muted); background: #141817; }
 .field-grid { display: grid; gap: 8px; }
 .field-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }

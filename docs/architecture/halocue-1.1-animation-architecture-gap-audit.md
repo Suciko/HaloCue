@@ -348,6 +348,13 @@ one project revision, one undo entry, and one autosave request. Escape cancels,
 and native text undo is no longer intercepted by the global project shortcut
 during an active text session.
 
+The professional field transaction tracer is recorded in
+`docs/handoffs/2026-08-27-professional-field-transaction-tracer.md`. Registered
+event text, slot, number, and duration fields now preview through the same
+focus-scoped transaction. Numeric controls retain partial text locally, reject
+empty/non-finite/out-of-range drafts without writing `0`, and either commit one
+validated value or restore the baseline on blur.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure

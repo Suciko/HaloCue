@@ -54,8 +54,7 @@ editor-only change.
 
 ## Remaining work
 
-Professional string/text fields and numeric inputs still use immediate
-per-change commands. They should adopt the same focus transaction adapter.
-Numeric fields additionally need empty/intermediate-string handling so invalid
-partial text is not coerced to zero before commit. Timeline duration handles
-should reuse the pointer form of this transaction lifecycle.
+Professional string/text, slot, number, and duration fields now use the same
+focus transaction in the later professional-field tracer. Numeric partial text
+is kept outside canonical project state. Timeline duration handles should next
+reuse the pointer form of this transaction lifecycle.

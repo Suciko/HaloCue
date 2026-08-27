@@ -55,6 +55,7 @@ import {
   type PreviewCompilationRequest,
 } from "./previewCompilation";
 import { eventDurationMs } from "./renderTimeline";
+import { parseNumericDraft } from "./fieldTransactions";
 import { projectCueState, sceneById } from "./cueStateProjection";
 import {
   eventEditorDefinition,
@@ -577,6 +578,88 @@ function TransactionalTextControl({
     : <input {...common} />;
 }
 
+function TransactionalNumberControl({
+  transactionKey,
+  value,
+  min,
+  max,
+  step,
+  preview,
+}: {
+  transactionKey: string;
+  value: number | undefined;
+  min?: number;
+  max?: number;
+  step?: number;
+  preview: (key: string, value: number) => void;
+}) {
+  const canonical = value === undefined ? "" : String(value);
+  const [draft, setDraft] = useState(canonical);
+  const [focused, setFocused] = useState(false);
+  const baselineRef = useRef(canonical);
+  const beginTransaction = useProjectStore((state) => state.beginTransaction);
+  const commitTransaction = useProjectStore((state) => state.commitTransaction);
+  const cancelTransaction = useProjectStore((state) => state.cancelTransaction);
+  const parsed = parseNumericDraft(draft, { min, max });
+
+  useEffect(() => {
+    if (!focused) setDraft(canonical);
+  }, [canonical, focused]);
+
+  const begin = () => {
+    baselineRef.current = canonical;
+    setFocused(true);
+    beginTransaction(transactionKey);
+  };
+  const cancel = () => {
+    cancelTransaction(transactionKey);
+    setFocused(false);
+    setDraft(baselineRef.current);
+  };
+  const finish = () => {
+    const finalValue = parseNumericDraft(draft, { min, max });
+    if (finalValue === null) {
+      cancel();
+      return;
+    }
+    beginTransaction(transactionKey);
+    preview(transactionKey, finalValue);
+    commitTransaction(transactionKey);
+    setFocused(false);
+    setDraft(String(finalValue));
+  };
+
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={draft}
+      aria-invalid={focused && parsed === null}
+      onFocus={begin}
+      onChange={(event) => {
+        const nextDraft = event.target.value;
+        setDraft(nextDraft);
+        beginTransaction(transactionKey);
+        const nextValue = parseNumericDraft(nextDraft, { min, max });
+        if (nextValue !== null) preview(transactionKey, nextValue);
+      }}
+      onBlur={finish}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          cancel();
+          event.currentTarget.blur();
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
 function CharacterInspector() {
   const project = useProjectStore((state) => state.project);
   const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
@@ -823,11 +906,13 @@ function ProfessionalEventFields({
   fields,
   project,
   updateEvent,
+  previewEvent,
 }: {
   event: CueEvent;
   fields: readonly EventEditorField[];
   project: ReturnType<typeof useProjectStore.getState>["project"];
   updateEvent: (eventId: string, patch: Partial<CueEvent>) => void;
+  previewEvent: (key: string, eventId: string, patch: Partial<CueEvent>) => void;
 }) {
   return <>
     {fields.map((field) => {
@@ -842,7 +927,14 @@ function ProfessionalEventFields({
       }
       if (field.control === "slot") {
         return <Field key={field.key} label={field.label} hint={field.hint}>
-          <input type="number" min={field.min} max={field.max} step={field.step} value={Number(value || field.min || 1)} onChange={(change) => updateEvent(event.event_id, { [field.key]: Number(change.target.value) })} />
+          <TransactionalNumberControl
+            transactionKey={`event.field:${event.event_id}:${field.key}`}
+            min={field.min}
+            max={field.max}
+            step={field.step}
+            value={typeof value === "number" ? value : field.min}
+            preview={(key, nextValue) => previewEvent(key, event.event_id, { [field.key]: nextValue })}
+          />
         </Field>;
       }
       if (field.control === "background") {
@@ -855,13 +947,23 @@ function ProfessionalEventFields({
       }
       if (field.control === "number") {
         return <Field key={field.key} label={field.label} hint={field.hint}>
-          <input type="number" min={field.min} max={field.max} step={field.step} value={typeof value === "number" ? value : ""} onChange={(change) => updateEvent(event.event_id, { [field.key]: Number(change.target.value) })} />
+          <TransactionalNumberControl
+            transactionKey={`event.field:${event.event_id}:${field.key}`}
+            min={field.min}
+            max={field.max}
+            step={field.step}
+            value={typeof value === "number" ? value : undefined}
+            preview={(key, nextValue) => previewEvent(key, event.event_id, { [field.key]: nextValue })}
+          />
         </Field>;
       }
       return <Field key={field.key} label={field.label} hint={field.hint}>
-        {field.multiline
-          ? <textarea rows={6} value={String(value || "")} onChange={(change) => updateEvent(event.event_id, { [field.key]: change.target.value })} />
-          : <input value={String(value || "")} onChange={(change) => updateEvent(event.event_id, { [field.key]: change.target.value })} />}
+        <TransactionalTextControl
+          transactionKey={`event.field:${event.event_id}:${field.key}`}
+          rows={field.multiline ? 6 : undefined}
+          value={String(value || "")}
+          preview={(key, nextValue) => previewEvent(key, event.event_id, { [field.key]: nextValue })}
+        />
       </Field>;
     })}
   </>;
@@ -933,6 +1035,7 @@ function ProfessionalInspector() {
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const selectedEventId = useProjectStore((state) => state.selectedEventId);
   const updateEvent = useProjectStore((state) => state.updateEvent);
+  const previewEvent = useProjectStore((state) => state.previewEvent);
   const cue = sceneById(project, selectedSceneId)
     .cues.find((item) => item.cue_id === selectedCueId)!;
   const event = cue.events.find((item) => item.event_id === selectedEventId) || cue.events[0];
@@ -966,9 +1069,23 @@ function ProfessionalInspector() {
       <div className="inspector-content">
         <Field label="事件 ID"><input className="mono" value={event.event_id} readOnly /></Field>
         <Field label="事件类型"><input className="mono" value={event.kind} readOnly /></Field>
-        <ProfessionalEventFields event={event} fields={editorFields} project={project} updateEvent={updateEvent} />
+        <ProfessionalEventFields
+          event={event}
+          fields={editorFields}
+          project={project}
+          updateEvent={updateEvent}
+          previewEvent={previewEvent}
+        />
         <div className="field-grid two">
-          <Field label="时长"><div className="duration-input"><input type="number" min={1} value={event.duration_ms ?? resolvedDuration} onChange={(change) => updateEvent(event.event_id, { duration_ms: Number(change.target.value) })} /><span>ms</span></div></Field>
+          <Field label="时长"><div className="duration-input">
+            <TransactionalNumberControl
+              transactionKey={`event.duration:${event.event_id}`}
+              min={1}
+              value={event.duration_ms ?? resolvedDuration}
+              preview={(key, nextValue) => previewEvent(key, event.event_id, { duration_ms: nextValue })}
+            />
+            <span>ms</span>
+          </div></Field>
           <Field label="开始帧"><input className="mono" value="自动" readOnly /></Field>
         </div>
         <details className="advanced-fields" open={!editorDefinition}>
