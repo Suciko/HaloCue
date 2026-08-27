@@ -74,6 +74,11 @@ import {
 } from "./cueStateProjection";
 import { TimelineEventSegment } from "./TimelineEventSegment";
 import {
+  buildShotTimeline,
+  type ShotTimelineClip,
+  type ShotTimelineProjection,
+} from "./shotTimeline";
+import {
   eventEditorDefinition,
   eventEditorDefinitions,
   eventLabel,
@@ -1688,6 +1693,153 @@ function Timeline() {
   );
 }
 
+function shotTimelineClipLabel(clip: ShotTimelineClip): string {
+  if (clip.track_id === "character" && clip.slot) return `${clip.label} · #${clip.slot}`;
+  return clip.label;
+}
+
+function ShotTimelineWorkspace() {
+  const project = useProjectStore((state) => state.project);
+  const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
+  const selectedCueId = useProjectStore((state) => state.selectedCueId);
+  const selectedEventId = useProjectStore((state) => state.selectedEventId);
+  const playheadFrame = useProjectStore((state) => state.previewPlayheadFrame);
+  const selectEvent = useProjectStore((state) => state.selectEvent);
+  const setPlayheadFrame = useProjectStore((state) => state.setPreviewPlayheadFrame);
+  const scene = sceneById(project, selectedSceneId);
+  const cue = scene.cues.find((item) => item.cue_id === selectedCueId);
+  const evaluation = useMemo(
+    () => evaluateScene(project, selectedCueId, { sceneId: selectedSceneId }),
+    [project, selectedCueId, selectedSceneId],
+  );
+  const projection = useMemo<ShotTimelineProjection | null>(() => {
+    if (!cue) return null;
+    return buildShotTimeline({ sceneId: scene.scene_id, cue, timeline: evaluation.timeline });
+  }, [cue, evaluation.timeline, scene.scene_id]);
+  if (!cue || !projection) return <section className="shot-timeline-panel"><div className="empty-state">选择一个 Cue</div></section>;
+
+  const rangeStart = projection.start_frame;
+  const rangeEnd = Math.max(rangeStart + 1, projection.end_frame);
+  const span = rangeEnd - rangeStart;
+  const selectedClip = projection.tracks.flatMap((track) => track.clips)
+    .find((clip) => clip.event_id === selectedEventId);
+  const visibleFrame = Math.max(
+    rangeStart,
+    Math.min(rangeEnd - 1, playheadFrame ?? selectedClip?.start_frame ?? rangeStart),
+  );
+  const playheadPercent = ((visibleFrame - rangeStart) / span) * 100;
+  const rulerFrames = Array.from({ length: 5 }, (_, index) => (
+    Math.round(rangeStart + (span * index) / 4)
+  ));
+  const scrubAt = (clientX: number, element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    const ratio = rect.width > 0
+      ? Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      : 0;
+    setPlayheadFrame(Math.round(rangeStart + ratio * span));
+  };
+  const clipPosition = (clip: ShotTimelineClip) => ({
+    left: `${Math.max(0, ((clip.start_frame - rangeStart) / span) * 100)}%`,
+    width: `${Math.max(1.5, ((clip.end_frame - clip.start_frame) / span) * 100)}%`,
+  });
+
+  return (
+    <section className="shot-timeline-panel" aria-label="镜头时间轴">
+      <header className="shot-timeline-heading">
+        <div>
+          <Clapperboard />
+          <span><strong>镜头时间轴</strong><small>{cue.title || "未命名演出"} · {projection.total_frames} 帧</small></span>
+        </div>
+        <output aria-live="polite">{formatTimelineFrame(visibleFrame, projection.frame_rate)} · F{visibleFrame}</output>
+      </header>
+      {projection.unmappedEventIds.length > 0 && (
+        <div className="shot-timeline-notice" role="status">
+          <AlertTriangle />{projection.unmappedEventIds.length} 个高级事件暂未进入可渲染时间轴
+        </div>
+      )}
+      <div className="shot-timeline-scroll">
+        <div className="shot-timeline-inner">
+          <div className="shot-ruler-row">
+            <span className="shot-track-label">时间</span>
+            <div
+              className="shot-ruler"
+              data-shot-ruler
+              role="slider"
+              tabIndex={0}
+              aria-label="镜头时间轴播放头"
+              aria-valuemin={rangeStart}
+              aria-valuemax={rangeEnd - 1}
+              aria-valuenow={visibleFrame}
+              aria-valuetext={`${formatTimelineFrame(visibleFrame, projection.frame_rate)}，第 ${visibleFrame} 帧`}
+              onPointerDown={(event) => {
+                event.currentTarget.setPointerCapture(event.pointerId);
+                scrubAt(event.clientX, event.currentTarget);
+              }}
+              onPointerMove={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) scrubAt(event.clientX, event.currentTarget);
+              }}
+              onClick={(event) => scrubAt(event.clientX, event.currentTarget)}
+              onKeyDown={(event) => {
+                const step = event.shiftKey ? projection.frame_rate : 1;
+                const next = {
+                  ArrowLeft: visibleFrame - step,
+                  ArrowDown: visibleFrame - step,
+                  ArrowRight: visibleFrame + step,
+                  ArrowUp: visibleFrame + step,
+                  Home: rangeStart,
+                  End: rangeEnd - 1,
+                }[event.key];
+                if (next !== undefined) {
+                  event.preventDefault();
+                  setPlayheadFrame(Math.max(rangeStart, Math.min(rangeEnd - 1, next)));
+                }
+              }}
+            >
+              {rulerFrames.map((frame, index) => <span key={`${frame}:${index}`} style={{ left: `${(index / 4) * 100}%` }}>{formatTimelineFrame(frame, projection.frame_rate)}</span>)}
+            </div>
+          </div>
+          <div className="shot-track-stack">
+            <span className="shot-playhead" style={{ left: `calc(110px + (100% - 110px) * ${playheadPercent / 100})` }} />
+            {projection.tracks.map((track) => (
+              <div className="shot-track-row" key={track.id}>
+                <div className="shot-track-label" title={track.label}><strong>{track.label}</strong><small>{track.clips.length || "—"}</small></div>
+                <div
+                  className="shot-track-lane"
+                  data-shot-track={track.id}
+                  onPointerDown={(event) => scrubAt(event.clientX, event.currentTarget)}
+                  onClick={(event) => scrubAt(event.clientX, event.currentTarget)}
+                >
+                  {track.clips.map((clip) => (
+                    <button
+                      type="button"
+                      className={`shot-clip${clip.event_id === selectedEventId ? " is-selected" : ""}${clip.wait_for_completion ? "" : " is-parallel"}`}
+                      data-shot-clip
+                      data-event-id={clip.event_id}
+                      key={clip.event_id}
+                      style={clipPosition(clip)}
+                      title={`${shotTimelineClipLabel(clip)} · ${clip.start_frame}–${clip.end_frame} · ${clip.wait_for_completion ? "顺序执行" : "与后续事件并行"}`}
+                      aria-label={`${shotTimelineClipLabel(clip)}，第 ${clip.start_frame} 至 ${clip.end_frame} 帧`}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        selectEvent(clip.event_id);
+                        setPlayheadFrame(clip.start_frame);
+                      }}
+                    >
+                      <span>{shotTimelineClipLabel(clip)}</span>
+                      {!clip.wait_for_completion && <small>并行</small>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function SimpleWorkspace() {
   return (
     <div className="workspace-grid simple-grid">
@@ -1699,10 +1851,21 @@ function SimpleWorkspace() {
 }
 
 function ProfessionalWorkspace() {
+  const [workspaceView, setWorkspaceView] = useState<"script" | "shot">("script");
   return (
     <div className="workspace-grid professional-grid">
       <ProjectRail showCues />
-      <main className="professional-main"><div className="professional-upper"><PreviewFrame /><ProfessionalEventList /></div><Timeline /></main>
+      <main className="professional-main">
+        <div className="professional-view-tabs" role="tablist" aria-label="专业工作区">
+          <button type="button" role="tab" aria-selected={workspaceView === "script"} className={workspaceView === "script" ? "is-active" : ""} onClick={() => setWorkspaceView("script")}><MessageSquareText />脚本</button>
+          <button type="button" role="tab" aria-selected={workspaceView === "shot"} className={workspaceView === "shot" ? "is-active" : ""} onClick={() => setWorkspaceView("shot")}><Clapperboard />镜头时间轴</button>
+        </div>
+        <div className="professional-view-content">
+          {workspaceView === "script"
+            ? <div className="professional-script-layout"><div className="professional-upper"><PreviewFrame /><ProfessionalEventList /></div><Timeline /></div>
+            : <div className="professional-shot-layout"><PreviewFrame /><ShotTimelineWorkspace /></div>}
+        </div>
+      </main>
       <ProfessionalInspector />
     </div>
   );
