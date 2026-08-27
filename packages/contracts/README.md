@@ -4,7 +4,7 @@ This package owns versioned JSON contracts shared by the client, backend, BA
 editor, and adapters. A wire-shape change requires a new version or an explicit
 migration plus consumer tests. Current editor/render contracts include
 `halocue-project/1.1`, `character-capabilities/1.0`, `scene-events/1.0`,
-`render-timeline/1.0`, `scene-performance/1.1`, `scene-evaluation/1.2`,
+`render-timeline/1.0`, `scene-performance/1.2`, `scene-evaluation/1.3`,
 `preview-intent/1.0`, `preview-intent/1.1`, and `render-sequence/1.1`.
 Planned contracts include
 `script-release/1.1`, `production-request/1.1`, `performance-draft/1.0`,
@@ -44,17 +44,18 @@ frame ranges generated from a validated scene descriptor. Browser preview and
 offline export consume the same event IDs, durations, and frame boundaries;
 wall-clock callbacks are presentation controls, not part of this contract.
 
-The current `scene-performance/1.1` schema lives in
-`scene-performance/1.1.schema.json`. It is the renderer-independent animation
+The current `scene-performance/1.2` schema lives in
+`scene-performance/1.2.schema.json`. It is the renderer-independent animation
 plan compiled from authored scene events. It defines deterministic stage shake
 plus character opacity, vertical-offset, and scale contributions with explicit
 target/channel/value-space metadata, exact frame ranges, and one-to-many
-source-event mapping. Preview and export sample this plan even when wall-clock
-CSS animation is disabled. `scene-performance/1.0` remains the historical
-shake-only predecessor.
+source-event mapping. It also defines seek-safe numeric keyframes for character
+motion, beginning with additive vertical offset and rotation for `motion/nod`.
+Preview and export sample this plan even when wall-clock CSS animation is
+disabled. `scene-performance/1.0` and `1.1` remain historical predecessors.
 
-The current `scene-evaluation/1.2` schema lives in
-`scene-evaluation/1.2.schema.json`. It binds a descriptor, timeline, performance
+The current `scene-evaluation/1.3` schema lives in
+`scene-evaluation/1.3.schema.json`. It binds a descriptor, timeline, performance
 plan, and non-fatal diagnostics for namespaced
 professional events that a presentation adapter does not render yet. The
 editor, browser preview, and offline adapters can therefore share one explicit

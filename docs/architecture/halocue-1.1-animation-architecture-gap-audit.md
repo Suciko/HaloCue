@@ -277,6 +277,15 @@ event mapped to separate opacity, layout-offset, and scale operations. This is
 still a performance-compiler slice, not completion of the Preview Session or
 Editor Transaction Modules.
 
+The first authored character-motion slice is recorded in
+`docs/handoffs/2026-08-27-scene-performance-nod-keyframes.md`. It introduces
+`scene-performance/1.2` and `scene-evaluation/1.3`, distinguishes a later
+same-character state update from a true placement, and compiles `motion/nod`
+into seek-safe vertical-offset and rotation keyframes. Browser preview, Python,
+and headless capture now sample the same motion, while skip and reduced-motion
+return to the clean baseline. Other capability motions and CSS-only effects
+remain future slices.
+
 The first Preview Session slice is recorded in
 `docs/handoffs/2026-08-27-preview-session-generation-tracer.md`. It adds an
 explicit generation boundary, validates a candidate before replacing the live

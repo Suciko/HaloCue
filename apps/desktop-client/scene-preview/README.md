@@ -36,11 +36,15 @@ The export-safe URL renders the editor tray fully transparent. Append
 still decides whether either button appears inside the video frame.
 
 The preview controller consumes the deterministic `render-timeline/1.0` and
-`scene-performance/1.1` contracts. `window.HaloCueScenePreview.controller`
+`scene-performance/1.2` contracts. `window.HaloCueScenePreview.controller`
 exposes `applyIntent`, `seekFrame`, `seekEvent`, `seekReference`, `play`,
 `pause`, and `dispose`. These methods keep
 the browser preview on the same end-exclusive frame ranges used by the Python
 offline timeline adapter. The default page remains a live realtime preview.
+`play({fromFrame, toFrame})` can run one bounded authored-performance range,
+which lets capability trials replay only their motion event. Reduced-motion
+preference keeps the same bounded timing while transient geometry returns to
+its clean baseline.
 
 Every successful mount creates a monotonic Preview Session generation. The
 candidate descriptor, timeline, and performance plan are validated before the
