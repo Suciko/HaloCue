@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -16,6 +17,12 @@ PREVIEW_ROOT = REPO_ROOT / "apps" / "desktop-client" / "scene-preview"
 class QuietHandler(SimpleHTTPRequestHandler):
     def log_message(self, *_args):
         return
+
+    def do_GET(self):  # noqa: N802 - inherited HTTP handler API
+        if self.path.startswith("/slow-background.png"):
+            time.sleep(0.45)
+            self.path = "/assets/demo-conference-room.jpg"
+        return super().do_GET()
 
 
 def _serve_preview():
@@ -376,6 +383,116 @@ def test_controller_seeks_plays_and_pauses_the_multi_event_timeline():
             page.wait_for_timeout(100)
             assert page.locator("#preview-stage").get_attribute("data-current-frame") == paused_frame
             assert page.locator("#preview-stage").get_attribute("data-playback") == "paused"
+            browser.close()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+@pytest.mark.browser
+def test_preview_session_rejects_stale_controllers_and_delayed_media_callbacks():
+    playwright = pytest.importorskip("playwright.sync_api")
+    server, thread = _serve_preview()
+    stale_descriptor = json.loads(
+        (PREVIEW_ROOT / "example.scene-descriptor.json").read_text(encoding="utf-8")
+    )
+    current_descriptor = json.loads(json.dumps(stale_descriptor))
+    stale_descriptor["scene_id"] = "scene/stale"
+    current_descriptor["scene_id"] = "scene/current"
+    for prefix, descriptor in (("stale", stale_descriptor), ("current", current_descriptor)):
+        for index, event in enumerate(descriptor["events"]):
+            event["event_id"] = f"event/{prefix}/{index}"
+    stale_background = {
+        **stale_descriptor["background"],
+        "preview_uri": "./slow-background.png",
+    }
+    stale_descriptor["background"] = stale_background
+    stale_descriptor["initial_background"] = dict(stale_background)
+    current_background = {
+        **current_descriptor["background"],
+        "preview_uri": "./assets/demo-conference-room.png",
+    }
+    current_descriptor["background"] = current_background
+    current_descriptor["initial_background"] = dict(current_background)
+
+    try:
+        with playwright.sync_playwright() as runtime:
+            try:
+                browser = runtime.chromium.launch(headless=True)
+            except Exception as exc:  # pragma: no cover - depends on local browser install
+                if "Executable doesn't exist" in str(exc):
+                    pytest.skip("Playwright Chromium is not installed")
+                raise
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+            page.goto(
+                f"http://127.0.0.1:{server.server_port}/index.html?renderer=static"
+            )
+            page.wait_for_function("() => Boolean(window.HaloCueScenePreview.controller)")
+
+            mounted = page.evaluate(
+                """payload => {
+                    const stale = window.HaloCueScenePreview.mount(payload.stale);
+                    const current = window.HaloCueScenePreview.mount(payload.current);
+                    current.seekFrame(0);
+                    window.__stalePreviewController = stale;
+                    window.__currentPreviewController = current;
+                    return {
+                        staleGeneration: stale.generation,
+                        currentGeneration: current.generation,
+                        staleCurrent: stale.isCurrent(),
+                        currentCurrent: current.isCurrent(),
+                    };
+                }""",
+                {"stale": stale_descriptor, "current": current_descriptor},
+            )
+            assert mounted["currentGeneration"] > mounted["staleGeneration"]
+            assert mounted["staleCurrent"] is False
+            assert mounted["currentCurrent"] is True
+            page.wait_for_function(
+                """() => document.querySelector('#stage-background')
+                    .style.backgroundImage.includes('demo-conference-room.png')"""
+            )
+
+            stale_call = page.evaluate(
+                """() => {
+                    const stage = document.querySelector('#preview-stage');
+                    const before = stage.dataset.currentEvent;
+                    const result = window.__stalePreviewController.seekFrame(0);
+                    return {before, after: stage.dataset.currentEvent, rejected: result === null};
+                }"""
+            )
+            assert stale_call["rejected"] is True
+            assert stale_call["after"] == stale_call["before"]
+
+            page.wait_for_timeout(650)
+            assert "demo-conference-room.png" in page.locator(
+                "#stage-background"
+            ).evaluate("element => element.style.backgroundImage")
+
+            preserved = page.evaluate(
+                """descriptor => {
+                    const stage = document.querySelector('#preview-stage');
+                    const generation = stage.dataset.previewGeneration;
+                    let rejected = false;
+                    try {
+                        window.HaloCueScenePreview.mount(descriptor, undefined, {
+                            performance: {schema_version: 'scene-performance/0.0'},
+                        });
+                    }
+                    catch (_) { rejected = true; }
+                    return {
+                        rejected,
+                        generationUnchanged: stage.dataset.previewGeneration === generation,
+                        currentStillActive: window.__currentPreviewController.isCurrent(),
+                    };
+                }""",
+                current_descriptor,
+            )
+            assert preserved == {
+                "rejected": True,
+                "generationUnchanged": True,
+                "currentStillActive": True,
+            }
             browser.close()
     finally:
         server.shutdown()

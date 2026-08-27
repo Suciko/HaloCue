@@ -198,10 +198,33 @@
     assertDescriptor(descriptor);
     const stage = root || document.querySelector("#preview-stage");
     if (!stage) throw new Error("Preview stage root was not found.");
-    stage.__haloCueController?.dispose?.();
-    installStageScale(stage);
     const rendererMode = new URLSearchParams(window.location.search).get("renderer") === "static"
       ? "static" : "realtime";
+    const initialActors = Array.isArray(descriptor.initial_actors)
+      ? descriptor.initial_actors
+      : descriptor.actors;
+    const resolvedTimeline = resolveRenderTimeline(descriptor, options.timeline);
+    const timeline = resolvedTimeline.timeline;
+    const resolvedPerformance = resolveScenePerformance(descriptor, timeline, options.performance);
+    const performance = resolvedPerformance.performance;
+    const captureMode = options.capture === true;
+    if (initialActors.length !== 5) {
+      throw new Error("Scene descriptor initial_actors must contain exactly five actor slots.");
+    }
+
+    // Compile and validate the candidate before replacing the live session.
+    // Once committed, a monotonically increasing generation makes every old
+    // controller and delayed callback observably stale.
+    stage.__haloCueController?.dispose?.();
+    const generation = (Number(stage.__haloCuePreviewGeneration) || 0) + 1;
+    stage.__haloCuePreviewGeneration = generation;
+    stage.dataset.previewGeneration = String(generation);
+    let disposed = false;
+    const isCurrentSession = () => (
+      !disposed && stage.__haloCuePreviewGeneration === generation
+    );
+
+    installStageScale(stage);
     stage.dataset.renderer = rendererMode;
     const actorLayer = stage.querySelector("#actor-layer");
     const speaker = stage.querySelector("#speaker-name");
@@ -224,22 +247,11 @@
       ? SPINE_RENDERER?.createManager?.() || null
       : null;
     stage.__haloCueSpineManager = spineManager;
-    const initialActors = Array.isArray(descriptor.initial_actors)
-      ? descriptor.initial_actors
-      : descriptor.actors;
-    const resolvedTimeline = resolveRenderTimeline(descriptor, options.timeline);
-    const timeline = resolvedTimeline.timeline;
-    const resolvedPerformance = resolveScenePerformance(descriptor, timeline, options.performance);
-    const performance = resolvedPerformance.performance;
-    const captureMode = options.capture === true;
     stage.dataset.timelineSource = resolvedTimeline.source;
     stage.dataset.performanceSource = resolvedPerformance.source;
     stage.dataset.capture = captureMode ? "deterministic" : "preview";
     if (locationLabel) {
       locationLabel.hidden = descriptor.presentation?.location_mode === "hidden";
-    }
-    if (initialActors.length !== 5) {
-      throw new Error("Scene descriptor initial_actors must contain exactly five actor slots.");
     }
     const actorCatalog = new Map(
       [...descriptor.actors, ...initialActors]
@@ -482,25 +494,29 @@
         return line;
       }));
       const toggle = document.querySelector("#guides-toggle");
-      toggle?.addEventListener("change", () => {
+      if (toggle) toggle.onchange = () => {
+        if (!isCurrentSession()) return;
         guides.classList.toggle("is-visible", toggle.checked);
         guides.setAttribute("aria-hidden", String(!toggle.checked));
-      });
+      };
     }
 
     function installResourceInspector() {
       if (!assetInspector || !editorMode) return;
       const copy = document.querySelector("#copy-resource-map");
-      copy?.addEventListener("click", async () => {
+      if (copy) copy.onclick = async () => {
+        if (!isCurrentSession()) return;
         const payload = JSON.stringify(resourceMapPayload(), null, 2);
         try {
           if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
           await navigator.clipboard.writeText(payload);
+          if (!isCurrentSession()) return;
           if (inspectorCopyStatus) inspectorCopyStatus.textContent = "资源定位 JSON 已复制";
         } catch (_error) {
+          if (!isCurrentSession()) return;
           if (inspectorCopyStatus) inspectorCopyStatus.textContent = "当前浏览器不允许直接复制";
         }
-      });
+      };
       renderResourceInspector();
     }
 
@@ -561,7 +577,7 @@
     }
 
     function pulseMotion(element, className) {
-      if (!element) return;
+      if (!isCurrentSession() || !element) return;
       element.classList.remove(className);
       // Force a new animation cycle when two adjacent events use the same
       // slot.  This is layout-only and does not change the 16:9 stage math.
@@ -598,7 +614,7 @@
       }
       const startedAt = window.performance.now();
       const tick = (now) => {
-        if (!state.typewriter) return;
+        if (!isCurrentSession() || !state.typewriter) return;
         const frame = state.typewriter.frame(now - startedAt);
         copy.textContent = frame.visibleText;
         if (frame.complete) {
@@ -649,12 +665,12 @@
         const mediaUri = stageMedia?.preview_uri || "";
         const isRealtimeSpine = Boolean(visible && stageMedia?.kind === "spine" && stageMedia?.bundle_key && spineManager);
         image.onload = () => {
-          if (image.dataset.requestUri !== mediaUri) return;
+          if (!isCurrentSession() || image.dataset.requestUri !== mediaUri) return;
           portrait.classList.toggle("has-image", Boolean(mediaUri));
           updateMediaReadiness();
         };
         image.onerror = () => {
-          if (image.dataset.requestUri !== mediaUri) return;
+          if (!isCurrentSession() || image.dataset.requestUri !== mediaUri) return;
           portrait.classList.remove("has-image");
           updateMediaReadiness();
         };
@@ -671,12 +687,13 @@
         if (isRealtimeSpine) {
           spineManager.attach(canvas, stageMedia, {
             ready: () => {
-              if (canvas.closest(".actor-slot") === element) {
+              if (isCurrentSession() && canvas.closest(".actor-slot") === element) {
                 portrait.classList.add("realtime-ready");
                 updateMediaReadiness();
               }
             },
             error: () => {
+              if (!isCurrentSession()) return;
               portrait.classList.remove("has-realtime-media", "realtime-ready");
               updateMediaReadiness();
             },
@@ -880,6 +897,7 @@
     }
 
     function seekFrame(frame, options = {}) {
+      if (!isCurrentSession()) return null;
       if (!options.fromPlayback) cancelPlayback();
       const sample = AA.sampleRenderTimeline(timeline, frame);
       cancelTypewriter();
@@ -912,11 +930,13 @@
     }
 
     function seekEvent(eventIndex, options = {}) {
+      if (!isCurrentSession()) return null;
       const frame = AA.timelineFrameForEvent(timeline, eventIndex, options.complete !== false);
       return seekFrame(frame, options);
     }
 
     function seekReference() {
+      if (!isCurrentSession()) return null;
       const reference = descriptor.presentation?.reference_frame;
       if (!reference) return null;
       const spineTimeMs = Number(reference.spine_time_ms);
@@ -927,12 +947,13 @@
     }
 
     function pause() {
+      if (!isCurrentSession()) return;
       cancelPlayback();
       spineManager?.pause();
     }
 
     function play(options = {}) {
-      if (!timeline.total_frames) return;
+      if (!isCurrentSession() || !timeline.total_frames) return;
       cancelPlayback();
       cancelTypewriter();
       const requested = Number(options.fromFrame);
@@ -946,7 +967,7 @@
       spineManager?.pause();
       let lastRenderedFrame = -1;
       const tick = (now) => {
-        if (!state.playing) return;
+        if (!isCurrentSession() || !state.playing) return;
         const nextFrame = Math.floor((now - startedAt) * timeline.frame_rate / 1000);
         if (nextFrame >= timeline.total_frames) {
           seekFrame(timeline.total_frames - 1, { fromPlayback: true });
@@ -963,6 +984,7 @@
     }
 
     function advanceEvent() {
+      if (!isCurrentSession()) return;
       cancelPlayback();
       spineManager?.resume();
       stage.dataset.playback = "live";
@@ -986,6 +1008,7 @@
     }
 
     function loadPreviewBackground(background, options = {}) {
+      if (!isCurrentSession()) return;
       const previewUri = resolvePreviewUri(background && background.preview_uri);
       const focusX = clampUnit(background?.focus_x, 0.5);
       const focusY = clampUnit(background?.focus_y, 0.5);
@@ -1023,7 +1046,7 @@
       updateMediaReadiness();
       const image = new Image();
       image.addEventListener("load", () => {
-        if (state.backgroundRequestUri !== previewUri) return;
+        if (!isCurrentSession() || state.backgroundRequestUri !== previewUri) return;
         stageBackground.style.backgroundImage = `url("${previewUri}")`;
         stageBackground.dataset.previewUri = previewUri;
         stage.classList.add("has-background-image");
@@ -1037,7 +1060,7 @@
         status.textContent = "Background ready";
       });
       image.addEventListener("error", () => {
-        if (state.backgroundRequestUri !== previewUri) return;
+        if (!isCurrentSession() || state.backgroundRequestUri !== previewUri) return;
         state.backgroundPending = false;
         updateMediaReadiness();
         status.textContent = "Background placeholder";
@@ -1128,18 +1151,22 @@
     const locationTimer = !captureMode
       && locationLabel
       && descriptor.presentation?.location_mode !== "persistent"
-      ? window.setTimeout(() => locationLabel.classList.add("is-dismissed"), 2600)
+      ? window.setTimeout(() => {
+        if (isCurrentSession()) locationLabel.classList.add("is-dismissed");
+      }, 2600)
       : null;
     // The first visible cast enters as a restrained, staggered GalGame
     // entrance instead of appearing fully formed on the first frame.
     const initialMotionTimers = [];
     const initialMotionFrame = captureMode ? null : window.requestAnimationFrame(() => {
-      if (!state.initialMotionPending) return;
+      if (!isCurrentSession() || !state.initialMotionPending) return;
       state.initialMotionPending = false;
       initialActors.filter((actor) => actor && actor.state === "visible")
         .forEach((actor, index) => {
           initialMotionTimers.push(window.setTimeout(
-            () => pulseMotion(actorElements.get(actor.slot), "is-entering"),
+            () => {
+              if (isCurrentSession()) pulseMotion(actorElements.get(actor.slot), "is-entering");
+            },
             index * 70,
           ));
         });
@@ -1147,6 +1174,8 @@
     if (captureMode) state.initialMotionPending = false;
     const controller = {
       advance: advanceEvent,
+      generation,
+      isCurrent: isCurrentSession,
       pause,
       play,
       seekEvent,
@@ -1156,6 +1185,13 @@
       timeline,
       performance,
       dispose() {
+        if (disposed) return;
+        const ownsStage = stage.__haloCuePreviewGeneration === generation;
+        disposed = true;
+        if (ownsStage) {
+          stage.__haloCuePreviewGeneration = generation + 1;
+          stage.dataset.previewGeneration = String(generation + 1);
+        }
         cancelPlayback();
         cancelTypewriter();
         state.initialMotionPending = false;
@@ -1169,6 +1205,10 @@
         if (timelinePlay) timelinePlay.onclick = null;
         if (timelineScrubber) timelineScrubber.oninput = null;
         if (timelineReference) timelineReference.onclick = null;
+        const guidesToggle = document.querySelector("#guides-toggle");
+        const copyResourceMap = document.querySelector("#copy-resource-map");
+        if (guidesToggle) guidesToggle.onchange = null;
+        if (copyResourceMap) copyResourceMap.onclick = null;
         stage.__haloCueStageScaleObserver?.disconnect?.();
         if (stage.__haloCueStageScaleHandler) {
           window.removeEventListener("resize", stage.__haloCueStageScaleHandler);

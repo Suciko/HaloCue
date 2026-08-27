@@ -277,6 +277,13 @@ event mapped to separate opacity, layout-offset, and scale operations. This is
 still a performance-compiler slice, not completion of the Preview Session or
 Editor Transaction Modules.
 
+The first Preview Session slice is recorded in
+`docs/handoffs/2026-08-27-preview-session-generation-tracer.md`. It adds an
+explicit generation boundary, validates a candidate before replacing the live
+session, and prevents stale controllers or delayed media callbacks from
+mutating the shared stage. Broader scene ownership and editor-to-preview
+selection synchronization remain later slices.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure

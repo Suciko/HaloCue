@@ -72,10 +72,13 @@ import type {
 } from "./types";
 
 type PreviewController = {
+  generation: number;
+  isCurrent: () => boolean;
   timeline: { total_frames: number };
   performance: ScenePerformancePlan;
   seekFrame: (frame: number) => void;
   play: (options?: { fromFrame?: number }) => void;
+  dispose: () => void;
 };
 
 type PreviewWindow = Window & {
@@ -246,6 +249,8 @@ function PreviewFrame() {
     const timer = window.setTimeout(mount, 140);
     return () => window.clearTimeout(timer);
   }, [evaluation]);
+
+  useEffect(() => () => controllerRef.current?.dispose(), []);
 
   return (
     <section className="preview-region" aria-label="实时预览">

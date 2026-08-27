@@ -42,6 +42,14 @@ exposes `seekFrame`,
 the browser preview on the same end-exclusive frame ranges used by the Python
 offline timeline adapter. The default page remains a live realtime preview.
 
+Every successful mount creates a monotonic Preview Session generation. The
+candidate descriptor, timeline, and performance plan are validated before the
+current session is replaced. Disposed controllers become inert, and delayed
+image, Spine, playback, typewriter, location-label, and entrance callbacks
+check the generation before touching the shared stage. A failed candidate
+therefore leaves the current preview intact, while a late callback from an old
+scene cannot overwrite the new scene.
+
 Useful deterministic URLs:
 
 - `?descriptor=official-p69&reference=1` seeks and freezes the descriptor's
