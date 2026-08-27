@@ -75,5 +75,12 @@ simple mode still selects only the contextual fields needed for the current
 task.
 
 The next slice can expand the catalog to resource previews and schema-driven
-diagnostics, then deepen the ProjectCodec seam for 1.0 imports and nested
-validation.
+diagnostics. The ProjectCodec seam for 1.0 imports, deterministic Cue IDs,
+nested validation, corrupt-snapshot recovery, and editor diagnostics is now
+implemented in the same branch.
+
+## Codec publication
+
+- ProjectCodec/diagnostics commit: `pending final commit`
+- The codec is pushed to the same PR after the focused editor suite and build
+  complete.

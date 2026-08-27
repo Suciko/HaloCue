@@ -72,4 +72,15 @@ describe("scene evaluation seam", () => {
     expect(evaluation.descriptor.events.at(-1)?.kind).toBe("halocue.ba:screen-shake");
     expect(evaluation.timeline.events.at(-1)?.duration_ms).toBe(360);
   });
+
+  it("reports structural project errors through the evaluation seam", () => {
+    const project = structuredClone(demoProject);
+    project.chapters[0].scenes[0].cues[0].events[1].slot = 6;
+
+    const evaluation = evaluateScene(project, project.chapters[0].scenes[0].cues[0].cue_id);
+
+    expect(evaluation.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "project.invalid_slot", severity: "error" }),
+    ]));
+  });
 });

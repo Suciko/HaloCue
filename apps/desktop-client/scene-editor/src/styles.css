@@ -210,6 +210,8 @@ svg { width: 16px; height: 16px; flex: none; stroke-width: 1.8; }
 .quick-effects button { height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-2); color: var(--muted); font-size: 9px; cursor: pointer; }
 .quick-effects button:hover { color: var(--text); border-color: #47534e; }
 .inspector-footer, .diagnostic-strip { min-height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 13px; border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 9px; }
+.diagnostic-strip.is-warning { color: var(--warning); }
+.diagnostic-strip.is-error { color: #ff9b91; background: rgba(113, 39, 35, .18); }
 .inspector-footer svg, .diagnostic-strip svg { width: 12px; color: var(--accent); }
 
 .professional-main { display: grid; grid-template-rows: minmax(0, 1fr) 132px; overflow: hidden; }

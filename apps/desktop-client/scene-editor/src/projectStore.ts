@@ -20,6 +20,7 @@ import type {
 import { isDescriptorRenderable } from "./sceneEventRegistry";
 import { createSceneEvent } from "./sceneEventFactory";
 import { firstScene, projectSceneAtCue } from "./cueStateProjection";
+import type { ProjectDiagnostic } from "./projectCodec";
 
 const clone = <T,>(value: T): T => structuredClone(value);
 
@@ -52,6 +53,7 @@ type EditorState = {
   future: HistoryEntry[];
   dirty: boolean;
   revision: number;
+  projectDiagnostics: ProjectDiagnostic[];
   setMode: (mode: EditorMode) => void;
   setInspectorTab: (tab: InspectorTab) => void;
   selectCue: (cueId: string) => void;
@@ -115,6 +117,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       future: [],
       dirty: true,
       revision: state.revision + 1,
+      projectDiagnostics: [...repository.getDiagnostics()],
     });
   };
 
@@ -129,6 +132,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     future: [],
     dirty: false,
     revision: 0,
+    projectDiagnostics: [...repository.getDiagnostics()],
     setMode: (mode) => {
       saveEditorMode(mode);
       set({ mode });
@@ -299,6 +303,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         }, ...state.future.slice(0, 59)],
         dirty: true,
         revision: state.revision + 1,
+        projectDiagnostics: [...repository.getDiagnostics()],
       });
     },
     redo: () => {
@@ -316,6 +321,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         future: state.future.slice(1),
         dirty: true,
         revision: state.revision + 1,
+        projectDiagnostics: [...repository.getDiagnostics()],
       });
     },
     replaceProject: (project) => {
@@ -330,6 +336,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         future: [],
         dirty: false,
         revision: get().revision + 1,
+        projectDiagnostics: [...repository.getDiagnostics()],
       });
     },
     markSaved: () => set({ dirty: false }),

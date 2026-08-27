@@ -2,6 +2,7 @@ import { buildDescriptor } from "./descriptor";
 import type { CapabilityRegistry } from "./capabilities";
 import { buildRenderTimeline, DEFAULT_FRAME_RATE } from "./renderTimeline";
 import { firstScene } from "./cueStateProjection";
+import { diagnoseProject } from "./projectCodec";
 import type { EvaluationDiagnostic, HaloCueProject, SceneEvaluation } from "./types";
 import { isDescriptorRenderable } from "./sceneEventRegistry";
 
@@ -29,11 +30,17 @@ export function evaluateScene(
 ): SceneEvaluation {
   const descriptor = buildDescriptor(project, selectedCueId, options);
   const frameRate = Number(descriptor.presentation.frame_rate) || DEFAULT_FRAME_RATE;
+  const projectDiagnostics = diagnoseProject(project)
+    // Advanced namespaced events have a dedicated presentation warning below.
+    .filter((diagnostic) => diagnostic.code !== "project.unknown_event_kind");
   return {
     schema_version: "scene-evaluation/1.0",
     scene_id: descriptor.scene_id,
     descriptor,
     timeline: buildRenderTimeline(descriptor, frameRate),
-    diagnostics: diagnosticsForAdvancedEvents(project),
+    diagnostics: [
+      ...projectDiagnostics,
+      ...diagnosticsForAdvancedEvents(project),
+    ],
   };
 }

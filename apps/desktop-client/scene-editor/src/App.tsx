@@ -3,6 +3,7 @@ import {
   ArrowLeftToLine,
   ArrowRightToLine,
   ArrowUp,
+  AlertTriangle,
   Box,
   Check,
   ChevronDown,
@@ -122,6 +123,9 @@ function TopBar({ onOpen, onSave }: { onOpen: () => void; onSave: () => void }) 
   const setMode = useProjectStore((state) => state.setMode);
   const undo = useProjectStore((state) => state.undo);
   const redo = useProjectStore((state) => state.redo);
+  const projectDiagnostics = useProjectStore((state) => state.projectDiagnostics);
+  const hasProjectError = projectDiagnostics.some((item) => item.severity === "error");
+  const hasProjectWarning = projectDiagnostics.some((item) => item.severity === "warning");
 
   return (
     <header className="topbar">
@@ -133,7 +137,7 @@ function TopBar({ onOpen, onSave }: { onOpen: () => void; onSave: () => void }) 
       <div className="project-heading">
         <strong>{project.title || "未命名项目"}</strong>
         <span className={dirty ? "save-state is-dirty" : "save-state"}>
-          {dirty ? "草稿已自动保存" : "已保存"}
+          {hasProjectError ? "项目有待修复项" : hasProjectWarning ? "项目有校验警告" : dirty ? "草稿已自动保存" : "已保存"}
         </span>
       </div>
       <div className="mode-switch" role="group" aria-label="编辑模式">
@@ -705,6 +709,13 @@ function ProfessionalInspector() {
   const advancedFields = Object.entries(event).filter(([key]) => (
     !["event_id", "kind", "duration_ms", ...editorFields.map((item) => item.key)].includes(key)
   ));
+  const evaluation = useMemo(() => evaluateScene(project, selectedCueId), [project, selectedCueId]);
+  const eventIndex = cue.events.findIndex((item) => item.event_id === event.event_id);
+  const eventDiagnostics = evaluation.diagnostics.filter((item) => (
+    item.path.includes(`events[${eventIndex}]`) || item.severity === "error"
+  ));
+  const errorCount = eventDiagnostics.filter((item) => item.severity === "error").length;
+  const warningCount = eventDiagnostics.filter((item) => item.severity === "warning").length;
 
   return (
     <aside className="inspector professional-inspector">
@@ -727,7 +738,10 @@ function ProfessionalInspector() {
           </div>
         </details>
       </div>
-      <div className="diagnostic-strip"><Check />事件通过基础校验</div>
+      <div className={`diagnostic-strip${errorCount ? " is-error" : warningCount ? " is-warning" : ""}`}>
+        {errorCount ? <AlertTriangle /> : warningCount ? <AlertTriangle /> : <Check />}
+        {errorCount ? `${errorCount} 个错误需要修复` : warningCount ? `${warningCount} 个警告` : "事件通过基础校验"}
+      </div>
     </aside>
   );
 }

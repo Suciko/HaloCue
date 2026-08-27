@@ -1,4 +1,10 @@
 import { demoProject } from "./demoProject";
+import {
+  inspectProject,
+  parseProject as decodeProject,
+  serializeProject as encodeProject,
+  type ProjectDiagnostic,
+} from "./projectCodec";
 import type { EditorMode, HaloCueProject } from "./types";
 
 export const DRAFT_KEY = "halocue.scene-editor.draft.v1";
@@ -12,6 +18,7 @@ export interface ProjectRepository {
   saveDraft(project: HaloCueProject): void;
   parseProject(value: unknown): HaloCueProject;
   serializeProject(project: HaloCueProject): string;
+  getDiagnostics(): readonly ProjectDiagnostic[];
 }
 
 export interface ProjectFileAdapter {
@@ -20,33 +27,29 @@ export interface ProjectFileAdapter {
 }
 
 export function isProject(value: unknown): value is HaloCueProject {
-  if (!value || typeof value !== "object") return false;
-  const project = value as Partial<HaloCueProject>;
-  return project.schema_version === "halocue-project/1.1"
-    && typeof project.project_id === "string"
-    && Array.isArray(project.characters)
-    && Array.isArray(project.resources)
-    && Array.isArray(project.chapters);
+  return inspectProject(value).project !== null;
 }
 
 function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
-function validatedProject(value: unknown): HaloCueProject {
-  if (!isProject(value)) {
-    throw new Error("当前编辑器需要 halocue-project/1.1；1.0 项目请先通过迁移服务打开");
-  }
-  return clone(value);
-}
-
-function parseStored(value: string | null): HaloCueProject | null {
+function parseStored(value: string | null): { project: HaloCueProject | null; diagnostics: ProjectDiagnostic[] } | null {
   if (!value) return null;
   try {
     const parsed = JSON.parse(value);
-    return isProject(parsed) ? clone(parsed) : null;
+    const result = inspectProject(parsed);
+    return { project: result.project, diagnostics: result.diagnostics };
   } catch {
-    return null;
+    return {
+      project: null,
+      diagnostics: [{
+        code: "project.invalid_stored_json",
+        severity: "warning",
+        path: "$",
+        message: "存储中的项目快照不是有效 JSON，已跳过。",
+      }],
+    };
   }
 }
 
@@ -77,15 +80,32 @@ export function saveEditorMode(mode: EditorMode): void {
 }
 
 export class LocalStorageProjectRepository implements ProjectRepository {
+  private lastDiagnostics: ProjectDiagnostic[] = [];
+
   constructor(private readonly storage: StorageLike | null = browserStorage()) {}
 
   loadDraft(): HaloCueProject {
     try {
       const pending = parseStored(this.storage?.getItem(PENDING_DRAFT_KEY) || null);
-      if (pending) return pending;
+      if (pending?.project) {
+        this.lastDiagnostics = pending.diagnostics;
+        return pending.project;
+      }
       const current = parseStored(this.storage?.getItem(DRAFT_KEY) || null);
-      return current || clone(demoProject);
+      if (current?.project) {
+        this.lastDiagnostics = [
+          ...(pending?.diagnostics || []),
+          ...current.diagnostics,
+        ];
+        return current.project;
+      }
+      this.lastDiagnostics = [
+        ...(pending?.diagnostics || []),
+        ...(current?.diagnostics || []),
+      ];
+      return clone(demoProject);
     } catch {
+      this.lastDiagnostics = [];
       return clone(demoProject);
     }
   }
@@ -104,20 +124,31 @@ export class LocalStorageProjectRepository implements ProjectRepository {
   }
 
   parseProject(value: unknown): HaloCueProject {
-    return validatedProject(value);
+    const result = inspectProject(value);
+    this.lastDiagnostics = result.diagnostics;
+    return decodeProject(value);
   }
 
   serializeProject(project: HaloCueProject): string {
-    return JSON.stringify(validatedProject(project), null, 2);
+    const result = inspectProject(project);
+    this.lastDiagnostics = result.diagnostics;
+    return encodeProject(project);
+  }
+
+  getDiagnostics(): readonly ProjectDiagnostic[] {
+    return clone(this.lastDiagnostics);
   }
 }
 
 export class MemoryProjectRepository implements ProjectRepository {
   private draft: HaloCueProject;
   private failNextSave = false;
+  private lastDiagnostics: ProjectDiagnostic[] = [];
 
   constructor(seed: HaloCueProject = demoProject) {
-    this.draft = validatedProject(seed);
+    const result = inspectProject(seed);
+    this.lastDiagnostics = result.diagnostics;
+    this.draft = decodeProject(seed);
   }
 
   loadDraft(): HaloCueProject {
@@ -129,15 +160,25 @@ export class MemoryProjectRepository implements ProjectRepository {
       this.failNextSave = false;
       throw new Error("项目草稿保存失败");
     }
-    this.draft = validatedProject(project);
+    const result = inspectProject(project);
+    this.lastDiagnostics = result.diagnostics;
+    this.draft = decodeProject(project);
   }
 
   parseProject(value: unknown): HaloCueProject {
-    return validatedProject(value);
+    const result = inspectProject(value);
+    this.lastDiagnostics = result.diagnostics;
+    return decodeProject(value);
   }
 
   serializeProject(project: HaloCueProject): string {
-    return JSON.stringify(validatedProject(project), null, 2);
+    const result = inspectProject(project);
+    this.lastDiagnostics = result.diagnostics;
+    return encodeProject(project);
+  }
+
+  getDiagnostics(): readonly ProjectDiagnostic[] {
+    return clone(this.lastDiagnostics);
   }
 
   rejectNextSave(): void {
