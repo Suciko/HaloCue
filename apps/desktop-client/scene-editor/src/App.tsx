@@ -1774,6 +1774,13 @@ function ShotTimelineWorkspace() {
     rangeStart,
     Math.min(rangeEnd - 1, playheadFrame ?? selectedClip?.start_frame ?? rangeStart),
   );
+  const isClipActive = (clip: ShotTimelineClip) => (
+    visibleFrame >= clip.start_frame && visibleFrame < clip.end_frame
+  );
+  const activeClips = orderedClips.filter(isClipActive);
+  const activeContext = activeClips.length > 0
+    ? `播放头 F${visibleFrame} · ${activeClips.map(shotTimelineClipLabel).join("、")}`
+    : `播放头 F${visibleFrame} · 无活跃事件`;
   const playheadPercent = ((visibleFrame - rangeStart) / span) * 100;
   const rulerFrames = Array.from({ length: 5 }, (_, index) => (
     Math.round(rangeStart + (span * index) / 4)
@@ -1825,6 +1832,7 @@ function ShotTimelineWorkspace() {
                   ? `已选 ${selectedUnmappedEvent.kind} · ${selectedUnmappedEvent.event_id} · 未映射`
                 : "未选择可渲染事件"}
             </small>
+            <small data-shot-active-context aria-live="polite" aria-atomic="true">{activeContext}</small>
           </span>
         </div>
         <output aria-live="polite">{formatTimelineFrame(visibleFrame, projection.frame_rate)} · F{visibleFrame}</output>
@@ -1891,7 +1899,7 @@ function ShotTimelineWorkspace() {
                   onClick={(event) => scrubAt(event.clientX, event.currentTarget)}
                 >
                   {track.clips.map((clip) => {
-                    const isActive = visibleFrame >= clip.start_frame && visibleFrame < clip.end_frame;
+                    const isActive = isClipActive(clip);
                     return <button
                       ref={(element) => {
                         if (element) clipRefs.current[clip.event_id] = element;
@@ -1906,7 +1914,7 @@ function ShotTimelineWorkspace() {
                       key={clip.event_id}
                       style={clipPosition(clip)}
                       title={`${shotTimelineClipLabel(clip)} · ${clip.start_frame}–${clip.end_frame} · ${clip.wait_for_completion ? "顺序执行" : "与后续事件并行"}`}
-                      aria-label={`${track.label}，${shotTimelineClipLabel(clip)}，第 ${clip.start_frame} 至 ${clip.end_frame} 帧`}
+                      aria-label={`${track.label}，${shotTimelineClipLabel(clip)}，第 ${clip.start_frame} 至 ${clip.end_frame} 帧${isActive ? "，播放头当前" : ""}`}
                       onPointerDown={(event) => event.stopPropagation()}
                       onClick={(event) => {
                         event.stopPropagation();

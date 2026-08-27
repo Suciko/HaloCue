@@ -103,6 +103,34 @@ describe("professional shot timeline workspace", () => {
     expect(container.querySelector(`.shot-clip.is-active[data-event-id="${dialogue.event_id}"]`)).not.toBeNull();
   });
 
+  it("announces the active playhead context to keyboard and assistive-technology users", () => {
+    const shotTab = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"))
+      .find((button) => button.textContent?.includes("镜头时间轴"));
+    act(() => shotTab?.click());
+
+    const state = useProjectStore.getState();
+    const evaluation = evaluateScene(state.project, state.selectedCueId, {
+      sceneId: state.selectedSceneId,
+    });
+    const motion = evaluation.timeline.events.find((event) => event.event_id === "event/yuuka-nod")!;
+    const dialogue = evaluation.timeline.events.find((event) => event.event_id === "event/dialogue/001")!;
+    const frame = motion.start_frame;
+    act(() => state.setPreviewPlayheadFrame(frame));
+
+    const context = container.querySelector<HTMLElement>("[data-shot-active-context]");
+    expect(context?.getAttribute("aria-live")).toBe("polite");
+    expect(context?.getAttribute("aria-atomic")).toBe("true");
+    expect(context?.textContent).toContain(`播放头 F${frame}`);
+    expect(context?.textContent).toContain("角色动作");
+    expect(context?.textContent).toContain("对白");
+    expect(container.querySelector<HTMLButtonElement>(
+      `.shot-clip[data-event-id="${motion.event_id}"]`,
+    )?.getAttribute("aria-label")).toContain("播放头当前");
+    expect(container.querySelector<HTMLButtonElement>(
+      `.shot-clip[data-event-id="${dialogue.event_id}"]`,
+    )?.getAttribute("aria-label")).toContain("播放头当前");
+  });
+
   it("keeps the shared selection and playhead while keyboard navigation moves professional tabs", () => {
     const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"));
     const scriptTab = tabs.find((button) => button.textContent?.includes("脚本"))!;
