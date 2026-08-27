@@ -89,6 +89,97 @@ describe("professional event list interactions", () => {
     expect(container.querySelector(".sr-only")?.textContent).toBe("角色入场 已移动到第 3 项");
   });
 
+  it("drags the selected range as one ordered block", () => {
+    const originalOrder = firstScene(useProjectStore.getState().project).cues[0].events
+      .map((event) => event.event_id);
+    const historyBefore = useProjectStore.getState().history.length;
+    let mains = Array.from(container.querySelectorAll<HTMLButtonElement>(".event-main"));
+    act(() => mains[1].click());
+    act(() => mains[2].dispatchEvent(new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      shiftKey: true,
+    })));
+    const handles = Array.from(container.querySelectorAll<HTMLButtonElement>(".event-drag-handle"));
+    const rows = Array.from(container.querySelectorAll<HTMLDivElement>(".event-row"));
+    const dataTransfer: MutableDataTransfer = {
+      dropEffect: "none",
+      effectAllowed: "none",
+      getData: vi.fn(),
+      setData: vi.fn(),
+    };
+    vi.spyOn(rows[3], "getBoundingClientRect").mockReturnValue({
+      top: 100,
+      height: 50,
+    } as DOMRect);
+
+    act(() => handles[1].dispatchEvent(dragEvent("dragstart", dataTransfer)));
+    expect(rows[1].classList.contains("is-dragging")).toBe(true);
+    expect(rows[2].classList.contains("is-dragging")).toBe(true);
+    act(() => rows[3].dispatchEvent(dragEvent("dragover", dataTransfer, 140)));
+    expect(rows[3].classList.contains("is-drop-after")).toBe(true);
+    act(() => rows[3].dispatchEvent(dragEvent("drop", dataTransfer, 140)));
+
+    let state = useProjectStore.getState();
+    expect(firstScene(state.project).cues[0].events.map((event) => event.event_id))
+      .toEqual([originalOrder[0], originalOrder[3], originalOrder[1], originalOrder[2]]);
+    expect(state.selectedEventIds).toEqual(originalOrder.slice(1, 3));
+    expect(state.selectedEventId).toBe(originalOrder[2]);
+    expect(state.history).toHaveLength(historyBefore + 1);
+    expect(container.querySelector(".sr-only")?.textContent)
+      .toBe("2 个事件已移动到第 3–4 项");
+
+    act(() => state.undo());
+    state = useProjectStore.getState();
+    expect(firstScene(state.project).cues[0].events.map((event) => event.event_id))
+      .toEqual(originalOrder);
+    expect(state.selectedEventIds).toEqual(originalOrder.slice(1, 3));
+    mains = Array.from(container.querySelectorAll<HTMLButtonElement>(".event-main"));
+    expect(mains[1].getAttribute("aria-pressed")).toBe("true");
+    expect(mains[2].getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("uses the same selected-block command for keyboard and direction controls", () => {
+    const originalOrder = firstScene(useProjectStore.getState().project).cues[0].events
+      .map((event) => event.event_id);
+    let mains = Array.from(container.querySelectorAll<HTMLButtonElement>(".event-main"));
+    act(() => mains[1].click());
+    act(() => mains[2].dispatchEvent(new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      shiftKey: true,
+    })));
+    let handles = Array.from(container.querySelectorAll<HTMLButtonElement>(".event-drag-handle"));
+    act(() => handles[1].dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "End",
+    })));
+
+    let state = useProjectStore.getState();
+    expect(firstScene(state.project).cues[0].events.map((event) => event.event_id))
+      .toEqual([originalOrder[0], originalOrder[3], originalOrder[1], originalOrder[2]]);
+    expect(state.selectedEventIds).toEqual(originalOrder.slice(1, 3));
+
+    act(() => state.undo());
+    const moveUp = container.querySelector<HTMLButtonElement>(
+      '.event-row:nth-of-type(3) .event-actions button[aria-label="上移已选 2 个事件"]',
+    ) ?? Array.from(container.querySelectorAll<HTMLButtonElement>(
+      '.event-actions button[aria-label="上移已选 2 个事件"]',
+    ))[0];
+    expect(moveUp).toBeDefined();
+    act(() => moveUp?.click());
+
+    state = useProjectStore.getState();
+    expect(firstScene(state.project).cues[0].events.map((event) => event.event_id))
+      .toEqual([originalOrder[1], originalOrder[2], originalOrder[0], originalOrder[3]]);
+    expect(state.selectedEventIds).toEqual(originalOrder.slice(1, 3));
+    expect(container.querySelector(".sr-only")?.textContent)
+      .toBe("2 个事件已移动到第 1–2 项");
+    handles = Array.from(container.querySelectorAll<HTMLButtonElement>(".event-drag-handle"));
+    expect(handles[0].getAttribute("aria-label")).toContain("重排已选 2 个事件");
+  });
+
   it("inserts before the selected stable event and restores the anchor on undo", () => {
     const originalOrder = firstScene(useProjectStore.getState().project).cues[0].events
       .map((event) => event.event_id);

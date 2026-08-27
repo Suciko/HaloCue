@@ -361,6 +361,43 @@ describe("shared dual-mode project store", () => {
     expect(current.selectedEventId).toBe(originalOrder[3]);
   });
 
+  it("reorders a stable multi-selection as one block and restores it on undo", () => {
+    const state = useProjectStore.getState();
+    const cue = firstScene(state.project).cues[0];
+    const originalOrder = cue.events.map((event) => event.event_id);
+    const revisionBefore = state.revision;
+    const historyBefore = state.history.length;
+    state.selectEvent(originalOrder[1]);
+    useProjectStore.getState().selectEvent(originalOrder[3], "toggle");
+
+    expect(useProjectStore.getState().moveEvent(originalOrder[1], {
+      targetEventId: originalOrder[0],
+      placement: "before",
+    })).toEqual({ status: "committed", revision: revisionBefore + 1 });
+
+    let current = useProjectStore.getState();
+    expect(firstScene(current.project).cues[0].events.map((event) => event.event_id))
+      .toEqual([originalOrder[1], originalOrder[3], originalOrder[0], originalOrder[2]]);
+    expect(current.selectedEventIds).toEqual([originalOrder[1], originalOrder[3]]);
+    expect(current.selectedEventId).toBe(originalOrder[3]);
+    expect(current.eventSelectionAnchorId).toBe(originalOrder[3]);
+    expect(current.history).toHaveLength(historyBefore + 1);
+
+    expect(current.moveEvent(originalOrder[1], {
+      targetEventId: originalOrder[3],
+      placement: "after",
+    })).toEqual({ status: "no-op", revision: revisionBefore + 1 });
+    expect(useProjectStore.getState().history).toHaveLength(historyBefore + 1);
+
+    current.undo();
+    current = useProjectStore.getState();
+    expect(firstScene(current.project).cues[0].events.map((event) => event.event_id))
+      .toEqual(originalOrder);
+    expect(current.selectedEventIds).toEqual([originalOrder[1], originalOrder[3]]);
+    expect(current.selectedEventId).toBe(originalOrder[3]);
+    expect(current.eventSelectionAnchorId).toBe(originalOrder[3]);
+  });
+
   it("targets edits, evaluation, undo, and redo at the selected Scene", () => {
     const store = useProjectStore.getState();
     store.replaceProject(multiSceneProject());

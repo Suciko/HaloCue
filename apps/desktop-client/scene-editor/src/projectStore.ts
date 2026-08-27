@@ -23,7 +23,7 @@ import type {
 import { AutosaveCoordinator } from "./autosave";
 import { isDescriptorRenderable } from "./sceneEventRegistry";
 import { createSceneEvent } from "./sceneEventFactory";
-import { reorderEvents, type EventMove } from "./eventReorder";
+import { reorderEventBlock, type EventMove } from "./eventReorder";
 import { eventInsertionIndex, type EventInsertion } from "./eventInsertion";
 import {
   repairEventSelection,
@@ -652,9 +652,15 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         eventSelectionAnchorId,
       });
     },
-    moveEvent: (eventId, move) => commit((_project, cue) => {
-      cue.events = reorderEvents(cue.events, eventId, move).slice();
-    }),
+    moveEvent: (eventId, move) => {
+      const state = get();
+      const sourceEventIds = state.selectedEventIds.includes(eventId)
+        ? state.selectedEventIds
+        : [eventId];
+      return commit((_project, cue) => {
+        cue.events = reorderEventBlock(cue.events, sourceEventIds, move).slice();
+      });
+    },
     undo: () => {
       commitActiveTransaction();
       const state = get();

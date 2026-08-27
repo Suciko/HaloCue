@@ -990,8 +990,9 @@ function ProfessionalEventList() {
   const addEvent = useProjectStore((state) => state.addEvent);
   const cue = sceneById(project, selectedSceneId)
     .cues.find((item) => item.cue_id === selectedCueId)!;
-  const [draggedEventId, setDraggedEventId] = useState<string | null>(null);
+  const [draggedEventIds, setDraggedEventIds] = useState<string[]>([]);
   const draggedEventIdRef = useRef<string | null>(null);
+  const draggedEventIdsRef = useRef<string[]>([]);
   const [dropTarget, setDropTarget] = useState<{
     eventId: string;
     placement: EventDropPlacement;
@@ -999,27 +1000,41 @@ function ProfessionalEventList() {
   const [reorderNotice, setReorderNotice] = useState("");
   const [insertPlacement, setInsertPlacement] = useState<EventInsertPlacement>("after");
   const selectedEventIndex = cue.events.findIndex((event) => event.event_id === selectedEventId);
+  const selectionFirstIndex = cue.events.findIndex((event) => selectedEventIds.includes(event.event_id));
+  const selectionLastIndex = cue.events.reduce((lastIndex, event, index) => (
+    selectedEventIds.includes(event.event_id) ? index : lastIndex
+  ), -1);
   const addSummary = cue.events.length === 0
     ? "添加第一个事件"
     : selectedEventIndex < 0
       ? "添加到末尾"
       : `在 ${String(selectedEventIndex + 1).padStart(2, "0")} ${insertPlacement === "before" ? "前" : "后"}添加`;
   const moveAndAnnounce = (eventId: string, move: EventMove) => {
-    selectEvent(eventId);
+    const before = useProjectStore.getState();
+    const movedEventIds = before.selectedEventIds.includes(eventId)
+      ? before.selectedEventIds
+      : [eventId];
+    if (!before.selectedEventIds.includes(eventId)) selectEvent(eventId);
     const result = moveEvent(eventId, move);
     if (result.status !== "committed") return;
     const current = useProjectStore.getState();
     const currentCue = sceneById(current.project, current.selectedSceneId)
       .cues.find((item) => item.cue_id === current.selectedCueId);
-    const nextIndex = currentCue?.events.findIndex((item) => item.event_id === eventId) ?? -1;
+    const nextIndexes = movedEventIds
+      .map((id) => currentCue?.events.findIndex((item) => item.event_id === id) ?? -1)
+      .filter((index) => index >= 0);
+    const nextIndex = nextIndexes[0] ?? -1;
     const moved = currentCue?.events[nextIndex];
-    if (moved) {
+    if (movedEventIds.length > 1 && nextIndexes.length === movedEventIds.length) {
+      setReorderNotice(`${movedEventIds.length} 个事件已移动到第 ${nextIndexes[0] + 1}–${nextIndexes.at(-1)! + 1} 项`);
+    } else if (moved) {
       setReorderNotice(`${eventLabel(moved.kind) || "扩展演出"} 已移动到第 ${nextIndex + 1} 项`);
     }
   };
   const clearDrag = () => {
     draggedEventIdRef.current = null;
-    setDraggedEventId(null);
+    draggedEventIdsRef.current = [];
+    setDraggedEventIds([]);
     setDropTarget(null);
   };
   const deleteSelection = () => {
@@ -1092,10 +1107,13 @@ function ProfessionalEventList() {
         {cue.events.map((event, index) => (
           <div
             key={event.event_id}
-            className={`${event.event_id === selectedEventId ? "event-row is-active" : "event-row"}${selectedEventIds.includes(event.event_id) ? " is-selected" : ""}${draggedEventId === event.event_id ? " is-dragging" : ""}${dropTarget?.eventId === event.event_id ? ` is-drop-${dropTarget.placement}` : ""}`}
+            className={`${event.event_id === selectedEventId ? "event-row is-active" : "event-row"}${selectedEventIds.includes(event.event_id) ? " is-selected" : ""}${draggedEventIds.includes(event.event_id) ? " is-dragging" : ""}${dropTarget?.eventId === event.event_id ? ` is-drop-${dropTarget.placement}` : ""}`}
             onDragOver={(dragEvent) => {
               const sourceId = draggedEventIdRef.current;
-              if (!sourceId || sourceId === event.event_id) return;
+              if (!sourceId || draggedEventIdsRef.current.includes(event.event_id)) {
+                if (dropTarget?.eventId === event.event_id) setDropTarget(null);
+                return;
+              }
               dragEvent.preventDefault();
               dragEvent.dataTransfer.dropEffect = "move";
               const rect = dragEvent.currentTarget.getBoundingClientRect();
@@ -1109,7 +1127,7 @@ function ProfessionalEventList() {
             onDrop={(dragEvent) => {
               dragEvent.preventDefault();
               const sourceId = draggedEventIdRef.current;
-              if (sourceId && sourceId !== event.event_id) {
+              if (sourceId && !draggedEventIdsRef.current.includes(event.event_id)) {
                 const rect = dragEvent.currentTarget.getBoundingClientRect();
                 moveAndAnnounce(sourceId, {
                   targetEventId: event.event_id,
@@ -1123,28 +1141,52 @@ function ProfessionalEventList() {
               className="event-drag-handle"
               type="button"
               draggable
-              aria-label={`重排${eventLabel(event.kind) || "扩展演出"}，当前第 ${index + 1} 项，共 ${cue.events.length} 项`}
+              aria-label={selectedEventIds.length > 1 && selectedEventIds.includes(event.event_id)
+                ? `重排已选 ${selectedEventIds.length} 个事件，当前主项第 ${index + 1} 项，共 ${cue.events.length} 项`
+                : `重排${eventLabel(event.kind) || "扩展演出"}，当前第 ${index + 1} 项，共 ${cue.events.length} 项`}
               aria-keyshortcuts="ArrowUp ArrowDown Home End"
-              title="拖动重排；方向键逐项移动，Home/End 移到首尾"
-              onClick={() => selectEvent(event.event_id)}
+              title={selectedEventIds.length > 1 && selectedEventIds.includes(event.event_id)
+                ? `拖动或按键重排已选 ${selectedEventIds.length} 个事件`
+                : "拖动重排；方向键逐项移动，Home/End 移到首尾"}
+              onClick={() => {
+                if (!selectedEventIds.includes(event.event_id)) selectEvent(event.event_id);
+              }}
               onDragStart={(dragEvent) => {
+                const dragIds = selectedEventIds.includes(event.event_id)
+                  ? selectedEventIds
+                  : [event.event_id];
                 dragEvent.dataTransfer.effectAllowed = "move";
                 dragEvent.dataTransfer.setData("text/plain", event.event_id);
                 draggedEventIdRef.current = event.event_id;
-                setDraggedEventId(event.event_id);
+                draggedEventIdsRef.current = dragIds;
+                setDraggedEventIds(dragIds);
                 setDropTarget(null);
-                selectEvent(event.event_id);
+                if (!selectedEventIds.includes(event.event_id)) selectEvent(event.event_id);
               }}
               onDragEnd={clearDrag}
               onKeyDown={(keyEvent) => {
+                const sourceIds = selectedEventIds.includes(event.event_id)
+                  ? selectedEventIds
+                  : [event.event_id];
+                const sourceIdSet = new Set(sourceIds);
+                const firstExternalEvent = cue.events.find((item) => !sourceIdSet.has(item.event_id));
+                const lastExternalEvent = [...cue.events].reverse()
+                  .find((item) => !sourceIdSet.has(item.event_id));
                 const move = {
                   ArrowUp: -1,
                   ArrowDown: 1,
-                  Home: index === 0 ? null : { targetEventId: cue.events[0].event_id, placement: "before" },
-                  End: index === cue.events.length - 1 ? null : {
-                    targetEventId: cue.events.at(-1)!.event_id,
-                    placement: "after",
-                  },
+                  Home: firstExternalEvent
+                    ? {
+                      targetEventId: firstExternalEvent.event_id,
+                      placement: "before",
+                    }
+                    : null,
+                  End: lastExternalEvent
+                    ? {
+                      targetEventId: lastExternalEvent.event_id,
+                      placement: "after",
+                    }
+                    : null,
                 }[keyEvent.key] as EventMove | null | undefined;
                 if (move === undefined) return;
                 keyEvent.preventDefault();
@@ -1186,8 +1228,16 @@ function ProfessionalEventList() {
               {!eventLabel(event.kind) && <span className="namespace-tag">{event.kind.split(":")[0]}</span>}
             </button>
             <div className="event-actions">
-              <IconButton label="上移" disabled={index === 0} onClick={() => moveAndAnnounce(event.event_id, -1)}><ArrowUp /></IconButton>
-              <IconButton label="下移" disabled={index === cue.events.length - 1} onClick={() => moveAndAnnounce(event.event_id, 1)}><ArrowDown /></IconButton>
+              <IconButton
+                label={selectedEventIds.length > 1 && selectedEventIds.includes(event.event_id) ? `上移已选 ${selectedEventIds.length} 个事件` : "上移"}
+                disabled={selectedEventIds.includes(event.event_id) ? selectionFirstIndex === 0 : index === 0}
+                onClick={() => moveAndAnnounce(event.event_id, -1)}
+              ><ArrowUp /></IconButton>
+              <IconButton
+                label={selectedEventIds.length > 1 && selectedEventIds.includes(event.event_id) ? `下移已选 ${selectedEventIds.length} 个事件` : "下移"}
+                disabled={selectedEventIds.includes(event.event_id) ? selectionLastIndex === cue.events.length - 1 : index === cue.events.length - 1}
+                onClick={() => moveAndAnnounce(event.event_id, 1)}
+              ><ArrowDown /></IconButton>
               <IconButton
                 label={selectedEventIds.length > 1 && selectedEventIds.includes(event.event_id) ? `复制已选 ${selectedEventIds.length} 个事件` : "复制事件"}
                 onClick={() => {
