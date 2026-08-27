@@ -81,6 +81,6 @@ implemented in the same branch.
 
 ## Codec publication
 
-- ProjectCodec/diagnostics commit: `pending final commit`
+- ProjectCodec/diagnostics commit: `d9dc0d6`
 - The codec is pushed to the same PR after the focused editor suite and build
   complete.
