@@ -81,4 +81,25 @@ describe("simple Cue strip interactions", () => {
     expect(document.activeElement).toBe(cues[0]);
     expect(useProjectStore.getState().selectedCueId).toBe("cue/conference/001");
   });
+
+  it("returns focus to a newly inserted Cue for continuous authoring", () => {
+    const insertAfter = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="在后面插入"]',
+    );
+    expect(insertAfter).not.toBeNull();
+    const before = useProjectStore.getState();
+    const revision = before.revision;
+    const historyLength = before.history.length;
+
+    act(() => insertAfter?.click());
+
+    const cues = Array.from(container.querySelectorAll<HTMLButtonElement>(".cue-item"));
+    expect(cues).toHaveLength(4);
+    expect(document.activeElement).toBe(cues[1]);
+    expect(cues.map((cue) => cue.tabIndex)).toEqual([-1, 0, -1, -1]);
+    expect(cues[1].getAttribute("aria-pressed")).toBe("true");
+    expect(useProjectStore.getState().selectedCueId).toMatch(/^cue\//);
+    expect(useProjectStore.getState().revision).toBe(revision + 1);
+    expect(useProjectStore.getState().history).toHaveLength(historyLength + 1);
+  });
 });

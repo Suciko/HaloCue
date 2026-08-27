@@ -537,9 +537,19 @@ function CueStrip() {
   const scene = sceneById(project, selectedSceneId);
   const [dragged, setDragged] = useState<string | null>(null);
   const cueRefs = useRef<Record<string, HTMLButtonElement>>({});
+  const pendingCueFocus = useRef<string | null>(null);
+  useEffect(() => {
+    if (pendingCueFocus.current !== selectedCueId) return;
+    cueRefs.current[selectedCueId]?.focus();
+    pendingCueFocus.current = null;
+  }, [selectedCueId]);
   const focusCue = (cue: Cue) => {
     selectCue(cue.cue_id);
     cueRefs.current[cue.cue_id]?.focus();
+  };
+  const focusAfterCueCommand = (command: () => void) => {
+    command();
+    pendingCueFocus.current = useProjectStore.getState().selectedCueId;
   };
   const navigateCue = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
     const nextIndex = event.key === "ArrowRight" || event.key === "ArrowDown"
@@ -561,9 +571,9 @@ function CueStrip() {
       <div className="cue-strip-toolbar">
         <div><Clapperboard /><strong>演出节拍</strong><span>{scene.cues.length} 个 Cue</span></div>
         <div>
-          <IconButton label="在前面插入" onClick={() => addCue("before")}><ArrowLeftToLine /></IconButton>
-          <IconButton label="在后面插入" onClick={() => addCue("after")}><ArrowRightToLine /></IconButton>
-          <IconButton label="复制当前 Cue" onClick={duplicateCue}><Copy /></IconButton>
+          <IconButton label="在前面插入" onClick={() => focusAfterCueCommand(() => addCue("before"))}><ArrowLeftToLine /></IconButton>
+          <IconButton label="在后面插入" onClick={() => focusAfterCueCommand(() => addCue("after"))}><ArrowRightToLine /></IconButton>
+          <IconButton label="复制当前 Cue" onClick={() => focusAfterCueCommand(duplicateCue)}><Copy /></IconButton>
           <IconButton label="删除当前 Cue" disabled={scene.cues.length <= 1} tone="danger" onClick={deleteCue}><Trash2 /></IconButton>
         </div>
       </div>
@@ -602,7 +612,7 @@ function CueStrip() {
             </button>
           );
         })}
-        <button className="cue-add" type="button" onClick={() => addCue("after")}><Plus />添加演出</button>
+        <button className="cue-add" type="button" onClick={() => focusAfterCueCommand(() => addCue("after"))}><Plus />添加演出</button>
       </div>
     </section>
   );
