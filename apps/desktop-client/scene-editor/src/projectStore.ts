@@ -11,6 +11,7 @@ import {
 import type {
   Cue,
   CueEvent,
+  EditorAutosaveState,
   EditorSelection,
   EditorTransactionResult,
   EditorMode,
@@ -19,6 +20,7 @@ import type {
   QuickEffectKind,
   Scene,
 } from "./types";
+import { AutosaveCoordinator } from "./autosave";
 import { isDescriptorRenderable } from "./sceneEventRegistry";
 import { createSceneEvent } from "./sceneEventFactory";
 import { projectSceneAtCue, sceneById } from "./cueStateProjection";
@@ -65,6 +67,7 @@ type EditorState = {
   revision: number;
   previewRevision: number;
   activeTransaction: ActiveEditorTransaction | null;
+  autosave: EditorAutosaveState;
   projectDiagnostics: ProjectDiagnostic[];
   setMode: (mode: EditorMode) => void;
   setInspectorTab: (tab: InspectorTab) => void;
@@ -77,6 +80,8 @@ type EditorState = {
   previewEnvironment: (key: string, patch: Partial<CueEvent>) => void;
   commitTransaction: (key: string) => EditorTransactionResult;
   cancelTransaction: (key: string) => void;
+  flushAutosave: () => void;
+  retryAutosave: () => void;
   updateProjectTitle: (title: string) => EditorTransactionResult;
   updateDialogue: (patch: Partial<CueEvent>) => EditorTransactionResult;
   updateEnvironment: (patch: Partial<CueEvent>) => EditorTransactionResult;
@@ -192,6 +197,11 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
   const initial = initialSelection(initialProject);
 
   return create<EditorState>((set, get) => {
+  const autosaveCoordinator = new AutosaveCoordinator<HaloCueProject>(
+    (project) => repository.saveDraft(project),
+    (autosave) => set({ autosave }),
+  );
+
   const commitActiveTransaction = (key?: string): EditorTransactionResult => {
     const state = get();
     const active = state.activeTransaction;
@@ -205,7 +215,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       return noOp(state);
     }
     try {
-      repository.saveDraft(state.project);
+      repository.serializeProject(state.project);
     } catch (error) {
       set({
         ...active.base,
@@ -217,12 +227,14 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       throw error;
     }
     const revision = state.revision + 1;
+    const autosave = autosaveCoordinator.request(state.project, revision);
     set({
       history: [...state.history.slice(-59), active.base],
       future: [],
       dirty: true,
       revision,
       activeTransaction: null,
+      autosave,
       projectDiagnostics: [...repository.getDiagnostics()],
     });
     return { status: "committed", revision };
@@ -248,8 +260,9 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         ? state.selectedEventId : selection.selectedEventId,
     };
     const nextSelection = repairTransactionSelection(project, requestedSelection);
-    repository.saveDraft(project);
+    repository.serializeProject(project);
     const revision = state.revision + 1;
+    const autosave = autosaveCoordinator.request(project, revision);
     set({
       project,
       ...nextSelection,
@@ -260,6 +273,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       future: [],
       dirty: true,
       revision,
+      autosave,
       projectDiagnostics: [...repository.getDiagnostics()],
     });
     return { status: "committed", revision };
@@ -280,6 +294,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     revision: 0,
     previewRevision: 0,
     activeTransaction: null,
+    autosave: autosaveCoordinator.currentState(),
     projectDiagnostics: [...repository.getDiagnostics()],
     setMode: (mode) => {
       commitActiveTransaction();
@@ -380,6 +395,8 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         previewRevision: state.previewRevision + 1,
       });
     },
+    flushAutosave: () => autosaveCoordinator.flush(),
+    retryAutosave: () => autosaveCoordinator.retry(),
     updateProjectTitle: (title) => commit((project) => { project.title = title; }),
     updateDialogue: (patch) => commit((_project, cue) => {
       let dialogue = cue.events.find((event) => event.kind === "dialogue");
@@ -532,8 +549,9 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       const state = get();
       const previous = state.history.at(-1);
       if (!previous) return noOp(state);
-      repository.saveDraft(previous.project);
+      repository.serializeProject(previous.project);
       const revision = state.revision + 1;
+      const autosave = autosaveCoordinator.request(previous.project, revision);
       set({
         ...previous,
         history: state.history.slice(0, -1),
@@ -543,6 +561,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         }, ...state.future.slice(0, 59)],
         dirty: true,
         revision,
+        autosave,
         projectDiagnostics: [...repository.getDiagnostics()],
       });
       return { status: "committed", revision };
@@ -552,8 +571,9 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       const state = get();
       const next = state.future[0];
       if (!next) return noOp(state);
-      repository.saveDraft(next.project);
+      repository.serializeProject(next.project);
       const revision = state.revision + 1;
+      const autosave = autosaveCoordinator.request(next.project, revision);
       set({
         ...next,
         history: [...state.history, {
@@ -563,6 +583,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         future: state.future.slice(1),
         dirty: true,
         revision,
+        autosave,
         projectDiagnostics: [...repository.getDiagnostics()],
       });
       return { status: "committed", revision };
@@ -570,8 +591,9 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     replaceProject: (project) => {
       const normalized = repository.parseProject(project);
       const selection = initialSelection(normalized);
-      repository.saveDraft(normalized);
       const revision = get().revision + 1;
+      repository.serializeProject(normalized);
+      const autosave = autosaveCoordinator.request(normalized, revision);
       set({
         project: normalized,
         ...selection,
@@ -581,6 +603,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         revision,
         previewRevision: get().previewRevision + 1,
         activeTransaction: null,
+        autosave,
         projectDiagnostics: [...repository.getDiagnostics()],
       });
       return { status: "committed", revision };

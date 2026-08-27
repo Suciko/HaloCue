@@ -19,6 +19,22 @@ class CountingProjectRepository extends MemoryProjectRepository {
   }
 }
 
+class RejectingValidationRepository extends MemoryProjectRepository {
+  private rejectValidation = false;
+
+  override serializeProject(project: HaloCueProject): string {
+    if (this.rejectValidation) {
+      this.rejectValidation = false;
+      throw new Error("项目草稿校验失败");
+    }
+    return super.serializeProject(project);
+  }
+
+  rejectNextValidation(): void {
+    this.rejectValidation = true;
+  }
+}
+
 function transactionSnapshot(store: ReturnType<typeof createProjectStore>) {
   const state = store.getState();
   return {
@@ -33,6 +49,7 @@ function transactionSnapshot(store: ReturnType<typeof createProjectStore>) {
     revision: state.revision,
     previewRevision: state.previewRevision,
     activeTransaction: state.activeTransaction,
+    autosave: state.autosave,
     projectDiagnostics: state.projectDiagnostics,
   };
 }
@@ -130,33 +147,32 @@ describe("project repository seam", () => {
     expect(values.has(`${DRAFT_KEY}.pending`)).toBe(true);
   });
 
-  it("does not publish any editor transaction state when a commit save fails", () => {
-    const repository = new MemoryProjectRepository(demoProject);
+  it("does not publish any editor transaction state when candidate validation fails", () => {
+    const repository = new RejectingValidationRepository(demoProject);
     const store = createProjectStore(repository);
     store.getState().updateProjectTitle("可撤销标题");
     store.getState().undo();
     const before = transactionSnapshot(store);
-    repository.rejectNextSave();
+    repository.rejectNextValidation();
 
-    expect(() => store.getState().updateProjectTitle("不可写入")).toThrow("项目草稿保存失败");
+    expect(() => store.getState().updateProjectTitle("不可提交")).toThrow("项目草稿校验失败");
     expect(transactionSnapshot(store)).toEqual(before);
-    expect(repository.loadDraft()).toEqual(before.project);
   });
 
-  it("keeps undo and redo atomic when their save fails", () => {
-    const repository = new MemoryProjectRepository(demoProject);
+  it("keeps undo and redo atomic when candidate validation fails", () => {
+    const repository = new RejectingValidationRepository(demoProject);
     const store = createProjectStore(repository);
     store.getState().updateProjectTitle("已编辑");
 
     let before = transactionSnapshot(store);
-    repository.rejectNextSave();
-    expect(() => store.getState().undo()).toThrow("项目草稿保存失败");
+    repository.rejectNextValidation();
+    expect(() => store.getState().undo()).toThrow("项目草稿校验失败");
     expect(transactionSnapshot(store)).toEqual(before);
 
     store.getState().undo();
     before = transactionSnapshot(store);
-    repository.rejectNextSave();
-    expect(() => store.getState().redo()).toThrow("项目草稿保存失败");
+    repository.rejectNextValidation();
+    expect(() => store.getState().redo()).toThrow("项目草稿校验失败");
     expect(transactionSnapshot(store)).toEqual(before);
   });
 
@@ -173,6 +189,31 @@ describe("project repository seam", () => {
     expect(result).toEqual({ status: "no-op", revision: before.revision });
     expect(repository.saves).toBe(savesBefore);
     expect(transactionSnapshot(store)).toEqual(before);
+  });
+
+  it("coalesces multiple durable editor revisions into the latest autosave", () => {
+    const repository = new CountingProjectRepository(demoProject);
+    const store = createProjectStore(repository);
+
+    store.getState().updateProjectTitle("中间标题");
+    store.getState().updateProjectTitle("最终标题");
+    expect(repository.saves).toBe(0);
+    expect(store.getState().autosave).toEqual({
+      status: "pending",
+      savedRevision: 0,
+      pendingRevision: 2,
+      error: null,
+    });
+
+    store.getState().flushAutosave();
+    expect(repository.saves).toBe(1);
+    expect(repository.loadDraft().title).toBe("最终标题");
+    expect(store.getState().autosave).toEqual({
+      status: "saved",
+      savedRevision: 2,
+      pendingRevision: null,
+      error: null,
+    });
   });
 
   it("previews many gesture values but commits one save and one undo entry", () => {
@@ -198,13 +239,15 @@ describe("project repository seam", () => {
     expect(state.activeTransaction).toBeNull();
     expect(state.history).toHaveLength(1);
     expect(state.dirty).toBe(true);
+    expect(state.autosave.status).toBe("pending");
+    state.flushAutosave();
     expect(repository.saves).toBe(1);
 
     state.undo();
     expect(store.getState().project).toEqual(base);
   });
 
-  it("rolls a preview gesture back when its single commit save fails", () => {
+  it("keeps a complete gesture commit retryable when background persistence fails", () => {
     const repository = new CountingProjectRepository(demoProject);
     const store = createProjectStore(repository);
     const key = "environment.zoom:failure";
@@ -214,7 +257,41 @@ describe("project repository seam", () => {
     store.getState().previewEnvironment(key, { zoom: 1.25 });
     repository.rejectNextSave();
 
-    expect(() => store.getState().commitTransaction(key)).toThrow("项目草稿保存失败");
+    expect(store.getState().commitTransaction(key)).toEqual({ status: "committed", revision: 1 });
+    store.getState().flushAutosave();
+    let committed = transactionSnapshot(store);
+    expect(committed.project).not.toEqual(base.project);
+    expect(committed.history).toHaveLength(1);
+    expect(committed.dirty).toBe(true);
+    expect(committed.revision).toBe(1);
+    expect(committed.activeTransaction).toBeNull();
+    expect(committed.autosave).toEqual({
+      status: "failed",
+      savedRevision: 0,
+      pendingRevision: 1,
+      error: "项目草稿保存失败",
+    });
+    expect(repository.saves).toBe(0);
+
+    store.getState().retryAutosave();
+    store.getState().flushAutosave();
+    committed = transactionSnapshot(store);
+    expect(committed.autosave.status).toBe("saved");
+    expect(committed.autosave.savedRevision).toBe(1);
+    expect(repository.saves).toBe(1);
+  });
+
+  it("rolls a gesture back when its final candidate cannot be validated", () => {
+    const repository = new RejectingValidationRepository(demoProject);
+    const store = createProjectStore(repository);
+    const key = "environment.zoom:invalid";
+    const base = transactionSnapshot(store);
+
+    store.getState().beginTransaction(key);
+    store.getState().previewEnvironment(key, { zoom: 1.25 });
+    repository.rejectNextValidation();
+
+    expect(() => store.getState().commitTransaction(key)).toThrow("项目草稿校验失败");
     const restored = transactionSnapshot(store);
     expect(restored.project).toEqual(base.project);
     expect(restored.history).toEqual(base.history);
@@ -222,7 +299,7 @@ describe("project repository seam", () => {
     expect(restored.dirty).toBe(base.dirty);
     expect(restored.revision).toBe(base.revision);
     expect(restored.activeTransaction).toBeNull();
-    expect(repository.saves).toBe(0);
+    expect(restored.autosave).toEqual(base.autosave);
   });
 
   it("cancels a gesture without making its preview durable", () => {

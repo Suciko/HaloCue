@@ -10,6 +10,12 @@ export type EditorTransactionResult = {
   status: "committed" | "no-op";
   revision: number;
 };
+export type EditorAutosaveState = {
+  status: "saved" | "pending" | "failed";
+  savedRevision: number;
+  pendingRevision: number | null;
+  error: string | null;
+};
 export type QuickEffectKind =
   | "halocue.ba:background-pan"
   | "halocue.ba:screen-shake"

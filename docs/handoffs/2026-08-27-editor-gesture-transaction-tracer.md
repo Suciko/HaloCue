@@ -15,8 +15,8 @@ begin -> preview* -> commit
 Preview steps update the working project and therefore the live stage, but do
 not save, append history, clear redo, change dirty state, or increment the
 durable revision. Commit compares the final project with the gesture baseline,
-saves once, and creates one undo entry. Returning to the baseline commits as a
-no-op.
+creates one canonical revision and one undo entry, then queues that revision
+once for autosave. Returning to the baseline commits as a no-op.
 
 Environment zoom is the first vertical tracer. Pointer dragging previews every
 range value and commits on release or blur. Keyboard range adjustment begins
@@ -34,15 +34,17 @@ Project export explicitly finishes an active gesture and then reads the latest
 store state, so a keyboard save cannot export a transient value under an older
 revision.
 
-If the repository rejects the gesture's single save, the working project,
-selection, dirty state, and diagnostics roll back to the baseline and the
-gesture closes. Cancel performs the same visual rollback without persistence.
+If final candidate validation fails, the working project, selection, dirty
+state, diagnostics, and autosave state roll back to the baseline and the
+gesture closes. Cancel performs the same visual rollback. A later background
+persistence failure keeps the complete committed revision in memory and marks
+it retryable.
 
 ## Verification
 
 Tests prove that multiple zoom previews produce zero saves and zero history
-entries, followed by one save and one undo entry at commit. Separate coverage
-checks failed commit rollback and cancellation. Verification completed with 62
+entries, followed by one queued autosave and one undo entry at commit. Separate
+coverage checks validation rollback and cancellation. Verification completed with 62
 scene-editor tests and 35 focused Python/model/browser regression tests; the
 production TypeScript build and whitespace check also passed.
 
@@ -52,7 +54,6 @@ Only environment zoom uses the gesture lifecycle so far. The same boundary can
 be adopted by timeline drag, numeric scrubbing, stage positioning, and camera
 motion when those controls become interactive.
 
-Durable commit still writes the repository synchronously, and scene evaluation
-still recompiles from every working-project preview. The next slices should add
-revision-aware autosave and preview-compilation schedulers independently,
-without weakening the atomic transaction behavior established here.
+Preview compilation and autosave now have independent revision-aware
+coordinators in later tracer slices. Further work should adopt the gesture
+boundary for additional continuous controls without weakening these semantics.

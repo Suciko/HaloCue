@@ -137,6 +137,8 @@ function TopBar({ onOpen, onSave }: { onOpen: () => void; onSave: () => void }) 
   const mode = useProjectStore((state) => state.mode);
   const dirty = useProjectStore((state) => state.dirty);
   const activeTransaction = useProjectStore((state) => state.activeTransaction);
+  const autosave = useProjectStore((state) => state.autosave);
+  const retryAutosave = useProjectStore((state) => state.retryAutosave);
   const history = useProjectStore((state) => state.history);
   const future = useProjectStore((state) => state.future);
   const setMode = useProjectStore((state) => state.setMode);
@@ -155,15 +157,25 @@ function TopBar({ onOpen, onSave }: { onOpen: () => void; onSave: () => void }) 
       </div>
       <div className="project-heading">
         <strong>{project.title || "未命名项目"}</strong>
-        <span className={dirty || activeTransaction ? "save-state is-dirty" : "save-state"}>
+        <span
+          className={dirty || activeTransaction || autosave.status !== "saved" ? "save-state is-dirty" : "save-state"}
+          title={autosave.error || undefined}
+        >
           {hasProjectError
             ? "项目有待修复项"
+            : autosave.status === "failed"
+              ? "自动保存失败"
             : hasProjectWarning
               ? "项目有校验警告"
               : activeTransaction
                 ? "正在预览调整"
-                : dirty ? "草稿已自动保存" : "已保存"}
+                : autosave.status === "pending"
+                  ? "正在自动保存"
+                  : dirty ? "草稿已自动保存" : "已保存"}
         </span>
+        {autosave.status === "failed" && (
+          <button className="save-retry" type="button" onClick={retryAutosave}>重试</button>
+        )}
       </div>
       <div className="mode-switch" role="group" aria-label="编辑模式">
         <button
@@ -993,6 +1005,7 @@ export default function App() {
     if (state.activeTransaction) {
       state.commitTransaction(state.activeTransaction.key);
     }
+    useProjectStore.getState().flushAutosave();
     const currentProject = useProjectStore.getState().project;
     projectFileAdapter.download(
       currentProject,
@@ -1013,6 +1026,12 @@ export default function App() {
       setNotice(exception instanceof Error ? exception.message : "无法打开项目");
     }
   };
+
+  useEffect(() => {
+    const flush = () => useProjectStore.getState().flushAutosave();
+    window.addEventListener("beforeunload", flush);
+    return () => window.removeEventListener("beforeunload", flush);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

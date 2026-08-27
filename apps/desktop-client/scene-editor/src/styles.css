@@ -65,6 +65,7 @@ svg { width: 16px; height: 16px; flex: none; stroke-width: 1.8; }
 .save-state { flex: none; color: var(--muted); font-size: 11px; }
 .save-state::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 6px; border-radius: 50%; background: var(--accent); vertical-align: 1px; }
 .save-state.is-dirty::before { background: var(--warning); }
+.save-retry { height: 22px; padding: 0 7px; border: 1px solid #6f4d2c; border-radius: 4px; background: #241b13; color: #ffbd79; font-size: 10px; cursor: pointer; }
 .mode-switch { justify-self: center; padding: 3px; background: #0f1211; border: 1px solid var(--line-soft); border-radius: 7px; }
 .mode-switch button { height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 13px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
 .mode-switch button.is-active { color: var(--text); background: var(--panel-3); box-shadow: inset 0 0 0 1px #35403c; }

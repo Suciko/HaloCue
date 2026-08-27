@@ -303,9 +303,9 @@ The first Editor Transaction slice is recorded in
 `docs/handoffs/2026-08-27-editor-transaction-noop-atomicity-tracer.md`. Shared
 commands now report committed versus no-op outcomes, suppress semantically
 equivalent writes, repair event selection inside the same transaction, and
-publish project, selection, history, dirty state, diagnostics, and revision
-only after persistence succeeds. Begin/preview/commit gesture sessions and
-independent autosave/preview coalescing remain later slices.
+publish project, selection, history, dirty state, diagnostics, and revision as
+one validated state change. Begin/preview/commit gesture sessions and
+independent autosave/preview coalescing are recorded in later slices.
 
 The gesture-session tracer is recorded in
 `docs/handoffs/2026-08-27-editor-gesture-transaction-tracer.md`. Environment
@@ -313,8 +313,8 @@ zoom now uses an explicit begin/preview/commit/cancel lifecycle: intermediate
 values update the working project and live preview without saving or extending
 history, while pointer/key release creates one durable edit and one undo entry.
 The transaction auto-finishes before another command or canonical selection
-change, and failed persistence rolls the trial back. Autosave scheduling and
-preview-compilation coalescing remain separate follow-up slices.
+change. Failed final validation rolls the trial back; background persistence
+failure keeps the complete revision retryable.
 
 The preview-compilation scheduler is recorded in
 `docs/handoffs/2026-08-27-preview-compilation-coalescing-tracer.md`. Working
@@ -324,6 +324,13 @@ a gesture flushes its final snapshot. Intent-only changes reuse the existing
 Scene Evaluation, and generation-checked timers cannot publish superseded
 snapshots. Independent autosave scheduling remains the next Editor Transaction
 follow-up.
+
+The autosave scheduler is recorded in
+`docs/handoffs/2026-08-27-autosave-revision-coalescing-tracer.md`. Validated
+editor commits publish immediately and queue their revision into an independent
+450 ms latest-only persistence window. Saved, pending, and failed revisions are
+explicit editor state; a failed write retains the complete in-memory revision
+for retry. Export and browser unload flush pending work synchronously.
 
 ## Small shallow seam found
 
