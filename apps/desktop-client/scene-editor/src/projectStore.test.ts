@@ -3,6 +3,42 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { buildDescriptor } from "./descriptor";
 import { demoProject } from "./demoProject";
 import { advancedEventCount, firstScene, stageAtCue, useProjectStore } from "./projectStore";
+import { evaluateScene } from "./sceneEvaluation";
+
+function multiSceneProject() {
+  const project = structuredClone(demoProject);
+  project.chapters.push({
+    chapter_id: "chapter/branch",
+    title: "支线",
+    scenes: [{
+      scene_id: "scene/branch-room",
+      title: "支线教室",
+      cues: [
+        {
+          cue_id: "cue/branch/001",
+          title: "支线开场",
+          events: [{
+            event_id: "event/branch/dialogue/001",
+            kind: "dialogue",
+            text: "支线原文",
+            duration_ms: 1800,
+          }],
+        },
+        {
+          cue_id: "cue/branch/002",
+          title: "支线收束",
+          events: [{
+            event_id: "event/branch/dialogue/002",
+            kind: "dialogue",
+            text: "支线第二拍",
+            duration_ms: 1800,
+          }],
+        },
+      ],
+    }],
+  });
+  return project;
+}
 
 
 describe("shared dual-mode project store", () => {
@@ -149,5 +185,66 @@ describe("shared dual-mode project store", () => {
     const current = useProjectStore.getState();
     expect(firstScene(current.project).cues[0].events.some((event) => event.event_id === deletedId)).toBe(false);
     expect(current.selectedEventId).toBe(neighborId);
+  });
+
+  it("targets edits, evaluation, undo, and redo at the selected Scene", () => {
+    const store = useProjectStore.getState();
+    store.replaceProject(multiSceneProject());
+    store.selectChapter("chapter/branch");
+    expect(useProjectStore.getState().selectedSceneId).toBe("scene/branch-room");
+    store.selectScene("scene/missing");
+    expect(useProjectStore.getState().selectedSceneId).toBe("scene/branch-room");
+
+    let current = useProjectStore.getState();
+    expect(current.selectedChapterId).toBe("chapter/branch");
+    expect(current.selectedSceneId).toBe("scene/branch-room");
+    expect(current.selectedCueId).toBe("cue/branch/001");
+    current.updateDialogue({ text: "只修改支线" });
+
+    current = useProjectStore.getState();
+    expect(current.project.chapters[0].scenes[0].cues[0].events.at(-1)?.text)
+      .toBe("老师，校庆预算的最终确认就拜托您了。");
+    expect(current.project.chapters[1].scenes[0].cues[0].events[0].text)
+      .toBe("只修改支线");
+    expect(buildDescriptor(current.project, current.selectedCueId, {
+      sceneId: current.selectedSceneId,
+    }).scene_id).toBe("scene/branch-room");
+    const branchEvaluation = evaluateScene(current.project, current.selectedCueId, {
+      sceneId: current.selectedSceneId,
+    });
+    expect(branchEvaluation.scene_id).toBe("scene/branch-room");
+    expect(branchEvaluation.diagnostics).toEqual([]);
+
+    current.undo();
+    current = useProjectStore.getState();
+    expect(current.selectedSceneId).toBe("scene/branch-room");
+    expect(current.project.chapters[1].scenes[0].cues[0].events[0].text)
+      .toBe("支线原文");
+
+    current.redo();
+    current = useProjectStore.getState();
+    expect(current.selectedSceneId).toBe("scene/branch-room");
+    expect(current.project.chapters[1].scenes[0].cues[0].events[0].text)
+      .toBe("只修改支线");
+  });
+
+  it("repairs Cue selection inside the selected Scene and rejects cross-scene IDs", () => {
+    const store = useProjectStore.getState();
+    store.replaceProject(multiSceneProject());
+    store.selectScene("scene/branch-room");
+    store.selectEvent("event/branch/dialogue/001");
+    store.selectScene("scene/branch-room");
+    expect(useProjectStore.getState().selectedEventId)
+      .toBe("event/branch/dialogue/001");
+    store.selectCue("cue/conference/001");
+    expect(useProjectStore.getState().selectedCueId).toBe("cue/branch/001");
+
+    store.selectCue("cue/branch/002");
+    store.deleteCue();
+    const current = useProjectStore.getState();
+    expect(current.selectedSceneId).toBe("scene/branch-room");
+    expect(current.selectedCueId).toBe("cue/branch/001");
+    expect(current.project.chapters[1].scenes[0].cues).toHaveLength(1);
+    expect(current.project.chapters[0].scenes[0].cues).toHaveLength(3);
   });
 });

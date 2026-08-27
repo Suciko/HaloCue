@@ -11,10 +11,10 @@ export const RENDERABLE_EVENT_KINDS = new Set(
 export function buildDescriptor(
   project: HaloCueProject,
   selectedCueId: string,
-  options: { capabilityRegistry?: CapabilityRegistry } = {},
+  options: { capabilityRegistry?: CapabilityRegistry; sceneId?: string } = {},
 ): SceneDescriptor {
   const registry = options.capabilityRegistry || capabilityRegistry;
-  const projection = projectCueState(project, selectedCueId);
+  const projection = projectCueState(project, selectedCueId, { sceneId: options.sceneId });
   const { scene } = projection;
   const events = projection.renderableEvents;
   const characters = new Map(project.characters.map((character) => [character.character_id, character]));

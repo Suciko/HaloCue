@@ -2,13 +2,16 @@ import { buildDescriptor } from "./descriptor";
 import type { CapabilityRegistry } from "./capabilities";
 import { buildRenderTimeline, DEFAULT_FRAME_RATE } from "./renderTimeline";
 import { buildScenePerformance } from "./scenePerformance";
-import { firstScene } from "./cueStateProjection";
+import { sceneById } from "./cueStateProjection";
 import { diagnoseProject } from "./projectCodec";
 import type { EvaluationDiagnostic, HaloCueProject, SceneEvaluation } from "./types";
 import { isDescriptorRenderable } from "./sceneEventRegistry";
 
-function diagnosticsForAdvancedEvents(project: HaloCueProject): EvaluationDiagnostic[] {
-  const scene = firstScene(project);
+function diagnosticsForAdvancedEvents(
+  project: HaloCueProject,
+  sceneId?: string,
+): EvaluationDiagnostic[] {
+  const scene = sceneById(project, sceneId);
   const diagnostics: EvaluationDiagnostic[] = [];
   scene.cues.forEach((cue, cueIndex) => {
     cue.events.forEach((event, eventIndex) => {
@@ -27,7 +30,7 @@ function diagnosticsForAdvancedEvents(project: HaloCueProject): EvaluationDiagno
 export function evaluateScene(
   project: HaloCueProject,
   selectedCueId: string,
-  options: { capabilityRegistry?: CapabilityRegistry } = {},
+  options: { capabilityRegistry?: CapabilityRegistry; sceneId?: string } = {},
 ): SceneEvaluation {
   const descriptor = buildDescriptor(project, selectedCueId, options);
   const frameRate = Number(descriptor.presentation.frame_rate) || DEFAULT_FRAME_RATE;
@@ -43,7 +46,7 @@ export function evaluateScene(
     performance: buildScenePerformance(descriptor, timeline),
     diagnostics: [
       ...projectDiagnostics,
-      ...diagnosticsForAdvancedEvents(project),
+      ...diagnosticsForAdvancedEvents(project, descriptor.scene_id),
     ],
   };
 }

@@ -291,6 +291,14 @@ completed Cue frame, professional event selection resolves to an exact start
 frame, and unsupported extension selection carries an explicit fallback reason.
 Changing only the event selection reuses the current session generation.
 
+The canonical scene-selection slice is recorded in
+`docs/handoffs/2026-08-27-canonical-scene-selection-tracer.md`. Chapter, Scene,
+Cue, and event identity now travel together through editor state and history.
+Core authoring commands, descriptor/evaluation adapters, preview intent, and
+the visible editor panels address the selected Scene instead of assuming the
+first Scene. The remaining `firstScene` helper is only a compatibility default
+for callers that do not yet supply scene identity.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure

@@ -1,5 +1,11 @@
 export type EditorMode = "simple" | "professional";
 export type InspectorTab = "character" | "dialogue" | "environment";
+export type EditorSelection = {
+  selectedChapterId: string;
+  selectedSceneId: string;
+  selectedCueId: string;
+  selectedEventId: string | null;
+};
 export type QuickEffectKind =
   | "halocue.ba:background-pan"
   | "halocue.ba:screen-shake"

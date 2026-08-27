@@ -11,6 +11,7 @@ import {
 import type {
   Cue,
   CueEvent,
+  EditorSelection,
   EditorMode,
   HaloCueProject,
   InspectorTab,
@@ -19,7 +20,7 @@ import type {
 } from "./types";
 import { isDescriptorRenderable } from "./sceneEventRegistry";
 import { createSceneEvent } from "./sceneEventFactory";
-import { firstScene, projectSceneAtCue } from "./cueStateProjection";
+import { projectSceneAtCue, sceneById } from "./cueStateProjection";
 import type { ProjectDiagnostic } from "./projectCodec";
 
 const clone = <T,>(value: T): T => structuredClone(value);
@@ -40,12 +41,14 @@ export function advancedEventCount(cue: Cue): number {
   return cue.events.filter((event) => !isDescriptorRenderable(event.kind)).length;
 }
 
-type HistoryEntry = { project: HaloCueProject; selectedCueId: string; selectedEventId: string | null };
+type HistoryEntry = { project: HaloCueProject } & EditorSelection;
 
 type EditorState = {
   project: HaloCueProject;
   mode: EditorMode;
   inspectorTab: InspectorTab;
+  selectedChapterId: string;
+  selectedSceneId: string;
   selectedCueId: string;
   selectedSlot: number;
   selectedEventId: string | null;
@@ -56,6 +59,8 @@ type EditorState = {
   projectDiagnostics: ProjectDiagnostic[];
   setMode: (mode: EditorMode) => void;
   setInspectorTab: (tab: InspectorTab) => void;
+  selectChapter: (chapterId: string) => void;
+  selectScene: (sceneId: string) => void;
   selectCue: (cueId: string) => void;
   selectSlot: (slot: number) => void;
   selectEvent: (eventId: string | null) => void;
@@ -81,11 +86,40 @@ type EditorState = {
   resetDemo: () => void;
 };
 
-function initialSelection(project: HaloCueProject) {
-  const scene = firstScene(project);
-  const cue = scene.cues[0];
-  if (!cue) throw new Error("场景至少需要一个 Cue");
-  return { cueId: cue.cue_id, eventId: cue.events[0]?.event_id || null };
+function selectionForScene(
+  project: HaloCueProject,
+  sceneId: string,
+): EditorSelection {
+  for (const chapter of project.chapters) {
+    const scene = chapter.scenes.find((item) => item.scene_id === sceneId);
+    if (!scene) continue;
+    const cue = scene.cues[0];
+    if (!cue) throw new Error(`场景 ${scene.scene_id} 至少需要一个 Cue`);
+    return {
+      selectedChapterId: chapter.chapter_id,
+      selectedSceneId: scene.scene_id,
+      selectedCueId: cue.cue_id,
+      selectedEventId: cue.events[0]?.event_id || null,
+    };
+  }
+  throw new Error(`项目中不存在场景 ${sceneId}`);
+}
+
+function initialSelection(project: HaloCueProject): EditorSelection {
+  for (const chapter of project.chapters) {
+    const scene = chapter.scenes.find((item) => item.cues.length > 0);
+    if (scene) return selectionForScene(project, scene.scene_id);
+  }
+  throw new Error("项目至少需要一个包含 Cue 的场景");
+}
+
+function selectionSnapshot(state: EditorState): EditorSelection {
+  return {
+    selectedChapterId: state.selectedChapterId,
+    selectedSceneId: state.selectedSceneId,
+    selectedCueId: state.selectedCueId,
+    selectedEventId: state.selectedEventId,
+  };
 }
 
 export function createProjectStore(repository: ProjectRepository = projectRepository) {
@@ -95,24 +129,25 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
   return create<EditorState>((set, get) => {
   const commit = (
     mutator: (project: HaloCueProject, cue: Cue, scene: Scene) => void,
-    selection?: Partial<Pick<EditorState, "selectedCueId" | "selectedEventId">>,
+    selection?: Partial<EditorSelection>,
   ) => {
     const state = get();
     const project = clone(state.project);
-    const scene = firstScene(project);
+    const scene = sceneById(project, state.selectedSceneId);
     const cue = scene.cues.find((item) => item.cue_id === state.selectedCueId);
     if (!cue) return;
     mutator(project, cue, scene);
     repository.saveDraft(project);
     set({
       project,
+      selectedChapterId: selection?.selectedChapterId ?? state.selectedChapterId,
+      selectedSceneId: selection?.selectedSceneId ?? state.selectedSceneId,
       selectedCueId: selection?.selectedCueId ?? state.selectedCueId,
       selectedEventId: selection?.selectedEventId === undefined
         ? state.selectedEventId : selection.selectedEventId,
       history: [...state.history.slice(-59), {
         project: state.project,
-        selectedCueId: state.selectedCueId,
-        selectedEventId: state.selectedEventId,
+        ...selectionSnapshot(state),
       }],
       future: [],
       dirty: true,
@@ -125,9 +160,11 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     project: initialProject,
     mode: loadEditorMode(),
     inspectorTab: "dialogue",
-    selectedCueId: initial.cueId,
+    selectedChapterId: initial.selectedChapterId,
+    selectedSceneId: initial.selectedSceneId,
+    selectedCueId: initial.selectedCueId,
     selectedSlot: 1,
-    selectedEventId: initial.eventId,
+    selectedEventId: initial.selectedEventId,
     history: [],
     future: [],
     dirty: false,
@@ -138,12 +175,44 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       set({ mode });
     },
     setInspectorTab: (inspectorTab) => set({ inspectorTab }),
+    selectChapter: (chapterId) => {
+      const state = get();
+      if (chapterId === state.selectedChapterId) return;
+      const chapter = state.project.chapters.find((item) => item.chapter_id === chapterId);
+      const scene = chapter?.scenes.find((item) => item.cues.length > 0);
+      if (!scene) return;
+      set(selectionForScene(state.project, scene.scene_id));
+    },
+    selectScene: (sceneId) => {
+      const state = get();
+      if (sceneId === state.selectedSceneId) return;
+      try {
+        set(selectionForScene(state.project, sceneId));
+      } catch (_error) {
+        // A stale tree item must not corrupt the current canonical selection.
+      }
+    },
     selectCue: (selectedCueId) => {
-      const cue = firstScene(get().project).cues.find((item) => item.cue_id === selectedCueId);
-      set({ selectedCueId, selectedEventId: cue?.events[0]?.event_id || null });
+      const state = get();
+      if (selectedCueId === state.selectedCueId) return;
+      const cue = sceneById(state.project, state.selectedSceneId)
+        .cues.find((item) => item.cue_id === selectedCueId);
+      if (!cue) return;
+      set({ selectedCueId, selectedEventId: cue.events[0]?.event_id || null });
     },
     selectSlot: (selectedSlot) => set({ selectedSlot, inspectorTab: "character" }),
-    selectEvent: (selectedEventId) => set({ selectedEventId }),
+    selectEvent: (selectedEventId) => {
+      if (selectedEventId === null) {
+        set({ selectedEventId: null });
+        return;
+      }
+      const state = get();
+      const cue = sceneById(state.project, state.selectedSceneId)
+        .cues.find((item) => item.cue_id === state.selectedCueId);
+      if (cue?.events.some((event) => event.event_id === selectedEventId)) {
+        set({ selectedEventId });
+      }
+    },
     updateProjectTitle: (title) => commit((project) => { project.title = title; }),
     updateDialogue: (patch) => commit((_project, cue) => {
       let dialogue = cue.events.find((event) => event.kind === "dialogue");
@@ -177,7 +246,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     swapSlots: (source, target) => {
       if (source === target) return;
       const state = get();
-      const scene = firstScene(state.project);
+      const scene = sceneById(state.project, state.selectedSceneId);
       const slots = projectSceneAtCue(scene, state.selectedCueId).afterCue.slots;
       commit((_project, cue) => {
         cue.events = cue.events.filter((event) => !(
@@ -252,7 +321,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     },
     deleteCue: () => {
       const state = get();
-      const scene = firstScene(state.project);
+      const scene = sceneById(state.project, state.selectedSceneId);
       if (scene.cues.length <= 1) return;
       const index = scene.cues.findIndex((cue) => cue.cue_id === state.selectedCueId);
       const next = scene.cues[Math.max(0, index - 1)];
@@ -273,7 +342,8 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     }),
     deleteEvent: (eventId) => {
       const state = get();
-      const cue = firstScene(state.project).cues.find((item) => item.cue_id === state.selectedCueId);
+      const cue = sceneById(state.project, state.selectedSceneId)
+        .cues.find((item) => item.cue_id === state.selectedCueId);
       if (!cue || !cue.events.some((event) => event.event_id === eventId)) return;
       const index = cue.events.findIndex((event) => event.event_id === eventId);
       const nextEvent = cue.events[index + 1] || cue.events[index - 1] || null;
@@ -298,8 +368,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         history: state.history.slice(0, -1),
         future: [{
           project: state.project,
-          selectedCueId: state.selectedCueId,
-          selectedEventId: state.selectedEventId,
+          ...selectionSnapshot(state),
         }, ...state.future.slice(0, 59)],
         dirty: true,
         revision: state.revision + 1,
@@ -315,8 +384,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         ...next,
         history: [...state.history, {
           project: state.project,
-          selectedCueId: state.selectedCueId,
-          selectedEventId: state.selectedEventId,
+          ...selectionSnapshot(state),
         }],
         future: state.future.slice(1),
         dirty: true,
@@ -330,8 +398,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       repository.saveDraft(normalized);
       set({
         project: normalized,
-        selectedCueId: selection.cueId,
-        selectedEventId: selection.eventId,
+        ...selection,
         history: [],
         future: [],
         dirty: false,

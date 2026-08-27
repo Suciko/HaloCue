@@ -50,7 +50,7 @@ import { capabilityStatesFor } from "./capabilities";
 import { evaluateScene } from "./sceneEvaluation";
 import { buildPreviewIntent } from "./previewIntent";
 import { eventDurationMs } from "./renderTimeline";
-import { firstScene, projectCueState } from "./cueStateProjection";
+import { projectCueState, sceneById } from "./cueStateProjection";
 import {
   eventEditorDefinition,
   eventEditorDefinitions,
@@ -183,10 +183,12 @@ function TopBar({ onOpen, onSave }: { onOpen: () => void; onSave: () => void }) 
 
 function ProjectRail({ showCues }: { showCues: boolean }) {
   const project = useProjectStore((state) => state.project);
+  const selectedChapterId = useProjectStore((state) => state.selectedChapterId);
+  const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
+  const selectChapter = useProjectStore((state) => state.selectChapter);
+  const selectScene = useProjectStore((state) => state.selectScene);
   const selectCue = useProjectStore((state) => state.selectCue);
-  const scene = firstScene(project);
-  const chapter = project.chapters[0];
 
   return (
     <aside className="project-rail">
@@ -196,21 +198,41 @@ function ProjectRail({ showCues }: { showCues: boolean }) {
       </div>
       <nav className="project-tree" aria-label={showCues ? "完整项目结构" : "场景导航"}>
         <div className="tree-row root"><ChevronDown /><Box />{project.title}</div>
-        <div className="tree-row depth-1"><ChevronDown /><Layers3 />{chapter?.title || "章节"}</div>
-        <div className="tree-row depth-2 is-open"><ChevronDown /><Clapperboard />{scene.title || "场景"}</div>
-        {showCues && <div className="tree-cues">
-          {scene.cues.map((cue, index) => (
+        {project.chapters.map((chapter) => (
+          <div className="tree-branch" key={chapter.chapter_id}>
             <button
               type="button"
-              key={cue.cue_id}
-              className={cue.cue_id === selectedCueId ? "tree-cue is-active" : "tree-cue"}
-              onClick={() => selectCue(cue.cue_id)}
+              className={`tree-row depth-1${chapter.chapter_id === selectedChapterId ? " is-open" : ""}`}
+              onClick={() => selectChapter(chapter.chapter_id)}
             >
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              <span>{cue.title || "未命名演出"}</span>
+              <ChevronDown /><Layers3 />{chapter.title || "章节"}
             </button>
-          ))}
-        </div>}
+            {chapter.scenes.map((scene) => (
+              <div className="tree-branch" key={scene.scene_id}>
+                <button
+                  type="button"
+                  className={`tree-row depth-2${scene.scene_id === selectedSceneId ? " is-open is-selected" : ""}`}
+                  onClick={() => selectScene(scene.scene_id)}
+                >
+                  <ChevronDown /><Clapperboard />{scene.title || "场景"}
+                </button>
+                {showCues && scene.scene_id === selectedSceneId && <div className="tree-cues">
+                  {scene.cues.map((cue, index) => (
+                    <button
+                      type="button"
+                      key={cue.cue_id}
+                      className={cue.cue_id === selectedCueId ? "tree-cue is-active" : "tree-cue"}
+                      onClick={() => selectCue(cue.cue_id)}
+                    >
+                      <span>{String(index + 1).padStart(2, "0")}</span>
+                      <span>{cue.title || "未命名演出"}</span>
+                    </button>
+                  ))}
+                </div>}
+              </div>
+            ))}
+          </div>
+        ))}
       </nav>
       <div className="rail-footer">
         <span><UsersRound />{project.characters.length} 名角色</span>
@@ -223,6 +245,7 @@ function ProjectRail({ showCues }: { showCues: boolean }) {
 function PreviewFrame() {
   const project = useProjectStore((state) => state.project);
   const mode = useProjectStore((state) => state.mode);
+  const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const selectedEventId = useProjectStore((state) => state.selectedEventId);
   const revision = useProjectStore((state) => state.revision);
@@ -232,8 +255,8 @@ function PreviewFrame() {
   const controllerRef = useRef<PreviewController | null>(null);
   const mountedEvaluationRef = useRef<SceneEvaluation | null>(null);
   const evaluation = useMemo(
-    () => evaluateScene(project, selectedCueId),
-    [project, selectedCueId, revision],
+    () => evaluateScene(project, selectedCueId, { sceneId: selectedSceneId }),
+    [project, selectedCueId, selectedSceneId, revision],
   );
   const intent = useMemo(
     () => buildPreviewIntent(project, evaluation, {
@@ -330,12 +353,13 @@ function PreviewFrame() {
 
 function StageSlots() {
   const project = useProjectStore((state) => state.project);
+  const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const selectedSlot = useProjectStore((state) => state.selectedSlot);
   const selectSlot = useProjectStore((state) => state.selectSlot);
   const swapSlots = useProjectStore((state) => state.swapSlots);
   const [dragged, setDragged] = useState<number | null>(null);
-  const slots = projectCueState(project, selectedCueId).afterCue.slots;
+  const slots = projectCueState(project, selectedCueId, { sceneId: selectedSceneId }).afterCue.slots;
   const characters = new Map(project.characters.map((character) => [character.character_id, character]));
 
   const drop = (event: DragEvent, slot: number) => {
@@ -394,13 +418,14 @@ function StageSlots() {
 
 function CueStrip() {
   const project = useProjectStore((state) => state.project);
+  const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const selectCue = useProjectStore((state) => state.selectCue);
   const addCue = useProjectStore((state) => state.addCue);
   const duplicateCue = useProjectStore((state) => state.duplicateCue);
   const deleteCue = useProjectStore((state) => state.deleteCue);
   const moveCue = useProjectStore((state) => state.moveCue);
-  const scene = firstScene(project);
+  const scene = sceneById(project, selectedSceneId);
   const [dragged, setDragged] = useState<string | null>(null);
 
   return (
@@ -416,7 +441,7 @@ function CueStrip() {
       </div>
       <div className="cue-list">
         {scene.cues.map((cue, index) => {
-          const dialogue = projectCueState(project, cue.cue_id).dialogueEvent;
+          const dialogue = projectCueState(project, cue.cue_id, { sceneId: selectedSceneId }).dialogueEvent;
           const advanced = advancedEventCount(cue);
           return (
             <button
@@ -459,11 +484,12 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 function CharacterInspector() {
   const project = useProjectStore((state) => state.project);
+  const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedSlot = useProjectStore((state) => state.selectedSlot);
   const setSlotCharacter = useProjectStore((state) => state.setSlotCharacter);
   const updateCharacterState = useProjectStore((state) => state.updateCharacterState);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
-  const projection = projectCueState(project, selectedCueId);
+  const projection = projectCueState(project, selectedCueId, { sceneId: selectedSceneId });
   const characterId = projection.afterCue.slots[selectedSlot - 1];
   const character = project.characters.find((item) => item.character_id === characterId);
   const stateEvent = projection.afterCue.actorStateEvents[selectedSlot - 1];
@@ -512,9 +538,10 @@ function CharacterInspector() {
 
 function DialogueInspector() {
   const project = useProjectStore((state) => state.project);
+  const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const updateDialogue = useProjectStore((state) => state.updateDialogue);
-  const dialogue = projectCueState(project, selectedCueId).dialogueEvent
+  const dialogue = projectCueState(project, selectedCueId, { sceneId: selectedSceneId }).dialogueEvent
     || { event_id: "", kind: "dialogue", text: "" };
   const auto = dialogue.timing !== "fixed";
   const resolvedDuration = (() => {
@@ -557,10 +584,11 @@ function DialogueInspector() {
 
 function EnvironmentInspector() {
   const project = useProjectStore((state) => state.project);
+  const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const updateEnvironment = useProjectStore((state) => state.updateEnvironment);
   const addQuickEffect = useProjectStore((state) => state.addQuickEffect);
-  const projection = projectCueState(project, selectedCueId);
+  const projection = projectCueState(project, selectedCueId, { sceneId: selectedSceneId });
   const background = projection.cueBackgroundEvent || projection.beforeCue.backgroundEvent;
   const transitionId = typeof background?.transition_id === "string"
     ? background.transition_id
@@ -603,10 +631,12 @@ function EnvironmentInspector() {
 
 function SimpleInspector() {
   const project = useProjectStore((state) => state.project);
+  const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const tab = useProjectStore((state) => state.inspectorTab);
   const setTab = useProjectStore((state) => state.setInspectorTab);
-  const cue = firstScene(project).cues.find((item) => item.cue_id === selectedCueId)!;
+  const cue = sceneById(project, selectedSceneId)
+    .cues.find((item) => item.cue_id === selectedCueId)!;
   const tabs: Array<[InspectorTab, ReactNode, string]> = [
     ["character", <UserRound key="character" />, "角色"],
     ["dialogue", <MessageSquareText key="dialogue" />, "对白"],
@@ -690,13 +720,15 @@ function ProfessionalEventFields({
 
 function ProfessionalEventList() {
   const project = useProjectStore((state) => state.project);
+  const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const selectedEventId = useProjectStore((state) => state.selectedEventId);
   const selectEvent = useProjectStore((state) => state.selectEvent);
   const moveEvent = useProjectStore((state) => state.moveEvent);
   const deleteEvent = useProjectStore((state) => state.deleteEvent);
   const addEvent = useProjectStore((state) => state.addEvent);
-  const cue = firstScene(project).cues.find((item) => item.cue_id === selectedCueId)!;
+  const cue = sceneById(project, selectedSceneId)
+    .cues.find((item) => item.cue_id === selectedCueId)!;
 
   return (
     <section className="event-workbench">
@@ -748,10 +780,12 @@ function ProfessionalEventList() {
 
 function ProfessionalInspector() {
   const project = useProjectStore((state) => state.project);
+  const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const selectedEventId = useProjectStore((state) => state.selectedEventId);
   const updateEvent = useProjectStore((state) => state.updateEvent);
-  const cue = firstScene(project).cues.find((item) => item.cue_id === selectedCueId)!;
+  const cue = sceneById(project, selectedSceneId)
+    .cues.find((item) => item.cue_id === selectedCueId)!;
   const event = cue.events.find((item) => item.event_id === selectedEventId) || cue.events[0];
   if (!event) return <aside className="inspector professional-inspector"><div className="empty-state">选择一个事件</div></aside>;
   const resolvedDuration = (() => {
@@ -766,7 +800,10 @@ function ProfessionalInspector() {
   const advancedFields = Object.entries(event).filter(([key]) => (
     !["event_id", "kind", "duration_ms", ...editorFields.map((item) => item.key)].includes(key)
   ));
-  const evaluation = useMemo(() => evaluateScene(project, selectedCueId), [project, selectedCueId]);
+  const evaluation = useMemo(
+    () => evaluateScene(project, selectedCueId, { sceneId: selectedSceneId }),
+    [project, selectedCueId, selectedSceneId],
+  );
   const eventIndex = cue.events.findIndex((item) => item.event_id === event.event_id);
   const eventDiagnostics = evaluation.diagnostics.filter((item) => (
     item.path.includes(`events[${eventIndex}]`) || item.severity === "error"
@@ -805,13 +842,14 @@ function ProfessionalInspector() {
 
 function Timeline() {
   const project = useProjectStore((state) => state.project);
+  const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const selectedEventId = useProjectStore((state) => state.selectedEventId);
   const selectCue = useProjectStore((state) => state.selectCue);
-  const scene = firstScene(project);
+  const scene = sceneById(project, selectedSceneId);
   const evaluation = useMemo(
-    () => evaluateScene(project, selectedCueId),
-    [project, selectedCueId],
+    () => evaluateScene(project, selectedCueId, { sceneId: selectedSceneId }),
+    [project, selectedCueId, selectedSceneId],
   );
   const cue = scene.cues.find((item) => item.cue_id === selectedCueId);
   const cueEventIds = new Set(cue?.events.map((event) => event.event_id));
