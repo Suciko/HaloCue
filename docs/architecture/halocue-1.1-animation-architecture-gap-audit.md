@@ -414,6 +414,16 @@ native input/textarea/contenteditable undo remain outside the project command
 path, while committed outcomes share the existing accessible announcement
 surface.
 
+The character-capability trial tracer is recorded in
+`docs/handoffs/2026-08-27-character-capability-trial-tracer.md`. Simple mode now
+browses expression, motion, and emoticon states from
+`character-capabilities/1.0` as semantic choices. Focus or hover enters an
+explicit cancel-on-interrupt Editor Transaction that updates working preview
+without history, revision, or autosave; Escape, leaving the picker, navigation,
+and unrelated commands restore the exact base. A click confirms one canonical
+state change. Unknown authored state IDs remain visible with an unavailable
+diagnostic instead of being replaced by a default.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure

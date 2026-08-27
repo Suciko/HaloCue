@@ -76,17 +76,16 @@ Four rows became six exactly once, with the two duplicate rows selected and the
 announcement `2 个事件已复制`. Ctrl+Z restored four rows and the original two-row
 selection in one step, announcing `已撤销上一步编辑`.
 
-## Known boundary and next action
+## Known boundary and delivered next action
 
 This slice defines authoring command input, not a user-configurable shortcut
 system. It does not add menus, command search, clipboard serialization, or
 cross-Cue paste. Those features are unnecessary before the animation authoring
 surface has a stable domain vocabulary.
 
-The next bounded slice should begin the Resource Workspace sequence from the
-long-term plan: browse `character-capabilities/1.0` expression, motion, and
-emoticon states for the selected character, start a non-committing capability
-trial in realtime preview, cancel without project/history/autosave changes, and
-commit one supported capability through the existing Editor Transaction and
-Scene Performance paths. Unknown or unavailable capabilities must remain
-visible with an explicit diagnostic instead of being silently discarded.
+The first Resource Workspace slice was delivered in implementation commit
+`91fd4c0` and is handed off in
+`docs/handoffs/2026-08-27-character-capability-trial-tracer.md`. Expression,
+motion, and emoticon states are browsable semantic choices. Hover/focus trial is
+cancel-on-interrupt and history-free; clicking confirms one canonical change.
+Unknown authored states remain visible with an explicit unavailable diagnostic.
