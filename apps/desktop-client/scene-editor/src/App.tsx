@@ -230,6 +230,14 @@ function TopBar({ onOpen, onSave }: { onOpen: () => void; onSave: () => void }) 
   );
 }
 
+type ProjectRailNode = {
+  kind: "chapter" | "scene" | "cue";
+  id: string;
+  chapterId: string;
+  sceneId?: string;
+  cueId?: string;
+};
+
 function ProjectRail({ showCues }: { showCues: boolean }) {
   const project = useProjectStore((state) => state.project);
   const selectedChapterId = useProjectStore((state) => state.selectedChapterId);
@@ -238,6 +246,55 @@ function ProjectRail({ showCues }: { showCues: boolean }) {
   const selectChapter = useProjectStore((state) => state.selectChapter);
   const selectScene = useProjectStore((state) => state.selectScene);
   const selectCue = useProjectStore((state) => state.selectCue);
+  const selectionNodeId = showCues ? selectedCueId : selectedSceneId;
+  const [rovingNodeId, setRovingNodeId] = useState(selectionNodeId);
+  const nodeRefs = useRef<Record<string, HTMLButtonElement>>({});
+  const nodes = useMemo<ProjectRailNode[]>(() => project.chapters.flatMap((chapter) => [
+    { kind: "chapter", id: chapter.chapter_id, chapterId: chapter.chapter_id },
+    ...chapter.scenes.flatMap((scene) => [
+      { kind: "scene" as const, id: scene.scene_id, chapterId: chapter.chapter_id, sceneId: scene.scene_id },
+      ...(showCues && scene.scene_id === selectedSceneId
+        ? scene.cues.map((cue) => ({
+          kind: "cue" as const,
+          id: cue.cue_id,
+          chapterId: chapter.chapter_id,
+          sceneId: scene.scene_id,
+          cueId: cue.cue_id,
+        }))
+        : []),
+    ]),
+  ]), [project.chapters, selectedSceneId, showCues]);
+  const activeNodeId = nodes.some((node) => node.id === rovingNodeId)
+    ? rovingNodeId
+    : selectionNodeId;
+  const selectNode = (node: ProjectRailNode) => {
+    setRovingNodeId(node.id);
+    if (node.kind === "chapter") selectChapter(node.chapterId);
+    else if (node.kind === "scene" && node.sceneId) selectScene(node.sceneId);
+    else if (node.kind === "cue" && node.cueId) selectCue(node.cueId);
+  };
+  const focusNode = (node: ProjectRailNode) => {
+    selectNode(node);
+    nodeRefs.current[node.id]?.focus();
+  };
+  const navigateNode = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    node: ProjectRailNode,
+  ) => {
+    const index = nodes.findIndex((item) => item.id === node.id);
+    const nextIndex = event.key === "ArrowDown" || event.key === "ArrowRight"
+      ? Math.min(nodes.length - 1, index + 1)
+      : event.key === "ArrowUp" || event.key === "ArrowLeft"
+        ? Math.max(0, index - 1)
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? nodes.length - 1
+            : -1;
+    if (nextIndex < 0 || nextIndex === index) return;
+    event.preventDefault();
+    focusNode(nodes[nextIndex]);
+  };
 
   return (
     <aside className="project-rail">
@@ -245,14 +302,24 @@ function ProjectRail({ showCues }: { showCues: boolean }) {
         <span>{showCues ? "项目" : "场景"}</span>
         <IconButton label="项目菜单"><MoreHorizontal /></IconButton>
       </div>
-      <nav className="project-tree" aria-label={showCues ? "完整项目结构" : "场景导航"}>
+      <nav className="project-tree" role="tree" aria-label={showCues ? "完整项目结构" : "场景导航"}>
         <div className="tree-row root"><ChevronDown /><Box />{project.title}</div>
         {project.chapters.map((chapter) => (
           <div className="tree-branch" key={chapter.chapter_id}>
             <button
               type="button"
+              role="treeitem"
+              data-project-tree-item
+              aria-level={1}
+              aria-current={activeNodeId === chapter.chapter_id ? "page" : undefined}
+              tabIndex={activeNodeId === chapter.chapter_id ? 0 : -1}
+              ref={(element) => {
+                if (element) nodeRefs.current[chapter.chapter_id] = element;
+                else delete nodeRefs.current[chapter.chapter_id];
+              }}
               className={`tree-row depth-1${chapter.chapter_id === selectedChapterId ? " is-open" : ""}`}
-              onClick={() => selectChapter(chapter.chapter_id)}
+              onClick={() => selectNode({ kind: "chapter", id: chapter.chapter_id, chapterId: chapter.chapter_id })}
+              onKeyDown={(event) => navigateNode(event, { kind: "chapter", id: chapter.chapter_id, chapterId: chapter.chapter_id })}
             >
               <ChevronDown /><Layers3 />{chapter.title || "章节"}
             </button>
@@ -260,8 +327,18 @@ function ProjectRail({ showCues }: { showCues: boolean }) {
               <div className="tree-branch" key={scene.scene_id}>
                 <button
                   type="button"
+                  role="treeitem"
+                  data-project-tree-item
+                  aria-level={2}
+                  aria-current={activeNodeId === scene.scene_id ? "page" : undefined}
+                  tabIndex={activeNodeId === scene.scene_id ? 0 : -1}
+                  ref={(element) => {
+                    if (element) nodeRefs.current[scene.scene_id] = element;
+                    else delete nodeRefs.current[scene.scene_id];
+                  }}
                   className={`tree-row depth-2${scene.scene_id === selectedSceneId ? " is-open is-selected" : ""}`}
-                  onClick={() => selectScene(scene.scene_id)}
+                  onClick={() => selectNode({ kind: "scene", id: scene.scene_id, chapterId: chapter.chapter_id, sceneId: scene.scene_id })}
+                  onKeyDown={(event) => navigateNode(event, { kind: "scene", id: scene.scene_id, chapterId: chapter.chapter_id, sceneId: scene.scene_id })}
                 >
                   <ChevronDown /><Clapperboard />{scene.title || "场景"}
                 </button>
@@ -269,9 +346,19 @@ function ProjectRail({ showCues }: { showCues: boolean }) {
                   {scene.cues.map((cue, index) => (
                     <button
                       type="button"
+                      role="treeitem"
+                      data-project-tree-item
+                      aria-level={3}
+                      aria-current={activeNodeId === cue.cue_id ? "page" : undefined}
+                      tabIndex={activeNodeId === cue.cue_id ? 0 : -1}
+                      ref={(element) => {
+                        if (element) nodeRefs.current[cue.cue_id] = element;
+                        else delete nodeRefs.current[cue.cue_id];
+                      }}
                       key={cue.cue_id}
                       className={cue.cue_id === selectedCueId ? "tree-cue is-active" : "tree-cue"}
-                      onClick={() => selectCue(cue.cue_id)}
+                      onClick={() => selectNode({ kind: "cue", id: cue.cue_id, chapterId: chapter.chapter_id, sceneId: scene.scene_id, cueId: cue.cue_id })}
+                      onKeyDown={(event) => navigateNode(event, { kind: "cue", id: cue.cue_id, chapterId: chapter.chapter_id, sceneId: scene.scene_id, cueId: cue.cue_id })}
                     >
                       <span>{String(index + 1).padStart(2, "0")}</span>
                       <span>{cue.title || "未命名演出"}</span>
