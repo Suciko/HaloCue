@@ -536,6 +536,25 @@ function CueStrip() {
   const moveCue = useProjectStore((state) => state.moveCue);
   const scene = sceneById(project, selectedSceneId);
   const [dragged, setDragged] = useState<string | null>(null);
+  const cueRefs = useRef<Record<string, HTMLButtonElement>>({});
+  const focusCue = (cue: Cue) => {
+    selectCue(cue.cue_id);
+    cueRefs.current[cue.cue_id]?.focus();
+  };
+  const navigateCue = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
+    const nextIndex = event.key === "ArrowRight" || event.key === "ArrowDown"
+      ? Math.min(scene.cues.length - 1, index + 1)
+      : event.key === "ArrowLeft" || event.key === "ArrowUp"
+        ? Math.max(0, index - 1)
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? scene.cues.length - 1
+            : -1;
+    if (nextIndex < 0 || nextIndex === index) return;
+    event.preventDefault();
+    focusCue(scene.cues[nextIndex]);
+  };
 
   return (
     <section className="cue-strip" aria-label="演出节拍">
@@ -554,11 +573,18 @@ function CueStrip() {
           const advanced = advancedEventCount(cue);
           return (
             <button
+              ref={(element) => {
+                if (element) cueRefs.current[cue.cue_id] = element;
+                else delete cueRefs.current[cue.cue_id];
+              }}
               type="button"
               draggable
               key={cue.cue_id}
               className={cue.cue_id === selectedCueId ? "cue-item is-active" : "cue-item"}
+              aria-pressed={cue.cue_id === selectedCueId}
+              tabIndex={cue.cue_id === selectedCueId ? 0 : -1}
               onClick={() => selectCue(cue.cue_id)}
+              onKeyDown={(event) => navigateCue(event, index)}
               onDragStart={() => setDragged(cue.cue_id)}
               onDragEnd={() => setDragged(null)}
               onDragOver={(event) => event.preventDefault()}
