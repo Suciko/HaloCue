@@ -1767,6 +1767,9 @@ function ShotTimelineWorkspace() {
   const span = rangeEnd - rangeStart;
   const orderedClips = projection.tracks.flatMap((track) => track.clips);
   const selectedClip = orderedClips.find((clip) => clip.event_id === selectedEventId);
+  const selectedUnmappedEvent = selectedEventId && projection.unmappedEventIds.includes(selectedEventId)
+    ? cue.events.find((event) => event.event_id === selectedEventId)
+    : undefined;
   const visibleFrame = Math.max(
     rangeStart,
     Math.min(rangeEnd - 1, playheadFrame ?? selectedClip?.start_frame ?? rangeStart),
@@ -1818,6 +1821,8 @@ function ShotTimelineWorkspace() {
             <small data-shot-selection-context aria-live="polite" aria-atomic="true">
               {selectedClip
                 ? `已选 ${shotTimelineClipLabel(selectedClip)} · F${selectedClip.start_frame}-${selectedClip.end_frame}`
+                : selectedUnmappedEvent
+                  ? `已选 ${selectedUnmappedEvent.kind} · ${selectedUnmappedEvent.event_id} · 未映射`
                 : "未选择可渲染事件"}
             </small>
           </span>

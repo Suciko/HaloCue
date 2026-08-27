@@ -265,6 +265,41 @@ describe("professional shot timeline workspace", () => {
     expect(context?.textContent).toContain("已选");
   });
 
+  it("keeps an unmapped advanced selection explicit without fabricating timing", () => {
+    const project = structuredClone(useProjectStore.getState().project);
+    const scene = project.chapters[0].scenes[0];
+    scene.cues[0].events.push({
+      event_id: "event/advanced/unmapped-shot",
+      kind: "halocue.ba:reaction-beat",
+      intensity: 0.35,
+    });
+    act(() => {
+      useProjectStore.getState().replaceProject(project);
+      useProjectStore.getState().selectEvent("event/advanced/unmapped-shot");
+    });
+
+    const shotTab = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"))
+      .find((button) => button.textContent?.includes("镜头时间轴"));
+    act(() => shotTab?.click());
+
+    const context = container.querySelector<HTMLElement>("[data-shot-selection-context]");
+    expect(context?.textContent).toContain("未映射");
+    expect(context?.textContent).toContain("event/advanced/unmapped-shot");
+    expect(container.querySelector("[data-event-timing-projection]")).toBeNull();
+    expect(useProjectStore.getState().selectedEventId).toBe("event/advanced/unmapped-shot");
+
+    const renderableClip = container.querySelector<HTMLButtonElement>(
+      '.shot-clip[data-event-id="event/dialogue/001"]',
+    );
+    expect(renderableClip).not.toBeNull();
+    act(() => renderableClip?.click());
+    expect(container.querySelector("[data-shot-selection-context]")?.textContent)
+      .toContain("已选");
+    expect(container.querySelector("[data-shot-selection-context]")?.textContent)
+      .not.toContain("未映射");
+    expect(container.querySelector("[data-event-timing-projection]")).not.toBeNull();
+  });
+
   it("shows selected event timing as a read-only timeline projection", () => {
     const scene = firstScene(useProjectStore.getState().project);
     const cue = scene.cues[0];
