@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import App from "./App";
 import { demoProject } from "./demoProject";
 import { useProjectStore } from "./projectStore";
+import { evaluateScene } from "./sceneEvaluation";
 
 const actEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -124,5 +125,37 @@ describe("simple Cue strip interactions", () => {
     expect(cues[0].getAttribute("aria-pressed")).toBe("true");
     expect(useProjectStore.getState().revision).toBe(revision + 1);
     expect(useProjectStore.getState().history).toHaveLength(historyLength + 1);
+  });
+
+  it("shows the selected Cue range and task context in Simple mode", () => {
+    const state = useProjectStore.getState();
+    act(() => state.setInspectorTab("character"));
+    const cue = state.project.chapters[0].scenes[0].cues[1];
+    const evaluation = evaluateScene(state.project, cue.cue_id, {
+      sceneId: state.selectedSceneId,
+    });
+    const eventIds = new Set(cue.events.map((event) => event.event_id));
+    const segments = evaluation.timeline.events.filter((event) => eventIds.has(event.event_id));
+    const start = Math.min(...segments.map((event) => event.start_frame));
+    const end = Math.max(...segments.map((event) => event.end_frame));
+
+    const cueButton = Array.from(container.querySelectorAll<HTMLButtonElement>(".cue-item"))
+      .find((button) => button.textContent?.includes("意外来客"));
+    expect(cueButton).not.toBeNull();
+    act(() => cueButton?.click());
+
+    const range = container.querySelector<HTMLElement>("[data-preview-selection-range]");
+    expect(range?.textContent).toBe(`Cue F${start}-${end}`);
+    expect(range?.getAttribute("data-preview-selection-kind")).toBe("cue");
+    expect(useProjectStore.getState().inspectorTab).toBe("dialogue");
+    expect(container.querySelector<HTMLButtonElement>('.inspector-tabs [role="tab"][aria-selected="true"]')?.textContent)
+      .toContain("对白");
+
+    const revision = useProjectStore.getState().revision;
+    const locate = container.querySelector<HTMLButtonElement>("[data-preview-locate]");
+    expect(locate).not.toBeNull();
+    act(() => locate?.click());
+    expect(useProjectStore.getState().previewPlayheadFrame).toBe(start);
+    expect(useProjectStore.getState().revision).toBe(revision);
   });
 });

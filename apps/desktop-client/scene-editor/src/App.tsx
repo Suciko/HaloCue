@@ -412,6 +412,20 @@ function PreviewFrame() {
   const selectedTimelineEvent = evaluation.timeline.events.find(
     (event) => event.event_id === selectedEventId,
   );
+  const selectedCue = sceneById(project, selectedSceneId).cues.find(
+    (cue) => cue.cue_id === selectedCueId,
+  );
+  const selectedCueEventIds = new Set(selectedCue?.events.map((event) => event.event_id));
+  const selectedCueTimelineEvents = evaluation.timeline.events.filter(
+    (event) => selectedCueEventIds.has(event.event_id),
+  );
+  const selectedCueRange = selectedCueTimelineEvents.length > 0
+    ? {
+      start_frame: Math.min(...selectedCueTimelineEvents.map((event) => event.start_frame)),
+      end_frame: Math.max(...selectedCueTimelineEvents.map((event) => event.end_frame)),
+    }
+    : null;
+  const selectedPreviewRange = mode === "professional" ? selectedTimelineEvent : selectedCueRange;
   const intentRef = useRef(intent);
   intentRef.current = intent;
   const motionTrialKey = activeTransaction?.key.endsWith(":motion")
@@ -514,20 +528,25 @@ function PreviewFrame() {
           <span className="preview-meta" aria-live="polite">
             1280 × 720 · Spine · {intentLabel}
           </span>
-          {selectedTimelineEvent && (
-            <span className="preview-selection-range" data-preview-selection-range>
-              F{selectedTimelineEvent.start_frame}-{selectedTimelineEvent.end_frame}
+          {selectedPreviewRange && (
+            <span
+              className="preview-selection-range"
+              data-preview-selection-range
+              data-preview-selection-kind={mode === "professional" ? "event" : "cue"}
+            >
+              {mode === "professional" ? "" : "Cue "}
+              F{selectedPreviewRange.start_frame}-{selectedPreviewRange.end_frame}
             </span>
           )}
         </div>
         <div className="preview-toolbar-actions">
           <button type="button" onClick={mount}><RotateCcw />刷新</button>
-          {selectedTimelineEvent && (
+          {selectedPreviewRange && (
             <button
               type="button"
               data-preview-locate
-              title="定位到所选事件起点"
-              onClick={() => setPlayheadFrame(selectedTimelineEvent.start_frame)}
+              title={`定位到所选${mode === "professional" ? "事件" : "Cue"}起点`}
+              onClick={() => setPlayheadFrame(selectedPreviewRange.start_frame)}
             ><LocateFixed />定位</button>
           )}
           <button type="button" disabled={!ready} onClick={() => controllerRef.current?.play({ fromFrame: 0 })}><Play />从头播放</button>

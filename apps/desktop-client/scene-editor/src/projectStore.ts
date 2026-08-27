@@ -153,6 +153,17 @@ function initialSelection(project: HaloCueProject): EditorSelection {
   throw new Error("项目至少需要一个包含 Cue 的场景");
 }
 
+function inspectorTabForCue(cue: Cue): InspectorTab {
+  if (cue.events.some((event) => event.kind === "dialogue")) return "dialogue";
+  if (cue.events.some((event) => ["enter", "exit", "character-motion"].includes(event.kind))) {
+    return "character";
+  }
+  if (cue.events.some((event) => event.kind === "background" || event.kind === "halocue.ba:background-pan")) {
+    return "environment";
+  }
+  return "dialogue";
+}
+
 function selectionSnapshot(state: EditorState): EditorSelection {
   return {
     selectedChapterId: state.selectedChapterId,
@@ -555,6 +566,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         selectedEventIds: cue.events[0] ? [cue.events[0].event_id] : [],
         eventSelectionAnchorId: cue.events[0]?.event_id || null,
         previewPlayheadFrame: null,
+        inspectorTab: state.mode === "simple" ? inspectorTabForCue(cue) : state.inspectorTab,
       });
     },
     selectSlot: (selectedSlot) => {
