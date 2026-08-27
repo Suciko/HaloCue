@@ -139,4 +139,63 @@ describe("preview toolbar selection playback", () => {
       toFrame: expectedEnd - 1,
     });
   });
+
+  it("announces preview synchronization and ready states beside transport controls", () => {
+    renderEditor("professional");
+    const status = container.querySelector<HTMLElement>("[data-preview-status]");
+    expect(status?.getAttribute("role")).toBe("status");
+    expect(status?.getAttribute("aria-live")).toBe("polite");
+    expect(status?.textContent).toContain("同步中");
+
+    const iframe = container.querySelector<HTMLIFrameElement>("iframe")!;
+    const controller = {
+      applyIntent: vi.fn(),
+      generation: 1,
+      isCurrent: () => true,
+      scene_id: "scene/conference-room",
+      timeline: null,
+      performance: null,
+      seekFrame: vi.fn(),
+      play: vi.fn(),
+      dispose: vi.fn(),
+    };
+    Object.assign(iframe.contentWindow!, {
+      HaloCueScenePreview: {
+        mount: vi.fn((_descriptor, _root, options) => {
+          controller.timeline = options?.timeline || null;
+          controller.performance = options?.performance || null;
+          return controller;
+        }),
+      },
+    });
+    act(() => iframe.dispatchEvent(new Event("load")));
+
+    expect(status?.textContent).toContain("已就绪");
+    expect(container.querySelector<HTMLButtonElement>(
+      "[data-preview-play-selection]",
+    )?.disabled).toBe(false);
+  });
+
+  it("announces preview failures and keeps playback disabled", () => {
+    renderEditor("professional");
+    const iframe = container.querySelector<HTMLIFrameElement>("iframe")!;
+    Object.assign(iframe.contentWindow!, {
+      HaloCueScenePreview: {
+        mount: vi.fn(() => {
+          throw new Error("renderer unavailable");
+        }),
+      },
+    });
+
+    act(() => iframe.dispatchEvent(new Event("load")));
+
+    const status = container.querySelector<HTMLElement>("[data-preview-status]");
+    expect(status?.textContent).toContain("预览失败");
+    expect(status?.title).toBe("renderer unavailable");
+    expect(container.querySelector<HTMLButtonElement>(
+      "[data-preview-play-selection]",
+    )?.disabled).toBe(true);
+    expect(container.querySelector(".preview-error")?.textContent)
+      .toContain("renderer unavailable");
+  });
 });

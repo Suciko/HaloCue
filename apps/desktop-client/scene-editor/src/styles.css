@@ -114,6 +114,10 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .preview-toolbar { height: 38px; display: flex; justify-content: space-between; align-items: center; padding: 0 3px; }
 .preview-toolbar > div, .preview-toolbar-actions { display: flex; align-items: center; gap: 8px; }
 .preview-toolbar strong { font-size: 12px; }
+.preview-status { display: inline-flex; align-items: center; gap: 4px; padding: 2px 5px; border: 1px solid var(--line); border-radius: 3px; color: var(--subtle); font-size: 8px; white-space: nowrap; }
+.preview-status::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.preview-status.is-ready { border-color: rgba(119, 214, 176, .35); color: var(--accent); }
+.preview-status.is-error { border-color: rgba(216, 91, 72, .42); color: var(--danger); }
 .preview-meta { color: var(--subtle); font-size: 10px; }
 .preview-selection-range { flex: none; padding: 2px 5px; border: 1px solid #3d5b4c; border-radius: 3px; color: var(--accent); font: 8px/1 "Cascadia Code", "Consolas", monospace; }
 .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px rgba(119, 214, 176, .1); }

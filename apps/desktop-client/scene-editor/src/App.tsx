@@ -438,6 +438,8 @@ function PreviewFrame() {
     "scene-start": "场景起始画面",
     "explicit-frame": `精确帧 ${intent.target.frame}`,
   }[intent.target.resolution];
+  const previewStatus = error ? "error" : ready ? "ready" : "syncing";
+  const previewStatusLabel = error ? "预览失败" : ready ? "已就绪" : "同步中";
 
   useEffect(() => {
     const previous = addressRef.current;
@@ -525,6 +527,16 @@ function PreviewFrame() {
         <div>
           <span className="live-dot" />
           <strong>实时预览</strong>
+          <span
+            className={`preview-status is-${previewStatus}`}
+            data-preview-status
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            title={error || undefined}
+          >
+            {previewStatusLabel}
+          </span>
           <span className="preview-meta" aria-live="polite">
             1280 × 720 · Spine · {intentLabel}
           </span>
