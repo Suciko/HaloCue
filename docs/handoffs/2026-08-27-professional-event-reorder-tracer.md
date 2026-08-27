@@ -7,6 +7,7 @@
 - Owner: HaloCue maintainers
 - Source branch: `feature/1.1-ba-editor-from-1.0`
 - Implementation commit: `8befda3`
+- Full-App test boundary follow-up: `2e5cd9a`
 - PR: <https://github.com/Suciko/HaloCue/pull/27>
 
 ## Outcome
@@ -70,10 +71,12 @@ non-adjacent targets, invalid targets, boundaries, and equivalent no-ops. Store
 tests prove stable-ID order, selection preservation, one history entry, one-step
 undo, and no history for an equivalent placement.
 
-The jsdom interaction test dispatches `dragstart`, `dragover`, and `drop` through
-the rendered professional list. It checks source dimming, the target insertion
-class, data-transfer move semantics, final order, selection, revision/history,
-announcement text, and transient-state cleanup.
+The jsdom interaction test renders the complete App in professional mode, then
+dispatches `dragstart`, `dragover`, and `drop` through the event list. It checks
+source dimming, the target insertion class, data-transfer move semantics, final
+order, selection, revision/history, announcement text, and transient-state
+cleanup. Rendering through the default App export preserves Vite's existing
+Fast Refresh boundary.
 
 A 1280 x 720 browser check confirmed the dedicated visible/focusable grip and
 focus ring. Arrow Up moved the second event to position 1, retained the moved
