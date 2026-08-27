@@ -1,70 +1,65 @@
-# 2026-08-28 simple Inspector tabs tracer
+# Handoff: Simple Inspector tab-panel tracer
 
-## Scope
-
-This slice makes the Simple Inspector's `角色` / `对白` / `环境` tabs a
-keyboard-addressable task surface. The selected tab remains editor state and
-does not create a project revision or undo entry.
+- Issue: [#24](https://github.com/Suciko/HaloCue/issues/24)
+- Branch: `feature/1.1-ba-editor-from-1.0`
+- Scope: accessible tab-to-panel linkage for the Simple Inspector
+- Status: implementation complete and pushed
 
 ## Delivery
 
-- Branch: `feature/1.1-ba-editor-from-1.0`
-- Code commit: `ea95f7e feat(1.1): navigate simple inspector tabs by keyboard`
-- Pushed: yes, to `origin/feature/1.1-ba-editor-from-1.0`
-- Pull request: https://github.com/Suciko/HaloCue/pull/27
-- Parent issue: https://github.com/Suciko/HaloCue/issues/24
-- Changed code:
-  - `apps/desktop-client/scene-editor/src/App.tsx`
-  - `apps/desktop-client/scene-editor/src/simpleInspectorUi.test.tsx`
-
-## Behavior
-
-- Inspector tabs use one roving `tabIndex`; the selected tab is `0`, the other
-  tabs are `-1`.
-- Arrow Left/Right and Up/Down move between tabs; Home and End move to the
-  first and last tab. Focus and `aria-selected` follow `inspectorTab`.
-- Existing `setInspectorTab` remains the only state transition. No project
-  JSON, revision, history, autosave, or preview playhead changes.
-- The tablist now has the accessible name `当前演出属性`.
-
-## TDD and verification
-
-- Red: the new UI test found all three buttons at `tabIndex=0` and ArrowRight
-  left `inspectorTab` unchanged.
-- Green: refs, keyboard navigation, roving tab stops, and ARIA state were added
-  behind the existing Store setter.
-- Focused: `npm test -- --run src/simpleInspectorUi.test.tsx` -> 1 test passed.
-- Full editor: `npm test` -> 27 files, 152 tests passed.
-- Build: `npm run build` passed. The known external runtime font URL warning
-  remains: `/scene-preview/assets/fonts/NotoSansSC-Variable.ttf`.
-- Repository: `git diff --check` passed before commit.
-- Python: `python -m pytest -q` -> 2200 passed, 14 skipped in 734.59s.
-
-## Browser evidence
-
-The in-app browser checked `http://127.0.0.1:5174/scene-editor/` at 390x844:
-
-- Initial state exposed only `对白` as the tab stop.
-- ArrowRight moved focus and selection to `环境`; Home returned to `角色`.
-- `aria-selected` and `tabIndex` matched the visible tab after each move.
-- `document.body.scrollWidth` and `document.body.clientWidth` both remained
-  390.
-- Screenshot: `output/playwright/simple-inspector-tabs-narrow.png`.
+The Simple Inspector's `角色`, `对白`, and `环境` tabs now expose stable IDs
+and `aria-controls` references. The active property surface is a matching
+`role=tabpanel` with `aria-labelledby`, while the existing Inspector child
+forms remain unchanged inside it. The panel wrapper is editor UI state only and
+does not change project revision, history, autosave, event IDs, or payloads.
 
 ## Studio evidence and boundary
 
-The public first-party editor page
-`https://docs.avg-engine.com/manual/overview/editor` describes the selected
-Block's contextual inspector as part of the same ordered-script and live
-preview workflow. HaloCue applies that relationship to its Simple task tabs
-with independent labels and controls.
+First-party reference reviewed:
 
-ADR-0005 remains in force: recovered/decompiled Studio implementation is
-behavior evidence only. No private source, bundle, font, image, audio, model,
-or other proprietary asset was read into or copied into this repository.
+- [Studio editor overview](https://docs.avg-engine.com/images/manual/overview/editor/editor-overview.png)
+- [Studio editor manual](https://docs.avg-engine.com/manual/overview/editor)
+
+The public Studio editor keeps the selected authoring object, preview, and
+contextual property surface in one workspace. HaloCue makes the existing
+Simple Inspector's tab relationship explicit to assistive technology while
+retaining its own surface and terminology. The official image is behavior/layout
+evidence only and is not copied into the repository.
+
+ADR-0005 remains in force. No decompiled implementation body, source map,
+production bundle, private font, image, audio, model, or installed Studio/AA
+resource entered this change.
+
+## Changed paths
+
+- `apps/desktop-client/scene-editor/src/App.tsx`
+- `apps/desktop-client/scene-editor/src/styles.css`
+- `apps/desktop-client/scene-editor/src/simpleInspectorUi.test.tsx`
+
+## Verification
+
+- Red: the new UI test failed because the active tab had no `aria-controls` and
+  no associated property panel.
+- Green: `npm test -- --run src/simpleInspectorUi.test.tsx` -> **3 tests passed**.
+- Full editor: `npm test` -> **29 files, 157 tests passed**.
+- Build: `npm run build` -> passed. The known external runtime font URL warning
+  remains for `/scene-preview/assets/fonts/NotoSansSC-Variable.ttf`.
+- `git diff --check` -> passed before commit.
+- Browser DOM at 390x844 confirmed `simple-inspector-tab-dialogue` controls
+  `simple-inspector-panel-dialogue`, with `role=tabpanel`, matching
+  `aria-labelledby`, and equal body/client widths.
+- Screenshot: `output/playwright/simple-inspector-tabpanel-narrow.png`.
+- The optional renderer on `127.0.0.1:8898` was stopped; its known proxy/font
+  errors were isolated from the editor-side accessibility and layout checks.
+
+## Commit and push
+
+- Code commit: `1197306 feat(1.1): link simple inspector tabs`
+- Pushed to `origin/feature/1.1-ba-editor-from-1.0`
 
 ## Next bounded slice
 
-Add keyboard selection and roving focus for the five visible stage slots in
-Simple mode. Preserve the `1..5` stage contract and keep off-stage `#0` out of
-the visible slot list.
+Continue with one focused selection-feedback behavior in Simple mode, such as
+announcing the selected Cue title and derived frame range together from one
+live context node. Keep continuous-dialogue data modeling, clip resizing,
+absolute starts, audio tracks, and theme migration out of scope.
