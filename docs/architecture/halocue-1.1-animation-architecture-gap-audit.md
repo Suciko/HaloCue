@@ -397,6 +397,14 @@ primary event and range anchor retain their source-relative identity. The
 command creates one project revision and one undo entry; no project or preview
 contract changes.
 
+The selected-event reorder tracer is recorded in
+`docs/handoffs/2026-08-27-event-block-reorder-tracer.md`. Direction, Home/End,
+row buttons, and pointer drops now route through one stable block-placement
+operation. Selected events are normalized to canonical order, removed, and
+reinserted together while retaining primary and anchor identity. Drops inside
+the source block and equivalent boundaries remain true no-ops; one completed
+move creates one revision and one undo entry.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure

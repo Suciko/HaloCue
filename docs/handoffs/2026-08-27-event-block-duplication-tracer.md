@@ -82,16 +82,17 @@ and the live region announced `3 个事件已复制`. One Undo restored four row
 original three selected events, and `event/dialogue/001` as the dialogue
 primary.
 
-## Known boundary and next action
+## Known boundary and delivered next action
 
 Duplication is scoped to one Cue and preserves relative source order. It does
 not yet let a multi-selection move as one atomic block; existing grip, arrow,
 and pointer reorder semantics still operate on one event and collapse to one
 primary selection.
 
-The next bounded slice should move a selected event block through the same
-stable before/after placement model. It must preserve relative order, reject a
-drop inside the selected block as a no-op, retain the complete selection and
-primary/anchor identity, create one revision and one undo entry, and work from
-pointer, keyboard, and direction-button entry points without separate reorder
-algorithms.
+The selected-block reorder slice was delivered in implementation commit
+`824b599` and is handed off in
+`docs/handoffs/2026-08-27-event-block-reorder-tracer.md`. It preserves relative
+order, rejects a drop inside the source block as a no-op, retains the complete
+selection and primary/anchor identity, creates one revision and one undo entry,
+and routes pointer, keyboard, and direction-button entry points through the
+same stable block-placement operation.
