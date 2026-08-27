@@ -349,6 +349,10 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .shot-timeline-heading strong { font-size: 11px; }
 .shot-timeline-heading small, .shot-timeline-heading output { color: var(--subtle); font-size: 9px; }
 .shot-timeline-heading output { flex: none; font-family: "Cascadia Code", "Consolas", monospace; }
+.shot-timeline-legend { min-height: 28px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 4px 12px; border-bottom: 1px solid var(--line-soft); color: var(--subtle); font-size: 9px; }
+.shot-timeline-legend > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.shot-legend-swatch { width: 8px; height: 8px; display: inline-block; border-radius: 2px; background: #4f9a78; }
+.shot-legend-swatch.is-parallel { background: #c69b44; }
 .shot-timeline-notice { min-height: 29px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border-bottom: 1px solid rgba(239, 199, 109, .18); background: rgba(239, 199, 109, .08); color: var(--warning); font-size: 9px; }
 .shot-timeline-notice svg { width: 13px; }
 .shot-timeline-scroll { min-height: 0; overflow: auto; padding: 9px 10px 12px; }

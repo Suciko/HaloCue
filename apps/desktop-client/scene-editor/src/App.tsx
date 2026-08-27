@@ -1829,6 +1829,10 @@ function ShotTimelineWorkspace() {
         </div>
         <output aria-live="polite">{formatTimelineFrame(visibleFrame, projection.frame_rate)} · F{visibleFrame}</output>
       </header>
+      <div className="shot-timeline-legend" data-shot-timeline-legend aria-label="执行语义图例">
+        <span><i className="shot-legend-swatch is-sequential" aria-hidden="true" />顺序执行</span>
+        <span><i className="shot-legend-swatch is-parallel" aria-hidden="true" />与后续事件并行</span>
+      </div>
       {projection.unmappedEventIds.length > 0 && (
         <div className="shot-timeline-notice" role="status">
           <AlertTriangle />{projection.unmappedEventIds.length} 个高级事件暂未进入可渲染时间轴

@@ -68,6 +68,19 @@ describe("professional shot timeline workspace", () => {
     expect(JSON.stringify(after.project)).toBe(project);
   });
 
+  it("shows a derived legend for sequential and non-blocking clips", () => {
+    const shotTab = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"))
+      .find((button) => button.textContent?.includes("镜头时间轴"));
+    act(() => shotTab?.click());
+
+    const legend = container.querySelector<HTMLElement>("[data-shot-timeline-legend]");
+    expect(legend).not.toBeNull();
+    expect(legend?.textContent).toContain("顺序执行");
+    expect(legend?.textContent).toContain("与后续事件并行");
+    expect(legend?.querySelector(".is-sequential")).not.toBeNull();
+    expect(legend?.querySelector(".is-parallel")).not.toBeNull();
+  });
+
   it("keeps the shared selection and playhead while keyboard navigation moves professional tabs", () => {
     const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"));
     const scriptTab = tabs.find((button) => button.textContent?.includes("脚本"))!;
