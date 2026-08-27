@@ -470,6 +470,25 @@ function StageSlots() {
   const [dragged, setDragged] = useState<number | null>(null);
   const slots = projectCueState(project, selectedCueId, { sceneId: selectedSceneId }).afterCue.slots;
   const characters = new Map(project.characters.map((character) => [character.character_id, character]));
+  const slotRefs = useRef<Record<number, HTMLButtonElement>>({});
+  const focusSlot = (slot: number) => {
+    selectSlot(slot);
+    slotRefs.current[slot]?.focus();
+  };
+  const navigateSlot = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
+    const nextIndex = event.key === "ArrowRight" || event.key === "ArrowDown"
+      ? Math.min(slots.length - 1, index + 1)
+      : event.key === "ArrowLeft" || event.key === "ArrowUp"
+        ? Math.max(0, index - 1)
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? slots.length - 1
+            : -1;
+    if (nextIndex < 0 || nextIndex === index) return;
+    event.preventDefault();
+    focusSlot(nextIndex + 1);
+  };
 
   const drop = (event: DragEvent, slot: number) => {
     event.preventDefault();
@@ -489,11 +508,18 @@ function StageSlots() {
           const character = characterId ? characters.get(characterId) : undefined;
           return (
             <button
+              ref={(element) => {
+                if (element) slotRefs.current[slot] = element;
+                else delete slotRefs.current[slot];
+              }}
               type="button"
               draggable
               key={slot}
               className={`${selectedSlot === slot ? "stage-slot is-active" : "stage-slot"}${dragged === slot ? " is-dragging" : ""}`}
+              aria-pressed={selectedSlot === slot}
+              tabIndex={selectedSlot === slot ? 0 : -1}
               onClick={() => selectSlot(slot)}
+              onKeyDown={(event) => navigateSlot(event, index)}
               onDragStart={() => setDragged(slot)}
               onDragEnd={() => setDragged(null)}
               onDragOver={(event) => event.preventDefault()}
