@@ -388,6 +388,15 @@ selection remain history-free editor state; deleting the visible selection is
 one validated project revision. Undo restores both the complete event payloads
 and the prior multi-selection snapshot.
 
+The selected-event duplication tracer is recorded in
+`docs/handoffs/2026-08-27-event-block-duplication-tracer.md`. A disjoint or
+contiguous professional selection is normalized to canonical Cue order, deeply
+cloned with fresh stable event IDs, and inserted as one block after the last
+selected source. The duplicate block becomes the complete selection while the
+primary event and range anchor retain their source-relative identity. The
+command creates one project revision and one undo entry; no project or preview
+contract changes.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure

@@ -85,15 +85,17 @@ delete left the background event and announced three deletions. One Undo
 restored the original four events, the three selected rows, and the dialogue
 primary event.
 
-## Known boundary and next action
+## Known boundary and delivered next action
 
 Multi-selection is scoped to one selected Cue. Drag reorder and duration resize
 intentionally collapse back to one primary event; moving a selected block and
 batch-changing heterogeneous fields require separate semantics. Simple mode
 continues to expose only its task-focused single selection.
 
-The next bounded batch slice should duplicate the selected events as one
-ordered block. It must deep-copy every known and namespaced payload field,
-generate fresh stable event IDs, insert through the existing stable insertion
-rule, select the duplicate block with a clear primary event, commit once, and
-restore the original selection/order on one Undo.
+The selected-event duplication slice was delivered in implementation commit
+`0861271` and is handed off in
+`docs/handoffs/2026-08-27-event-block-duplication-tracer.md`. It deep-copies the
+canonical selected block, generates fresh stable event IDs, inserts through the
+stable insertion rule, maps primary and anchor identity to their corresponding
+duplicates, commits once, and restores the original selection/order on one
+Undo.
