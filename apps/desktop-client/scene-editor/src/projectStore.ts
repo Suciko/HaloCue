@@ -31,6 +31,7 @@ import {
   selectionAfterEventDeletion,
   type EventSelectionMode,
 } from "./eventSelection";
+import { duplicateEventBlock } from "./eventDuplication";
 import { projectSceneAtCue, sceneById } from "./cueStateProjection";
 import type { ProjectDiagnostic } from "./projectCodec";
 
@@ -111,6 +112,7 @@ type EditorState = {
   updateEvent: (eventId: string, patch: Partial<CueEvent>) => EditorTransactionResult;
   deleteEvent: (eventId: string) => EditorTransactionResult;
   deleteSelectedEvents: () => EditorTransactionResult;
+  duplicateSelectedEvents: () => EditorTransactionResult;
   moveEvent: (eventId: string, move: EventMove) => EditorTransactionResult;
   undo: () => EditorTransactionResult;
   redo: () => EditorTransactionResult;
@@ -620,6 +622,36 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     }),
     deleteEvent: (eventId) => deleteEvents([eventId]),
     deleteSelectedEvents: () => deleteEvents(get().selectedEventIds),
+    duplicateSelectedEvents: () => {
+      commitActiveTransaction();
+      const state = get();
+      const cue = sceneById(state.project, state.selectedSceneId)
+        .cues.find((item) => item.cue_id === state.selectedCueId);
+      if (!cue) return noOp(state);
+      const selectedSources = cue.events.filter((event) => state.selectedEventIds.includes(event.event_id));
+      if (selectedSources.length === 0) return noOp(state);
+      const duplicateEventIds = selectedSources.map(() => localId("event"));
+      const duplicateIdFor = new Map(selectedSources.map((event, index) => (
+        [event.event_id, duplicateEventIds[index]]
+      )));
+      const selectedEventId = state.selectedEventId
+        ? duplicateIdFor.get(state.selectedEventId) ?? duplicateEventIds[0]
+        : duplicateEventIds[0];
+      const eventSelectionAnchorId = state.eventSelectionAnchorId
+        ? duplicateIdFor.get(state.eventSelectionAnchorId) ?? selectedEventId
+        : selectedEventId;
+      return commit((_project, draftCue) => {
+        draftCue.events = duplicateEventBlock(
+          draftCue.events,
+          state.selectedEventIds,
+          (_source, index) => duplicateEventIds[index],
+        ).events;
+      }, {
+        selectedEventId,
+        selectedEventIds: duplicateEventIds,
+        eventSelectionAnchorId,
+      });
+    },
     moveEvent: (eventId, move) => commit((_project, cue) => {
       cue.events = reorderEvents(cue.events, eventId, move).slice();
     }),

@@ -327,6 +327,40 @@ describe("shared dual-mode project store", () => {
     expect(current.eventSelectionAnchorId).toBe(originalOrder[2]);
   });
 
+  it("duplicates a stable multi-selection as one newly selected block", () => {
+    const state = useProjectStore.getState();
+    const cue = firstScene(state.project).cues[0];
+    const originalOrder = cue.events.map((event) => event.event_id);
+    const revisionBefore = state.revision;
+    const historyBefore = state.history.length;
+    state.selectEvent(originalOrder[1]);
+    useProjectStore.getState().selectEvent(originalOrder[3], "toggle");
+
+    expect(useProjectStore.getState().duplicateSelectedEvents())
+      .toEqual({ status: "committed", revision: revisionBefore + 1 });
+
+    let current = useProjectStore.getState();
+    const events = firstScene(current.project).cues[0].events;
+    const duplicateIds = events.slice(4).map((event) => event.event_id);
+    expect(events.map((event) => event.event_id))
+      .toEqual([...originalOrder, ...duplicateIds]);
+    expect(duplicateIds).toHaveLength(2);
+    expect(new Set([...originalOrder, ...duplicateIds]).size).toBe(6);
+    expect(events[4]).toEqual({ ...cue.events[1], event_id: duplicateIds[0] });
+    expect(events[5]).toEqual({ ...cue.events[3], event_id: duplicateIds[1] });
+    expect(current.selectedEventIds).toEqual(duplicateIds);
+    expect(current.selectedEventId).toBe(duplicateIds[1]);
+    expect(current.eventSelectionAnchorId).toBe(duplicateIds[1]);
+    expect(current.history).toHaveLength(historyBefore + 1);
+
+    current.undo();
+    current = useProjectStore.getState();
+    expect(firstScene(current.project).cues[0].events.map((event) => event.event_id))
+      .toEqual(originalOrder);
+    expect(current.selectedEventIds).toEqual([originalOrder[1], originalOrder[3]]);
+    expect(current.selectedEventId).toBe(originalOrder[3]);
+  });
+
   it("targets edits, evaluation, undo, and redo at the selected Scene", () => {
     const store = useProjectStore.getState();
     store.replaceProject(multiSceneProject());

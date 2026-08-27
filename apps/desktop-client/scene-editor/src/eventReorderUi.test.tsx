@@ -142,8 +142,9 @@ describe("professional event list interactions", () => {
     expect(state.eventSelectionAnchorId).toBe(originalOrder[1]);
     expect(state.history).toHaveLength(historyBefore);
     expect(container.querySelectorAll(".event-row.is-selected")).toHaveLength(3);
-    const batchDelete = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
-      .find((button) => button.textContent?.trim() === "删除 3 项");
+    const batchDelete = container.querySelector<HTMLButtonElement>(
+      ".event-selection-toolbar button.is-danger",
+    );
     expect(batchDelete).toBeDefined();
 
     act(() => batchDelete?.click());
@@ -162,5 +163,43 @@ describe("professional event list interactions", () => {
     expect(state.selectedEventIds).toEqual(originalOrder.slice(1));
     eventRows = Array.from(container.querySelectorAll<HTMLButtonElement>(".event-main"));
     expect(eventRows[3].getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("duplicates the selected range as one newly selected block", () => {
+    const originalEvents = firstScene(useProjectStore.getState().project).cues[0].events;
+    const originalOrder = originalEvents.map((event) => event.event_id);
+    const historyBefore = useProjectStore.getState().history.length;
+    let eventRows = Array.from(container.querySelectorAll<HTMLButtonElement>(".event-main"));
+    act(() => eventRows[1].click());
+    act(() => eventRows[3].dispatchEvent(new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      shiftKey: true,
+    })));
+    const duplicateButton = container.querySelector<HTMLButtonElement>(
+      ".event-selection-toolbar button:not(.is-danger)",
+    );
+    expect(duplicateButton?.textContent?.trim()).toBe("复制");
+
+    act(() => duplicateButton?.click());
+
+    let state = useProjectStore.getState();
+    const events = firstScene(state.project).cues[0].events;
+    const duplicateIds = events.slice(4).map((event) => event.event_id);
+    expect(events.map((event) => event.event_id)).toEqual([...originalOrder, ...duplicateIds]);
+    expect(duplicateIds).toHaveLength(3);
+    expect(state.selectedEventIds).toEqual(duplicateIds);
+    expect(state.selectedEventId).toBe(duplicateIds[2]);
+    expect(state.history).toHaveLength(historyBefore + 1);
+    expect(container.querySelectorAll(".event-row.is-selected")).toHaveLength(3);
+    expect(container.querySelector(".sr-only")?.textContent).toBe("3 个事件已复制");
+
+    act(() => state.undo());
+    state = useProjectStore.getState();
+    expect(firstScene(state.project).cues[0].events.map((event) => event.event_id))
+      .toEqual(originalOrder);
+    expect(state.selectedEventIds).toEqual(originalOrder.slice(1));
+    eventRows = Array.from(container.querySelectorAll<HTMLButtonElement>(".event-main"));
+    expect(eventRows).toHaveLength(4);
   });
 });

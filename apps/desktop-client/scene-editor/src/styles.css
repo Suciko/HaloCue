@@ -231,9 +231,6 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .event-workbench > header small { color: var(--subtle); font-size: 8px; }
 .event-add-menu { position: relative; }
 .event-workbench-actions { flex: none; }
-.event-batch-delete { height: 28px; display: flex; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid #67413f; border-radius: 5px; background: #2a1e1c; color: #d7a09b; font-size: 8px; cursor: pointer; }
-.event-batch-delete:hover { border-color: #8b514d; color: #f0b5af; }
-.event-batch-delete svg { width: 12px; }
 .event-add-menu summary { height: 28px; display: flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-2); color: var(--muted); font-size: 9px; cursor: pointer; list-style: none; }
 .event-add-menu summary:hover { color: var(--text); border-color: #47534e; }
 .event-add-menu summary svg { width: 13px; }
@@ -249,6 +246,12 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .event-insert-position button.is-active { border-color: var(--accent); background: var(--accent-bg); color: var(--text); }
 .event-list { height: calc(100% - 45px); overflow: auto; padding: 7px; }
 .sr-only { width: 1px; height: 1px; position: absolute; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; }
+.event-selection-toolbar { position: sticky; top: 0; z-index: 3; min-height: 34px; display: flex; align-items: center; gap: 4px; margin-bottom: 5px; padding: 4px 5px; border: 1px solid #3c5d6b; border-radius: 5px; background: #182321; box-shadow: 0 4px 10px rgba(0,0,0,.22); }
+.event-selection-toolbar > span { margin-right: auto; color: #aebfba; font-size: 8px; }
+.event-selection-toolbar button { height: 24px; display: flex; align-items: center; gap: 3px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); color: var(--muted); font-size: 8px; cursor: pointer; }
+.event-selection-toolbar button:hover { color: var(--text); }
+.event-selection-toolbar button.is-danger { border-color: #67413f; color: #d7a09b; }
+.event-selection-toolbar svg { width: 11px; }
 .event-row { min-width: 0; position: relative; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; margin-bottom: 4px; border: 1px solid transparent; border-radius: 6px; background: var(--panel-2); }
 .event-row:hover { border-color: var(--line); }
 .event-row.is-selected { border-color: #3c5d6b; background: rgba(55, 91, 105, .2); }

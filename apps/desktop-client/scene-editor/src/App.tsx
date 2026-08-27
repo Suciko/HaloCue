@@ -986,6 +986,7 @@ function ProfessionalEventList() {
   const moveEvent = useProjectStore((state) => state.moveEvent);
   const deleteEvent = useProjectStore((state) => state.deleteEvent);
   const deleteSelectedEvents = useProjectStore((state) => state.deleteSelectedEvents);
+  const duplicateSelectedEvents = useProjectStore((state) => state.duplicateSelectedEvents);
   const addEvent = useProjectStore((state) => state.addEvent);
   const cue = sceneById(project, selectedSceneId)
     .cues.find((item) => item.cue_id === selectedCueId)!;
@@ -1026,19 +1027,17 @@ function ProfessionalEventList() {
     const result = deleteSelectedEvents();
     if (result.status === "committed") setReorderNotice(`${count} 个事件已删除`);
   };
+  const duplicateSelection = () => {
+    const count = useProjectStore.getState().selectedEventIds.length;
+    const result = duplicateSelectedEvents();
+    if (result.status === "committed") setReorderNotice(`${count} 个事件已复制`);
+  };
 
   return (
     <section className="event-workbench">
       <header>
         <div><Layers3 /><span><strong>{cue.title}</strong><small>{cue.events.length} 个有序事件{selectedEventIds.length > 1 ? ` · 已选 ${selectedEventIds.length} 项` : ""}</small></span></div>
         <div className="event-workbench-actions">
-          {selectedEventIds.length > 1 && (
-            <button
-              className="event-batch-delete"
-              type="button"
-              onClick={deleteSelection}
-            ><Trash2 />删除 {selectedEventIds.length} 项</button>
-          )}
           <details className="event-add-menu">
           <summary><Plus />{addSummary}</summary>
           <div className="event-add-options">
@@ -1083,6 +1082,13 @@ function ProfessionalEventList() {
       </header>
       <div className="event-list">
         <p className="sr-only" aria-live="polite">{reorderNotice}</p>
+        {selectedEventIds.length > 1 && (
+          <div className="event-selection-toolbar" role="toolbar" aria-label={`${selectedEventIds.length} 个已选事件的批量操作`}>
+            <span>{selectedEventIds.length} 项已选</span>
+            <button type="button" onClick={duplicateSelection}><Copy />复制</button>
+            <button className="is-danger" type="button" onClick={deleteSelection}><Trash2 />删除</button>
+          </div>
+        )}
         {cue.events.map((event, index) => (
           <div
             key={event.event_id}
@@ -1152,7 +1158,7 @@ function ProfessionalEventList() {
               className="event-main"
               type="button"
               aria-pressed={selectedEventIds.includes(event.event_id)}
-              aria-keyshortcuts="Delete"
+              aria-keyshortcuts="Control+D Meta+D Delete"
               onClick={(selectionEvent) => {
                 const mode = selectionEvent.shiftKey
                   ? selectionEvent.ctrlKey || selectionEvent.metaKey ? "add-range" : "range"
@@ -1160,10 +1166,15 @@ function ProfessionalEventList() {
                 selectEvent(event.event_id, mode);
               }}
               onKeyDown={(keyEvent) => {
-                if (keyEvent.key !== "Delete") return;
-                keyEvent.preventDefault();
-                if (selectedEventIds.includes(event.event_id)) deleteSelection();
-                else deleteEvent(event.event_id);
+                if ((keyEvent.ctrlKey || keyEvent.metaKey) && keyEvent.key.toLowerCase() === "d") {
+                  keyEvent.preventDefault();
+                  if (!selectedEventIds.includes(event.event_id)) selectEvent(event.event_id);
+                  duplicateSelection();
+                } else if (keyEvent.key === "Delete") {
+                  keyEvent.preventDefault();
+                  if (selectedEventIds.includes(event.event_id)) deleteSelection();
+                  else deleteEvent(event.event_id);
+                }
               }}
             >
               <span className="event-icon"><EventIcon kind={event.kind} /></span>
@@ -1177,6 +1188,13 @@ function ProfessionalEventList() {
             <div className="event-actions">
               <IconButton label="上移" disabled={index === 0} onClick={() => moveAndAnnounce(event.event_id, -1)}><ArrowUp /></IconButton>
               <IconButton label="下移" disabled={index === cue.events.length - 1} onClick={() => moveAndAnnounce(event.event_id, 1)}><ArrowDown /></IconButton>
+              <IconButton
+                label={selectedEventIds.length > 1 && selectedEventIds.includes(event.event_id) ? `复制已选 ${selectedEventIds.length} 个事件` : "复制事件"}
+                onClick={() => {
+                  if (!selectedEventIds.includes(event.event_id)) selectEvent(event.event_id);
+                  duplicateSelection();
+                }}
+              ><Copy /></IconButton>
               <IconButton
                 label={selectedEventIds.length > 1 && selectedEventIds.includes(event.event_id) ? `删除已选 ${selectedEventIds.length} 个事件` : "删除事件"}
                 tone="danger"
