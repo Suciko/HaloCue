@@ -36,7 +36,7 @@ export function evaluateScene(
     .filter((diagnostic) => diagnostic.code !== "project.unknown_event_kind");
   const timeline = buildRenderTimeline(descriptor, frameRate);
   return {
-    schema_version: "scene-evaluation/1.1",
+    schema_version: "scene-evaluation/1.2",
     scene_id: descriptor.scene_id,
     descriptor,
     timeline,

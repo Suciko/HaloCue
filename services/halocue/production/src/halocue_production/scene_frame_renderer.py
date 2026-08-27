@@ -14,7 +14,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 TIMELINE_SCHEMA_VERSION = "render-timeline/1.0"
-PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.0"
+PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.1"
 LOCAL_PREVIEW_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
@@ -150,7 +150,9 @@ def _validate_performance(
     }
     operation_ids: set[str] = set()
     for index, operation in enumerate(operations):
-        if not isinstance(operation, dict) or operation.get("kind") != "shake":
+        if not isinstance(operation, dict) or operation.get("kind") not in {
+            "shake", "numeric-tween"
+        }:
             raise SceneFrameRenderError(f"scene performance operation {index} is invalid")
         operation_id = operation.get("operation_id")
         if not isinstance(operation_id, str) or not operation_id or operation_id in operation_ids:
@@ -162,6 +164,47 @@ def _validate_performance(
         end = _require_int(operation.get("end_frame"), f"operations[{index}].end_frame", minimum=1)
         if end <= start or end > timeline["total_frames"]:
             raise SceneFrameRenderError("scene performance operation frame range is invalid")
+        if operation["kind"] == "numeric-tween":
+            target = operation.get("target")
+            if (
+                not isinstance(target, dict)
+                or target.get("kind") != "character"
+                or not isinstance(target.get("character_id"), str)
+                or not target["character_id"]
+                or not isinstance(target.get("slot"), int)
+                or isinstance(target["slot"], bool)
+                or not 1 <= target["slot"] <= 5
+            ):
+                raise SceneFrameRenderError("scene performance character target is invalid")
+            if operation.get("channel") not in {
+                "presentation.opacity", "layout.offset-y", "presentation.scale"
+            }:
+                raise SceneFrameRenderError("scene performance tween channel is invalid")
+
+    mapped_operation_ids: set[str] = set()
+    mapped_source_ids: set[str] = set()
+    for index, source in enumerate(source_map):
+        if not isinstance(source, dict):
+            raise SceneFrameRenderError(f"scene performance source_map {index} is invalid")
+        source_event_id = source.get("source_event_id")
+        mapped_ids = source.get("operation_ids")
+        primary_id = source.get("primary_operation_id")
+        if source_event_id not in source_ids or source_event_id in mapped_source_ids:
+            raise SceneFrameRenderError("scene performance source event mapping is invalid")
+        if (
+            not isinstance(mapped_ids, list)
+            or not mapped_ids
+            or any(not isinstance(item, str) or item not in operation_ids for item in mapped_ids)
+            or len(set(mapped_ids)) != len(mapped_ids)
+            or primary_id not in mapped_ids
+        ):
+            raise SceneFrameRenderError("scene performance operation mapping is invalid")
+        if any(item in mapped_operation_ids for item in mapped_ids):
+            raise SceneFrameRenderError("scene performance operation mapping is duplicated")
+        mapped_source_ids.add(source_event_id)
+        mapped_operation_ids.update(mapped_ids)
+    if mapped_operation_ids != operation_ids:
+        raise SceneFrameRenderError("scene performance operation mapping is incomplete")
 
 
 def _capture_url(preview_url: str, frame: int, renderer: str) -> str:

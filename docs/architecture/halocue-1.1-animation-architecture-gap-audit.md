@@ -270,6 +270,13 @@ versioned `scene-performance/1.0`, `scene-evaluation/1.1`, and
 export parity tests. This completes only the shake tracer bullet; Findings 1-4
 remain broader long-term Modules rather than completed architecture.
 
+The next slice extends that Seam to character enter/exit and is recorded in
+`docs/handoffs/2026-08-27-scene-performance-character-tween-tracer.md`. It
+introduces `scene-performance/1.1` and `scene-evaluation/1.2`, with one authored
+event mapped to separate opacity, layout-offset, and scale operations. This is
+still a performance-compiler slice, not completion of the Preview Session or
+Editor Transaction Modules.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure

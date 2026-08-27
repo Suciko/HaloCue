@@ -27,7 +27,7 @@ describe("scene performance compiler", () => {
     const shakeRange = timeline.events[1];
 
     expect(plan).toEqual({
-      schema_version: "scene-performance/1.0",
+      schema_version: "scene-performance/1.1",
       frame_rate: 30,
       scene_id: "scene/performance",
       total_frames: timeline.total_frames,
@@ -52,6 +52,69 @@ describe("scene performance compiler", () => {
     });
   });
 
+  it("compiles enter and exit into shared character contribution channels", () => {
+    const source = descriptor();
+    source.initial_actors = [
+      { slot: 1, character_id: null, state: "hidden" },
+      { slot: 2, character_id: null, state: "hidden" },
+      { slot: 3, character_id: null, state: "hidden" },
+      { slot: 4, character_id: null, state: "hidden" },
+      { slot: 5, character_id: null, state: "hidden" },
+    ];
+    source.events = [
+      { event_id: "event/enter", kind: "enter", slot: 2, character_id: "character/alice" },
+      { event_id: "event/wait", kind: "wait", duration_ms: 100 },
+      { event_id: "event/exit", kind: "exit", slot: 2 },
+    ];
+    const timeline = buildRenderTimeline(source);
+    const plan = buildScenePerformance(source, timeline);
+    const enter = timeline.events[0];
+    const exit = timeline.events[2];
+    const enterIds = plan.source_map[0].operation_ids;
+    const exitIds = plan.source_map[1].operation_ids;
+
+    expect(enterIds).toHaveLength(3);
+    expect(exitIds).toHaveLength(3);
+    expect(plan.operations.filter((operation) => operation.source_event_id === "event/enter")
+      .map((operation) => operation.channel))
+      .toEqual(["presentation.opacity", "layout.offset-y", "presentation.scale"]);
+
+    expect(sampleScenePerformance(plan, enter.start_frame, "sample").characters).toEqual([{
+      character_id: "character/alice",
+      slot: 2,
+      opacity: 0,
+      offset_y_px: 24,
+      scale: 0.97,
+    }]);
+    expect(sampleScenePerformance(plan, enter.end_frame - 1, "sample").characters).toEqual([{
+      character_id: "character/alice",
+      slot: 2,
+      opacity: 1,
+      offset_y_px: 0,
+      scale: 1,
+    }]);
+    expect(sampleScenePerformance(plan, enter.start_frame, "skip").characters[0]).toMatchObject({
+      opacity: 1,
+      offset_y_px: 0,
+      scale: 1,
+    });
+    expect(sampleScenePerformance(plan, enter.start_frame, "reduced-motion").characters[0]).toMatchObject({
+      opacity: 0,
+      offset_y_px: 0,
+      scale: 1,
+    });
+    expect(sampleScenePerformance(plan, exit.start_frame, "sample").characters[0]).toMatchObject({
+      opacity: 1,
+      offset_y_px: 0,
+      scale: 1,
+    });
+    expect(sampleScenePerformance(plan, exit.end_frame - 1, "sample").characters[0]).toMatchObject({
+      opacity: 0,
+      offset_y_px: 12,
+      scale: 0.985,
+    });
+  });
+
   it("samples deterministic motion while skip and reduced motion keep the clean baseline", () => {
     const source = descriptor();
     const timeline = buildRenderTimeline(source);
@@ -73,7 +136,8 @@ describe("scene performance compiler", () => {
   it("clamps author intensity and rejects a mismatched timeline", () => {
     const strong = descriptor(8);
     const plan = buildScenePerformance(strong, buildRenderTimeline(strong));
-    expect(plan.operations[0].amplitude_x_px).toBe(14);
+    const shake = plan.operations.find((operation) => operation.kind === "shake");
+    expect(shake?.amplitude_x_px).toBe(14);
 
     const source = descriptor();
     const timeline = buildRenderTimeline(source);

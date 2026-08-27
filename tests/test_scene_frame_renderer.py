@@ -115,6 +115,18 @@ def test_renderer_rejects_remote_urls_mismatched_timelines_and_non_video_frames(
             height=800,
         )
 
+    broken_mapping = json.loads(json.dumps(performance))
+    broken_mapping["source_map"][0]["operation_ids"] = ["operation/missing"]
+    with pytest.raises(SceneFrameRenderError, match="operation mapping"):
+        render_scene_frame(
+            preview_url="http://127.0.0.1:8898/index.html",
+            descriptor=descriptor,
+            timeline=timeline,
+            performance=broken_mapping,
+            frame=0,
+            output_path=output,
+        )
+
 
 @pytest.mark.browser
 def test_offline_renderer_repeats_one_frame_and_handles_a_second_scene(
@@ -383,6 +395,59 @@ def test_compiled_screen_shake_has_deterministic_exported_intermediate_frames(
     ]
 
     assert performance["source_map"][0]["source_event_id"] == "event/shake"
-    assert results[0].performance_schema_version == "scene-performance/1.0"
+    assert results[0].performance_schema_version == "scene-performance/1.1"
     assert results[0].sha256 == results[2].sha256
     assert results[1].sha256 != results[0].sha256
+
+
+@pytest.mark.browser
+def test_compiled_character_enter_exports_sampled_opacity_layout_and_scale(
+    browser,
+    preview_url,
+    tmp_path,
+):
+    descriptor = _descriptor("example")
+    alice = next(
+        actor for actor in descriptor["actors"]
+        if actor["character_id"] == "character/alice"
+    )
+    alice["stage_media"] = {
+        "kind": "portrait",
+        "preview_uri": "./assets/demo-conference-room.png",
+        "anchor_x": 0.5,
+        "anchor_y": 1,
+        "scale": 1.6,
+        "offset_x": 0,
+        "offset_y": 0,
+    }
+    descriptor["events"] = [{
+        "event_id": "event/alice-enter",
+        "kind": "enter",
+        "character_id": "character/alice",
+        "slot": 3,
+        "duration_ms": 500,
+    }]
+    timeline = build_render_timeline(descriptor)
+    performance = build_scene_performance(descriptor, timeline)
+    start = timeline["events"][0]["start_frame"]
+    middle = start + 4
+    end = timeline["events"][0]["end_frame"] - 1
+
+    results = [
+        render_scene_frame(
+            preview_url=preview_url,
+            descriptor=descriptor,
+            timeline=timeline,
+            performance=performance,
+            frame=frame,
+            output_path=tmp_path / f"enter-{frame}.png",
+            renderer="static",
+            browser=browser,
+        )
+        for frame in (start, middle, end)
+    ]
+
+    source = performance["source_map"][0]
+    assert source["source_event_id"] == "event/alice-enter"
+    assert len(source["operation_ids"]) == 3
+    assert len({result.sha256 for result in results}) == 3

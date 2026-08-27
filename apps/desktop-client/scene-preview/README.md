@@ -36,7 +36,7 @@ The export-safe URL renders the editor tray fully transparent. Append
 still decides whether either button appears inside the video frame.
 
 The preview controller consumes the deterministic `render-timeline/1.0` and
-`scene-performance/1.0` contracts. `window.HaloCueScenePreview.controller`
+`scene-performance/1.1` contracts. `window.HaloCueScenePreview.controller`
 exposes `seekFrame`,
 `seekEvent`, `seekReference`, `play`, `pause`, and `dispose`. These methods keep
 the browser preview on the same end-exclusive frame ranges used by the Python
@@ -58,6 +58,9 @@ from the injected `scene-descriptor/1.0` payload. The matching
 `window.HALO_CUE_SCENE_PERFORMANCE` plan is validated the same way. Deterministic
 stage shake is applied as sampled geometry rather than a CSS keyframe, so its
 intermediate frames survive capture with browser animations disabled.
+Character enter/exit is sampled from the same plan as opacity, vertical-offset,
+and scale contributions. Skip commits their final state; reduced motion keeps
+the opacity fade while committing positional and scale motion immediately.
 
 The repository CLI builds the Python timeline and performance plan, injects all
 three contracts into the

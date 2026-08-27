@@ -182,7 +182,7 @@
     if (suppliedPerformance === undefined) {
       return { performance: expected, source: "derived" };
     }
-    if (!suppliedPerformance || suppliedPerformance.schema_version !== "scene-performance/1.0") {
+    if (!suppliedPerformance || suppliedPerformance.schema_version !== "scene-performance/1.1") {
       throw new Error("unsupported supplied scene performance schema");
     }
     if (JSON.stringify(canonicalJson(suppliedPerformance)) !== JSON.stringify(canonicalJson(expected))) {
@@ -529,6 +529,26 @@
       stage.dataset.performanceOffsetY = String(sample.stage.offset_y_px);
       stage.dataset.performanceOperations = sample.active_operation_ids.join(" ");
       stage.dataset.performanceMode = sample.mode;
+      actorElements.forEach((element) => {
+        element.style.setProperty("--performance-character-offset-y", "0px");
+        element.style.setProperty("--performance-character-scale", "1");
+        element.dataset.performanceOpacity = "";
+        element.dataset.performanceOffsetY = "0";
+        element.dataset.performanceScale = "1";
+      });
+      for (const character of sample.characters) {
+        const actor = state.actors[character.slot - 1];
+        const element = actorElements.get(character.slot);
+        if (!element || actor?.character_id !== character.character_id) continue;
+        if (character.opacity !== null) {
+          element.style.opacity = String(character.opacity);
+          element.dataset.performanceOpacity = String(character.opacity);
+        }
+        element.style.setProperty("--performance-character-offset-y", `${character.offset_y_px}px`);
+        element.style.setProperty("--performance-character-scale", String(character.scale));
+        element.dataset.performanceOffsetY = String(character.offset_y_px);
+        element.dataset.performanceScale = String(character.scale);
+      }
       return sample;
     }
 
@@ -854,23 +874,9 @@
       const event = sample.item?.event;
       if (!event) return;
       if (event.kind === "exit" && event.slot) {
-        const actor = state.actors[event.slot - 1];
-        actor.presentation.opacity = AA.fadeAnimation(
-          actor.presentation,
-          false,
-          sample.item.duration_ms,
-        ).sample(sample.progress);
         return;
       }
       applyEvent(event, { motion: false, loadBackground: false });
-      if (event.kind === "enter" && event.slot) {
-        const actor = state.actors[event.slot - 1];
-        actor.presentation.opacity = AA.fadeAnimation(
-          actor.presentation,
-          true,
-          sample.item.duration_ms,
-        ).sample(sample.progress);
-      }
     }
 
     function seekFrame(frame, options = {}) {

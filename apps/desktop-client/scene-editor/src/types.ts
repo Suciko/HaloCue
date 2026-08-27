@@ -155,6 +155,27 @@ export type StageShakeOperation = {
   frequency_hz: number;
 };
 
+export type CharacterTweenChannel =
+  | "presentation.opacity"
+  | "layout.offset-y"
+  | "presentation.scale";
+
+export type CharacterTweenOperation = {
+  operation_id: string;
+  source_event_id: string;
+  kind: "numeric-tween";
+  target: { kind: "character"; character_id: string; slot: number };
+  channel: CharacterTweenChannel;
+  value_space: "absolute" | "relative-to-baseline" | "factor-from-baseline";
+  start_frame: number;
+  end_frame: number;
+  from: number;
+  to: number;
+  easing: "ease-out-cubic";
+};
+
+export type ScenePerformanceOperation = StageShakeOperation | CharacterTweenOperation;
+
 export type PerformanceSourceMapEntry = {
   source_event_id: string;
   operation_ids: string[];
@@ -162,11 +183,11 @@ export type PerformanceSourceMapEntry = {
 };
 
 export type ScenePerformancePlan = {
-  schema_version: "scene-performance/1.0";
+  schema_version: "scene-performance/1.1";
   frame_rate: number;
   scene_id: string | null;
   total_frames: number;
-  operations: StageShakeOperation[];
+  operations: ScenePerformanceOperation[];
   source_map: PerformanceSourceMapEntry[];
 };
 
@@ -176,6 +197,13 @@ export type ScenePerformanceSample = {
   mode: PerformanceExecutionMode;
   active_operation_ids: string[];
   stage: { offset_x_px: number; offset_y_px: number };
+  characters: Array<{
+    character_id: string;
+    slot: number;
+    opacity: number | null;
+    offset_y_px: number;
+    scale: number;
+  }>;
 };
 
 export type EvaluationDiagnostic = {
@@ -186,7 +214,7 @@ export type EvaluationDiagnostic = {
 };
 
 export type SceneEvaluation = {
-  schema_version: "scene-evaluation/1.1";
+  schema_version: "scene-evaluation/1.2";
   scene_id: string;
   descriptor: SceneDescriptor;
   timeline: RenderTimeline;

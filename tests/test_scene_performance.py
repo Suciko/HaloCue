@@ -13,7 +13,7 @@ from jsonschema import Draft202012Validator
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_ROOT = ROOT / "packages" / "project-model"
 RUNTIME = ROOT / "apps" / "desktop-client" / "scene-preview" / "scene-performance-runtime.js"
-SCHEMA = ROOT / "packages" / "contracts" / "scene-performance" / "1.0.schema.json"
+SCHEMA = ROOT / "packages" / "contracts" / "scene-performance" / "1.1.schema.json"
 if str(MODEL_ROOT) not in sys.path:
     sys.path.insert(0, str(MODEL_ROOT))
 
@@ -47,7 +47,7 @@ def test_performance_plan_normalizes_shake_and_matches_contract():
     plan = build_scene_performance(descriptor, timeline)
     operation = plan["operations"][0]
 
-    assert plan["schema_version"] == "scene-performance/1.0"
+    assert plan["schema_version"] == "scene-performance/1.1"
     assert operation == {
         "operation_id": "event/shake/operation/shake",
         "source_event_id": "event/shake",
@@ -89,14 +89,103 @@ def test_performance_sampling_is_deterministic_and_modes_share_final_state():
     }
 
 
+def test_enter_and_exit_share_numeric_tween_channels_and_execution_modes():
+    descriptor = _descriptor()
+    descriptor["initial_actors"] = [
+        {"slot": slot, "character_id": None, "state": "hidden"}
+        for slot in range(1, 6)
+    ]
+    descriptor["events"] = [
+        {
+            "event_id": "event/enter",
+            "kind": "enter",
+            "slot": 2,
+            "character_id": "character/alice",
+        },
+        {"event_id": "event/wait", "kind": "wait", "duration_ms": 100},
+        {"event_id": "event/exit", "kind": "exit", "slot": 2},
+    ]
+    timeline = build_render_timeline(descriptor)
+    plan = build_scene_performance(descriptor, timeline)
+    enter = timeline["events"][0]
+    exit_event = timeline["events"][2]
+
+    assert [
+        operation["channel"]
+        for operation in plan["operations"]
+        if operation["source_event_id"] == "event/enter"
+    ] == ["presentation.opacity", "layout.offset-y", "presentation.scale"]
+    assert len(plan["source_map"][0]["operation_ids"]) == 3
+    assert sample_scene_performance(plan, enter["start_frame"])["characters"] == [{
+        "character_id": "character/alice",
+        "slot": 2,
+        "opacity": 0,
+        "offset_y_px": 24,
+        "scale": 0.97,
+    }]
+    assert sample_scene_performance(plan, enter["end_frame"] - 1)["characters"][0] == {
+        "character_id": "character/alice",
+        "slot": 2,
+        "opacity": 1,
+        "offset_y_px": 0,
+        "scale": 1,
+    }
+    assert sample_scene_performance(plan, enter["start_frame"], mode="skip")["characters"][0] == {
+        "character_id": "character/alice",
+        "slot": 2,
+        "opacity": 1,
+        "offset_y_px": 0,
+        "scale": 1,
+    }
+    assert sample_scene_performance(
+        plan, enter["start_frame"], mode="reduced-motion"
+    )["characters"][0] == {
+        "character_id": "character/alice",
+        "slot": 2,
+        "opacity": 0,
+        "offset_y_px": 0,
+        "scale": 1,
+    }
+    assert sample_scene_performance(plan, exit_event["end_frame"] - 1)["characters"][0] == {
+        "character_id": "character/alice",
+        "slot": 2,
+        "opacity": 0,
+        "offset_y_px": 12,
+        "scale": 0.985,
+    }
+
+
 def test_browser_runtime_builds_and_samples_the_same_performance_plan():
     node = shutil.which("node")
     if not node:
         pytest.skip("Node.js is not installed")
     descriptor = _descriptor()
+    descriptor["initial_actors"] = [
+        {"slot": slot, "character_id": None, "state": "hidden"}
+        for slot in range(1, 6)
+    ]
+    descriptor["events"] = [
+        {
+            "event_id": "event/enter",
+            "kind": "enter",
+            "slot": 2,
+            "character_id": "character/alice",
+        },
+        {
+            "event_id": "event/shake",
+            "kind": "halocue.ba:screen-shake",
+            "intensity": 0.35,
+        },
+        {"event_id": "event/exit", "kind": "exit", "slot": 2},
+    ]
     timeline = build_render_timeline(descriptor)
     plan = build_scene_performance(descriptor, timeline)
-    frames = [timeline["events"][1]["start_frame"] + offset for offset in (0, 2, 5, 10)]
+    frames = [
+        timeline["events"][0]["start_frame"] + 2,
+        timeline["events"][1]["start_frame"] + 2,
+        timeline["events"][2]["start_frame"] + 2,
+        timeline["events"][2]["end_frame"] - 1,
+    ]
     script = r"""
 const fs = require('fs');
 const vm = require('vm');
