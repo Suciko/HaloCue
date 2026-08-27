@@ -405,6 +405,15 @@ reinserted together while retaining primary and anchor identity. Drops inside
 the source block and equivalent boundaries remain true no-ops; one completed
 move creates one revision and one undo entry.
 
+The professional command-dispatch tracer is recorded in
+`docs/handoffs/2026-08-27-professional-command-dispatch-tracer.md`. Save,
+Undo/Redo, Duplicate, Delete, and selection movement now resolve through one
+platform-neutral keyboard map. Professional list commands dispatch once at the
+surface boundary instead of being duplicated by every row. IME composition and
+native input/textarea/contenteditable undo remain outside the project command
+path, while committed outcomes share the existing accessible announcement
+surface.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure

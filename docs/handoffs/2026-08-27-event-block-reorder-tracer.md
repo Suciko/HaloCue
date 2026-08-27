@@ -82,7 +82,7 @@ selected, and the live region announced `2 个事件已移动到第 1–2 项`. 
 restored the original four-row order, both selected rows, and
 `event/enter/noa` as the primary inspector event.
 
-## Known boundary and next action
+## Known boundary and delivered next action
 
 Block movement is intentionally scoped to one Cue. It compresses a disjoint
 selection into one contiguous block after movement; it does not preserve gaps,
@@ -90,9 +90,9 @@ move events across Cues, or retime animation durations. Timeline duration
 handles remain single-event gestures because a proportional multi-event retime
 needs a separate baseline and snapping rule.
 
-The next bounded professional-editing slice should centralize command dispatch
-for selection-aware Duplicate, Delete, Move, Undo, and Redo. Commands should
-work while the event list owns focus without being duplicated across row
-handlers, must not steal native text-editing shortcuts, and must expose disabled
-and announced states from the same Store outcomes. This prepares a stable input
-surface before adding more animation/keyframe editing operations.
+The professional command-dispatch slice was delivered in implementation commit
+`cc7e631` and is handed off in
+`docs/handoffs/2026-08-27-professional-command-dispatch-tracer.md`. Duplicate,
+Delete, Move, Undo, and Redo work from one list-surface dispatcher instead of
+per-row handlers. Platform modifiers, IME composition, native text undo, Store
+outcomes, and accessible announcements now share one tested boundary.
