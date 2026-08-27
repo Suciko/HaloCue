@@ -35,8 +35,8 @@ The export-safe URL renders the editor tray fully transparent. Append
 `?editor=1` while authoring to reveal the AUTO/MENU switches; the descriptor
 still decides whether either button appears inside the video frame.
 
-The preview controller consumes the deterministic `render-timeline/1.1` and
-`scene-performance/1.3` contracts. `window.HaloCueScenePreview.controller`
+The preview controller consumes the deterministic `render-timeline/1.2` and
+`scene-performance/1.4` contracts. `window.HaloCueScenePreview.controller`
 exposes `applyIntent`, `seekFrame`, `seekEvent`, `seekReference`, `play`,
 `pause`, and `dispose`. These methods keep
 the browser preview on the same end-exclusive frame ranges used by the Python

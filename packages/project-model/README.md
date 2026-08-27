@@ -21,12 +21,15 @@ The slice supports:
   16:9 presentation.
 
 `render_timeline.py` projects a scene descriptor into the independent
-`render-timeline/1.1` contract. It uses explicit end-exclusive frame ranges and
+`render-timeline/1.2` contract. It uses explicit end-exclusive frame ranges and
 stable default durations so browser preview and offline video exporters can
 share timing without depending on AUTO playback or wall-clock callbacks.
+Registry-supported character motion may set `wait_for_completion` to false;
+the following event then starts at the same sequential cursor and `total_frames`
+is the maximum end frame.
 
 `scene_performance.py` compiles supported authored effects into the independent
-`scene-performance/1.3` animation plan and samples exact frames under play,
+`scene-performance/1.4` animation plan and samples exact frames under play,
 sample, skip, and reduced-motion execution modes. It currently supports a
 deterministic stage shake and composable character opacity, vertical-offset,
 scale, and keyframed rotation contributions with stable source mapping.
@@ -35,7 +38,7 @@ uses seek-safe offset/rotation keyframes, while `motion/appear` uses factor
 opacity/scale and additive offset keyframes shared by preview and export.
 
 `scene_evaluation.py` binds the descriptor, timeline, and performance plan into
-the `scene-evaluation/1.4` intermediate result consumed by offline adapters. It
+the `scene-evaluation/1.5` intermediate result consumed by offline adapters. It
 also reports namespaced events that remain in the canonical project but are
 not yet rendered by the AA presentation adapter, plus explicit character motion
 placed outside the target character's occupied range.

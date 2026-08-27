@@ -3,8 +3,8 @@
 This package owns versioned JSON contracts shared by the client, backend, BA
 editor, and adapters. A wire-shape change requires a new version or an explicit
 migration plus consumer tests. Current editor/render contracts include
-`halocue-project/1.1`, `character-capabilities/1.0`, `scene-events/1.1`,
-`render-timeline/1.1`, `scene-performance/1.3`, `scene-evaluation/1.4`,
+`halocue-project/1.1`, `character-capabilities/1.0`, `scene-events/1.2`,
+`render-timeline/1.2`, `scene-performance/1.4`, `scene-evaluation/1.5`,
 `preview-intent/1.0`, `preview-intent/1.1`, and `render-sequence/1.1`.
 Planned contracts include
 `script-release/1.1`, `production-request/1.1`, `performance-draft/1.0`,
@@ -32,23 +32,27 @@ The `character-capabilities/1.0` schema stores stable expression, motion,
 emoticon, and transition state IDs. Adapter-specific animation names stay in
 namespaced logical fields; local resource paths remain outside the project.
 
-The `scene-events/1.1` manifest is the shared event registry. It records which
+The `scene-events/1.2` manifest is the shared event registry. It records which
 events may enter the descriptor and deterministic timeline, whether an event
-is visual-only, its default duration policy, and its simple-mode label. The
-TypeScript, Python, and browser adapters read this manifest at their seams;
-they do not maintain independent kind or duration tables. Version 1.1 adds the
-explicit `character-motion` event so newly authored transient motion no longer
-overloads persistent `enter` state.
+is visual-only, whether it supports non-blocking completion, its default
+duration policy, and its simple-mode label. The TypeScript, Python, and browser
+adapters read this manifest at their seams; they do not maintain independent
+kind or duration tables. Version 1.2 adds the explicit `character-motion`
+non-blocking capability while preserving the ordered event list as the source
+of truth.
 
-The `render-timeline/1.1` schema lives in
-`render-timeline/1.1.schema.json`. It records deterministic, end-exclusive
+The `render-timeline/1.2` schema lives in
+`render-timeline/1.2.schema.json`. It records deterministic, end-exclusive
 frame ranges generated from a validated scene descriptor. Browser preview and
 offline export consume the same event IDs, durations, and frame boundaries;
 wall-clock callbacks are presentation controls, not part of this contract.
-Version 1.1 schedules explicit character motion as a fixed visual-only range.
+When `wait_for_completion` is false for a registry-supported event, the next
+event starts at the same sequential cursor and `total_frames` is the maximum
+end frame across all events. Every normalized timeline event exposes the
+boolean completion policy.
 
-The current `scene-performance/1.3` schema lives in
-`scene-performance/1.3.schema.json`. It is the renderer-independent animation
+The current `scene-performance/1.4` schema lives in
+`scene-performance/1.4.schema.json`. It is the renderer-independent animation
 plan compiled from authored scene events. It defines deterministic stage shake
 plus character opacity, vertical-offset, and scale contributions with explicit
 target/channel/value-space metadata, exact frame ranges, and one-to-many
@@ -58,8 +62,8 @@ additive offset for `motion/appear`.
 Preview and export sample this plan even when wall-clock CSS animation is
 disabled. `scene-performance/1.0` through `1.2` remain historical predecessors.
 
-The current `scene-evaluation/1.4` schema lives in
-`scene-evaluation/1.4.schema.json`. It binds a descriptor, timeline, performance
+The current `scene-evaluation/1.5` schema lives in
+`scene-evaluation/1.5.schema.json`. It binds a descriptor, timeline, performance
 plan, and non-fatal diagnostics for namespaced
 professional events that a presentation adapter does not render yet. The
 editor, browser preview, and offline adapters can therefore share one explicit
