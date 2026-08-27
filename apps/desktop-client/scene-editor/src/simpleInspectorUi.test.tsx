@@ -82,4 +82,19 @@ describe("simple Inspector tabs", () => {
     expect(document.activeElement).toBe(tabs[0]);
     expect(useProjectStore.getState().inspectorTab).toBe("character");
   });
+
+  it("keeps the selected Cue title visible in the Inspector context", () => {
+    const before = useProjectStore.getState();
+    const revision = before.revision;
+    const cue = Array.from(container.querySelectorAll<HTMLButtonElement>(".cue-item"))
+      .find((button) => button.textContent?.includes("意外来客"));
+    expect(cue).not.toBeNull();
+
+    act(() => cue?.click());
+
+    const context = container.querySelector<HTMLElement>("[data-simple-cue-context]");
+    expect(context?.textContent).toBe("意外来客");
+    expect(context?.getAttribute("aria-live")).toBe("polite");
+    expect(useProjectStore.getState().revision).toBe(revision);
+  });
 });

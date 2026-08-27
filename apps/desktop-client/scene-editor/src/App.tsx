@@ -1255,7 +1255,16 @@ function SimpleInspector() {
 
   return (
     <aside className="inspector simple-inspector">
-      <div className="inspector-heading"><span><CircleGauge />当前演出</span><IconButton label="更多设置"><MoreHorizontal /></IconButton></div>
+      <div className="inspector-heading">
+        <span className="simple-inspector-context">
+          <CircleGauge />
+          <span>
+            <strong>当前演出</strong>
+            <small data-simple-cue-context aria-live="polite">{cue.title || "未命名演出"}</small>
+          </span>
+        </span>
+        <IconButton label="更多设置"><MoreHorizontal /></IconButton>
+      </div>
       <div className="inspector-tabs" role="tablist" aria-label="当前演出属性">
         {tabs.map(([value, icon, label], index) => <button
           ref={(element) => {
