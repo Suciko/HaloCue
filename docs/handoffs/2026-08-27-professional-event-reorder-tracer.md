@@ -89,7 +89,8 @@ This slice reorders events inside one selected Cue. It does not move events
 between Cues, auto-scroll long lists during drag, or add multi-selection. Those
 belong to larger professional timeline and batch-edit slices.
 
-The next bounded slice should add stable event insertion placement. The add
-menu should state whether a new event will be inserted before or after the
-selected event, preserve the current stable selection, use one canonical
-command, and fall back predictably when the Cue is empty.
+The stable insertion follow-up is delivered in implementation commit `38392ef`
+and documented by
+`docs/handoffs/2026-08-27-stable-event-insertion-tracer.md`. The next
+professional skeleton gap is multi-selection with one atomic batch command;
+single-selection reorder and insertion should remain the primary anchor.

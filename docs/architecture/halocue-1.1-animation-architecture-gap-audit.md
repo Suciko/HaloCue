@@ -372,6 +372,14 @@ position. Direction buttons, keyboard movement, and pointer drops all resolve
 through the same relative-target `moveEvent` command; an equivalent placement
 remains a no-op and one completed move creates one undo entry.
 
+The stable event-insertion tracer is recorded in
+`docs/handoffs/2026-08-27-stable-event-insertion-tracer.md`. The add menu now
+names its selected stable anchor and exposes before/after placement. The Store
+resolves that intent to a canonical index, inserts one factory-created event,
+selects its new stable ID, and restores the prior anchor on one-step undo. Empty
+Cues and stale/missing anchors use an explicit append fallback instead of a
+component-local index guess.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure
