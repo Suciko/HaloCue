@@ -10,7 +10,7 @@ from scene_performance import build_scene_performance
 from scene_events import scene_event_registry
 
 
-SCENE_EVALUATION_SCHEMA_VERSION = "scene-evaluation/1.2"
+SCENE_EVALUATION_SCHEMA_VERSION = "scene-evaluation/1.3"
 
 
 def evaluate_scene(

@@ -1,7 +1,7 @@
 (function (global) {
   "use strict";
 
-  const PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.1";
+  const PERFORMANCE_SCHEMA_VERSION = "scene-performance/1.2";
   const PERFORMANCE_SAMPLE_SCHEMA_VERSION = "scene-performance-sample/1.0";
   const DEFAULT_SHAKE_INTENSITY = 0.35;
   const SHAKE_FREQUENCY_HZ = 12;
@@ -11,6 +11,18 @@
   const CHARACTER_EXIT_OFFSET_Y_PX = 12;
   const CHARACTER_ENTER_SCALE = 0.97;
   const CHARACTER_EXIT_SCALE = 0.985;
+  const NOD_OFFSET_Y_KEYFRAMES = Object.freeze([
+    { offset: 0, value: 0 },
+    { offset: 0.32, value: 4 },
+    { offset: 0.68, value: -2 },
+    { offset: 1, value: 0 },
+  ]);
+  const NOD_ROTATION_KEYFRAMES = Object.freeze([
+    { offset: 0, value: 0 },
+    { offset: 0.32, value: 1.5 },
+    { offset: 0.68, value: -1 },
+    { offset: 1, value: 0 },
+  ]);
   const EXECUTION_MODES = new Set(["play", "sample", "skip", "reduced-motion"]);
 
   function clamp(value, minimum, maximum) {
@@ -77,6 +89,28 @@
       to,
       easing: "ease-out-cubic",
     });
+    const addCharacterKeyframes = (
+      item, characterId, slot, suffix, channel, keyframes,
+    ) => operations.push({
+      operation_id: `${item.event_id}/operation/${suffix}`,
+      source_event_id: item.event_id,
+      kind: "numeric-keyframes",
+      target: { kind: "character", character_id: characterId, slot },
+      channel,
+      value_space: "relative-to-baseline",
+      start_frame: item.start_frame,
+      end_frame: item.end_frame,
+      keyframes: keyframes.map((keyframe) => ({ ...keyframe })),
+      easing: "ease-in-out-strong",
+    });
+    const addNod = (item, characterId, slot) => {
+      addCharacterKeyframes(
+        item, characterId, slot, "motion-nod-offset-y", "layout.offset-y", NOD_OFFSET_Y_KEYFRAMES,
+      );
+      addCharacterKeyframes(
+        item, characterId, slot, "motion-nod-rotation", "presentation.rotation", NOD_ROTATION_KEYFRAMES,
+      );
+    };
     for (const item of timeline.events) {
       if (item.kind === "halocue.ba:screen-shake") {
         const resolvedIntensity = intensity(item.event?.intensity);
@@ -99,10 +133,20 @@
         const characterId = typeof item.event?.character_id === "string"
           ? item.event.character_id : "";
         if (!Number.isInteger(slot) || slot < 1 || slot > 5 || !characterId) continue;
-        addCharacterTween(item, characterId, slot, "opacity", "presentation.opacity", "absolute", 0, 1);
-        addCharacterTween(item, characterId, slot, "offset-y", "layout.offset-y", "relative-to-baseline", CHARACTER_ENTER_OFFSET_Y_PX, 0);
-        addCharacterTween(item, characterId, slot, "scale", "presentation.scale", "factor-from-baseline", CHARACTER_ENTER_SCALE, 1);
+        const isStateUpdate = slotCharacters.get(slot) === characterId;
+        if (!isStateUpdate) {
+          addCharacterTween(item, characterId, slot, "opacity", "presentation.opacity", "absolute", 0, 1);
+          addCharacterTween(item, characterId, slot, "offset-y", "layout.offset-y", "relative-to-baseline", CHARACTER_ENTER_OFFSET_Y_PX, 0);
+          addCharacterTween(item, characterId, slot, "scale", "presentation.scale", "factor-from-baseline", CHARACTER_ENTER_SCALE, 1);
+        }
+        if (item.event?.motion_id === "motion/nod") addNod(item, characterId, slot);
         slotCharacters.set(slot, characterId);
+      }
+      if (item.kind === "dialogue" && item.event?.motion_id === "motion/nod") {
+        const characterId = typeof item.event?.character_id === "string" ? item.event.character_id : "";
+        const slot = [...slotCharacters.entries()]
+          .find(([, currentCharacterId]) => currentCharacterId === characterId)?.[0];
+        if (slot) addNod(item, characterId, slot);
       }
       if (item.kind === "exit") {
         const slot = Number(item.event?.slot);
@@ -135,6 +179,55 @@
     };
   }
 
+  function cubicBezierCoordinate(t, first, second) {
+    const inverse = 1 - t;
+    return 3 * inverse * inverse * t * first
+      + 3 * inverse * t * t * second
+      + t * t * t;
+  }
+
+  function cubicBezierDerivative(t, first, second) {
+    const inverse = 1 - t;
+    return 3 * inverse * inverse * first
+      + 6 * inverse * t * (second - first)
+      + 3 * t * t * (1 - second);
+  }
+
+  function easeInOutStrong(progress) {
+    const target = clamp(progress, 0, 1);
+    let parameter = target;
+    for (let iteration = 0; iteration < 8; iteration += 1) {
+      const error = cubicBezierCoordinate(parameter, 0.77, 0.175) - target;
+      const derivative = cubicBezierDerivative(parameter, 0.77, 0.175);
+      if (Math.abs(error) < 1e-7 || Math.abs(derivative) < 1e-7) break;
+      parameter = clamp(parameter - error / derivative, 0, 1);
+    }
+    let lower = 0;
+    let upper = 1;
+    for (let iteration = 0; iteration < 12; iteration += 1) {
+      const current = cubicBezierCoordinate(parameter, 0.77, 0.175);
+      if (Math.abs(current - target) < 1e-7) break;
+      if (current < target) lower = parameter;
+      else upper = parameter;
+      parameter = (lower + upper) / 2;
+    }
+    return cubicBezierCoordinate(parameter, 0, 1);
+  }
+
+  function sampleKeyframes(keyframes, progress) {
+    const terminal = keyframes.at(-1);
+    if (!terminal) return 0;
+    if (progress >= terminal.offset) return terminal.value;
+    const nextIndex = keyframes.findIndex((keyframe) => keyframe.offset >= progress);
+    if (nextIndex <= 0) return keyframes[0]?.value || 0;
+    const previous = keyframes[nextIndex - 1];
+    const next = keyframes[nextIndex];
+    const span = next.offset - previous.offset;
+    const localProgress = span <= 0 ? 1 : (progress - previous.offset) / span;
+    const eased = easeInOutStrong(localProgress);
+    return previous.value + (next.value - previous.value) * eased;
+  }
+
   function sampleScenePerformance(plan, frame, mode = "sample") {
     if (!plan || plan.schema_version !== PERFORMANCE_SCHEMA_VERSION) {
       throw new Error("unsupported scene performance schema");
@@ -165,20 +258,30 @@
         offsetY += operation.amplitude_y_px * Math.sin(phase * 1.7) * envelope;
         continue;
       }
-      const eased = 1 - (1 - progress) ** 3;
-      const useFinal = mode === "skip"
-        || (mode === "reduced-motion" && operation.channel !== "presentation.opacity");
-      const value = useFinal ? operation.to : operation.from + (operation.to - operation.from) * eased;
+      const value = operation.kind === "numeric-keyframes"
+        ? sampleKeyframes(operation.keyframes, progress)
+        : (() => {
+          const eased = 1 - (1 - progress) ** 3;
+          const useFinal = mode === "skip"
+            || (mode === "reduced-motion" && operation.channel !== "presentation.opacity");
+          return useFinal ? operation.to : operation.from + (operation.to - operation.from) * eased;
+        })();
       const key = `${operation.target.character_id}|${operation.target.slot}`;
       const sample = characterSamples.get(key) || {
         character_id: operation.target.character_id,
         slot: operation.target.slot,
         opacity: null,
         offset_y_px: 0,
+        rotation_deg: 0,
         scale: 1,
       };
       if (operation.channel === "presentation.opacity") sample.opacity = quantize(value, 6);
-      if (operation.channel === "layout.offset-y") sample.offset_y_px = quantize(value, 6);
+      if (operation.channel === "layout.offset-y") {
+        sample.offset_y_px = quantize(sample.offset_y_px + value, 6);
+      }
+      if (operation.channel === "presentation.rotation") {
+        sample.rotation_deg = quantize(sample.rotation_deg + value, 6);
+      }
       if (operation.channel === "presentation.scale") sample.scale = quantize(value, 6);
       characterSamples.set(key, sample);
     }

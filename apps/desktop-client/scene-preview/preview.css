@@ -436,6 +436,7 @@ h1 {
   transition: opacity 180ms var(--ease-out), filter 220ms var(--ease-out), transform 500ms var(--ease-in-out);
   will-change: opacity, filter, transform;
   translate: 0 calc(var(--performance-character-offset-y, 0px) * var(--stage-scale, 1));
+  rotate: var(--performance-character-rotation, 0deg);
   scale: var(--performance-character-scale, 1);
 }
 

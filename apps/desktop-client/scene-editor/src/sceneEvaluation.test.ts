@@ -16,13 +16,13 @@ describe("scene evaluation seam", () => {
     const scene = firstScene(demoProject);
     const evaluation = evaluateScene(demoProject, scene.cues[1].cue_id);
 
-    expect(evaluation.schema_version).toBe("scene-evaluation/1.2");
+    expect(evaluation.schema_version).toBe("scene-evaluation/1.3");
     expect(evaluation.scene_id).toBe(scene.scene_id);
     expect(evaluation.timeline.events.map((event) => event.event_id)).toEqual(
       evaluation.descriptor.events.map((event) => event.event_id),
     );
     expect(evaluation.timeline.events.at(-1)?.end_frame).toBe(evaluation.timeline.total_frames);
-    expect(evaluation.schema_version).toBe("scene-evaluation/1.2");
+    expect(evaluation.schema_version).toBe("scene-evaluation/1.3");
     expect(evaluation.performance.scene_id).toBe(evaluation.scene_id);
     expect(evaluation.performance.total_frames).toBe(evaluation.timeline.total_frames);
   });

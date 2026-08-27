@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Suciko/HaloCue/contracts/scene-evaluation/1.3.schema.json",
+  "title": "HaloCue scene evaluation intermediate result",
+  "description": "Descriptor, frame schedule, compiled performance plan, and diagnostics for one canonical scene.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scene_id", "descriptor", "timeline", "performance", "diagnostics"],
+  "properties": {
+    "schema_version": { "const": "scene-evaluation/1.3" },
+    "scene_id": { "type": "string", "minLength": 1 },
+    "descriptor": { "type": "object", "required": ["schema_version", "scene_id", "events"] },
+    "timeline": { "$ref": "../render-timeline/1.0.schema.json" },
+    "performance": { "$ref": "../scene-performance/1.2.schema.json" },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "severity", "path", "message"],
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "severity": { "enum": ["info", "warning", "error"] },
+          "path": { "type": "string", "minLength": 1 },
+          "message": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

@@ -13,7 +13,7 @@ from jsonschema import Draft202012Validator
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_ROOT = ROOT / "packages" / "project-model"
 RUNTIME = ROOT / "apps" / "desktop-client" / "scene-preview" / "scene-performance-runtime.js"
-SCHEMA = ROOT / "packages" / "contracts" / "scene-performance" / "1.1.schema.json"
+SCHEMA = ROOT / "packages" / "contracts" / "scene-performance" / "1.2.schema.json"
 if str(MODEL_ROOT) not in sys.path:
     sys.path.insert(0, str(MODEL_ROOT))
 
@@ -47,7 +47,7 @@ def test_performance_plan_normalizes_shake_and_matches_contract():
     plan = build_scene_performance(descriptor, timeline)
     operation = plan["operations"][0]
 
-    assert plan["schema_version"] == "scene-performance/1.1"
+    assert plan["schema_version"] == "scene-performance/1.2"
     assert operation == {
         "operation_id": "event/shake/operation/shake",
         "source_event_id": "event/shake",
@@ -121,6 +121,7 @@ def test_enter_and_exit_share_numeric_tween_channels_and_execution_modes():
         "slot": 2,
         "opacity": 0,
         "offset_y_px": 24,
+        "rotation_deg": 0,
         "scale": 0.97,
     }]
     assert sample_scene_performance(plan, enter["end_frame"] - 1)["characters"][0] == {
@@ -128,6 +129,7 @@ def test_enter_and_exit_share_numeric_tween_channels_and_execution_modes():
         "slot": 2,
         "opacity": 1,
         "offset_y_px": 0,
+        "rotation_deg": 0,
         "scale": 1,
     }
     assert sample_scene_performance(plan, enter["start_frame"], mode="skip")["characters"][0] == {
@@ -135,6 +137,7 @@ def test_enter_and_exit_share_numeric_tween_channels_and_execution_modes():
         "slot": 2,
         "opacity": 1,
         "offset_y_px": 0,
+        "rotation_deg": 0,
         "scale": 1,
     }
     assert sample_scene_performance(
@@ -144,6 +147,7 @@ def test_enter_and_exit_share_numeric_tween_channels_and_execution_modes():
         "slot": 2,
         "opacity": 0,
         "offset_y_px": 0,
+        "rotation_deg": 0,
         "scale": 1,
     }
     assert sample_scene_performance(plan, exit_event["end_frame"] - 1)["characters"][0] == {
@@ -151,7 +155,53 @@ def test_enter_and_exit_share_numeric_tween_channels_and_execution_modes():
         "slot": 2,
         "opacity": 0,
         "offset_y_px": 12,
+        "rotation_deg": 0,
         "scale": 0.985,
+    }
+
+
+def test_same_character_nod_compiles_to_seek_safe_keyframes():
+    descriptor = _descriptor()
+    descriptor["initial_actors"] = [
+        {"slot": 2, "character_id": "character/alice", "state": "visible"},
+    ]
+    descriptor["events"] = [{
+        "event_id": "event/nod",
+        "kind": "enter",
+        "slot": 2,
+        "character_id": "character/alice",
+        "motion_id": "motion/nod",
+        "duration_ms": 500,
+    }]
+    timeline = build_render_timeline(descriptor)
+    plan = build_scene_performance(descriptor, timeline)
+    event = timeline["events"][0]
+
+    assert [operation["kind"] for operation in plan["operations"]] == [
+        "numeric-keyframes",
+        "numeric-keyframes",
+    ]
+    assert [operation["channel"] for operation in plan["operations"]] == [
+        "layout.offset-y",
+        "presentation.rotation",
+    ]
+    peak_frame = event["start_frame"] + round(
+        (event["end_frame"] - event["start_frame"] - 1) * 0.32
+    )
+    sampled = sample_scene_performance(plan, peak_frame)["characters"][0]
+    assert sampled["offset_y_px"] > 3.9
+    assert sampled["rotation_deg"] > 1.4
+    assert sample_scene_performance(plan, event["start_frame"], mode="skip")["characters"] == []
+    assert sample_scene_performance(
+        plan, event["start_frame"], mode="reduced-motion"
+    )["characters"] == []
+    assert sample_scene_performance(plan, event["end_frame"] - 1)["characters"][0] == {
+        "character_id": "character/alice",
+        "slot": 2,
+        "opacity": None,
+        "offset_y_px": 0,
+        "rotation_deg": 0,
+        "scale": 1,
     }
 
 
@@ -170,6 +220,15 @@ def test_browser_runtime_builds_and_samples_the_same_performance_plan():
             "kind": "enter",
             "slot": 2,
             "character_id": "character/alice",
+            "motion_id": "motion/nod",
+        },
+        {
+            "event_id": "event/nod",
+            "kind": "enter",
+            "slot": 2,
+            "character_id": "character/alice",
+            "motion_id": "motion/nod",
+            "duration_ms": 500,
         },
         {
             "event_id": "event/shake",
@@ -180,11 +239,16 @@ def test_browser_runtime_builds_and_samples_the_same_performance_plan():
     ]
     timeline = build_render_timeline(descriptor)
     plan = build_scene_performance(descriptor, timeline)
+    nod_event = timeline["events"][1]
+    nod_span = nod_event["end_frame"] - nod_event["start_frame"] - 1
     frames = [
         timeline["events"][0]["start_frame"] + 2,
         timeline["events"][1]["start_frame"] + 2,
+        nod_event["start_frame"] + round(nod_span * 0.32),
+        nod_event["start_frame"] + round(nod_span * 0.68),
         timeline["events"][2]["start_frame"] + 2,
-        timeline["events"][2]["end_frame"] - 1,
+        timeline["events"][3]["start_frame"] + 2,
+        timeline["events"][3]["end_frame"] - 1,
     ]
     script = r"""
 const fs = require('fs');

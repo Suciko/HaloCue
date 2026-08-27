@@ -27,7 +27,7 @@ describe("scene performance compiler", () => {
     const shakeRange = timeline.events[1];
 
     expect(plan).toEqual({
-      schema_version: "scene-performance/1.1",
+      schema_version: "scene-performance/1.2",
       frame_rate: 30,
       scene_id: "scene/performance",
       total_frames: timeline.total_frames,
@@ -84,6 +84,7 @@ describe("scene performance compiler", () => {
       slot: 2,
       opacity: 0,
       offset_y_px: 24,
+      rotation_deg: 0,
       scale: 0.97,
     }]);
     expect(sampleScenePerformance(plan, enter.end_frame - 1, "sample").characters).toEqual([{
@@ -91,6 +92,7 @@ describe("scene performance compiler", () => {
       slot: 2,
       opacity: 1,
       offset_y_px: 0,
+      rotation_deg: 0,
       scale: 1,
     }]);
     expect(sampleScenePerformance(plan, enter.start_frame, "skip").characters[0]).toMatchObject({
@@ -113,6 +115,86 @@ describe("scene performance compiler", () => {
       offset_y_px: 12,
       scale: 0.985,
     });
+  });
+
+  it("compiles a same-character nod as seek-safe keyframes instead of another entrance", () => {
+    const source = descriptor();
+    source.initial_actors = [
+      { slot: 2, character_id: "character/alice", state: "visible" },
+    ];
+    source.events = [{
+      event_id: "event/nod",
+      kind: "enter",
+      slot: 2,
+      character_id: "character/alice",
+      motion_id: "motion/nod",
+      duration_ms: 500,
+    }];
+    const timeline = buildRenderTimeline(source);
+    const plan = buildScenePerformance(source, timeline);
+    const event = timeline.events[0];
+
+    expect(plan.operations).toEqual([
+      expect.objectContaining({
+        operation_id: "event/nod/operation/motion-nod-offset-y",
+        kind: "numeric-keyframes",
+        channel: "layout.offset-y",
+        keyframes: [
+          { offset: 0, value: 0 },
+          { offset: 0.32, value: 4 },
+          { offset: 0.68, value: -2 },
+          { offset: 1, value: 0 },
+        ],
+        easing: "ease-in-out-strong",
+      }),
+      expect.objectContaining({
+        operation_id: "event/nod/operation/motion-nod-rotation",
+        kind: "numeric-keyframes",
+        channel: "presentation.rotation",
+      }),
+    ]);
+    expect(plan.operations.some((operation) => (
+      operation.kind === "numeric-tween" && operation.channel === "presentation.opacity"
+    ))).toBe(false);
+
+    const peakFrame = event.start_frame + Math.round((event.end_frame - event.start_frame - 1) * 0.32);
+    const sampled = sampleScenePerformance(plan, peakFrame, "sample").characters[0];
+    expect(sampled.offset_y_px).toBeGreaterThan(3.9);
+    expect(sampled.rotation_deg).toBeGreaterThan(1.4);
+    expect(sampleScenePerformance(plan, event.start_frame, "skip").characters).toEqual([]);
+    expect(sampleScenePerformance(plan, event.start_frame, "reduced-motion").characters).toEqual([]);
+    expect(sampleScenePerformance(plan, event.end_frame - 1, "sample").characters[0]).toMatchObject({
+      offset_y_px: 0,
+      rotation_deg: 0,
+    });
+  });
+
+  it("composes a requested nod with a real first placement", () => {
+    const source = descriptor();
+    source.initial_actors = [
+      { slot: 2, character_id: null, state: "hidden" },
+    ];
+    source.events = [{
+      event_id: "event/enter-and-nod",
+      kind: "enter",
+      slot: 2,
+      character_id: "character/alice",
+      motion_id: "motion/nod",
+      duration_ms: 500,
+    }];
+    const timeline = buildRenderTimeline(source);
+    const plan = buildScenePerformance(source, timeline);
+
+    expect(plan.source_map[0].operation_ids).toHaveLength(5);
+    expect(plan.operations.map((operation) => operation.channel)).toEqual([
+      "presentation.opacity",
+      "layout.offset-y",
+      "presentation.scale",
+      "layout.offset-y",
+      "presentation.rotation",
+    ]);
+    expect(sampleScenePerformance(plan, timeline.events[0].start_frame, "sample").characters[0])
+      .toMatchObject({ opacity: 0, offset_y_px: 24, rotation_deg: 0, scale: 0.97 });
   });
 
   it("samples deterministic motion while skip and reduced motion keep the clean baseline", () => {

@@ -395,7 +395,7 @@ def test_compiled_screen_shake_has_deterministic_exported_intermediate_frames(
     ]
 
     assert performance["source_map"][0]["source_event_id"] == "event/shake"
-    assert results[0].performance_schema_version == "scene-performance/1.1"
+    assert results[0].performance_schema_version == "scene-performance/1.2"
     assert results[0].sha256 == results[2].sha256
     assert results[1].sha256 != results[0].sha256
 

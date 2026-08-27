@@ -101,7 +101,7 @@ type PreviewController = {
   timeline: RenderTimeline;
   performance: ScenePerformancePlan;
   seekFrame: (frame: number) => void;
-  play: (options?: { fromFrame?: number }) => void;
+  play: (options?: { fromFrame?: number; toFrame?: number }) => void;
   dispose: () => void;
 };
 
@@ -312,6 +312,9 @@ function PreviewFrame() {
   const intent = compilation.intent;
   const intentRef = useRef(intent);
   intentRef.current = intent;
+  const motionTrialKey = activeTransaction?.key.endsWith(":motion")
+    ? activeTransaction.key
+    : null;
   const intentLabel = {
     "selected-event": "所选事件起点",
     "cue-terminal": "Cue 完成态",
@@ -379,6 +382,20 @@ function PreviewFrame() {
       setError(exception instanceof Error ? exception.message : "预览定位失败");
     }
   }, [evaluation, intent, ready]);
+
+  useEffect(() => {
+    const controller = controllerRef.current;
+    if (!ready || !motionTrialKey || !controller?.isCurrent()) return;
+    const nodOperation = [...evaluation.performance.operations].reverse().find((operation) => (
+      operation.kind === "numeric-keyframes"
+      && operation.operation_id.endsWith("/operation/motion-nod-offset-y")
+    ));
+    if (!nodOperation) return;
+    controller.play({
+      fromFrame: nodOperation.start_frame,
+      toFrame: nodOperation.end_frame - 1,
+    });
+  }, [evaluation, motionTrialKey, ready]);
 
   useEffect(() => () => {
     coordinatorRef.current?.dispose();

@@ -735,6 +735,127 @@ def test_capability_motion_and_emoticon_are_independent_preview_layers():
 
 
 @pytest.mark.browser
+def test_nod_performance_is_seekable_in_deterministic_capture_mode():
+    playwright = pytest.importorskip("playwright.sync_api")
+    server, thread = _serve_preview()
+    descriptor = {
+        "schema_version": "scene-descriptor/1.0",
+        "scene_id": "scene/seekable-nod",
+        "presentation": {"frame_rate": 30},
+        "actors": [
+            {
+                "slot": 1,
+                "character_id": "character/alice",
+                "display_name": "爱丽丝",
+                "dialogue_name": "爱丽丝",
+                "state": "visible",
+            },
+            *[
+                {"slot": slot, "character_id": None, "display_name": "", "state": "hidden"}
+                for slot in range(2, 6)
+            ],
+        ],
+        "initial_actors": [
+            {
+                "slot": 1,
+                "character_id": "character/alice",
+                "display_name": "爱丽丝",
+                "dialogue_name": "爱丽丝",
+                "state": "visible",
+            },
+            *[
+                {"slot": slot, "character_id": None, "display_name": "", "state": "hidden"}
+                for slot in range(2, 6)
+            ],
+        ],
+        "events": [{
+            "event_id": "event/alice-nod",
+            "kind": "enter",
+            "character_id": "character/alice",
+            "slot": 1,
+            "motion_id": "motion/nod",
+            "duration_ms": 500,
+        }],
+    }
+    try:
+        with playwright.sync_playwright() as runtime:
+            try:
+                browser = runtime.chromium.launch(headless=True)
+            except Exception as exc:  # pragma: no cover - depends on local browser install
+                if "Executable doesn't exist" in str(exc):
+                    pytest.skip("Playwright Chromium is not installed")
+                raise
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+            page.add_init_script(
+                "window.HALO_CUE_SCENE_DESCRIPTOR = "
+                + json.dumps(descriptor, ensure_ascii=False)
+                + ";"
+            )
+            page.goto(
+                f"http://127.0.0.1:{server.server_port}/index.html"
+                "?renderer=static&capture=1"
+            )
+            page.wait_for_function("() => Boolean(window.HaloCueScenePreview.controller)")
+
+            sampled = page.evaluate(
+                """() => {
+                    const controller = window.HaloCueScenePreview.controller;
+                    const item = controller.timeline.events[0];
+                    const frame = item.start_frame
+                      + Math.round((item.end_frame - item.start_frame - 1) * 0.32);
+                    controller.seekFrame(frame);
+                    const actor = document.querySelector('.actor-slot[data-slot="1"]');
+                    return {
+                      schema: controller.performance.schema_version,
+                      kinds: controller.performance.operations.map(operation => operation.kind),
+                      channels: controller.performance.operations.map(operation => operation.channel),
+                      offsetY: Number(actor.dataset.performanceOffsetY),
+                      rotation: Number(actor.dataset.performanceRotation),
+                      active: document.querySelector('#preview-stage').dataset.performanceOperations,
+                    };
+                }"""
+            )
+            assert sampled["schema"] == "scene-performance/1.2"
+            assert sampled["kinds"] == ["numeric-keyframes", "numeric-keyframes"]
+            assert sampled["channels"] == ["layout.offset-y", "presentation.rotation"]
+            assert sampled["offsetY"] > 3.9
+            assert sampled["rotation"] > 1.4
+            assert "motion-nod-offset-y" in sampled["active"]
+
+            terminal = page.evaluate(
+                """() => {
+                    const controller = window.HaloCueScenePreview.controller;
+                    const item = controller.timeline.events[0];
+                    controller.seekFrame(item.end_frame - 1);
+                    const actor = document.querySelector('.actor-slot[data-slot="1"]');
+                    return {
+                      offsetY: Number(actor.dataset.performanceOffsetY),
+                      rotation: Number(actor.dataset.performanceRotation),
+                    };
+                }"""
+            )
+            assert terminal == {"offsetY": 0, "rotation": 0}
+
+            stop_frame = page.evaluate(
+                """() => {
+                    const controller = window.HaloCueScenePreview.controller;
+                    const item = controller.timeline.events[0];
+                    const stop = item.start_frame + 2;
+                    controller.play({fromFrame: item.start_frame, toFrame: stop});
+                    return stop;
+                }"""
+            )
+            page.wait_for_function(
+                """() => document.querySelector('#preview-stage').dataset.playback === 'paused'"""
+            )
+            assert int(page.locator("#preview-stage").get_attribute("data-current-frame")) == stop_frame
+            browser.close()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+@pytest.mark.browser
 def test_editor_mode_exposes_resource_locator_and_calibration_guides():
     playwright = pytest.importorskip("playwright.sync_api")
     server, thread = _serve_preview()

@@ -186,7 +186,7 @@
     if (suppliedPerformance === undefined) {
       return { performance: expected, source: "derived" };
     }
-    if (!suppliedPerformance || suppliedPerformance.schema_version !== "scene-performance/1.1") {
+    if (!suppliedPerformance || suppliedPerformance.schema_version !== "scene-performance/1.2") {
       throw new Error("unsupported supplied scene performance schema");
     }
     if (JSON.stringify(canonicalJson(suppliedPerformance)) !== JSON.stringify(canonicalJson(expected))) {
@@ -623,9 +623,11 @@
       stage.dataset.performanceMode = sample.mode;
       actorElements.forEach((element) => {
         element.style.setProperty("--performance-character-offset-y", "0px");
+        element.style.setProperty("--performance-character-rotation", "0deg");
         element.style.setProperty("--performance-character-scale", "1");
         element.dataset.performanceOpacity = "";
         element.dataset.performanceOffsetY = "0";
+        element.dataset.performanceRotation = "0";
         element.dataset.performanceScale = "1";
       });
       for (const character of sample.characters) {
@@ -637,8 +639,10 @@
           element.dataset.performanceOpacity = String(character.opacity);
         }
         element.style.setProperty("--performance-character-offset-y", `${character.offset_y_px}px`);
+        element.style.setProperty("--performance-character-rotation", `${character.rotation_deg}deg`);
         element.style.setProperty("--performance-character-scale", String(character.scale));
         element.dataset.performanceOffsetY = String(character.offset_y_px);
+        element.dataset.performanceRotation = String(character.rotation_deg);
         element.dataset.performanceScale = String(character.scale);
       }
       return sample;
@@ -728,9 +732,11 @@
         const emoticonState = CAPABILITY_RUNTIME.emoticon(actor.emoticon_id);
         element.dataset.motion = visible ? motionId : "";
         element.dataset.emoticon = visible ? (emoticonState?.id || CAPABILITY_RUNTIME.stateId(actor.emoticon_id)) : "";
-        for (const className of ["is-motion-nod", "is-motion-appear"]) {
-          element.classList.toggle(className, Boolean(visible && className === CAPABILITY_RUNTIME.motionClass(motionId)));
-        }
+        element.classList.remove("is-motion-nod");
+        element.classList.toggle(
+          "is-motion-appear",
+          Boolean(visible && CAPABILITY_RUNTIME.motionClass(motionId) === "is-motion-appear"),
+        );
         if (emoticonElement && emoticonSymbol) {
           emoticonElement.hidden = !visible || !emoticonState;
           emoticonElement.dataset.state = visible ? (emoticonState?.id || "") : "";
@@ -994,7 +1000,7 @@
       state.effect = null;
       loadPreviewBackground(state.background, { animate: false });
       renderEvent(sample.item?.event || null, { sample, suppressMotion: true });
-      applyPerformanceFrame(sample.frame, options.fromPlayback ? "play" : (options.mode || "sample"));
+      applyPerformanceFrame(sample.frame, options.mode || (options.fromPlayback ? "play" : "sample"));
       const spineTimeMs = Number.isFinite(options.spineTimeMs)
         ? Math.max(0, options.spineTimeMs)
         : sample.frame * 1000 / timeline.frame_rate;
@@ -1050,6 +1056,13 @@
       const startFrame = Number.isFinite(requested)
         ? Math.max(0, Math.min(timeline.total_frames - 1, Math.floor(requested)))
         : state.frame >= 0 && state.frame < timeline.total_frames - 1 ? state.frame : 0;
+      const requestedStop = Number(options.toFrame);
+      const stopFrame = Number.isFinite(requestedStop)
+        ? Math.max(startFrame, Math.min(timeline.total_frames - 1, Math.floor(requestedStop)))
+        : timeline.total_frames - 1;
+      const playbackMode = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+        ? "reduced-motion"
+        : "play";
       const startedAt = window.performance.now() - startFrame * 1000 / timeline.frame_rate;
       state.playing = true;
       stage.dataset.playback = "playing";
@@ -1059,13 +1072,13 @@
       const tick = (now) => {
         if (!isCurrentSession() || !state.playing) return;
         const nextFrame = Math.floor((now - startedAt) * timeline.frame_rate / 1000);
-        if (nextFrame >= timeline.total_frames) {
-          seekFrame(timeline.total_frames - 1, { fromPlayback: true });
+        if (nextFrame >= stopFrame) {
+          seekFrame(stopFrame, { fromPlayback: true, mode: playbackMode });
           cancelPlayback();
           return;
         }
         if (nextFrame !== lastRenderedFrame) {
-          seekFrame(nextFrame, { fromPlayback: true });
+          seekFrame(nextFrame, { fromPlayback: true, mode: playbackMode });
           lastRenderedFrame = nextFrame;
         }
         state.playbackFrame = window.requestAnimationFrame(tick);
