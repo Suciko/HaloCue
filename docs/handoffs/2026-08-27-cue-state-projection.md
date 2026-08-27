@@ -60,8 +60,13 @@ uses the separate `NotoSansSC-Variable.ttf` declaration.
 
 ## Next slice
 
-Build an `EventEditorCatalog` Adapter on top of the existing Scene Event
-Registry so professional event creation, summaries, icons, and typed field
-editing stop depending on unrelated `App.tsx` kind switches. Keep simple mode
-contextual by selecting only the small subset of catalog fields needed for the
-current task.
+The first `EventEditorCatalog` Adapter is now implemented on top of the Scene
+Event Registry. Professional event creation, summaries, icons, and typed field
+editing consume this catalog instead of unrelated `App.tsx` kind switches.
+Unknown events remain namespaced/read-only in the advanced field view, while
+simple mode still selects only the contextual fields needed for the current
+task.
+
+The next slice can expand the catalog to resource previews and schema-driven
+diagnostics, then deepen the ProjectCodec seam for 1.0 imports and nested
+validation.

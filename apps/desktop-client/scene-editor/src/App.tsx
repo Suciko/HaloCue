@@ -32,6 +32,7 @@ import {
   WandSparkles,
   X,
   Zap,
+  type LucideIcon,
 } from "lucide-react";
 import {
   type ChangeEvent,
@@ -47,8 +48,15 @@ import { projectFileAdapter } from "./projectRepository";
 import { capabilityStatesFor } from "./capabilities";
 import { evaluateScene } from "./sceneEvaluation";
 import { eventDurationMs } from "./renderTimeline";
-import { sceneEventDefinitions } from "./sceneEventRegistry";
 import { firstScene, projectCueState } from "./cueStateProjection";
+import {
+  eventEditorDefinition,
+  eventEditorDefinitions,
+  eventLabel,
+  eventSummary,
+  type EventEditorField,
+  type EventIconKey,
+} from "./eventEditorCatalog";
 import {
   advancedEventCount,
   useProjectStore,
@@ -77,10 +85,6 @@ type PreviewWindow = Window & {
     controller?: PreviewController;
   };
 };
-
-const eventLabels: Record<string, string> = Object.fromEntries(
-  sceneEventDefinitions().map((event) => [event.kind, event.editor_label]),
-);
 
 function IconButton({
   label,
@@ -563,11 +567,64 @@ function SimpleInspector() {
 }
 
 function EventIcon({ kind }: { kind: string }) {
-  if (kind === "dialogue") return <MessageSquareText />;
-  if (kind === "background") return <Image />;
-  if (kind === "enter" || kind === "exit") return <UserRound />;
-  if (kind === "wait") return <CircleGauge />;
-  return <Sparkles />;
+  const icons: Record<EventIconKey, LucideIcon> = {
+    dialogue: MessageSquareText,
+    background: Image,
+    actor: UserRound,
+    wait: CircleGauge,
+    effect: Sparkles,
+  };
+  const Icon = icons[eventEditorDefinition(kind)?.icon || "effect"];
+  return <Icon />;
+}
+
+function ProfessionalEventFields({
+  event,
+  fields,
+  project,
+  updateEvent,
+}: {
+  event: CueEvent;
+  fields: readonly EventEditorField[];
+  project: ReturnType<typeof useProjectStore.getState>["project"];
+  updateEvent: (eventId: string, patch: Partial<CueEvent>) => void;
+}) {
+  return <>
+    {fields.map((field) => {
+      const value = event[field.key];
+      if (field.control === "character") {
+        return <Field key={field.key} label={field.label} hint={field.hint}>
+          <select value={String(value || "")} onChange={(change) => updateEvent(event.event_id, { [field.key]: change.target.value || undefined })}>
+            <option value="">{field.allowNarrator ? "#0 / 旁白 / 画外音" : "选择角色"}</option>
+            {project.characters.map((character) => <option key={character.character_id} value={character.character_id}>{character.character_id}</option>)}
+          </select>
+        </Field>;
+      }
+      if (field.control === "slot") {
+        return <Field key={field.key} label={field.label} hint={field.hint}>
+          <input type="number" min={field.min} max={field.max} step={field.step} value={Number(value || field.min || 1)} onChange={(change) => updateEvent(event.event_id, { [field.key]: Number(change.target.value) })} />
+        </Field>;
+      }
+      if (field.control === "background") {
+        return <Field key={field.key} label={field.label} hint={field.hint}>
+          <select value={String(value || "")} onChange={(change) => updateEvent(event.event_id, { resource_id: change.target.value || undefined })}>
+            <option value="">沿用上一拍</option>
+            {project.resources.filter((resource) => resource.role === "background").map((resource) => <option key={resource.resource_id} value={resource.resource_id}>{resource.resource_id}</option>)}
+          </select>
+        </Field>;
+      }
+      if (field.control === "number") {
+        return <Field key={field.key} label={field.label} hint={field.hint}>
+          <input type="number" min={field.min} max={field.max} step={field.step} value={typeof value === "number" ? value : ""} onChange={(change) => updateEvent(event.event_id, { [field.key]: Number(change.target.value) })} />
+        </Field>;
+      }
+      return <Field key={field.key} label={field.label} hint={field.hint}>
+        {field.multiline
+          ? <textarea rows={6} value={String(value || "")} onChange={(change) => updateEvent(event.event_id, { [field.key]: change.target.value })} />
+          : <input value={String(value || "")} onChange={(change) => updateEvent(event.event_id, { [field.key]: change.target.value })} />}
+      </Field>;
+    })}
+  </>;
 }
 
 function ProfessionalEventList() {
@@ -587,7 +644,7 @@ function ProfessionalEventList() {
         <details className="event-add-menu">
           <summary><Plus />添加事件</summary>
           <div className="event-add-options">
-            {sceneEventDefinitions().filter((definition) => definition.timeline_supported).map((definition) => (
+            {eventEditorDefinitions().filter((definition) => definition.timelineSupported).map((definition) => (
               <button
                 type="button"
                 key={definition.kind}
@@ -597,7 +654,7 @@ function ProfessionalEventList() {
                 }}
               >
                 <EventIcon kind={definition.kind} />
-                {definition.editor_label}
+                {definition.label}
               </button>
             ))}
           </div>
@@ -611,10 +668,10 @@ function ProfessionalEventList() {
               <span className="event-icon"><EventIcon kind={event.kind} /></span>
               <span className="event-order">{String(index + 1).padStart(2, "0")}</span>
               <span className="event-copy">
-                <strong>{eventLabels[event.kind] || "扩展演出"}</strong>
-                <small>{event.text || event.character_id || event.resource_id || event.kind}</small>
+                <strong>{eventLabel(event.kind) || "扩展演出"}</strong>
+                <small>{eventSummary(event)}</small>
               </span>
-              {!eventLabels[event.kind] && <span className="namespace-tag">{event.kind.split(":")[0]}</span>}
+              {!eventLabel(event.kind) && <span className="namespace-tag">{event.kind.split(":")[0]}</span>}
             </button>
             <div className="event-actions">
               <IconButton label="上移" disabled={index === 0} onClick={() => moveEvent(event.event_id, -1)}><ArrowUp /></IconButton>
@@ -643,6 +700,11 @@ function ProfessionalInspector() {
       return 1000;
     }
   })();
+  const editorDefinition = eventEditorDefinition(event.kind);
+  const editorFields = editorDefinition?.fields || [];
+  const advancedFields = Object.entries(event).filter(([key]) => (
+    !["event_id", "kind", "duration_ms", ...editorFields.map((item) => item.key)].includes(key)
+  ));
 
   return (
     <aside className="inspector professional-inspector">
@@ -650,34 +712,18 @@ function ProfessionalInspector() {
       <div className="inspector-content">
         <Field label="事件 ID"><input className="mono" value={event.event_id} readOnly /></Field>
         <Field label="事件类型"><input className="mono" value={event.kind} readOnly /></Field>
-        {event.kind === "dialogue" && <>
-          <Field label="角色逻辑键">
-            <select value={event.character_id || ""} onChange={(change) => updateEvent(event.event_id, { character_id: change.target.value || undefined })}>
-              <option value="">#0 / 画外音</option>
-              {project.characters.map((character) => <option key={character.character_id} value={character.character_id}>{character.character_id}</option>)}
-            </select>
-          </Field>
-          <Field label="对白文本"><textarea rows={6} value={event.text || ""} onChange={(change) => updateEvent(event.event_id, { text: change.target.value })} /></Field>
-        </>}
-        {(event.kind === "enter" || event.kind === "exit") && <>
-          <Field label="舞台栏位"><input type="number" min={1} max={5} value={event.slot || 1} onChange={(change) => updateEvent(event.event_id, { slot: Number(change.target.value) })} /></Field>
-          {event.kind === "enter" && <Field label="角色逻辑键"><select value={event.character_id || ""} onChange={(change) => updateEvent(event.event_id, { character_id: change.target.value || undefined })}>
-            <option value="">选择角色</option>
-            {project.characters.map((character) => <option key={character.character_id} value={character.character_id}>{character.character_id}</option>)}
-          </select></Field>}
-        </>}
-        {event.kind === "background" && <Field label="资源逻辑键"><select value={event.resource_id || ""} onChange={(change) => updateEvent(event.event_id, { resource_id: change.target.value })}>{project.resources.filter((resource) => resource.role === "background").map((resource) => <option key={resource.resource_id} value={resource.resource_id}>{resource.resource_id}</option>)}</select></Field>}
+        <ProfessionalEventFields event={event} fields={editorFields} project={project} updateEvent={updateEvent} />
         <div className="field-grid two">
           <Field label="时长"><div className="duration-input"><input type="number" min={1} value={event.duration_ms ?? resolvedDuration} onChange={(change) => updateEvent(event.event_id, { duration_ms: Number(change.target.value) })} /><span>ms</span></div></Field>
           <Field label="开始帧"><input className="mono" value="自动" readOnly /></Field>
         </div>
-        <details className="advanced-fields" open={!eventLabels[event.kind]}>
+        <details className="advanced-fields" open={!editorDefinition}>
           <summary><ChevronRight />高级字段</summary>
           <div className="property-table">
-            {Object.entries(event).filter(([key]) => !["event_id", "kind", "text", "duration_ms", "character_id", "resource_id", "slot"].includes(key)).map(([key, value]) => (
+            {advancedFields.map(([key, value]) => (
               <div key={key}><span className="mono">{key}</span><code>{JSON.stringify(value)}</code></div>
             ))}
-            {!Object.keys(event).some((key) => !["event_id", "kind", "text", "duration_ms", "character_id", "resource_id", "slot"].includes(key)) && <p>此事件没有额外字段。</p>}
+            {!advancedFields.length && <p>此事件没有额外字段。</p>}
           </div>
         </details>
       </div>
@@ -714,11 +760,11 @@ function Timeline() {
             <button
               type="button"
               key={event.event_id}
-              title={`${eventLabels[event.kind] || event.kind} · ${event.duration_ms} ms`}
+              title={`${eventLabel(event.kind) || event.kind} · ${event.duration_ms} ms`}
               style={{ flexGrow: event.duration_frames }}
               onClick={() => useProjectStore.getState().selectEvent(event.event_id)}
             >
-              <span>{eventLabels[event.kind] || "扩展演出"}</span>
+              <span>{eventLabel(event.kind) || "扩展演出"}</span>
               <small>{event.duration_ms} ms</small>
             </button>
           ))}
