@@ -102,4 +102,27 @@ describe("simple Cue strip interactions", () => {
     expect(useProjectStore.getState().revision).toBe(revision + 1);
     expect(useProjectStore.getState().history).toHaveLength(historyLength + 1);
   });
+
+  it("returns focus to the repaired Cue after deleting the selection", () => {
+    let cues = Array.from(container.querySelectorAll<HTMLButtonElement>(".cue-item"));
+    act(() => cues[1].click());
+    const before = useProjectStore.getState();
+    const revision = before.revision;
+    const historyLength = before.history.length;
+    const deleteCue = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="删除当前 Cue"]',
+    );
+    expect(deleteCue).not.toBeNull();
+
+    act(() => deleteCue?.click());
+
+    cues = Array.from(container.querySelectorAll<HTMLButtonElement>(".cue-item"));
+    expect(cues).toHaveLength(2);
+    expect(document.activeElement).toBe(cues[0]);
+    expect(useProjectStore.getState().selectedCueId).toBe("cue/conference/001");
+    expect(cues.map((cue) => cue.tabIndex)).toEqual([0, -1]);
+    expect(cues[0].getAttribute("aria-pressed")).toBe("true");
+    expect(useProjectStore.getState().revision).toBe(revision + 1);
+    expect(useProjectStore.getState().history).toHaveLength(historyLength + 1);
+  });
 });

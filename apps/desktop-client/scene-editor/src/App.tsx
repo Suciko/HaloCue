@@ -574,7 +574,7 @@ function CueStrip() {
           <IconButton label="在前面插入" onClick={() => focusAfterCueCommand(() => addCue("before"))}><ArrowLeftToLine /></IconButton>
           <IconButton label="在后面插入" onClick={() => focusAfterCueCommand(() => addCue("after"))}><ArrowRightToLine /></IconButton>
           <IconButton label="复制当前 Cue" onClick={() => focusAfterCueCommand(duplicateCue)}><Copy /></IconButton>
-          <IconButton label="删除当前 Cue" disabled={scene.cues.length <= 1} tone="danger" onClick={deleteCue}><Trash2 /></IconButton>
+          <IconButton label="删除当前 Cue" disabled={scene.cues.length <= 1} tone="danger" onClick={() => focusAfterCueCommand(deleteCue)}><Trash2 /></IconButton>
         </div>
       </div>
       <div className="cue-list">
