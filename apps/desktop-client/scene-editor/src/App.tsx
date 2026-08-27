@@ -1815,7 +1815,7 @@ function ShotTimelineWorkspace() {
           <span>
             <strong>镜头时间轴</strong>
             <small>{cue.title || "未命名演出"} · {projection.total_frames} 帧</small>
-            <small data-shot-selection-context>
+            <small data-shot-selection-context aria-live="polite" aria-atomic="true">
               {selectedClip
                 ? `已选 ${shotTimelineClipLabel(selectedClip)} · F${selectedClip.start_frame}-${selectedClip.end_frame}`
                 : "未选择可渲染事件"}
@@ -1895,7 +1895,7 @@ function ShotTimelineWorkspace() {
                       key={clip.event_id}
                       style={clipPosition(clip)}
                       title={`${shotTimelineClipLabel(clip)} · ${clip.start_frame}–${clip.end_frame} · ${clip.wait_for_completion ? "顺序执行" : "与后续事件并行"}`}
-                      aria-label={`${shotTimelineClipLabel(clip)}，第 ${clip.start_frame} 至 ${clip.end_frame} 帧`}
+                      aria-label={`${track.label}，${shotTimelineClipLabel(clip)}，第 ${clip.start_frame} 至 ${clip.end_frame} 帧`}
                       onPointerDown={(event) => event.stopPropagation()}
                       onClick={(event) => {
                         event.stopPropagation();

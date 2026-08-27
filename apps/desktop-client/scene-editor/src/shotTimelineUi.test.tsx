@@ -241,6 +241,30 @@ describe("professional shot timeline workspace", () => {
     expect(useProjectStore.getState().history).toHaveLength(historyLength);
   });
 
+  it("announces a keyboard-selected clip's track and frame range", () => {
+    const shotTab = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"))
+      .find((button) => button.textContent?.includes("镜头时间轴"));
+    act(() => shotTab?.click());
+
+    const second = container.querySelectorAll<HTMLButtonElement>(".shot-clip")[1];
+    expect(second).toBeDefined();
+    act(() => {
+      second.focus();
+      second.dispatchEvent(new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "ArrowLeft",
+      }));
+    });
+
+    expect(second.getAttribute("aria-label")).toContain("Character");
+    expect(second.getAttribute("aria-label")).toMatch(/第 \d+ 至 \d+ 帧/);
+    const context = container.querySelector<HTMLElement>("[data-shot-selection-context]");
+    expect(context?.getAttribute("aria-live")).toBe("polite");
+    expect(context?.getAttribute("aria-atomic")).toBe("true");
+    expect(context?.textContent).toContain("已选");
+  });
+
   it("shows selected event timing as a read-only timeline projection", () => {
     const scene = firstScene(useProjectStore.getState().project);
     const cue = scene.cues[0];
