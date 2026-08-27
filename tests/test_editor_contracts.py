@@ -106,3 +106,30 @@ def test_preview_intent_contract_accepts_an_explicit_event_playhead_target():
     mismatched_alignment = json.loads(json.dumps(intent))
     mismatched_alignment["target"]["alignment"] = "end"
     assert not validator.is_valid(mismatched_alignment)
+
+
+def test_preview_intent_1_1_contract_accepts_only_exact_playhead_targets():
+    schema = _json(
+        ROOT / "packages" / "contracts" / "preview-intent" / "1.1.schema.json"
+    )
+    intent = {
+        "schema_version": "preview-intent/1.1",
+        "scene_id": "scene/classroom",
+        "cue_id": "cue/classroom/001",
+        "selection_kind": "playhead",
+        "selected_event_id": None,
+        "target": {
+            "event_id": "event/alice-line",
+            "frame": 47,
+            "alignment": "exact",
+            "resolution": "explicit-frame",
+        },
+    }
+
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema)
+    validator.validate(intent)
+    event_selection = json.loads(json.dumps(intent))
+    event_selection["selection_kind"] = "event"
+    event_selection["selected_event_id"] = "event/alice-line"
+    assert not validator.is_valid(event_selection)

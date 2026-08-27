@@ -447,9 +447,62 @@ def test_controller_applies_versioned_preview_intent_without_remounting():
             assert applied["targetEventId"] == applied["expectedEvent"]
             assert applied["resolution"] == "selected-event"
 
+            scrubbed = page.evaluate(
+                """() => {
+                    const controller = window.HaloCueScenePreview.controller;
+                    const generation = controller.generation;
+                    const item = controller.timeline.events[2];
+                    const frame = Math.min(item.end_frame - 1, item.start_frame + 2);
+                    controller.applyIntent({
+                        schema_version: 'preview-intent/1.1',
+                        scene_id: controller.scene_id,
+                        cue_id: 'cue/example/selected',
+                        selection_kind: 'playhead',
+                        selected_event_id: null,
+                        target: {
+                            event_id: item.event_id,
+                            frame,
+                            alignment: 'exact',
+                            resolution: 'explicit-frame',
+                        },
+                    });
+                    const stage = document.querySelector('#preview-stage');
+                    return {
+                        sameGeneration: controller.generation === generation,
+                        frame: controller.state.frame,
+                        expectedFrame: frame,
+                        selectionKind: stage.dataset.previewSelectionKind,
+                        selectedEventId: stage.dataset.previewSelectedEventId,
+                        resolution: stage.dataset.previewIntentResolution,
+                    };
+                }"""
+            )
+            assert scrubbed["sameGeneration"] is True
+            assert scrubbed["frame"] == scrubbed["expectedFrame"]
+            assert scrubbed["selectionKind"] == "playhead"
+            assert scrubbed["selectedEventId"] == ""
+            assert scrubbed["resolution"] == "explicit-frame"
+
             preserved = page.evaluate(
                 """() => {
                     const controller = window.HaloCueScenePreview.controller;
+                    const item = controller.timeline.events[0];
+                    let legacyPlayheadRejected = false;
+                    try {
+                        controller.applyIntent({
+                            schema_version: 'preview-intent/1.0',
+                            scene_id: controller.scene_id,
+                            cue_id: 'cue/example/selected',
+                            selection_kind: 'playhead',
+                            selected_event_id: null,
+                            target: {
+                                event_id: item.event_id,
+                                frame: item.start_frame,
+                                alignment: 'exact',
+                                resolution: 'explicit-frame',
+                            },
+                        });
+                    } catch (_) { legacyPlayheadRejected = true; }
                     const before = controller.state.frame;
                     let rejected = false;
                     try {
@@ -467,9 +520,15 @@ def test_controller_applies_versioned_preview_intent_without_remounting():
                             },
                         });
                     } catch (_) { rejected = true; }
-                    return {rejected, before, after: controller.state.frame};
+                    return {
+                        legacyPlayheadRejected,
+                        rejected,
+                        before,
+                        after: controller.state.frame,
+                    };
                 }"""
             )
+            assert preserved["legacyPlayheadRejected"] is True
             assert preserved["rejected"] is True
             assert preserved["after"] == preserved["before"]
             browser.close()

@@ -50,7 +50,7 @@ Ruff, browser JavaScript syntax check, and whitespace check also passed.
 
 ## Remaining work
 
-The editor still owns only the first Scene in several UI components. A later
-slice must move Chapter/Scene selection into the canonical store and make every
-editor command address that selected Scene. Editor Transaction work remains
-separate.
+Canonical Scene selection and Editor Transaction work are recorded in later
+tracers. The additive `preview-intent/1.1` timeline tracer now extends this
+contract with exact intermediate-frame playhead selection while retaining 1.0
+compatibility for Cue and event intents.

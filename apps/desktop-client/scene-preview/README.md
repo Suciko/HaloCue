@@ -50,13 +50,16 @@ check the generation before touching the shared stage. A failed candidate
 therefore leaves the current preview intact, while a late callback from an old
 scene cannot overwrite the new scene.
 
-The editor sends a versioned `preview-intent/1.0` to `applyIntent`. Simple-mode
+The editor sends a versioned `preview-intent/1.0` or additive
+`preview-intent/1.1` to `applyIntent`. Simple-mode
 Cue selection targets the Cue's completed frame. Professional-mode event
 selection targets the exact event start without remounting the Preview Session.
 If a selected extension event has no presentation adapter, the intent records
 and displays an explicit prior-renderable or scene-start fallback. The runtime
-rejects a mismatched scene, event, frame, or start/end alignment before moving
-the playhead.
+rejects a mismatched scene, event, frame, or alignment before moving the
+playhead. Version 1.1 adds professional `playhead` selection: an
+`explicit-frame` target with `exact` alignment may address any frame inside its
+containing event, without remounting the session or changing project history.
 
 Useful deterministic URLs:
 

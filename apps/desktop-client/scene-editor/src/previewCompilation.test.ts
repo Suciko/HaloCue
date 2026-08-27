@@ -17,6 +17,7 @@ function request(
     selectedSceneId: "scene/conference-room",
     selectedCueId: "cue/conference/001",
     selectedEventId: "event/dialogue/001",
+    playheadFrame: null,
     ...patch,
   };
 }
@@ -77,6 +78,26 @@ describe("preview compilation coordinator", () => {
     expect(selected.evaluation).toBe(initial.evaluation);
     expect(selected.intent.target.resolution).toBe("selected-event");
     expect(selected.intent.selected_event_id).toBe("event/enter/yuuka");
+  });
+
+  it("reuses scene evaluation while scrubbing to an exact frame", () => {
+    const initial = compilePreview(request());
+    const scrubbed = compilePreview(request(demoProject, {
+      mode: "professional",
+      playheadFrame: 7,
+    }), 1, initial);
+
+    expect(scrubbed.evaluation).toBe(initial.evaluation);
+    expect(scrubbed.intent).toEqual(expect.objectContaining({
+      schema_version: "preview-intent/1.1",
+      selection_kind: "playhead",
+      selected_event_id: null,
+      target: expect.objectContaining({
+        frame: 7,
+        alignment: "exact",
+        resolution: "explicit-frame",
+      }),
+    }));
   });
 
   it("cancels pending work when disposed", () => {

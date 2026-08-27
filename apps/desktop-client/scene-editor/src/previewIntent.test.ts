@@ -104,4 +104,33 @@ describe("preview intent", () => {
       eventId: "event/missing",
     })).toThrow(/不存在事件/);
   });
+
+  it("resolves a professional playhead to its exact containing event frame", () => {
+    const cue = demoProject.chapters[0].scenes[0].cues[1];
+    const evaluation = evaluateScene(demoProject, cue.cue_id);
+    const dialogue = evaluation.timeline.events.find(
+      (event) => event.event_id === "event/dialogue/002",
+    )!;
+    const frame = dialogue.start_frame + 3;
+
+    const intent = buildPreviewIntent(demoProject, evaluation, {
+      cueId: cue.cue_id,
+      kind: "playhead",
+      frame,
+    });
+
+    expect(intent).toEqual({
+      schema_version: "preview-intent/1.1",
+      scene_id: "scene/conference-room",
+      cue_id: cue.cue_id,
+      selection_kind: "playhead",
+      selected_event_id: null,
+      target: {
+        event_id: dialogue.event_id,
+        frame,
+        alignment: "exact",
+        resolution: "explicit-frame",
+      },
+    });
+  });
 });

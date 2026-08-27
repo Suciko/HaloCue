@@ -61,6 +61,7 @@ type EditorState = {
   selectedCueId: string;
   selectedSlot: number;
   selectedEventId: string | null;
+  previewPlayheadFrame: number | null;
   history: HistoryEntry[];
   future: HistoryEntry[];
   dirty: boolean;
@@ -76,6 +77,7 @@ type EditorState = {
   selectCue: (cueId: string) => void;
   selectSlot: (slot: number) => void;
   selectEvent: (eventId: string | null) => void;
+  setPreviewPlayheadFrame: (frame: number | null) => void;
   beginTransaction: (key: string) => void;
   previewEnvironment: (key: string, patch: Partial<CueEvent>) => void;
   commitTransaction: (key: string) => EditorTransactionResult;
@@ -273,6 +275,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       future: [],
       dirty: true,
       revision,
+      previewPlayheadFrame: selection ? null : state.previewPlayheadFrame,
       autosave,
       projectDiagnostics: [...repository.getDiagnostics()],
     });
@@ -288,6 +291,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     selectedCueId: initial.selectedCueId,
     selectedSlot: 1,
     selectedEventId: initial.selectedEventId,
+    previewPlayheadFrame: null,
     history: [],
     future: [],
     dirty: false,
@@ -299,7 +303,10 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     setMode: (mode) => {
       commitActiveTransaction();
       saveEditorMode(mode);
-      set({ mode });
+      set({
+        mode,
+        previewPlayheadFrame: mode === "simple" ? null : get().previewPlayheadFrame,
+      });
     },
     setInspectorTab: (inspectorTab) => set({ inspectorTab }),
     selectChapter: (chapterId) => {
@@ -309,14 +316,14 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
       const chapter = state.project.chapters.find((item) => item.chapter_id === chapterId);
       const scene = chapter?.scenes.find((item) => item.cues.length > 0);
       if (!scene) return;
-      set(selectionForScene(state.project, scene.scene_id));
+      set({ ...selectionForScene(state.project, scene.scene_id), previewPlayheadFrame: null });
     },
     selectScene: (sceneId) => {
       commitActiveTransaction();
       const state = get();
       if (sceneId === state.selectedSceneId) return;
       try {
-        set(selectionForScene(state.project, sceneId));
+        set({ ...selectionForScene(state.project, sceneId), previewPlayheadFrame: null });
       } catch (_error) {
         // A stale tree item must not corrupt the current canonical selection.
       }
@@ -324,25 +331,42 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
     selectCue: (selectedCueId) => {
       commitActiveTransaction();
       const state = get();
-      if (selectedCueId === state.selectedCueId) return;
+      if (selectedCueId === state.selectedCueId) {
+        if (state.previewPlayheadFrame !== null) set({ previewPlayheadFrame: null });
+        return;
+      }
       const cue = sceneById(state.project, state.selectedSceneId)
         .cues.find((item) => item.cue_id === selectedCueId);
       if (!cue) return;
-      set({ selectedCueId, selectedEventId: cue.events[0]?.event_id || null });
+      set({
+        selectedCueId,
+        selectedEventId: cue.events[0]?.event_id || null,
+        previewPlayheadFrame: null,
+      });
     },
     selectSlot: (selectedSlot) => set({ selectedSlot, inspectorTab: "character" }),
     selectEvent: (selectedEventId) => {
       commitActiveTransaction();
       if (selectedEventId === null) {
-        set({ selectedEventId: null });
+        set({ selectedEventId: null, previewPlayheadFrame: null });
         return;
       }
       const state = get();
       const cue = sceneById(state.project, state.selectedSceneId)
         .cues.find((item) => item.cue_id === state.selectedCueId);
       if (cue?.events.some((event) => event.event_id === selectedEventId)) {
-        set({ selectedEventId });
+        set({ selectedEventId, previewPlayheadFrame: null });
       }
+    },
+    setPreviewPlayheadFrame: (frame) => {
+      if (frame === null) {
+        set({ previewPlayheadFrame: null });
+        return;
+      }
+      if (!Number.isInteger(frame) || frame < 0) {
+        throw new Error("预览播放头必须是非负整数帧");
+      }
+      set({ previewPlayheadFrame: frame });
     },
     beginTransaction: (key) => {
       if (!key) throw new Error("编辑事务需要稳定的 key");
@@ -561,6 +585,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         }, ...state.future.slice(0, 59)],
         dirty: true,
         revision,
+        previewPlayheadFrame: null,
         autosave,
         projectDiagnostics: [...repository.getDiagnostics()],
       });
@@ -583,6 +608,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         future: state.future.slice(1),
         dirty: true,
         revision,
+        previewPlayheadFrame: null,
         autosave,
         projectDiagnostics: [...repository.getDiagnostics()],
       });
@@ -603,6 +629,7 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         revision,
         previewRevision: get().previewRevision + 1,
         activeTransaction: null,
+        previewPlayheadFrame: null,
         autosave,
         projectDiagnostics: [...repository.getDiagnostics()],
       });

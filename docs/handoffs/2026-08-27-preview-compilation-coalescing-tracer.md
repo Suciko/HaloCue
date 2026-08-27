@@ -15,6 +15,7 @@ The coordinator applies these rules:
 - a newer request cancels the older timer and becomes the only compilable
   snapshot;
 - Scene, Cue, mode, or event address changes compile immediately;
+- exact playhead changes rebuild only Preview Intent and reuse Scene Evaluation;
 - finishing a gesture flushes its pending final snapshot immediately; and
 - component disposal invalidates pending generations.
 
@@ -25,8 +26,8 @@ another asynchronous adapter later without permitting stale publication.
 ## Evaluation versus intent
 
 A Preview Compilation contains both the Scene Evaluation and resolved Preview
-Intent. When only mode or selected event changes, the coordinator reuses the
-existing evaluation object and rebuilds only the intent. Moving the
+Intent. When only mode, selected event, or exact playhead changes, the
+coordinator reuses the existing evaluation object and rebuilds only the intent. Moving the
 professional playhead therefore does not rebuild the descriptor, timeline, or
 performance plan.
 
@@ -45,8 +46,7 @@ whitespace check also passed.
 
 ## Remaining work
 
-The editor still persists durable commits synchronously. The next slice should
-introduce an independent autosave scheduler with explicit saved, pending, and
-failed revision state. It must preserve the transaction rollback guarantees
-already established and must not use preview generations as persistence
-revisions.
+The independent autosave scheduler is now recorded in its later tracer and
+uses editor revisions rather than preview generations. Further compilation work
+should focus on worker execution only when profiling proves the synchronous
+compiler exceeds the current short scheduling window.

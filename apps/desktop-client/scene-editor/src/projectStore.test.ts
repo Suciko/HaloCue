@@ -95,6 +95,22 @@ describe("shared dual-mode project store", () => {
     expect(current.revision).toBe(before.revision);
   });
 
+  it("moves the preview playhead without creating project history", () => {
+    const before = useProjectStore.getState();
+
+    before.setPreviewPlayheadFrame(17);
+    let current = useProjectStore.getState();
+    expect(current.previewPlayheadFrame).toBe(17);
+    expect(current.project).toBe(before.project);
+    expect(current.history).toEqual(before.history);
+    expect(current.revision).toBe(before.revision);
+    expect(current.autosave).toEqual(before.autosave);
+
+    current.selectEvent("event/dialogue/001");
+    current = useProjectStore.getState();
+    expect(current.previewPlayheadFrame).toBeNull();
+  });
+
   it("stores a stable expression state while the adapter resolves a Spine animation", () => {
     const state = useProjectStore.getState();
     state.updateCharacterState(1, { expression_id: "expression/smile" });

@@ -8,9 +8,9 @@
   const DEFAULT_ACTOR_MEDIA_SCALE = 1.6;
   const SPINE_RENDERER = window.HaloCueSpineRenderer;
   const PERFORMANCE_RUNTIME = window.HaloCueScenePerformanceRuntime;
-  const PREVIEW_INTENT_SCHEMA = "preview-intent/1.0";
+  const PREVIEW_INTENT_SCHEMAS = new Set(["preview-intent/1.0", "preview-intent/1.1"]);
   const PREVIEW_INTENT_RESOLUTIONS = new Set([
-    "selected-event", "cue-terminal", "prior-renderable", "scene-start",
+    "selected-event", "cue-terminal", "prior-renderable", "scene-start", "explicit-frame",
   ]);
   const EVENT_REGISTRY = window.HaloCueSceneEventRegistry || {
     isVisualOnly: () => false,
@@ -200,7 +200,7 @@
 
   function validatePreviewIntent(intent, descriptor, timeline) {
     if (intent === undefined) return null;
-    if (!intent || intent.schema_version !== PREVIEW_INTENT_SCHEMA) {
+    if (!intent || !PREVIEW_INTENT_SCHEMAS.has(intent.schema_version)) {
       throw new Error("unsupported preview intent schema");
     }
     if (intent.scene_id !== descriptor.scene_id) {
@@ -209,11 +209,15 @@
     if (typeof intent.cue_id !== "string" || !intent.cue_id.trim()) {
       throw new Error("preview intent cue_id is invalid");
     }
-    if (!new Set(["cue", "event"]).has(intent.selection_kind)) {
+    if (!new Set(["cue", "event", "playhead"]).has(intent.selection_kind)) {
       throw new Error("preview intent selection kind is invalid");
     }
+    if (intent.selection_kind === "playhead" && intent.schema_version !== "preview-intent/1.1") {
+      throw new Error("preview playhead requires preview-intent/1.1");
+    }
     if (
-      (intent.selection_kind === "cue" && intent.selected_event_id !== null)
+      (new Set(["cue", "playhead"]).has(intent.selection_kind)
+        && intent.selected_event_id !== null)
       || (intent.selection_kind === "event"
         && (typeof intent.selected_event_id !== "string" || !intent.selected_event_id))
     ) {
@@ -225,7 +229,7 @@
       || typeof target.event_id !== "string"
       || !target.event_id
       || !Number.isInteger(target.frame)
-      || !new Set(["start", "end"]).has(target.alignment)
+      || !new Set(["start", "end", "exact"]).has(target.alignment)
       || !PREVIEW_INTENT_RESOLUTIONS.has(target.resolution)
     ) {
       throw new Error("preview intent target is invalid");
@@ -248,6 +252,9 @@
         && target.alignment !== "start")
       || (new Set(["cue-terminal", "prior-renderable"]).has(target.resolution)
         && target.alignment !== "end")
+      || (target.resolution === "explicit-frame"
+        && (intent.selection_kind !== "playhead" || target.alignment !== "exact"))
+      || (intent.selection_kind === "playhead" && target.resolution !== "explicit-frame")
     ) {
       throw new Error("preview intent resolution does not match its selection");
     }

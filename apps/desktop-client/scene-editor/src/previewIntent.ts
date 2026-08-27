@@ -6,7 +6,7 @@ import type {
   ScenePreviewIntent,
 } from "./types";
 
-export const PREVIEW_INTENT_SCHEMA_VERSION = "preview-intent/1.0" as const;
+export const PREVIEW_INTENT_SCHEMA_VERSION_1_0 = "preview-intent/1.0" as const;
 
 function terminalIntent(
   sceneId: string,
@@ -15,7 +15,7 @@ function terminalIntent(
   resolution: "cue-terminal" | "prior-renderable",
 ): ScenePreviewIntent {
   return {
-    schema_version: PREVIEW_INTENT_SCHEMA_VERSION,
+    schema_version: PREVIEW_INTENT_SCHEMA_VERSION_1_0,
     scene_id: sceneId,
     cue_id: cueId,
     selection_kind: "cue",
@@ -34,8 +34,9 @@ export function buildPreviewIntent(
   evaluation: SceneEvaluation,
   selection: {
     cueId: string;
-    kind: "cue" | "event";
+    kind: "cue" | "event" | "playhead";
     eventId?: string | null;
+    frame?: number | null;
   },
 ): ScenePreviewIntent {
   const scene = sceneById(project, evaluation.scene_id);
@@ -48,6 +49,30 @@ export function buildPreviewIntent(
   const terminal = timeline.events.at(-1);
   if (!terminal) throw new Error("预览时间线没有可定位事件");
   const cue = scene.cues[cueIndex];
+
+  if (selection.kind === "playhead") {
+    const frame = selection.frame;
+    if (typeof frame !== "number" || !Number.isInteger(frame) || frame < 0 || frame >= timeline.total_frames) {
+      throw new Error(`预览播放头帧 ${String(frame)} 超出时间线`);
+    }
+    const target = timeline.events.find(
+      (item) => frame >= item.start_frame && frame < item.end_frame,
+    );
+    if (!target) throw new Error(`预览播放头帧 ${frame} 不属于任何事件`);
+    return {
+      schema_version: "preview-intent/1.1",
+      scene_id: scene.scene_id,
+      cue_id: cue.cue_id,
+      selection_kind: "playhead",
+      selected_event_id: null,
+      target: {
+        event_id: target.event_id,
+        frame,
+        alignment: "exact",
+        resolution: "explicit-frame",
+      },
+    };
+  }
 
   if (selection.kind === "cue" || !selection.eventId) {
     const cueEventIds = new Set(cue.events.map((event) => event.event_id));
@@ -68,7 +93,7 @@ export function buildPreviewIntent(
   const exact = timeline.events.find((item) => item.event_id === selection.eventId);
   if (exact) {
     return {
-      schema_version: PREVIEW_INTENT_SCHEMA_VERSION,
+      schema_version: PREVIEW_INTENT_SCHEMA_VERSION_1_0,
       scene_id: scene.scene_id,
       cue_id: cue.cue_id,
       selection_kind: "event",
@@ -93,7 +118,7 @@ export function buildPreviewIntent(
     .find((item): item is RenderTimelineEvent => Boolean(item));
   const target = prior || timeline.events[0];
   return {
-    schema_version: PREVIEW_INTENT_SCHEMA_VERSION,
+    schema_version: PREVIEW_INTENT_SCHEMA_VERSION_1_0,
     scene_id: scene.scene_id,
     cue_id: cue.cue_id,
     selection_kind: "event",

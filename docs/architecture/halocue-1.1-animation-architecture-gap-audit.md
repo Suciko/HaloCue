@@ -332,6 +332,14 @@ editor commits publish immediately and queue their revision into an independent
 explicit editor state; a failed write retains the complete in-memory revision
 for retry. Export and browser unload flush pending work synchronously.
 
+The professional timeline playhead tracer is recorded in
+`docs/handoffs/2026-08-27-professional-timeline-playhead-tracer.md`. The additive
+`preview-intent/1.1` contract introduces `playhead` selection with an
+`explicit-frame`/`exact` target. Pointer and keyboard scrubbing now seek
+deterministic animation intermediates through the existing Preview Session,
+without remounting media, mutating project data, appending history, or queuing
+autosave.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure

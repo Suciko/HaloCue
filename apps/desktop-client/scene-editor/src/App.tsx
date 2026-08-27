@@ -271,6 +271,7 @@ function PreviewFrame() {
   const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const selectedEventId = useProjectStore((state) => state.selectedEventId);
+  const playheadFrame = useProjectStore((state) => state.previewPlayheadFrame);
   const activeTransaction = useProjectStore((state) => state.activeTransaction);
   const frame = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
@@ -283,13 +284,14 @@ function PreviewFrame() {
     selectedSceneId,
     selectedCueId,
     selectedEventId,
-  }), [mode, project, selectedCueId, selectedEventId, selectedSceneId]);
+    playheadFrame,
+  }), [mode, playheadFrame, project, selectedCueId, selectedEventId, selectedSceneId]);
   const [compilation, setCompilation] = useState(() => compilePreview(request));
   const coordinatorRef = useRef<PreviewCompilationCoordinator | null>(null);
   if (!coordinatorRef.current) {
     coordinatorRef.current = new PreviewCompilationCoordinator(compilation, setCompilation);
   }
-  const addressRef = useRef({ mode, selectedSceneId, selectedCueId, selectedEventId });
+  const addressRef = useRef({ mode, selectedSceneId, selectedCueId, selectedEventId, playheadFrame });
   const wasTransactionActiveRef = useRef(Boolean(activeTransaction));
   const evaluation = compilation.evaluation;
   const intent = compilation.intent;
@@ -300,6 +302,7 @@ function PreviewFrame() {
     "cue-terminal": "Cue 完成态",
     "prior-renderable": "扩展事件前一画面",
     "scene-start": "场景起始画面",
+    "explicit-frame": `精确帧 ${intent.target.frame}`,
   }[intent.target.resolution];
 
   useEffect(() => {
@@ -307,10 +310,11 @@ function PreviewFrame() {
     const addressChanged = previous.mode !== mode
       || previous.selectedSceneId !== selectedSceneId
       || previous.selectedCueId !== selectedCueId
-      || previous.selectedEventId !== selectedEventId;
-    addressRef.current = { mode, selectedSceneId, selectedCueId, selectedEventId };
+      || previous.selectedEventId !== selectedEventId
+      || previous.playheadFrame !== playheadFrame;
+    addressRef.current = { mode, selectedSceneId, selectedCueId, selectedEventId, playheadFrame };
     coordinatorRef.current?.request(request, addressChanged ? "immediate" : "coalesced");
-  }, [mode, request, selectedCueId, selectedEventId, selectedSceneId]);
+  }, [mode, playheadFrame, request, selectedCueId, selectedEventId, selectedSceneId]);
 
   useEffect(() => {
     const active = Boolean(activeTransaction);
@@ -927,12 +931,21 @@ function ProfessionalInspector() {
   );
 }
 
+function formatTimelineFrame(frame: number, frameRate: number): string {
+  const totalSeconds = frame / frameRate;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds - minutes * 60;
+  return `${String(minutes).padStart(2, "0")}:${seconds.toFixed(2).padStart(5, "0")}`;
+}
+
 function Timeline() {
   const project = useProjectStore((state) => state.project);
   const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
   const selectedEventId = useProjectStore((state) => state.selectedEventId);
+  const playheadFrame = useProjectStore((state) => state.previewPlayheadFrame);
   const selectCue = useProjectStore((state) => state.selectCue);
+  const setPlayheadFrame = useProjectStore((state) => state.setPreviewPlayheadFrame);
   const scene = sceneById(project, selectedSceneId);
   const evaluation = useMemo(
     () => evaluateScene(project, selectedCueId, { sceneId: selectedSceneId }),
@@ -941,9 +954,86 @@ function Timeline() {
   const cue = scene.cues.find((item) => item.cue_id === selectedCueId);
   const cueEventIds = new Set(cue?.events.map((event) => event.event_id));
   const eventSegments = evaluation.timeline.events.filter((event) => cueEventIds.has(event.event_id));
+  const cueStartFrame = eventSegments[0]?.start_frame || 0;
+  const cueEndFrame = Math.max(
+    cueStartFrame,
+    (eventSegments.at(-1)?.end_frame || evaluation.timeline.total_frames) - 1,
+  );
+  const selectedEventFrame = eventSegments.find(
+    (event) => event.event_id === selectedEventId,
+  )?.start_frame;
+  const visibleFrame = Math.max(
+    cueStartFrame,
+    Math.min(cueEndFrame, playheadFrame ?? selectedEventFrame ?? cueEndFrame),
+  );
+  const cueFrameSpan = Math.max(1, cueEndFrame - cueStartFrame);
+  const playheadPercent = ((visibleFrame - cueStartFrame) / cueFrameSpan) * 100;
+  const rulerFrames = Array.from({ length: 4 }, (_, index) => (
+    Math.round(cueStartFrame + (cueFrameSpan * index) / 3)
+  ));
+  const scrubAt = (clientX: number, element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    const ratio = rect.width > 0
+      ? Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      : 0;
+    setPlayheadFrame(Math.round(cueStartFrame + ratio * cueFrameSpan));
+  };
+  const nudgePlayhead = (frame: number) => {
+    setPlayheadFrame(Math.max(cueStartFrame, Math.min(cueEndFrame, frame)));
+  };
   return (
     <section className="timeline-panel">
-      <div className="timeline-ruler"><span>00:00</span><span>00:05</span><span>00:10</span><span>00:15</span></div>
+      <div className="timeline-ruler">
+        {rulerFrames.map((frame, index) => (
+          <span key={`${index}:${frame}`}>{formatTimelineFrame(frame, evaluation.timeline.frame_rate)}</span>
+        ))}
+      </div>
+      <div className="timeline-track timeline-scrub-track">
+        <span className="track-label"><Play />播放头</span>
+        <div
+          className="timeline-scrubber"
+          role="slider"
+          tabIndex={0}
+          aria-label="预览播放头"
+          aria-valuemin={cueStartFrame}
+          aria-valuemax={cueEndFrame}
+          aria-valuenow={visibleFrame}
+          aria-valuetext={`${formatTimelineFrame(visibleFrame, evaluation.timeline.frame_rate)}，第 ${visibleFrame} 帧`}
+          onPointerDown={(event) => {
+            event.currentTarget.setPointerCapture(event.pointerId);
+            scrubAt(event.clientX, event.currentTarget);
+          }}
+          onPointerMove={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              scrubAt(event.clientX, event.currentTarget);
+            }
+          }}
+          onKeyDown={(event) => {
+            const page = Math.max(1, evaluation.timeline.frame_rate);
+            const target = {
+              ArrowLeft: visibleFrame - 1,
+              ArrowDown: visibleFrame - 1,
+              ArrowRight: visibleFrame + 1,
+              ArrowUp: visibleFrame + 1,
+              PageDown: visibleFrame - page,
+              PageUp: visibleFrame + page,
+              Home: cueStartFrame,
+              End: cueEndFrame,
+            }[event.key];
+            if (target !== undefined) {
+              event.preventDefault();
+              nudgePlayhead(target);
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              setPlayheadFrame(null);
+            }
+          }}
+        >
+          <span className="scrub-progress" style={{ width: `${playheadPercent}%` }} />
+          <span className="scrub-playhead" style={{ left: `${playheadPercent}%` }} />
+          <output>{formatTimelineFrame(visibleFrame, evaluation.timeline.frame_rate)} · F{visibleFrame}</output>
+        </div>
+      </div>
       <div className="timeline-track">
         <span className="track-label"><Clapperboard />Cue</span>
         <div className="timeline-segments">

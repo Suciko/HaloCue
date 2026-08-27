@@ -268,6 +268,13 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .timeline-panel { min-width: 0; padding: 8px 10px; border-top: 1px solid var(--line); background: #121514; overflow: hidden; }
 .timeline-ruler { height: 20px; display: flex; justify-content: space-between; padding-left: 91px; color: var(--subtle); font-size: 8px; }
 .timeline-track { min-width: 0; display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 8px; align-items: stretch; }
+.timeline-scrub-track { margin-bottom: 4px; }
+.timeline-scrubber { position: relative; min-width: 0; height: 35px; overflow: hidden; border: 1px solid #35413c; border-radius: 5px; background: repeating-linear-gradient(90deg, transparent 0, transparent calc(10% - 1px), rgba(255,255,255,.045) calc(10% - 1px), rgba(255,255,255,.045) 10%), #171c1a; cursor: ew-resize; touch-action: none; }
+.timeline-scrubber:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.scrub-progress { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, rgba(99, 223, 166, .05), rgba(99, 223, 166, .16)); pointer-events: none; }
+.scrub-playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent); box-shadow: 0 0 8px rgba(99, 223, 166, .55); pointer-events: none; }
+.scrub-playhead::before { content: ""; position: absolute; top: 0; left: -4px; width: 9px; height: 6px; border-radius: 0 0 4px 4px; background: var(--accent); }
+.timeline-scrubber output { position: absolute; right: 8px; top: 50%; translate: 0 -50%; color: #aebbb5; font: 9px/1 ui-monospace, SFMono-Regular, Consolas, monospace; pointer-events: none; }
 .event-timeline-track { margin-top: 4px; }
 .track-label { height: 35px; display: flex; align-items: center; gap: 7px; padding-left: 8px; border-radius: 5px; background: var(--panel-2); color: var(--muted); font-size: 9px; }
 .timeline-segments { min-width: 0; display: flex; gap: 3px; overflow-x: auto; }

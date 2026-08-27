@@ -211,18 +211,19 @@ export type PreviewIntentResolution =
   | "selected-event"
   | "cue-terminal"
   | "prior-renderable"
-  | "scene-start";
+  | "scene-start"
+  | "explicit-frame";
 
 export type ScenePreviewIntent = {
-  schema_version: "preview-intent/1.0";
+  schema_version: "preview-intent/1.0" | "preview-intent/1.1";
   scene_id: string;
   cue_id: string;
-  selection_kind: "cue" | "event";
+  selection_kind: "cue" | "event" | "playhead";
   selected_event_id: string | null;
   target: {
     event_id: string;
     frame: number;
-    alignment: "start" | "end";
+    alignment: "start" | "end" | "exact";
     resolution: PreviewIntentResolution;
   };
 };

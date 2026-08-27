@@ -13,6 +13,7 @@ export type PreviewCompilationRequest = {
   selectedSceneId: string;
   selectedCueId: string;
   selectedEventId: string | null;
+  playheadFrame: number | null;
 };
 
 export type PreviewCompilation = {
@@ -30,7 +31,8 @@ function sameRequest(
     && left.mode === right.mode
     && left.selectedSceneId === right.selectedSceneId
     && left.selectedCueId === right.selectedCueId
-    && left.selectedEventId === right.selectedEventId;
+    && left.selectedEventId === right.selectedEventId
+    && left.playheadFrame === right.playheadFrame;
 }
 
 function sameEvaluationInput(
@@ -52,10 +54,17 @@ export function compilePreview(
     : evaluateScene(request.project, request.selectedCueId, {
       sceneId: request.selectedSceneId,
     });
-  const intent = buildPreviewIntent(request.project, evaluation, {
+  const requestedFrame = request.playheadFrame === null
+    ? null
+    : Math.max(0, Math.min(evaluation.timeline.total_frames - 1, request.playheadFrame));
+  const intent = buildPreviewIntent(request.project, evaluation, requestedFrame === null ? {
     cueId: request.selectedCueId,
     kind: request.mode === "professional" ? "event" : "cue",
     eventId: request.mode === "professional" ? request.selectedEventId : null,
+  } : {
+    cueId: request.selectedCueId,
+    kind: "playhead",
+    frame: requestedFrame,
   });
   return { generation, request, evaluation, intent };
 }

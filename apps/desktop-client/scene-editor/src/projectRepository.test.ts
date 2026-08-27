@@ -43,6 +43,7 @@ function transactionSnapshot(store: ReturnType<typeof createProjectStore>) {
     selectedSceneId: state.selectedSceneId,
     selectedCueId: state.selectedCueId,
     selectedEventId: state.selectedEventId,
+    previewPlayheadFrame: state.previewPlayheadFrame,
     history: state.history,
     future: state.future,
     dirty: state.dirty,
