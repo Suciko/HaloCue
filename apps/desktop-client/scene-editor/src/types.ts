@@ -191,6 +191,26 @@ export type ScenePerformancePlan = {
   source_map: PerformanceSourceMapEntry[];
 };
 
+export type PreviewIntentResolution =
+  | "selected-event"
+  | "cue-terminal"
+  | "prior-renderable"
+  | "scene-start";
+
+export type ScenePreviewIntent = {
+  schema_version: "preview-intent/1.0";
+  scene_id: string;
+  cue_id: string;
+  selection_kind: "cue" | "event";
+  selected_event_id: string | null;
+  target: {
+    event_id: string;
+    frame: number;
+    alignment: "start" | "end";
+    resolution: PreviewIntentResolution;
+  };
+};
+
 export type ScenePerformanceSample = {
   schema_version: "scene-performance-sample/1.0";
   frame: number;

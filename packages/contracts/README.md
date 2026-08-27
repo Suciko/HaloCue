@@ -4,8 +4,8 @@ This package owns versioned JSON contracts shared by the client, backend, BA
 editor, and adapters. A wire-shape change requires a new version or an explicit
 migration plus consumer tests. Current editor/render contracts include
 `halocue-project/1.1`, `character-capabilities/1.0`, `scene-events/1.0`,
-`render-timeline/1.0`, `scene-performance/1.1`, `scene-evaluation/1.2`, and
-`render-sequence/1.1`.
+`render-timeline/1.0`, `scene-performance/1.1`, `scene-evaluation/1.2`,
+`preview-intent/1.0`, and `render-sequence/1.1`.
 Planned contracts include
 `script-release/1.1`, `production-request/1.1`, `performance-draft/1.0`,
 `build-bundle/1.0`, and `scene-descriptor/1.0`.
@@ -59,6 +59,13 @@ plan, and non-fatal diagnostics for namespaced
 professional events that a presentation adapter does not render yet. The
 editor, browser preview, and offline adapters can therefore share one explicit
 intermediate result without duplicating canonical project data.
+
+The `preview-intent/1.0` schema lives in `preview-intent/1.0.schema.json`. It
+turns editor Cue/event selection into an explicit scene identity and exact
+timeline frame. Cue selection resolves to the Cue's completed state; event
+selection resolves to the event start. A selected extension event that is not
+renderable records an explicit prior-renderable or scene-start fallback instead
+of silently seeking an unrelated frame.
 
 The `render-sequence/1.1` manifest binds a resumable numbered PNG sequence to
 the SHA-256 of its descriptor, timeline, and performance plan. A sequence can

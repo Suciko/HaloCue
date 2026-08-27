@@ -284,6 +284,13 @@ session, and prevents stale controllers or delayed media callbacks from
 mutating the shared stage. Broader scene ownership and editor-to-preview
 selection synchronization remain later slices.
 
+The next Preview Session slice is recorded in
+`docs/handoffs/2026-08-27-preview-intent-tracer.md`. It introduces the versioned
+`preview-intent/1.0` host/runtime contract: simple Cue selection resolves to a
+completed Cue frame, professional event selection resolves to an exact start
+frame, and unsupported extension selection carries an explicit fallback reason.
+Changing only the event selection reuses the current session generation.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure
@@ -292,9 +299,10 @@ it should not be treated as an architectural Seam. Removing it is optional and
 should be done only inside an affected implementation slice, not as standalone
 cleanup.
 
-## Decision needed before implementation
+## Decision record
 
-The maintainer should choose which candidate Module to deepen first. The audit
-recommends the Scene Performance Compiler tracer bullet above. After that
-choice, use `to-issues` to draft small AFK/HITL tracer-bullet Issues and obtain
-approval before publishing them.
+The Scene Performance Compiler was selected first and delivered through the
+shake and character-tween tracer bullets. Preview Session generation and intent
+followed as separate reviewed slices. Existing Issues and PR #27 remain the
+canonical tracker; additional `to-issues` publication still requires explicit
+maintainer approval.

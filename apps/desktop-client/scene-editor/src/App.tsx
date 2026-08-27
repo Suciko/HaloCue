@@ -48,6 +48,7 @@ import {
 import { projectFileAdapter } from "./projectRepository";
 import { capabilityStatesFor } from "./capabilities";
 import { evaluateScene } from "./sceneEvaluation";
+import { buildPreviewIntent } from "./previewIntent";
 import { eventDurationMs } from "./renderTimeline";
 import { firstScene, projectCueState } from "./cueStateProjection";
 import {
@@ -68,13 +69,17 @@ import type {
   InspectorTab,
   RenderTimeline,
   SceneDescriptor,
+  SceneEvaluation,
   ScenePerformancePlan,
+  ScenePreviewIntent,
 } from "./types";
 
 type PreviewController = {
+  applyIntent: (intent: ScenePreviewIntent) => unknown;
   generation: number;
   isCurrent: () => boolean;
-  timeline: { total_frames: number };
+  scene_id: string;
+  timeline: RenderTimeline;
   performance: ScenePerformancePlan;
   seekFrame: (frame: number) => void;
   play: (options?: { fromFrame?: number }) => void;
@@ -86,7 +91,11 @@ type PreviewWindow = Window & {
     mount: (
       descriptor: SceneDescriptor,
       root?: Element | null,
-      options?: { timeline?: RenderTimeline; performance?: ScenePerformancePlan },
+      options?: {
+        timeline?: RenderTimeline;
+        performance?: ScenePerformancePlan;
+        intent?: ScenePreviewIntent;
+      },
     ) => PreviewController;
     controller?: PreviewController;
   };
@@ -213,16 +222,35 @@ function ProjectRail({ showCues }: { showCues: boolean }) {
 
 function PreviewFrame() {
   const project = useProjectStore((state) => state.project);
+  const mode = useProjectStore((state) => state.mode);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
+  const selectedEventId = useProjectStore((state) => state.selectedEventId);
   const revision = useProjectStore((state) => state.revision);
   const frame = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const controllerRef = useRef<PreviewController | null>(null);
+  const mountedEvaluationRef = useRef<SceneEvaluation | null>(null);
   const evaluation = useMemo(
     () => evaluateScene(project, selectedCueId),
     [project, selectedCueId, revision],
   );
+  const intent = useMemo(
+    () => buildPreviewIntent(project, evaluation, {
+      cueId: selectedCueId,
+      kind: mode === "professional" ? "event" : "cue",
+      eventId: mode === "professional" ? selectedEventId : null,
+    }),
+    [evaluation, mode, project, selectedCueId, selectedEventId],
+  );
+  const intentRef = useRef(intent);
+  intentRef.current = intent;
+  const intentLabel = {
+    "selected-event": "所选事件起点",
+    "cue-terminal": "Cue 完成态",
+    "prior-renderable": "扩展事件前一画面",
+    "scene-start": "场景起始画面",
+  }[intent.target.resolution];
 
   const mount = () => {
     const previewWindow = frame.current?.contentWindow as PreviewWindow | null;
@@ -232,10 +260,11 @@ function PreviewFrame() {
       const controller = preview.mount(evaluation.descriptor, undefined, {
         timeline: evaluation.timeline,
         performance: evaluation.performance,
+        intent: intentRef.current,
       });
       preview.controller = controller;
       controllerRef.current = controller;
-      controller.seekFrame(Math.max(0, controller.timeline.total_frames - 1));
+      mountedEvaluationRef.current = evaluation;
       setError("");
       setReady(true);
     } catch (exception) {
@@ -250,7 +279,25 @@ function PreviewFrame() {
     return () => window.clearTimeout(timer);
   }, [evaluation]);
 
-  useEffect(() => () => controllerRef.current?.dispose(), []);
+  useEffect(() => {
+    const controller = controllerRef.current;
+    if (
+      !ready
+      || !controller?.isCurrent()
+      || mountedEvaluationRef.current !== evaluation
+    ) return;
+    try {
+      controller.applyIntent(intent);
+      setError("");
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "预览定位失败");
+    }
+  }, [evaluation, intent, ready]);
+
+  useEffect(() => () => {
+    mountedEvaluationRef.current = null;
+    controllerRef.current?.dispose();
+  }, []);
 
   return (
     <section className="preview-region" aria-label="实时预览">
@@ -258,7 +305,9 @@ function PreviewFrame() {
         <div>
           <span className="live-dot" />
           <strong>实时预览</strong>
-          <span className="preview-meta">1280 × 720 · Spine</span>
+          <span className="preview-meta" aria-live="polite">
+            1280 × 720 · Spine · {intentLabel}
+          </span>
         </div>
         <div className="preview-toolbar-actions">
           <button type="button" onClick={mount}><RotateCcw />刷新</button>
@@ -757,6 +806,7 @@ function ProfessionalInspector() {
 function Timeline() {
   const project = useProjectStore((state) => state.project);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
+  const selectedEventId = useProjectStore((state) => state.selectedEventId);
   const selectCue = useProjectStore((state) => state.selectCue);
   const scene = firstScene(project);
   const evaluation = useMemo(
@@ -782,6 +832,7 @@ function Timeline() {
             <button
               type="button"
               key={event.event_id}
+              className={event.event_id === selectedEventId ? "is-active" : ""}
               title={`${eventLabel(event.kind) || event.kind} · ${event.duration_ms} ms`}
               style={{ flexGrow: event.duration_frames }}
               onClick={() => useProjectStore.getState().selectEvent(event.event_id)}

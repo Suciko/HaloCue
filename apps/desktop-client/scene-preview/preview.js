@@ -8,6 +8,10 @@
   const DEFAULT_ACTOR_MEDIA_SCALE = 1.6;
   const SPINE_RENDERER = window.HaloCueSpineRenderer;
   const PERFORMANCE_RUNTIME = window.HaloCueScenePerformanceRuntime;
+  const PREVIEW_INTENT_SCHEMA = "preview-intent/1.0";
+  const PREVIEW_INTENT_RESOLUTIONS = new Set([
+    "selected-event", "cue-terminal", "prior-renderable", "scene-start",
+  ]);
   const EVENT_REGISTRY = window.HaloCueSceneEventRegistry || {
     isVisualOnly: () => false,
   };
@@ -194,6 +198,62 @@
     };
   }
 
+  function validatePreviewIntent(intent, descriptor, timeline) {
+    if (intent === undefined) return null;
+    if (!intent || intent.schema_version !== PREVIEW_INTENT_SCHEMA) {
+      throw new Error("unsupported preview intent schema");
+    }
+    if (intent.scene_id !== descriptor.scene_id) {
+      throw new Error("preview intent scene_id does not match the descriptor");
+    }
+    if (typeof intent.cue_id !== "string" || !intent.cue_id.trim()) {
+      throw new Error("preview intent cue_id is invalid");
+    }
+    if (!new Set(["cue", "event"]).has(intent.selection_kind)) {
+      throw new Error("preview intent selection kind is invalid");
+    }
+    if (
+      (intent.selection_kind === "cue" && intent.selected_event_id !== null)
+      || (intent.selection_kind === "event"
+        && (typeof intent.selected_event_id !== "string" || !intent.selected_event_id))
+    ) {
+      throw new Error("preview intent selected event is invalid");
+    }
+    const target = intent.target;
+    if (
+      !target
+      || typeof target.event_id !== "string"
+      || !target.event_id
+      || !Number.isInteger(target.frame)
+      || !new Set(["start", "end"]).has(target.alignment)
+      || !PREVIEW_INTENT_RESOLUTIONS.has(target.resolution)
+    ) {
+      throw new Error("preview intent target is invalid");
+    }
+    const item = timeline.events.find((event) => event.event_id === target.event_id);
+    if (!item || target.frame < item.start_frame || target.frame >= item.end_frame) {
+      throw new Error("preview intent target is outside its timeline event");
+    }
+    if (
+      (target.alignment === "start" && target.frame !== item.start_frame)
+      || (target.alignment === "end" && target.frame !== item.end_frame - 1)
+    ) {
+      throw new Error("preview intent alignment does not match its target frame");
+    }
+    if (
+      (target.resolution === "selected-event"
+        && (intent.selection_kind !== "event" || target.event_id !== intent.selected_event_id))
+      || (target.resolution === "cue-terminal" && intent.selection_kind !== "cue")
+      || (new Set(["selected-event", "scene-start"]).has(target.resolution)
+        && target.alignment !== "start")
+      || (new Set(["cue-terminal", "prior-renderable"]).has(target.resolution)
+        && target.alignment !== "end")
+    ) {
+      throw new Error("preview intent resolution does not match its selection");
+    }
+    return JSON.parse(JSON.stringify(intent));
+  }
+
   function mount(descriptor, root, options = {}) {
     assertDescriptor(descriptor);
     const stage = root || document.querySelector("#preview-stage");
@@ -207,6 +267,7 @@
     const timeline = resolvedTimeline.timeline;
     const resolvedPerformance = resolveScenePerformance(descriptor, timeline, options.performance);
     const performance = resolvedPerformance.performance;
+    const initialIntent = validatePreviewIntent(options.intent, descriptor, timeline);
     const captureMode = options.capture === true;
     if (initialActors.length !== 5) {
       throw new Error("Scene descriptor initial_actors must contain exactly five actor slots.");
@@ -219,6 +280,13 @@
     const generation = (Number(stage.__haloCuePreviewGeneration) || 0) + 1;
     stage.__haloCuePreviewGeneration = generation;
     stage.dataset.previewGeneration = String(generation);
+    for (const key of [
+      "previewCueId",
+      "previewSelectionKind",
+      "previewSelectedEventId",
+      "previewTargetEventId",
+      "previewIntentResolution",
+    ]) delete stage.dataset[key];
     let disposed = false;
     const isCurrentSession = () => (
       !disposed && stage.__haloCuePreviewGeneration === generation
@@ -282,6 +350,7 @@
       screenText: "",
       initialMotionPending: true,
       frame: -1,
+      intent: null,
       playing: false,
       playbackFrame: null,
     };
@@ -946,6 +1015,20 @@
       });
     }
 
+    function applyIntent(intent) {
+      if (!isCurrentSession()) return null;
+      const resolved = validatePreviewIntent(intent, descriptor, timeline);
+      const sample = seekFrame(resolved.target.frame, { mode: "sample" });
+      if (!sample) return null;
+      state.intent = resolved;
+      stage.dataset.previewCueId = resolved.cue_id;
+      stage.dataset.previewSelectionKind = resolved.selection_kind;
+      stage.dataset.previewSelectedEventId = resolved.selected_event_id || "";
+      stage.dataset.previewTargetEventId = resolved.target.event_id;
+      stage.dataset.previewIntentResolution = resolved.target.resolution;
+      return sample;
+    }
+
     function pause() {
       if (!isCurrentSession()) return;
       cancelPlayback();
@@ -1174,6 +1257,7 @@
     if (captureMode) state.initialMotionPending = false;
     const controller = {
       advance: advanceEvent,
+      applyIntent,
       generation,
       isCurrent: isCurrentSession,
       pause,
@@ -1181,6 +1265,7 @@
       seekEvent,
       seekFrame,
       seekReference,
+      scene_id: descriptor.scene_id,
       state,
       timeline,
       performance,
@@ -1220,6 +1305,7 @@
       },
     };
     stage.__haloCueController = controller;
+    if (initialIntent) applyIntent(initialIntent);
     return controller;
   }
 

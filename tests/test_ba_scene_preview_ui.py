@@ -390,6 +390,95 @@ def test_controller_seeks_plays_and_pauses_the_multi_event_timeline():
 
 
 @pytest.mark.browser
+def test_controller_applies_versioned_preview_intent_without_remounting():
+    playwright = pytest.importorskip("playwright.sync_api")
+    server, thread = _serve_preview()
+    try:
+        with playwright.sync_playwright() as runtime:
+            try:
+                browser = runtime.chromium.launch(headless=True)
+            except Exception as exc:  # pragma: no cover - depends on local browser install
+                if "Executable doesn't exist" in str(exc):
+                    pytest.skip("Playwright Chromium is not installed")
+                raise
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+            page.goto(
+                f"http://127.0.0.1:{server.server_port}/index.html?renderer=static"
+            )
+            page.wait_for_function("() => Boolean(window.HaloCueScenePreview.controller)")
+
+            applied = page.evaluate(
+                """() => {
+                    const controller = window.HaloCueScenePreview.controller;
+                    const generation = controller.generation;
+                    const item = controller.timeline.events[2];
+                    controller.applyIntent({
+                        schema_version: 'preview-intent/1.0',
+                        scene_id: controller.scene_id,
+                        cue_id: 'cue/example/selected',
+                        selection_kind: 'event',
+                        selected_event_id: item.event_id,
+                        target: {
+                            event_id: item.event_id,
+                            frame: item.start_frame,
+                            alignment: 'start',
+                            resolution: 'selected-event',
+                        },
+                    });
+                    const stage = document.querySelector('#preview-stage');
+                    return {
+                        sameGeneration: controller.generation === generation,
+                        frame: controller.state.frame,
+                        expectedFrame: item.start_frame,
+                        expectedEvent: item.event_id,
+                        cueId: stage.dataset.previewCueId,
+                        selectionKind: stage.dataset.previewSelectionKind,
+                        selectedEventId: stage.dataset.previewSelectedEventId,
+                        targetEventId: stage.dataset.previewTargetEventId,
+                        resolution: stage.dataset.previewIntentResolution,
+                    };
+                }"""
+            )
+            assert applied["sameGeneration"] is True
+            assert applied["frame"] == applied["expectedFrame"]
+            assert applied["cueId"] == "cue/example/selected"
+            assert applied["selectionKind"] == "event"
+            assert applied["selectedEventId"] == applied["expectedEvent"]
+            assert applied["targetEventId"] == applied["expectedEvent"]
+            assert applied["resolution"] == "selected-event"
+
+            preserved = page.evaluate(
+                """() => {
+                    const controller = window.HaloCueScenePreview.controller;
+                    const before = controller.state.frame;
+                    let rejected = false;
+                    try {
+                        controller.applyIntent({
+                            schema_version: 'preview-intent/1.0',
+                            scene_id: 'scene/wrong',
+                            cue_id: 'cue/wrong',
+                            selection_kind: 'cue',
+                            selected_event_id: null,
+                            target: {
+                                event_id: controller.timeline.events[0].event_id,
+                                frame: 0,
+                                alignment: 'start',
+                                resolution: 'scene-start',
+                            },
+                        });
+                    } catch (_) { rejected = true; }
+                    return {rejected, before, after: controller.state.frame};
+                }"""
+            )
+            assert preserved["rejected"] is True
+            assert preserved["after"] == preserved["before"]
+            browser.close()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+@pytest.mark.browser
 def test_preview_session_rejects_stale_controllers_and_delayed_media_callbacks():
     playwright = pytest.importorskip("playwright.sync_api")
     server, thread = _serve_preview()

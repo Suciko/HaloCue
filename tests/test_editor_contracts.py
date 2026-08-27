@@ -80,3 +80,29 @@ def test_non_finite_duration_is_rejected():
     project["chapters"][0]["scenes"][0]["cues"][0]["events"][0]["duration_ms"] = float("inf")
 
     assert any(item["code"] == "project.invalid_duration" for item in validate_project(project))
+
+
+def test_preview_intent_contract_accepts_an_explicit_event_playhead_target():
+    schema = _json(
+        ROOT / "packages" / "contracts" / "preview-intent" / "1.0.schema.json"
+    )
+    intent = {
+        "schema_version": "preview-intent/1.0",
+        "scene_id": "scene/classroom",
+        "cue_id": "cue/classroom/001",
+        "selection_kind": "event",
+        "selected_event_id": "event/alice-line",
+        "target": {
+            "event_id": "event/alice-line",
+            "frame": 42,
+            "alignment": "start",
+            "resolution": "selected-event",
+        },
+    }
+
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema)
+    validator.validate(intent)
+    mismatched_alignment = json.loads(json.dumps(intent))
+    mismatched_alignment["target"]["alignment"] = "end"
+    assert not validator.is_valid(mismatched_alignment)

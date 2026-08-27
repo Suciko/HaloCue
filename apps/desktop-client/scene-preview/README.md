@@ -37,8 +37,8 @@ still decides whether either button appears inside the video frame.
 
 The preview controller consumes the deterministic `render-timeline/1.0` and
 `scene-performance/1.1` contracts. `window.HaloCueScenePreview.controller`
-exposes `seekFrame`,
-`seekEvent`, `seekReference`, `play`, `pause`, and `dispose`. These methods keep
+exposes `applyIntent`, `seekFrame`, `seekEvent`, `seekReference`, `play`,
+`pause`, and `dispose`. These methods keep
 the browser preview on the same end-exclusive frame ranges used by the Python
 offline timeline adapter. The default page remains a live realtime preview.
 
@@ -49,6 +49,14 @@ image, Spine, playback, typewriter, location-label, and entrance callbacks
 check the generation before touching the shared stage. A failed candidate
 therefore leaves the current preview intact, while a late callback from an old
 scene cannot overwrite the new scene.
+
+The editor sends a versioned `preview-intent/1.0` to `applyIntent`. Simple-mode
+Cue selection targets the Cue's completed frame. Professional-mode event
+selection targets the exact event start without remounting the Preview Session.
+If a selected extension event has no presentation adapter, the intent records
+and displays an explicit prior-renderable or scene-start fallback. The runtime
+rejects a mismatched scene, event, frame, or start/end alignment before moving
+the playhead.
 
 Useful deterministic URLs:
 

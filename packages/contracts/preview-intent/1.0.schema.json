@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Suciko/HaloCue/contracts/preview-intent/1.0.schema.json",
+  "title": "HaloCue editor preview intent",
+  "description": "A resolved editor selection and deterministic preview playhead target.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scene_id",
+    "cue_id",
+    "selection_kind",
+    "selected_event_id",
+    "target"
+  ],
+  "properties": {
+    "schema_version": { "const": "preview-intent/1.0" },
+    "scene_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "cue_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "selection_kind": { "enum": ["cue", "event"] },
+    "selected_event_id": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "frame", "alignment", "resolution"],
+      "properties": {
+        "event_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "frame": { "type": "integer", "minimum": 0 },
+        "alignment": { "enum": ["start", "end"] },
+        "resolution": {
+          "enum": [
+            "selected-event",
+            "cue-terminal",
+            "prior-renderable",
+            "scene-start"
+          ]
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "selection_kind": { "const": "cue" } },
+        "required": ["selection_kind"]
+      },
+      "then": { "properties": { "selected_event_id": { "type": "null" } } }
+    },
+    {
+      "if": {
+        "properties": { "selection_kind": { "const": "event" } },
+        "required": ["selection_kind"]
+      },
+      "then": { "properties": { "selected_event_id": { "type": "string" } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "target": {
+            "properties": {
+              "resolution": { "enum": ["selected-event", "scene-start"] }
+            },
+            "required": ["resolution"]
+          }
+        },
+        "required": ["target"]
+      },
+      "then": {
+        "properties": {
+          "target": { "properties": { "alignment": { "const": "start" } } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "target": {
+            "properties": {
+              "resolution": { "enum": ["cue-terminal", "prior-renderable"] }
+            },
+            "required": ["resolution"]
+          }
+        },
+        "required": ["target"]
+      },
+      "then": {
+        "properties": {
+          "target": { "properties": { "alignment": { "const": "end" } } }
+        }
+      }
+    }
+  ]
+}
