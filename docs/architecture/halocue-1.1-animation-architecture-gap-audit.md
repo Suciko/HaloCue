@@ -355,6 +355,15 @@ focus-scoped transaction. Numeric controls retain partial text locally, reject
 empty/non-finite/out-of-range drafts without writing `0`, and either commit one
 validated value or restore the baseline on blur.
 
+The timeline event-resize tracer is recorded in
+`docs/handoffs/2026-08-27-timeline-event-resize-tracer.md`. Professional event
+bars now expose a visible, keyboard-focusable duration handle. Pointer distance
+is converted with the segment scale captured at gesture start, snapped to whole
+timeline frames, previewed through `previewEvent`, and committed as one
+revision. Returning to the baseline frame preserves the originally authored
+millisecond value, so a sub-frame move remains a true no-op instead of silently
+normalizing project data.
+
 ## Small shallow seam found
 
 `apps/desktop-client/scene-editor/src/sceneEventFactory.ts` is currently a pure

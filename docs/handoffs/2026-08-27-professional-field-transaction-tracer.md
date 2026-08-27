@@ -51,8 +51,9 @@ contract/model/browser boundary remains unchanged by this editor-only slice.
 
 ## Remaining work
 
-The next professional timeline slice should add duration handles to the event
-bars. Pointer movement should preview the duration through `previewEvent`, use
-frame snapping, and commit one revision on release. A handle must remain
-keyboard accessible and must not reuse transient playhead state as project
-data.
+The duration-handle follow-up is delivered in implementation commit `78f1d0b`
+and documented by
+`docs/handoffs/2026-08-27-timeline-event-resize-tracer.md`. Professional event
+reordering is the next bounded direct-manipulation gap: the list already shows
+grips and up/down commands, but it does not yet provide a pointer reorder
+gesture with an equivalent keyboard path.
