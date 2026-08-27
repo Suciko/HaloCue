@@ -1274,16 +1274,27 @@ function SimpleInspector() {
           key={value}
           type="button"
           role="tab"
+          id={`simple-inspector-tab-${value}`}
           aria-selected={tab === value}
+          aria-controls={`simple-inspector-panel-${value}`}
           tabIndex={tab === value ? 0 : -1}
           className={tab === value ? "is-active" : ""}
           onClick={() => setTab(value)}
           onKeyDown={(event) => navigateTab(event, index)}
         >{icon}{label}</button>)}
       </div>
-      {tab === "character" && <CharacterInspector />}
-      {tab === "dialogue" && <DialogueInspector />}
-      {tab === "environment" && <EnvironmentInspector />}
+      <div
+        id={`simple-inspector-panel-${tab}`}
+        className="simple-inspector-panel"
+        role="tabpanel"
+        aria-labelledby={`simple-inspector-tab-${tab}`}
+        data-simple-inspector-panel="true"
+        tabIndex={0}
+      >
+        {tab === "character" && <CharacterInspector />}
+        {tab === "dialogue" && <DialogueInspector />}
+        {tab === "environment" && <EnvironmentInspector />}
+      </div>
       <div className="inspector-footer"><Check />所有修改已写入统一项目</div>
     </aside>
   );

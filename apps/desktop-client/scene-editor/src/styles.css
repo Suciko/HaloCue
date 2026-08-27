@@ -177,6 +177,7 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .simple-inspector-context > span { min-width: 0; display: grid !important; gap: 1px; }
 .simple-inspector-context strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .simple-inspector-context small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--subtle); font-size: 8px; text-transform: none; }
+.simple-inspector-panel { min-height: 0; flex: 1; display: flex; overflow: hidden; }
 .inspector-tabs { height: 42px; display: grid; grid-template-columns: repeat(3, 1fr); padding: 4px 6px 0; border-bottom: 1px solid var(--line-soft); }
 .inspector-tabs button { display: flex; align-items: center; justify-content: center; gap: 5px; position: relative; border: 0; background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; }
 .inspector-tabs button.is-active { color: var(--text); }

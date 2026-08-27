@@ -97,4 +97,17 @@ describe("simple Inspector tabs", () => {
     expect(context?.getAttribute("aria-live")).toBe("polite");
     expect(useProjectStore.getState().revision).toBe(revision);
   });
+
+  it("associates the active Inspector tab with its property panel", () => {
+    const activeTab = container.querySelector<HTMLButtonElement>(
+      '.inspector-tabs [role="tab"][aria-selected="true"]',
+    );
+    expect(activeTab).not.toBeNull();
+    const panelId = activeTab?.getAttribute("aria-controls");
+    expect(panelId).toBeTruthy();
+    const panel = panelId ? container.querySelector<HTMLElement>(`#${panelId}`) : null;
+    expect(panel?.getAttribute("role")).toBe("tabpanel");
+    expect(panel?.getAttribute("aria-labelledby")).toBe(activeTab?.id);
+    expect(panel?.getAttribute("data-simple-inspector-panel")).toBe("true");
+  });
 });
