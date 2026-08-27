@@ -56,6 +56,11 @@ import {
 } from "./previewCompilation";
 import { eventDurationMs } from "./renderTimeline";
 import { parseNumericDraft } from "./fieldTransactions";
+import {
+  eventDropPlacement,
+  type EventDropPlacement,
+  type EventMove,
+} from "./eventReorder";
 import { projectCueState, sceneById } from "./cueStateProjection";
 import { TimelineEventSegment } from "./TimelineEventSegment";
 import {
@@ -970,7 +975,7 @@ function ProfessionalEventFields({
   </>;
 }
 
-function ProfessionalEventList() {
+export function ProfessionalEventList() {
   const project = useProjectStore((state) => state.project);
   const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
   const selectedCueId = useProjectStore((state) => state.selectedCueId);
@@ -981,6 +986,31 @@ function ProfessionalEventList() {
   const addEvent = useProjectStore((state) => state.addEvent);
   const cue = sceneById(project, selectedSceneId)
     .cues.find((item) => item.cue_id === selectedCueId)!;
+  const [draggedEventId, setDraggedEventId] = useState<string | null>(null);
+  const draggedEventIdRef = useRef<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    eventId: string;
+    placement: EventDropPlacement;
+  } | null>(null);
+  const [reorderNotice, setReorderNotice] = useState("");
+  const moveAndAnnounce = (eventId: string, move: EventMove) => {
+    selectEvent(eventId);
+    const result = moveEvent(eventId, move);
+    if (result.status !== "committed") return;
+    const current = useProjectStore.getState();
+    const currentCue = sceneById(current.project, current.selectedSceneId)
+      .cues.find((item) => item.cue_id === current.selectedCueId);
+    const nextIndex = currentCue?.events.findIndex((item) => item.event_id === eventId) ?? -1;
+    const moved = currentCue?.events[nextIndex];
+    if (moved) {
+      setReorderNotice(`${eventLabel(moved.kind) || "扩展演出"} 已移动到第 ${nextIndex + 1} 项`);
+    }
+  };
+  const clearDrag = () => {
+    draggedEventIdRef.current = null;
+    setDraggedEventId(null);
+    setDropTarget(null);
+  };
 
   return (
     <section className="event-workbench">
@@ -1006,10 +1036,73 @@ function ProfessionalEventList() {
         </details>
       </header>
       <div className="event-list">
+        <p className="sr-only" aria-live="polite">{reorderNotice}</p>
         {cue.events.map((event, index) => (
-          <div key={event.event_id} className={event.event_id === selectedEventId ? "event-row is-active" : "event-row"}>
-            <button className="event-main" type="button" onClick={() => selectEvent(event.event_id)}>
+          <div
+            key={event.event_id}
+            className={`${event.event_id === selectedEventId ? "event-row is-active" : "event-row"}${draggedEventId === event.event_id ? " is-dragging" : ""}${dropTarget?.eventId === event.event_id ? ` is-drop-${dropTarget.placement}` : ""}`}
+            onDragOver={(dragEvent) => {
+              const sourceId = draggedEventIdRef.current;
+              if (!sourceId || sourceId === event.event_id) return;
+              dragEvent.preventDefault();
+              dragEvent.dataTransfer.dropEffect = "move";
+              const rect = dragEvent.currentTarget.getBoundingClientRect();
+              const placement = eventDropPlacement(dragEvent.clientY, rect.top, rect.height);
+              setDropTarget({ eventId: event.event_id, placement });
+            }}
+            onDragLeave={(dragEvent) => {
+              if (dragEvent.relatedTarget instanceof Node && dragEvent.currentTarget.contains(dragEvent.relatedTarget)) return;
+              if (dropTarget?.eventId === event.event_id) setDropTarget(null);
+            }}
+            onDrop={(dragEvent) => {
+              dragEvent.preventDefault();
+              const sourceId = draggedEventIdRef.current;
+              if (sourceId && sourceId !== event.event_id) {
+                const rect = dragEvent.currentTarget.getBoundingClientRect();
+                moveAndAnnounce(sourceId, {
+                  targetEventId: event.event_id,
+                  placement: eventDropPlacement(dragEvent.clientY, rect.top, rect.height),
+                });
+              }
+              clearDrag();
+            }}
+          >
+            <button
+              className="event-drag-handle"
+              type="button"
+              draggable
+              aria-label={`重排${eventLabel(event.kind) || "扩展演出"}，当前第 ${index + 1} 项，共 ${cue.events.length} 项`}
+              aria-keyshortcuts="ArrowUp ArrowDown Home End"
+              title="拖动重排；方向键逐项移动，Home/End 移到首尾"
+              onClick={() => selectEvent(event.event_id)}
+              onDragStart={(dragEvent) => {
+                dragEvent.dataTransfer.effectAllowed = "move";
+                dragEvent.dataTransfer.setData("text/plain", event.event_id);
+                draggedEventIdRef.current = event.event_id;
+                setDraggedEventId(event.event_id);
+                setDropTarget(null);
+                selectEvent(event.event_id);
+              }}
+              onDragEnd={clearDrag}
+              onKeyDown={(keyEvent) => {
+                const move = {
+                  ArrowUp: -1,
+                  ArrowDown: 1,
+                  Home: index === 0 ? null : { targetEventId: cue.events[0].event_id, placement: "before" },
+                  End: index === cue.events.length - 1 ? null : {
+                    targetEventId: cue.events.at(-1)!.event_id,
+                    placement: "after",
+                  },
+                }[keyEvent.key] as EventMove | null | undefined;
+                if (move === undefined) return;
+                keyEvent.preventDefault();
+                if (move === null) return;
+                moveAndAnnounce(event.event_id, move);
+              }}
+            >
               <GripVertical />
+            </button>
+            <button className="event-main" type="button" onClick={() => selectEvent(event.event_id)}>
               <span className="event-icon"><EventIcon kind={event.kind} /></span>
               <span className="event-order">{String(index + 1).padStart(2, "0")}</span>
               <span className="event-copy">
@@ -1019,8 +1112,8 @@ function ProfessionalEventList() {
               {!eventLabel(event.kind) && <span className="namespace-tag">{event.kind.split(":")[0]}</span>}
             </button>
             <div className="event-actions">
-              <IconButton label="上移" disabled={index === 0} onClick={() => moveEvent(event.event_id, -1)}><ArrowUp /></IconButton>
-              <IconButton label="下移" disabled={index === cue.events.length - 1} onClick={() => moveEvent(event.event_id, 1)}><ArrowDown /></IconButton>
+              <IconButton label="上移" disabled={index === 0} onClick={() => moveAndAnnounce(event.event_id, -1)}><ArrowUp /></IconButton>
+              <IconButton label="下移" disabled={index === cue.events.length - 1} onClick={() => moveAndAnnounce(event.event_id, 1)}><ArrowDown /></IconButton>
               <IconButton label="删除事件" tone="danger" onClick={() => deleteEvent(event.event_id)}><Trash2 /></IconButton>
             </div>
           </div>

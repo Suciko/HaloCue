@@ -238,11 +238,20 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .event-add-options button:hover { background: var(--panel-3); color: var(--text); }
 .event-add-options svg { width: 13px; color: var(--accent); }
 .event-list { height: calc(100% - 45px); overflow: auto; padding: 7px; }
-.event-row { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; margin-bottom: 4px; border: 1px solid transparent; border-radius: 6px; background: var(--panel-2); }
+.sr-only { width: 1px; height: 1px; position: absolute; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; }
+.event-row { min-width: 0; position: relative; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; margin-bottom: 4px; border: 1px solid transparent; border-radius: 6px; background: var(--panel-2); }
 .event-row:hover { border-color: var(--line); }
 .event-row.is-active { border-color: #4c806b; background: var(--accent-bg); }
-.event-main { min-width: 0; height: 49px; display: grid; grid-template-columns: 13px 27px 21px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 4px 5px; border: 0; background: transparent; text-align: left; cursor: pointer; }
-.event-main > svg { width: 12px; color: var(--subtle); }
+.event-row.is-dragging { opacity: .42; }
+.event-row.is-drop-before::before, .event-row.is-drop-after::after { content: ""; position: absolute; right: 4px; left: 4px; z-index: 2; height: 2px; border-radius: 1px; background: var(--accent); box-shadow: 0 0 7px rgba(99,223,166,.55); pointer-events: none; }
+.event-row.is-drop-before::before { top: -3px; }
+.event-row.is-drop-after::after { bottom: -3px; }
+.event-drag-handle { width: 24px; height: 49px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--subtle); cursor: grab; touch-action: none; }
+.event-drag-handle:active { cursor: grabbing; }
+.event-drag-handle:hover { color: var(--text); }
+.event-drag-handle:focus-visible { outline: 1px solid var(--accent); outline-offset: -3px; border-radius: 4px; }
+.event-drag-handle svg { width: 12px; pointer-events: none; }
+.event-main { min-width: 0; height: 49px; display: grid; grid-template-columns: 27px 21px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 4px 5px 4px 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .event-icon { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 4px; background: #111514; color: var(--accent); }
 .event-icon svg { width: 13px; }
 .event-order { color: var(--subtle); font-size: 8px; }

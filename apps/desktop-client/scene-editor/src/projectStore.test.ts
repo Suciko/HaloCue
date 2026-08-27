@@ -219,6 +219,50 @@ describe("shared dual-mode project store", () => {
     expect(current.selectedEventId).toBe(neighborId);
   });
 
+  it("reorders professional events by stable target ID and undoes in one step", () => {
+    const state = useProjectStore.getState();
+    const cue = firstScene(state.project).cues[0];
+    const originalOrder = cue.events.map((event) => event.event_id);
+    const sourceId = originalOrder[0];
+    const targetId = originalOrder[2];
+    const revisionBefore = state.revision;
+    const historyBefore = state.history.length;
+    state.selectEvent(sourceId);
+
+    expect(state.moveEvent(sourceId, { targetEventId: targetId, placement: "after" }))
+      .toEqual({ status: "committed", revision: revisionBefore + 1 });
+
+    let current = useProjectStore.getState();
+    expect(firstScene(current.project).cues[0].events.map((event) => event.event_id))
+      .toEqual([originalOrder[1], originalOrder[2], sourceId, originalOrder[3]]);
+    expect(current.selectedEventId).toBe(sourceId);
+    expect(current.history).toHaveLength(historyBefore + 1);
+
+    current.undo();
+    current = useProjectStore.getState();
+    expect(firstScene(current.project).cues[0].events.map((event) => event.event_id))
+      .toEqual(originalOrder);
+    expect(current.selectedEventId).toBe(sourceId);
+  });
+
+  it("treats equivalent event placements as no-op transactions", () => {
+    const state = useProjectStore.getState();
+    const cue = firstScene(state.project).cues[0];
+    const originalOrder = cue.events.map((event) => event.event_id);
+    const revisionBefore = state.revision;
+    const historyBefore = state.history;
+
+    expect(state.moveEvent(originalOrder[0], {
+      targetEventId: originalOrder[1],
+      placement: "before",
+    })).toEqual({ status: "no-op", revision: revisionBefore });
+
+    const current = useProjectStore.getState();
+    expect(firstScene(current.project).cues[0].events.map((event) => event.event_id))
+      .toEqual(originalOrder);
+    expect(current.history).toEqual(historyBefore);
+  });
+
   it("targets edits, evaluation, undo, and redo at the selected Scene", () => {
     const store = useProjectStore.getState();
     store.replaceProject(multiSceneProject());

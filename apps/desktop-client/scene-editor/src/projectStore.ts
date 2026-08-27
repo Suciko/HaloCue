@@ -23,6 +23,7 @@ import type {
 import { AutosaveCoordinator } from "./autosave";
 import { isDescriptorRenderable } from "./sceneEventRegistry";
 import { createSceneEvent } from "./sceneEventFactory";
+import { reorderEvents, type EventMove } from "./eventReorder";
 import { projectSceneAtCue, sceneById } from "./cueStateProjection";
 import type { ProjectDiagnostic } from "./projectCodec";
 
@@ -100,7 +101,7 @@ type EditorState = {
   moveCue: (sourceCueId: string, targetCueId: string) => EditorTransactionResult;
   updateEvent: (eventId: string, patch: Partial<CueEvent>) => EditorTransactionResult;
   deleteEvent: (eventId: string) => EditorTransactionResult;
-  moveEvent: (eventId: string, direction: -1 | 1) => EditorTransactionResult;
+  moveEvent: (eventId: string, move: EventMove) => EditorTransactionResult;
   undo: () => EditorTransactionResult;
   redo: () => EditorTransactionResult;
   replaceProject: (project: HaloCueProject) => EditorTransactionResult;
@@ -588,12 +589,8 @@ export function createProjectStore(repository: ProjectRepository = projectReposi
         draftCue.events = draftCue.events.filter((event) => event.event_id !== eventId);
       }, { selectedEventId: nextEvent?.event_id || null });
     },
-    moveEvent: (eventId, direction) => commit((_project, cue) => {
-      const index = cue.events.findIndex((event) => event.event_id === eventId);
-      const target = index + direction;
-      if (index < 0 || target < 0 || target >= cue.events.length) return;
-      const [event] = cue.events.splice(index, 1);
-      cue.events.splice(target, 0, event);
+    moveEvent: (eventId, move) => commit((_project, cue) => {
+      cue.events = reorderEvents(cue.events, eventId, move).slice();
     }),
     undo: () => {
       commitActiveTransaction();
