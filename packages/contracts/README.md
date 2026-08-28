@@ -40,8 +40,8 @@ adapters read this manifest at their seams; they do not maintain independent
 kind or duration tables. Version 1.2 adds the explicit non-blocking capability
 while preserving the ordered event list as the source of truth. The current
 manifest enables it for `character-motion`, the camera-like
-`halocue.ba:background-pan`, and `halocue.ba:screen-shake`; every other
-registered event remains sequential.
+`halocue.ba:background-pan`, `halocue.ba:screen-shake`, and the overlay-like
+`halocue.ba:screen-text`; every other registered event remains sequential.
 
 The `render-timeline/1.2` schema lives in
 `render-timeline/1.2.schema.json`. It records deterministic, end-exclusive
@@ -52,6 +52,11 @@ When `wait_for_completion` is false for a registry-supported event, the next
 event starts at the same sequential cursor and `total_frames` is the maximum
 end frame across all events. Every normalized timeline event exposes the
 boolean completion policy.
+
+During an overlap, the latest-authored active event remains the primary
+timeline item. Presentation adapters may additionally compose compatible
+entries from `activeItems`; the browser preview uses that projection to keep a
+non-blocking screen-text overlay visible while a later dialogue is primary.
 
 The current `scene-performance/1.4` schema lives in
 `scene-performance/1.4.schema.json`. It is the renderer-independent animation

@@ -25,9 +25,12 @@ The slice supports:
 stable default durations so browser preview and offline video exporters can
 share timing without depending on AUTO playback or wall-clock callbacks.
 Registry-supported `character-motion`, `halocue.ba:background-pan`, and
-`halocue.ba:screen-shake` events may set `wait_for_completion` to false; the
-following event then starts at the same sequential cursor and `total_frames` is
-the maximum end frame.
+`halocue.ba:screen-shake`, and `halocue.ba:screen-text` events may set
+`wait_for_completion` to false; the following event then starts at the same
+sequential cursor and `total_frames` is the maximum end frame. A fixed-duration
+non-blocking screen-text event remains an active overlay while a later dialogue
+is the primary event; reverse seek clears it to baseline and forward seek
+restores it deterministically.
 
 `scene_performance.py` compiles supported authored effects into the independent
 `scene-performance/1.4` animation plan and samples exact frames under play,
