@@ -12,6 +12,7 @@ if str(MODEL_ROOT) not in sys.path:
 from project_model import (  # noqa: E402
     build_aa_scene_descriptor,
     deserialize_project,
+    migrate_project,
     validate_project,
 )
 
@@ -25,12 +26,27 @@ def valid_project() -> dict:
             {
                 "character_id": "character/alice",
                 "name": "Alice",
+                "dialogue_name": "爱丽丝",
+                "alias": "勇者爱丽丝",
+                "club_name": "游戏开发部",
                 "resource_id": "synthetic/character/alice/portrait",
+                "avatar_key": "Student_Portrait_Alice",
+                "spine_key": "CharacterSpine_alice",
+                "stage_media": {
+                    "kind": "portrait",
+                    "preview_uri": "./assets/synthetic-alice-stage.png",
+                    "anchor_x": 0.5,
+                    "anchor_y": 1,
+                },
             },
             {
                 "character_id": "character/bob",
                 "name": "Bob",
                 "resource_id": "synthetic/character/bob/portrait",
+                "stage_media": {
+                    "kind": "spine-frame",
+                    "preview_uri": "./assets/synthetic-bob-stage.png",
+                },
             },
         ],
         "resources": [
@@ -38,6 +54,8 @@ def valid_project() -> dict:
                 "resource_id": "synthetic/background/classroom",
                 "role": "background",
                 "logical_key": "background/classroom",
+                "focus_x": 0.42,
+                "focus_y": 0.68,
             },
             {
                 "resource_id": "synthetic/character/alice/portrait",
@@ -90,13 +108,64 @@ def valid_project() -> dict:
     }
 
 
-def test_valid_project_has_no_diagnostics_and_round_trips_without_losing_ids():
+def test_valid_legacy_project_migrates_to_cues_without_losing_event_ids():
     project = valid_project()
 
     assert validate_project(project) == []
 
     restored = deserialize_project(json.loads(json.dumps(project, ensure_ascii=False)))
-    assert restored == project
+    assert restored == migrate_project(project)
+    assert restored["schema_version"] == "halocue-project/1.1"
+    cues = restored["chapters"][0]["scenes"][0]["cues"]
+    assert [cue["events"][0]["event_id"] for cue in cues] == [
+        "event/background",
+        "event/alice-enter",
+        "event/alice-line",
+        "event/bob-enter",
+    ]
+    assert migrate_project(project) == migrate_project(project)
+
+
+def test_current_project_supports_multiple_events_in_one_cue():
+    project = migrate_project(valid_project())
+    cues = project["chapters"][0]["scenes"][0]["cues"]
+    cues[0]["events"].extend(cue["events"][0] for cue in cues[1:3])
+    del cues[1:3]
+
+    assert validate_project(project) == []
+    descriptor = build_aa_scene_descriptor(project, "scene/classroom")
+    assert [event["event_id"] for event in descriptor["events"]] == [
+        "event/background",
+        "event/alice-enter",
+        "event/alice-line",
+        "event/bob-enter",
+    ]
+
+
+def test_current_project_preserves_explicit_character_motion_in_the_descriptor():
+    project = migrate_project(valid_project())
+    cue = project["chapters"][0]["scenes"][0]["cues"][1]
+    cue["events"].append(
+        {
+            "event_id": "event/alice-nod",
+            "kind": "character-motion",
+            "slot": 1,
+            "character_id": "character/alice",
+            "motion_id": "motion/nod",
+        }
+    )
+
+    assert validate_project(project) == []
+    descriptor = build_aa_scene_descriptor(project, "scene/classroom")
+    assert next(
+        event for event in descriptor["events"] if event["event_id"] == "event/alice-nod"
+    ) == {
+        "event_id": "event/alice-nod",
+        "kind": "character-motion",
+        "character_id": "character/alice",
+        "slot": 1,
+        "motion_id": "motion/nod",
+    }
 
 
 def test_validation_reports_duplicate_ids_and_unresolved_references():
@@ -121,9 +190,35 @@ def test_aa_preview_is_deterministic_and_uses_five_stable_slots():
     assert [slot["slot"] for slot in descriptor["actors"]] == [1, 2, 3, 4, 5]
     assert descriptor["actors"][0]["character_id"] == "character/alice"
     assert descriptor["actors"][0]["display_name"] == "Alice"
+    assert descriptor["actors"][0]["dialogue_name"] == "爱丽丝"
+    assert descriptor["actors"][0]["alias"] == "勇者爱丽丝"
+    assert descriptor["actors"][0]["club_name"] == "游戏开发部"
+    assert descriptor["actors"][0]["stage_media"]["kind"] == "portrait"
+    assert descriptor["actors"][0]["avatar_key"] == "Student_Portrait_Alice"
     assert descriptor["actors"][3]["character_id"] == "character/bob"
+    assert all(actor["state"] == "hidden" for actor in descriptor["initial_actors"])
+    assert descriptor["initial_background"] == descriptor["background"]
     assert descriptor["background"]["resource_id"] == "synthetic/background/classroom"
+    assert descriptor["background"]["focus_x"] == 0.42
+    assert descriptor["background"]["focus_y"] == 0.68
     assert build_aa_scene_descriptor(valid_project(), "scene/classroom") == descriptor
+
+
+def test_validation_rejects_avatar_as_stage_media():
+    project = valid_project()
+    project["characters"][0]["stage_media"] = {
+        "kind": "avatar",
+        "preview_uri": "./assets/avatar.png",
+    }
+
+    diagnostics = validate_project(project)
+
+    assert {
+        "code": "project.unknown_stage_media_kind",
+        "severity": "error",
+        "path": "characters[0].stage_media.kind",
+        "message": "stage_media kind must be one of ['portrait', 'spine', 'spine-frame']",
+    } in diagnostics
 
 
 def test_deserialize_rejects_unknown_project_version():

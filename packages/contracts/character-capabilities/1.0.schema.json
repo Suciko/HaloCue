@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Suciko/HaloCue/contracts/character-capabilities/1.0.schema.json",
+  "title": "HaloCue character capabilities",
+  "description": "Stable authoring states resolved to local Spine animations, attachments, and overlays by a resource adapter.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "capability_id", "character_id", "expression", "motion", "emoticon", "transition"],
+  "properties": {
+    "schema_version": { "const": "character-capabilities/1.0" },
+    "capability_id": { "$ref": "#/$defs/stableId" },
+    "character_id": { "$ref": "#/$defs/stableId" },
+    "expression": { "$ref": "#/$defs/stateList" },
+    "motion": { "$ref": "#/$defs/stateList" },
+    "emoticon": { "$ref": "#/$defs/stateList" },
+    "transition": { "$ref": "#/$defs/stateList" },
+    "extensions": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9.-]*:[A-Za-z0-9._/-]+$" },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "stateList": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/state" }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state_id", "label"],
+      "properties": {
+        "state_id": { "$ref": "#/$defs/stableId" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "adapter_state": {
+          "type": "object",
+          "description": "Namespaced logical lookup only; physical paths remain in local manifests.",
+          "propertyNames": { "pattern": "^[a-z0-9][a-z0-9.-]*:[A-Za-z0-9._/-]+$" },
+          "additionalProperties": { "type": ["string", "number", "boolean", "null"] }
+        }
+      }
+    }
+  }
+}

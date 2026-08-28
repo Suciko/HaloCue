@@ -1,0 +1,129 @@
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+
+import App from "./App";
+import { demoProject } from "./demoProject";
+import { evaluateScene } from "./sceneEvaluation";
+import { useProjectStore } from "./projectStore";
+
+const actEnvironment = globalThis as typeof globalThis & {
+  IS_REACT_ACT_ENVIRONMENT?: boolean;
+};
+
+describe("simple Inspector tabs", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeAll(() => {
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterAll(() => {
+    delete actEnvironment.IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  beforeEach(() => {
+    localStorage.clear();
+    useProjectStore.getState().replaceProject(structuredClone(demoProject));
+    useProjectStore.getState().setMode("simple");
+    useProjectStore.getState().setInspectorTab("dialogue");
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    act(() => root.render(<App />));
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it("navigates tabs with one roving tab stop without changing project history", () => {
+    const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>(
+      '.inspector-tabs [role="tab"]',
+    ));
+    expect(tabs).toHaveLength(3);
+    expect(tabs.map((tab) => tab.tabIndex)).toEqual([-1, 0, -1]);
+    expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual([
+      "false",
+      "true",
+      "false",
+    ]);
+
+    const before = useProjectStore.getState();
+    const revision = before.revision;
+    const historyLength = before.history.length;
+
+    act(() => {
+      tabs[1].focus();
+      tabs[1].dispatchEvent(new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "ArrowRight",
+      }));
+    });
+
+    expect(document.activeElement).toBe(tabs[2]);
+    expect(useProjectStore.getState().inspectorTab).toBe("environment");
+    expect(tabs.map((tab) => tab.tabIndex)).toEqual([-1, -1, 0]);
+    expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual([
+      "false",
+      "false",
+      "true",
+    ]);
+    expect(useProjectStore.getState().revision).toBe(revision);
+    expect(useProjectStore.getState().history).toHaveLength(historyLength);
+
+    act(() => tabs[2].dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Home",
+    })));
+    expect(document.activeElement).toBe(tabs[0]);
+    expect(useProjectStore.getState().inspectorTab).toBe("character");
+  });
+
+  it("keeps the selected Cue title visible in the Inspector context", () => {
+    const before = useProjectStore.getState();
+    const revision = before.revision;
+    const scene = before.project.chapters[0].scenes[0];
+    const selectedCue = scene.cues[1];
+    const evaluation = evaluateScene(before.project, selectedCue.cue_id, {
+      sceneId: scene.scene_id,
+    });
+    const eventIds = new Set(selectedCue.events.map((event) => event.event_id));
+    const segments = evaluation.timeline.events.filter((event) => eventIds.has(event.event_id));
+    const start = Math.min(...segments.map((event) => event.start_frame));
+    const end = Math.max(...segments.map((event) => event.end_frame));
+    const cue = Array.from(container.querySelectorAll<HTMLButtonElement>(".cue-item"))
+      .find((button) => button.textContent?.includes("意外来客"));
+    expect(cue).not.toBeNull();
+
+    act(() => cue?.click());
+
+    const context = container.querySelector<HTMLElement>("[data-simple-cue-context]");
+    expect(context?.textContent).toBe(`意外来客 · F${start}-${end}`);
+    expect(context?.getAttribute("aria-live")).toBe("polite");
+    expect(context?.getAttribute("aria-atomic")).toBe("true");
+    expect(useProjectStore.getState().revision).toBe(revision);
+  });
+
+  it("associates the active Inspector tab with its property panel", () => {
+    const context = container.querySelector<HTMLElement>("[data-simple-cue-context]");
+    expect(context?.id).toBe("simple-inspector-cue-context");
+    const tablist = container.querySelector<HTMLElement>('.inspector-tabs[role="tablist"]');
+    expect(tablist?.getAttribute("aria-describedby")).toBe(context?.id);
+    const activeTab = container.querySelector<HTMLButtonElement>(
+      '.inspector-tabs [role="tab"][aria-selected="true"]',
+    );
+    expect(activeTab).not.toBeNull();
+    const panelId = activeTab?.getAttribute("aria-controls");
+    expect(panelId).toBeTruthy();
+    const panel = panelId ? container.querySelector<HTMLElement>(`#${panelId}`) : null;
+    expect(panel?.getAttribute("role")).toBe("tabpanel");
+    expect(panel?.getAttribute("aria-labelledby")).toBe(activeTab?.id);
+    expect(panel?.getAttribute("aria-describedby")).toBe(context?.id);
+    expect(panel?.getAttribute("data-simple-inspector-panel")).toBe("true");
+  });
+});

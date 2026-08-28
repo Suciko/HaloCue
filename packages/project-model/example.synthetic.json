@@ -1,5 +1,5 @@
 {
-  "schema_version": "halocue-project/1.0",
+  "schema_version": "halocue-project/1.1",
   "project_id": "project/synthetic-classroom",
   "title": "Synthetic classroom scene",
   "characters": [
@@ -29,23 +29,29 @@
         {
           "scene_id": "scene/classroom",
           "title": "Classroom",
-          "events": [
+          "cues": [
             {
-              "event_id": "event/background",
-              "kind": "background",
-              "resource_id": "synthetic/background/classroom"
-            },
-            {
-              "event_id": "event/alice-enter",
-              "kind": "enter",
-              "character_id": "character/alice",
-              "slot": 3
-            },
-            {
-              "event_id": "event/alice-line",
-              "kind": "dialogue",
-              "character_id": "character/alice",
-              "text": "Welcome to the classroom."
+              "cue_id": "cue/classroom/001",
+              "title": "欢迎",
+              "events": [
+                {
+                  "event_id": "event/background",
+                  "kind": "background",
+                  "resource_id": "synthetic/background/classroom"
+                },
+                {
+                  "event_id": "event/alice-enter",
+                  "kind": "enter",
+                  "character_id": "character/alice",
+                  "slot": 3
+                },
+                {
+                  "event_id": "event/alice-line",
+                  "kind": "dialogue",
+                  "character_id": "character/alice",
+                  "text": "Welcome to the classroom."
+                }
+              ]
             }
           ]
         }

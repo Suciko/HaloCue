@@ -1,0 +1,100 @@
+{
+  "schema_version": "scene-descriptor/1.0",
+  "scene_id": "scene/official-p69-yuuka-aris-calibration",
+  "location_label": "",
+  "presentation": {
+    "frame_rate": 30,
+    "location_mode": "hidden",
+    "reference_frame": {
+      "id": "official-p69-final-v9",
+      "timeline_schema_version": "render-timeline/1.2",
+      "viewport": { "width": 1280, "height": 720 },
+      "design_canvas": { "width": 2560, "height": 1440 },
+      "target_event_index": 0,
+      "resolved_frame": 35,
+      "spine_time_ms": 1166.667,
+      "dialogue_complete": true,
+      "overlay_controls_visible": true,
+      "anchors": {
+        "dialogue_panel": { "x": 0.1, "top": 0.711111 },
+        "speaker_name": { "x": 0.1, "top": 0.7 },
+        "secondary_identity": { "x": 0.164063, "top": 0.715741 },
+        "dialogue_text": { "x": 0.1, "top": 0.790278 },
+        "dialogue_shade": { "top": 0.61 },
+        "slot_1_center": { "x": 0.1875 },
+        "slot_5_center": { "x": 0.8125 },
+        "auto_button": { "x": 0.79375, "y": 0.025, "width": 0.09375, "height": 0.0625 },
+        "menu_button": { "x": 0.894531, "y": 0.025, "width": 0.09375, "height": 0.0625 }
+      }
+    },
+    "overlay_controls": {
+      "auto": true,
+      "menu": true,
+      "auto_enabled": true,
+      "auto_label": "自动",
+      "menu_label": "菜单"
+    }
+  },
+  "background": {
+    "resource_id": "aa/background/bg_gamedevroom",
+    "logical_key": "bg_gamedevroom",
+    "aa_key": "BG_GameDevRoom",
+    "zoom": 1.068,
+    "preview_uri": "/api/resources/stage/background?key=bg_gamedevroom"
+  },
+  "actors": [
+    {
+      "slot": 1,
+      "character_id": "character/yuuka",
+      "display_name": "早濑优香",
+      "dialogue_name": "优香",
+      "club_name": "研讨会",
+      "avatar_key": "Student_Portrait_Yuuka",
+      "thumbnail_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Yuuka",
+      "thumbnail_kind": "avatar",
+      "stage_media": {
+        "kind": "spine",
+        "bundle_key": "CharacterSpine_yuuka",
+        "animation": "06",
+        "anchor_x": 0.5,
+        "anchor_y": 1,
+        "scale": 1.704,
+        "offset_x": -32,
+        "offset_y": 1038
+      },
+      "state": "visible"
+    },
+    { "slot": 2, "character_id": null, "display_name": "", "state": "hidden" },
+    { "slot": 3, "character_id": null, "display_name": "", "state": "hidden" },
+    { "slot": 4, "character_id": null, "display_name": "", "state": "hidden" },
+    {
+      "slot": 5,
+      "character_id": "character/alice",
+      "display_name": "天童爱丽丝",
+      "dialogue_name": "爱丽丝",
+      "club_name": "游戏开发部",
+      "avatar_key": "Student_Portrait_Aris",
+      "thumbnail_uri": "/api/resources/preview?kind=avatar&key=Student_Portrait_Aris",
+      "thumbnail_kind": "avatar",
+      "stage_media": {
+        "kind": "spine",
+        "bundle_key": "CharacterSpine_aris",
+        "animation": "00",
+        "anchor_x": 0.5,
+        "anchor_y": 1,
+        "scale": 2.266,
+        "offset_x": -48,
+        "offset_y": 766
+      },
+      "state": "visible"
+    }
+  ],
+  "events": [
+    {
+      "event_id": "event/yuuka-line",
+      "kind": "dialogue",
+      "character_id": "character/yuuka",
+      "text": "哈？你们这是什么反应？"
+    }
+  ]
+}

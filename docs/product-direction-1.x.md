@@ -34,10 +34,30 @@ not the default deliverable.
 - AA/AAP compatibility remains an import, preview, and optional export edge.
   `HaloCueProject` is never shaped around AAP limitations.
 
-The ordinary-user workflow should begin with a clear scene, characters, and
-timeline rather than exposing every advanced Studio-style property at once.
-Advanced node, event, resource, and export controls remain available through an
-explicit advanced mode.
+### AA-compatible stage layout
+
+The 1.1 editor exposes **five visible portrait positions**, numbered `1` to
+`5`, matching the existing AA runtime and compiler validation. AAP keeps a
+six-entry `characters` array for serialization, but entry `0` is the
+no-portrait narrator/off-screen speaker slot; it is not a sixth visible
+position. Product copy, editor controls, validation, and export documentation
+must call this “five visible positions” and must not describe it as a
+six-position stage.
+
+The ordinary-user workflow is a low-operation-cost editing workspace over the
+same complete project semantics as professional mode. It should begin with the
+current scene, characters, Cue, and preview, then disclose only the controls
+needed for the current task. Direct manipulation, useful defaults, and
+contextual panels should remove steps; simple mode must not be implemented as
+an AA UI clone, a field dump, or merely the professional UI with controls
+hidden. Advanced node, event, resource, and export controls remain available
+through professional mode without converting or duplicating project data.
+
+Studio is the primary reference for coherent project and editing semantics.
+AA is secondary interaction evidence for BA-specific concepts such as five
+visible stage positions and Cue-sized script beats. AA navigation and dense
+single-screen layouts are not compatibility requirements and should be
+improved when they raise operation cost or reduce clarity.
 
 ## MMT as a presentation channel
 

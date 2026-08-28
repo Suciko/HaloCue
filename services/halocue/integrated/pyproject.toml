@@ -1,0 +1,12 @@
+[project]
+name = "halocue-integrated"
+version = "1.0.0"
+description = "Same-origin HaloCue 1.0 writing and AA production runtime"
+requires-python = ">=3.11,<3.14"
+
+[project.scripts]
+halocue-integrated = "halocue_integrated.server:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

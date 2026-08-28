@@ -1,0 +1,1392 @@
+/* ==========================================================================
+   HaloCue 1.0 Integrated AA Production Design System
+   墨青 / 竹青 / 暖米纸 · 现代化专业桌面创作工程排版规范
+   ========================================================================== */
+
+:root {
+  --font-ui: "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  --font-reading: "Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "STSong", "Songti SC", "SimSun", serif;
+  --ink: #202735;
+  --ink-2: #303b4f;
+  --paper: #ffffff;
+  --paper-sidebar: #eef0f3;
+  --canvas: #f5f6f8;
+  --surface: #ffffff;
+  --surface-soft: #f7f8fa;
+  --line: #d9dde4;
+  --line-strong: #c5cbd5;
+  --muted: #697386;
+  --green: #2f7d5c;
+  --green-hover: #286d50;
+  --green-soft: #edf6f1;
+  --green-border: #bdd8ca;
+  --accent: #3f69a7;
+  --accent-hover: #345a91;
+  --accent-soft: #edf2fa;
+  --success: #2f7d5c;
+  --success-soft: #edf6f1;
+  --warn: #94651d;
+  --warn-soft: #fbf5e8;
+  --danger: #a54a42;
+  --danger-soft: #fbefee;
+  --shadow-sm: 0 1px 3px rgba(31, 39, 53, 0.04);
+  --shadow-md: 0 6px 20px rgba(31, 39, 53, 0.06);
+  --shadow-lg: 0 18px 48px rgba(31, 39, 53, 0.12);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html, body {
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  margin: 0;
+  padding: 0;
+}
+
+.halocue-integrated-production {
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-ui);
+}
+
+/* Global Form Controls & Buttons */
+.halocue-integrated-production button,
+.halocue-integrated-production input,
+.halocue-integrated-production select,
+.halocue-integrated-production textarea {
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  transition: border-color 140ms ease-out, box-shadow 140ms ease-out, background-color 140ms ease-out, transform 100ms ease-out;
+}
+
+.halocue-integrated-production input,
+.halocue-integrated-production select {
+  height: 38px;
+  padding: 0 12px;
+  box-sizing: border-box;
+}
+
+.halocue-integrated-production textarea {
+  padding: 12px 14px;
+  box-sizing: border-box;
+}
+
+.halocue-integrated-production input:focus,
+.halocue-integrated-production select:focus,
+.halocue-integrated-production textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(63, 105, 167, 0.14);
+}
+
+.halocue-integrated-production button {
+  min-height: 36px;
+  padding: 7px 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-weight: 500;
+  user-select: none;
+}
+
+.halocue-integrated-production button:active {
+  transform: scale(0.97);
+}
+
+.halocue-integrated-production .primary,
+.halocue-integrated-production button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(63, 105, 167, 0.2);
+}
+
+.halocue-integrated-production .primary:hover,
+.halocue-integrated-production button.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  box-shadow: 0 4px 12px rgba(63, 105, 167, 0.24);
+}
+
+.halocue-integrated-production .primary:active,
+.halocue-integrated-production button.primary:active {
+  transform: scale(0.97);
+}
+
+.halocue-integrated-production .text-button {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  padding: 4px 8px;
+}
+
+.halocue-integrated-production .text-button:hover {
+  text-decoration: underline;
+}
+
+/* App Shell Grid */
+.halocue-integrated-production .app-shell {
+  display: grid;
+  grid-template-columns: 58px 280px minmax(0, 1fr);
+  grid-template-rows: 60px minmax(0, 1fr);
+  height: 100vh;
+  overflow: hidden;
+  background: var(--canvas);
+}
+
+/* ==========================================================================
+   Left Primary Nav Rail
+   ========================================================================== */
+.halocue-integrated-production .app-rail {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 4px;
+  padding: 10px 5px;
+  border-right: 0;
+  background: #232a34;
+  box-sizing: border-box;
+}
+
+.integrated-brand {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: #27313d;
+  color: #ffffff;
+  font: 700 14px/1 Georgia, "STSong", serif;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 6px rgba(19, 38, 34, 0.2);
+  margin: auto;
+  text-decoration: none;
+  user-select: none;
+}
+
+.integrated-nav-item {
+  display: flex !important;
+  width: 48px !important;
+  height: 52px !important;
+  flex: 0 0 52px !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 3px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  color: #9cb5ab !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  text-decoration: none !important;
+  cursor: pointer !important;
+  transition: background-color 140ms ease-out, color 140ms ease-out, transform 100ms ease-out !important;
+  box-sizing: border-box !important;
+}
+
+.integrated-nav-item:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+}
+
+.integrated-nav-item:active {
+  transform: scale(0.95) !important;
+}
+
+.integrated-nav-item.active {
+  background: rgba(255, 255, 255, 0.13) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  box-shadow: inset 2px 0 0 #64c8a8 !important;
+}
+
+.integrated-nav-mark {
+  font: 17px/1 Georgia, "STSong", serif !important;
+}
+
+.integrated-nav-spacer {
+  margin-top: auto;
+  flex: 1 1 auto;
+  min-height: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 6px;
+  width: 100%;
+}
+
+/* ==========================================================================
+   Topbar
+   ========================================================================== */
+.halocue-integrated-production .topbar {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  grid-template-columns: 58px 280px minmax(0, 1fr) auto;
+  height: 60px;
+  padding: 0 24px 0 0;
+  border-bottom: 1px solid var(--line);
+  background: rgba(251, 249, 244, 0.94);
+  box-shadow: 0 1px 4px rgba(19, 38, 34, 0.03);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.halocue-integrated-production .topbar .integrated-brand {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.halocue-integrated-production .topbar > div:first-of-type {
+  grid-column: 2 / 4;
+  grid-row: 1;
+  min-width: 0;
+  padding: 0 20px;
+}
+
+.halocue-integrated-production .topbar small {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.3px;
+}
+
+.halocue-integrated-production .topbar h2 {
+  margin: 2px 0 0;
+  font: 600 17px/1.2 var(--font-reading);
+  color: var(--ink);
+}
+
+.halocue-integrated-production .topbar .top-actions {
+  grid-column: 4;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.halocue-integrated-production .integrated-top-action,
+.halocue-integrated-production .overview-button {
+  min-height: 32px;
+  padding: 5px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #3b4d45;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.halocue-integrated-production .integrated-top-action:hover,
+.halocue-integrated-production .overview-button:hover {
+  border-color: #9cbdb1;
+  background: #f4faf7;
+  color: var(--ink);
+}
+
+.halocue-integrated-production .icon-button {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #55665f;
+  font-size: 14px;
+}
+
+.halocue-integrated-production .status-dot {
+  font-size: 11px;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+.halocue-integrated-production .status-dot::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  background: #23856d;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(35, 133, 109, 0.2);
+}
+
+/* ==========================================================================
+   Stage Sidebar (Sub Navigation)
+   ========================================================================== */
+.halocue-integrated-production .stage-sidebar {
+  grid-column: 2;
+  grid-row: 2;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  background: var(--paper-sidebar);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.halocue-integrated-production .side-header {
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #fbf9f4;
+}
+
+.halocue-integrated-production .side-header small {
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.halocue-integrated-production .side-header h1 {
+  margin: 4px 0 2px;
+  font: 600 20px/1.3 var(--font-reading);
+  color: var(--ink);
+}
+
+.halocue-integrated-production .side-header p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.halocue-integrated-production .flow-progress {
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+}
+
+.halocue-integrated-production .flow-progress > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.halocue-integrated-production .flow-progress small {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.halocue-integrated-production .flow-progress strong {
+  font-size: 12px;
+  color: var(--green);
+  font-family: Consolas, monospace;
+}
+
+.halocue-integrated-production .flow-progress-track {
+  height: 4px;
+  border-radius: 2px;
+  background: #e2ded4;
+  overflow: hidden;
+  display: block;
+}
+
+.halocue-integrated-production .flow-progress-track i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 240ms ease-out;
+}
+
+.halocue-integrated-production .stage-list {
+  list-style: none;
+  margin: 0;
+  padding: 14px 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.halocue-integrated-production .stage-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 140ms ease-out, border-color 140ms ease-out, transform 100ms ease-out;
+}
+
+.halocue-integrated-production .stage-list li:hover {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.halocue-integrated-production .stage-list li:active {
+  transform: scale(0.98);
+}
+
+.halocue-integrated-production .stage-list li.active {
+  background: #ffffff;
+  border-color: #c4d2e4;
+  box-shadow: 0 2px 8px rgba(63, 105, 167, 0.08);
+}
+
+.halocue-integrated-production .stage-list b {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  background: #ffffff;
+  flex: 0 0 auto;
+}
+
+.halocue-integrated-production .stage-list li.active b {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.halocue-integrated-production .stage-list li.done b {
+  background: var(--success);
+  border-color: var(--success);
+  color: #ffffff;
+}
+
+.halocue-integrated-production .stage-list span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.halocue-integrated-production .stage-list strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.halocue-integrated-production .stage-list small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.halocue-integrated-production .stage-list em {
+  font-size: 10px;
+  font-style: normal;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #e9f3ee;
+  color: var(--green);
+  font-weight: 600;
+}
+
+.halocue-integrated-production .side-status {
+  margin: auto 12px 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffdfa;
+  box-shadow: var(--shadow-sm);
+}
+
+.halocue-integrated-production .side-status small {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.halocue-integrated-production .side-status strong {
+  display: block;
+  font-size: 14px;
+  color: var(--ink);
+  margin: 4px 0 2px;
+}
+
+.halocue-integrated-production .side-status p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* ==========================================================================
+   Workspace & Pages
+   ========================================================================== */
+.halocue-integrated-production .workspace {
+  grid-column: 3;
+  grid-row: 2;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--canvas);
+}
+
+.halocue-integrated-production .page {
+  padding: 28px 36px 64px;
+  max-width: 1140px;
+  margin: 0 auto;
+}
+
+.halocue-integrated-production .page-lead,
+.halocue-integrated-production .review-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.halocue-integrated-production .page-lead small,
+.halocue-integrated-production .review-head small {
+  font-size: 11px;
+  color: var(--green);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.halocue-integrated-production .page-lead h3,
+.halocue-integrated-production .review-head h3 {
+  margin: 4px 0 2px;
+  font: 600 22px/1.3 var(--font-reading);
+  color: var(--ink);
+}
+
+.halocue-integrated-production .page-lead p,
+.halocue-integrated-production .review-head p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.halocue-integrated-production .mode-badge {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #b8ded0;
+  background: #eaf5f0;
+  color: var(--green);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   Source Mode Selector, Writing Works Grid & Modern Dropzone (Stage 1)
+   ========================================================================== */
+.halocue-integrated-production .source-mode-selector,
+.source-mode-selector {
+  margin-bottom: 20px;
+}
+
+.halocue-integrated-production .source-tabs,
+.source-tabs {
+  display: flex;
+  gap: 6px;
+  background: var(--paper-sidebar);
+  border: 1px solid var(--line);
+  padding: 4px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.halocue-integrated-production .source-tab,
+.source-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: none;
+  background: transparent;
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.halocue-integrated-production .source-tab:hover,
+.source-tab:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.halocue-integrated-production .source-tab.active,
+.source-tab.active {
+  background: #ffffff;
+  color: var(--ink);
+  box-shadow: 0 2px 6px rgba(19, 38, 34, 0.08);
+}
+
+.halocue-integrated-production .source-tab .tab-mark,
+.source-tab .tab-mark {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.halocue-integrated-production .source-tab.active .tab-mark,
+.source-tab.active .tab-mark {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.halocue-integrated-production .source-pane.hidden,
+.source-pane.hidden {
+  display: none !important;
+}
+
+.halocue-integrated-production .writing-works-list-container,
+.writing-works-list-container {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.halocue-integrated-production .writing-works-head,
+.writing-works-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: #2e423a;
+}
+
+.halocue-integrated-production .writing-releases-grid,
+.writing-releases-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.halocue-integrated-production .writing-release-card,
+.writing-release-card {
+  border: 1px solid #e3e5de;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+  transition: transform 150ms ease-out, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.halocue-integrated-production .writing-release-card:hover,
+.writing-release-card:hover {
+  border-color: #b9c9df;
+  box-shadow: 0 4px 14px rgba(63, 105, 167, 0.08);
+  transform: translateY(-1px);
+}
+
+.halocue-integrated-production .release-card-head,
+.release-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.halocue-integrated-production .release-tag,
+.release-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.halocue-integrated-production .release-tag.published,
+.release-tag.published {
+  background: #eaf5f0;
+  color: var(--green);
+  border: 1px solid #b8ded0;
+}
+
+.halocue-integrated-production .release-tag.draft,
+.release-tag.draft {
+  background: #f5f0e4;
+  color: var(--warn);
+  border: 1px solid #dfd3bb;
+}
+
+.halocue-integrated-production .writing-release-card h4,
+.writing-release-card h4 {
+  margin: 6px 0 2px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.halocue-integrated-production .writing-release-card p,
+.writing-release-card p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.halocue-integrated-production .select-writing-release-btn,
+.select-writing-release-btn {
+  align-self: flex-start;
+  width: auto;
+  min-height: 32px;
+  padding: 6px 12px;
+}
+
+.halocue-integrated-production .source-pane-manual,
+.source-pane-manual {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.halocue-integrated-production .source-pane-manual p,
+.source-pane-manual p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.halocue-integrated-production .writing-releases-empty,
+.writing-releases-empty {
+  grid-column: 1 / -1;
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Modern Dropzone */
+#scriptFile,
+input[type="file"].sr-only,
+.halocue-integrated-production #scriptFile,
+.halocue-integrated-production input[type="file"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  position: absolute !important;
+  pointer-events: none !important;
+}
+
+.halocue-integrated-production .modern-dropzone,
+.modern-dropzone {
+  border: 2px dashed #c5cbd5;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 32px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.halocue-integrated-production .modern-dropzone:hover,
+.halocue-integrated-production .modern-dropzone.dragover,
+.modern-dropzone:hover,
+.modern-dropzone.dragover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 3px rgba(63, 105, 167, 0.08);
+}
+
+.halocue-integrated-production .dropzone-icon,
+.dropzone-icon {
+  font-size: 28px;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.halocue-integrated-production .dropzone-inner strong,
+.dropzone-inner strong {
+  display: block;
+  font-size: 14px;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+
+.halocue-integrated-production .dropzone-inner small,
+.dropzone-inner small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 14px;
+}
+
+.halocue-integrated-production .dropzone-file-info,
+.dropzone-file-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: #ffffff;
+  border: 1px solid #b8ded0;
+  border-radius: 8px;
+  padding: 12px 18px;
+  text-align: left;
+}
+
+.halocue-integrated-production .dropzone-file-icon,
+.dropzone-file-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--green);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.halocue-integrated-production .dropzone-file-details strong,
+.dropzone-file-details strong {
+  display: block;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.halocue-integrated-production .dropzone-file-details small,
+.dropzone-file-details small {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.halocue-integrated-production .dropzone-file-actions,
+.dropzone-file-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.halocue-integrated-production .active-source-badge,
+.active-source-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: #eaf5f0;
+  border: 1px solid #b8ded0;
+  border-radius: 7px;
+  margin-bottom: 6px;
+}
+
+.halocue-integrated-production .active-source-badge .badge-tag,
+.active-source-badge .badge-tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff;
+  background: var(--green);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.halocue-integrated-production .active-source-badge strong,
+.active-source-badge strong {
+  font-size: 13px;
+  color: var(--ink);
+  flex: 1;
+}
+
+/* ==========================================================================
+   Source Form (Stage 1)
+   ========================================================================== */
+.halocue-integrated-production .source-form {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+  padding: 24px 28px;
+  display: grid;
+  gap: 18px;
+}
+
+.halocue-integrated-production .source-form > label {
+  display: grid;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #2e423a;
+}
+
+.halocue-integrated-production .source-form textarea {
+  min-height: 240px;
+  line-height: 1.7;
+  font-size: 14px;
+  font-family: Consolas, "PingFang SC", sans-serif;
+  background: var(--surface);
+}
+
+.halocue-integrated-production .generation-mode-fieldset {
+  border: 1px solid #dce4e0;
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: #fbfdfc;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 0;
+}
+
+.halocue-integrated-production .generation-mode-fieldset legend {
+  font-size: 12px;
+  font-weight: 700;
+  color: #3b4f47;
+  padding: 0 6px;
+}
+
+.halocue-integrated-production .mode-choice {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 10px;
+  padding: 12px 14px !important;
+  border: 1px solid #dce2df;
+  border-radius: 6px;
+  background: #ffffff;
+  cursor: pointer;
+  margin: 0 !important;
+  transition: border-color 140ms ease-out, background-color 140ms ease-out;
+}
+
+.halocue-integrated-production .mode-choice:hover {
+  border-color: #9cbdb1;
+}
+
+.halocue-integrated-production .mode-choice:has(input:checked) {
+  border-color: var(--green);
+  background: #edf6f2;
+  box-shadow: 0 0 0 1px var(--green);
+}
+
+.halocue-integrated-production .mode-choice input {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: var(--green);
+  flex: 0 0 auto;
+}
+
+.halocue-integrated-production .mode-choice span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.halocue-integrated-production .mode-choice b {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.halocue-integrated-production .mode-choice small {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: normal;
+}
+
+.halocue-integrated-production .generation-mode-notice {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  border-top: 1px dashed var(--line);
+}
+
+.halocue-integrated-production .form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.halocue-integrated-production .source-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* ==========================================================================
+   Recent Runs List
+   ========================================================================== */
+.halocue-integrated-production .recent-runs {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+  padding: 20px 24px;
+  margin-top: 20px;
+}
+
+.halocue-integrated-production .recent-runs header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 12px;
+}
+
+.halocue-integrated-production .recent-runs h3 {
+  margin: 2px 0 0;
+  font: 600 16px/1.3 var(--font-reading);
+  color: var(--ink);
+}
+
+.halocue-integrated-production .run-list {
+  display: grid;
+  gap: 6px;
+}
+
+.halocue-integrated-production .run-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fffdfc;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out, transform 120ms ease-out;
+}
+
+.halocue-integrated-production .run-row:hover {
+  border-color: var(--action-line, #b9c9df);
+  background: var(--accent-soft);
+  transform: translateY(-1px);
+}
+
+/* ==========================================================================
+   Mapping (Stage 2)
+   ========================================================================== */
+.halocue-integrated-production .mapping-list {
+  display: grid;
+  gap: 8px;
+}
+
+.halocue-integrated-production .mapping-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(260px, 2fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+}
+
+.halocue-integrated-production .mapping-row strong {
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.halocue-integrated-production .mapping-value {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.halocue-integrated-production .mapping-value b {
+  color: var(--green);
+  background: #eaf5f0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   Gates & Action Panel (Stage 3)
+   ========================================================================== */
+.halocue-integrated-production .gate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.halocue-integrated-production .gate-card {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.halocue-integrated-production .gate-card.pass {
+  border-top: 3px solid var(--green);
+  background: #fbfdfc;
+}
+
+.halocue-integrated-production .gate-card.block {
+  border-top: 3px solid var(--warn);
+  background: #fdfbf9;
+}
+
+.halocue-integrated-production .action-panel {
+  margin-top: 20px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 20px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ==========================================================================
+   Review Workbench (Stage 4)
+   ========================================================================== */
+.halocue-integrated-production .workflow-hint {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 20px;
+  margin-bottom: 16px;
+}
+
+.halocue-integrated-production .review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+}
+
+.halocue-integrated-production .review-column,
+.halocue-integrated-production .inspector {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.halocue-integrated-production .filterbar {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 6px;
+}
+
+.halocue-integrated-production .filterbar button {
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--muted);
+}
+
+.halocue-integrated-production .filterbar button.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.halocue-integrated-production .card-list {
+  max-height: calc(100vh - 300px);
+  overflow-y: auto;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.halocue-integrated-production .draft-card {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+
+.halocue-integrated-production .draft-card:hover {
+  border-color: var(--action-line, #b9c9df);
+  background: #f8fafc;
+}
+
+.halocue-integrated-production .draft-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 2px 8px rgba(63, 105, 167, 0.08);
+}
+
+.halocue-integrated-production .draft-card.blocking {
+  border-left: 3px solid var(--danger);
+}
+
+.halocue-integrated-production .draft-card.pending {
+  border-left: 3px solid var(--warn);
+}
+
+.halocue-integrated-production .inspector {
+  padding: 20px 22px;
+  min-height: 350px;
+}
+
+.halocue-integrated-production .inspector h3 {
+  font: 600 18px/1.3 var(--font-reading);
+  color: var(--ink);
+  margin: 6px 0 14px;
+}
+
+/* ==========================================================================
+   Sticky Bottom Bars
+   ========================================================================== */
+.halocue-integrated-production .sticky-actions,
+.halocue-integrated-production .buildbar {
+  position: sticky;
+  bottom: 0;
+  background: rgba(251, 249, 244, 0.94);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid var(--line);
+  margin: 22px -36px -64px;
+  padding: 14px 36px;
+  z-index: 4;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+/* ==========================================================================
+   Modals & Dialogs
+   ========================================================================== */
+.halocue-integrated-production dialog {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  max-width: none;
+}
+
+.halocue-integrated-production dialog::backdrop {
+  background: rgba(16, 32, 28, 0.55);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+
+.halocue-integrated-production .dialog-shell {
+  width: min(740px, calc(100vw - 36px));
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--paper);
+  border: 1px solid #ccd7d0;
+  border-radius: 12px;
+  box-shadow: 0 28px 70px rgba(15, 33, 28, 0.26);
+  padding: 24px 28px;
+  box-sizing: border-box;
+}
+
+.halocue-integrated-production .dialog-shell header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.halocue-integrated-production .dialog-shell header small {
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.halocue-integrated-production .dialog-shell header h3 {
+  margin: 3px 0 0;
+  font: 600 20px/1.3 var(--font-reading);
+  color: var(--ink);
+}
+
+/* Responsive */
+@media (max-width: 800px) {
+  .halocue-integrated-production .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: 52px auto minmax(0, 1fr) 52px;
+    height: 100dvh;
+  }
+
+  .halocue-integrated-production .app-rail {
+    grid-column: 1;
+    grid-row: 4;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 52px;
+    flex-direction: row !important;
+    padding: 0 10px !important;
+    gap: 8px;
+    z-index: 20;
+    justify-content: space-around !important;
+  }
+
+  .halocue-integrated-production .app-rail .integrated-brand {
+    display: none;
+  }
+
+  .halocue-integrated-production .integrated-nav-item {
+    width: auto !important;
+    height: 44px !important;
+    flex: 1 1 auto !important;
+  }
+
+  .halocue-integrated-production .integrated-nav-spacer {
+    display: none;
+  }
+
+  .halocue-integrated-production .stage-sidebar {
+    grid-column: 1;
+    grid-row: 2;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .halocue-integrated-production .workspace {
+    grid-column: 1;
+    grid-row: 3;
+    padding-bottom: 56px;
+  }
+
+  .halocue-integrated-production .page {
+    padding: 16px 14px 40px;
+  }
+
+  .halocue-integrated-production .source-form {
+    padding: 16px;
+  }
+
+  .halocue-integrated-production .generation-mode-fieldset {
+    grid-template-columns: 1fr;
+  }
+
+  .halocue-integrated-production .review-layout {
+    grid-template-columns: 1fr;
+  }
+}

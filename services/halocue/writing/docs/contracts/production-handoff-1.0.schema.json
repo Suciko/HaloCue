@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://halocue.local/contracts/production-handoff-1.0.schema.json",
+  "title": "HaloCue Production Handoff 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project", "generation_mode", "source", "script_release"],
+  "properties": {
+    "schema_version": {"const": "production-handoff/1.0"},
+    "project": {"type": "string", "minLength": 1},
+    "generation_mode": {"const": "format_only"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "text"],
+      "properties": {
+        "kind": {"const": "inline"},
+        "text": {"type": "string", "minLength": 1}
+      }
+    },
+    "asset_handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "release_id", "source_set_digest", "references"],
+      "properties": {
+        "schema_version": {"const": "production-asset-handoff/1.0"},
+        "release_id": {"type": "string", "minLength": 1},
+        "source_set_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["scene_id", "references", "digest"],
+            "properties": {
+              "scene_id": {"type": "string", "minLength": 1},
+              "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+              "references": {"type": "array", "items": {"type": "object"}}
+            }
+          }
+        }
+      }
+    },
+    "script_release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "id", "work_id", "display_version", "content_hash", "writing_pack_version", "ba_writing_source_digest", "source_set_digest"],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "id": {"type": "string", "minLength": 1},
+        "work_id": {"type": "string", "minLength": 1},
+        "display_version": {"type": "string", "minLength": 1},
+        "content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "writing_pack_version": {"type": "string", "minLength": 1},
+        "ba_writing_source_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "source_set_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

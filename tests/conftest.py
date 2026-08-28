@@ -91,7 +91,7 @@ def annotated_script_path(tmp_path):
     return path
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def browser():
     install = (
         "Install browser test support with: python -m pip install playwright && "

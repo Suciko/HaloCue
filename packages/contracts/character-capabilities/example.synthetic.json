@@ -1,0 +1,25 @@
+{
+  "schema_version": "character-capabilities/1.0",
+  "capability_id": "capability/alice/default",
+  "character_id": "character/alice",
+  "expression": [
+    { "state_id": "expression/neutral", "label": "平静" },
+    {
+      "state_id": "expression/smile",
+      "label": "微笑",
+      "adapter_state": { "aa:animation": "03_smile" }
+    }
+  ],
+  "motion": [
+    { "state_id": "motion/idle", "label": "待机" },
+    { "state_id": "motion/nod", "label": "点头" }
+  ],
+  "emoticon": [
+    { "state_id": "emoticon/none", "label": "无" },
+    { "state_id": "emoticon/bulb", "label": "灵光" }
+  ],
+  "transition": [
+    { "state_id": "transition/cut", "label": "直接切换" },
+    { "state_id": "transition/fade", "label": "淡入淡出" }
+  ]
+}

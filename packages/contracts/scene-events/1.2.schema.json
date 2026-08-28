@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Suciko/HaloCue/contracts/scene-events/1.2.schema.json",
+  "title": "HaloCue scene event registry",
+  "description": "Versioned event metadata shared by editor, preview, and offline render adapters.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "events"],
+  "properties": {
+    "schema_version": { "const": "scene-events/1.2" },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/eventDefinition" }
+    }
+  },
+  "$defs": {
+    "eventDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "descriptor_renderable",
+        "timeline_supported",
+        "visual_only",
+        "supports_non_blocking",
+        "duration_policy",
+        "default_duration_ms",
+        "simple_action",
+        "editor_label"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._/-]+(?::[A-Za-z0-9._/-]+)?$"
+        },
+        "descriptor_renderable": { "type": "boolean" },
+        "timeline_supported": { "type": "boolean" },
+        "visual_only": { "type": "boolean" },
+        "supports_non_blocking": { "type": "boolean" },
+        "duration_policy": {
+          "type": "string",
+          "enum": ["fixed", "dialogue-aa-v1"]
+        },
+        "default_duration_ms": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "simple_action": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "editor_label": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

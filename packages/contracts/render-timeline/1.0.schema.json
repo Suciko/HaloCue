@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Suciko/HaloCue/contracts/render-timeline/1.0.schema.json",
+  "title": "HaloCue deterministic render timeline",
+  "description": "End-exclusive frame ranges shared by browser preview and offline video adapters.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "frame_rate",
+    "scene_id",
+    "events",
+    "total_frames"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "render-timeline/1.0"
+    },
+    "frame_rate": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 240
+    },
+    "scene_id": {
+      "type": ["string", "null"]
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/timelineEvent"
+      }
+    },
+    "total_frames": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "$defs": {
+    "timelineEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "kind",
+        "start_frame",
+        "end_frame",
+        "duration_frames",
+        "duration_ms",
+        "event"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "background",
+            "dialogue",
+            "enter",
+            "exit",
+            "wait",
+            "halocue.ba:background-pan",
+            "halocue.ba:screen-shake",
+            "halocue.ba:screen-text",
+            "halocue.ba:hit-effect"
+          ]
+        },
+        "start_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_frame": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "duration_frames": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "event": {
+          "type": "object",
+          "required": ["event_id", "kind"]
+        }
+      }
+    }
+  }
+}
