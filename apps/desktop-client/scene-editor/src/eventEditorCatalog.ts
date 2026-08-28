@@ -81,6 +81,12 @@ const fields = {
   ]),
   screenText: Object.freeze([
     field({ key: "text", label: "屏幕文字", control: "text" }),
+    field({
+      key: "wait_for_completion",
+      label: "阻塞后续事件",
+      control: "boolean",
+      hint: "关闭后，下一事件会在屏幕文字显示期间开始",
+    }),
   ]),
   hitEffect: Object.freeze([
     field({ key: "slot", label: "目标栏位", control: "slot", min: 1, max: 5, step: 1 }),
@@ -172,6 +178,7 @@ const CATALOG: Record<string, EventEditorDefinition> = {
     event_id: eventId,
     kind: "halocue.ba:screen-text",
     text: "屏幕文字",
+    wait_for_completion: true,
   })),
   "halocue.ba:hit-effect": registered("halocue.ba:hit-effect", "effect", fields.hitEffect, ({ eventId, selectedSlot }) => ({
     event_id: eventId,

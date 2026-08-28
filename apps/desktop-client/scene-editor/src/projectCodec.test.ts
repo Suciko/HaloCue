@@ -127,6 +127,28 @@ describe("ProjectCodec seam", () => {
       }));
   });
 
+  it("accepts non-blocking screen text through project validation", () => {
+    const project = structuredClone(demoProject) as Record<string, any>;
+    const events = project.chapters[0].scenes[0].cues[0].events;
+    const textIndex = events.length;
+    events.push({
+      event_id: "event/parallel-screen-text",
+      kind: "halocue.ba:screen-text",
+      text: "三天后",
+      wait_for_completion: false,
+    });
+
+    const diagnostics = diagnoseProject(project);
+    expect(diagnostics.some((item) => item.severity === "error")).toBe(false);
+    expect(diagnostics.some((item) => item.path.endsWith(`events[${textIndex}].wait_for_completion`)))
+      .toBe(false);
+    expect(parseProject(project).chapters[0].scenes[0].cues[0].events.at(-1))
+      .toEqual(expect.objectContaining({
+        event_id: "event/parallel-screen-text",
+        wait_for_completion: false,
+      }));
+  });
+
   it("diagnoses invalid wait flags and unsupported non-blocking event kinds", () => {
     const project = structuredClone(demoProject) as Record<string, any>;
     const events = project.chapters[0].scenes[0].cues[0].events;

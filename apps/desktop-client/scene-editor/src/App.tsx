@@ -2007,6 +2007,18 @@ function shotTimelineClipLabel(clip: ShotTimelineClip): string {
   return clip.label;
 }
 
+const SHOT_CLIP_HEIGHT_PX = 32;
+const SHOT_CLIP_GAP_PX = 4;
+const SHOT_TRACK_PADDING_PX = 5;
+
+function shotTrackHeight(laneCount: number): number {
+  return (
+    SHOT_TRACK_PADDING_PX * 2
+    + laneCount * SHOT_CLIP_HEIGHT_PX
+    + Math.max(0, laneCount - 1) * SHOT_CLIP_GAP_PX
+  );
+}
+
 function ShotTimelineWorkspace() {
   const project = useProjectStore((state) => state.project);
   const selectedSceneId = useProjectStore((state) => state.selectedSceneId);
@@ -2062,6 +2074,7 @@ function ShotTimelineWorkspace() {
   const clipPosition = (clip: ShotTimelineClip) => ({
     left: `${Math.max(0, ((clip.start_frame - rangeStart) / span) * 100)}%`,
     width: `${Math.max(1.5, ((clip.end_frame - clip.start_frame) / span) * 100)}%`,
+    top: `${SHOT_TRACK_PADDING_PX + clip.lane_index * (SHOT_CLIP_HEIGHT_PX + SHOT_CLIP_GAP_PX)}px`,
   });
   const focusClip = (clip: ShotTimelineClip) => {
     selectEvent(clip.event_id);
@@ -2173,12 +2186,15 @@ function ShotTimelineWorkspace() {
           </div>
           <div className="shot-track-stack">
             <span className="shot-playhead" style={{ left: `calc(110px + (100% - 110px) * ${playheadPercent / 100})` }} />
-            {projection.tracks.map((track) => (
-              <div className="shot-track-row" key={track.id}>
+            {projection.tracks.map((track) => {
+              const trackHeight = shotTrackHeight(track.lane_count);
+              return <div className="shot-track-row" key={track.id} style={{ minHeight: `${trackHeight}px` }}>
                 <div className="shot-track-label" title={track.label}><strong>{track.label}</strong><small>{track.clips.length || "—"}</small></div>
                 <div
                   className="shot-track-lane"
                   data-shot-track={track.id}
+                  data-shot-lane-count={track.lane_count}
+                  style={{ minHeight: `${trackHeight}px` }}
                   onPointerDown={(event) => scrubAt(event.clientX, event.currentTarget)}
                   onClick={(event) => scrubAt(event.clientX, event.currentTarget)}
                 >
@@ -2193,6 +2209,7 @@ function ShotTimelineWorkspace() {
                       className={`shot-clip${clip.event_id === selectedEventId ? " is-selected" : ""}${clip.wait_for_completion ? "" : " is-parallel"}${isActive ? " is-active" : ""}`}
                       data-shot-clip
                       data-shot-active={isActive ? "true" : undefined}
+                      data-shot-lane={clip.lane_index}
                       data-event-id={clip.event_id}
                       aria-pressed={clip.event_id === selectedEventId}
                       key={clip.event_id}
@@ -2211,8 +2228,8 @@ function ShotTimelineWorkspace() {
                     </button>;
                   })}
                 </div>
-              </div>
-            ))}
+              </div>;
+            })}
           </div>
         </div>
       </div>

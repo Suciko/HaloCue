@@ -982,6 +982,15 @@
       applyEvent(event, { motion: false, loadBackground: false });
     }
 
+    function applyActiveOverlays(sample) {
+      const screenTextItem = sample.activeItems
+        .filter((item) => item.kind === "halocue.ba:screen-text")
+        .at(-1);
+      state.screenText = typeof screenTextItem?.event?.text === "string"
+        ? screenTextItem.event.text
+        : "";
+    }
+
     function seekFrame(frame, options = {}) {
       if (!isCurrentSession()) return null;
       if (!options.fromPlayback) cancelPlayback();
@@ -998,6 +1007,7 @@
         }
       }
       applySampledEvent(sample);
+      applyActiveOverlays(sample);
       state.eventIndex = sample.eventIndex;
       state.frame = sample.frame;
       state.motion = null;

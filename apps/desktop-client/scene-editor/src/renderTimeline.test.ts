@@ -110,6 +110,45 @@ describe("render timeline overlap semantics", () => {
     expect(timeline.total_frames).toBe(11);
   });
 
+  it("keeps non-blocking screen text active behind the following dialogue", () => {
+    const timeline = buildRenderTimeline(descriptor([
+      {
+        event_id: "event/screen-text",
+        kind: "halocue.ba:screen-text",
+        text: "三天后",
+        duration_ms: 1800,
+        wait_for_completion: false,
+      },
+      {
+        event_id: "event/line",
+        kind: "dialogue",
+        text: "文字显示时继续对白。",
+        duration_ms: 500,
+      },
+    ]));
+
+    expect(timeline.events.map((event) => ({
+      event_id: event.event_id,
+      start_frame: event.start_frame,
+      end_frame: event.end_frame,
+      wait_for_completion: event.wait_for_completion,
+    }))).toEqual([
+      {
+        event_id: "event/screen-text",
+        start_frame: 0,
+        end_frame: 54,
+        wait_for_completion: false,
+      },
+      {
+        event_id: "event/line",
+        start_frame: 0,
+        end_frame: 15,
+        wait_for_completion: true,
+      },
+    ]);
+    expect(timeline.total_frames).toBe(54);
+  });
+
   it("rejects non-blocking timing on an event without that capability", () => {
     expect(() => buildRenderTimeline(descriptor([{
       event_id: "event/wait",

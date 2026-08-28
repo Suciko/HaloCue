@@ -383,7 +383,7 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .shot-track-row > .shot-track-label strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; font-weight: 600; }
 .shot-track-row > .shot-track-label small { color: var(--subtle); font: 8px "Cascadia Code", "Consolas", monospace; }
 .shot-track-lane { position: relative; min-width: 0; min-height: 42px; border: 1px solid #2d3833; border-radius: 4px; background: repeating-linear-gradient(90deg, transparent 0, transparent calc(10% - 1px), rgba(255,255,255,.045) calc(10% - 1px), rgba(255,255,255,.045) 10%), #171c1a; cursor: ew-resize; touch-action: none; }
-.shot-clip { position: absolute; top: 5px; bottom: 5px; min-width: 22px; display: flex; align-items: center; gap: 4px; overflow: hidden; padding: 0 7px; border: 1px solid #416454; border-radius: 4px; background: #214133; color: #cce8da; text-align: left; white-space: nowrap; cursor: pointer; transition: border-color 120ms ease, background 120ms ease, transform 120ms ease; }
+.shot-clip { position: absolute; top: 5px; height: 32px; min-width: 22px; display: flex; align-items: center; gap: 4px; overflow: hidden; padding: 0 7px; border: 1px solid #416454; border-radius: 4px; background: #214133; color: #cce8da; text-align: left; white-space: nowrap; cursor: pointer; transition: border-color 120ms ease, background 120ms ease, transform 120ms ease; }
 .shot-clip:hover { border-color: var(--accent); background: #28513f; transform: translateY(-1px); }
 .shot-clip.is-selected { border-color: var(--accent-strong); background: #2e654c; box-shadow: 0 0 0 1px rgba(146, 232, 197, .18); }
 .shot-clip.is-parallel { border-color: #9b7d3b; background: #4b3b1e; color: #f4d995; }

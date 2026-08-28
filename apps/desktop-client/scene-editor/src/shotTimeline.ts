@@ -17,6 +17,7 @@ export type ShotTimelineClip = {
   event_id: string;
   kind: string;
   track_id: ShotTimelineTrackId;
+  lane_index: number;
   label: string;
   start_frame: number;
   end_frame: number;
@@ -30,6 +31,7 @@ export type ShotTimelineClip = {
 export type ShotTimelineTrack = {
   id: ShotTimelineTrackId;
   label: string;
+  lane_count: number;
   clips: ShotTimelineClip[];
 };
 
@@ -60,7 +62,9 @@ function trackIdFor(event: RenderTimelineEvent): ShotTimelineTrackId {
   return "effect";
 }
 
-function clipFor(event: RenderTimelineEvent): ShotTimelineClip {
+type UnplacedShotTimelineClip = Omit<ShotTimelineClip, "lane_index">;
+
+function clipFor(event: RenderTimelineEvent): UnplacedShotTimelineClip {
   const source = event.event;
   return {
     event_id: event.event_id,
@@ -74,6 +78,23 @@ function clipFor(event: RenderTimelineEvent): ShotTimelineClip {
     wait_for_completion: event.wait_for_completion,
     ...(typeof source.character_id === "string" ? { character_id: source.character_id } : {}),
     ...(typeof source.slot === "number" ? { slot: source.slot } : {}),
+  };
+}
+
+function assignClipLanes(clips: UnplacedShotTimelineClip[]): {
+  clips: ShotTimelineClip[];
+  lane_count: number;
+} {
+  const laneEndFrames: number[] = [];
+  const placed = clips.map((clip) => {
+    let laneIndex = laneEndFrames.findIndex((endFrame) => endFrame <= clip.start_frame);
+    if (laneIndex < 0) laneIndex = laneEndFrames.length;
+    laneEndFrames[laneIndex] = clip.end_frame;
+    return { ...clip, lane_index: laneIndex };
+  });
+  return {
+    clips: placed,
+    lane_count: Math.max(1, laneEndFrames.length),
   };
 }
 
@@ -97,7 +118,7 @@ export function buildShotTimeline({
   const tracks = SHOT_TIMELINE_TRACKS.map(({ id, label }) => ({
     id,
     label,
-    clips: clips.filter((clip) => clip.track_id === id),
+    ...assignClipLanes(clips.filter((clip) => clip.track_id === id)),
   }));
   const startFrame = clips.reduce(
     (minimum, clip) => Math.min(minimum, clip.start_frame),

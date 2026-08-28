@@ -42,6 +42,11 @@ describe("event editor catalog seam", () => {
       intensity: 0.35,
       wait_for_completion: true,
     }));
+    expect(createEditorEvent("halocue.ba:screen-text", context)).toEqual(expect.objectContaining({
+      kind: "halocue.ba:screen-text",
+      text: "屏幕文字",
+      wait_for_completion: true,
+    }));
     expect(createEditorEvent("character-motion", context)).toEqual(expect.objectContaining({
       kind: "character-motion",
       slot: 3,

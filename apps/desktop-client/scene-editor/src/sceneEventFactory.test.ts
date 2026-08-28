@@ -25,6 +25,16 @@ describe("scene event factory", () => {
       intensity: 0.35,
       wait_for_completion: true,
     });
+    expect(createSceneEvent("halocue.ba:screen-text", {
+      eventId: "event/new-screen-text",
+      selectedSlot: 3,
+      project: demoProject,
+    })).toEqual({
+      event_id: "event/new-screen-text",
+      kind: "halocue.ba:screen-text",
+      text: "屏幕文字",
+      wait_for_completion: true,
+    });
     expect(createSceneEvent("character-motion", {
       eventId: "event/new-motion",
       selectedSlot: 3,

@@ -138,6 +138,35 @@ def test_non_blocking_screen_shake_overlaps_the_following_dialogue():
     assert timeline["total_frames"] == 11
 
 
+def test_non_blocking_screen_text_overlaps_the_following_dialogue():
+    timeline = build_render_timeline(
+        descriptor(
+            [
+                {
+                    "event_id": "event/screen-text",
+                    "kind": "halocue.ba:screen-text",
+                    "text": "三天后",
+                    "duration_ms": 1800,
+                    "wait_for_completion": False,
+                },
+                {
+                    "event_id": "event/line",
+                    "kind": "dialogue",
+                    "text": "文字显示时继续对白。",
+                    "duration_ms": 500,
+                },
+            ]
+        ),
+        frame_rate=30,
+    )
+
+    assert [
+        (item["start_frame"], item["end_frame"], item["wait_for_completion"])
+        for item in timeline["events"]
+    ] == [(0, 54, False), (0, 15, True)]
+    assert timeline["total_frames"] == 54
+
+
 def test_dialogue_duration_is_deterministic_and_preserves_source_event():
     source = {"event_id": "event/line", "kind": "dialogue", "text": "你好。\n再见"}
     first = build_render_timeline(descriptor([source]))
@@ -248,8 +277,14 @@ def test_browser_runtime_builds_the_same_render_timeline_as_python():
                 "duration_ms": 360,
                 "wait_for_completion": False,
             },
+            {
+                "event_id": "event/text",
+                "kind": "halocue.ba:screen-text",
+                "text": "提示",
+                "duration_ms": 1800,
+                "wait_for_completion": False,
+            },
             {"event_id": "event/line", "kind": "dialogue", "text": "你好。\n再见！"},
-            {"event_id": "event/text", "kind": "halocue.ba:screen-text", "text": "提示"},
             {"event_id": "event/exit", "kind": "exit", "slot": 3},
         ]
     )
@@ -308,6 +343,13 @@ def test_browser_sample_prefers_the_latest_authored_event_during_overlap():
                 "wait_for_completion": False,
             },
             {
+                "event_id": "event/text",
+                "kind": "halocue.ba:screen-text",
+                "text": "提示",
+                "duration_ms": 1800,
+                "wait_for_completion": False,
+            },
+            {
                 "event_id": "event/line",
                 "kind": "dialogue",
                 "text": "动作中说话",
@@ -339,5 +381,5 @@ process.stdout.write(JSON.stringify({
 
     assert json.loads(completed.stdout) == {
         "item": "event/line",
-        "active": ["event/nod", "event/pan", "event/shake", "event/line"],
+        "active": ["event/nod", "event/pan", "event/shake", "event/text", "event/line"],
     }

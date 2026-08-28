@@ -221,10 +221,21 @@ def test_offline_renderer_accepts_overlapping_timeline_and_uses_latest_active_ev
             "wait_for_completion": False,
         },
     )
+    descriptor["events"].insert(
+        5,
+        {
+            "event_id": "event/screen-text",
+            "kind": "halocue.ba:screen-text",
+            "text": "三天后",
+            "duration_ms": 1800,
+            "wait_for_completion": False,
+        },
+    )
     timeline = build_render_timeline(descriptor)
     performance = build_scene_performance(descriptor, timeline)
 
-    assert [timeline["events"][index]["start_frame"] for index in (2, 3, 4, 5)] == [
+    assert [timeline["events"][index]["start_frame"] for index in (2, 3, 4, 5, 6)] == [
+        30,
         30,
         30,
         30,

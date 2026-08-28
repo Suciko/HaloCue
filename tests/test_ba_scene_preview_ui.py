@@ -735,6 +735,105 @@ def test_capability_motion_and_emoticon_are_independent_preview_layers():
 
 
 @pytest.mark.browser
+def test_non_blocking_screen_text_remains_visible_while_dialogue_is_primary():
+    playwright = pytest.importorskip("playwright.sync_api")
+    server, thread = _serve_preview()
+    hidden = [
+        {"slot": slot, "character_id": None, "display_name": "", "state": "hidden"}
+        for slot in range(1, 6)
+    ]
+    descriptor = {
+        "schema_version": "scene-descriptor/1.0",
+        "scene_id": "scene/overlap-screen-text-dialogue",
+        "presentation": {"frame_rate": 30},
+        "actors": hidden,
+        "initial_actors": hidden,
+        "events": [
+            {
+                "event_id": "event/background",
+                "kind": "background",
+                "duration_ms": 1,
+            },
+            {
+                "event_id": "event/screen-text",
+                "kind": "halocue.ba:screen-text",
+                "text": "三天后",
+                "duration_ms": 1800,
+                "wait_for_completion": False,
+            },
+            {
+                "event_id": "event/line",
+                "kind": "dialogue",
+                "text": "文字显示时继续对白。",
+                "duration_ms": 500,
+            },
+        ],
+    }
+    try:
+        with playwright.sync_playwright() as runtime:
+            try:
+                browser = runtime.chromium.launch(headless=True)
+            except Exception as exc:  # pragma: no cover - depends on local browser install
+                if "Executable doesn't exist" in str(exc):
+                    pytest.skip("Playwright Chromium is not installed")
+                raise
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+            page.add_init_script(
+                "window.HALO_CUE_SCENE_DESCRIPTOR = "
+                + json.dumps(descriptor, ensure_ascii=False)
+                + ";"
+            )
+            page.goto(f"http://127.0.0.1:{server.server_port}/index.html?renderer=static&capture=1")
+            page.wait_for_function("() => Boolean(window.HaloCueScenePreview.controller)")
+
+            sampled = page.evaluate(
+                """() => {
+                    const controller = window.HaloCueScenePreview.controller;
+                    const layer = document.querySelector('#screen-text-layer');
+                    const text = document.querySelector('#screen-text');
+                    const dialogue = document.querySelector('.dialogue-panel');
+                    const overlap = controller.seekFrame(2);
+                    const overlapState = {
+                      hidden: layer.hidden,
+                      text: text.textContent,
+                      dialogueHidden: dialogue.classList.contains('is-hidden'),
+                    };
+                    controller.seekFrame(0);
+                    const baselineHidden = layer.hidden;
+                    controller.seekFrame(2);
+                    return {
+                      starts: controller.timeline.events.map(item => item.start_frame),
+                      waits: controller.timeline.events.map(item => item.wait_for_completion),
+                      primary: overlap.item.event_id,
+                      active: overlap.activeItems.map(item => item.event_id),
+                      current: document.querySelector('#preview-stage').dataset.currentEvent,
+                      overlapState,
+                      baselineHidden,
+                      restoredHidden: layer.hidden,
+                      restoredText: text.textContent,
+                    };
+                }"""
+            )
+            assert sampled["starts"] == [0, 1, 1]
+            assert sampled["waits"] == [True, False, True]
+            assert sampled["primary"] == "event/line"
+            assert sampled["active"] == ["event/screen-text", "event/line"]
+            assert sampled["current"] == "event/line"
+            assert sampled["overlapState"] == {
+                "hidden": False,
+                "text": "三天后",
+                "dialogueHidden": False,
+            }
+            assert sampled["baselineHidden"] is True
+            assert sampled["restoredHidden"] is False
+            assert sampled["restoredText"] == "三天后"
+            browser.close()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+@pytest.mark.browser
 def test_nod_performance_is_seekable_in_deterministic_capture_mode():
     playwright = pytest.importorskip("playwright.sync_api")
     server, thread = _serve_preview()

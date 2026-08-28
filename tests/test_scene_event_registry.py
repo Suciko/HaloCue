@@ -42,6 +42,7 @@ def test_manifest_schema_and_registry_are_consistent():
     assert scene_event_registry.supports_non_blocking("character-motion") is True
     assert scene_event_registry.supports_non_blocking("halocue.ba:background-pan") is True
     assert scene_event_registry.supports_non_blocking("halocue.ba:screen-shake") is True
+    assert scene_event_registry.supports_non_blocking("halocue.ba:screen-text") is True
     assert all(
         not event["supports_non_blocking"]
         for event in definitions
@@ -50,6 +51,7 @@ def test_manifest_schema_and_registry_are_consistent():
             "character-motion",
             "halocue.ba:background-pan",
             "halocue.ba:screen-shake",
+            "halocue.ba:screen-text",
         }
     )
     timeline_schema = _json(ROOT / "packages" / "contracts" / "render-timeline" / "1.2.schema.json")

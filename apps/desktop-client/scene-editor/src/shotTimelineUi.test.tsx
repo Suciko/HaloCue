@@ -132,6 +132,36 @@ describe("professional shot timeline workspace", () => {
     expect(container.querySelector(`.shot-clip.is-active[data-event-id="${dialogue.event_id}"]`)).not.toBeNull();
   });
 
+  it("renders same-track overlaps in separate derived lanes", () => {
+    const project = structuredClone(useProjectStore.getState().project);
+    const cue = project.chapters[0].scenes[0].cues[0];
+    const dialogueIndex = cue.events.findIndex((event) => event.kind === "dialogue");
+    cue.events.splice(dialogueIndex, 0, {
+      event_id: "event/screen-text",
+      kind: "halocue.ba:screen-text",
+      text: "三天后",
+      duration_ms: 1800,
+      wait_for_completion: false,
+    });
+    act(() => useProjectStore.getState().replaceProject(project));
+    const shotTab = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"))
+      .find((button) => button.textContent?.includes("镜头时间轴"));
+    act(() => shotTab?.click());
+
+    const lane = container.querySelector<HTMLElement>('[data-shot-track="dialogue"]');
+    const screenText = container.querySelector<HTMLButtonElement>(
+      '.shot-clip[data-event-id="event/screen-text"]',
+    );
+    const dialogue = container.querySelector<HTMLButtonElement>(
+      '.shot-clip[data-event-id="event/dialogue/001"]',
+    );
+    expect(lane?.dataset.shotLaneCount).toBe("2");
+    expect(screenText?.dataset.shotLane).toBe("0");
+    expect(dialogue?.dataset.shotLane).toBe("1");
+    expect(screenText?.style.top).not.toBe(dialogue?.style.top);
+    expect(Number.parseFloat(lane?.style.minHeight || "0")).toBeGreaterThan(42);
+  });
+
   it("announces the active playhead context to keyboard and assistive-technology users", () => {
     const shotTab = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"))
       .find((button) => button.textContent?.includes("镜头时间轴"));

@@ -36,11 +36,15 @@ describe("scene event registry seam", () => {
     expect(sceneEventRegistry.definition("halocue.ba:screen-shake")).toEqual(expect.objectContaining({
       supports_non_blocking: true,
     }));
+    expect(sceneEventRegistry.definition("halocue.ba:screen-text")).toEqual(expect.objectContaining({
+      supports_non_blocking: true,
+    }));
     expect(sceneEventDefinitions()
       .filter((event) => ![
         "character-motion",
         "halocue.ba:background-pan",
         "halocue.ba:screen-shake",
+        "halocue.ba:screen-text",
       ].includes(event.kind))
       .every((event) => event.supports_non_blocking === false)).toBe(true);
   });

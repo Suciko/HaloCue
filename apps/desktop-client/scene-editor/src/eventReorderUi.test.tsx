@@ -472,4 +472,31 @@ describe("professional event list interactions", () => {
       .find((item) => item.event_id === event?.event_id)?.wait_for_completion)
       .toBe(false);
   });
+
+  it("authors screen text as sequential by default and can make it parallel", () => {
+    const addText = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".event-add-options > button"),
+    ).find((button) => button.textContent?.trim() === "屏幕文字");
+    expect(addText).toBeDefined();
+
+    act(() => addText?.click());
+
+    const state = useProjectStore.getState();
+    const event = firstScene(state.project).cues[0].events
+      .find((item) => item.event_id === state.selectedEventId);
+    expect(event).toEqual(expect.objectContaining({
+      kind: "halocue.ba:screen-text",
+      text: "屏幕文字",
+      wait_for_completion: true,
+    }));
+
+    const waitToggle = Array.from(container.querySelectorAll<HTMLLabelElement>("label.field"))
+      .find((label) => label.textContent?.includes("阻塞后续事件"))
+      ?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(waitToggle?.checked).toBe(true);
+    act(() => waitToggle?.click());
+    expect(firstScene(useProjectStore.getState().project).cues[0].events
+      .find((item) => item.event_id === event?.event_id)?.wait_for_completion)
+      .toBe(false);
+  });
 });

@@ -71,4 +71,33 @@ describe("shot timeline projection", () => {
     expect(projection.tracks.flatMap((track) => track.clips)
       .some((clip) => clip.event_id === "event/unmapped")).toBe(false);
   });
+
+  it("assigns overlapping clips on one semantic track to stable sub-lanes", () => {
+    const project = structuredClone(demoProject);
+    const scene = project.chapters[0].scenes[0];
+    const cue = scene.cues[0];
+    const dialogueIndex = cue.events.findIndex((event) => event.kind === "dialogue");
+    cue.events.splice(dialogueIndex, 0, {
+      event_id: "event/screen-text",
+      kind: "halocue.ba:screen-text",
+      text: "三天后",
+      duration_ms: 1800,
+      wait_for_completion: false,
+    });
+    const evaluation = evaluateScene(project, cue.cue_id, { sceneId: scene.scene_id });
+
+    const projection = buildShotTimeline({
+      sceneId: scene.scene_id,
+      cue,
+      timeline: evaluation.timeline,
+    });
+    const track = projection.tracks.find((item) => item.id === "dialogue")!;
+    const screenText = track.clips.find((clip) => clip.event_id === "event/screen-text")!;
+    const dialogue = track.clips.find((clip) => clip.kind === "dialogue")!;
+
+    expect(screenText.start_frame).toBe(dialogue.start_frame);
+    expect(track.lane_count).toBe(2);
+    expect(screenText.lane_index).toBe(0);
+    expect(dialogue.lane_index).toBe(1);
+  });
 });
