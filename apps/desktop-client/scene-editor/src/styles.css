@@ -368,7 +368,7 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .shot-legend-swatch.is-parallel { background: #c69b44; }
 .shot-timeline-notice { min-height: 29px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border-bottom: 1px solid rgba(239, 199, 109, .18); background: rgba(239, 199, 109, .08); color: var(--warning); font-size: 9px; }
 .shot-timeline-notice svg { width: 13px; }
-.shot-timeline-scroll { min-height: 0; overflow: auto; padding: 9px 10px 12px; }
+.shot-timeline-scroll { min-height: 0; flex: 1; overflow: auto; padding: 9px 10px 12px; }
 .shot-timeline-inner { min-width: 620px; }
 .shot-ruler-row, .shot-track-row { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 10px; }
 .shot-track-label { display: flex; align-items: center; padding-left: 6px; color: var(--subtle); font-size: 8px; text-transform: uppercase; }
@@ -391,6 +391,20 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
 .shot-clip.is-parallel.is-active { border-color: #e4ba59; box-shadow: 0 0 0 1px rgba(228, 186, 89, .28), inset 0 0 0 1px rgba(228, 186, 89, .12); }
 .shot-clip span { overflow: hidden; text-overflow: ellipsis; font-size: 8px; }
 .shot-clip small { flex: none; color: inherit; font-size: 7px; opacity: .8; }
+.shot-selection-detail { min-width: 0; min-height: 76px; display: grid; grid-template-columns: minmax(170px, 1.1fr) minmax(0, 2fr); align-items: stretch; border-top: 1px solid var(--line); background: #151918; }
+.shot-selection-detail > header { min-width: 0; display: grid; grid-template-columns: 18px minmax(0, 1fr); grid-template-rows: 1fr auto; align-items: center; column-gap: 7px; padding: 10px 12px; border-right: 1px solid var(--line-soft); }
+.shot-selection-detail > header > svg { grid-row: 1 / -1; width: 14px; color: var(--accent); }
+.shot-selection-detail > header span { min-width: 0; display: grid; gap: 2px; }
+.shot-selection-detail > header small { color: var(--subtle); font-size: 8px; }
+.shot-selection-detail > header strong, .shot-selection-detail > header code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shot-selection-detail > header strong { font-size: 10px; }
+.shot-selection-detail > header code { grid-column: 2; color: var(--muted); font: 8px "Cascadia Code", "Consolas", monospace; }
+.shot-selection-detail dl { min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; }
+.shot-selection-detail dl div { min-width: 0; display: grid; align-content: center; gap: 5px; padding: 8px 10px; border-right: 1px solid var(--line-soft); }
+.shot-selection-detail dl div:last-child { border-right: 0; }
+.shot-selection-detail dt { color: var(--subtle); font-size: 8px; }
+.shot-selection-detail dd { min-width: 0; margin: 0; overflow: hidden; color: #cbd4d0; font: 9px "Cascadia Code", "Consolas", monospace; text-overflow: ellipsis; white-space: nowrap; }
+.shot-selection-detail dd.is-parallel { color: var(--warning); }
 .timeline-event-main { width: 100%; height: 100%; display: grid; align-content: center; justify-items: start; gap: 1px; padding: 0 15px 0 8px; overflow: hidden; border: 0; background: transparent; color: #bdc6c2; white-space: nowrap; text-align: left; font-size: 9px; cursor: pointer; }
 .timeline-event-main span, .timeline-event-main small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .timeline-event-main small { color: var(--subtle); font-size: 7px; }
@@ -451,4 +465,9 @@ button.tree-row:hover { background: var(--panel-2); color: var(--text); }
   .shot-timeline-controls { width: 100%; justify-content: space-between; }
   .shot-cue-picker { flex: 1; }
   .shot-cue-picker select { width: min(190px, 65vw); }
+  .shot-selection-detail { grid-template-columns: 1fr; }
+  .shot-selection-detail > header { border-right: 0; border-bottom: 1px solid var(--line-soft); }
+  .shot-selection-detail dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .shot-selection-detail dl div:nth-child(2) { border-right: 0; }
+  .shot-selection-detail dl div:nth-child(-n + 2) { border-bottom: 1px solid var(--line-soft); }
 }

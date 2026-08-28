@@ -2046,6 +2046,9 @@ function ShotTimelineWorkspace() {
   const span = rangeEnd - rangeStart;
   const orderedClips = projection.tracks.flatMap((track) => track.clips);
   const selectedClip = orderedClips.find((clip) => clip.event_id === selectedEventId);
+  const selectedTrack = selectedClip
+    ? projection.tracks.find((track) => track.id === selectedClip.track_id)
+    : undefined;
   const selectedUnmappedEvent = selectedEventId && projection.unmappedEventIds.includes(selectedEventId)
     ? cue.events.find((event) => event.event_id === selectedEventId)
     : undefined;
@@ -2233,6 +2236,43 @@ function ShotTimelineWorkspace() {
           </div>
         </div>
       </div>
+      {selectedClip && selectedTrack && (
+        <section
+          className="shot-selection-detail"
+          data-shot-selection-detail
+          data-event-id={selectedClip.event_id}
+          aria-label="时间轴选中详情"
+        >
+          <header>
+            <ScanLine />
+            <span>
+              <small>时间轴选中</small>
+              <strong>{shotTimelineClipLabel(selectedClip)}</strong>
+            </span>
+            <code title={selectedClip.kind}>{selectedClip.kind}</code>
+          </header>
+          <dl>
+            <div>
+              <dt>轨道</dt>
+              <dd>{selectedTrack.label}</dd>
+            </div>
+            <div>
+              <dt>范围</dt>
+              <dd>F{selectedClip.start_frame}-{selectedClip.end_frame}</dd>
+            </div>
+            <div>
+              <dt>时长</dt>
+              <dd>{selectedClip.duration_frames} 帧 · {selectedClip.duration_ms} ms</dd>
+            </div>
+            <div>
+              <dt>执行</dt>
+              <dd className={selectedClip.wait_for_completion ? "" : "is-parallel"}>
+                {selectedClip.wait_for_completion ? "顺序执行" : "与后续事件并行"}
+              </dd>
+            </div>
+          </dl>
+        </section>
+      )}
     </section>
   );
 }

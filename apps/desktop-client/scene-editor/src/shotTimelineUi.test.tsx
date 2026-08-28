@@ -441,4 +441,42 @@ describe("professional shot timeline workspace", () => {
     expect(timing?.textContent).toContain("与后续事件并行");
     expect(timing?.querySelector("input, select, textarea, button")).toBeNull();
   });
+
+  it("shows a stable read-only selection detail below the shot timeline", () => {
+    const state = useProjectStore.getState();
+    const evaluation = evaluateScene(state.project, state.selectedCueId, {
+      sceneId: state.selectedSceneId,
+    });
+    const motion = evaluation.timeline.events.find((event) => event.event_id === "event/yuuka-nod")!;
+    const shotTab = Array.from(container.querySelectorAll<HTMLButtonElement>("[role=tab]"))
+      .find((button) => button.textContent?.includes("镜头时间轴"));
+    act(() => shotTab?.click());
+    const motionClip = container.querySelector<HTMLButtonElement>(
+      '.shot-clip[data-event-id="event/yuuka-nod"]',
+    );
+    act(() => motionClip?.click());
+
+    const detail = container.querySelector<HTMLElement>("[data-shot-selection-detail]");
+    expect(detail?.getAttribute("aria-label")).toBe("时间轴选中详情");
+    expect(detail?.textContent).toContain("角色动作");
+    expect(detail?.textContent).toContain("character-motion");
+    expect(detail?.textContent).toContain("Character");
+    expect(detail?.textContent).toContain(`F${motion.start_frame}-${motion.end_frame}`);
+    expect(detail?.textContent).toContain(`${motion.duration_frames} 帧`);
+    expect(detail?.textContent).toContain("与后续事件并行");
+    expect(detail?.querySelector("input, select, textarea, button")).toBeNull();
+
+    const revision = useProjectStore.getState().revision;
+    const historyLength = useProjectStore.getState().history.length;
+    const dialogueClip = container.querySelector<HTMLButtonElement>(
+      '.shot-clip[data-event-id="event/dialogue/001"]',
+    );
+    act(() => dialogueClip?.click());
+
+    expect(detail?.textContent).toContain("对白");
+    expect(detail?.textContent).toContain("顺序执行");
+    expect(detail?.textContent).not.toContain("角色动作");
+    expect(useProjectStore.getState().revision).toBe(revision);
+    expect(useProjectStore.getState().history).toHaveLength(historyLength);
+  });
 });
