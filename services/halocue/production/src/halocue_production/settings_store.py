@@ -32,6 +32,20 @@ class SettingsStore:
         os.replace(temporary, self.path)
 
     @staticmethod
+    def validate_spine_cli(value: object) -> Path:
+        raw = str(value or "").strip()
+        if not raw:
+            raise ProductionError("spine_cli_required", "Spine 命令行程序路径不能为空")
+        path = Path(raw).expanduser().resolve()
+        if not path.is_file():
+            raise ProductionError(
+                "spine_cli_not_found",
+                "找不到 Spine 命令行程序，请选择 Spine.com、Spine.exe 或对应启动脚本",
+                details={"path": str(path)},
+            )
+        return path
+
+    @staticmethod
     def validate_aa_workspace(value: object) -> Path:
         raw = str(value or "").strip()
         if not raw:
@@ -47,4 +61,3 @@ class SettingsStore:
                 details={"missing": missing},
             )
         return path
-

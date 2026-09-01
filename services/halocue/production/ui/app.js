@@ -8,6 +8,7 @@
     capabilities: null,
     selectedCard: null,
     selectedSpeaker: null,
+    characterCatalog: [],
     currentStage: "source",
     filter: "all",
     model: null,
@@ -21,6 +22,7 @@
     assetImport: null,
     taskPreflight: null,
     aiPreflight: null,
+    characterCatalogRunId: null,
     performancePreview: null,
     previewIndex: 0,
     busy: false,
@@ -28,10 +30,14 @@
     sourceFileName: null,
     upstreamRelease: null,
     aaEnvironment: null,
+    spineCli: null,
   };
   const API_ROOT = location.port === "8891"
     ? "http://127.0.0.1:8892/api/v1"
     : "/api/v1";
+
+  let pendingConfirmation = null;
+  let confirmationOpener = null;
 
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -42,7 +48,26 @@
   const previewUrl = (kind, key) => state.currentRun
     ? `${API_ROOT}/production-runs/${encodeURIComponent(state.currentRun.run_id)}/resources/${kind}/${encodeURIComponent(key)}/preview`
     : `${API_ROOT}/resources/${kind}/${encodeURIComponent(key)}/preview`;
-  const previewImage = (kind, key, label, className) => `<span class="resource-thumb media-frame"><img class="${className}" src="${previewUrl(kind, key)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="preview-placeholder" aria-hidden="true">预览</span></span>`;
+  const previewImage = (kind, key, label, className, available = false) => available
+    ? `<span class="resource-thumb media-frame"><img class="${className}" src="${previewUrl(kind, key)}" alt="" loading="lazy" decoding="async"><span class="preview-placeholder" aria-hidden="true">预览</span></span>`
+    : '<span class="resource-thumb media-frame preview-unavailable"><span class="preview-placeholder is-visible" aria-hidden="true">无预览</span></span>';
+
+  function askConfirmation({ title, body, confirmLabel = "确认", danger = false }) {
+    const dialog = $("#actionConfirmDialog");
+    if (!dialog) return Promise.resolve(false);
+    if (pendingConfirmation) pendingConfirmation(false);
+    $("#actionConfirmTitle").textContent = title || "确认继续？";
+    $("#actionConfirmBody").textContent = body || "这项操作会修改当前制作任务。";
+    const accept = $("#actionConfirmAccept");
+    accept.textContent = confirmLabel;
+    accept.className = danger ? "primary danger-button" : "primary";
+    confirmationOpener = document.activeElement;
+    return new Promise((resolve) => {
+      pendingConfirmation = resolve;
+      dialog.showModal();
+      requestAnimationFrame(() => accept.focus());
+    });
+  }
 
   function savedLayoutMode() {
     try {
@@ -70,11 +95,16 @@
 
   function toast(message, tone = "normal") {
     const element = $("#toast");
+    const embeddedShell = document.querySelector(".embedded-production-shell");
     element.textContent = message;
     element.dataset.tone = tone;
     element.classList.add("visible");
+    embeddedShell?.classList.add("toast-visible");
     clearTimeout(toast.timer);
-    toast.timer = setTimeout(() => element.classList.remove("visible"), 3600);
+    toast.timer = setTimeout(() => {
+      element.classList.remove("visible");
+      embeddedShell?.classList.remove("toast-visible");
+    }, 3600);
   }
 
   async function api(path, options = {}) {
@@ -148,6 +178,10 @@
     $("#breadcrumb").textContent = `制作 / ${labels[stage]}`;
     $("#pageTitle").textContent = stage === "source" ? "把已有剧本转换为 AA 工程" : labels[stage];
     document.querySelector(".workspace").scrollTo({ top: 0, behavior: "instant" });
+    // The embedded workbench scrolls its shell rather than .workspace. Reset
+    // that container after replacing the active page so the sticky step strip
+    // cannot cover the new page heading when switching from a long source page.
+    document.querySelector(".embedded-production-shell")?.scrollTo({ top: 0, behavior: "instant" });
     if (stage === "mapping") renderMapping();
     if (stage === "generation") renderGeneration();
     if (stage === "review") renderReview();
@@ -228,6 +262,8 @@
       item.setAttribute("aria-disabled", access.allowed ? "false" : "true");
       item.tabIndex = access.allowed ? 0 : -1;
       const label = active ? "当前" : done ? "已完成" : needsMapping ? "需先映射" : state.currentRun || stage === "source" ? "可进入" : "未开始";
+      const visualState = active ? "current" : done ? "done" : !access.allowed ? "locked" : "available";
+      item.dataset.stageState = visualState;
       item.querySelector("[data-stage-state]").textContent = label;
       item.setAttribute("aria-label", `${item.querySelector("strong")?.textContent || "步骤"}，${label}${active ? "" : "，点击进入"}`);
     });
@@ -245,7 +281,7 @@
   function updateShell() {
     const run = state.currentRun;
     const origin = upstreamReleaseFor(run);
-    $("#runTitle").textContent = run ? `${run.project} · ${run.run_id}` : "尚未建立制作任务";
+    $("#runTitle").textContent = run ? run.project : "尚未建立制作任务";
     const labels = {
       waiting_for_review: "等待审查", ready_to_compile: "可以编译", compiling: "正在编译",
       compiled: "编译完成", installed: "已安装", generating_direction: "正在生成演出",
@@ -304,22 +340,17 @@
     };
     const sourceOrigin = origin
       ? `<section class="overview-origin from-writing" aria-label="写作端交接信息">
-          <header><span>来源</span><b>来自写作工作台</b><em>正文已按 SHA-256 校验</em></header>
-          <dl>
-            <div><dt>定稿版本</dt><dd>${esc(origin.display_version)}</dd></div>
-            <div><dt>发布标识</dt><dd class="mono" title="${esc(origin.release_id)}">${esc(origin.release_id)}</dd></div>
-            ${origin.work_id ? `<div><dt>作品标识</dt><dd class="mono" title="${esc(origin.work_id)}">${esc(origin.work_id)}</dd></div>` : ""}
-            ${origin.writing_pack_version ? `<div><dt>写作包</dt><dd>${esc(origin.writing_pack_version)}</dd></div>` : ""}
-          </dl>
+          <header><span>来源</span><b>来自写作工作台</b><em>已确认写作定稿</em></header>
+          <dl><div><dt>定稿版本</dt><dd>${esc(origin.display_version || "已确认")}</dd></div></dl>
         </section>`
       : `<section class="overview-origin direct-import" aria-label="剧本来源">
-          <header><span>来源</span><b>直接导入剧本</b><em>此任务未关联写作端定稿</em></header>
+          <header><span>来源</span><b>直接导入剧本</b><em>已从本地剧本建立任务</em></header>
         </section>`;
-    body.innerHTML = `<section class="overview-title"><div><small>${esc(run.run_id)}</small><h4>${esc(run.project)}</h4><p>${esc(mode)} · ${esc(statusLabels[run.state] || run.state)}</p></div><b>${snapshot.completed}/4</b></section>
+    body.innerHTML = `<section class="overview-title"><div><small>当前制作任务</small><h4>${esc(run.project)}</h4><p>${esc(mode)} · ${esc(statusLabels[run.state] || run.state)}</p></div><b>${snapshot.completed}/4</b></section>
       ${sourceOrigin}
       <section class="overview-metrics" aria-label="任务数据"><article><small>剧本文本</small><strong>${esc(run.source_summary?.line_count || 0)} 行</strong></article><article><small>演出草稿</small><strong>${esc(draft?.cards?.length || run.source_summary?.card_count || 0)} 张</strong></article><article><small>待审卡片</small><strong>${esc(counts.pending || 0)} 张</strong></article><article><small>阻断问题</small><strong>${esc(counts.blocking_errors || 0)} 项</strong></article></section>
       <ol class="overview-stage-list">${stageOrder.map((stage, index) => { const names = { source: "剧本已冻结", mapping: "角色映射", generation: "演出草稿", review: "审查与安装" }; const done = snapshot.done[stage]; const current = stage === state.currentStage; return `<li class="${done ? "done" : current ? "current" : ""}"><b>${done ? "完" : index + 1}</b><span><strong>${names[stage]}</strong><small>${done ? "已完成" : current ? "正在处理" : "尚未完成"}</small></span></li>`; }).join("")}</ol>
-      <section class="overview-blockers ${blockers.length ? "has-blockers" : "ready"}"><small>${blockers.length ? "当前阻断" : "当前状态"}</small><strong>${blockers.length ? blockers.map((item) => blockerLabels[item] || item).join("；") : run.state === "installed" ? "工程已经安装到 AA" : "没有发现新的阻断项"}</strong>${run.last_build_id ? `<p>最近构建：${esc(run.last_build_id)}${run.last_installed_project ? ` · 已安装为 ${esc(run.last_installed_project)}` : ""}</p>` : ""}</section>`;
+      <section class="overview-blockers ${blockers.length ? "has-blockers" : "ready"}"><small>${blockers.length ? "当前阻断" : "当前状态"}</small><strong>${blockers.length ? blockers.map((item) => blockerLabels[item] || item).join("；") : run.state === "installed" ? "工程已经安装到 AA" : "没有发现新的阻断项"}</strong>${run.last_installed_project ? `<p>已安装为 ${esc(run.last_installed_project)}</p>` : ""}</section>`;
     $("#runOverviewHint").textContent = `推荐：${snapshot.recommendedLabel}`;
     const action = $("#runOverviewContinue");
     action.disabled = false;
@@ -349,14 +380,35 @@
   }
 
   async function loadRuns() {
+    const list = $("#runList");
+    const refresh = $("#reloadRuns");
+    if (!list) return;
+    const previousRefreshLabel = refresh?.textContent || "刷新";
+    if (refresh) {
+      refresh.disabled = true;
+      refresh.textContent = "读取中...";
+    }
     try {
       const result = await api("/production-runs");
-      const list = $("#runList");
       if (!result.items?.length) { list.innerHTML = '<p class="empty">暂无制作任务</p>'; return; }
+      const stateLabels = { waiting_for_review: "等待审查", ready_to_compile: "可以编译", compiling: "正在编译", compiled: "编译完成", installed: "已安装", generating_direction: "正在生成演出", direction_failed: "演出生成失败", compile_failed: "编译失败" };
       list.innerHTML = result.items.slice(0, 8).map((run) => `<button class="run-row" data-run-id="${esc(run.run_id)}">
-        <span><strong>${esc(run.project)}</strong><small>${esc(run.run_id)} · ${esc(run.state)}</small></span><b>打开</b></button>`).join("");
+        <span><strong>${esc(run.project)}</strong><small>${esc(stateLabels[run.state] || "处理中")}</small></span><b>打开</b></button>`).join("");
       $$("[data-run-id]").forEach((button) => button.addEventListener("click", () => openRun(button.dataset.runId)));
-    } catch (error) { handleError(error); }
+    } catch (error) {
+      list.innerHTML = `<div class="run-list-state run-list-error" role="alert"><strong>最近任务读取失败</strong><p>${esc(error.message || "制作任务暂时无法读取，请重试。")}</p><button type="button" class="text-button run-list-retry">重新读取任务</button></div>`;
+      list.querySelector(".run-list-retry")?.addEventListener("click", async (event) => {
+        const retry = event.currentTarget;
+        retry.disabled = true;
+        retry.textContent = "正在读取...";
+        await loadRuns();
+      }, { once: true });
+    } finally {
+      if (refresh) {
+        refresh.disabled = false;
+        refresh.textContent = previousRefreshLabel;
+      }
+    }
   }
 
   async function openRun(runId) {
@@ -367,7 +419,6 @@
       updateShell();
       const next = result.draft?.review_ready ? "review" : "mapping";
       showStage(next, { force: true });
-      toast(`已打开 ${result.run.project}`);
     } catch (error) { handleError(error); }
   }
 
@@ -747,6 +798,60 @@
     return mapping.name || "已选立绘角色";
   }
 
+  function mappingResource(mapping) {
+    if (!mapping || mapping.kind !== "portrait") return null;
+    const identifier = String(mapping.id || "").trim();
+    if (!identifier) return null;
+    return state.characterCatalog?.find((item) => String(item.identifier || item.key || "") === identifier) || mapping;
+  }
+
+  function mappingPreview(mapping) {
+    const resource = mappingResource(mapping);
+    if (!resource || mapping.kind !== "portrait") {
+      return '<span class="mapping-avatar mapping-avatar-empty" aria-hidden="true">无立绘</span>';
+    }
+    return resource.preview_available === true
+      ? previewImage("characters", resource.identifier || resource.key, resource.name || mapping.name || "角色头像", "mapping-avatar-image", true)
+      : '<span class="mapping-avatar mapping-avatar-empty" aria-hidden="true">待预览</span>';
+  }
+
+  function mappingEvidence(mapping) {
+    if (!mapping || mapping.kind === "unset") return ["尚未选择角色资源"];
+    if (mapping.kind === "narrator") return ["旁白，不使用角色服装"];
+    if (mapping.kind === "voice") return ["语音角色，不显示角色立绘"];
+    const resource = mappingResource(mapping) || mapping;
+    const outfit = resource?.outfit_key || mapping.outfit_key || "";
+    const spine = resource?.spine || mapping.spine || "";
+    const faceCount = resource?.face_count ?? mapping.face_count;
+    return [
+      outfit ? `服装：${outfit}` : "服装未标注，需打开素材核对",
+      spine ? "骨骼资源已登记" : "骨骼资源待核对",
+      faceCount != null ? `${faceCount} 个已登记表情` : "表情数量待核对",
+    ];
+  }
+
+  function sceneDirectionState(scene, index, sceneList) {
+    const start = Number(scene?.start_line || scene?.line_no || 1);
+    const nextStart = Number(sceneList?.[index + 1]?.start_line || sceneList?.[index + 1]?.line_no || 0);
+    const end = Number(scene?.end_line || (nextStart > start ? nextStart - 1 : Number.MAX_SAFE_INTEGER));
+    const cards = (state.currentDraft?.cards || []).filter((card) => {
+      const line = Number(card.line_no || 0);
+      return line >= start && line <= end;
+    });
+    const hasDirection = cards.some((card) => {
+      const current = card.current || {};
+      return ["face", "emo", "act", "fx"].some((field) => String(current[field] || "").trim());
+    });
+    if (hasDirection) return { className: "ready", label: "已有演出草稿", detail: "可在逐卡审查中继续调整" };
+    const runState = state.currentRun?.state;
+    if (runState === "generating_direction") return { className: "running", label: "演出生成中", detail: "等待生成任务完成" };
+    if (runState === "direction_failed") return { className: "failed", label: "演出生成失败", detail: "回到生成准备重试" };
+    if (state.currentRun?.source_summary?.generation_mode === "ai_direction") {
+      return { className: "pending", label: "待生成演出", detail: "完成角色映射后进入生成准备" };
+    }
+    return { className: "stable", label: "沿用剧本演出", detail: "当前任务不会自动添加 AI 演出" };
+  }
+
   function preflightRequestLabel(request) {
     return request.kind === "background_request" ? "背景请求" : "音效请求";
   }
@@ -767,7 +872,7 @@
         <article class="${requests.length ? "needs-work" : ""}"><small>待处理素材</small><strong>${requests.length} 项</strong><p>${requests.length ? "素材请求会在审查器内从当前任务的冻结素材清单处理。" : "未检测到需要单独处理的背景或音效请求。"}</p>${requests.length ? `<ul>${requests.slice(0, 3).map((request) => `<li><span><b>${esc(preflightRequestLabel(request))}</b><em>第 ${esc(request.line_no || "-")} 行 · ${esc(request.description || "等待处理")}</em></span><button type="button" data-preflight-card="${esc(request.card_id)}">打开处理</button></li>`).join("")}${requests.length > 3 ? `<li><em>另有 ${requests.length - 3} 项素材请求</em></li>` : ""}</ul>` : ""}</article>
         <article class="${errors.length ? "has-errors" : diagnostics.length ? "needs-work" : ""}"><small>编译诊断</small><strong>${errors.length ? `${errors.length} 项阻断` : diagnostics.length ? `${diagnostics.length} 项提示` : "暂无阻断"}</strong><p>${errors.length ? "先处理阻断项，编译门禁才会打开。" : diagnostics.length ? "提示不会自动修改草稿；请在审查时逐项确认。" : "可继续完成逐卡审查。"}</p>${diagnostics.length ? `<ul>${diagnostics.slice(0, 3).map((item) => `<li><b>${esc(item.line_no ? `第 ${item.line_no} 行` : item.code)}</b><em>${esc(item.message)}</em></li>`).join("")}${diagnostics.length > 3 ? `<li><em>另有 ${diagnostics.length - 3} 项诊断</em></li>` : ""}</ul>` : ""}</article>
       </div>
-      <footer class="task-preflight-next"><div><small>推荐下一步</small><strong>${esc(action.label || "确认角色映射")}</strong><p>${esc(action.detail || "请继续完成当前步骤。")}</p></div><button type="button" class="primary" id="taskPreflightContinue" data-next-stage="${esc(action.stage || "mapping")}">${action.stage === "review" ? "前往审查处理" : "开始角色映射"}</button></footer>`;
+      <footer class="task-preflight-next"><div><small>系统建议</small><strong>${esc(action.label || "确认角色映射")}</strong><p>${esc(action.detail || "请继续完成当前步骤。")}</p></div></footer>`;
     $("#refreshTaskPreflight")?.addEventListener("click", loadTaskPreflight);
     $$("[data-preflight-card]").forEach((button) => button.addEventListener("click", () => {
       const card = state.currentDraft?.cards?.find((item) => item.card_id === button.dataset.preflightCard);
@@ -775,7 +880,6 @@
       state.selectedCard = card;
       showStage("review", { force: true });
     }));
-    $("#taskPreflightContinue")?.addEventListener("click", (event) => showStage(event.currentTarget.dataset.nextStage, { force: true }));
   }
 
   async function loadTaskPreflight() {
@@ -788,6 +892,19 @@
     }
     renderTaskPreflight();
     await loadAiPreflights();
+    await loadCharacterCatalog();
+  }
+
+  async function loadCharacterCatalog() {
+    if (!state.currentRun?.run_id || state.characterCatalogRunId === state.currentRun.run_id) return;
+    try {
+      const result = await api(`/production-runs/${encodeURIComponent(state.currentRun.run_id)}/resources/characters?q=&limit=200`);
+      state.characterCatalog = Array.isArray(result.items) ? result.items : [];
+      state.characterCatalogRunId = state.currentRun.run_id;
+      if (state.currentStage === "mapping") renderMapping();
+    } catch (_) {
+      // Mapping remains usable without previews; the picker can retry its own request.
+    }
   }
 
   function renderAiPreflight() {
@@ -801,26 +918,62 @@
     const speakers = analysis.potential_speakers || [];
     const scenes = analysis.scenes || [];
     const ambiguities = analysis.ambiguities || [];
+    const source = state.currentRun.source_summary || {};
+    const speakerDetails = Array.isArray(source.speaker_details) && source.speaker_details.length
+      ? source.speaker_details
+      : (source.speakers || state.currentDraft?.cast?.detected_speakers || []).map((speaker) => ({ speaker, count: 0, sample: "" }));
+    const sourceScenes = Array.isArray(source.scenes) ? source.scenes : [];
+    const format = source.format?.label || source.format_label || (source.speakers?.length ? "角色：台词" : "混合剧本格式");
+    const alertClass = latest ? (ambiguities.length ? "warning" : "success") : "pending";
+    const alertText = latest
+      ? (ambiguities.length ? `AI 初审发现 ${ambiguities.length} 项需要你确认，建议先处理角色和场景歧义。` : "未发现阻塞问题，可以检查并确认角色映射和演出规划。")
+      : (available ? "规则检查已完成，AI 演出规划尚未运行。运行后会补充场景、角色和素材线索。" : "AI 初审需要先配置模型；当前不会用模拟结果代替真实建议。");
     const action = available
-      ? `<button type="button" id="runAiPreflight" ${state.busy ? "disabled" : ""}>${state.busy ? "AI 初审处理中" : "运行 AI 初审"}</button>`
-      : `<button type="button" id="configureAiPreflight" class="primary">去配置模型</button>`;
-    const result = latest
-      ? `<div class="ai-preflight-result">
-          <div class="ai-preflight-summary"><div><small>最近一次结果 · 冻结源剧本</small><strong>识别 ${scenes.length} 个场景变化，${ambiguities.length} 项待确认</strong><p>初审只给出建议，不会改角色映射、素材清单或演出草稿。结果来自 ${esc(latest.model?.name || "已配置模型")}。</p></div><button type="button" data-ai-preflight-action="rerun">重新运行</button></div>
-          <div class="ai-preflight-grid">
-            <article class="${speakers.length ? "needs-work" : ""}"><small>可能遗漏的说话者</small><strong>${speakers.length} 位</strong><p>${speakers.length ? "请先确认这些名字是否真的是说话者，再在下方角色映射中处理。" : "没有发现规则解析之外、需要你确认的说话者。"}</p>${speakers.length ? `<ul>${speakers.map((name) => `<li><b>${esc(name)}</b><button type="button" data-ai-preflight-action="mapping">查看角色映射</button></li>`).join("")}</ul>` : ""}</article>
-            <article class="${scenes.length ? "needs-work" : ""}"><small>场景与背景建议</small><strong>${scenes.length} 段</strong><p>${scenes.length ? "背景只是建议；确认需要后，再到素材库登记或在审查器中选用。" : "没有识别到明确的地点、时间或室内外变化。"}</p>${scenes.length ? `<ul>${scenes.slice(0, 4).map((scene) => `<li><span><b>第 ${esc(scene.start_line)}-${esc(scene.end_line)} 行</b><em>${esc(scene.location || "地点待确认")}${scene.time ? ` · ${esc(scene.time)}` : ""}</em><em>${esc(scene.background_need || "未给出背景建议")}</em></span></li>`).join("")}${scenes.length > 4 ? `<li><em>另有 ${scenes.length - 4} 段场景建议</em></li>` : ""}</ul><button type="button" data-ai-preflight-action="assets">前往素材处理</button>` : ""}</article>
-            <article class="${ambiguities.length ? "has-errors" : ""}"><small>需要人工确认</small><strong>${ambiguities.length} 项</strong><p>${ambiguities.length ? "这些不是系统错误。确认后可直接在映射或逐卡审查中修改。" : "没有发现必须由你决定的场景或角色歧义。"}</p>${ambiguities.length ? `<ul>${ambiguities.slice(0, 4).map((item) => `<li><b>第 ${esc(item.line)} 行</b><em>${esc(item.message)}</em></li>`).join("")}${ambiguities.length > 4 ? `<li><em>另有 ${ambiguities.length - 4} 项待确认</em></li>` : ""}</ul>` : ""}</article>
-          </div>
-        </div>`
-      : `<div class="ai-preflight-empty"><strong>${available ? "还没有 AI 初审结果" : "AI 初审需要先配置模型"}</strong><p>${available ? "它会读取创建任务时冻结的剧本，分析场景、潜在说话者和需要人工确认的信息。不会修改任何草稿或资源。" : "当前没有可用模型，因此不会提交任务，也不会显示模拟结果。请在设置中配置模型后再运行。"}</p></div>`;
-    panel.innerHTML = `<header class="ai-preflight-head"><div><small>可选步骤 · 只读建议</small><h3>AI 初审：先看懂剧本，再决定怎么制作</h3><p>适合补充规则检查看不到的场景和叙事线索。它不是自动制作，也不会替你确认角色、骨骼或背景。</p></div>${action}</header>${result}`;
+      ? `<button type="button" id="runAiPreflight" class="quiet" ${state.busy ? "disabled" : ""}>${state.busy ? "AI 初审处理中" : latest ? "重新运行 AI 初审" : "运行 AI 初审"}</button>`
+      : `<button type="button" id="configureAiPreflight" class="quiet">去配置模型</button>`;
+    const castRows = speakerDetails.length
+      ? speakerDetails.map((item) => {
+        const speaker = item.speaker || item.name || "未命名说话者";
+        const mapping = mappingFor(speaker);
+        const mapped = mapping && mapping.kind && mapping.kind !== "unset";
+        const evidence = mappingEvidence(mapping);
+        return `<li class="ai-preflight-cast-row"><span class="ai-preflight-cast-identity">${mappingPreview(mapping)}<span><b>${esc(speaker)}</b><em>${esc(item.count || 0)} 段台词${item.sample ? ` · “${esc(item.sample)}”` : ""}</em><small>${esc(evidence.join(" · "))}</small></span></span><span class="ai-preflight-cast-state ${mapped ? "ready" : "missing"}">${esc(mapped ? mappingStatusLabel(mapping) : "待确认")}</span><button type="button" class="quiet" data-ai-preflight-action="confirm-mapping" data-speaker="${esc(speaker)}">${mapped ? "修改" : "选择角色"}</button></li>`;
+      }).join("")
+      : '<li><em>没有识别到说话者，请检查剧本格式。</em></li>';
+    const sceneRows = scenes.length
+      ? scenes.map((scene, index) => { const direction = sceneDirectionState(scene, index, scenes); return `<li class="ai-preflight-scene-row"><span><b>第 ${esc(scene.start_line)}-${esc(scene.end_line)} 行</b><strong>${esc(scene.location || "地点待确认")}${scene.time ? ` · ${esc(scene.time)}` : ""}</strong><em class="ai-preflight-scene-state ${direction.className}">${esc(direction.label)} · ${esc(direction.detail)}</em><small class="ai-preflight-scene-background">背景建议：${esc(scene.background_need || "未给出")}</small></span><button type="button" class="quiet" data-ai-preflight-action="review-scene" data-line="${esc(scene.start_line || "")}">查看场景</button></li>`; }).join("")
+      : sourceScenes.length
+        ? sourceScenes.map((scene, index) => { const direction = sceneDirectionState(scene, index, sourceScenes); return `<li class="ai-preflight-scene-row"><span><b>第 ${esc(scene.line_no || "-")} 行</b><strong>${esc(scene.title || "未命名场景")}</strong><em class="ai-preflight-scene-state ${direction.className}">${esc(direction.label)} · ${esc(direction.detail)}</em><small class="ai-preflight-scene-background">背景建议：运行 AI 初审后补充</small></span><button type="button" class="quiet" data-ai-preflight-action="review-scene" data-line="${esc(scene.line_no || "")}">查看场景</button></li>`; }).join("")
+        : '<li><em>暂未识别场景变化；可以运行 AI 初审补充规划。</em></li>';
+    const ambiguityRows = ambiguities.length
+      ? ambiguities.slice(0, 6).map((item) => `<li><b>第 ${esc(item.line || "-")} 行</b><span>${esc(item.message || "需要人工确认")}</span></li>`).join("")
+      : '<li><em>没有发现必须由你决定的场景或角色歧义。</em></li>';
+    const result = `<div class="ai-preflight-decision-surface">
+      <div class="ai-preflight-alert ${alertClass}" role="status"><strong>${esc(alertText)}</strong><span>${latest ? "建议不会自动修改草稿；确认后仍需在下方工作面执行。" : "只读取创建任务时冻结的剧本，不写入角色映射、素材或演出草稿。"}</span></div>
+      <div class="ai-preflight-source-summary"><span><small>剧本识别</small><b>${esc(format)}</b></span><span><small>剧本行数</small><b>${esc(source.line_count || 0)} 行</b></span><span><small>说话者</small><b>${esc(speakerDetails.length)} 位 · ${esc(source.dialogue_count || 0)} 段台词</b></span><span><small>场景</small><b>${esc(latest ? scenes.length : sourceScenes.length)} 段</b></span></div>
+      <div class="ai-preflight-decision-grid">
+        <article class="ai-preflight-cast-panel"><header><div><small>角色映射</small><h4>确认每个说话者怎么出场</h4></div><button type="button" class="quiet" data-ai-preflight-action="mapping">查看全部映射</button></header><ul class="ai-preflight-cast-list">${castRows}</ul></article>
+        <article class="ai-preflight-scene-panel"><header><div><small>场景演出规划</small><h4>${latest ? "地点、时间和背景建议" : "规则识别到的场景"}</h4></div><button type="button" class="quiet" data-ai-preflight-action="assets">处理素材</button></header><ul class="ai-preflight-scene-list">${sceneRows}</ul></article>
+      </div>
+      <article class="ai-preflight-issues-panel ${ambiguities.length ? "has-errors" : ""}"><header><div><small>需要处理</small><h4>${ambiguities.length ? `${ambiguities.length} 项待确认` : "暂无必须处理的问题"}</h4></div><span>${latest ? "AI 只提供建议" : "运行后显示"}</span></header><ul>${ambiguityRows}</ul></article>
+      <footer class="ai-preflight-decision-footer"><span>${latest ? "确认映射和演出规划后，再进入生成准备。" : "先运行 AI 初审，再检查角色、场景和素材建议。"}</span><button type="button" class="quiet" data-ai-preflight-action="confirm-mapping">回到角色映射</button></footer>
+    </div>`;
+    panel.innerHTML = `<header class="ai-preflight-head"><div><small>第二步 · AI 辅助初审 · 只读建议</small><h3>AI 初审：先看懂剧本，再决定怎么制作</h3><p>这里集中查看剧本识别、角色映射、场景演出和待确认事项。AI 不会替你写入草稿；每个决定都回到对应工作面执行。</p></div>${action}</header>${result}`;
     $("#runAiPreflight")?.addEventListener("click", startAiPreflight);
     $("#configureAiPreflight")?.addEventListener("click", () => openSettingsDialog("model"));
     $$('[data-ai-preflight-action]').forEach((button) => button.addEventListener("click", () => {
       const actionName = button.dataset.aiPreflightAction;
       if (actionName === "rerun") startAiPreflight();
       if (actionName === "mapping") $("#mappingList")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (actionName === "confirm-mapping") {
+        if (button.dataset.speaker) openMapping(button.dataset.speaker);
+        else $("#mappingList")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      if (actionName === "review-scene") {
+        const card = (state.currentDraft?.cards || []).find((item) => String(item.line_no || "") === String(button.dataset.line || ""));
+        if (card) state.selectedCard = card;
+        showStage("review", { force: true });
+      }
       if (actionName === "assets") openAssetLibrary();
     }));
   }
@@ -858,8 +1011,14 @@
     $("#mappingContinue").disabled = missing > 0;
     $("#mappingList").innerHTML = speakers.length ? speakers.map((speaker) => {
       const mapping = mappingFor(speaker);
-      return `<article class="mapping-row"><div><strong>${esc(speaker)}</strong><small>出现在 ${esc(state.currentRun.source_summary?.dialogue_count || 0)} 段台词中</small></div>
-        <div class="mapping-value"><b>${esc(mappingLabel(mapping))}</b><small>${mapping.kind === "portrait" ? "骨骼、头像和表情跟随此角色" : "当前行不会带出角色立绘"}</small></div>
+      const resource = mappingResource(mapping);
+      const speakerDetail = (state.currentRun.source_summary?.speaker_details || []).find((item) => item.speaker === speaker) || {};
+      const outfit = resource?.outfit_key || mapping.outfit_key || "";
+      const outfitLabel = outfit ? `服装：${outfit}` : mapping.kind === "portrait" ? "服装未标注，需打开素材核对" : "不使用角色服装";
+      const previewState = mapping.kind === "portrait" ? (resource?.preview_available === true ? "已加载头像预览" : "暂无头像预览，请打开修改映射核对") : "不会显示角色立绘";
+      const evidence = mappingEvidence(mapping);
+      return `<article class="mapping-row"><div class="mapping-speaker-cell">${mappingPreview(mapping)}<span><strong>${esc(speaker)}</strong><small>出现在 ${esc(speakerDetail.count || 0)} 段台词中</small></span></div>
+        <div class="mapping-value"><b>${esc(mappingLabel(mapping))}</b><small>${esc(outfitLabel)}</small><small>${esc(previewState)}</small><small>${esc(evidence.slice(-2).join(" · "))}</small></div>
         <button class="mapping-edit" data-speaker="${esc(speaker)}">修改映射</button></article>`;
     }).join("") : '<p class="empty">没有检测到说话者，请检查剧本格式。</p>';
     $$(".mapping-edit").forEach((button) => button.addEventListener("click", () => openMapping(button.dataset.speaker)));
@@ -881,10 +1040,13 @@
         : `/resources/characters?q=${encodeURIComponent(query)}&limit=30`;
       const result = await api(path);
       const rows = result.items || [];
+      state.characterCatalog = rows;
+      state.characterCatalogRunId = state.currentRun?.run_id || null;
       $("#characterResults").innerHTML = rows.length ? rows.map((item) => `<button type="button" class="character-row resource-row" data-character-id="${esc(item.identifier)}" data-character-name="${esc(item.name)}" aria-label="选择 ${esc(item.name)} 映射给当前说话者">
-        ${previewImage("characters", item.identifier, item.name, "resource-thumb avatar-thumb")}<span><strong>${esc(item.name)}</strong><small>${esc(item.identifier)}${item.club ? ` · ${esc(item.club)}` : ""}</small><small>选择后会带入该角色的骨骼、头像和 ${item.face_count || 0} 个表情。</small></span><b>选择角色</b></button>`).join("") : '<p class="empty">没有匹配的角色。</p>';
+        ${previewImage("characters", item.identifier, item.name, "resource-thumb avatar-thumb", item.preview_available === true)}<span><strong>${esc(item.name)}</strong><small>${esc(item.identifier)}${item.club ? ` · ${esc(item.club)}` : ""}</small><small>${item.outfit_key ? `服装：${esc(item.outfit_key)} · ` : ""}选择后会带入骨骼、头像和 ${item.face_count || 0} 个表情。</small></span><b>选择角色</b></button>`).join("") : '<p class="empty">没有匹配的角色。</p>';
       $$("[data-character-id]").forEach((button) => button.addEventListener("click", () => saveMapping({
-        kind: "portrait", id: button.dataset.characterId, name: button.dataset.characterName
+        kind: "portrait", id: button.dataset.characterId, name: button.dataset.characterName,
+        ...(state.characterCatalog.find((item) => item.identifier === button.dataset.characterId) || {})
       })));
     } catch (error) { $("#mappingDialogStatus").textContent = error.message; }
   }
@@ -980,7 +1142,7 @@
     if (!state.currentDraft) return;
     const cards = state.currentDraft.cards || [];
     const pending = state.currentDraft.counts?.pending || 0;
-    $("#reviewSummary").textContent = `${state.currentDraft.draft_version} 版草稿 · ${cards.length} 张卡片 · ${pending} 张待审`;
+    $("#reviewSummary").textContent = `当前演出草稿 · ${cards.length} 张卡片 · ${pending} 张待审`;
     $("#reviewSummary").setAttribute("aria-live", "polite");
     const visible = cards.filter((card) => {
       const status = cardStatus(card);
@@ -1034,8 +1196,8 @@
       return;
     }
     const isCg = frame.presentation === "cg";
-    const background = frame.background_key
-      ? `style="background-image:url('${esc(previewResourceUrl("backgrounds", frame.background_key))}')"`
+    const background = frame.background_key && frame.background_preview_available === true
+      ? `<img class="preview-stage-image" src="${esc(previewResourceUrl("backgrounds", frame.background_key))}" alt="" loading="lazy" decoding="async">`
       : "";
     const cg = "";
     const annotations = frame.annotations?.length
@@ -1043,7 +1205,7 @@
       : "";
     const statusLabel = frame.review_state === "approved" ? "已审" : "待审";
     target.className = `performance-preview-frame presentation-${esc(frame.presentation)}`;
-    target.innerHTML = `<section class="preview-stage" ${background}><div class="preview-stage-overlay"></div><div class="preview-progress">${state.previewIndex + 1} / ${frames.length} · 第 ${esc(frame.line_no || "-")} 张 · ${esc(statusLabel)}</div>${cg}<div class="preview-dialogue ${isCg ? "is-cg" : ""}"><small>${esc(isCg ? "CG 空镜段落" : frame.presentation === "request" ? "需要处理" : frame.presentation === "direction" ? "演出指令" : "当前台词")}</small><strong>${esc(frame.title || "未命名卡片")}</strong><p>${esc(frame.text || "此卡没有可显示的文本。")}</p>${annotations}</div></section><div class="preview-card-strip" aria-label="草稿卡片定位">${frames.map((item, index) => `<button type="button" class="${index === state.previewIndex ? "active" : ""}" data-preview-index="${index}" aria-label="跳到第 ${esc(item.line_no || "-")} 张卡片">${esc(String(item.line_no || index + 1).padStart(2, "0"))}</button>`).join("")}</div>`;
+    target.innerHTML = `<section class="preview-stage">${background}<div class="preview-stage-overlay"></div><div class="preview-progress">${state.previewIndex + 1} / ${frames.length} · 第 ${esc(frame.line_no || "-")} 张 · ${esc(statusLabel)}</div>${cg}<div class="preview-dialogue ${isCg ? "is-cg" : ""}"><small>${esc(isCg ? "CG 空镜段落" : frame.presentation === "request" ? "需要处理" : frame.presentation === "direction" ? "演出指令" : "当前台词")}</small><strong>${esc(frame.title || "未命名卡片")}</strong><p>${esc(frame.text || "此卡没有可显示的文本。")}</p>${annotations}</div></section><div class="preview-card-strip" aria-label="草稿卡片定位">${frames.map((item, index) => `<button type="button" class="${index === state.previewIndex ? "active" : ""}" data-preview-index="${index}" aria-label="跳到第 ${esc(item.line_no || "-")} 张卡片">${esc(String(item.line_no || index + 1).padStart(2, "0"))}</button>`).join("")}</div>`;
     status.textContent = `当前展示第 ${frame.line_no || "-"} 张卡片；预览是只读的，修改请回到这张卡。`;
     $("#previewPrevious").disabled = state.previewIndex === 0;
     $("#previewNext").disabled = state.previewIndex >= frames.length - 1;
@@ -1097,15 +1259,15 @@
       return;
     }
     target.className = "";
-    target.innerHTML = `<section class="proposal-summary"><strong>共 ${audit.total} 条 AI 演出建议</strong><p>“已写入草稿”仍需逐卡审查。只有能唯一对应到当前台词的建议才显示“保留/撤销”；其余建议只读，避免草稿调整后误改内容。</p></section>${generations.map((generation) => `<section class="proposal-generation"><header><div><h4>一次生成记录 · ${esc(generation.proposal_count)} 条建议</h4><small>${esc(generation.model || "未记录模型")} · 剧情类型：${esc(generation.story_type || "auto")} · 写入后草稿版本：${esc(generation.draft_version || "-")}</small></div></header><ul class="proposal-list">${(generation.proposals || []).map((proposal) => { const suggested = proposal.type === "suggested_fix"; const before = proposal.before || "未设置"; const after = proposal.after || "未设置"; const action = proposal.can_apply_safely ? `<div class="proposal-actions"><button type="button" data-proposal-action="approve" data-proposal-id="${esc(proposal.proposal_id)}">保留这项标注</button><button type="button" class="danger" data-proposal-action="reject" data-proposal-id="${esc(proposal.proposal_id)}">撤销并恢复原值</button></div>` : ""; return `<li class="proposal-item ${suggested ? "suggested" : "applied"}"><div><strong>${esc(proposalFieldLabel(proposal.field))}：${esc(after)}</strong><p>${suggested ? "模型提出了这个值，但系统没有把它写入草稿。" : "模型已把这个值写进生成后的草稿，仍需要你在逐卡审查中确认。"}</p><div class="proposal-change"><span>原值：${esc(before)}</span><span>建议值：${esc(after)}</span></div><p>${esc(proposal.apply_reason)}</p>${action}</div><b>${suggested ? "仅供参考" : proposal.can_apply_safely ? "可确认或撤销" : "已写入草稿"}</b></li>`; }).join("")}</ul></section>`).join("")}`;
-    status.textContent = `当前草稿为第 ${audit.draft_version || "-"} 版；本窗口不会修改它。`;
+    target.innerHTML = `<section class="proposal-summary"><strong>共 ${audit.total} 条 AI 演出建议</strong><p>“已写入草稿”仍需逐卡审查。只有能唯一对应到当前台词的建议才显示“保留/撤销”；其余建议只读，避免草稿调整后误改内容。</p></section>${generations.map((generation) => `<section class="proposal-generation"><header><div><h4>一次生成记录 · ${esc(generation.proposal_count)} 条建议</h4><small>本次生成仅供审查，不会在这里直接修改草稿</small></div></header><ul class="proposal-list">${(generation.proposals || []).map((proposal) => { const suggested = proposal.type === "suggested_fix"; const before = proposal.before || "未设置"; const after = proposal.after || "未设置"; const action = proposal.can_apply_safely ? `<div class="proposal-actions"><button type="button" data-proposal-action="approve" data-proposal-id="${esc(proposal.proposal_id)}">保留这项标注</button><button type="button" class="danger" data-proposal-action="reject" data-proposal-id="${esc(proposal.proposal_id)}">撤销并恢复原值</button></div>` : ""; return `<li class="proposal-item ${suggested ? "suggested" : "applied"}"><div><strong>${esc(proposalFieldLabel(proposal.field))}：${esc(after)}</strong><p>${suggested ? "模型提出了这个值，但系统没有把它写入草稿。" : "模型已把这个值写进生成后的草稿，仍需要你在逐卡审查中确认。"}</p><div class="proposal-change"><span>原值：${esc(before)}</span><span>建议值：${esc(after)}</span></div><p>${esc(proposal.apply_reason)}</p>${action}</div><b>${suggested ? "仅供参考" : proposal.can_apply_safely ? "可确认或撤销" : "已写入草稿"}</b></li>`; }).join("")}</ul></section>`).join("")}`;
+    status.textContent = "当前演出建议只读；不会修改草稿。";
     $$('[data-proposal-action]').forEach((button) => button.addEventListener("click", () => decideDirectionProposal(button.dataset.proposalId, button.dataset.proposalAction)));
   }
 
   async function decideDirectionProposal(proposalId, action) {
     if (!state.currentRun || !state.currentDraft) return;
     const verb = action === "reject" ? "撤销并恢复生成前的值" : "保留这项 AI 标注";
-    if (!window.confirm(`${verb}？${action === "reject" ? "这会修改对应台词，并让该卡回到待审。" : "这只记录你的确认，不会改写台词。"}`)) return;
+    if (!await askConfirmation({ title: `${verb}？`, body: action === "reject" ? "这会修改对应台词，并让该卡回到待审。" : "这只记录你的确认，不会改写台词。", confirmLabel: action === "reject" ? "撤销标注" : "保留标注", danger: action === "reject" })) return;
     try {
       const result = await api(`/production-runs/${encodeURIComponent(state.currentRun.run_id)}/direction-proposals/${encodeURIComponent(proposalId)}`, { method: "POST", body: JSON.stringify({ action, expected_draft_version: state.currentDraft.draft_version }) });
       applyRun(result);
@@ -1360,7 +1522,7 @@
   }
 
   async function deleteSelectedCard(card) {
-    if (!window.confirm(`删除第 ${card.line_no || "-"} 张卡片？删除后需要重新审查。`)) return;
+    if (!await askConfirmation({ title: `删除第 ${card.line_no || "-"} 张卡片？`, body: "删除后需要重新审查，其他卡片不会被改写。", confirmLabel: "删除卡片", danger: true })) return;
     try {
       const result = await api(`/production-runs/${encodeURIComponent(state.currentRun.run_id)}/cards/${encodeURIComponent(card.card_id)}`, { method: "DELETE", body: JSON.stringify({ expected_draft_version: state.currentDraft.draft_version }) });
       state.selectedCard = null; applyRun(result); toast("卡片已删除，草稿已回到待审状态。", "warning");
@@ -1440,7 +1602,7 @@
       const result = await api(`/production-runs/${encodeURIComponent(state.currentRun.run_id)}/resources/cg-backgrounds?q=${encodeURIComponent(query)}&limit=120`);
       const items = result.items || [];
       $("#cgResults").innerHTML = items.length ? items.map((item) => `<button type="button" class="character-row resource-row cg-material-row ${item.key === state.cgBackgroundKey ? "selected" : ""}" data-cg-key="${esc(item.key)}" aria-pressed="${item.key === state.cgBackgroundKey}">
-        ${previewImage("backgrounds", item.key, item.name || item.key, "resource-thumb cg-thumb")}<span><strong>${esc(item.name || item.key)}</strong><small>${esc(item.key)} · ${item.cg_source === "official_cg" ? "官方 CG" : "自定义背景"}</small><small>进入所选范围时切换为这张图，并强制隐藏全部角色立绘。</small></span><b>${item.key === state.cgBackgroundKey ? "已选中" : "选择"}</b></button>`).join("") : '<p class="empty">没有匹配的自定义背景或官方 CG。</p>';
+        ${previewImage("backgrounds", item.key, item.name || item.key, "resource-thumb cg-thumb", item.preview_available === true)}<span><strong>${esc(item.name || item.key)}</strong><small>${esc(item.key)} · ${item.cg_source === "official_cg" ? "官方 CG" : "自定义背景"}</small><small>进入所选范围时切换为这张图，并强制隐藏全部角色立绘。</small></span><b>${item.key === state.cgBackgroundKey ? "已选中" : "选择"}</b></button>`).join("") : '<p class="empty">没有匹配的自定义背景或官方 CG。</p>';
       $$("[data-cg-key]").forEach((button) => button.addEventListener("click", () => {
         state.cgBackgroundKey = button.dataset.cgKey;
         renderCgSelection();
@@ -1470,7 +1632,7 @@
 
   async function deleteCgSegment(segment) {
     if (!state.currentRun || !state.currentDraft || !segment) return;
-    if (!window.confirm(`删除 CG 段落“${segment.label}”？范围内卡片会重新变为待审。`)) return;
+    if (!await askConfirmation({ title: `删除 CG 段落“${segment.label}”？`, body: "范围内卡片会重新变为待审，原有台词和背景引用不会被删除。", confirmLabel: "删除 CG 段落", danger: true })) return;
     try {
       const result = await api(`/production-runs/${encodeURIComponent(state.currentRun.run_id)}/cg-segments/${encodeURIComponent(segment.segment_id)}`, {
         method: "DELETE", body: JSON.stringify({ expected_draft_version: state.currentDraft.draft_version })
@@ -1515,7 +1677,7 @@
       const result = await api(path);
       const items = result.items || [];
       $("#resourceResults").innerHTML = items.length ? items.map((item) => `<button type="button" class="character-row resource-row" data-resource-key="${esc(item.key)}" aria-label="选择 ${esc(picker.label)} ${esc(item.name || item.key)}">
-        ${picker.kind === "backgrounds" ? previewImage("backgrounds", item.key, item.name || item.key, "resource-thumb background-thumb") : '<span class="resource-thumb sound-thumb" aria-hidden="true">SE</span>'}<span><strong>${esc(item.name || item.key)}</strong><small>${esc(item.key)}</small><small>${picker.kind === "backgrounds" ? "选择后会替换当前卡片的背景指令。" : "选择后会替换当前卡片的声音指令。"}</small></span><b>${picker.kind === "backgrounds" ? "使用背景" : "使用声音"}</b></button>`).join("") : '<p class="empty">没有匹配的已登记素材。</p>';
+        ${picker.kind === "backgrounds" ? previewImage("backgrounds", item.key, item.name || item.key, "resource-thumb background-thumb", item.preview_available === true) : '<span class="resource-thumb sound-thumb" aria-hidden="true">SE</span>'}<span><strong>${esc(item.name || item.key)}</strong><small>${esc(item.key)}</small><small>${picker.kind === "backgrounds" ? "选择后会替换当前卡片的背景指令。" : "选择后会替换当前卡片的声音指令。"}</small></span><b>${picker.kind === "backgrounds" ? "使用背景" : "使用声音"}</b></button>`).join("") : '<p class="empty">没有匹配的已登记素材。</p>';
       $$("[data-resource-key]").forEach((button) => button.addEventListener("click", async () => {
         const selected = items.find((item) => item.key === button.dataset.resourceKey);
         if (!selected) return;
@@ -1530,7 +1692,7 @@
     const key = item.key || item.identifier || "";
     const name = item.name || key;
     const preview = kind === "characters" || kind === "backgrounds" || kind === "cg"
-      ? previewImage(kind, key, name, `resource-thumb ${kind === "characters" ? "avatar-thumb" : kind === "cg" ? "cg-thumb" : "background-thumb"}`)
+      ? previewImage(kind, key, name, `resource-thumb ${kind === "characters" ? "avatar-thumb" : kind === "cg" ? "cg-thumb" : "background-thumb"}`, item.preview_available === true)
       : '<span class="resource-thumb sound-thumb" aria-hidden="true">SE</span>';
     const usage = state.assetUsage[`${kind}:${key}`] || [];
     const usageText = usage.length ? `本任务已使用 ${usage.length} 处：${usage.slice(0, 2).map((item) => item.line_no ? `第 ${item.line_no} 张` : item.label).join("、")}` : "本任务尚未使用";
@@ -1540,7 +1702,7 @@
     const imported = item.source === "task_import";
     const source = imported ? "本任务导入" : "初始素材快照";
     const remove = imported ? `<button type="button" class="asset-remove" data-remove-asset-id="${esc(item.asset_id || "")}" data-remove-asset-name="${esc(name)}" ${usage.length ? "disabled title=\"已被当前任务使用，请先在审查器替换引用\"" : ""}>${usage.length ? "正在使用" : "移除导入素材"}</button>` : "";
-    return `<article class="asset-library-item">${preview}<div><strong>${esc(name)}</strong><small>${esc(key)}</small><small>${esc(detail)}</small><small class="asset-usage ${usage.length ? "used" : "unused"}">${esc(usageText)}</small></div><div class="asset-item-actions"><span class="asset-source ${imported ? "imported" : ""}">${source}</span>${remove}</div></article>`;
+    return `<article class="asset-library-item" data-asset-key="${esc(key)}">${preview}<div><strong>${esc(name)}</strong><small class="asset-technical-key" aria-hidden="true">${esc(key)}</small><small>${esc(detail)}</small><small class="asset-usage ${usage.length ? "used" : "unused"}">${esc(usageText)}</small></div><div class="asset-item-actions"><span class="asset-source ${imported ? "imported" : ""}">${source}</span>${remove}</div></article>`;
   }
 
   async function loadAssetLibrary({ reset = false } = {}) {
@@ -1571,7 +1733,7 @@
 
   async function removeTaskAsset(assetId, name) {
     if (!assetId || !state.currentRun || !state.currentDraft) return;
-    if (!window.confirm(`移除“${name}”？它会从当前任务的可用素材中删除，且不会写入 AA 工作区。`)) return;
+    if (!await askConfirmation({ title: `移除“${name}”？`, body: "它会从当前任务的可用素材中删除，不会写入 AA 工作区。", confirmLabel: "移除素材", danger: true })) return;
     try {
       setBusy(true);
       $("#assetLibraryStatus").textContent = `正在移除“${name}”…`;
@@ -1590,17 +1752,38 @@
     return document.querySelector('input[name="assetImportKind"]:checked')?.value || "background";
   }
 
+  function ensureSpineRenderControl() {
+    const host = $("#assetCharacterFields");
+    if (!host || $("#renderSpinePreview")) return;
+    const label = document.createElement("label");
+    label.id = "assetSpineFields";
+    label.className = "spine-render-option";
+    label.innerHTML = '<span><input id="renderSpinePreview" type="checkbox">先渲染编号表情，再让模型查看</span><small>只生成临时视觉证据，不修改原始 ZIP；需要本机配置 Spine CLI。</small>';
+    host.appendChild(label);
+  }
+
+  function updateAssetImportFileName() {
+    const file = $("#assetImportFile").files?.[0];
+    $("#assetImportFileName").textContent = file?.name || "尚未选择文件";
+  }
+
   function updateAssetImportForm() {
+    ensureSpineRenderControl();
     const kind = selectedAssetImportKind();
     const file = $("#assetImportFile");
     file.value = "";
     file.accept = ["background", "cg"].includes(kind) ? ".png,.jpg,.jpeg" : kind === "sound" ? ".wav" : ".zip";
+    updateAssetImportFileName();
     $("#assetCharacterFields").classList.toggle("hidden", kind !== "character");
+    $("#assetSpineFields")?.classList.toggle("hidden", kind !== "character");
     $("#assetBackgroundFields").classList.toggle("hidden", !["background", "cg"].includes(kind));
     $("#assetValidationResult").className = "asset-validation empty";
     $("#assetValidationResult").textContent = "选择文件后，点击“上传并检查”。";
+    $("#assetRecognitionResult").className = "asset-recognition empty";
+    $("#assetRecognitionResult").innerHTML = "<strong>可选的图片识别</strong><p>检查通过后，可以让已配置的视觉模型查看预览并提出标签或表情建议；不接受也可以直接手工登记。</p>";
     $("#assetImportStatus").textContent = kind === "character" ? "角色 ZIP 必须含 skel、atlas、贴图和头像。" : kind === "cg" ? "插图会在构建时写入 PopupOverrides，可在高级指令中用 @popup 调用。" : "尚未选择文件。";
     $("#registerAssetImport").disabled = true;
+    $("#recognizeAssetImport").disabled = true;
     state.assetImport = null;
   }
 
@@ -1618,6 +1801,7 @@
     $("#assetIdentifier").value = "";
     $("#assetDisplayName").value = "";
     $("#assetNickname").value = "";
+    $("#renderSpinePreview") && ($("#renderSpinePreview").checked = false);
     setImportStep(1);
     updateAssetImportForm();
     $("#assetImportDialog").showModal();
@@ -1630,8 +1814,14 @@
       payload.identifier = $("#assetIdentifier").value.trim();
       payload.display_name = $("#assetDisplayName").value.trim();
       payload.nickname = $("#assetNickname").value.trim();
+      payload.render_spine_preview = $("#renderSpinePreview")?.checked === true;
     }
     if (["background", "cg"].includes(kind)) payload.labels = { label: $("#assetLabel").value.trim() };
+    const recognition = state.assetImport?.recognition;
+    if (recognition?.digest) {
+      payload.recognition_digest = recognition.digest;
+      payload.accept_recognition = state.assetImport.recognitionAccepted === true;
+    }
     return payload;
   }
 
@@ -1648,12 +1838,62 @@
     target.innerHTML = `<strong>${validation.ok ? "检查通过，可以登记" : "检查未通过"}</strong><p>${esc(summary)}</p>${issues.length ? `<ul>${issues.map((issue) => `<li>${esc(issue.message)}</li>`).join("")}</ul>` : "<p>没有阻断问题。登记后会加入当前任务的冻结素材清单。</p>"}`;
   }
 
+  function renderAssetRecognition(recognition) {
+    const target = $("#assetRecognitionResult");
+    if (!target) return;
+    if (!recognition?.candidate) {
+      target.className = "asset-recognition empty";
+      target.innerHTML = "<strong>可选的图片识别</strong><p>不接受识别也可以直接手工登记。角色骨骼只会根据静态头像、贴图和已验证的表情 ID 提出保守建议。</p>";
+      return;
+    }
+    const candidate = recognition.candidate;
+    const expressions = Array.isArray(candidate.expression_suggestions) ? candidate.expression_suggestions : [];
+    const accepted = state.assetImport?.recognitionAccepted === true;
+    target.className = `asset-recognition ${accepted ? "accepted" : "proposal"}`;
+    const evidence = recognition.evidence || {};
+    const calibrationCount = Array.isArray(evidence.calibration) ? evidence.calibration.length : 0;
+    const evidenceLabel = selectedAssetImportKind() === "character"
+      ? Number(evidence.rendered_animation_count || 0) > 0
+        ? `已渲染 ${Number(evidence.rendered_animation_count || 0)} 个 Spine 表情预览；仅作为视觉证据${calibrationCount ? `；${calibrationCount} 项需要人工校准` : ""}`
+        : `静态头像/贴图 + ${Number(evidence.validated_face_ids?.length || 0)} 个已验证表情 ID；未渲染 Spine 动画`
+      : "只基于本次上传内容";
+    target.innerHTML = `<header><strong>${accepted ? "已选择采用识别建议" : "识别建议待确认"}</strong><span>${esc(evidenceLabel)}</span></header><p>${esc(candidate.summary || "模型没有提供摘要；可以继续手工填写。")}</p>${candidate.title ? `<dl><div><dt>建议名称</dt><dd>${esc(candidate.title)}</dd></div><div><dt>标签</dt><dd>${esc((candidate.tags || []).join("、") || "未提供")}</dd></div>${candidate.mood ? `<div><dt>氛围</dt><dd>${esc(candidate.mood)}</dd></div>` : ""}</dl>` : ""}${expressions.length ? `<section><b>表情建议</b><ul>${expressions.map(item => `<li><span>${esc(item.face_id)}</span>${esc(item.label)}</li>`).join("")}</ul></section>` : ""}<button type="button" class="quiet" id="acceptAssetRecognition">${accepted ? "取消采用，改用手工信息" : "采用这些建议"}</button>`;
+    $("#assetImportStatus").textContent = accepted ? "识别建议已加入登记内容；仍会先写入当前任务。" : "识别建议仅供查看；点击“采用这些建议”后才会随登记保存。";
+  }
+
+  async function recognizeAssetImport() {
+    if (!state.assetImport?.validation?.ok || !state.currentRun) return;
+    try {
+      setBusy(true);
+      $("#recognizeAssetImport").disabled = true;
+      $("#assetImportStatus").textContent = "正在读取图片预览并生成识别建议…";
+      const result = await api(`/production-runs/${encodeURIComponent(state.currentRun.run_id)}/assets/recognize`, {
+        method: "POST", body: JSON.stringify(importPayload()),
+      });
+      state.assetImport.recognition = result.recognition;
+      state.assetImport.recognitionAccepted = false;
+      renderAssetRecognition(result.recognition);
+    } catch (error) {
+      const message = error.code === "asset_recognition_not_configured"
+        ? "当前没有配置视觉模型；可以跳过识别，继续手工登记。"
+        : ["asset_spine_render_not_configured", "asset_spine_render_failed", "asset_spine_render_empty"].includes(error.code)
+          ? (error.message || "Spine 表情预览没有生成；可以关闭渲染并继续静态识别。")
+        : error.message || "识别建议生成失败；可以跳过识别后手工登记。";
+      $("#assetRecognitionResult").className = "asset-recognition unavailable";
+      $("#assetRecognitionResult").innerHTML = `<strong>没有生成识别建议</strong><p>${esc(message)}</p>`;
+      $("#assetImportStatus").textContent = "识别未完成；登记不会被阻断。";
+    } finally {
+      $("#recognizeAssetImport").disabled = false;
+      setBusy(false);
+    }
+  }
+
   async function validateAssetImport() {
     const file = $("#assetImportFile").files?.[0];
     const kind = selectedAssetImportKind();
     if (!file) { $("#assetImportStatus").textContent = "请先选择要导入的文件。"; return; }
     if (kind === "character" && (!$("#assetIdentifier").value.trim() || !$("#assetDisplayName").value.trim())) {
-      $("#assetImportStatus").textContent = "角色骨骼需要填写 Identifier 和显示名称。"; return;
+      $("#assetImportStatus").textContent = "角色骨骼需要填写角色标识和显示名称。"; return;
     }
     try {
       setBusy(true); setImportStep(2);
@@ -1668,6 +1908,7 @@
       state.assetImport.validation = validationResult.validation;
       renderAssetValidation(validationResult.validation);
       $("#registerAssetImport").disabled = !validationResult.validation.ok;
+      $("#recognizeAssetImport").disabled = !validationResult.validation.ok || kind === "sound";
       $("#assetImportStatus").textContent = validationResult.validation.ok ? "检查完成。确认无误后，登记到当前任务。" : "请根据检查结果更换文件或修改角色信息。";
     } catch (error) { handleError(error); $("#assetImportStatus").textContent = error.message || "上传或检查失败。"; } finally { setBusy(false); }
   }
@@ -1732,7 +1973,7 @@
       try { const result = await api(`/production-runs/${state.currentRun.run_id}/install-check`, { method: "POST", body: JSON.stringify({ build_id: state.currentRun.last_build_id, category: $("#installCategory").value, story_name: $("#installStoryName").value }) }); $("#installStatus").textContent = result.target.conflict ? `目标 ${result.target.project} 已存在，请更换名称。` : `目标 ${result.target.project} 可用。`; $("#installRun").disabled = result.target.conflict; } catch (error) { handleError(error); }
     });
     $("#installRun").addEventListener("click", async () => {
-      if (!window.confirm("将把当前构建写入已配置的 AA 工作区，是否继续？")) return;
+      if (!await askConfirmation({ title: "将当前构建写入 AA 工作区？", body: "这会在已配置的本机 AA 工作区创建或恢复制作工程；写作正文和 ScriptRelease 不会被修改。", confirmLabel: "继续安装" })) return;
       try { const result = await api(`/production-runs/${state.currentRun.run_id}/install`, { method: "POST", body: JSON.stringify({ build_id: state.currentRun.last_build_id, category: $("#installCategory").value, story_name: $("#installStoryName").value }) }); applyRun(result); toast(`已安装到 ${result.install.project || "AA"}`); } catch (error) { handleError(error); }
     });
   }
@@ -1751,10 +1992,92 @@
     try { const result = await api("/settings/direction-model"); state.model = result.model; $("#modelProvider").value = result.model.provider || "openai"; $("#modelBaseUrl").value = result.model.base_url || ""; $("#modelName").value = result.model.model || ""; $("#modelStatus").textContent = result.model.configured ? `已配置 · ${result.model.secret_source}` : "尚未配置"; } catch (error) { handleError(error); }
   }
 
+  function renderSpineCliSettings(result) {
+    state.spineCli = result.spine_cli || {};
+    const info = state.spineCli;
+    const capability = result.capability || {};
+    const status = $("#spineCliStatus");
+    const capabilityText = $("#spineCliCapability");
+    if (!status) return;
+    const configured = info.configured === true && info.valid !== false;
+    const invalid = info.configured === true && info.valid === false;
+    status.className = `environment-status ${configured ? "ready" : "needs-work"}`;
+    status.innerHTML = configured
+      ? "<strong>Spine 预览已启用</strong><p>导入角色时可以选择先渲染编号表情。渲染结果只作为待确认的视觉证据。</p>"
+      : invalid
+        ? "<strong>配置路径不可用</strong><p>找不到该程序；请重新选择 Spine.com、Spine.exe 或对应启动脚本。</p>"
+        : "<strong>未启用 Spine 预览</strong><p>仍可使用静态头像、贴图和已验证表情 ID；需要动画证据时再配置。</p>";
+    if (capabilityText) {
+      capabilityText.textContent = capability.state === "available"
+        ? "当前机器可以调用 Spine CLI。渲染仅写入临时 Production 数据目录，识别结果仍需人工确认。"
+        : "当前机器没有可用的 Spine CLI。配置后可在角色导入步骤启用临时表情预览。";
+    }
+    const input = $("#spineCliPath");
+    if (input && info.path && document.activeElement !== input) input.value = info.path;
+  }
+
+  async function loadSpineCliSettings() {
+    try {
+      const result = await api("/settings/spine-cli");
+      renderSpineCliSettings(result);
+    } catch (error) {
+      const status = $("#spineCliStatus");
+      if (status) status.innerHTML = `<strong>读取设置失败</strong><p>${esc(error.message || "请稍后重试")}</p>`;
+      handleError(error);
+    }
+  }
+
+  async function saveSpineCli(event) {
+    event?.preventDefault();
+    const input = $("#spineCliPath");
+    const save = $("#saveSpineCli");
+    const status = $("#spineCliStatus");
+    const path = input?.value.trim() || "";
+    if (!path) {
+      if (status) status.innerHTML = "<strong>请先填写路径</strong><p>选择 Spine.com、Spine.exe 或对应启动脚本后再保存。</p>";
+      input?.focus();
+      return;
+    }
+    if (save) save.disabled = true;
+    if (status) status.innerHTML = "<strong>正在检查</strong><p>验证程序路径，不会启动 Spine 或修改素材。</p>";
+    try {
+      const result = await api("/settings/spine-cli", { method: "POST", body: JSON.stringify({ path }) });
+      renderSpineCliSettings(result);
+      await refreshCapabilities();
+      toast("Spine 表情预览设置已保存。", "normal");
+    } catch (error) {
+      if (status) status.innerHTML = `<strong>保存失败</strong><p>${esc(error.message || "请检查路径后重试")}</p>`;
+      handleError(error);
+    } finally {
+      if (save) save.disabled = false;
+    }
+  }
+
+  async function clearSpineCli() {
+    const clear = $("#clearSpineCli");
+    const status = $("#spineCliStatus");
+    if (clear) clear.disabled = true;
+    if (status) status.innerHTML = "<strong>正在清除</strong><p>之后仍可使用静态识别，不会删除任何素材。</p>";
+    try {
+      const result = await api("/settings/spine-cli", { method: "POST", body: JSON.stringify({ clear: true }) });
+      const input = $("#spineCliPath");
+      if (input) input.value = "";
+      renderSpineCliSettings(result);
+      await refreshCapabilities();
+      toast("已关闭 Spine 表情预览。", "normal");
+    } catch (error) {
+      if (status) status.innerHTML = `<strong>清除失败</strong><p>${esc(error.message || "请稍后重试")}</p>`;
+      handleError(error);
+    } finally {
+      if (clear) clear.disabled = false;
+    }
+  }
+
   function showSettingsPane(name) {
     $$('[data-settings-pane]').forEach((button) => button.classList.toggle("active", button.dataset.settingsPane === name));
     $("#settingsWorkspacePane").classList.toggle("hidden", name !== "workspace");
     $("#modelForm").classList.toggle("hidden", name !== "model");
+    $("#spineForm").classList.toggle("hidden", name !== "spine");
   }
 
   async function openSettingsDialog(pane = "workspace") {
@@ -1762,6 +2085,7 @@
     const dialog = $("#settingsDialog");
     if (!dialog.open) dialog.showModal();
     if (pane === "model") await loadModelSettings();
+    else if (pane === "spine") await loadSpineCliSettings();
     else await inspectAaEnvironment(false, true);
   }
 
@@ -1822,7 +2146,8 @@
           actions.push(`<button type="button" class="task-open-run" data-task-run-id="${esc(job.run_id)}" data-task-stage="${esc(job.next_action.stage)}">打开关联任务</button>`);
         }
         const action = actions.length ? `<div class="task-row-actions">${actions.join("")}</div>` : "";
-        return `<article class="task-row task-${esc(job.state)}"><div><div class="task-row-top"><strong>${esc(job.label || job.kind)}</strong><b>${esc(labels[job.state] || job.state)}</b></div><small>${esc(job.job_id)}${job.run_id ? ` · ${esc(job.run_id)}` : ""}</small><p>${esc(detail)}</p></div>${action}</article>`;
+        const association = job.run_id ? "关联当前制作任务" : "后台任务";
+        return `<article class="task-row task-${esc(job.state)}"><div><div class="task-row-top"><strong>${esc(job.label || job.kind)}</strong><b>${esc(labels[job.state] || job.state)}</b></div><small>${association}</small><p>${esc(detail)}</p></div>${action}</article>`;
       }).join("") : '<p class="empty">暂无后台任务。</p>';
       $$("[data-task-run-id]").forEach((button) => button.addEventListener("click", () => openRunFromTask(button.dataset.taskRunId, button.dataset.taskStage)));
       $$('[data-cancel-job]').forEach((button) => button.addEventListener("click", async () => {
@@ -1861,7 +2186,21 @@
     const filter = event.target.closest("[data-filter]"); if (filter) { state.filter = filter.dataset.filter; $$("[data-filter]").forEach((item) => item.classList.toggle("active", item === filter)); renderReview(); }
     const close = event.target.closest("[data-close-dialog]"); if (close) { event.preventDefault(); event.stopPropagation(); const dialog = $(`#${close.dataset.closeDialog}`); if (dialog?.open) dialog.close(); return; }
   });
+  $("#actionConfirmDialog").addEventListener("close", (event) => {
+    const resolver = pendingConfirmation;
+    pendingConfirmation = null;
+    if (resolver) resolver(event.currentTarget.returnValue === "default");
+    const opener = confirmationOpener;
+    confirmationOpener = null;
+    requestAnimationFrame(() => opener?.isConnected && opener.focus());
+  });
   document.addEventListener("keydown", (event) => {
+    const confirmation = $("#actionConfirmDialog");
+    if (confirmation?.open && event.key === "Escape") {
+      event.preventDefault();
+      confirmation.close("cancel");
+      return;
+    }
     const stage = event.target.closest(".stage-list [data-stage]");
     if (!stage || !["Enter", " "].includes(event.key)) return;
     event.preventDefault();
@@ -1893,8 +2232,17 @@
   $("#openAssetLibrary").addEventListener("click", openAssetLibrary);
   $("#openAssetImport").addEventListener("click", openAssetImport);
   $$('input[name="assetImportKind"]').forEach((input) => input.addEventListener("change", updateAssetImportForm));
+  $("#assetImportFile").addEventListener("change", updateAssetImportFileName);
   $("#validateAssetImport").addEventListener("click", validateAssetImport);
+  $("#recognizeAssetImport").addEventListener("click", recognizeAssetImport);
   $("#registerAssetImport").addEventListener("click", registerAssetImport);
+  document.addEventListener("click", (event) => {
+    const accept = event.target.closest("#acceptAssetRecognition");
+    if (!accept || !state.assetImport?.recognition) return;
+    event.preventDefault();
+    state.assetImport.recognitionAccepted = state.assetImport.recognitionAccepted !== true;
+    renderAssetRecognition(state.assetImport.recognition);
+  });
   $("#assetLibrarySearch").addEventListener("input", () => loadAssetLibrary({ reset: true }));
   $("#assetLibraryMore").addEventListener("click", () => loadAssetLibrary());
   $$("[data-asset-kind]").forEach((button) => button.addEventListener("click", () => {
@@ -1914,12 +2262,15 @@
   $$('[data-settings-pane]').forEach((button) => button.addEventListener("click", async () => {
     showSettingsPane(button.dataset.settingsPane);
     if (button.dataset.settingsPane === "model") await loadModelSettings();
+    else if (button.dataset.settingsPane === "spine") await loadSpineCliSettings();
     else await inspectAaEnvironment(false, true);
   }));
   $("#inspectAaEnvironment").addEventListener("click", () => inspectAaEnvironment(false));
   $("#adoptAaEnvironment").addEventListener("click", () => inspectAaEnvironment(true));
   $("#modelForm").addEventListener("submit", saveModel);
   $("#testModel").addEventListener("click", testModel);
+  $("#spineForm").addEventListener("submit", saveSpineCli);
+  $("#clearSpineCli").addEventListener("click", clearSpineCli);
   $("#openTasks").addEventListener("click", async () => { await renderTasks(); $("#tasksDialog").showModal(); });
   $("#refreshTasks").addEventListener("click", renderTasks);
 

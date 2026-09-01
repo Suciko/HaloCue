@@ -158,6 +158,21 @@ def main() -> None:
                         assert metrics["runSummaries"] == 1
                         assert metrics["openRunSummaries"] == 0
 
+                        # Pending decisions own the interaction layer. The
+                        # Composer is inert until the user chooses to defer or
+                        # resolve the card; dismiss it before inspecting the
+                        # lower-priority run audit trail.
+                        decision = page.locator(".work-decision-dock")
+                        decision.wait_for(timeout=20_000)
+                        assert page.locator(".work-agent-composer").evaluate(
+                            "element => element.inert"
+                        )
+                        decision.locator("[data-decision-dismiss]").click()
+                        decision.wait_for(state="detached", timeout=20_000)
+                        assert not page.locator(".work-agent-composer").evaluate(
+                            "element => element.inert"
+                        )
+
                         page.locator("details.agent-presentation-summary > summary").click()
                         run_summary_text = page.locator(
                             ".agent-presentation-body"
@@ -218,6 +233,32 @@ def main() -> None:
                             if item["id"] == thread_id
                         )
                         assert len(restored_thread["messages"]) >= 8
+
+                        # Task history is an operational surface, not a raw
+                        # execution log. It must keep the recovery action
+                        # understandable without exposing internal IDs or
+                        # provider implementation details.
+                        if width <= 640:
+                            page.locator(".mobile-more-menu > summary").click()
+                            page.locator('.mobile-more-menu [data-mobile="tasks"]').click()
+                        else:
+                            page.locator('[data-section="tasks"]').click()
+                        page.locator("#workspace h2").filter(has_text="后台任务").wait_for(
+                            timeout=20_000
+                        )
+                        details = page.locator(".task-details")
+                        if details.count():
+                            details.first.locator("summary").click()
+                        task_text = page.locator("#workspace").inner_text()
+                        assert "Attempt" not in task_text
+                        assert "provider" not in task_text
+                        assert not any(
+                            marker in task_text
+                            for marker in ("scene-", "agent-", "run-", "provider_output_invalid")
+                        )
+                        if details.count():
+                            assert "任务位置" in task_text
+                        assert "返回写作" in task_text
                         assert not console_issues
                         results.append(
                             {

@@ -156,6 +156,7 @@ def test_integrated_runtime_serves_both_workbenches_and_apis(tmp_path):
     assert "window.HaloCueProductionEmbed.close();" not in integration_shell_js
     assert "close({ section: destination })" not in integration_shell_js
     assert 'if (section === "production" && !initialProductionNavigationCancelled)' in integration_shell_js
+    assert 'replaceHistory: true' in integration_shell_js
     assert 'section && !["works", "writing", "references", "tasks"].includes(section)' in integration_shell_js
     assert "The writing workbench owns its deep-link route" in integration_shell_js
     assert 'params.get("stage") === "release"' not in integration_shell_js

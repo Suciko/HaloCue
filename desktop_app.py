@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 
 from webui import LocalWebServer, free_port, initialize_runtime
+from halocue_meta import DISPLAY_NAME
 
 
 class DesktopAppError(RuntimeError):
@@ -55,7 +56,7 @@ def run_desktop(
                     "缺少桌面窗口组件，HaloCue 发布包可能不完整。"
                 ) from exc
         webview_module.create_window(
-            "HaloCue 0.9.3",
+            DISPLAY_NAME,
             url,
             width=1360,
             height=860,

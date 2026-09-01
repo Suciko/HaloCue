@@ -9,6 +9,7 @@ from PIL import Image
 
 from halocue_production.errors import ProductionError
 from halocue_production.service import ProductionService
+from halocue_production import spine_rendering
 
 
 class FakeVisionProvider:
@@ -17,10 +18,12 @@ class FakeVisionProvider:
 
     def __init__(self) -> None:
         self.calls = 0
+        self.last_user = ""
         self.stats = {"calls": 0, "in": 0, "out": 0}
 
     def complete_json_vision(self, system, images, user, schema):
         self.calls += 1
+        self.last_user = user
         self.stats["calls"] = self.calls
         return {
             "title": "雨夜走廊",
@@ -34,6 +37,15 @@ class FakeVisionProvider:
                 {"face_id": "not-validated", "label": "未知"},
             ],
         }
+
+
+class IncompleteVisionProvider(FakeVisionProvider):
+    def complete_json_vision(self, system, images, user, schema):
+        self.calls += 1
+        if self.calls == 1:
+            raise ProductionError("structured_output_invalid", "title missing")
+        self.last_user = user
+        return {"summary": "模型补全后的摘要", "expression_suggestions": "不可信字段"}
 
 
 def image_bytes(color: str = "#214f66") -> bytes:
@@ -88,7 +100,13 @@ def test_image_recognition_is_a_proposal_until_explicit_registration(settings, m
     assert validation["validation"]["ok"] is True
     assert proposal["recognition"]["state"] == "proposal"
     assert proposal["recognition"]["evidence"] == {
-        "scope": "uploaded_image", "image_count": 1, "spine_animation_rendered": False
+        "scope": "uploaded_image",
+        "image_count": 1,
+        "validated_face_ids": [],
+        "semantic_face_count": 0,
+        "expression_source": "uploaded_image",
+        "rendered_animation_count": 0,
+        "spine_animation_rendered": False,
     }
     assert service.list_custom_assets()["items"] == []
 
@@ -109,6 +127,28 @@ def test_image_recognition_is_a_proposal_until_explicit_registration(settings, m
     service.jobs.close()
 
 
+def test_incomplete_vision_json_gets_one_repair_attempt(settings, monkeypatch):
+    service = ProductionService(settings)
+    provider = IncompleteVisionProvider()
+    monkeypatch.setattr(service.direction_models, "provider", lambda: provider)
+    monkeypatch.setattr(
+        service.direction_model_settings,
+        "public",
+        lambda: {"model": {"configured": True, "provider": provider.name, "model": provider.model}},
+    )
+    upload = service.upload_asset(filename="repair.png", content=image_bytes())
+
+    recognition = service.recognize_custom_asset({
+        "kind": "background", "upload_token": upload["upload_token"]
+    })["recognition"]
+
+    assert provider.calls == 2
+    assert recognition["candidate"]["title"] == "repair"
+    assert recognition["candidate"]["summary"] == "模型补全后的摘要"
+    assert recognition["evidence"]["response_repaired"] is True
+    service.jobs.close()
+
+
 def test_spine_recognition_only_uses_validated_faces_and_never_claims_render(settings, monkeypatch):
     service = ProductionService(settings)
     provider = FakeVisionProvider()
@@ -125,7 +165,167 @@ def test_spine_recognition_only_uses_validated_faces_and_never_claims_render(set
 
     assert proposal["candidate"]["expression_suggestions"] == [{"face_id": "03", "label": "微笑"}]
     assert proposal["evidence"]["scope"] == "avatar_and_texture_preview"
+    assert proposal["evidence"]["validated_face_ids"] == ["03"]
+    assert proposal["evidence"]["expression_source"] == "atlas_allowlist_and_static_preview"
+    assert proposal["evidence"]["rendered_animation_count"] == 0
     assert proposal["evidence"]["spine_animation_rendered"] is False
+    assert "semantic_face_hints" in provider.last_user
+    service.jobs.close()
+
+
+def test_spine_preview_opt_in_fails_closed_without_cli(settings, monkeypatch):
+    service = ProductionService(settings)
+    provider = FakeVisionProvider()
+    monkeypatch.setattr(service.direction_models, "provider", lambda: provider)
+    monkeypatch.setattr(
+        service.direction_model_settings,
+        "public",
+        lambda: {"model": {"configured": True, "provider": provider.name, "model": provider.model}},
+    )
+    monkeypatch.setattr(spine_rendering, "resolve_cli", lambda **_: None)
+    upload = service.upload_asset(filename="student.zip", content=spine_zip_bytes())
+
+    with pytest.raises(ProductionError) as missing:
+        service.recognize_custom_asset({
+            "kind": "character",
+            "upload_token": upload["upload_token"],
+            "identifier": "1516544",
+            "render_spine_preview": True,
+        })
+
+    assert missing.value.code == "asset_spine_render_not_configured"
+    assert provider.calls == 0
+    service.jobs.close()
+
+
+def test_spine_preview_evidence_is_sent_to_vision_and_never_becomes_a_direct_write(
+    settings, monkeypatch, tmp_path
+):
+    service = ProductionService(settings)
+    provider = FakeVisionProvider()
+    monkeypatch.setattr(service.direction_models, "provider", lambda: provider)
+    monkeypatch.setattr(
+        service.direction_model_settings,
+        "public",
+        lambda: {"model": {"configured": True, "provider": provider.name, "model": provider.model}},
+    )
+    rendered = tmp_path / "face-03.png"
+    rendered.write_bytes(image_bytes("#bb8866"))
+    monkeypatch.setattr(
+        spine_rendering,
+        "render_preview",
+        lambda **_: {
+            "_sources": [rendered],
+            "rendered_face_ids": ["03"],
+            "rendered_animation_count": 1,
+            "spine_animation_rendered": True,
+            "expression_source": "rendered_spine_preview",
+            "calibration": [],
+        },
+    )
+    upload = service.upload_asset(filename="student.zip", content=spine_zip_bytes())
+    payload = {
+        "kind": "character",
+        "upload_token": upload["upload_token"],
+        "identifier": "1516544",
+        "render_spine_preview": True,
+    }
+
+    proposal = service.recognize_custom_asset(payload)
+
+    assert proposal["recognition"]["evidence"]["scope"] == "rendered_spine_face_preview"
+    assert proposal["recognition"]["evidence"]["rendered_animation_count"] == 1
+    assert proposal["recognition"]["evidence"]["rendered_face_ids"] == ["03"]
+    assert proposal["recognition"]["evidence"]["spine_animation_rendered"] is True
+    assert "rendered_face_ids=['03']" in provider.last_user
+    assert service.list_custom_assets()["items"] == []
+    service.jobs.close()
+
+
+def test_spine_recognition_passes_deterministic_semantic_hints_without_claiming_render(
+    settings, monkeypatch
+):
+    service = ProductionService(settings)
+    provider = FakeVisionProvider()
+    monkeypatch.setattr(service.direction_models, "provider", lambda: provider)
+    monkeypatch.setattr(
+        service.direction_model_settings,
+        "public",
+        lambda: {"model": {"configured": True, "provider": provider.name, "model": provider.model}},
+    )
+    upload = service.upload_asset(filename="semantic-student.zip", content=spine_zip_bytes())
+    monkeypatch.setattr(
+        service.adapter,
+        "validate_task_asset",
+        lambda **_: {
+            "ok": True,
+            "kind": "character",
+            "stem": "semantic-student",
+            "sha256": "a" * 64,
+            "metadata": {
+                "faces": ["03"],
+                "semantic_face_combinations": {
+                    "03": {
+                        "primary_emotion": "喜悦",
+                        "semantic_labels": ["微笑"],
+                        "parts": ["mouth_smile"],
+                    }
+                },
+            },
+            "issues": [],
+        },
+    )
+
+    result = service.recognize_custom_asset(
+        {"kind": "character", "upload_token": upload["upload_token"], "identifier": "semantic"}
+    )["recognition"]
+
+    assert result["evidence"]["semantic_face_count"] == 1
+    assert result["evidence"]["expression_source"] == "skeleton_metadata_and_static_preview"
+    assert result["evidence"]["rendered_animation_count"] == 0
+    assert '"03"' in provider.last_user and "微笑" in provider.last_user
+    assert result["evidence"]["spine_animation_rendered"] is False
+    service.jobs.close()
+
+
+def test_task_character_import_can_accept_expression_proposal_without_global_registration(settings, monkeypatch):
+    service = ProductionService(settings)
+    provider = FakeVisionProvider()
+    monkeypatch.setattr(service.direction_models, "provider", lambda: provider)
+    monkeypatch.setattr(
+        service.direction_model_settings,
+        "public",
+        lambda: {"model": {"configured": True, "provider": provider.name, "model": provider.model}},
+    )
+    run = service.create_run({"project": "任务骨骼识别", "source": {"kind": "inline", "text": "爱丽丝: 测试\n"}})
+    upload = service.upload_asset(filename="student.zip", content=spine_zip_bytes())
+    payload = {
+        "kind": "character",
+        "upload_token": upload["upload_token"],
+        "identifier": "1516544",
+    }
+
+    proposal = service.recognize_task_asset(run["run"]["run_id"], payload)
+    assert proposal["recognition"]["candidate"]["expression_suggestions"] == [
+        {"face_id": "03", "label": "微笑"}
+    ]
+    assert service.task_assets(run["run"]["run_id"])["items"] == []
+
+    registered = service.register_task_asset(
+        run["run"]["run_id"],
+        {
+            **payload,
+            "display_name": "自定义爱丽丝",
+            "accept_recognition": True,
+            "recognition_digest": proposal["recognition"]["digest"],
+            "expected_draft_version": run["draft"]["draft_version"],
+        },
+    )
+    assert registered["asset"]["recognition_accepted"] is True
+    assert registered["asset"]["recognition"]["candidate"]["expression_suggestions"] == [
+        {"face_id": "03", "label": "微笑"}
+    ]
+    assert service.task_assets(run["run"]["run_id"])["items"][0]["recognition_accepted"] is True
     service.jobs.close()
 
 

@@ -1347,12 +1347,18 @@ def test_character_card_history_and_archive_are_versioned_and_restart_safe(tmp_p
         "character-original",
         {"expected_version": revised["work"]["version"]},
     )
+    restored = service.restore_character_card(
+        work_id,
+        "character-original",
+        {"expected_version": archived["work"]["version"]},
+    )
     loaded = WritingService(tmp_path).get_work(work_id)
     card = next(item for item in loaded["artifacts"] if item["kind"] == "character_card")
     assert card["scope_id"] == "character-original"
-    assert [revision["ordinal"] for revision in card["revisions"]] == [3, 2, 1]
-    assert card["current_revision"]["content"]["status"] == "archived"
-    assert archived["revision_id"] == card["current_revision_id"]
+    assert [revision["ordinal"] for revision in card["revisions"]] == [4, 3, 2, 1]
+    assert card["current_revision"]["content"]["status"] == "active"
+    assert card["current_revision"]["parent_revision_id"] == archived["revision_id"]
+    assert restored["revision_id"] == card["current_revision_id"]
 
 
 def test_world_cards_keep_stable_identity_history_and_archive_out_of_context(tmp_path):
@@ -2541,6 +2547,58 @@ def test_work_canon_identity_history_and_context_trust_survive_restart(tmp_path)
     assert context["work_canon"]["facts"] == []
 
 
+def test_work_canon_archived_fact_can_be_restored_as_a_new_revision(tmp_path):
+    service = WritingService(tmp_path)
+    work_id, scene_id, _, work = build_to_proposal(service)
+    created = service.save_work_canon(
+        work_id,
+        {
+            "expected_version": work["version"],
+            "facts": [{
+                "id": "fact-restorable",
+                "text": "广播室的异常频段需要先做技术复核。",
+                "source": "用户确认",
+                "confidence_status": "confirmed",
+                "scope": "work",
+            }],
+        },
+    )
+    archived = service.save_work_canon(
+        work_id,
+        {
+            "expected_version": created["work"]["version"],
+            "facts": [{
+                "id": "fact-restorable",
+                "text": "广播室的异常频段需要先做技术复核。",
+                "source": "用户确认",
+                "confidence_status": "confirmed",
+                "scope": "work",
+                "status": "archived",
+            }],
+        },
+    )
+    restored = service.save_work_canon(
+        work_id,
+        {
+            "expected_version": archived["work"]["version"],
+            "facts": [{
+                "id": "fact-restorable",
+                "text": "广播室的异常频段需要先做技术复核。",
+                "source": "用户确认",
+                "confidence_status": "confirmed",
+                "scope": "work",
+                "status": "active",
+            }],
+        },
+    )
+
+    artifact = next(item for item in restored["work"]["artifacts"] if item["kind"] == "work_canon")
+    context = service.assemble_context(work_id, scene_id)
+    assert [revision["ordinal"] for revision in artifact["revisions"]] == [3, 2, 1]
+    assert artifact["current_revision"]["content"]["facts"][0]["status"] == "active"
+    assert context["work_canon"]["facts"][0]["id"] == "fact-restorable"
+
+
 def test_unconfirmed_world_card_stays_in_library_but_out_of_scene_context(tmp_path):
     service = WritingService(tmp_path)
     work_id, scene_id, _, work = build_to_proposal(service)
@@ -2862,6 +2920,25 @@ def test_invalid_provider_script_is_rejected_without_silent_line_dropping(tmp_pa
     }
     with service.repo.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM proposals WHERE scope_id=?", (scene["scene_id"],)).fetchone()[0] == 0
+
+
+def test_official_script_normalizes_an_unambiguous_character_short_name():
+    context = {
+        "runtime_character_cards": [{
+            "name": "天童爱丽丝",
+            "canonical_name": "天童爱丽丝",
+            "aliases": [],
+        }],
+        "scene_contract": {},
+        "brief": {},
+    }
+
+    normalized = WritingService._normalize_official_script(
+        "旁白: 广播又响了一次。\n爱丽丝: 我来确认信号来源。\n",
+        context,
+    )
+
+    assert normalized == "旁白: 广播又响了一次。\n天童爱丽丝: 我来确认信号来源。\n"
 
 
 def test_scene_review_agent_persists_provider_findings_and_fingerprints(tmp_path):

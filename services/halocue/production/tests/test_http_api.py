@@ -233,7 +233,7 @@ def test_http_task_asset_upload_validate_register_and_preview(settings, tmp_path
 
         status, _, listed = request(base, f"/api/v1/production-runs/{run_id}/resources/backgrounds?q=scene")
         assert status == 200
-        assert listed["items"] == [{"key": "scene", "name": "scene", "source": "task_import", "asset_id": registered["asset"]["asset_id"]}]
+        assert listed["items"] == [{"key": "scene", "name": "scene", "source": "task_import", "asset_id": registered["asset"]["asset_id"], "preview_available": True}]
         status, _, removed = request(
             base,
             f"/api/v1/production-runs/{run_id}/assets/{registered['asset']['asset_id']}",
@@ -548,6 +548,49 @@ def test_http_direction_model_settings_are_redacted(settings, monkeypatch):
         assert status == 200
         assert loaded == saved
         assert "api_key" not in loaded["model"]
+
+
+def test_http_spine_cli_settings_are_validated_persisted_and_clearable(settings, tmp_path, monkeypatch):
+    monkeypatch.delenv("HALOCUE_SPINE_CLI", raising=False)
+    monkeypatch.delenv("SPINE_CLI", raising=False)
+    spine = tmp_path / "Spine.com"
+    spine.write_bytes(b"placeholder")
+    with api(settings) as base:
+        status, _, initial = request(base, "/api/v1/settings/spine-cli")
+        assert status == 200
+        assert initial["spine_cli"]["configured"] is False
+        assert initial["spine_cli"]["valid"] is False
+
+        status, _, missing = request(
+            base, "/api/v1/settings/spine-cli", {}, "POST"
+        )
+        assert status == 400
+        assert missing["error"]["code"] == "spine_cli_required"
+
+        status, _, rejected = request(
+            base,
+            "/api/v1/settings/spine-cli",
+            {"path": str(tmp_path / "missing" / "Spine.com")},
+            "POST",
+        )
+        assert status == 400
+        assert rejected["error"]["code"] == "spine_cli_not_found"
+
+        status, _, saved = request(
+            base, "/api/v1/settings/spine-cli", {"path": str(spine)}, "POST"
+        )
+        assert status == 200
+        assert saved["spine_cli"]["configured"] is True
+        assert saved["spine_cli"]["valid"] is True
+        assert saved["spine_cli"]["source"] == "settings"
+        assert saved["spine_cli"]["path"] == str(spine.resolve())
+
+        status, _, cleared = request(
+            base, "/api/v1/settings/spine-cli", {"clear": True}, "POST"
+        )
+        assert status == 200
+        assert cleared["spine_cli"]["configured"] is False
+        assert cleared["spine_cli"]["path"] is None
 
 
 def test_http_direction_generation_rejects_invalid_layout_mode(settings, monkeypatch):

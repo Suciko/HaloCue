@@ -65,6 +65,18 @@ class ResourceCatalog:
             )
         return value
 
+    def _preview_available(
+        self, kind: str, key: str, *, avatar_key: str = "", spine: str = ""
+    ) -> bool:
+        """Expose a safe capability flag so clients never probe missing images."""
+        if kind == "characters":
+            return self.previews.avatar(avatar_key=avatar_key, spine=spine) is not None
+        if kind == "backgrounds":
+            return self.previews.background(key) is not None
+        if kind == "cg":
+            return self.previews.cg(key) is not None
+        return False
+
     @staticmethod
     def _page(items: list[dict[str, Any]], offset: int, limit: int) -> dict[str, Any]:
         total = len(items)
@@ -90,7 +102,12 @@ class ResourceCatalog:
 
         if kind == "cg":
             items = [
-                {"key": key, "name": key, "source": "aa_popup_override"}
+                {
+                    "key": key,
+                    "name": key,
+                    "source": "aa_popup_override",
+                    "preview_available": self._preview_available("cg", key),
+                }
                 for key in self.cg_keys()
                 if not needle or needle in key.casefold()
             ]
@@ -102,6 +119,7 @@ class ResourceCatalog:
                     "name": str(key),
                     "aa_hash": value,
                     "source": "resource_index",
+                    "preview_available": self._preview_available("backgrounds", str(key)),
                 }
                 for key, value in raw.items()
                 if not needle or needle in str(key).casefold()
@@ -109,7 +127,12 @@ class ResourceCatalog:
         elif kind == "sounds":
             raw = payload.get("sounds") if isinstance(payload.get("sounds"), list) else []
             items = [
-                {"key": str(value), "name": str(value), "source": "resource_index"}
+                {
+                    "key": str(value),
+                    "name": str(value),
+                    "source": "resource_index",
+                    "preview_available": False,
+                }
                 for value in raw
                 if isinstance(value, (str, int))
                 and (not needle or needle in str(value).casefold())
@@ -147,6 +170,12 @@ class ResourceCatalog:
                         "name_source": presentation["name_source"],
                         "aliases": aliases,
                         "source": "resource_index",
+                        "preview_available": self._preview_available(
+                            "characters",
+                            identifier,
+                            avatar_key=str(value.get("avatar") or ""),
+                            spine=str(value.get("spine") or ""),
+                        ),
                     }
                 )
 

@@ -9,6 +9,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from halocue_writing.workflow_pack import (  # noqa: E402
+    ENGINE_RULE_SOURCE,
     MODE_SOURCES,
     WORKFLOW_RULE_SOURCES,
 )
@@ -25,6 +26,7 @@ _SYNTHETIC_SKILL_PATHS = [
 ]
 _SYNTHETIC_SKILL_PATHS.extend(MODE_SOURCES.values())
 _SYNTHETIC_SKILL_PATHS.append("knowledge/老师在场规则.md")
+_SYNTHETIC_SKILL_PATHS.append(ENGINE_RULE_SOURCE)
 
 for logical_path in dict.fromkeys(_SYNTHETIC_SKILL_PATHS):
     target = _SYNTHETIC_SKILL_ROOT / logical_path

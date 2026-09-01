@@ -1,6 +1,6 @@
 # HaloCue｜AA 剧本自动演出工具
 
-**HaloCue 0.9.3** 是一款面向
+**HaloCue 1.0.0** 是一款面向
 [AzureArchive](https://github.com/foxxlight/AzureArchive) 的 AA 剧本自动演出工具。它读取用户已经写好的中文剧本，安排表情、动作、站位、镜头、背景与声音，经过人工审查后编译为 AA 工程，同时帮助管理演员和素材。
 
 现版本的 AI 用于提出演出标注，不负责创作或改写剧本正文；用户始终可以在编译前逐项审查和修改结果。
@@ -10,15 +10,18 @@ Esoteric Software 均无隶属关系。HaloCue 不提供游戏资源，也不授
 
 ## 下载与开始
 
-普通 Windows 用户下载 `HaloCue-0.9.3-windows-x64.zip`：
+普通 Windows 用户下载 `HaloCue-1.0.0-windows-x64.zip`：
+
+如确有逐文件书面授权，私发覆盖包固定命名为
+`HaloCue-1.0.0-private-windows-x64.zip`，不上传 GitHub。
 
 1. 完整解压 ZIP，不要直接在压缩包里运行。
-2. 双击 `HaloCue.exe`。
-3. 双击 `HaloCue.exe`，程序会直接打开独立应用窗口，不会启动系统浏览器。
-4. 首次使用时，在应用内选择你自己的 `AzureArchive.exe`；HaloCue 会读取 AA 设置并自动识别项目和存档位置。
-5. 按“导入剧本 → 确认演员 → 审查 → 编译”完成一章。
+2. 双击 `HaloCue.exe`，程序会直接打开独立应用窗口，不会启动系统浏览器。
+3. 首次使用时，在应用内选择你自己的 `AzureArchive.exe`；HaloCue 会读取 AA 设置并自动识别项目和存档位置。
+4. 按“导入剧本 → 确认演员 → 审查 → 编译”完成一章。
 
-**Windows ZIP 不需要安装 Python。** 更完整的非技术说明见
+**Windows ZIP 不需要安装 Python。** 完整用户手册见
+[docs/用户手册-1.0.md](docs/用户手册-1.0.md)；旧版兼容说明见
 [使用说明-从这里开始.md](使用说明-从这里开始.md)。
 
 ## 发布版本边界

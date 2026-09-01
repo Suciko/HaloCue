@@ -35,6 +35,25 @@ class InvalidBlueprintProvider(FakeWritingProvider):
         return {"title": "只有标题"}
 
 
+class NarratorOnlyBlueprintProvider(FakeWritingProvider):
+    def generate_blueprint(self, brief: dict, analysis_context: dict | None = None) -> dict:
+        return {
+            "title": "雨停后的空教室",
+            "premise": "用两句旁白完成一个安静的收束场景。",
+            "theme": "完成记录后离开。",
+            "central_conflict": "有限篇幅内交代环境变化和行动结果。",
+            "direction": ["先写雨停后的光线", "再写记录完成和离开"],
+            "characters": [],
+            "narrator_only": True,
+            "mode": "text_reading",
+            "recommendations": {
+                "secondary_scene_modes": [],
+                "character_card_ids": [],
+                "sensei_presence": "absent",
+            },
+        }
+
+
 class InvalidStructureProvider(FakeWritingProvider):
     def generate_structure_plan(self, messages: list[dict], structure_context: dict) -> dict:
         return {
@@ -109,6 +128,85 @@ def accepted_blueprint_from_conversation(service: WritingService, title: str = "
         work["id"], proposed["proposal_id"], {"expected_version": proposed["work"]["version"]}
     )
     return accepted["work"]
+
+
+def test_work_conversation_without_scope_stays_on_work_surface_after_scenes_exist(tmp_path):
+    service = WritingService(tmp_path)
+    accepted = accepted_blueprint_from_conversation(service, "主对话默认范围")
+    chapter_id = accepted["volumes"][0]["chapters"][0]["id"]
+    created = service.create_scene(
+        accepted["id"],
+        chapter_id,
+        {
+            "expected_version": accepted["version"],
+            "title": "旧广播室",
+            "goal": "确认录音来源",
+        },
+    )
+    thread = created["work"]["conversation_threads"][0]
+
+    discussed = service.post_conversation_message(
+        accepted["id"],
+        thread["id"],
+        {
+            "expected_thread_version": thread["version"],
+            "text": "先为优香建立一张人物卡。",
+        },
+    )
+
+    assistant = discussed["work"]["conversation_threads"][0]["messages"][-1]
+    contract = assistant["content"]["task_contract"]
+    assert contract["id"] == "blueprint.generate"
+    assert contract["task_scope"]["surface"] == "work"
+    assert not any(item["kind"] == "scene_script" for item in discussed["work"]["proposals"])
+
+
+def test_failed_work_conversation_retries_as_conversation_after_scenes_exist(tmp_path):
+    service = WritingService(tmp_path)
+    accepted = accepted_blueprint_from_conversation(service, "主对话重试范围")
+    chapter_id = accepted["volumes"][0]["chapters"][0]["id"]
+    created = service.create_scene(
+        accepted["id"],
+        chapter_id,
+        {
+            "expected_version": accepted["version"],
+            "title": "旧广播室",
+            "goal": "确认录音来源",
+        },
+    )
+    thread = created["work"]["conversation_threads"][0]
+
+    def fail_discussion(_messages, _context):
+        raise DomainError("writing_provider_failed", "网络失败。", status=502)
+
+    service.provider.discuss_work = fail_discussion
+    with pytest.raises(DomainError) as failed:
+        service.post_conversation_message(
+            accepted["id"],
+            thread["id"],
+            {
+                "expected_thread_version": thread["version"],
+                "text": "请建立优香的人物卡。",
+            },
+        )
+    run_id = failed.value.details["agent_run_id"]
+    failed_work = service.get_work(accepted["id"])
+    failed_run = next(item for item in failed_work["agent_runs"] if item["id"] == run_id)
+    failed_thread = failed_work["conversation_threads"][0]
+    assert failed_run["scope_type"] == "work"
+    assert failed_run["policy"]["task_id"] == "blueprint.generate"
+
+    service.provider = FakeWritingProvider()
+    retried = service.retry_agent_run(
+        accepted["id"],
+        run_id,
+        {"expected_thread_version": failed_thread["version"]},
+    )
+
+    retried_run = next(item for item in retried["work"]["agent_runs"] if item["id"] == retried["agent_run_id"])
+    assert retried["retried_from_agent_run_id"] == run_id
+    assert retried_run["scope_type"] == "work"
+    assert retried_run["policy"]["retry_of"] == run_id
 
 
 def test_long_conversation_summary_is_durable_traceable_and_injected(tmp_path):
@@ -771,6 +869,56 @@ def test_character_discussion_requires_proposal_before_creating_a_versioned_card
     assert restored_proposal["candidate"]["content"]["name"] == "白露"
 
 
+def test_legacy_list_evidence_does_not_block_a_new_knowledge_proposal(tmp_path):
+    service = WritingService(tmp_path)
+    work = service.create_work({"title": "资料候选兼容", "idea": "先讨论世界观，再建立人物资料。"})
+    thread = work["conversation_threads"][0]
+
+    discussed_world = service.post_conversation_message(
+        work["id"], thread["id"],
+        {"expected_thread_version": thread["version"], "text": "请创建《静默校舍》的地点设定：午夜后旧广播才会工作。"},
+    )
+    world_thread = discussed_world["work"]["conversation_threads"][0]
+    legacy = service.propose_conversation_knowledge(
+        work["id"], thread["id"],
+        {
+            "expected_version": discussed_world["work"]["version"],
+            "expected_thread_version": world_thread["version"],
+            "kind": "world_card",
+        },
+    )
+
+    # 1.0 predecessors persisted this shape. It is valid historical data but
+    # lacks the source-preview key introduced by the current schema.
+    with service.repo.transaction() as connection:
+        connection.execute(
+            "UPDATE proposals SET evidence_json='[]' WHERE id=?",
+            (legacy["proposal_id"],),
+        )
+
+    legacy_thread = legacy["work"]["conversation_threads"][0]
+    discussed_character = service.post_conversation_message(
+        work["id"], thread["id"],
+        {
+            "expected_thread_version": legacy_thread["version"],
+            "text": "创建一个叫《白露》的自定义角色卡，她负责辨认旧机器留下的声音。",
+        },
+    )
+    character_thread = discussed_character["work"]["conversation_threads"][0]
+    proposed = service.propose_conversation_knowledge(
+        work["id"], thread["id"],
+        {
+            "expected_version": discussed_character["work"]["version"],
+            "expected_thread_version": character_thread["version"],
+            "kind": "character_card",
+        },
+    )
+
+    proposal = next(item for item in proposed["work"]["proposals"] if item["id"] == proposed["proposal_id"])
+    assert proposal["kind"] == "character_card"
+    assert proposal["candidate"]["content"]["name"] == "白露"
+
+
 def test_world_discussion_proposal_is_recoverable_and_updates_world_bible_only_after_acceptance(tmp_path):
     service = WritingService(tmp_path)
     work = service.create_work({"title": "世界观维护", "idea": "调查一座停用校舍。"})
@@ -1304,6 +1452,83 @@ def test_story_blueprint_accepts_writing_pack_display_mode_names():
     assert normalized["recommendations"]["secondary_scene_modes"] == ["text_reading"]
 
 
+def test_explicit_narrator_only_blueprint_can_be_confirmed_without_character_cards(tmp_path):
+    service = WritingService(tmp_path)
+    service.provider = NarratorOnlyBlueprintProvider()
+    work = service.create_work({"title": "纯旁白短场景"})
+    brief = service.save_brief(
+        work["id"],
+        {
+            "expected_version": work["version"],
+            "idea": "只用两句旁白写雨停后的空教室，不出现对白角色。",
+            "intent_only": True,
+        },
+    )
+
+    proposed = service.generate_blueprint(
+        work["id"], {"expected_version": brief["work"]["version"]}
+    )
+    confirmed = service.confirm_blueprint(
+        work["id"],
+        {
+            "expected_version": proposed["work"]["version"],
+            "mode": "text_reading",
+            "character_card_ids": [],
+            "sensei_presence": "absent",
+        },
+    )
+
+    current_brief = next(
+        item for item in confirmed["work"]["artifacts"] if item["kind"] == "brief"
+    )["current_revision"]["content"]
+    current_blueprint = next(
+        item for item in confirmed["work"]["artifacts"] if item["kind"] == "story_blueprint"
+    )["current_revision"]["content"]
+    assert current_brief["characters"] == []
+    assert current_brief["character_card_ids"] == []
+    assert current_brief["has_sensei"] is False
+    assert current_blueprint["status"] == "accepted"
+    assert current_blueprint["narrator_only"] is True
+
+    chapter = service.create_chapter(
+        work["id"],
+        {"expected_version": confirmed["work"]["version"], "title": "尾声"},
+    )
+    scene = service.create_scene(
+        work["id"],
+        chapter["chapter_id"],
+        {
+            "expected_version": chapter["work"]["version"],
+            "title": "空教室",
+            "location": "教室",
+            "goal": "用旁白完成收束",
+        },
+    )
+    configured = service.configure_scene_context(
+        work["id"],
+        scene["scene_id"],
+        {
+            "expected_version": scene["work"]["version"],
+            "character_card_ids": [],
+            "world_item_ids": [],
+            "reference_file_ids": [],
+        },
+    )
+    configured_scene = next(
+        item
+        for volume in configured["work"]["volumes"]
+        for chapter_item in volume["chapters"]
+        for item in chapter_item["scenes"]
+        if item["id"] == scene["scene_id"]
+    )
+    assert configured_scene["contract"]["context_selection"] == {
+        "mode": "explicit",
+        "character_card_ids": [],
+        "world_item_ids": [],
+        "reference_file_ids": [],
+    }
+
+
 def test_chapter_plan_acceptance_rejects_stale_story_blueprint_dependency(tmp_path):
     service = WritingService(tmp_path)
     work = service.create_work({"title": "细纲上游冲突", "idea": "两位学生在夜间寻找录音。"})
@@ -1629,6 +1854,60 @@ def test_decision_card_rejects_invalid_option_count_and_duplicate_ids():
             },
         })
     assert duplicate.value.code == "provider_output_invalid"
+
+
+def test_import_task_contract_and_review_stay_in_agent_conversation(tmp_path):
+    service = WritingService(tmp_path)
+    work = service.create_work({"title": "导入转剧本任务", "idea": "把旧稿整理成可审查剧本。"})
+    thread = work["conversation_threads"][0]
+    attachment = service.create_conversation_attachment(
+        work["id"], thread["id"],
+        {
+            "expected_thread_version": thread["version"],
+            "filename": "旧稿.txt",
+            "media_type": "text/plain",
+            "content_base64": base64.b64encode("第一章\n场景一\n星野：我们走。".encode("utf-8")).decode("ascii"),
+        },
+    )
+    current_thread = attachment["work"]["conversation_threads"][0]
+    result = service.post_conversation_message(
+        work["id"], thread["id"],
+        {
+            "expected_thread_version": current_thread["version"],
+            "text": "检查这份旧稿并整理为剧本候选。",
+            "attachment_ids": [attachment["attachment_id"]],
+            "task_scope": {
+                "surface": "work",
+                "import_mode": "story_to_script",
+                "import_id": "story-import-test",
+                "import_preview": {
+                    "source_type": "story",
+                    "counts": {"chapters": 1, "scenes": 1},
+                    "scenes": [{"title": "场景一", "paragraph_count": 2}],
+                    "warnings": ["角色映射需要确认"],
+                },
+            },
+        },
+    )
+    assistant = result["work"]["conversation_threads"][0]["messages"][-1]
+    contract = assistant["content"]["task_contract"]
+    assert contract["task_scope"]["import_mode"] == "story_to_script"
+    assert contract["import_contract"]["required_sections"] == [
+        "chapters", "scenes", "character_mappings", "dialogue", "narration", "stage_directions"
+    ]
+    review = assistant["content"]["import_review"]
+    assert review["schema_version"] == "script-import-review/1.0"
+    assert review["unrecognized_nodes"] == ["角色映射需要确认"]
+    assert not result["work"]["proposals"]
+
+
+def test_import_review_rejects_unknown_mode():
+    with pytest.raises(DomainError) as failure:
+        WritingService._validate_discussion_reply({
+            "text": "导入审查",
+            "import_review": {"mode": "rewrite_everything"},
+        })
+    assert failure.value.code == "provider_output_invalid"
 
 
 @pytest.mark.parametrize("alias", ["choice", "choices", "options", "select", "selection"])

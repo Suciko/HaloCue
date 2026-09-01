@@ -343,7 +343,7 @@
                   <i aria-hidden="true"></i>
                 </button>
                 <div class="writing-scene-list">
-                  ${(chapter.scenes || []).map((scene, sceneIndex) => `<button type="button" class="writing-scene ${scene.id === state.sceneId && state.stage === 'draft' ? 'active' : ''}" data-scene="${esc(scene.id)}">
+                  ${(chapter.scenes || []).map((scene, sceneIndex) => `<button type="button" class="writing-scene ${scene.id === state.sceneId && state.stage === 'draft' ? 'active' : ''} ${readiness.blocked ? 'writing-gate-locked' : ''}" data-scene="${esc(scene.id)}" ${readiness.blocked ? `data-writing-gate="${esc(sceneReason)}" aria-label="进入本场未开放，点击查看原因"` : ''}>
                     <span>${String(sceneIndex + 1).padStart(2, '0')}</span>
                     <span><b>${esc(scene.title)}</b><small>${esc(scene.contract?.location || '地点待定')}</small></span>
                     <i class="${scene.current_revision_id ? 'done' : ''}" title="${scene.current_revision_id ? '已有正式正文' : '尚无正文'}"></i>
@@ -369,6 +369,7 @@
     const chapter = writingChapter();
     if (!workspace) return;
     const readiness = writingReadinessView();
+    const sceneReason = readiness.reason || '先完成当前作品决定，再继续规划场景。';
     if (!chapter) {
       if (readiness.blocked) {
         workspace.innerHTML = `<div class="chapter-structure-workspace">${writingBlockedEmptyMarkup(readiness, '完成决定后，这里会开放建立第一章。')}</div>`;
@@ -406,7 +407,7 @@
           </div>
           <div class="scene-writing-action">
             <span class="scene-state ${scene.current_revision_id ? 'done' : ''}">${scene.current_revision_id ? '已有正文' : '待起草'}</span>
-            <button type="button" class="${scene.current_revision_id ? 'quiet' : 'primary'}" data-scene-open="${esc(scene.id)}">${scene.current_revision_id ? '查看正文' : '去写本场'}</button>
+            <button type="button" class="${scene.current_revision_id ? 'quiet' : 'primary'} ${readiness.blocked ? 'writing-gate-locked' : ''}" data-scene-open="${esc(scene.id)}" ${readiness.blocked ? `data-writing-gate="${esc(sceneReason)}" aria-label="进入本场未开放，点击查看原因"` : ''}>${scene.current_revision_id ? '查看正文' : '去写本场'}</button>
           </div>
         </article>`).join('') : blockedEmpty ? writingBlockedEmptyMarkup(readiness, blockedSceneNextStepCopy) : `<div class="chapter-scene-empty"><b>这一章还没有场景</b><p>建立第一场后，Agent、上下文和正文都会绑定稳定的场景 ID。</p><button type="button" class="primary" data-structure-add-scene="${esc(chapter.id)}">建立第一场</button></div>`}</div>
       </section>
@@ -475,7 +476,10 @@
 
   function compactSceneContext() {
     const panel = document.querySelector('.scene-context-panel');
-    if (!panel || state.stage !== 'draft') return;
+    // Keep the full selector visible while the user is editing it. The
+    // compact summary is useful at rest, but replacing the form here would
+    // make the only explicit context configuration control impossible to use.
+    if (!panel || state.stage !== 'draft' || state.sceneContextEditorOpen) return;
     const cards = state.context?.runtime_character_cards?.length || 0;
     const revisions = state.context?.source_revision_ids?.length || 0;
     const assetReferences = state.context?.scene_asset_references?.length || 0;
@@ -486,10 +490,10 @@
       : '作品起点 · 无前场正文';
     panel.classList.add('scene-context-compact', 'scene-context-secondary');
     panel.innerHTML = `<div class="scene-context-compact-copy">
-      <span>本场上下文</span>
-      <b>${ready ? '已自动准备' : '正在自动准备'}</b>
-      <small>${ready ? `${cards} 张人物卡 · ${assetReferences} 个素材引用 · ${revisions} 份写作资料 · ${esc(continuation)}` : '将读取章节方向、前文、已确认资料和本场素材引用'}</small>
-    </div><button type="button" class="quiet" data-inspector="context">查看详情</button>`;
+      <span>章节资料</span>
+      <b>${ready ? '已准备' : '准备中'}</b>
+      <small>${ready ? `${cards} 张人物卡 · ${assetReferences} 个素材引用 · ${revisions} 份写作资料 · ${esc(continuation)}` : '会读取本章方向、前文和已确认资料'}</small>
+    </div><button type="button" class="quiet" data-toggle-scene-context>查看资料</button>`;
   }
 
   const SCENE_ASSET_KIND_CONFIG = {
@@ -548,8 +552,9 @@
     const contextPanel = document.querySelector('#workspace .scene-context-panel');
     if (!scene || !contextPanel || document.querySelector('[data-scene-assets-panel]')) return;
     const references = sceneAssetReferences(scene);
+    if (!references.length) return;
     contextPanel.insertAdjacentHTML('afterend', `<section class="scene-assets-panel" data-scene-assets-panel>
-      <div><p class="eyebrow">本场素材</p><h3>${references.length ? `${references.length} 项素材已准备` : '暂无本场素材'}</h3><p>${references.length ? '背景、角色和音效只作为本场参考。' : '需要时再添加背景、角色或音效。'}</p></div>
+      <div><p class="eyebrow">已选素材</p><h3>${references.length} 项已准备</h3><p>背景、角色和音效只作为本章正文的参考。</p></div>
       <div class="scene-assets-panel-content">${references.length ? `<ul>${references.map(sceneAssetReferenceMarkup).join('')}</ul>` : '<span class="scene-assets-empty">尚未选择素材</span>'}<button type="button" class="quiet" data-scene-asset-picker="${esc(scene.id)}">管理素材</button></div>
       <div class="scene-assets-suggestions" data-scene-asset-suggestions="${esc(scene.id)}">${sceneAssetSuggestionsMarkup(scene.id)}</div>
     </section>`);
@@ -914,6 +919,7 @@
       render();
       return true;
     }
+    if (review.matches('details')) review.open = true;
     review.classList.add('writing-return-target');
     review.scrollIntoView({ behavior: 'smooth', block: 'start' });
     const firstAction = review.querySelector('button:not([disabled])');
@@ -929,7 +935,10 @@
       && gate.scope_id === scene.id
       && gate.snapshot?.revision_id === scene.current_revision_id
     );
-    const gate = gates.length ? gates[gates.length - 1] : null;
+    // The work API returns gates newest-first. The current Revision must use
+    // the newest matching gate; taking the last item resurrects an older
+    // blocked result after a successful re-check.
+    const gate = gates.length ? gates[0] : null;
     const findings = (state.work?.review_findings || []).filter(finding =>
       finding.scene_id === scene.id
       && finding.revision_id === scene.current_revision_id
@@ -1349,6 +1358,10 @@
           }
         }
       }
+      // The continuous chapter renderer owns the command bar. Re-attach the
+      // release-required memory action after this decorator has projected the
+      // current scene state, otherwise its button is overwritten above.
+      if (typeof decorateSceneMemoryAction === 'function') decorateSceneMemoryAction();
       decorateSceneAgent();
       compactSceneContext();
       decorateSceneAssets();
@@ -1447,7 +1460,10 @@
       return;
     }
     const workSwitch = event.target.closest('[data-select-work]');
-    if (workSwitch?.dataset.selectWork === state.work?.id) {
+    // An empty workspace has no work-switch control. Do not let the optional
+    // chain turn `undefined === undefined` into a match that consumes every
+    // click, including onboarding and first-use actions.
+    if (workSwitch && workSwitch.dataset.selectWork === state.work?.id) {
       event.preventDefault();
       event.stopImmediatePropagation();
       document.getElementById('workSwitchDialog')?.close();
@@ -1765,7 +1781,7 @@
     if (!picker) return;
     picker.query = String(new FormData(form).get('query') || '').trim();
     void loadSceneAssetPickerItems();
-  });
+  }, true);
 
   document.addEventListener('error', event => {
     if (event.target.matches?.('[data-scene-asset-preview]')) event.target.hidden = true;

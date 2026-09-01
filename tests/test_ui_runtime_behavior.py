@@ -24,9 +24,32 @@ h.window.AppRuntime.applyAAReadiness(ready);
 console.log(JSON.stringify({before,after:{gate:h.get('#aaSetupGate').hidden,choose:h.get('#chooseStoryButton').disabled,analyze:h.get('#analyzeStoryButton').disabled}}));
 '''
     assert run_harness(script) == {
-        "before": {"gate": False, "choose": True, "analyze": True},
+        "before": {"gate": False, "choose": False, "analyze": True},
         "after": {"gate": True, "choose": False, "analyze": False},
     }
+
+
+def test_story_import_remains_available_before_aa_connection():
+    script = r'''
+const {createHarness}=require(process.argv[1]);const h=createHarness();
+h.window.AppRuntime.applyAAReadiness({connected:false,program:{status:'missing',path:''}});
+console.log(JSON.stringify({choose:h.get('#chooseStoryButton').disabled,context:h.get('#storyContextAction').disabled,analyze:h.get('#analyzeStoryButton').disabled}));
+'''
+    assert run_harness(script) == {
+        "choose": False,
+        "context": False,
+        "analyze": True,
+    }
+
+
+def test_story_picker_opens_instead_of_redirecting_to_settings_before_aa_connection():
+    script = r'''
+const {createHarness}=require(process.argv[1]);const h=createHarness();
+h.window.AppRuntime.applyAAReadiness({connected:false,program:{status:'missing',path:''}});
+h.clickAction('open-script',h.get('#chooseStoryButton'));
+console.log(JSON.stringify({picker:h.get('#mBrowse').classList.contains('on'),settings:h.get('#settingsDrawer').classList.contains('open')}));
+'''
+    assert run_harness(script) == {"picker": True, "settings": False}
 
 
 def test_startup_does_not_reopen_the_previous_story_from_browser_storage():

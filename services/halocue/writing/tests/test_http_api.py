@@ -297,6 +297,21 @@ def test_resource_catalog_and_aap_import_http_contracts_are_explicit_and_read_on
         assert status == 201
         assert staged["data"]["status"] == "staged_draft"
         assert staged["data"]["write_boundary"] == "staged_import_only_no_formal_revision"
+        status, adopted = request(
+            base + "/api/v1/imports/aap:adopt",
+            "POST",
+            {"import_id": staged["data"]["import_id"], "confirm": True},
+        )
+        assert status == 201
+        assert adopted["data"]["status"] == "adopted"
+        assert adopted["data"]["revision_ids"]
+        status, replay = request(
+            base + "/api/v1/imports/aap:adopt",
+            "POST",
+            {"import_id": staged["data"]["import_id"], "confirm": True},
+        )
+        assert status == 201
+        assert replay["data"]["idempotent_replay"] is True
 
         story_bytes = "第一章 走廊\n场景一 午后\n星野：天气真好。".encode("utf-8")
         story_encoded = base64.b64encode(story_bytes).decode("ascii")
@@ -310,6 +325,14 @@ def test_resource_catalog_and_aap_import_http_contracts_are_explicit_and_read_on
         assert status == 201
         assert story_staged["data"]["status"] == "staged_draft"
         assert story_staged["data"]["write_boundary"] == "staged_import_only_no_formal_revision"
+        status, story_adopted = request(
+            base + "/api/v1/imports/story:adopt",
+            "POST",
+            {"import_id": story_staged["data"]["import_id"], "confirm": True},
+        )
+        assert status == 201
+        assert story_adopted["data"]["status"] == "adopted"
+        assert story_adopted["data"]["work_id"]
         assert not list((tmp_path / "data" / "works").glob("**/*")) if (tmp_path / "data" / "works").exists() else True
     finally:
         server.shutdown()
@@ -1184,6 +1207,17 @@ def test_production_embed_can_prepare_the_hidden_surface_before_first_open():
     assert "window.HaloCueProductionEmbed = { open, close, preload, status" in script
 
 
+def test_production_embed_does_not_retry_warmup_over_a_visible_open_or_failure():
+    script = (
+        Path(__file__).resolve().parents[1] / "web" / "production-embed.js"
+    ).read_text(encoding="utf-8")
+
+    preload = script[script.index("async function preload()"):script.index("function status()")]
+    assert 'app()?.classList.contains("production-mode")' in preload
+    assert 'loadState === "failed"' in preload
+    assert "return element.shadowRoot;" in preload
+
+
 def test_production_embed_restores_focus_after_async_surface_open():
     script = (
         Path(__file__).resolve().parents[1] / "web" / "production-embed.js"
@@ -1211,7 +1245,7 @@ def test_production_embed_keeps_handoff_status_out_of_the_ordinary_workbench():
     assert "制作任务已打开" in script
     assert "已编译" in script
     assert "场景" in script
-    assert '/production-embed.js?v=20260823-9' in (web_root / "index.html").read_text(encoding="utf-8")
+    assert '/production-embed.js?v=20260827-10' in (web_root / "index.html").read_text(encoding="utf-8")
     assert "已送往 AA 制作" not in script
     assert 'save.textContent = context.runId ? "制作任务已打开" : "选择制作任务"' in script
     assert "制作任务 ${context.runId}" not in script
@@ -1269,6 +1303,30 @@ def test_production_embed_background_browser_keeps_ordinary_surface_compact():
     assert "embedded-background-category-list" in styles
     assert "当前任务可用素材" not in script
     assert "只读素材快照" not in script
+
+
+def test_production_embed_asset_context_updates_are_idempotent():
+    script = (
+        Path(__file__).resolve().parents[1] / "web" / "production-embed.js"
+    ).read_text(encoding="utf-8")
+
+    # This function runs inside a subtree MutationObserver. Reassigning the
+    # same text would schedule the observer forever and starve the workbench.
+    assert "if (heading && heading.textContent !== selected.title)" in script
+    assert "if (label && label.textContent !== selected.search)" in script
+    assert "if (input && input.placeholder !== selected.placeholder)" in script
+
+
+def test_writing_ui_allows_explicit_narrator_only_direction_without_character_cards():
+    script = (
+        Path(__file__).resolve().parents[1] / "web" / "app.js"
+    ).read_text(encoding="utf-8")
+
+    assert "blueprint()?.narrator_only!==true" in script
+    assert "narratorOnly=b.narrator_only===true" in script
+    assert "纯旁白，不需要人物卡" in script
+    assert "cards.length||narratorOnly" in script
+    assert "confirmedCards.length||narratorOnly" in script
 
 
 def test_production_embed_restructures_the_existing_stage_workflow_without_copying_state():
@@ -1414,6 +1472,9 @@ def test_agent_plus_menu_includes_document_upload_without_a_second_toolbar_butto
     assert 'data-attachment-upload="document"' in script
     assert 'id="workAgentDocumentInput"' in script
     assert '.txt,.md,.pdf,.docx' in script
+    assert '.aap' in script
+    assert 'data-open-import-dialog' in script
+    assert '交给 Agent 转换' in script
     assert "文档已提取文字并加入本轮消息" in script
 
 
@@ -1572,9 +1633,10 @@ def test_mobile_writing_defaults_to_two_views_and_does_not_reserve_hidden_panes(
     assert 'grid-template-columns: 22px minmax(0, 1fr);' in styles
     assert '@keyframes writing-mobile-pane-in' in styles
     assert 'prefers-reduced-motion: reduce' in styles
-    assert 'writing-workbench.css?v=20260823-70' in html
-    assert 'app.js?v=20260824-115' in html
-    assert 'writing-workbench.js?v=20260822-65' in html
+    assert '.app-shell.work-agent-stage.mobile-thread-open .work-agent-rail-head > .rail-head-actions' in styles
+    assert 'writing-workbench.css?v=20260825-73' in html
+    assert 'app.js?v=20260827-126' in html
+    assert 'writing-workbench.js?v=20260825-68' in html
 
 
 def test_writing_workbench_explains_work_readiness_and_locked_actions():
@@ -1858,6 +1920,12 @@ def test_scene_candidate_uses_full_context_inline_diff_without_side_by_side_card
     assert 'class="scene-diff-choice"' in script
     assert "data-scene-change" in script
     assert "data-apply-scene-changes" in script
+    assert "function sceneChangePreviewMarkup(change)" in script
+    assert "data-scene-change-preview" in script
+    assert "加入这段内容" not in script[script.index("function sceneProposalReviewMarkup"):script.index("function sceneFindingLabel")]
+    assert "entry.change.kind!=='insert'" in script
+    assert "['旁白','叙述'].includes(speaker)" in script
+    assert "无对应文字" not in script
     assert "scene-diff-columns" not in script[script.index("function sceneProposalReviewMarkup"):script.index("function sceneFindingLabel")]
     assert ".scene-context-line.is-removed" in styles
     assert ".scene-context-line.is-added" in styles
@@ -1918,6 +1986,8 @@ def test_manuscript_insert_affordance_is_quiet_until_targeted_and_touchable():
 
 def test_onboarding_explains_key_work_and_scene_controls():
     script = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    workbench = (Path(__file__).resolve().parents[1] / "web" / "writing-workbench.js").read_text(encoding="utf-8")
+    styles = (Path(__file__).resolve().parents[1] / "web" / "writing-workbench.css").read_text(encoding="utf-8")
 
     assert "state.surface==='writing'&&state.stage==='draft'" in script
     assert "root.addEventListener('click'" in script
@@ -1928,6 +1998,9 @@ def test_onboarding_explains_key_work_and_scene_controls():
     assert "正文候选不是聊天文案" in script
     assert "决定正式修改如何落地" in script
     assert "图片或文档只作为当前讨论的输入" in script
+    assert "workSwitch && workSwitch.dataset.selectWork === state.work?.id" in workbench
+    assert ".onboarding-tour { position: fixed; inset: 0; z-index: 10000; pointer-events: auto; }" in styles
+    assert ".onboarding-highlight" in styles and "pointer-events: none" in styles[styles.index(".onboarding-highlight"):styles.index(".onboarding-highlight") + 500]
 
 
 def test_pending_scene_proposal_is_rendered_inside_manuscript_surface():
@@ -1962,6 +2035,28 @@ def test_writing_draft_renders_a_continuous_chapter_with_scene_anchors():
     assert ".chapter-continuous" in styles
     assert ".chapter-manuscript-flow" in styles
     assert ".chapter-manuscript-scene" in styles
+    assert "host=$('.chapter-continuous')" in script
+    assert "activeSection.prepend(section)" in script
+    assert "data-toggle-scene-context>查看资料" in workbench
+    assert ".writing-workbench-stage .scene-context-secondary" in styles
+    assert "display: flex !important;" in styles[styles.index(".writing-workbench-stage .scene-context-secondary"):]
+    assert "这一章是一份连续正文" in script
+    assert "让 Agent 修改" in script
+    assert "chapter-more-tools" in script
+    assert "<details class=\"scene-review-summary" in script
+    assert "if (review.matches('details')) review.open = true;" in workbench
+    assert "class=\"next-command" not in script[script.index("chapterActiveSceneMarkup=function"):script.index("function sceneBlockLineMarkup")]
+
+
+def test_writing_shell_defaults_to_manuscript_and_opens_agent_on_demand():
+    shell = (Path(__file__).resolve().parents[1] / "web" / "shell.js").read_text(encoding="utf-8")
+
+    assert "panels.v4" in shell
+    assert "let panels = { tree: false, inspector: true };" in shell
+    assert "hasOwnProperty.call(saved, 'inspector')" in shell
+    assert "button.dataset.inspector !== undefined" in shell
+    assert "setPanel('inspector', false);" in shell
+    assert "window.HaloCuePanels" in shell
 
 
 def test_scene_switch_preserves_scroll_and_keeps_empty_manuscript_compact():
@@ -2023,6 +2118,11 @@ def test_chapter_reading_uses_one_manuscript_surface_and_hides_internal_inspecto
     assert "编辑本场正文" not in app
     assert "function chapterInlineManuscriptMarkup(scene,artifact)" in app
     assert "class=\"chapter-inline-manuscript\"" in app
+    assert "data-scene-id=\"${esc(scene?.id||'')}\"" in app
+    assert "const sceneId=form.dataset.sceneId||state.sceneId" in app
+    assert "state._pendingChapterSceneScroll=scene.id" in app
+    assert "async function saveLibraryMutation(path,payload,{artifactId=''})" in app
+    assert "artifactId=state.editCard?.artifactId||''" in app
     assert "data-manuscript-edit-first" not in app
     assert "data-manuscript-insert=" in app
     assert "manuscript-insert-bar" in app
@@ -2187,9 +2287,17 @@ def test_user_work_status_ignores_historical_failures_after_later_success(tmp_pa
 def test_work_agent_uses_user_status_instead_of_internal_topline_labels():
     web_root = Path(__file__).resolve().parents[1] / "web"
     app = (web_root / "app.js").read_text(encoding="utf-8")
+    final_renderer = app[
+        app.index("function renderFinalWorkAgentSurface()") : app.index(
+            "function renderFinalWorkAgentRail()"
+        )
+    ]
     assert "works/${workId}/user-status" in app
     assert "当前下一步" in app
     assert "data-user-status-action" in app
+    assert "const statusMarkup=workUserStatusMarkup();" in final_renderer
+    assert "${statusMarkup}" in final_renderer
+    assert "messages.length||statusMarkup" in final_renderer
     assert "if(action==='review_knowledge')" in app
     assert "state.libraryView='suggestions'" in app
     assert "action==='review_scene_candidate'" in app
@@ -2197,3 +2305,54 @@ def test_work_agent_uses_user_status_instead_of_internal_topline_labels():
     assert '<button type="button" class="primary" data-section="writing">进入章节写作</button>' not in app
     assert "作品版本 ${work?.version" not in app
     assert "后台任务 ${activity.running}" not in app
+
+
+def test_world_rule_list_labels_scope_and_category_separately():
+    app = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+
+    assert "function worldRuleScopeLabel(scope)" in app
+    assert "场景范围" in app
+    assert "function worldRuleCategoryLabel(category)" in app
+    assert "通用规则" in app
+    assert "worldRuleScopeLabel(rule.scope)" in app
+    assert "worldRuleCategoryLabel(rule.category)" in app
+
+
+def test_library_archive_actions_use_the_non_blocking_confirmation_dialog():
+    web_root = Path(__file__).resolve().parents[1] / "web"
+    app = (web_root / "app.js").read_text(encoding="utf-8")
+    css = (web_root / "shell.css").read_text(encoding="utf-8")
+
+    assert "function archiveConfirmationDialog()" in app
+    assert "data-archive-confirm-accept" in app
+    assert "requestArchiveConfirmation({title:`归档「${card?.name||'这张人物卡'}」？`" in app
+    assert "acceptLabel:'归档作品事实'" in app
+    assert "if(!confirm('归档后" not in app
+    assert ".archive-confirmation-dialog" in css
+
+
+def test_character_card_archive_has_a_versioned_restore_path():
+    app = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    server = (Path(__file__).resolve().parents[1] / "src" / "halocue_writing" / "app.py").read_text(encoding="utf-8")
+
+    assert "data-restore-card" in app
+    assert "/character-cards/${button.dataset.restoreCard}/restore" in app
+    assert 'parts[6] == "restore"' in server
+
+
+def test_work_canon_archive_keeps_a_user_visible_restore_path():
+    app = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+
+    assert "library-archived-facts" in app
+    assert "lifecycle.dataset.restoreCanonFact" in app
+    assert "恢复作品事实" in app
+    assert "status:'active'" in app
+
+
+def test_revision_comparison_hides_internal_paths_and_raw_json():
+    app = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+
+    assert "function revisionDisplayEntries(value)" in app
+    assert "function revisionValueMarkup(value)" in app
+    assert '<code>${esc(change.path)}</code>' not in app
+    assert "revision-value-details" in app

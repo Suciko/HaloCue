@@ -1,0 +1,26 @@
+.confirm-dialog-shell {
+  width: min(500px, calc(100vw - 30px));
+}
+
+.confirm-dialog-body {
+  margin: 0 0 20px;
+  color: var(--muted);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.confirm-dialog-shell .dialog-footer {
+  justify-content: flex-end;
+}
+
+.confirm-dialog-shell .danger-button {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+@media (max-width: 800px) {
+  .confirm-dialog-shell {
+    width: min(100%, calc(100vw - 22px));
+  }
+}

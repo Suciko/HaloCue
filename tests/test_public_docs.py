@@ -19,7 +19,7 @@ def test_release_identity_and_install_paths_are_documented():
     changelog = _read("CHANGELOG.md")
     combined = "\n".join((readme, quickstart, changelog))
 
-    assert "HaloCue 0.9.3" in combined
+    assert "HaloCue 1.0.0" in combined
     assert VERSION in combined
     assert PUBLIC_ARCHIVE_NAME in combined
     assert PRIVATE_ARCHIVE_NAME in combined

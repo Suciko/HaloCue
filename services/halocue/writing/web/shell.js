@@ -1,17 +1,29 @@
 (() => {
-  const storageKey = 'halocue-writing.panels.v3';
+  const storageKey = 'halocue-writing.panels.v4';
   const root = document.getElementById('app');
   if (!root) return;
 
-  let panels = { tree: false, inspector: false };
+  // The manuscript is the primary desktop surface. The Agent stays one click
+  // away and opens when an Agent action is chosen.
+  let panels = { tree: false, inspector: true };
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
-    panels = { tree: Boolean(saved.tree), inspector: Boolean(saved.inspector) };
+    panels = {
+      tree: Object.prototype.hasOwnProperty.call(saved, 'tree') ? Boolean(saved.tree) : panels.tree,
+      inspector: Object.prototype.hasOwnProperty.call(saved, 'inspector') ? Boolean(saved.inspector) : panels.inspector,
+    };
   } catch (_) {
     // Invalid display preferences must not prevent the workbench from opening.
   }
 
   const save = () => localStorage.setItem(storageKey, JSON.stringify(panels));
+
+  function setPanel(side, collapsed) {
+    if (!(side in panels)) return;
+    panels[side] = Boolean(collapsed);
+    save();
+    apply();
+  }
 
   function apply() {
     const desktop = window.matchMedia('(min-width: 761px)').matches;
@@ -67,10 +79,19 @@
       panels = { tree: next, inspector: next };
       save();
       apply();
+      return;
+    }
+    if (button.dataset.inspector !== undefined && window.matchMedia('(min-width: 761px)').matches) {
+      setPanel('inspector', false);
     }
   }, true);
 
   window.addEventListener('resize', apply);
+
+  window.HaloCuePanels = Object.freeze({
+    open: side => setPanel(side, false),
+    collapse: side => setPanel(side, true),
+  });
 
   apply();
 })();

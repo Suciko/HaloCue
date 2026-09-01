@@ -16,6 +16,8 @@ COMMON_RULES = [
     "knowledge/人味对话机制.md",
 ]
 
+ENGINE_RULE_SOURCE = "knowledge/演出契约.md"
+
 WORKFLOW_RULE_SOURCES = {
     "brief.build": ["SKILL.md"],
     "canon.assemble": ["SKILL.md", "agents/memory-keeper.md", "knowledge/记忆系统格式规范.md"],

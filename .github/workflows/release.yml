@@ -1,4 +1,4 @@
-name: Public prerelease
+name: Publish HaloCue release
 
 on:
   workflow_dispatch:
@@ -6,7 +6,15 @@ on:
       release_tag:
         description: Existing Git tag to publish
         required: true
-        default: v0.9.3
+        default: v1.0.0
+      channel:
+        description: Update channel written into the signed manifest
+        required: true
+        type: choice
+        options:
+          - stable
+          - beta
+        default: stable
 
 permissions:
   contents: write
@@ -27,6 +35,12 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
       - name: Install Playwright Chromium
         run: python -m playwright install chromium
+      - name: Read release version
+        id: version
+        shell: pwsh
+        run: |
+          $version = python -c "from halocue_meta import VERSION; print(VERSION)"
+          "version=$version" >> $env:GITHUB_OUTPUT
       - name: Validate exact tag and public seed
         run: python tools/check_release_version.py --tag "${{ inputs.release_tag }}"
       - name: Run full test suite
@@ -46,11 +60,34 @@ jobs:
           python tools/verify_clean_source.py --source build/public-source/HaloCue
           python tools/build_public_release.py --source build/public-source/HaloCue --output build/releases
           python tools/scan_release.py build/releases/HaloCue --mode public
-          python tools/verify_release.py build/releases/HaloCue-0.9.3-windows-x64.zip
-      - name: Create draft public prerelease
+          python tools/verify_release.py "build/releases/HaloCue-${{ steps.version.outputs.version }}-windows-x64.zip"
+      - name: Create signed update manifest
+        shell: pwsh
+        env:
+          HALOCUE_UPDATE_SIGNING_KEY: ${{ secrets.HALOCUE_UPDATE_SIGNING_KEY }}
+        run: |
+          if (-not $env:HALOCUE_UPDATE_SIGNING_KEY) { throw 'HALOCUE_UPDATE_SIGNING_KEY is not configured.' }
+          python tools/build_update_manifest.py `
+            --archive "build/releases/HaloCue-${{ steps.version.outputs.version }}-windows-x64.zip" `
+            --archive-url "https://github.com/${{ github.repository }}/releases/download/${{ inputs.release_tag }}/HaloCue-${{ steps.version.outputs.version }}-windows-x64.zip" `
+            --release-notes-url "https://github.com/${{ github.repository }}/releases/tag/${{ inputs.release_tag }}" `
+            --output build/releases/update-manifest.json `
+            --key-id stable-2026 `
+            --channel "${{ inputs.channel }}"
+      - name: Publish GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ inputs.release_tag }}" --verify-tag --draft --prerelease --title "HaloCue 0.9.3" --notes-file CHANGELOG.md
-          gh release upload "${{ inputs.release_tag }}" "build/releases/HaloCue-0.9.3-windows-x64.zip" "build/releases/HaloCue-0.9.3-windows-x64.zip.sha256"
+          $prerelease = '${{ inputs.channel }}' -eq 'beta'
+          $args = @(
+            'release', 'create', '${{ inputs.release_tag }}', '--verify-tag',
+            '--title', "HaloCue ${{ steps.version.outputs.version }}",
+            '--notes-file', 'CHANGELOG.md'
+          )
+          if ($prerelease) { $args += '--prerelease' }
+          gh @args
+          gh release upload '${{ inputs.release_tag }}' `
+            "build/releases/HaloCue-${{ steps.version.outputs.version }}-windows-x64.zip" `
+            "build/releases/HaloCue-${{ steps.version.outputs.version }}-windows-x64.zip.sha256" `
+            build/releases/update-manifest.json --clobber

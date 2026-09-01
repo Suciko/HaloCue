@@ -20,7 +20,7 @@ hiddenimports = [
 ]
 
 excludes = [
-    "archspec", "av", "bcrypt", "cryptography", "cv2", "hypothesis",
+    "archspec", "av", "bcrypt", "cv2", "hypothesis",
     "invoke", "matplotlib", "nacl", "numpy", "onnxruntime", "outcome",
     "pandas", "paramiko", "pkg_resources", "pluggy", "py", "pytest",
     "_pytest", "scipy", "setuptools", "sklearn", "sympy", "tkinter",

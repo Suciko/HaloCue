@@ -181,3 +181,56 @@ def test_existing_attachment_without_index_is_lazily_migrated_and_context_is_bou
         ).fetchone()[0]
     assert count > 20
     assert sent["work"]["conversation_threads"][0]["attachments"][0]["status"] == "attached"
+
+
+def test_aap_attachment_is_indexed_as_readable_json_for_agent(tmp_path):
+    service = WritingService(tmp_path)
+    work = service.create_work({"title": "AAP 导入", "idea": "保留导入内容，等待 Agent 整理。"})
+    thread = work["conversation_threads"][0]
+    project = {"ProjectName": "导入工程", "nodes": [{"NodeName": "场景一", "text": "旁白"}]}
+    uploaded = service.create_conversation_attachment(
+        work["id"], thread["id"], {
+            "expected_thread_version": thread["version"],
+            "filename": "story.aap",
+            "media_type": "application/json",
+            "content_base64": base64.b64encode(json.dumps(project, ensure_ascii=False).encode("utf-8")).decode("ascii"),
+        },
+    )
+    attachment = uploaded["work"]["conversation_threads"][0]["attachments"][0]
+    assert attachment["document_index"]["version"] == "document-chunks/1.0"
+    assert attachment["document_index"]["chunk_count"] >= 1
+
+
+def test_aap_attachment_rejects_invalid_json(tmp_path):
+    service = WritingService(tmp_path)
+    work = service.create_work({"title": "AAP 校验"})
+    thread = work["conversation_threads"][0]
+    try:
+        service.create_conversation_attachment(
+            work["id"], thread["id"], {
+                "expected_thread_version": thread["version"],
+                "filename": "broken.aap",
+                "media_type": "application/json",
+                "content_base64": base64.b64encode(b"not-json").decode("ascii"),
+            },
+        )
+    except Exception as error:
+        assert getattr(error, "code", "") == "attachment_type_mismatch"
+        assert "UTF-8 JSON" in str(error)
+    else:
+        raise AssertionError("invalid .aap content should be rejected")
+
+
+def test_story_import_stage_is_idempotent_for_retry(tmp_path):
+    service = WritingService(tmp_path)
+    payload = {
+        "filename": "可重试旧稿.txt",
+        "content_base64": base64.b64encode("第一章\n场景一\n旁白".encode("utf-8")).decode("ascii"),
+        "confirm": True,
+        "idempotency_key": "import-retry-1",
+    }
+    first = service.stage_story_import(payload)
+    replay = service.stage_story_import(payload)
+    assert replay["import_id"] == first["import_id"]
+    assert replay["idempotent_replay"] is True
+    assert len(list((tmp_path / "imports" / "story").iterdir())) == 1

@@ -2,7 +2,7 @@ import builtins
 
 import pytest
 
-import conftest
+from . import conftest
 
 
 def _raise_from_playwright_import(monkeypatch, missing_name):

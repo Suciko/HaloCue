@@ -126,13 +126,34 @@
     controls.innerHTML = `
       <button type="button" class="quiet production-assets" data-production-proxy="openAssetLibrary">制作素材</button>
       <button type="button" class="quiet production-overview" data-production-proxy="openRunOverview">任务总览</button>
-      <button type="button" class="quiet production-refresh" data-production-proxy="refreshRun" title="刷新制作任务" aria-label="刷新制作任务">↻</button>`;
+      <details class="production-more-actions">
+        <summary>更多</summary>
+        <div role="menu">
+          <button type="button" data-production-proxy="openTasks" role="menuitem">后台任务</button>
+          <button type="button" data-production-proxy="openSettings" role="menuitem">设置</button>
+          <button type="button" data-production-proxy="refreshRun" role="menuitem" aria-label="刷新制作任务">刷新制作任务</button>
+        </div>
+      </details>`;
     controls.addEventListener("click", event => {
       const button = event.target.closest("[data-production-proxy]");
       if (!button) return;
       root.querySelector(`#${button.dataset.productionProxy}`)?.click();
+      button.closest("details")?.removeAttribute("open");
     });
     topActions.prepend(controls);
+    const syncAvailability = () => {
+      const assetButton = controls.querySelector(".production-assets");
+      const hasRun = !root.querySelector("#openRunOverview")?.disabled;
+      if (!assetButton) return;
+      assetButton.disabled = !hasRun;
+      assetButton.title = hasRun ? "打开当前任务素材" : "先打开一个制作任务";
+      assetButton.setAttribute("aria-disabled", String(!hasRun));
+    };
+    const overviewButton = root.querySelector("#openRunOverview");
+    if (overviewButton) {
+      new MutationObserver(syncAvailability).observe(overviewButton, { attributes: true, attributeFilter: ["disabled"] });
+    }
+    syncAvailability();
   }
 
   function restoreOuterChrome() {
@@ -411,6 +432,26 @@
     }
   }
 
+  function restoreAssetDialogContext(dialog, kind) {
+    if (!dialog || kind === "backgrounds") return;
+    dialog.classList.remove("embedded-background-browser");
+    const labels = {
+      characters: { title: "角色素材", search: "搜索角色", placeholder: "输入角色名、服装或社团" },
+      sounds: { title: "音效素材", search: "搜索音效", placeholder: "输入音效名称或用途" },
+      cg: { title: "插图素材", search: "搜索插图", placeholder: "输入画面名称或用途" },
+    };
+    const selected = labels[kind] || labels.characters;
+    const heading = dialog.querySelector("header h3");
+    if (heading && heading.textContent !== selected.title) heading.textContent = selected.title;
+    const search = dialog.querySelector(".asset-search-label");
+    if (search) {
+      const label = search.childNodes[0];
+      if (label && label.textContent !== selected.search) label.textContent = selected.search;
+      const input = search.querySelector("input");
+      if (input && input.placeholder !== selected.placeholder) input.placeholder = selected.placeholder;
+    }
+  }
+
   function backgroundMetadataMap(items = []) {
     return new Map(items.map(item => {
       const key = String(item.requested_key || item.technical?.key || item.key || "");
@@ -447,9 +488,9 @@
     const configured = backgroundGroupLabels[group] || backgroundGroupLabels.scene;
     const name = backgroundUserLabel(item, metadata, group);
     const categoryInfo = backgroundCategoryInfo(metadata, group);
-    const preview = runId && key
+    const preview = runId && key && item.preview_available === true
       ? `<span class="resource-thumb background-thumb"><span class="background-preview-placeholder" aria-hidden="true">预览</span><img ${index < 6 ? `src="${productionResourceUrl(runId, "backgrounds", key, "/preview")}"` : `data-preview-src="${productionResourceUrl(runId, "backgrounds", key, "/preview")}"`} loading="lazy" decoding="async" alt=""></span>`
-      : `<span class="resource-thumb background-thumb" aria-hidden="true">景</span>`;
+      : `<span class="resource-thumb background-thumb preview-unavailable" aria-hidden="true">无预览</span>`;
     return `<article class="asset-library-item embedded-background-item" data-embedded-background-key="${escapeHtml(key)}" data-background-category="${escapeHtml(categoryInfo.filterValues.join("|"))}"><div class="embedded-background-preview">${preview}</div><div><strong>${escapeHtml(name)}</strong><small>${escapeHtml(categoryInfo.visible)}</small></div></article>`;
   }
 
@@ -559,6 +600,7 @@
       if (!controls) return;
       const kind = dialog?.querySelector(".asset-tabs button.active")?.dataset.assetKind;
       if (kind === "backgrounds") simplifyBackgroundDialog(dialog);
+      else restoreAssetDialogContext(dialog, kind);
       controls.hidden = !dialog?.open || kind !== "backgrounds";
       if (dialog?.open && kind === "backgrounds" && !controls.dataset.backgroundLoaded) {
         controls.dataset.backgroundLoaded = "true";
@@ -659,7 +701,9 @@
       const legacyPreviewTrigger = review.querySelector("#openPerformancePreview");
       if (legacyPreviewTrigger) {
         legacyPreviewTrigger.hidden = true;
-        toolList.append(legacyPreviewTrigger);
+        // Keep the production client's startup hook in the review surface,
+        // but never place it inside the user-facing tools menu.
+        review.append(legacyPreviewTrigger);
       }
       [...review.querySelectorAll(".review-actions > button:not(#openPerformancePreview)")].forEach(button => toolList.append(button));
       review.querySelector(".review-actions")?.replaceChildren(tools);
@@ -668,7 +712,12 @@
       timeline.className = "production-background-timeline";
       timeline.setAttribute("aria-label", "背景时间线");
       timeline.innerHTML = '<span>背景时间线</span><div data-production-background-nodes><small>正在读取草稿画面</small></div>';
-      reviewLayout.insertAdjacentElement("beforebegin", timeline);
+      const timelineWrap = document.createElement("details");
+      timelineWrap.className = "production-background-timeline-wrap";
+      timelineWrap.innerHTML = '<summary><span>背景变化</span><small>按切换点查看</small></summary>';
+      timelineWrap.open = window.matchMedia("(min-width: 801px)").matches;
+      timelineWrap.append(timeline);
+      reviewLayout.insertAdjacentElement("beforebegin", timelineWrap);
 
       const side = document.createElement("aside");
       side.className = "production-review-side";
@@ -687,6 +736,13 @@
       previewToggle.setAttribute("aria-expanded", "false");
       previewToggle.textContent = "查看剧情预览";
       review.querySelector(".review-head")?.append(previewToggle);
+      const editToggle = document.createElement("button");
+      editToggle.type = "button";
+      editToggle.className = "production-edit-toggle";
+      editToggle.dataset.productionEditCurrent = "true";
+      editToggle.setAttribute("aria-expanded", "false");
+      editToggle.textContent = "编辑当前卡";
+      review.querySelector(".review-head")?.append(editToggle);
       const backdrop = document.createElement("button");
       backdrop.type = "button";
       backdrop.className = "production-preview-backdrop";
@@ -699,6 +755,7 @@
     const dialog = root.querySelector("#settingsDialog");
     const tabs = dialog?.querySelector(".settings-tabs");
     const workspacePane = dialog?.querySelector("#settingsWorkspacePane");
+    const spinePane = dialog?.querySelector("#spineForm");
     const environment = dialog?.querySelector("#aaEnvironmentStatus");
     if (!dialog || !tabs || !workspacePane || !environment || dialog.__haloCueWorkbench) return;
     dialog.classList.add("production-settings-workbench");
@@ -738,6 +795,7 @@
       tabs.querySelectorAll("[data-settings-pane]").forEach(item => item.classList.toggle("active", item === button));
       workspacePane.classList.toggle("hidden", pane !== "workspace");
       dialog.querySelector("#modelForm")?.classList.toggle("hidden", pane !== "model");
+      spinePane?.classList.toggle("hidden", pane !== "spine");
       renderPane.classList.toggle("hidden", pane !== "render");
     }, true);
     dialog.__haloCueWorkbench = true;
@@ -771,11 +829,11 @@
 
   function previewFrameMarkup(frame, runId, index, total) {
     if (!frame) return '<div class="production-preview-empty"><strong>没有可预览画面</strong><p>选择其他卡片，或先生成审查草稿。</p></div>';
-    const background = frame.background_key
-      ? `style="background-image:url('${productionResourceUrl(runId, "backgrounds", frame.background_key, "/preview")}')"`
+    const background = frame.background_key && frame.background_preview_available === true
+      ? `<img class="production-preview-background" src="${productionResourceUrl(runId, "backgrounds", frame.background_key, "/preview")}" alt="" loading="lazy" decoding="async">`
       : "";
     const label = frame.presentation === "cg" ? "CG 画面" : frame.presentation === "direction" ? "演出指令" : frame.presentation === "scene" ? "场景" : "当前台词";
-    return `<div class="production-preview-frame" ${background}><span class="production-preview-count">${index + 1} / ${total}</span><div class="production-preview-dialogue"><small>${escapeHtml(label)}</small><strong>${escapeHtml(frame.title || frame.speaker?.name || "未命名")}</strong><p>${escapeHtml(frame.text || "这张卡片没有正文。")}</p></div></div>`;
+    return `<div class="production-preview-frame">${background}<span class="production-preview-count">${index + 1} / ${total}</span><div class="production-preview-dialogue"><small>${escapeHtml(label)}</small><strong>${escapeHtml(frame.title || frame.speaker?.name || "未命名")}</strong><p>${escapeHtml(frame.text || "这张卡片没有正文。")}</p></div></div>`;
   }
 
   function installReviewWorkbench(root) {
@@ -784,18 +842,66 @@
     const cardList = root.querySelector("#cardList");
     const stage = root.querySelector("[data-production-preview-stage]");
     const timeline = root.querySelector("[data-production-background-nodes]");
+    const side = root.querySelector(".production-review-side");
     const toggle = root.querySelector(".production-preview-toggle");
+    const editToggle = root.querySelector("[data-production-edit-current]");
     const close = root.querySelector(".production-preview-close");
     const backdrop = root.querySelector(".production-preview-backdrop");
     if (!review || !cardList || !stage || !timeline) return;
 
-    const setDrawer = open => {
+    let drawerAccessibilityState = [];
+    let drawerOpener = toggle;
+    const setDrawer = (open, mode = "preview") => {
       review.classList.toggle("preview-open", open);
+      review.classList.toggle("edit-open", open && mode === "edit");
       toggle?.setAttribute("aria-expanded", String(open));
-      if (open) close?.focus({ preventScroll: true });
-      else toggle?.focus({ preventScroll: true });
+      editToggle?.setAttribute("aria-expanded", String(open && mode === "edit"));
+      const toast = root.querySelector(".toast.visible");
+      const shell = root.querySelector(".embedded-production-shell");
+      if (open) {
+        // A previous task toast can otherwise sit on top of the preview drawer.
+        toast?.classList.remove("visible");
+        shell?.classList.remove("toast-visible");
+        drawerAccessibilityState = [
+          review.querySelector(".review-head"),
+          review.querySelector(".production-background-timeline"),
+          review.querySelector(".review-column"),
+          review.querySelector(".buildbar"),
+        ].filter(Boolean).map(element => ({
+          element,
+          ariaHidden: element.getAttribute("aria-hidden"),
+          inert: element.inert,
+        }));
+        drawerAccessibilityState.forEach(({ element }) => {
+          element.inert = true;
+          element.setAttribute("aria-hidden", "true");
+        });
+        if (mode === "edit") {
+          window.setTimeout(() => side?.querySelector(".inspector input, .inspector textarea, .inspector select, .inspector button:not([disabled])")?.focus({ preventScroll: true }), 60);
+        } else {
+          close?.focus({ preventScroll: true });
+        }
+      } else {
+        drawerAccessibilityState.forEach(({ element, ariaHidden, inert }) => {
+          element.inert = inert;
+          if (ariaHidden === null) element.removeAttribute("aria-hidden");
+          else element.setAttribute("aria-hidden", ariaHidden);
+        });
+        drawerAccessibilityState = [];
+        review.classList.remove("edit-open");
+        editToggle?.setAttribute("aria-expanded", "false");
+        drawerOpener?.focus({ preventScroll: true });
+        drawerOpener = toggle;
+      }
     };
-    toggle?.addEventListener("click", () => setDrawer(true));
+    toggle?.addEventListener("click", () => { drawerOpener = toggle; setDrawer(true); });
+    editToggle?.addEventListener("click", () => {
+      if (!cardList.querySelector("[data-card-id].selected")) {
+        cardList.querySelector("[data-card-id]")?.click();
+      }
+      drawerOpener = editToggle;
+      setDrawer(true, "edit");
+    });
     close?.addEventListener("click", () => setDrawer(false));
     backdrop?.addEventListener("click", () => setDrawer(false));
 
@@ -880,13 +986,51 @@
     simplifyAssetWorkbench(root);
   }
 
+  function setProductionSurfaceState(root, stateName, options = {}) {
+    const panelState = String(stateName || "loading");
+    let panel = root.querySelector(".production-surface-state");
+    if (!panel) {
+      panel = document.createElement("section");
+      panel.className = "production-surface-state production-embed-empty";
+      panel.setAttribute("aria-live", "polite");
+      root.append(panel);
+    }
+    const shell = root.querySelector(".embedded-production-shell");
+    const ready = panelState === "ready";
+    panel.hidden = ready;
+    panel.dataset.state = panelState;
+    if (shell) {
+      shell.hidden = !ready;
+      shell.inert = !ready;
+      if (ready) shell.removeAttribute("aria-hidden");
+      else shell.setAttribute("aria-hidden", "true");
+    }
+    if (ready) {
+      panel.replaceChildren();
+      host()?.setAttribute("aria-busy", "false");
+      return panel;
+    }
+    const title = options.title || (panelState === "loading" ? "正在打开 AA 制作" : "AA 制作工作面没有打开");
+    const detail = options.detail || (panelState === "loading" ? "正在连接制作服务，请稍候。" : "请重新读取制作工作面。");
+    const retry = typeof options.onRetry === "function"
+      ? `<button type="button" class="production-embed-retry">${esc(options.actionLabel || "重试")}</button>`
+      : "";
+    panel.setAttribute("role", panelState === "loading" ? "status" : "alert");
+    panel.innerHTML = `<div class="production-surface-state-card"><span class="production-surface-state-mark" aria-hidden="true">${panelState === "loading" ? "…" : "!"}</span><div><strong>${esc(title)}</strong><p>${esc(detail)}</p>${retry}</div></div>`;
+    const retryButton = panel.querySelector(".production-embed-retry");
+    retryButton?.addEventListener("click", () => options.onRetry(), { once: true });
+    host()?.setAttribute("aria-busy", panelState === "loading" ? "true" : "false");
+    return panel;
+  }
+
   async function loadProductionSurface() {
     const element = ensureHost();
     const root = element.shadowRoot || element.attachShadow({ mode: "open" });
-    const loading = document.createElement("div");
-    loading.className = "production-embed-loading";
-    loading.textContent = "正在连接 AA 制作后端...";
-    root.replaceChildren(loading);
+    root.replaceChildren();
+    setProductionSurfaceState(root, "loading", {
+      title: "正在打开 AA 制作",
+      detail: "正在连接制作服务，请稍候。",
+    });
 
     const response = await fetch("/production/", { headers: { Accept: "text/html" } });
     if (!response.ok) throw new Error(`AA 制作前端不可用（${response.status}）`);
@@ -929,6 +1073,10 @@
     shell.append(importedWorkspace);
     const auxiliary = [...parsed.body.querySelectorAll("dialog, #toast")].map(node => document.importNode(node, true));
     root.replaceChildren(...links, shell, ...auxiliary);
+    setProductionSurfaceState(root, "loading", {
+      title: "正在准备 AA 制作",
+      detail: "工作面即将就绪，正在读取制作能力。",
+    });
     await Promise.all(styleLoads);
 
     await new Promise((resolve, reject) => {
@@ -939,7 +1087,7 @@
       document.head.append(script);
     });
     installProductionWorkbench(root);
-    element.setAttribute("aria-busy", "false");
+    setProductionSurfaceState(root, "ready");
     return root;
   }
 
@@ -963,6 +1111,12 @@
 
   async function preload() {
     const element = ensureHost();
+    // Warmup is best-effort. Once the user has entered AA, or a warmup has
+    // already failed, it must not start a second hidden request and replace
+    // the visible loading/error boundary owned by open().
+    if (app()?.classList.contains("production-mode") || loadState === "failed") {
+      return element.shadowRoot;
+    }
     if (!app()?.classList.contains("production-mode")) element.hidden = true;
     try {
       return await ensureProductionSurface();
@@ -980,15 +1134,16 @@
   }
 
   async function selectRun(root, runId) {
-    if (!runId) return;
+    if (!runId) return true;
     for (let attempt = 0; attempt < 80; attempt += 1) {
       const button = [...root.querySelectorAll("[data-run-id]")].find(item => item.dataset.runId === runId);
       if (button) {
         button.click();
-        return;
+        return true;
       }
       await sleep(100);
     }
+    return false;
   }
 
   async function open(options = {}) {
@@ -1008,7 +1163,18 @@
       installProductionLabelSanitizer(root);
       installBackgroundClassification(root);
       installOuterActions(root);
-      await selectRun(root, context.runId);
+      setProductionSurfaceState(root, "ready");
+      const selected = await selectRun(root, context.runId);
+      if (context.runId && !selected) {
+        setProductionSurfaceState(root, "missing-run", {
+          title: "没有找到这项制作任务",
+          detail: "任务列表可能还在同步，或这条链接已经失效。",
+          actionLabel: "重新读取任务",
+          onRetry: () => open({ ...context, replaceHistory: true }),
+        });
+      } else {
+        setProductionSurfaceState(root, "ready");
+      }
       // Loading the embedded production surface and selecting a run can move focus
       // back to document.body; restore the outer work-surface focus after async work.
       element.focus({ preventScroll: true });
@@ -1016,8 +1182,12 @@
       loadPromise = null;
       element.setAttribute("aria-busy", "false");
       const root = element.shadowRoot || element.attachShadow({ mode: "open" });
-      root.innerHTML = `<div class="production-embed-error"><b>AA 制作工作面没有打开</b><p>${String(error.message || error)}</p><button type="button" id="retryProduction">重试</button></div>`;
-      root.querySelector("#retryProduction")?.addEventListener("click", () => open({ ...context, replaceHistory: true }));
+      setProductionSurfaceState(root, "error", {
+        title: "AA 制作工作面没有打开",
+        detail: String(error.message || error),
+        actionLabel: "重试",
+        onRetry: () => open({ ...context, replaceHistory: true }),
+      });
     }
   }
 

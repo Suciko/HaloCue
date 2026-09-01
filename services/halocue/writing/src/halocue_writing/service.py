@@ -68,8 +68,8 @@ from .release_integrity import (
     verify_script_release,
 )
 from .resource_catalog import ResourceCatalog
-from .aap_import import parse_aap_payload
-from .story_import import parse_story_payload
+from .aap_import import parse_aap_bytes, parse_aap_payload
+from .story_import import parse_story_bytes, parse_story_payload
 
 
 class _ProposalAcceptanceStopped(Exception):
@@ -1561,7 +1561,7 @@ class WritingService:
             if run["status"] not in {"failed", "cancelled"}:
                 raise DomainError("agent_run_not_retryable", "只有失败或已取消的 Agent 运行可以重试。", status=409)
             policy = json.loads(run["policy_json"])
-            if policy.get("workflow") in {
+            if run["scope_type"] == "scene" and policy.get("workflow") in {
                 "scene.candidate.generate", "scene.draft.generate", "scene.draft.rewrite", "scene.review",
             }:
                 return self._retry_scene_agent_run(work_id, run, payload)
@@ -2008,11 +2008,18 @@ class WritingService:
             raw = base64.b64decode(str(payload.get("content_base64") or ""), validate=True)
         except (ValueError, binascii.Error) as exc:
             raise DomainError("aap_preview_failed", ".aap 文件编码无效。", status=422) from exc
-        import_id = new_id("aap-import")
+        idempotency_key = str(payload.get("idempotency_key") or "").strip()
+        import_id = f"aap-import-{sha256_text(idempotency_key).split(':', 1)[-1][:24]}" if idempotency_key else new_id("aap-import")
         target = self.repo.data_dir / "imports" / "aap" / import_id
+        if target.exists() and (target / "preview.json").is_file() and (target / "source.aap").is_file():
+            if (target / "source.aap").read_bytes() != raw:
+                raise DomainError("import_idempotency_conflict", "同一个导入请求对应了不同文件，请重新选择文件后重试。", status=409)
+            self._record_staged_import(import_id=import_id, kind="aap", preview=preview)
+            return {"schema_version": "story-import/1.0", "import_id": import_id, "filename": preview["filename"], "status": "staged_draft", "preview": preview, "write_boundary": "staged_import_only_no_formal_revision", "idempotent_replay": True}
         target.mkdir(parents=True, exist_ok=False)
         (target / "source.aap").write_bytes(raw)
         (target / "preview.json").write_text(canonical_json(preview), encoding="utf-8")
+        self._record_staged_import(import_id=import_id, kind="aap", preview=preview)
         return {"schema_version": "story-import/1.0", "import_id": import_id, "filename": preview["filename"], "status": "staged_draft", "preview": preview, "write_boundary": "staged_import_only_no_formal_revision"}
 
     def preview_story_import(self, payload: dict) -> dict:
@@ -2033,12 +2040,21 @@ class WritingService:
             raw = base64.b64decode(str(payload.get("content_base64") or ""), validate=True)
         except (ValueError, binascii.Error) as exc:
             raise DomainError("story_import_preview_failed", "导入文件编码无效。", status=422) from exc
-        import_id = new_id("story-import")
+        idempotency_key = str(payload.get("idempotency_key") or "").strip()
+        import_id = f"story-import-{sha256_text(idempotency_key).split(':', 1)[-1][:24]}" if idempotency_key else new_id("story-import")
         target = self.repo.data_dir / "imports" / "story" / import_id
+        if target.exists() and (target / "preview.json").is_file():
+            existing_suffix = Path(preview["filename"]).suffix.lower()
+            existing_source = target / f"source{existing_suffix}"
+            if not existing_source.is_file() or existing_source.read_bytes() != raw:
+                raise DomainError("import_idempotency_conflict", "同一个导入请求对应了不同文件，请重新选择文件后重试。", status=409)
+            self._record_staged_import(import_id=import_id, kind="story", preview=preview)
+            return {"schema_version": "story-import/1.0", "import_id": import_id, "filename": preview["filename"], "status": "staged_draft", "preview": preview, "write_boundary": "staged_import_only_no_formal_revision", "idempotent_replay": True}
         target.mkdir(parents=True, exist_ok=False)
         suffix = Path(preview["filename"]).suffix.lower()
         (target / f"source{suffix}").write_bytes(raw)
         (target / "preview.json").write_text(canonical_json(preview), encoding="utf-8")
+        self._record_staged_import(import_id=import_id, kind="story", preview=preview)
         return {
             "schema_version": "story-import/1.0",
             "import_id": import_id,
@@ -2047,6 +2063,242 @@ class WritingService:
             "preview": preview,
             "write_boundary": "staged_import_only_no_formal_revision",
         }
+
+    def _record_staged_import(self, *, import_id: str, kind: str, preview: dict) -> None:
+        """Keep the durable import state separate from the source attachment."""
+        timestamp = now()
+        with self.repo.transaction() as connection:
+            existing = connection.execute(
+                "SELECT kind,source_digest FROM staged_imports WHERE import_id=?",
+                (import_id,),
+            ).fetchone()
+            if existing:
+                if existing["kind"] != kind or existing["source_digest"] != preview["source_digest"]:
+                    raise DomainError(
+                        "import_idempotency_conflict",
+                        "同一个导入编号对应了不同文件，请重新选择文件后重试。",
+                        status=409,
+                    )
+                return
+            connection.execute(
+                "INSERT INTO staged_imports (import_id,kind,filename,source_digest,status,work_id,result_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    import_id,
+                    kind,
+                    preview["filename"],
+                    preview["source_digest"],
+                    "staged",
+                    None,
+                    None,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+
+    @staticmethod
+    def _import_lines_by_chapter(preview: dict, *, source_kind: str) -> list[dict]:
+        """Convert either import preview into ordered chapter/scene text groups."""
+        lines = preview.get("lines") if isinstance(preview.get("lines"), list) else []
+        if source_kind == "aap":
+            chapter_groups = [{"title": "第一章", "scenes": []}]
+            scene_lookup: dict[str, dict] = {}
+            for line in lines:
+                scene_title = str(line.get("scene") or "未命名场景").strip() or "未命名场景"
+                scene = scene_lookup.get(scene_title)
+                if scene is None:
+                    scene = {"title": scene_title, "lines": []}
+                    scene_lookup[scene_title] = scene
+                    chapter_groups[0]["scenes"].append(scene)
+                text = str(line.get("text") or "").strip()
+                if not text:
+                    continue
+                speaker = str(line.get("speaker") or "").strip()
+                scene["lines"].append(f"{speaker}：{text}" if line.get("is_dialogue") and speaker else text)
+            return chapter_groups
+
+        chapter_lookup: dict[str, dict] = {}
+        chapter_order: list[dict] = []
+        scene_lookup: dict[tuple[str, str], dict] = {}
+        for line in lines:
+            chapter_title = str(line.get("chapter") or "第一章").strip() or "第一章"
+            scene_title = str(line.get("scene") or "正文").strip() or "正文"
+            chapter = chapter_lookup.get(chapter_title)
+            if chapter is None:
+                chapter = {"title": chapter_title, "scenes": []}
+                chapter_lookup[chapter_title] = chapter
+                chapter_order.append(chapter)
+            scene = scene_lookup.get((chapter_title, scene_title))
+            if scene is None:
+                scene = {"title": scene_title, "lines": []}
+                scene_lookup[(chapter_title, scene_title)] = scene
+                chapter["scenes"].append(scene)
+            text = str(line.get("text") or "").strip()
+            if not text:
+                continue
+            speaker = str(line.get("speaker") or "").strip()
+            scene["lines"].append(f"{speaker}：{text}" if line.get("kind") == "dialogue" and speaker else text)
+        return chapter_order
+
+    def _adopt_staged_import(self, *, import_id: str, source_kind: str, title: str | None = None) -> dict:
+        """Create a new work from a staged import after an explicit user decision."""
+        if source_kind not in {"aap", "story"}:
+            raise DomainError("import_kind_invalid", "导入类型无效。", status=422)
+        target = self.repo.data_dir / "imports" / source_kind / import_id
+        preview_path = target / "preview.json"
+        if not target.is_dir() or not preview_path.is_file():
+            raise DomainError("import_not_found", "找不到待采纳的导入草稿，请重新预览文件。", status=404)
+        try:
+            preview = json.loads(preview_path.read_text(encoding="utf-8"))
+            raw = (target / ("source.aap" if source_kind == "aap" else f"source{Path(str(preview.get('filename') or '')).suffix.lower()}" )).read_bytes()
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise DomainError("import_source_unavailable", "导入源文件或预览已经损坏。", status=422) from exc
+        parser = parse_aap_bytes if source_kind == "aap" else parse_story_bytes
+        try:
+            verified = parser(str(preview.get("filename") or ""), raw)
+        except ValueError as exc:
+            raise DomainError("import_source_invalid", str(exc), status=422) from exc
+        if verified.get("source_digest") != preview.get("source_digest"):
+            raise DomainError("import_source_changed", "导入源文件已经变化，请重新预览并暂存。", status=409)
+        groups = self._import_lines_by_chapter(verified, source_kind=source_kind)
+        groups = [group for group in groups if any(scene.get("lines") for scene in group.get("scenes", []))]
+        if not groups:
+            raise DomainError("import_empty", "导入文件没有可以建立正文的内容。", status=422)
+        requested_title = str(title or verified.get("project_title") or Path(str(verified.get("filename") or "导入作品")).stem).strip()
+        if not requested_title:
+            requested_title = "导入作品"
+        if len(requested_title) > 120:
+            raise DomainError("validation_error", "作品名称不能超过 120 个字符。", status=422)
+
+        created_revisions: list[str] = []
+        timestamp = now()
+        result: dict
+        with self.repo.transaction() as connection:
+            existing = connection.execute(
+                "SELECT status,work_id,result_json,source_digest FROM staged_imports WHERE import_id=? AND kind=?",
+                (import_id, source_kind),
+            ).fetchone()
+            if existing and existing["source_digest"] != verified["source_digest"]:
+                raise DomainError("import_idempotency_conflict", "导入编号与当前文件不匹配。", status=409)
+            if existing and existing["status"] == "adopted" and existing["result_json"]:
+                replay = json.loads(existing["result_json"])
+                replay["idempotent_replay"] = True
+                return replay
+            if not existing:
+                connection.execute(
+                    "INSERT INTO staged_imports (import_id,kind,filename,source_digest,status,work_id,result_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (import_id, source_kind, verified["filename"], verified["source_digest"], "staged", None, None, timestamp, timestamp),
+                )
+
+            work_id = new_id("work")
+            volume_id = new_id("volume")
+            thread_id = new_id("thread")
+            connection.execute(
+                "INSERT INTO works VALUES (?,?,?,?,?,?,?)",
+                (work_id, requested_title, "active", 1, PACK_VERSION, timestamp, timestamp),
+            )
+            connection.execute(
+                "INSERT INTO volumes VALUES (?,?,?,?,?,?,?,?)",
+                (volume_id, work_id, "000001", "第一卷", "active", 1, timestamp, timestamp),
+            )
+            connection.execute(
+                "INSERT INTO conversation_threads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (thread_id, work_id, "work", work_id, "创作主对话", "active", "discuss", "review", 1, "{}", 0, timestamp, timestamp),
+            )
+            connection.execute(
+                "INSERT INTO authorization_policies VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (new_id("policy"), work_id, thread_id, "work", work_id, "review", canonical_json(["read", "discuss"]), None, None, None, "active", 1, timestamp, timestamp),
+            )
+            run_id = new_id("run")
+            connection.execute(
+                "INSERT INTO production_runs VALUES (?,?,?,?,?,?,?,?)",
+                (run_id, work_id, "creation", "review", "planned", "[]", timestamp, timestamp),
+            )
+
+            chapter_rows = []
+            for chapter_index, group in enumerate(groups, start=1):
+                chapter_id = new_id("chapter")
+                chapter_title = str(group.get("title") or f"第{chapter_index}章").strip()
+                connection.execute(
+                    "INSERT INTO chapters (id,work_id,volume_id,stable_order_key,title,status,version,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (chapter_id, work_id, volume_id, f"{chapter_index:06d}", chapter_title, "active", 1, timestamp, timestamp),
+                )
+                chapter_rows.append({"id": chapter_id, "title": chapter_title, "scenes": []})
+                for scene_index, scene_data in enumerate(group.get("scenes") or [], start=1):
+                    text = "\n".join(str(line) for line in scene_data.get("lines") or [] if str(line).strip())
+                    if not text:
+                        continue
+                    scene_id = new_id("scene")
+                    scene_title = str(scene_data.get("title") or f"场景 {scene_index:02d}").strip()
+                    contract = {
+                        "location": "",
+                        "goal": "导入正文待审查",
+                        "writing_mode": "imported",
+                        "intent_source": f"{source_kind}:{import_id}",
+                        "stop_boundary": "导入内容完成后停止",
+                    }
+                    connection.execute(
+                        "INSERT INTO scenes VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                        (scene_id, work_id, chapter_id, f"{scene_index:06d}", scene_title, "review", 1, None, canonical_json(contract), timestamp, timestamp),
+                    )
+                    artifact = self._artifact(connection, work_id, "scene_script", "scene", scene_id)
+                    revision_id = self._add_revision(
+                        connection,
+                        artifact,
+                        self._scene_content_from_text(text, scene_id),
+                        "user",
+                        {
+                            "workflow": "story-import.adopt" if source_kind == "story" else "aap-import.adopt",
+                            "import_id": import_id,
+                            "source_digest": verified["source_digest"],
+                            "filename": verified["filename"],
+                            "source_type": source_kind,
+                        },
+                        schema_version="scene-blocks/1.0",
+                    )
+                    connection.execute(
+                        "UPDATE scenes SET current_revision_id=? WHERE id=?",
+                        (revision_id, scene_id),
+                    )
+                    created_revisions.append(revision_id)
+                    chapter_rows[-1]["scenes"].append({"id": scene_id, "title": scene_title, "revision_id": revision_id})
+
+            result = {
+                "schema_version": "story-import/1.0",
+                "import_id": import_id,
+                "status": "adopted",
+                "source_type": source_kind,
+                "filename": verified["filename"],
+                "work_id": work_id,
+                "title": requested_title,
+                "chapters": chapter_rows,
+                "revision_ids": created_revisions,
+                "write_boundary": "formal_revision_created_after_user_confirmation",
+                "idempotent_replay": False,
+            }
+            connection.execute(
+                "UPDATE staged_imports SET status='adopted',work_id=?,result_json=?,updated_at=? WHERE import_id=? AND kind=?",
+                (work_id, canonical_json(result), timestamp, import_id, source_kind),
+            )
+        for revision_id in created_revisions:
+            self._schedule_commit_projection(work_id, revision_id)
+        result["work"] = self.get_work(work_id)
+        return result
+
+    def adopt_aap_import(self, payload: dict) -> dict:
+        if payload.get("confirm") is not True:
+            raise DomainError("aap_confirmation_required", "请先确认导入预览，再建立正式作品。", status=409)
+        import_id = str(payload.get("import_id") or "").strip()
+        if not import_id.startswith("aap-import-"):
+            raise DomainError("import_id_invalid", "导入编号无效。", status=422)
+        return self._adopt_staged_import(import_id=import_id, source_kind="aap", title=payload.get("title"))
+
+    def adopt_story_import(self, payload: dict) -> dict:
+        if payload.get("confirm") is not True:
+            raise DomainError("story_import_confirmation_required", "请先确认导入预览，再建立正式作品。", status=409)
+        import_id = str(payload.get("import_id") or "").strip()
+        if not import_id.startswith("story-import-"):
+            raise DomainError("import_id_invalid", "导入编号无效。", status=422)
+        return self._adopt_staged_import(import_id=import_id, source_kind="story", title=payload.get("title"))
 
     def list_works(self):
         with self.repo.connect() as connection:
@@ -2839,6 +3091,9 @@ class WritingService:
         ).fetchone()[0]
 
         requested_scope = requested_scope if isinstance(requested_scope, dict) else {}
+        import_mode = str(requested_scope.get("import_mode") or "").strip()
+        if import_mode not in {"", "story_to_script", "aap_to_script"}:
+            raise DomainError("invalid_import_mode", "导入转换任务类型无效。", status=409)
         surface = str(requested_scope.get("surface", "auto"))
         chapter = None
         scene = None
@@ -2958,6 +3213,48 @@ class WritingService:
             output_mode="official_script",
         )
         skill_runtime["prompt_bundle"] = prompt_bundle
+        import_contract = None
+        import_preview = None
+        if import_mode:
+            source_label = "AAP 工程" if import_mode == "aap_to_script" else "小说或文稿"
+            task = (
+                f"读取已加入对话的{source_label}，把它转换成可审查的剧本候选。"
+                "必须同时整理章节、场景、人物映射、对白、旁白和舞台动作；"
+                "明确列出无法识别的节点、需要人工补充的内容，并为关键判断保留来源片段。"
+                "只能输出 Proposal，不能直接修改正文、人物卡、世界观或发布版本。"
+            )
+            import_contract = {
+                "schema_version": "script-import-task/1.0",
+                "mode": import_mode,
+                "source_type": "aap" if import_mode == "aap_to_script" else "story_document",
+                "required_sections": ["chapters", "scenes", "character_mappings", "dialogue", "narration", "stage_directions"],
+                "review_sections": ["unrecognized_nodes", "manual_followups", "source_citations"],
+                "write_boundary": "proposal_only",
+            }
+            def bounded_import_count(value):
+                try:
+                    return max(0, min(int(value or 0), 1000000))
+                except (TypeError, ValueError):
+                    return 0
+            raw_preview = requested_scope.get("import_preview") if isinstance(requested_scope.get("import_preview"), dict) else {}
+            raw_counts = raw_preview.get("counts") if isinstance(raw_preview.get("counts"), dict) else {}
+            import_preview = {
+                "source_type": str(raw_preview.get("source_type") or "")[:40],
+                "project_title": str(raw_preview.get("project_title") or "")[:160],
+                "counts": {
+                    key: bounded_import_count(raw_counts.get(key))
+                    for key in ("chapters", "scenes", "paragraphs", "lines", "characters", "backgrounds", "dialogues")
+                },
+                "scenes": [
+                    {
+                        "title": str(item.get("title") or "未命名场景")[:160],
+                        "line_count": bounded_import_count(item.get("line_count") or item.get("paragraph_count")),
+                    }
+                    for item in (raw_preview.get("scenes") or [])[:30]
+                    if isinstance(item, dict)
+                ],
+                "warnings": [str(item)[:320] for item in (raw_preview.get("warnings") or [])[:20]],
+            }
         contract.update(
             {
                 "task": task,
@@ -2973,6 +3270,7 @@ class WritingService:
                     "scene_id": scene["id"] if scene else (memory_scene["id"] if memory_scene else None),
                     "scene_title": scene["title"] if scene else (memory_scene["title"] if memory_scene else None),
                     "scene_revision_id": scene["current_revision_id"] if scene else (memory_scene["current_revision_id"] if memory_scene else None),
+                    **({"import_mode": import_mode, "import_id": str(requested_scope.get("import_id") or "").strip(), "import_preview": import_preview} if import_mode else {}),
                 },
                 "rule_sources": {
                     "common": COMMON_RULES,
@@ -2980,6 +3278,7 @@ class WritingService:
                 },
                 "write_boundary": "正式 Brief、资料库事实和正文只能由对应 Proposal 采纳后写入。",
                 "skill_runtime": skill_runtime,
+                **({"import_contract": import_contract} if import_contract else {}),
             }
         )
         return contract
@@ -3162,6 +3461,9 @@ class WritingService:
     @staticmethod
     def _effective_conversation_scope(thread, requested_scope: dict | None) -> dict:
         scope = dict(requested_scope) if isinstance(requested_scope, dict) else {}
+        import_mode = str(scope.get("import_mode") or "").strip()
+        if import_mode not in {"", "story_to_script", "aap_to_script"}:
+            raise DomainError("invalid_import_mode", "导入转换任务类型无效。", status=409)
         surface = str(scope.get("surface") or "auto")
         if thread["scope_type"] == "chapter":
             requested_chapter = str(scope.get("chapter_id") or "").strip()
@@ -3180,6 +3482,11 @@ class WritingService:
         if thread["scope_type"] == "work" and thread["scope_id"] == thread["work_id"]:
             if surface not in {"", "auto", "work", "chapter", "scene", "scene_memory"}:
                 raise DomainError("invalid_thread_scope", "作品对话请求了不支持的任务作用域。", status=409)
+            # A missing scope is still a work-level request.  Leaving it as
+            # ``auto`` makes the active scene count select a scene template,
+            # even though this is the persistent work conversation.
+            if surface in {"", "auto"}:
+                return {**scope, "surface": "work"}
             return scope
         raise DomainError("invalid_thread_scope", "当前对话作用域无效。", status=409)
 
@@ -4148,6 +4455,22 @@ class WritingService:
                         if line:
                             paragraphs.append(line)
                     text = "\n\n".join(paragraphs)
+            elif suffix == ".aap":
+                try:
+                    parsed = json.loads(content.decode("utf-8-sig"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise DomainError(
+                        "attachment_type_mismatch",
+                        ".aap 必须是有效的 UTF-8 JSON 工程文件。",
+                        status=415,
+                    ) from exc
+                if not isinstance(parsed, dict):
+                    raise DomainError(
+                        "attachment_type_mismatch",
+                        ".aap 工程根节点必须是对象。",
+                        status=415,
+                    )
+                text = json.dumps(parsed, ensure_ascii=False, indent=2)
             elif suffix == ".pdf":
                 if not content.startswith(b"%PDF-"):
                     raise DomainError("attachment_type_mismatch", "文件不是有效的 PDF 文档。", status=415)
@@ -4195,19 +4518,20 @@ class WritingService:
             ".md": {"", "text/plain", "text/markdown", "text/x-markdown"},
             ".pdf": {"", "application/pdf"},
             ".docx": {"", "application/zip", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+            ".aap": {"", "application/json", "application/octet-stream", "text/plain"},
         }
         suffix = Path(filename).suffix.lower()
         is_image = media_type in image_types
         is_document = suffix in document_types and media_type in document_types[suffix]
         if not is_image and not is_document:
-            raise DomainError("unsupported_attachment_type", "支持 PNG、JPEG、WebP、GIF、TXT、Markdown、PDF 或 DOCX。", status=415)
+            raise DomainError("unsupported_attachment_type", "支持 PNG、JPEG、WebP、GIF、TXT、Markdown、PDF、DOCX 或 AAP。", status=415)
         try:
             content = base64.b64decode(encoded, validate=True)
         except (ValueError, binascii.Error) as exc:
             raise DomainError("invalid_attachment", "附件内容不是有效的 Base64 数据。") from exc
-        byte_limit = 5_000_000 if is_image else 10_000_000
+        byte_limit = 5_000_000 if is_image else (32_000_000 if suffix == ".aap" else 10_000_000)
         if not content or len(content) > byte_limit:
-            limit_label = "5 MB" if is_image else "10 MB"
+            limit_label = "5 MB" if is_image else ("32 MB" if suffix == ".aap" else "10 MB")
             raise DomainError("attachment_too_large", f"附件必须小于 {limit_label}。", status=413)
         if is_image and not self._validate_image_signature(media_type, content):
             raise DomainError("attachment_type_mismatch", "图片内容与声明格式不一致。", status=415)
@@ -4486,21 +4810,58 @@ class WritingService:
             })
 
         if not provider_failure:
-            try:
-                with self.repo.connect() as connection:
-                    current_thread, current_policy = self._require_agent_policy_current(
-                        connection, work_id, thread_id, policy_snapshot
-                    )
-                    tool_results = self._dispatch_agent_tools(
-                        connection, work_id, thread_id, current_thread, history, task_contract, reply,
-                        policy=current_policy, attachment_count=len(attachments),
-                    )
-            except DomainError as exc:
-                if exc.code == "agent_authorization_changed":
-                    self._cancel_agent_for_authorization_change(run_id, exc)
-                raise
-            if not provider.is_simulation and reply.get("tool_calls"):
-                initial_reply = reply
+            # One author turn can need a small chain of factual lookups (for
+            # example, character card -> world rule -> discussion draft).  Do
+            # not turn that normal sequence into a false Provider failure, but
+            # cap it so tools remain an auditable assistant, not an unbounded
+            # autonomous loop.  Tool execution still cannot create a Revision.
+            max_tool_rounds = 3
+            tool_round = 0
+            accumulated_activity = []
+            accumulated_payloads = []
+            current_reply = reply
+            first_dispatch = True
+            while first_dispatch or current_reply.get("tool_calls"):
+                first_dispatch = False
+                if current_reply.get("tool_calls"):
+                    if tool_round >= max_tool_rounds:
+                        provider_failure = {
+                            "code": "agent_tool_round_limit",
+                            "type": "DomainError",
+                            "message": "模型连续请求的资料查询超过本轮上限，未执行额外工具，正式资料没有改变。",
+                        }
+                        reply = {
+                            **current_reply,
+                            "tool_calls": [],
+                            "text": "本轮已完成必要的资料查询，但模型请求了过多连续操作；没有执行额外工具，也没有修改正式资料。你可以缩小问题后重试。",
+                            "ready_for_proposal": False,
+                            "reasoning_summary": "连续工具调用达到本轮上限，已保留已执行结果并停止后续调用。",
+                            "tool_activity": accumulated_activity,
+                            "tool_results": accumulated_payloads,
+                        }
+                        break
+                    tool_round += 1
+                try:
+                    with self.repo.connect() as connection:
+                        current_thread, current_policy = self._require_agent_policy_current(
+                            connection, work_id, thread_id, policy_snapshot
+                        )
+                        round_results = self._dispatch_agent_tools(
+                            connection, work_id, thread_id, current_thread, history, task_contract, current_reply,
+                            policy=current_policy, attachment_count=len(attachments),
+                        )
+                except DomainError as exc:
+                    if exc.code == "agent_authorization_changed":
+                        self._cancel_agent_for_authorization_change(run_id, exc)
+                    raise
+                tool_results.extend(round_results)
+                accumulated_activity.extend(current_reply.get("tool_activity", []))
+                accumulated_payloads.extend(current_reply.get("tool_results", []))
+
+                if provider.is_simulation or not current_reply.get("tool_calls"):
+                    reply = current_reply
+                    break
+
                 try:
                     with self._provider_lock:
                         if not self._agent_run_is_running(run_id):
@@ -4512,14 +4873,20 @@ class WritingService:
                         followup = self._validate_discussion_reply(
                             provider.discuss_work(
                                 history,
-                                {**provider_context, "tool_followup": True, "tool_results": initial_reply.get("tool_results", [])},
+                                {
+                                    **provider_context,
+                                    "tool_followup": True,
+                                    "tool_round": tool_round,
+                                    "tool_results": current_reply.get("tool_results", []),
+                                },
                             )
                         )
                         usage = self._merge_usage(usage, self._provider_usage(provider))
-                    followup["tool_activity"] = initial_reply.get("tool_activity", [])
-                    followup["tool_results"] = initial_reply.get("tool_results", [])
-                    if initial_reply.get("artifact_preview") and not followup.get("artifact_preview"):
-                        followup["artifact_preview"] = initial_reply["artifact_preview"]
+                    followup["tool_activity"] = list(accumulated_activity)
+                    followup["tool_results"] = list(accumulated_payloads)
+                    if current_reply.get("artifact_preview") and not followup.get("artifact_preview"):
+                        followup["artifact_preview"] = current_reply["artifact_preview"]
+                    current_reply = followup
                     reply = followup
                 except Exception as exc:
                     provider_failure = {
@@ -4527,12 +4894,23 @@ class WritingService:
                         "type": type(exc).__name__,
                         "message": getattr(exc, "message", "模型未能根据工具结果完成本轮对话。"),
                     }
+                    failure_details = getattr(exc, "details", {})
+                    if isinstance(failure_details, dict):
+                        # Keep a bounded, provider-authored diagnosis in the
+                        # durable run record. It is intentionally not sent to
+                        # the normal author-facing error card.
+                        for key in ("failure_kind", "http_status", "provider_message", "operation", "reason"):
+                            if key in failure_details:
+                                provider_failure[key] = failure_details[key]
                     reply = {
-                        **initial_reply,
+                        **current_reply,
                         "text": "工具已经按权限执行，但模型未能根据结果完成回复；正式资料没有改变。",
                         "ready_for_proposal": False,
                         "reasoning_summary": "工具执行结果已保存，模型后续回复失败，可从本轮运行记录重试。",
+                        "tool_activity": accumulated_activity,
+                        "tool_results": accumulated_payloads,
                     }
+                    break
 
         if not self._agent_run_is_running(run_id):
             return {
@@ -5035,7 +5413,61 @@ class WritingService:
                     status=502,
                     details={"field": "artifact_preview.kind"},
                 )
+        import_review = result.get("import_review")
+        if import_review is not None:
+            result["import_review"] = WritingService._validate_import_review(import_review)
         return result
+
+    @staticmethod
+    def _validate_import_review(value: dict) -> dict:
+        """Validate the review-only shape used by story/AAP conversion turns."""
+        if not isinstance(value, dict):
+            raise DomainError("provider_output_invalid", "导入转换审查结果必须是对象。", status=502, details={"field": "import_review"})
+        mode = str(value.get("mode") or "").strip()
+        if mode not in {"story_to_script", "aap_to_script"}:
+            raise DomainError("provider_output_invalid", "导入转换审查结果的任务类型无效。", status=502, details={"field": "import_review.mode"})
+        normalized = {"schema_version": "script-import-review/1.0", "mode": mode}
+        for field in ("source_type", "source_label"):
+            text = str(value.get(field) or "").strip()
+            if len(text) > 160:
+                raise DomainError("provider_output_invalid", "导入来源说明过长。", status=502, details={"field": f"import_review.{field}"})
+            if text:
+                normalized[field] = text
+        for field in ("chapters", "scenes", "character_mappings", "unrecognized_nodes", "manual_followups", "source_citations"):
+            entries = value.get(field, [])
+            if not isinstance(entries, list) or len(entries) > 120:
+                raise DomainError("provider_output_invalid", "导入转换审查列表无效或过长。", status=502, details={"field": f"import_review.{field}"})
+            clean = []
+            for index, entry in enumerate(entries):
+                if isinstance(entry, str):
+                    text = entry.strip()
+                    if len(text) > 320:
+                        raise DomainError("provider_output_invalid", "导入转换审查文字过长。", status=502, details={"field": f"import_review.{field}[{index}]"})
+                    clean.append(text)
+                    continue
+                if not isinstance(entry, dict):
+                    raise DomainError("provider_output_invalid", "导入转换审查条目无效。", status=502, details={"field": f"import_review.{field}[{index}]"})
+                item = {}
+                for key, raw in entry.items():
+                    if key not in {"title", "name", "status", "description", "source_name", "target_name", "display_label", "chunk_id", "paragraph_ids", "scene_count", "line_count"}:
+                        continue
+                    if key == "paragraph_ids":
+                        if not isinstance(raw, list) or len(raw) > 20 or any(len(str(item_id)) > 40 for item_id in raw):
+                            raise DomainError("provider_output_invalid", "导入来源段落标识无效。", status=502, details={"field": f"import_review.{field}[{index}].paragraph_ids"})
+                        item[key] = [str(item_id) for item_id in raw]
+                    elif key in {"scene_count", "line_count"}:
+                        try:
+                            item[key] = max(0, min(int(raw), 1000000))
+                        except (TypeError, ValueError) as exc:
+                            raise DomainError("provider_output_invalid", "导入数量字段无效。", status=502, details={"field": f"import_review.{field}[{index}].{key}"}) from exc
+                    else:
+                        text = str(raw or "").strip()
+                        if len(text) > 320:
+                            raise DomainError("provider_output_invalid", "导入审查字段过长。", status=502, details={"field": f"import_review.{field}[{index}].{key}"})
+                        item[key] = text
+                clean.append(item)
+            normalized[field] = clean
+        return normalized
 
     @staticmethod
     def _validate_decision_card(value: dict) -> dict:
@@ -5555,7 +5987,11 @@ class WritingService:
                 "SELECT evidence_json,candidate_uri FROM proposals WHERE work_id=?",
                 (work_id,),
             ).fetchall():
-                evidence = json.loads(proposal_row["evidence_json"] or "{}")
+                decoded_evidence = json.loads(proposal_row["evidence_json"] or "{}")
+                # Early proposal records stored their evidence as a JSON array.
+                # It cannot identify a source preview, but it must not prevent a
+                # later discussion draft from becoming its own Proposal.
+                evidence = decoded_evidence if isinstance(decoded_evidence, dict) else {}
                 if evidence.get("source_preview_message_id") == preview_row["id"]:
                     consumed = True
                     break
@@ -6881,13 +7317,16 @@ class WritingService:
                 "provider_output_invalid", "故事方向必须包含非空的有序推进列表。", status=502,
                 details={"field": "direction"},
             )
+        narrator_only = value.get("narrator_only") is True
         characters = value.get("characters")
-        if not isinstance(characters, list) or not characters or any(
+        if not isinstance(characters, list) or any(
             not isinstance(item, str) or not item.strip() for item in characters
-        ):
+        ) or (not characters and not narrator_only) or (characters and narrator_only):
             raise DomainError(
-                "provider_output_invalid", "故事方向必须给出至少一个主要角色。", status=502,
-                details={"field": "characters"},
+                "provider_output_invalid",
+                "故事方向必须给出至少一个主要角色；明确的纯旁白方向必须将 narrator_only 设为 true 且角色列表为空。",
+                status=502,
+                details={"field": "characters", "narrator_only": narrator_only},
             )
         mode_aliases = {
             "主线与战斗": "main_battle",
@@ -6929,6 +7368,7 @@ class WritingService:
             "theme": str(value.get("theme") or "").strip(),
             "direction": [item.strip() for item in directions],
             "characters": [item.strip() for item in characters],
+            "narrator_only": narrator_only,
             "mode": mode,
             "recommendations": {
                 **recommendations,
@@ -7412,8 +7852,6 @@ class WritingService:
         if mode not in MODE_SOURCES:
             raise DomainError("validation_error", "请选择本场起草规则包。", details={"field": "mode"})
         requested_ids = [str(value).strip() for value in payload.get("character_card_ids", []) if str(value).strip()]
-        if not requested_ids:
-            raise DomainError("validation_error", "请从人物库选择至少一张人物卡。", details={"field": "character_card_ids"})
         sensei_decision = str(payload.get("sensei_presence", "auto")).strip()
         if sensei_decision not in {"auto", "present", "absent"}:
             raise DomainError("validation_error", "老师出场选择无效。", details={"field": "sensei_presence"})
@@ -7430,6 +7868,15 @@ class WritingService:
             blueprint = json.loads(self.repo.read_text(blueprint_revision["content_uri"]))
             if blueprint.get("status", "accepted") != "proposed":
                 raise DomainError("blueprint_not_pending", "当前故事方向没有等待确认的候选。", status=409)
+            narrator_only = blueprint.get("narrator_only") is True
+            if narrator_only and requested_ids:
+                raise DomainError(
+                    "validation_error",
+                    "纯旁白方向不能选择人物卡；如需角色出场，请先重新分析故事方向。",
+                    details={"field": "character_card_ids"},
+                )
+            if not narrator_only and not requested_ids:
+                raise DomainError("validation_error", "请从人物库选择至少一张人物卡。", details={"field": "character_card_ids"})
             available_cards = {card["id"]: card for card in self._analysis_character_cards(connection, work_id)}
             invalid_ids = [card_id for card_id in requested_ids if card_id not in available_cards]
             if invalid_ids:
@@ -7440,6 +7887,12 @@ class WritingService:
                 if sensei_decision == "auto"
                 else sensei_decision == "present"
             )
+            if narrator_only and has_sensei:
+                raise DomainError(
+                    "validation_error",
+                    "纯旁白方向不能同时让老师作为角色出场。",
+                    details={"field": "sensei_presence"},
+                )
             secondary = [
                 item for item in recommendations.get("secondary_scene_modes", [])
                 if item in MODE_SOURCES and item != mode
@@ -7749,6 +8202,28 @@ class WritingService:
             card["status"] = "archived"
             revision_id = self._add_revision(connection, dict(artifact), card, "user", {
                 "workflow": "character.archive", "pack": PACK_VERSION, "source_revision_id": revision["id"],
+            })
+            self._bump_work(connection, work_id, version)
+        self._schedule_commit_projection(work_id, revision_id)
+        return {"card_id": card_id, "revision_id": revision_id, "work": self.get_work(work_id)}
+
+    def restore_character_card(self, work_id: str, card_id: str, payload: dict):
+        expected = int(payload.get("expected_version", -1))
+        with self.repo.transaction() as connection:
+            version = self._check_work_version(connection, work_id, expected)
+            artifact = connection.execute(
+                "SELECT * FROM artifacts WHERE work_id=? AND kind='character_card' AND scope_type='character' AND scope_id=?",
+                (work_id, card_id),
+            ).fetchone()
+            if not artifact or not artifact["current_revision_id"]:
+                raise NotFound("character_card", card_id)
+            revision = connection.execute("SELECT * FROM revisions WHERE id=?", (artifact["current_revision_id"],)).fetchone()
+            card = json.loads(self.repo.read_text(revision["content_uri"]))
+            if card.get("status") != "archived":
+                raise DomainError("not_archived", "人物卡当前并未归档。", status=409)
+            card["status"] = "active"
+            revision_id = self._add_revision(connection, dict(artifact), card, "user", {
+                "workflow": "character.restore", "pack": PACK_VERSION, "source_revision_id": revision["id"],
             })
             self._bump_work(connection, work_id, version)
         self._schedule_commit_projection(work_id, revision_id)
@@ -9398,7 +9873,7 @@ class WritingService:
             for field in (
                 "scene_type", "external_trigger", "hidden_expectation", "defense", "choice",
                 "plot_delta", "emotion_delta", "residue", "ending_payoff", "sensei_scene_function",
-                "render_mode",
+                "render_mode", "literary_voice_variant",
             ):
                 if field in payload:
                     contract[field] = str(payload.get(field, "")).strip()
@@ -9565,15 +10040,44 @@ class WritingService:
 
     @staticmethod
     def _normalize_official_script(text: str, context: dict, *, allow_brief_speakers: bool = False) -> str:
-        allowed = {"旁白"}
+        # Providers often use a clearly unambiguous short name (for example
+        # "爱丽丝" for the card "天童爱丽丝"). Accept that form, but
+        # normalize it back to the card's formal display name. Do not guess
+        # when two cards share the same suffix.
+        speaker_labels = {"旁白": "旁白"}
         for card in context.get("runtime_character_cards", []):
-            for value in [card.get("name"), card.get("canonical_name"), *card.get("aliases", [])]:
-                if str(value or "").strip():
-                    allowed.add(str(value).strip())
+            primary = str(card.get("name") or card.get("canonical_name") or "").strip()
+            if not primary:
+                continue
+            labels = [card.get("name"), card.get("canonical_name"), *card.get("aliases", [])]
+            for value in labels:
+                label = str(value or "").strip()
+                if label:
+                    speaker_labels.setdefault(label, primary)
         if allow_brief_speakers:
-            allowed.update(str(item).strip() for item in context.get("brief", {}).get("characters", []) if str(item).strip())
+            for item in context.get("brief", {}).get("characters", []):
+                label = str(item).strip()
+                if label:
+                    speaker_labels.setdefault(label, label)
         if WritingService._scene_has_sensei(context.get("scene_contract", {}), context.get("brief", {})):
-            allowed.update({"老师", "Sensei"})
+            speaker_labels.setdefault("老师", "老师")
+            speaker_labels.setdefault("Sensei", "Sensei")
+
+        def canonical_speaker(value: str) -> str | None:
+            direct = speaker_labels.get(value)
+            if direct:
+                return direct
+            # A suffix is only accepted when it identifies one formal card.
+            # Requiring two characters avoids turning ordinary one-character
+            # labels into accidental matches.
+            if len(value) < 2:
+                return None
+            candidates = {
+                formal
+                for formal in speaker_labels.values()
+                if formal not in {"旁白", "老师", "Sensei"} and formal.endswith(value)
+            }
+            return next(iter(candidates)) if len(candidates) == 1 else None
 
         normalized = []
         invalid = []
@@ -9593,16 +10097,17 @@ class WritingService:
             if not speaker or not content:
                 invalid.append({"line": line_number, "reason": "empty_speaker_or_content", "text": line[:160]})
                 continue
-            if speaker not in allowed:
+            formal_speaker = canonical_speaker(speaker)
+            if not formal_speaker:
                 invalid.append({"line": line_number, "reason": "unknown_speaker", "speaker": speaker})
                 continue
-            normalized.append(f"{speaker}: {content}")
+            normalized.append(f"{formal_speaker}: {content}")
         if invalid:
             raise DomainError(
                 "provider_output_invalid",
                 "模型返回的正文不符合官方剧本文本格式，未创建 Proposal。",
                 status=502,
-                details={"invalid_lines": invalid, "allowed_speakers": sorted(allowed)},
+                details={"invalid_lines": invalid, "allowed_speakers": sorted(speaker_labels)},
             )
         if not normalized:
             raise DomainError("provider_output_invalid", "模型没有返回可用正文，未创建 Proposal。", status=502)
@@ -9654,7 +10159,7 @@ class WritingService:
             for field in (
                 "scene_type", "external_trigger", "hidden_expectation", "defense", "choice",
                 "plot_delta", "emotion_delta", "residue", "ending_payoff", "sensei_scene_function",
-                "render_mode",
+                "render_mode", "literary_voice_variant",
             ):
                 if field in payload:
                     contract[field] = str(payload.get(field, "")).strip()
@@ -9720,12 +10225,6 @@ class WritingService:
         character_card_ids = self._context_selection_ids(payload, "character_card_ids")
         world_item_ids = self._context_selection_ids(payload, "world_item_ids")
         reference_file_ids = self._context_selection_ids(payload, "reference_file_ids")
-        if not character_card_ids:
-            raise DomainError(
-                "validation_error",
-                "本场上下文至少需要选择一张已确认的人物卡。",
-                details={"field": "character_card_ids"},
-            )
         with self.repo.transaction() as connection:
             version = self._check_work_version(connection, work_id, expected)
             scene = connection.execute(
@@ -9733,6 +10232,30 @@ class WritingService:
             ).fetchone()
             if not scene:
                 raise NotFound("scene", scene_id)
+            blueprint_artifact = connection.execute(
+                "SELECT current_revision_id FROM artifacts WHERE work_id=? AND kind='story_blueprint'",
+                (work_id,),
+            ).fetchone()
+            narrator_only = False
+            if blueprint_artifact and blueprint_artifact["current_revision_id"]:
+                blueprint_revision = connection.execute(
+                    "SELECT content_uri FROM revisions WHERE id=?",
+                    (blueprint_artifact["current_revision_id"],),
+                ).fetchone()
+                blueprint = json.loads(self.repo.read_text(blueprint_revision["content_uri"]))
+                narrator_only = blueprint.get("status", "accepted") == "accepted" and blueprint.get("narrator_only") is True
+            if narrator_only and character_card_ids:
+                raise DomainError(
+                    "validation_error",
+                    "纯旁白场景不能选择人物卡。",
+                    details={"field": "character_card_ids"},
+                )
+            if not narrator_only and not character_card_ids:
+                raise DomainError(
+                    "validation_error",
+                    "本场上下文至少需要选择一张已确认的人物卡。",
+                    details={"field": "character_card_ids"},
+                )
 
             cards = {}
             for artifact in connection.execute(

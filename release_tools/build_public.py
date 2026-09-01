@@ -26,7 +26,6 @@ _PYINSTALLER_EXCLUDES = (
     "archspec",
     "av",
     "bcrypt",
-    "cryptography",
     "cv2",
     "hypothesis",
     "invoke",
@@ -63,6 +62,7 @@ _PYINSTALLER_METADATA_DISTRIBUTIONS = (
     "brotli",
     "certifi",
     "click",
+    "cryptography",
     "defusedxml",
     "distro",
     "docstring_parser",
@@ -101,6 +101,12 @@ _PUBLIC_RESOURCES = (
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
+)
+_OPTIONAL_PUBLIC_RESOURCES = (
+    "help.html",
+    "docs/用户手册-1.0.md",
+    "docs/高级部署与更新.md",
+    "docs/manual",
 )
 
 
@@ -233,6 +239,15 @@ def _run_pyinstaller(
         }
     )
     subprocess.run(command, cwd=work_root, env=environment, check=True)
+    updater_spec = source_root / "HaloCueUpdater.spec"
+    if updater_spec.is_file():
+        updater_command = [
+            str(python_executable), "-m", "PyInstaller", "--noconfirm", "--clean",
+            "--distpath", str(work_root / "dist"),
+            "--workpath", str(work_root / "updater-work"),
+            str(updater_spec),
+        ]
+        subprocess.run(updater_command, cwd=work_root, env=environment, check=True)
 
 
 def _source_constants(source_root: Path) -> dict[str, object]:
@@ -284,8 +299,10 @@ def _write_version_file(source_root: Path, work_root: Path) -> Path:
 
 
 def _copy_public_resources(source_root: Path, bundle_dir: Path) -> None:
-    for relative in _PUBLIC_RESOURCES:
+    for relative in (*_PUBLIC_RESOURCES, *(_OPTIONAL_PUBLIC_RESOURCES)):
         source = source_root / relative
+        if not source.exists():
+            continue
         for destination in (bundle_dir / relative, bundle_dir / "_internal" / relative):
             if source.is_dir():
                 shutil.copytree(source, destination, dirs_exist_ok=True)
@@ -444,6 +461,9 @@ def build_public_release(
     if not (built_bundle / "HaloCue.exe").is_file():
         raise ValueError("PyInstaller did not produce HaloCue/HaloCue.exe")
     shutil.move(str(built_bundle), str(bundle_dir))
+    updater_bundle = work_root / "dist" / "HaloCueUpdater"
+    if updater_bundle.is_dir() and (updater_bundle / "HaloCueUpdater.exe").is_file():
+        shutil.copy2(updater_bundle / "HaloCueUpdater.exe", bundle_dir / "HaloCueUpdater.exe")
     _copy_public_resources(source_root, bundle_dir)
     _remove_environment_payloads(bundle_dir)
     audit_third_party_notices(bundle_dir)

@@ -9,14 +9,23 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 import urllib.error
 import urllib.request
 import webbrowser
 from pathlib import Path
 
 from aa_install_discovery import discover_aa, normalize_aa_data_path
-from halocue_meta import DISPLAY_NAME, MIN_PYTHON
+from halocue_meta import (
+    DEFAULT_UPDATE_MANIFEST_URL,
+    DISPLAY_NAME,
+    MIN_PYTHON,
+    UPDATE_PUBLIC_KEYS,
+)
 from runtime_layout import LAYOUT, prepare_user_state
+from update_manager import UpdateError, fetch_manifest, stage_update
+from migration import legacy_state_path, migration_report, write_report
 
 
 if sys.stdout is None:
@@ -33,7 +42,99 @@ if LAYOUT.frozen:
 PROGRAM_DIR = LAYOUT.resource_root
 ENTRY_FILE = "启动AA自动写剧本.cmd"
 ERROR_LOG = LAYOUT.user_data_root / "启动失败日志.txt"
+UPDATE_STATE = LAYOUT.user_data_root / "update-status.json"
+MIGRATION_STATE = LAYOUT.user_data_root / "migration-status.json"
 CORE_FILES = ("webui.py", "ui.html")
+
+
+def _update_public_keys() -> dict[str, str]:
+    """Return embedded/QA public keys without ever reading private material."""
+    value = str(os.getenv("HALOCUE_UPDATE_PUBLIC_KEYS") or "").strip()
+    if not value:
+        return dict(UPDATE_PUBLIC_KEYS)
+    try:
+        payload = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return {
+        str(key): str(item)
+        for key, item in payload.items()
+        if isinstance(key, str) and isinstance(item, str)
+    } if isinstance(payload, dict) else {}
+
+
+def _write_update_state(payload: dict) -> None:
+    try:
+        UPDATE_STATE.parent.mkdir(parents=True, exist_ok=True)
+        temporary = UPDATE_STATE.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, UPDATE_STATE)
+    except OSError:
+        pass
+
+
+def check_for_update() -> dict:
+    """Fetch and verify the signed release manifest for CLI/UI consumers."""
+    checked_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    try:
+        manifest = fetch_manifest(
+            str(os.getenv("HALOCUE_UPDATE_MANIFEST_URL") or DEFAULT_UPDATE_MANIFEST_URL),
+            public_keys=_update_public_keys(),
+        )
+    except UpdateError as exc:
+        result = {"status": "unavailable", "checked_at": checked_at, "message": str(exc)}
+    else:
+        result = {
+            "status": "available" if manifest.is_newer else "current",
+            "checked_at": checked_at,
+            "version": manifest.version,
+            "release_notes_url": manifest.release_notes_url,
+            "archive_url": manifest.archive_url,
+            "archive_size": manifest.archive_size,
+        }
+    _write_update_state(result)
+    return result
+
+
+def download_update() -> dict:
+    """Download and safely stage the newest signed archive after confirmation."""
+    manifest = fetch_manifest(
+        str(os.getenv("HALOCUE_UPDATE_MANIFEST_URL") or DEFAULT_UPDATE_MANIFEST_URL),
+        public_keys=_update_public_keys(),
+    )
+    if not manifest.is_newer:
+        return {"status": "current", "version": manifest.version}
+    staging = LAYOUT.user_data_root / "updates" / "staging"
+    archive, extracted = stage_update(manifest, staging)
+    install_root = Path(sys.executable).resolve().parent if LAYOUT.frozen else LAYOUT.resource_root
+    result = {
+        "status": "staged",
+        "version": manifest.version,
+        "archive": str(archive),
+        "staged_root": str(extracted),
+        "install_root": str(install_root),
+    }
+    _write_update_state(result)
+    return result
+
+
+def schedule_update_check() -> None:
+    if not LAYOUT.frozen and not os.getenv("HALOCUE_UPDATE_CHECK_DEV"):
+        return
+    threading.Thread(target=check_for_update, name="halocue-update-check", daemon=True).start()
+
+
+def write_migration_status() -> dict:
+    target = Path(os.getenv("HALOCUE_1X_DATA_DIR") or (LAYOUT.user_data_root / "integrated"))
+    report = migration_report(legacy_state_path(), target)
+    try:
+        write_report(MIGRATION_STATE, report)
+    except OSError:
+        pass
+    return report
 
 
 def _discover_aa(
@@ -77,7 +178,7 @@ def build_environment_report(
         missing_files.append(name)
     database_path = (
         LAYOUT.database_path
-        if LAYOUT.frozen and root == PROGRAM_DIR
+        if root == PROGRAM_DIR
         else root / "aa_assets.db"
     )
     database_ready = database_path.is_file()
@@ -368,7 +469,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8770)
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--ready-file", type=Path)
+    parser.add_argument("--no-update", action="store_true", help="disable the background update check")
+    parser.add_argument("--check-update", action="store_true", help="check the signed update manifest and exit")
+    parser.add_argument("--download-update", action="store_true", help="download and stage a confirmed signed update")
+    parser.add_argument("--migration-status", action="store_true", help="print the legacy-data migration report and exit")
     args = parser.parse_args(argv)
+
+    if args.check_update:
+        print(json.dumps(check_for_update(), ensure_ascii=False))
+        return 0
+    if args.download_update:
+        try:
+            print(json.dumps(download_update(), ensure_ascii=False))
+        except UpdateError as exc:
+            print(json.dumps({"status": "unavailable", "message": str(exc)}, ensure_ascii=False))
+            return 1
+        return 0
+    if args.migration_status:
+        print(json.dumps(write_migration_status(), ensure_ascii=False))
+        return 0
 
     report = build_environment_report(
         PROGRAM_DIR,
@@ -392,6 +511,10 @@ def main(argv: list[str] | None = None) -> int:
         print(message)
         _show_error(message)
         return 1
+
+    if not args.no_update:
+        schedule_update_check()
+    write_migration_status()
 
     aa_path = str(report["aa"].get("path") or "").strip()
     aa_data = Path(aa_path) if aa_path else None

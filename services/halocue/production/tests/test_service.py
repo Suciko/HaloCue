@@ -265,6 +265,7 @@ def test_task_cg_background_is_frozen_previewable_and_injected_as_bg_override(se
         "name": "雨夜的约定",
         "source": "task_import",
         "asset_id": registered["asset"]["asset_id"],
+        "preview_available": True,
     }
     preview = service.run_resource_preview(created["run"]["run_id"], "backgrounds", key)
     assert preview.path.is_file()
@@ -509,6 +510,7 @@ def test_performance_preview_uses_current_draft_and_frozen_cast(settings, tmp_pa
     frame = next(item for item in preview["frames"] if item["card_id"] == line["card_id"])
     assert frame["presentation"] == "dialogue"
     assert frame["background_key"] == "BG_Classroom"
+    assert frame["background_preview_available"] is False
     assert frame["speaker"] == {"name": "爱丽丝", "mapping_kind": "portrait", "character_id": "alice-school"}
     assert {item["kind"]: item["value"] for item in frame["annotations"]} == {"表情": "01", "画面效果": "特写"}
     assert "private_source" not in json.dumps(preview, ensure_ascii=False)
@@ -637,6 +639,28 @@ def test_cast_mapping_review_and_optimistic_version_gate(settings):
     service.jobs.close()
 
 
+def test_editing_installed_draft_invalidates_previous_build_and_install_claim(settings):
+    service = ProductionService(settings)
+    created = service.create_run({"project": "已安装后修改", "source": {"kind": "inline", "text": SCRIPT}})
+    run_id = created["run"]["run_id"]
+    current = created["draft"]["draft_version"]
+    for speaker in ("爱丽丝", "凯伊"):
+        result = service.update_cast(run_id, {"speaker": speaker, "mapping": {"kind": "narrator"}, "expected_draft_version": current})
+        current = result["draft"]["draft_version"]
+    approved = service.approve_review(run_id, {"card_ids": None, "expected_draft_version": current})
+    run = service._run(run_id)
+    run.state = "installed"
+    run.last_build_id = "build-old"
+    run.last_installed_project = "已安装工程"
+    service.repository.save_run(run)
+
+    changed = service.update_cast(run_id, {"speaker": "爱丽丝", "mapping": {"kind": "voice", "display_name": "爱丽丝语音"}, "expected_draft_version": approved["draft"]["draft_version"]})
+    assert changed["run"]["state"] == "waiting_for_review"
+    assert changed["run"]["last_build_id"] is None
+    assert changed["run"]["last_installed_project"] is None
+    service.jobs.close()
+
+
 def test_compile_reports_missing_configuration_after_review(settings):
     service = ProductionService(settings)
     created = service.create_run(
@@ -733,6 +757,88 @@ def test_ai_preflight_is_read_only_and_persists_a_safe_task_local_result(setting
     after = service.run_detail(created["run"]["run_id"])["draft"]
     assert after["draft_version"] == before["draft_version"]
     assert after["content_revision"] == before["content_revision"]
+    service.jobs.close()
+
+
+def test_ai_preflight_does_not_expose_server_validation_fields_to_model(settings, monkeypatch):
+    """The model must not be primed to echo internal line-count metadata."""
+    monkeypatch.setenv("HALOCUE_PREFLIGHT_CONTEXT_KEY", "preflight-secret")
+    service = ProductionService(settings)
+    service.configure_direction_model(
+        {
+            "provider": "openai",
+            "base_url": "https://example.invalid/v1",
+            "model": "preflight-model",
+            "api_key_env": "HALOCUE_PREFLIGHT_CONTEXT_KEY",
+        }
+    )
+
+    captured: dict[str, str] = {}
+
+    class CapturingProvider:
+        name = "fake"
+        model = "preflight-model"
+
+        def complete_json(self, _system, volatile, _user, _schema):
+            captured["volatile"] = volatile
+            return {"potential_speakers": [], "scenes": [], "ambiguities": []}
+
+    service.direction_models.provider = lambda: CapturingProvider()
+    created = service.create_run(
+        {"project": "AI 初审上下文", "source": {"kind": "inline", "text": "旁白: 开始\n"}}
+    )
+    _, accepted = service.start_ai_preflight(created["run"]["run_id"])
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        job = service.jobs.get(accepted["job"]["job_id"])
+        if job and job.state in {"succeeded", "failed"}:
+            break
+        time.sleep(0.01)
+    assert job and job.state == "succeeded"
+    assert captured["volatile"] == ""
+    service.jobs.close()
+
+
+def test_ai_preflight_normalizes_missing_advisory_scene_fields(settings, monkeypatch):
+    """A scene with only line bounds remains a usable read-only suggestion."""
+    monkeypatch.setenv("HALOCUE_PREFLIGHT_PARTIAL_KEY", "preflight-secret")
+    service = ProductionService(settings)
+    service.configure_direction_model(
+        {
+            "provider": "openai",
+            "base_url": "https://example.invalid/v1",
+            "model": "preflight-model",
+            "api_key_env": "HALOCUE_PREFLIGHT_PARTIAL_KEY",
+        }
+    )
+
+    class PartialProvider:
+        name = "fake"
+        model = "preflight-model"
+
+        def complete_json(self, _system, _volatile, _user, _schema):
+            return {
+                "potential_speakers": [],
+                "scenes": [{"start_line": 1, "end_line": 1}],
+                "ambiguities": [],
+            }
+
+    service.direction_models.provider = lambda: PartialProvider()
+    created = service.create_run(
+        {"project": "AI 初审可选场景字段", "source": {"kind": "inline", "text": "旁白: 开始\n"}}
+    )
+    _, accepted = service.start_ai_preflight(created["run"]["run_id"])
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        job = service.jobs.get(accepted["job"]["job_id"])
+        if job and job.state in {"succeeded", "failed"}:
+            break
+        time.sleep(0.01)
+    assert job and job.state == "succeeded"
+    scene = service.ai_preflights(created["run"]["run_id"])["items"][0]["analysis"]["scenes"][0]
+    assert scene["location"] == ""
+    assert scene["time"] == ""
+    assert scene["background_need"] == ""
     service.jobs.close()
 
 
@@ -1696,8 +1802,11 @@ def test_resource_catalog_is_searchable_and_does_not_expose_paths(settings, tmp_
     characters = service.list_resources("characters", query="爱丽丝")
 
     assert backgrounds["items"][0]["key"] == "BG_RainyStation"
+    assert backgrounds["items"][0]["preview_available"] is False
     assert sounds["items"][0]["key"] == "SE_Confirm_01"
+    assert sounds["items"][0]["preview_available"] is False
     assert characters["items"][0]["face_count"] == 2
+    assert characters["items"][0]["preview_available"] is False
     assert not any(
         "path" in item
         for result in (backgrounds, sounds, characters)
@@ -1789,7 +1898,12 @@ def test_popup_catalog_is_separate_from_cg_background_selection(settings, tmp_pa
     service = ProductionService(configured)
     catalog = service.list_resources("cg", query="0070")
     assert catalog["items"] == [
-        {"key": "Event03_CH0070", "name": "Event03_CH0070", "source": "aa_popup_override"}
+        {
+            "key": "Event03_CH0070",
+            "name": "Event03_CH0070",
+            "source": "aa_popup_override",
+            "preview_available": True,
+        }
     ]
     created = service.create_run(
         {"project": "冻结 CG", "source": {"kind": "inline", "text": "老师: 测试\n"}}

@@ -69,6 +69,86 @@ class ToolFollowupProvider(FakeWritingProvider):
         }
 
 
+class FailingToolFollowupProvider(ToolFollowupProvider):
+    def discuss_work(self, messages: list[dict], work_context: dict) -> dict:
+        if work_context.get("tool_followup"):
+            raise DomainError(
+                "writing_provider_failed",
+                "工具结果回传被模型服务拒绝。",
+                status=502,
+                details={
+                    "failure_kind": "provider_invalid_request",
+                    "http_status": 400,
+                    "provider_message": "unsupported assistant message field",
+                    "operation": "作品讨论",
+                    "reason": "tool follow-up was rejected",
+                },
+            )
+        return super().discuss_work(messages, work_context)
+
+
+class ChainedToolFollowupProvider(ToolFollowupProvider):
+    """A realistic two-step lookup: work context first, then character cards."""
+
+    def discuss_work(self, messages: list[dict], work_context: dict) -> dict:
+        self.contexts.append(work_context)
+        round_number = int(work_context.get("tool_round") or 0)
+        self._usage = {
+            "input_tokens": 20,
+            "output_tokens": 5,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "estimated_cost": 0.001,
+        }
+        if not work_context.get("tool_followup"):
+            return {
+                "text": "先读取作品上下文。",
+                "questions": [],
+                "reasoning_summary": "需要先确认已采纳资料。",
+                "ready_for_proposal": False,
+                "tool_calls": [{"id": "chain-1", "tool": "read_work_context", "arguments": {}}],
+            }
+        if round_number == 1:
+            return {
+                "text": "再查找已存在的人物卡。",
+                "questions": [],
+                "reasoning_summary": "还需要核对人物是否已存在。",
+                "ready_for_proposal": False,
+                "tool_calls": [{"id": "chain-2", "tool": "search_character_cards", "arguments": {"query": "凯伊"}}],
+            }
+        return {
+            "text": "两项资料都已核对，现在可以继续讨论。",
+            "questions": ["要先整理人物卡，还是先确定场景冲突？"],
+            "reasoning_summary": "已完成作品资料和人物资料的连续核对。",
+            "ready_for_proposal": False,
+        }
+
+
+class EndlessToolFollowupProvider(ToolFollowupProvider):
+    """Keeps asking for the same safe lookup so the service limit is observable."""
+
+    def discuss_work(self, messages: list[dict], work_context: dict) -> dict:
+        self.contexts.append(work_context)
+        self._usage = {
+            "input_tokens": 10,
+            "output_tokens": 2,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "estimated_cost": 0.0005,
+        }
+        return {
+            "text": "继续核对已有资料。",
+            "questions": [],
+            "reasoning_summary": "请求下一轮只读查询。",
+            "ready_for_proposal": False,
+            "tool_calls": [{
+                "id": f"loop-{len(self.contexts)}",
+                "tool": "read_work_context",
+                "arguments": {},
+            }],
+        }
+
+
 class StandardDraftToolProvider(FakeWritingProvider):
     is_simulation = False
     kind = "standard-draft-tool-test"
@@ -269,6 +349,84 @@ def test_provider_tool_call_is_dispatched_then_followed_up_in_one_agent_run(tmp_
     assert assistant["cache_read_tokens"] == 25
     assert assistant["cache_write_tokens"] == 5
     assert assistant["estimated_cost"] == pytest.approx(0.003)
+
+
+def test_tool_followup_failure_preserves_safe_provider_diagnosis(tmp_path):
+    service = WritingService(tmp_path)
+    work = service.create_work({"title": "工具回传失败", "idea": "先讨论一台旧终端。"})
+    service.provider = FailingToolFollowupProvider()
+    thread = work["conversation_threads"][0]
+
+    with pytest.raises(DomainError) as failed:
+        service.post_conversation_message(
+            work["id"], thread["id"],
+            {"expected_thread_version": thread["version"], "text": "先检查已有资料再回答。"},
+        )
+
+    assert failed.value.code == "agent_failed"
+    run = next(
+        item for item in service.get_work(work["id"])["agent_runs"]
+        if item["id"] == failed.value.details["agent_run_id"]
+    )
+    assert run["failure"] == {
+        "code": "writing_provider_failed",
+        "type": "DomainError",
+        "message": "工具结果回传被模型服务拒绝。",
+        "failure_kind": "provider_invalid_request",
+        "http_status": 400,
+        "provider_message": "unsupported assistant message field",
+        "operation": "作品讨论",
+        "reason": "tool follow-up was rejected",
+    }
+
+
+def test_provider_tool_chain_runs_two_lookup_rounds_before_final_reply(tmp_path):
+    service = WritingService(tmp_path)
+    work = service.create_work({"title": "连续查询", "idea": "先讨论一台旧终端。"})
+    provider = ChainedToolFollowupProvider()
+    service.provider = provider
+    thread = work["conversation_threads"][0]
+
+    result = service.post_conversation_message(
+        work["id"], thread["id"],
+        {"expected_thread_version": thread["version"], "text": "先查资料，再回答。"},
+    )
+
+    assert [context.get("tool_round") for context in provider.contexts] == [None, 1, 2]
+    assert provider.contexts[1]["tool_results"][0]["tool"] == "read_work_context"
+    assert provider.contexts[2]["tool_results"][0]["tool"] == "search_character_cards"
+    run = next(item for item in result["work"]["agent_runs"] if item["id"] == result["agent_run_id"])
+    assert run["status"] == "completed"
+    assert [(item["tool_name"], item["status"]) for item in run["tool_calls"]] == [
+        ("read_work_context", "succeeded"),
+        ("search_character_cards", "succeeded"),
+    ]
+    assistant = result["work"]["conversation_threads"][0]["messages"][-1]
+    assert assistant["content"]["text"] == "两项资料都已核对，现在可以继续讨论。"
+    assert not result["work"]["proposals"]
+
+
+def test_provider_tool_chain_stops_after_three_rounds_without_formal_write(tmp_path):
+    service = WritingService(tmp_path)
+    work = service.create_work({"title": "查询上限", "idea": "先讨论一台旧终端。"})
+    provider = EndlessToolFollowupProvider()
+    service.provider = provider
+    thread = work["conversation_threads"][0]
+
+    with pytest.raises(DomainError) as failed:
+        service.post_conversation_message(
+            work["id"], thread["id"],
+            {"expected_thread_version": thread["version"], "text": "持续核对资料。"},
+        )
+
+    assert failed.value.code == "agent_failed"
+    state = service.get_work(work["id"])
+    run = next(item for item in state["agent_runs"] if item["id"] == failed.value.details["agent_run_id"])
+    assert run["failure"]["code"] == "agent_tool_round_limit"
+    assert len(run["tool_calls"]) == 3
+    assert not state["proposals"]
+    assistant = state["conversation_threads"][0]["messages"][-1]
+    assert "没有修改正式资料" in assistant["content"]["text"]
 
 
 def test_standard_draft_tool_arguments_are_not_overwritten_by_empty_preview(tmp_path):

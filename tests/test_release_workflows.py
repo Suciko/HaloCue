@@ -82,7 +82,8 @@ def test_release_workflow_is_manual_and_public_only():
     assert "build_private" not in lowered
     assert "spine_source" not in lowered
     assert "private-windows" not in lowered
-    assert "secrets." not in lowered
+    assert "secrets.halocue_update_signing_key" in lowered
+    assert lowered.count("secrets.") == 1
 
 
 def test_version_gate_accepts_only_exact_stable_tag_and_metadata():

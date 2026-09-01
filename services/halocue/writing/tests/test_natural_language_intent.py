@@ -17,6 +17,15 @@ def test_intent_plan_ui_distinguishes_read_only_discussion(tmp_path):
     assert "本轮只讨论，没有修改正式作品。" in source
 
 
+def test_decision_dock_does_not_repeat_confirmed_waiting_intent():
+    source = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+
+    assert "const intentNeedsConfirmation=item=>" in source
+    assert "item.result?.confirmed===true" in source
+    assert "action.id==='user.confirm'&&action.status==='completed'" in source
+    assert "state.activeAgentRunId?'确认已记录，Agent 正在继续处理':'确认已记录，等待审查候选'" in source
+
+
 def test_empty_workspace_intent_creates_unnamed_work_and_scene(tmp_path):
     service = WritingService(tmp_path)
     result = service.plan_intent({

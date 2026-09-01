@@ -22,7 +22,9 @@ from halocue_writing.service import WritingService
 VIEWPORTS = ((1920, 1080), (1440, 900), (1366, 768), (390, 844))
 
 
-def build_fixture(service: WritingService, suffix: str) -> tuple[str, str, str]:
+def build_fixture(
+    service: WritingService, suffix: str, *, empty_base: bool = False
+) -> tuple[str, str, str]:
     work = service.create_work({"title": f"Phase2 场景 Diff {suffix}"})
     work_id = work["id"]
     result = service.save_brief(
@@ -81,6 +83,8 @@ def build_fixture(service: WritingService, suffix: str) -> tuple[str, str, str]:
     result = service.generate_scene_candidate(
         work_id, scene_id, {"expected_version": result["work"]["version"]}
     )
+    if empty_base:
+        return work_id, scene_id, result["proposal_id"]
     result = service.accept_proposal(
         work_id,
         result["proposal_id"],
@@ -145,7 +149,9 @@ def main() -> None:
                 try:
                     for width, height in VIEWPORTS:
                         work_id, scene_id, proposal_id = build_fixture(
-                            service, f"{width}x{height}"
+                            service,
+                            f"{width}x{height}",
+                            empty_base=width == 1920,
                         )
                         page = browser.new_page(
                             viewport={"width": width, "height": height}
@@ -165,14 +171,83 @@ def main() -> None:
                                 {"type": "pageerror", "text": str(error)}
                             ),
                         )
-                        url = (
-                            f"http://127.0.0.1:{server.server_port}/?section=writing"
-                            f"&work_id={work_id}&stage=draft&scene_id={scene_id}"
+                        failed_requests: list[dict] = []
+                        page.on(
+                            "requestfailed",
+                            lambda request: failed_requests.append(
+                                {
+                                    "url": request.url,
+                                    "error": request.failure or "request failed",
+                                }
+                            ),
                         )
-                        response = page.goto(url, wait_until="domcontentloaded")
+                        homepage_url = (
+                            f"http://127.0.0.1:{server.server_port}/?section=works"
+                            f"&work_id={work_id}"
+                        )
+                        response = page.goto(
+                            homepage_url, wait_until="domcontentloaded"
+                        )
                         if response is None or not response.ok:
-                            raise AssertionError(f"workbench navigation failed: {url}")
+                            raise AssertionError(
+                                f"work homepage navigation failed: {homepage_url}"
+                            )
                         page.locator("body:not(.app-loading)").wait_for(timeout=20_000)
+                        status = page.locator(".work-user-status")
+                        status.wait_for(timeout=20_000)
+                        status_action = status.locator("[data-user-status-action]")
+                        assert status.locator("h3").inner_text() == "审查正文候选"
+                        assert status_action.inner_text() == "审查正文候选"
+                        assert status_action.get_attribute(
+                            "data-user-status-action"
+                        ) == "review_scene_candidate"
+                        assert page.locator(".work-agent-empty").count() == 0
+
+                        homepage_metrics = page.evaluate(
+                            """() => {
+                              const status = document.querySelector('.work-user-status');
+                              const action = status?.querySelector('[data-user-status-action]');
+                              const visiblePrimaryActions = [...document.querySelectorAll('.work-user-status button.primary')]
+                                .filter(element => element.getClientRects().length).length;
+                              const box = action?.getBoundingClientRect();
+                              return {
+                                overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                                visiblePrimaryActions,
+                                actionBox: box ? {top: box.top, right: box.right, bottom: box.bottom, left: box.left} : null,
+                                viewport: {width: innerWidth, height: innerHeight},
+                              };
+                            }"""
+                        )
+                        assert homepage_metrics["viewport"] == {
+                            "width": width,
+                            "height": height,
+                        }
+                        assert homepage_metrics["overflowX"] == 0
+                        assert homepage_metrics["visiblePrimaryActions"] == 1
+                        action_box = homepage_metrics["actionBox"]
+                        assert action_box
+                        assert action_box["left"] >= 0
+                        assert action_box["right"] <= width
+                        assert action_box["top"] >= 0
+                        assert action_box["bottom"] <= height
+
+                        homepage_screenshot = (
+                            args.output
+                            / f"phase2-work-next-action-{width}x{height}.png"
+                        )
+                        page.screenshot(path=homepage_screenshot, full_page=False)
+
+                        status_action.click()
+                        page.wait_for_function(
+                            """([workId, sceneId]) => {
+                              const params = new URLSearchParams(location.search);
+                              return params.get('section') === 'writing'
+                                && params.get('work_id') === workId
+                                && params.get('scene_id') === sceneId;
+                            }""",
+                            arg=[work_id, scene_id],
+                            timeout=20_000,
+                        )
                         diff = page.locator("[data-scene-diff-root]")
                         diff.wait_for(timeout=20_000)
                         page.wait_for_timeout(250)
@@ -187,7 +262,7 @@ def main() -> None:
                               overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
                               activeGlobalNav: [...document.querySelectorAll('.primary-nav [data-section].active')]
                                 .map(el => el.dataset.section),
-                              diffChanges: document.querySelectorAll('[data-scene-diff-change]').length,
+                              diffChanges: document.querySelectorAll('[data-scene-diff-root] [data-scene-change]').length,
                               binderVolumes: document.querySelectorAll('#treePanel [data-writing-volume]').length,
                               scope: document.querySelector('#crumb')?.textContent || '',
                             })"""
@@ -200,10 +275,39 @@ def main() -> None:
                         assert metrics["activeGlobalNav"] == ["writing"]
                         assert metrics["diffChanges"] >= 1
                         assert metrics["binderVolumes"] == 2
-                        assert "第一卷 / 第一章 / 门禁记录" in metrics["scope"]
+                        choice_previews = page.locator(
+                            ".scene-diff-choice [data-scene-change-preview]"
+                        )
+                        assert choice_previews.count() == metrics["diffChanges"]
+                        preview_texts = [
+                            choice_previews.nth(index).inner_text().strip()
+                            for index in range(choice_previews.count())
+                        ]
+                        assert all(preview_texts)
+                        assert len(set(preview_texts)) == len(preview_texts)
+                        assert "加入这段内容" not in diff.inner_text()
+                        assert page.locator(".scene-inline-empty").count() == 0
+                        assert "无对应文字" not in diff.inner_text()
+                        if width == 1920:
+                            assert page.locator(
+                                ".scene-full-context .scene-context-line.is-added"
+                            ).count() == metrics["diffChanges"]
+                            assert page.locator(
+                                ".scene-full-context .scene-context-line.is-removed"
+                            ).count() == 0
+                        assert "门禁记录" in metrics["scope"]
+                        if width > 640:
+                            assert "第一卷 / 第一章 / 门禁记录" in metrics["scope"]
 
                         panel_metrics = None
                         if width == 1366:
+                            page.evaluate(
+                                """() => {
+                                  window.HaloCuePanels.open('tree');
+                                  window.HaloCuePanels.open('inspector');
+                                }"""
+                            )
+                            page.wait_for_timeout(220)
                             panel_metrics = page.evaluate(
                                 """() => ({
                                   workspaceWidth: document.querySelector('#workspace').getBoundingClientRect().width,
@@ -280,10 +384,37 @@ def main() -> None:
                             assert button_box and nav_box
                             assert button_box["y"] + button_box["height"] < nav_box["y"]
 
+                            # Cross-surface navigation must not inherit the
+                            # manuscript's long scroll position, and leaving
+                            # the catalog must remove its overlay state.
+                            page.evaluate(
+                                "document.querySelector('#workspace').scrollTop = 240"
+                            )
+                            page.locator(
+                                ".mobile-more-menu > summary"
+                            ).click()
+                            page.locator(
+                                '.mobile-more-menu [data-section="assets"]'
+                            ).click()
+                            page.locator(".asset-catalog-hero").wait_for(
+                                timeout=20_000
+                            )
+                            assert page.locator("#workspace").evaluate(
+                                "element => element.scrollTop"
+                            ) == 0
+                            page.locator('[data-mobile="writing"]').click()
+                            diff.wait_for(timeout=20_000)
+                            assert page.locator(".asset-catalog-hero").count() == 0
+                            assert page.locator(".writing-mobile-tabs").is_visible()
+                            assert page.locator("#workspace").evaluate(
+                                "element => element.scrollTop"
+                            ) == 0
+
                         screenshot = args.output / f"phase2-scene-diff-{width}x{height}.png"
                         page.screenshot(path=screenshot, full_page=False)
 
-                        checkbox.uncheck()
+                        for index in range(page.locator("[data-scene-change]").count()):
+                            page.locator("[data-scene-change]").nth(index).uncheck()
                         assert apply_button.is_disabled()
                         assert apply_button.inner_text() == "应用 0 项修改"
                         checkbox.check()
@@ -308,15 +439,19 @@ def main() -> None:
                         assert proposal["status"] == "accepted"
                         assert scene["current_revision_id"] != proposal["base_revision_id"]
                         assert not console_issues
+                        assert not failed_requests
                         results.append(
                             {
                                 "viewport": f"{width}x{height}",
                                 "screenshot": screenshot.name,
+                                "homepage_screenshot": homepage_screenshot.name,
+                                "homepage_metrics": homepage_metrics,
                                 "metrics": metrics,
                                 "panel_metrics": panel_metrics,
                                 "selected_change_count": selected_count,
                                 "proposal_status_after_apply": proposal["status"],
                                 "console_issues": console_issues,
+                                "failed_requests": failed_requests,
                             }
                         )
                         page.close()

@@ -242,6 +242,17 @@ class Repository:
           kind TEXT NOT NULL, target_id TEXT NOT NULL, decision TEXT NOT NULL,
           note TEXT NOT NULL, created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS staged_imports (
+          import_id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL CHECK(kind IN ('aap','story')),
+          filename TEXT NOT NULL,
+          source_digest TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('staged','adopted')),
+          work_id TEXT REFERENCES works(id),
+          result_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS conversation_threads (
           id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works(id),
           scope_type TEXT NOT NULL, scope_id TEXT NOT NULL, title TEXT NOT NULL,

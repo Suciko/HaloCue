@@ -61,6 +61,15 @@ body:has(.app-shell.production-mode) #saveStatus {
   box-shadow: inset 2px 0 0 #64c8a8 !important;
 }
 
+/* Production has its own stage flow and contextual asset/task actions. Keep
+   the rail focused on moving between writing and production instead of
+   repeating the low-frequency destinations already available in “更多”. */
+.app-shell.production-mode .primary-nav .nav-item[data-section="assets"],
+.app-shell.production-mode .primary-nav .nav-item[data-section="references"],
+.app-shell.production-mode .primary-nav .nav-item[data-section="tasks"] {
+  display: none;
+}
+
 .app-shell.production-mode .crumb {
   grid-column: 2 / 4;
 }
@@ -88,6 +97,59 @@ body:has(.app-shell.production-mode) #saveStatus {
   font-size: 15px;
 }
 
+.production-more-actions {
+  position: relative;
+}
+
+.production-more-actions > summary {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong, #c2c8d2);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink-2, #303b4f);
+  cursor: pointer;
+  font-size: 12px;
+  list-style: none;
+}
+
+.production-more-actions > summary::-webkit-details-marker {
+  display: none;
+}
+
+.production-more-actions[open] > summary {
+  border-color: #8da6c8;
+  background: #edf4fc;
+  color: #345a91;
+}
+
+.production-more-actions > div {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  min-width: 150px;
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid var(--line, #d9dde4);
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(31, 39, 53, .16);
+}
+
+.production-more-actions > div button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.production-more-actions > div button:hover,
+.production-more-actions > div button:focus-visible {
+  background: #f3f6fa;
+}
+
 @media (max-width: 760px) {
   .app-shell.production-mode,
   .app-shell.production-mode.tree-collapsed,
@@ -111,8 +173,7 @@ body:has(.app-shell.production-mode) #saveStatus {
     grid-column: 2;
   }
 
-  .production-top-actions .production-overview,
-  .production-top-actions .production-refresh {
+  .production-top-actions .production-overview {
     display: none;
   }
 
@@ -171,6 +232,13 @@ body:has(.app-shell.production-mode) #saveStatus {
   min-height: 0;
   overflow: hidden;
   background: var(--canvas);
+}
+
+/* Keep the native hidden contract stronger than the responsive grid rule so
+   loading/error boundaries can replace the shell instead of leaving stale UI
+   visible while the state card is below the viewport. */
+.embedded-production-shell[hidden] {
+  display: none !important;
 }
 
 @media (max-width: 760px) {
@@ -447,6 +515,69 @@ body:has(.app-shell.production-mode) #saveStatus {
   padding: 32px;
   color: #8a3f38;
   font: 14px/1.7 var(--font-ui, sans-serif);
+}
+
+.production-surface-state,
+.production-embed-empty {
+  display: grid;
+  min-height: 100%;
+  padding: 32px;
+  place-items: center;
+  background: #f4f6f8;
+  color: var(--production-ink, #202735);
+}
+
+.production-surface-state[hidden] {
+  display: none !important;
+}
+
+.production-surface-state-card {
+  display: grid;
+  width: min(520px, 100%);
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 24px;
+  border: 1px solid var(--production-line, #d9dde4);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(31, 39, 53, .08);
+}
+
+.production-surface-state-mark {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--production-blue-soft, #edf4fc);
+  color: var(--production-blue, #3f69a7);
+  font-weight: 700;
+}
+
+.production-surface-state[data-state="error"] .production-surface-state-mark,
+.production-surface-state[data-state="missing-run"] .production-surface-state-mark {
+  background: #fbefed;
+  color: #a54a42;
+}
+
+.production-surface-state-card strong {
+  display: block;
+  margin: 3px 0 6px;
+  font-size: 16px;
+}
+
+.production-surface-state-card p {
+  margin: 0;
+  color: var(--production-muted, #697386);
+  line-height: 1.6;
+}
+
+.production-surface-state-card .production-embed-retry {
+  margin-top: 16px;
+  border-color: var(--production-blue, #3f69a7);
+  background: var(--production-blue, #3f69a7);
+  color: #fff;
 }
 
 .embedded-production-shell .modern-dropzone {
@@ -1300,6 +1431,18 @@ body:has(.app-shell.production-mode) #saveStatus {
   }
 }
 
+@media (max-width: 760px) {
+  .embedded-production-shell .review-actions {
+    overflow: visible;
+  }
+  .embedded-production-shell .production-review-tool-list {
+    right: auto;
+    left: 0;
+    min-width: min(100%, 260px);
+    max-width: calc(100vw - 28px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .production-top-actions .quiet,
   .embedded-production-shell button {
@@ -1486,6 +1629,7 @@ body:has(.app-shell.production-mode) #saveStatus {
   padding: 0 0 0 12px;
   border-left: 1px solid var(--line, #d9dde4);
 }
+.embedded-background-groups[hidden] { display: none !important; }
 
 .embedded-background-group-buttons {
   display: grid;
@@ -1728,6 +1872,35 @@ body:has(.app-shell.production-mode) #saveStatus {
   background: var(--production-blue-soft);
   box-shadow: none;
 }
+.embedded-production-shell .production-flow-strip .stage-list li[data-stage-state]::before {
+  position: absolute;
+  top: 10px;
+  left: 7px;
+  width: 3px;
+  height: calc(100% - 20px);
+  border-radius: 3px;
+  background: #cbd3df;
+  content: "";
+}
+.embedded-production-shell .production-flow-strip .stage-list li[data-stage-state="current"]::before {
+  background: var(--production-blue);
+}
+.embedded-production-shell .production-flow-strip .stage-list li[data-stage-state="done"]::before {
+  background: #4e8b73;
+}
+.embedded-production-shell .production-flow-strip .stage-list li[data-stage-state="locked"]::before {
+  background: #dfe3e9;
+}
+.embedded-production-shell .production-flow-strip .stage-list em[data-stage-state] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
 .embedded-production-shell .production-flow-strip .stage-list b {
   width: 28px;
   height: 28px;
@@ -1799,6 +1972,7 @@ body:has(.app-shell.production-mode) #saveStatus {
 }
 .embedded-production-shell .review-head > div:first-child { min-width: 0; flex: 1 1 240px; }
 .embedded-production-shell .review-actions { flex: 0 1 auto; }
+.embedded-production-shell .production-review-tools { position: relative; }
 .embedded-production-shell .review-actions > details > summary {
   display: inline-flex;
   min-height: 32px;
@@ -1816,6 +1990,8 @@ body:has(.app-shell.production-mode) #saveStatus {
 .embedded-production-shell .production-review-tool-list {
   position: absolute;
   z-index: 6;
+  top: calc(100% + 6px);
+  right: 0;
   display: grid;
   min-width: 180px;
   gap: 4px;
@@ -1924,6 +2100,13 @@ body:has(.app-shell.production-mode) #saveStatus {
   background-position: center;
   background-size: cover;
 }
+.embedded-production-shell .production-preview-background {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 .embedded-production-shell .production-preview-frame::after {
   content: "";
   position: absolute;
@@ -1963,26 +2146,27 @@ body:has(.app-shell.production-mode) #saveStatus {
 .embedded-production-shell .production-review-ready .buildbar { border-color: #bad6c7; background: #f1f8f4; }
 .embedded-production-shell .production-review-ready .buildbar .primary { box-shadow: 0 5px 12px rgba(57, 115, 88, .16); }
 
-.embedded-production-shell .production-settings-workbench .settings-tabs {
+:host .production-settings-workbench .settings-tabs {
   display: flex;
   gap: 4px;
   margin-bottom: 16px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--production-line);
 }
-.embedded-production-shell .production-settings-workbench .settings-tabs button { border-color: transparent; background: transparent; }
-.embedded-production-shell .production-settings-workbench .settings-tabs button.active { border-color: #c6d5e8; background: #edf4fc; color: var(--production-blue); }
-.embedded-production-shell .production-render-summary { display: grid; gap: 5px; padding: 15px; border: 1px solid var(--production-line); border-radius: 6px; background: #f8fafc; }
-.embedded-production-shell .production-render-summary strong { color: var(--production-ink); font-size: 17px; }
-.embedded-production-shell .production-render-summary p { margin: 0; color: var(--production-muted); line-height: 1.5; }
-.embedded-production-shell .production-render-summary[data-state="ready"] { border-color: #b8d9c8; background: #f1f8f4; }
-.embedded-production-shell .production-render-summary[data-state="blocked"] { border-color: #e3c5a5; background: #fff9f0; }
-.embedded-production-shell .production-technical-details { margin-top: 14px; color: var(--production-muted); font-size: 12px; }
+:host .production-settings-workbench .settings-tabs button { border-color: transparent; background: transparent; }
+:host .production-settings-workbench .settings-tabs button.active { border-color: #c6d5e8; background: #edf4fc; color: var(--production-blue); }
+:host .production-render-summary { display: grid; gap: 5px; padding: 15px; border: 1px solid var(--production-line); border-radius: 6px; background: #f8fafc; }
+:host .production-render-summary strong { color: var(--production-ink); font-size: 17px; }
+:host .production-render-summary p { margin: 0; color: var(--production-muted); line-height: 1.5; }
+:host .production-render-summary[data-state="ready"] { border-color: #b8d9c8; background: #f1f8f4; }
+:host .production-render-summary[data-state="blocked"] { border-color: #e3c5a5; background: #fff9f0; }
+:host .production-technical-details { margin-top: 14px; color: var(--production-muted); font-size: 12px; }
 
-.embedded-production-shell .production-asset-workbench .asset-library-shell > header p { display: none; }
-.embedded-production-shell .production-asset-workbench .asset-source,
-.embedded-production-shell .production-asset-workbench .asset-library-item > div > small:first-of-type { display: none; }
-.embedded-production-shell .production-asset-workbench .asset-library-results { min-height: 100px; }
+:host .production-asset-workbench .asset-library-shell > header p { display: none; }
+:host .production-asset-workbench .asset-source,
+:host .production-asset-workbench .asset-technical-key,
+:host .production-asset-workbench .asset-library-item > div > small:first-of-type { display: none; }
+:host .production-asset-workbench .asset-library-results { min-height: 100px; }
 
 /* Keep the persistent compile action in the page flow. The card list and
    inspector own their scrolling, so the action never paints over content. */
@@ -2059,6 +2243,167 @@ body:has(.app-shell.production-mode) #saveStatus {
   .embedded-production-shell .production-review-side .production-live-preview { grid-template-rows: auto 1fr; }
 }
 
+/* The embedded action bar sits at the bottom of the work surface. Lift
+   transient feedback above it so success/error messages never hide the next
+   action on desktop. Phones get a top placement in the media rule below. */
+.embedded-production-shell ~ .toast {
+  top: 10px;
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+@media (max-width: 800px) {
+  .embedded-production-shell.toast-visible > .workspace > .page {
+    padding-top: 48px;
+  }
+
+  /* Keep transient feedback clear of the step strip, page heading, and the
+     persistent action bar on phones. The toast is a sibling of the embedded
+     shell inside the ShadowRoot, so it needs its own mobile placement. */
+  .embedded-production-shell ~ .toast {
+    top: 119px;
+    right: 14px;
+    left: auto;
+    bottom: auto;
+    transform: none;
+    max-width: calc(100vw - 28px);
+    white-space: normal;
+    text-align: center;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .embedded-production-shell .production-review-side { transition: none; }
+}
+
+/* Asset import is a vertical form on phones. Keep the title and import
+   context visible when changing kind scrolls the selected option into view. */
+:host #assetImportDialog .asset-import-shell > header {
+  position: sticky;
+  top: -22px;
+  z-index: 4;
+  margin: -22px -22px 12px;
+  padding: 22px 22px 0;
+  border-bottom: 1px solid #d9dde4;
+  background: #fff;
+}
+
+@media (max-width: 800px) {
+  :host #assetImportDialog .asset-import-shell > header {
+    margin-bottom: 0;
+  }
+
+  :host #assetImportDialog .asset-import-shell .import-steps {
+    position: sticky;
+    top: 120px;
+    z-index: 3;
+    margin: 12px 0;
+    padding: 4px 0;
+    background: #fff;
+  }
+
+  :host #assetImportDialog .asset-import-shell .import-kind {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* The import form is longer than the phone viewport. Keep its actions in
+     document flow so the fixed-looking footer never masks identifier fields. */
+  :host #assetImportDialog .asset-import-shell > .dialog-footer {
+    position: static;
+    margin: 16px 0 0;
+    padding: 12px 0 0;
+    box-shadow: none;
+  }
+}
+
+/* Mobile review keeps the two high-frequency actions beside the heading. The
+   background timeline is useful context, but should not consume the first
+   viewport before the user has chosen a card. */
+.embedded-production-shell .production-edit-toggle {
+  display: none;
+  min-height: 32px;
+  border-color: #d4b39f;
+  background: #fff8f3;
+  color: #8d4e35;
+}
+
+.embedded-production-shell .production-background-timeline-wrap {
+  margin: 0 0 14px;
+}
+
+.embedded-production-shell .production-background-timeline-wrap > summary {
+  display: none;
+}
+
+@media (max-width: 800px) {
+  .embedded-production-shell .production-edit-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+    white-space: normal;
+    line-height: 1.25;
+  }
+
+  .embedded-production-shell .production-background-timeline-wrap {
+    margin: 8px 0;
+    border: 1px solid #d2dce9;
+    border-radius: 6px;
+    background: #f8fbff;
+  }
+
+  .embedded-production-shell .production-background-timeline-wrap > summary {
+    display: flex;
+    min-height: 36px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    color: var(--production-ink);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+    list-style: none;
+  }
+
+  .embedded-production-shell .production-background-timeline-wrap > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .embedded-production-shell .production-background-timeline-wrap > summary::after {
+    content: '›';
+    color: #7d8ea4;
+    font-size: 17px;
+    line-height: 1;
+    transform: translateY(-1px);
+  }
+
+  .embedded-production-shell .production-background-timeline-wrap[open] > summary::after {
+    transform: rotate(90deg) translateX(-1px);
+  }
+
+  .embedded-production-shell .production-background-timeline {
+    margin: 0;
+    border: 0;
+    border-top: 1px solid #d2dce9;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .embedded-production-shell .production-review-side {
+    padding: 12px;
+  }
+
+  .embedded-production-shell .edit-open .production-live-preview {
+    display: none;
+  }
+
+  .embedded-production-shell .edit-open .production-review-side > .inspector {
+    display: block;
+    min-height: calc(100dvh - 24px);
+    overflow: auto;
+  }
 }

@@ -142,12 +142,14 @@ def release_source_summary(summary_text: str, artifact_text: str, manifest: dict
     """Assert that the release card visibly identifies both immutable sources."""
     ba_digest = manifest["ba_writing_source_digest"]
     source_digest = manifest["source_set_digest"]
-    ba_label_visible = "BA Skill" in summary_text
-    source_label_visible = "来源集" in summary_text
+    ba_label_visible = "写作规则校验" in summary_text
+    source_label_visible = "来源校验" in summary_text
     ba_digest_visible = abbreviated_digest(ba_digest) in summary_text
     source_digest_visible = abbreviated_digest(source_digest) in summary_text
 
-    assert "Hash" in artifact_text
+    assert "正文校验" in artifact_text
+    assert ba_digest not in artifact_text
+    assert source_digest not in artifact_text
     assert ba_label_visible and ba_digest_visible
     assert source_label_visible and source_digest_visible
     return {
@@ -303,7 +305,7 @@ def main() -> None:
                         )
                         page.locator('[data-action="freeze-release"]').click()
                         release_artifact = page.locator(
-                            ".artifact", has_text="交给制作的定稿"
+                            ".artifact:has([data-handoff])"
                         ).first
                         release_artifact.wait_for(timeout=20_000)
 
@@ -339,7 +341,8 @@ def main() -> None:
                             timeout=5_000
                         )
                         artifact_text = release_artifact.inner_text()
-                        assert release["content_hash"] in artifact_text
+                        assert abbreviated_digest(release["content_hash"]) in artifact_text
+                        assert release["content_hash"] not in artifact_text
                         source_summary = release_source_summary(
                             integrity_summary.inner_text(), artifact_text, manifest
                         )

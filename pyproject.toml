@@ -4,12 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "halocue"
-version = "0.9.3"
+version = "1.0.0"
 description = "Narrative staging for AzureArchive"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
 dependencies = [
     "anthropic>=0.40,<1",
+    "cryptography>=42,<46",
     "Pillow>=10,<13",
     "pywin32>=306; sys_platform == 'win32'",
     "pywebview==6.2.1; sys_platform == 'win32'",

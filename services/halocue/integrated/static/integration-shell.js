@@ -44,6 +44,8 @@
       shell.dataset.integrationShadowRoot = String(Boolean(document.querySelector("#productionModule")?.shadowRoot));
       shell.dataset.integrationSurfaceVisible = String(lastSample.visible);
       shell.dataset.integrationSurfaceBlank = String(lastSample.blank);
+      shell.dataset.productionSurfaceReady = String(lastSample.surfaceReady);
+      shell.dataset.productionSurfaceBlank = String(lastSample.blank);
       shell.dataset.integrationBlankSamples = String(blankSampleCount);
       shell.dataset.integrationMinimumArea = String(minimumSurfaceArea || 0);
       shell.dataset.integrationProductionWarmState = productionWarmup.state;
@@ -62,6 +64,10 @@
       const height = Math.round(rect?.height || 0);
       const area = width * height;
       const backgroundColor = element ? surfaceBackground(element) : "transparent";
+      const productionRoot = open ? element?.shadowRoot : null;
+      const surfaceReady = open
+        ? Boolean(productionRoot?.querySelector(".embedded-production-shell, .production-surface-state"))
+        : Boolean(element);
       const visible = Boolean(
         element
         && !element.hidden
@@ -71,7 +77,7 @@
         && style?.visibility !== "hidden"
         && Number(style?.opacity ?? 1) > 0
       );
-      const blank = !visible || isTransparent(backgroundColor);
+      const blank = !visible || (open && !surfaceReady) || isTransparent(backgroundColor);
       sampleCount += 1;
       if (reason === "transition" && blank) blankSampleCount += 1;
       if (visible) minimumSurfaceArea = minimumSurfaceArea === null ? area : Math.min(minimumSurfaceArea, area);
@@ -82,6 +88,7 @@
         width,
         height,
         backgroundColor,
+        surfaceReady,
         blank,
       };
       publishDiagnostics();
@@ -147,6 +154,8 @@
             blankSampleCount,
             noBlankSamples: blankSampleCount === 0,
             minimumArea: minimumSurfaceArea || 0,
+            productionSurfaceReady: surface.surfaceReady,
+            productionSurfaceBlank: surface.blank,
           },
         };
       },
@@ -292,6 +301,7 @@
             runId: params.get("run_id") || "",
             workId: params.get("work_id") || "",
             releaseId: params.get("release_id") || "",
+            replaceHistory: true,
           });
         }
       } else if (section && !["works", "writing", "references", "tasks"].includes(section)) {

@@ -46,7 +46,6 @@ def test_pyinstaller_policy_uses_minimal_hidden_imports_and_excludes_global_stac
         "_tkinter",
         "archspec",
         "bcrypt",
-        "cryptography",
         "cv2",
         "invoke",
         "matplotlib",

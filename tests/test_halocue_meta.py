@@ -9,7 +9,7 @@ from halocue_meta import (
 
 def test_release_identity_is_exact():
     assert APP_ID == "halocue-local-server-v1"
-    assert DISPLAY_NAME == "HaloCue 0.9.3"
-    assert VERSION == "0.9.3"
-    assert PUBLIC_ARCHIVE_NAME == "HaloCue-0.9.3-windows-x64.zip"
-    assert PRIVATE_ARCHIVE_NAME == "HaloCue-0.9.3-private-windows-x64.zip"
+    assert DISPLAY_NAME == "HaloCue 1.0.0"
+    assert VERSION == "1.0.0"
+    assert PUBLIC_ARCHIVE_NAME == "HaloCue-1.0.0-windows-x64.zip"
+    assert PRIVATE_ARCHIVE_NAME == "HaloCue-1.0.0-private-windows-x64.zip"

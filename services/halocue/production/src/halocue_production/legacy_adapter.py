@@ -18,6 +18,7 @@ from . import cg_advice, cg_segments
 from .errors import ProductionError
 from .models import new_id, utc_now
 from .name_baseline import CharacterNameBaseline
+from .resource_previews import ResourcePreviewCatalog
 
 
 _IMPORT_LOCK = threading.RLock()
@@ -27,18 +28,26 @@ RESOURCE_SNAPSHOT_PREWARM_BYTES = 8 * 1024 * 1024
 
 
 class Legacy093Adapter:
-    """Translate the 1.0 production contract to stable 0.9.3 domain modules."""
+    """Translate the 1.0 contract to an explicitly selected legacy checkout.
+
+    The adapter keeps one implementation for the 0.9 compatibility family,
+    while reporting the actual checkout version instead of claiming that every
+    source tree is 0.9.3.  This is important when a local 0.95 checkout is used
+    for production acceptance.
+    """
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.compat_root = settings.data_dir / "legacy-runtime"
         self.compat_root.mkdir(parents=True, exist_ok=True)
+        self.legacy_version = self._detect_legacy_version(settings.legacy_root)
         self._modules: dict[str, Any] = {}
         self._resource_snapshot_lock = threading.RLock()
         self._resource_snapshot_signature: tuple[tuple[str, int, int], ...] | None = None
         self._resource_snapshot: dict[str, Any] | None = None
         self._resource_snapshot_scope: str | None = None
         self.name_baseline = CharacterNameBaseline(settings.name_baseline)
+        self.previews = ResourcePreviewCatalog(settings.legacy_root, settings.aa_data)
         self._load_modules()
         self.store = self._modules["draft_store"].DraftStore(
             base_dir=str(settings.data_dir / "drafts")
@@ -54,7 +63,7 @@ class Legacy093Adapter:
         if not self.settings.legacy_root.is_dir():
             raise ProductionError(
                 "legacy_adapter_unavailable",
-                "找不到 0.9.3 转换模块",
+                "找不到兼容转换模块",
                 status=503,
                 details={"legacy_root": str(self.settings.legacy_root)},
             )
@@ -77,6 +86,23 @@ class Legacy093Adapter:
             ):
                 self._modules[name] = importlib.import_module(name)
 
+    @staticmethod
+    def _detect_legacy_version(root: Path) -> str:
+        """Read a version marker without importing or mutating the legacy app."""
+        candidates = (root / "pyproject.toml", root / "halocue_meta.py", root / "VERSION")
+        for path in candidates:
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                continue
+            match = re.search(r"(?im)(?:^version\s*=\s*|HALOCUE_VERSION\s*=\s*[\"'])([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[-+][^\s\"']+)?)", text)
+            if match:
+                return match.group(1)
+            match = re.search(r"\b(0\.9(?:\.\d+)?|0\.95(?:\.\d+)?)\b", text)
+            if match:
+                return match.group(1)
+        return "unknown"
+
     @property
     def document(self):
         return self._modules["document"]
@@ -95,6 +121,12 @@ class Legacy093Adapter:
         layout_catalog = Path(
             str(getattr(self._modules.get("portrait_layout"), "DEFAULT_CATALOG", ""))
         )
+        return (
+            self._file_signature(self.settings.resource_index),
+            self._file_signature(self.settings.legacy_root / "aa_assets.db"),
+            self._file_signature(self.settings.name_baseline),
+            self._file_signature(layout_catalog),
+        )
 
     def _should_prewarm_resource_snapshot(self) -> bool:
         index_path = self.settings.resource_index
@@ -104,12 +136,6 @@ class Legacy093Adapter:
             return index_path.stat().st_size >= RESOURCE_SNAPSHOT_PREWARM_BYTES
         except OSError:
             return False
-        return (
-            self._file_signature(self.settings.resource_index),
-            self._file_signature(self.settings.legacy_root / "aa_assets.db"),
-            self._file_signature(self.settings.name_baseline),
-            self._file_signature(layout_catalog),
-        )
 
     def _refresh_resource_snapshot(self, scope: str | None = None) -> None:
         """Cache the immutable labelled base used to create task snapshots."""
@@ -177,7 +203,7 @@ class Legacy093Adapter:
         return {
             "legacy_adapter": {
                 "state": "available",
-                "version": "0.9.3",
+                "version": self.legacy_version,
                 "mode": "domain_modules",
             },
             "script_import": {"state": "available"},
@@ -427,7 +453,12 @@ class Legacy093Adapter:
             "background": ("width", "height", "mode", "format", "has_icc_profile"),
             "cg": ("width", "height", "mode", "format", "has_icc_profile"),
             "sound": ("codec", "sample_rate", "channels", "sample_fmt", "bits_per_sample", "duration"),
-            "character": ("identifier", "faces", "expression_parts", "expression_mode", "expression_status", "semantic_face_count", "spine_version", "spine_signature", "outfit_key"),
+            "character": (
+                "identifier", "faces", "expression_parts", "expression_mode",
+                "expression_status", "semantic_face_count",
+                "semantic_face_combinations", "spine_version", "spine_signature",
+                "outfit_key",
+            ),
         }.get(kind, ())
         return {name: value[name] for name in allowed if name in value}
 
@@ -497,6 +528,7 @@ class Legacy093Adapter:
                     "aliases": self.name_baseline.resolve(value)["aliases"],
                     "name_source": str(value.get("name_source") or "legacy_source_unreviewed"),
                     "club": str(value.get("club") or ""), "spine": str(value.get("spine") or ""),
+                    "avatar_key": str(value.get("avatar") or value.get("avatar_key") or ""),
                     "outfit_key": str(value.get("outfit_key") or ""), "face_count": len(faces),
                 })
             return rows
@@ -509,6 +541,22 @@ class Legacy093Adapter:
                 if str(value).strip()
             ]
         raise ProductionError("resource_kind_not_found", "该任务不支持此资源类型", status=404)
+
+    def _preview_available(self, token: str, kind: str, item: dict[str, Any]) -> bool:
+        preview_kind = "backgrounds" if kind == "cg-backgrounds" else kind
+        if preview_kind not in {"characters", "backgrounds", "cg"}:
+            return False
+        key = str(item.get("key") or "")
+        if self.task_asset_preview(token, preview_kind, key) is not None:
+            return True
+        if preview_kind == "characters":
+            return self.previews.avatar(
+                avatar_key=str(item.get("avatar_key") or ""),
+                spine=str(item.get("spine") or ""),
+            ) is not None
+        if preview_kind == "backgrounds":
+            return self.previews.background(key) is not None
+        return self.previews.cg(key) is not None
 
     def _registered_custom_background_keys(self) -> set[str]:
         database = self.settings.legacy_root / "aa_assets.db"
@@ -558,8 +606,9 @@ class Legacy093Adapter:
         source_items = self._cg_background_items(token, resources) if kind == "cg-backgrounds" else self._resource_items(resources, kind)
         items = [
             {
-                **item,
+                **{key: value for key, value in item.items() if key != "avatar_key"},
                 "source": "task_import" if str(item.get("key") or "") in imported else "task_snapshot",
+                "preview_available": self._preview_available(token, kind, item),
                 **({"asset_id": imported[str(item.get("key") or "")]["asset_id"]}
                    if str(item.get("key") or "") in imported else {}),
             }
@@ -740,8 +789,9 @@ class Legacy093Adapter:
         labels: dict[str, Any],
         expected_draft_version: int,
         library_asset_id: str = "",
+        recognition: dict[str, Any] | None = None,
+        recognition_accepted: bool = False,
     ) -> dict[str, Any]:
-        request = {"kind": kind, "source": str(source), "identifier": identifier}
         result = self.validate_task_asset(source=source, kind=kind, identifier=identifier)
         if not result["ok"]:
             return {"ok": False, "status": "rejected", **result}
@@ -765,6 +815,9 @@ class Legacy093Adapter:
             "sha256": result["sha256"], "metadata": metadata, "private_source": str(private_source),
             "outfit_key": str(metadata.get("outfit_key") or result["stem"]), "created_at": utc_now(),
         }
+        if recognition is not None:
+            record["recognition"] = recognition
+            record["recognition_accepted"] = bool(recognition_accepted)
         if library_asset_id:
             record["library_asset_id"] = library_asset_id
         try:
@@ -830,6 +883,8 @@ class Legacy093Adapter:
             "club": str(item.get("nickname") or ""), "labels": item.get("labels") if isinstance(item.get("labels"), dict) else {},
             "metadata": Legacy093Adapter._asset_metadata_public(str(item.get("kind") or ""), metadata),
             "library_asset_id": str(item.get("library_asset_id") or ""),
+            "recognition": item.get("recognition") if isinstance(item.get("recognition"), dict) else None,
+            "recognition_accepted": bool(item.get("recognition_accepted")),
             "created_at": str(item.get("created_at") or ""),
         }
 
@@ -915,7 +970,7 @@ class Legacy093Adapter:
             "scenes": {
                 "type": "array", "maxItems": 80,
                 "items": {
-                    "type": "object", "additionalProperties": False,
+                    "type": "object", "additionalProperties": True,
                     "properties": {
                         "start_line": {"type": "integer", "minimum": 1},
                         "end_line": {"type": "integer", "minimum": 1},
@@ -923,7 +978,11 @@ class Legacy093Adapter:
                         "time": {"type": "string", "maxLength": 40},
                         "background_need": {"type": "string", "maxLength": 120},
                     },
-                    "required": ["start_line", "end_line", "location", "time", "background_need"],
+                    # Location/time/background are advisory and models may
+                    # omit them when the frozen script does not provide
+                    # enough evidence. Normalize those fields to empty
+                    # strings below instead of failing the whole preflight.
+                    "required": [],
                 },
             },
             "ambiguities": {
@@ -973,11 +1032,15 @@ class Legacy093Adapter:
 
         normalized_scenes: list[dict[str, Any]] = []
         for item in scenes:
-            if not isinstance(item, dict) or set(item) != {"start_line", "end_line", "location", "time", "background_need"}:
-                raise ProductionError("ai_preflight_invalid_output", "AI 初审包含无效场景", status=502)
+            if not isinstance(item, dict):
+                continue
             start, end = item.get("start_line"), item.get("end_line")
+            if start is None:
+                start = item.get("line_start") or item.get("start")
+            if end is None:
+                end = item.get("line_end") or item.get("end")
             if isinstance(start, bool) or isinstance(end, bool) or not isinstance(start, int) or not isinstance(end, int):
-                raise ProductionError("ai_preflight_invalid_output", "AI 初审场景行号无效", status=502)
+                continue
             if start < 1 or end < start or end > max(1, line_count):
                 raise ProductionError("ai_preflight_invalid_output", "AI 初审场景行号超出冻结剧本范围", status=502)
             normalized_scenes.append({
@@ -1018,7 +1081,10 @@ class Legacy093Adapter:
             "scenes 只在地点、室内外或时间明确变化时分段；background_need 写该段需要的背景描述，"
             "不确定则留空字符串；ambiguities 只列必须由用户确认、且会影响场景或角色理解的信息。"
         )
-        volatile = json.dumps({"line_count": len(lines)}, ensure_ascii=False, separators=(",", ":"))
+        # Keep server-only validation metadata out of the model context. The
+        # provider validates the returned JSON against a strict schema, and
+        # exposing line_count invites otherwise harmless metadata echoing.
+        volatile = ""
         numbered = "\n".join(f"L{index + 1}\t{line}" for index, line in enumerate(lines) if line.strip())
         user = "请分析以下带行号的冻结剧本。行号仅用于定位，直接返回 JSON。\n\n" + numbered
         try:

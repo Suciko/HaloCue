@@ -334,6 +334,14 @@ def main() -> None:
                         assert metrics["visibleComposer"] == 1
                         assert "场景《核对门禁》" in impact.inner_text()
 
+                        decision = page.locator(".work-decision-dock")
+                        decision.wait_for(timeout=20_000)
+                        assert page.locator(".work-agent-composer").evaluate(
+                            "element => element.inert"
+                        )
+                        decision.locator("[data-decision-dismiss]").click()
+                        decision.wait_for(state="detached", timeout=20_000)
+
                         screenshot = args.output / f"phase3-knowledge-impact-{width}x{height}.png"
                         page.screenshot(path=screenshot, full_page=False)
 
@@ -399,8 +407,8 @@ def main() -> None:
                         suggestion_card.wait_for(timeout=20_000)
                         suggestion_text = suggestion_card.inner_text()
                         assert "温室夜间关闭，但教师可以临时授权进入" in suggestion_text
-                        assert "直接证据" in suggestion_text
-                        assert "1 个正文块" in suggestion_text
+                        assert "直接依据" in suggestion_text
+                        assert "1 处直接依据" in suggestion_text
                         suggestion_screenshot = (
                             args.output / f"phase3-background-suggestion-{width}x{height}.png"
                         )
@@ -431,10 +439,10 @@ def main() -> None:
                             ".revision-compare-change"
                         ).first.wait_for(timeout=20_000)
                         comparison_paths = comparison_dialog.locator(
-                            ".revision-compare-change > header code"
+                            ".revision-compare-change > header b"
                         ).all_inner_texts()
-                        assert "/entities/world-greenhouse/summary" in comparison_paths
-                        assert "/entities" not in comparison_paths
+                        assert any("摘要" in label for label in comparison_paths)
+                        assert "一张世界观卡" not in comparison_paths
                         assert "sha256:sha256:" not in page.locator(
                             "#revisionCompareMeta"
                         ).inner_text()

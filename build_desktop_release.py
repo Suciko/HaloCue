@@ -1,4 +1,4 @@
-"""Build and validate the HaloCue 0.9.3 Windows desktop release."""
+"""Build and validate the HaloCue 1.0 Windows desktop release."""
 
 from __future__ import annotations
 
@@ -15,8 +15,9 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from halocue_meta import VERSION
 
-VERSION = "0.9.3"
+
 RELEASE_BASENAME = f"HaloCue-{VERSION}-windows-x64"
 PRIVATE_RELEASE_BASENAME = f"HaloCue-{VERSION}-private-windows-x64"
 _ABSOLUTE_PATH = re.compile(
@@ -291,7 +292,7 @@ def build_release(
     private_spine_source: str | Path | None = None,
 ) -> tuple[Path, Path]:
     root = Path(project_root).resolve()
-    build_root = root / "build" / "desktop-0.9.3"
+    build_root = root / "build" / f"desktop-{VERSION}"
     seed_dir = build_root / "seed"
     work_dir = build_root / "pyinstaller"
     dist_dir = build_root / "dist"
@@ -313,11 +314,21 @@ def build_release(
             "--noconfirm", "--clean",
             "--workpath", str(work_dir),
             "--distpath", str(dist_dir),
-            str(root / "HaloCue.spec"),
-        ],
+        str(root / "HaloCue.spec"),
+    ],
         cwd=root,
         env=env,
         check=True,
+    )
+    subprocess.run(
+        [
+            str(Path(python_executable).resolve()),
+            "-m", "PyInstaller", "--noconfirm", "--clean",
+            "--workpath", str(work_dir / "updater"),
+            "--distpath", str(dist_dir),
+            str(root / "HaloCueUpdater.spec"),
+        ],
+        cwd=root, env=env, check=True,
     )
 
     output_root = (
@@ -333,10 +344,21 @@ def build_release(
     if release_dir.exists():
         shutil.rmtree(release_dir)
     shutil.copytree(dist_dir / "HaloCue", release_dir)
-    for name in ("使用说明-从这里开始.md", "README.md"):
+    shutil.copy2(dist_dir / "HaloCueUpdater" / "HaloCueUpdater.exe", release_dir / "HaloCueUpdater.exe")
+    for name in (
+        "使用说明-从这里开始.md",
+        "README.md",
+        "help.html",
+        "docs/用户手册-1.0.md",
+        "docs/高级部署与更新.md",
+    ):
         source = root / name
         if source.is_file():
-            shutil.copy2(source, release_dir / name)
+            target = release_dir / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+        elif source.is_dir():
+            shutil.copytree(source, release_dir / name, dirs_exist_ok=True)
     (release_dir / "版本.txt").write_text(
         f"HaloCue {VERSION}\nWindows 10/11 x64\n"
         + ("Private build with bundled Spine runtime\n" if private_spine_source else ""),

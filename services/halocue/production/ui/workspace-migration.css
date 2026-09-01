@@ -505,6 +505,62 @@
   gap: 8px;
 }
 
+/* Settings dialogs are mounted beside the embedded workbench shell, so the
+   shell-scoped primary-button rule does not reach them. Keep the main action
+   visible in both standalone and embedded production views. */
+.production-settings-shell button.primary {
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+  font-weight: 700;
+}
+
+.production-settings-shell button.primary:hover:not(:disabled) {
+  border-color: #245646;
+  background: #245646;
+}
+
+.spine-settings-intro {
+  padding: 13px 14px;
+  border-left: 3px solid var(--green);
+  background: #f1f7f3;
+}
+
+.spine-settings-intro strong,
+.spine-settings-intro p {
+  display: block;
+}
+
+.spine-settings-intro p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.spine-settings-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.spine-technical-details {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.spine-technical-details summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.spine-technical-details p {
+  margin: 8px 0 0;
+  line-height: 1.6;
+}
+
 .environment-status {
   padding: 14px;
   border: 1px solid var(--line);

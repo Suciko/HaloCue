@@ -56,6 +56,11 @@ class PendingToolExchange:
     user_prompt: str
     assistant_json: str
     tool_calls: tuple[ProviderToolCall, ...]
+    # Native protocol history before ``assistant_json``.  A model can need a
+    # second, read-only lookup after seeing the first result, so retaining just
+    # the immediately preceding tool exchange would make the next request
+    # invalid for both OpenAI-compatible and Anthropic APIs.
+    prior_messages_json: str = "[]"
 
 
 @dataclass(frozen=True)
@@ -354,6 +359,64 @@ class FakeWritingProvider(WritingProvider):
         artifact_preview = None
 
         import re
+        import_mode = str((task_contract.get("task_scope") or {}).get("import_mode") or "").strip()
+        if import_mode in {"story_to_script", "aap_to_script"}:
+            import_preview = (task_contract.get("task_scope") or {}).get("import_preview")
+            import_preview = import_preview if isinstance(import_preview, dict) else {}
+            source_type = "aap" if import_mode == "aap_to_script" else "story_document"
+            source_label = "AAP 工程" if import_mode == "aap_to_script" else "小说或文稿"
+            scenes = import_preview.get("scenes") if isinstance(import_preview.get("scenes"), list) else []
+            counts = import_preview.get("counts") if isinstance(import_preview.get("counts"), dict) else {}
+            warnings = import_preview.get("warnings") if isinstance(import_preview.get("warnings"), list) else []
+            citations = []
+            document_context = work_context.get("document_context")
+            if isinstance(document_context, dict):
+                citations = [
+                    {
+                        "display_label": str(item.get("display_label") or "")[:160],
+                        "chunk_id": str(item.get("chunk_id") or "")[:120],
+                        "paragraph_ids": [str(value)[:40] for value in (item.get("paragraph_ids") or [])[:20]],
+                    }
+                    for item in (document_context.get("citations") or [])[:8]
+                    if isinstance(item, dict)
+                ]
+            review_scenes = [
+                {
+                    "title": str(item.get("title") or "未命名场景")[:160],
+                    "line_count": int(item.get("line_count") or item.get("paragraph_count") or 0),
+                }
+                for item in scenes[:30] if isinstance(item, dict)
+            ]
+            manual_followups = [
+                "确认章节与场景的边界，再决定是否整理为正式剧本候选。",
+                "补充无法从来源确定的角色、背景或舞台动作。",
+            ]
+            text = (
+                f"我已把这份{source_label}接入当前 Agent 对话，并完成第一轮结构检查。"
+                "下面是转换审查清单；它仍然只是导入候选，不会直接改动正式作品。"
+            )
+            import_review = {
+                "schema_version": "script-import-review/1.0",
+                "mode": import_mode,
+                "source_type": source_type,
+                "source_label": source_label,
+                "chapters": [{"title": "待 Agent 根据来源确认", "scene_count": int(counts.get("scenes") or len(review_scenes))}],
+                "scenes": review_scenes,
+                "character_mappings": [],
+                "unrecognized_nodes": [str(item)[:320] for item in warnings[:20]],
+                "manual_followups": manual_followups,
+                "source_citations": citations,
+            }
+            return {
+                "text": text,
+                "questions": ["先确认章节和场景边界，还是先补齐角色映射？"],
+                "ready_for_proposal": True,
+                "ready_to_organize": True,
+                "import_review": import_review,
+                "reasoning_summary": "导入内容先经过结构、来源和人工补充项审查，再进入剧本候选，不直接写回正式作品。",
+                "tool_activity": tool_activity,
+                "simulation_notice": "当前使用的是本地模拟 Provider；真实模型会在同一任务契约下补全剧本候选。",
+            }
         char_match = re.search(r"《([^》]+)》.*(?:角色|人物)", latest) or re.search(r"(?:角色|人物).*《([^》]+)》", latest)
         world_match = re.search(r"《([^》]+)》.*(?:地点|世界观|设定)", latest) or re.search(r"(?:地点|世界观|设定).*《([^》]+)》", latest)
         rule_match = re.search(r"《([^》]+)》.*(?:世界规则|规则)", latest) or re.search(r"(?:世界规则|规则).*《([^》]+)》", latest)
@@ -519,6 +582,10 @@ class FakeWritingProvider(WritingProvider):
     def generate_blueprint(self, brief: dict, analysis_context: dict | None = None) -> dict:
         idea = brief.get("idea", "未命名的故事想法")
         characters = brief.get("characters") or []
+        narrator_request = f"{idea} {brief.get('constraints', '')}".lower()
+        narrator_only = any(token in narrator_request for token in (
+            "纯旁白", "只用旁白", "仅用旁白", "不出现对白角色", "narrator-only", "narrator only",
+        ))
         analysis_context = analysis_context or {}
         runtime_characters = analysis_context.get("runtime_character_cards", [])
         mentioned_cards = [
@@ -526,16 +593,18 @@ class FakeWritingProvider(WritingProvider):
             for card in runtime_characters
             if card.get("name") in characters or card.get("name") in idea
         ]
-        if not characters:
+        if narrator_only:
+            characters = []
+        elif not characters:
             characters = [card.get("name") for card in mentioned_cards if card.get("name")]
-        if not characters:
+        if not characters and not narrator_only:
             if "爱丽丝" in idea or "凯伊" in idea:
                 characters = ["爱丽丝", "凯伊"]
             elif "日奈" in idea or "亚子" in idea:
                 characters = ["日奈", "亚子"]
             else:
                 characters = ["爱丽丝", "凯伊"]
-        primary_mode = "bond_short"
+        primary_mode = "text_reading" if narrator_only else "bond_short"
         secondary_modes = []
         normalized_idea = idea.lower()
         if any(token in normalized_idea for token in ("战斗", "突入", "任务", "敌人", "防线", "行动", "枪战")):
@@ -556,13 +625,18 @@ class FakeWritingProvider(WritingProvider):
             "title": f"围绕“{idea[:24]}”的故事方向",
             "premise": idea,
             "theme": "在具体选择中确认彼此，而不是由旁白替人物总结关系。",
-            "central_conflict": f"{characters[0]}必须处理眼前的异常，同时避免让真实目的过早暴露。",
+            "central_conflict": (
+                "在有限篇幅内只用旁白交代环境变化和行动结果。"
+                if narrator_only
+                else f"{characters[0]}必须处理眼前的异常，同时避免让真实目的过早暴露。"
+            ),
             "direction": [
                 "先用可见的小问题建立场景压力",
                 "让人物的局部目标互相干扰并产生选择",
                 "在必要事实成立后停止，不追加主题升华",
             ],
             "characters": characters,
+            "narrator_only": narrator_only,
             "mode": primary_mode,
             "status": "proposed",
             "recommendations": {
@@ -982,8 +1056,9 @@ class LLMWritingProvider(WritingProvider):
             raise ValueError("模型工具调用缺少调用 ID，未执行任何工具")
         if len(ids) != len(set(ids)):
             raise ValueError("模型工具调用 ID 重复，未执行任何工具")
-        if is_followup and calls:
-            raise ValueError("模型在工具结果回传后再次请求工具，本轮未执行这些请求")
+        # A follow-up may legitimately require one more bounded, read-only
+        # lookup.  The service caps the whole discussion at three tool rounds;
+        # validation here only protects this individual Provider response.
         return calls
 
     def _native_followup_messages(self, tool_results: list[dict]) -> list[dict]:
@@ -1008,6 +1083,12 @@ class LLMWritingProvider(WritingProvider):
             raise ValueError("模型工具调用缺少可用于原生回传的调用 ID")
 
         assistant = json.loads(pending.assistant_json)
+        try:
+            prior_messages = json.loads(pending.prior_messages_json)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("模型工具调用上下文损坏") from exc
+        if not isinstance(prior_messages, list):
+            raise ValueError("模型工具调用上下文格式无效")
         if self.provider_type == "anthropic":
             blocks = [
                 {
@@ -1024,14 +1105,26 @@ class LLMWritingProvider(WritingProvider):
                     "text": "服务端附加检查结果：" + json.dumps(extra, ensure_ascii=False, sort_keys=True),
                 })
             return [
-                {"role": "user", "content": pending.user_prompt},
+                *prior_messages,
                 {"role": "assistant", "content": assistant},
                 {"role": "user", "content": blocks},
             ]
 
         messages = [
-            {"role": "user", "content": pending.user_prompt},
-            {**assistant, "role": "assistant"},
+            *prior_messages,
+            # OpenAI-compatible gateways do not share one complete message
+            # schema. In particular, some Gemini relays return a
+            # ``reasoning_content`` field that they reject when it is replayed
+            # as the assistant turn before a tool result. Keep only the native
+            # tool-exchange fields required by the Chat Completions contract.
+            {
+                "role": "assistant",
+                **{
+                    key: assistant[key]
+                    for key in ("content", "tool_calls", "name")
+                    if key in assistant
+                },
+            },
             *[
                 {
                     "role": "tool",
@@ -1083,7 +1176,7 @@ class LLMWritingProvider(WritingProvider):
                     }
                     for tool in tools
                 ]
-                req_data["tool_choice"] = {"type": "none" if tool_results is not None else "auto"}
+                req_data["tool_choice"] = {"type": "auto"}
             req_bytes = json.dumps(req_data).encode("utf-8")
             req = urllib.request.Request(endpoint, data=req_bytes, method="POST")
             req.add_header("Content-Type", "application/json")
@@ -1108,7 +1201,7 @@ class LLMWritingProvider(WritingProvider):
                     }
                     for tool in tools
                 ]
-                req_data["tool_choice"] = "none" if tool_results is not None else "auto"
+                req_data["tool_choice"] = "auto"
             req_bytes = json.dumps(req_data).encode("utf-8")
             req = urllib.request.Request(endpoint, data=req_bytes, method="POST")
             req.add_header("Content-Type", "application/json")
@@ -1143,7 +1236,12 @@ class LLMWritingProvider(WritingProvider):
                     user_prompt=user_prompt,
                     assistant_json=json.dumps(content_blocks, ensure_ascii=False, sort_keys=True),
                     tool_calls=normalized_calls,
-                ) if normalized_calls and tool_results is None else None
+                    prior_messages_json=json.dumps(
+                        native_messages or [{"role": "user", "content": user_prompt}],
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                ) if normalized_calls else None
                 self._thread_state.pending_exchange = pending
                 # Provider-native thinking blocks are deliberately not propagated. The product
                 # contract exposes only the model-authored reasoning_summary in normal output.
@@ -1173,7 +1271,12 @@ class LLMWritingProvider(WritingProvider):
                 user_prompt=user_prompt,
                 assistant_json=json.dumps(message, ensure_ascii=False, sort_keys=True),
                 tool_calls=normalized_calls_tuple,
-            ) if normalized_calls_tuple and tool_results is None else None
+                prior_messages_json=json.dumps(
+                    native_messages or [{"role": "user", "content": user_prompt}],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            ) if normalized_calls_tuple else None
             self._thread_state.pending_exchange = pending
             return LLMCallResult(
                 self._openai_text(message.get("content")),
@@ -1396,7 +1499,11 @@ class LLMWritingProvider(WritingProvider):
             tool_followup = bool(work_context.get("tool_followup"))
             task_contract = work_context.get("task_contract") if isinstance(work_context.get("task_contract"), dict) else {}
             task_id = str(task_contract.get("id") or "brief.build")
-            system_prompt = self._skill_system_prompt(task_id, work_context) + (
+            system_prompt = self._skill_system_prompt(
+                task_id,
+                work_context,
+                output_mode="discussion_json",
+            ) + (
                 "\n\n你是作品当前阶段的创作导演，协助作者讨论并理清故事方向、人物关系与事实边界。\n"
                 "conversation_summary 只是由历史消息派生的续聊索引，不是 WorkCanon、人物卡、世界观卡或官方证据。"
                 "冲突时严格按已采纳正式 Artifact、较新的原始用户消息、派生摘要的顺序判断；"
@@ -1438,7 +1545,11 @@ class LLMWritingProvider(WritingProvider):
                         "并保留 filename、chunk_id 和 paragraph_ids 以供界面核验。"
                     )
             if tool_followup:
-                system_prompt += "\n系统已经执行完上一轮工具。请只根据 tool_results 生成最终 JSON 回复，不要再次请求工具。"
+                system_prompt += (
+                    "\n系统已经执行完上一轮工具。优先根据 tool_results 生成最终 JSON 回复；"
+                    "只有确实缺少另一项已提供的只读资料时，才能请求下一轮工具。"
+                    "整个用户回合最多允许三轮工具调用，绝不因此修改正式资料。"
+                )
             user_prompt = f"作品上下文: {json.dumps(work_context, ensure_ascii=False)}\n历史消息:\n" + "\n".join(
                 f"{m.get('role')}: {m.get('text', '')}" for m in messages[-8:]
             )
@@ -1474,9 +1585,15 @@ class LLMWritingProvider(WritingProvider):
     def generate_blueprint(self, brief: dict, analysis_context: dict | None = None) -> dict:
         try:
             prompt_context = {**(analysis_context or {}), **brief}
-            system_prompt = self._skill_system_prompt("blueprint.generate", prompt_context) + (
+            system_prompt = self._skill_system_prompt(
+                "blueprint.generate",
+                prompt_context,
+                output_mode="story_blueprint_json",
+            ) + (
                 "\n\n你负责把已讨论的创意简报整理为结构化 StoryBlueprint，不写正文。\n"
                 "必须返回纯 JSON，包含 title, premise, theme, central_conflict, direction (数组), characters (数组), mode。\n"
+                "如果用户明确要求全篇只有旁白且没有任何对白角色，必须额外返回 narrator_only=true、characters=[]，"
+                "并建议 sensei_presence=absent；否则 narrator_only=false 且 characters 至少包含一个主要角色。\n"
             )
             user_prompt = f"Brief: {json.dumps(brief, ensure_ascii=False)}\nContext: {json.dumps(analysis_context or {}, ensure_ascii=False)}"
             call = self._call_llm(system_prompt, user_prompt)
@@ -1538,7 +1655,11 @@ class LLMWritingProvider(WritingProvider):
                 "每条 finding 只允许 kind、severity、message、evidence 四个字段；"
                 "severity 只能是 blocking、warning、info。"
                 "重点检查 OOC、连续性、信息归属、BA 风格、第四面墙、禁止揭示和停止边界。"
-                "没有问题时返回空数组。不要输出隐藏思维链。"
+                "每条 finding 必须同时包含非空 kind、合法 severity、非空 message 和 evidence 对象；"
+                "证据没有额外字段时也必须写 evidence: {}，不能省略或写 null。"
+                "例如：{\"findings\":[{\"kind\":\"ooc\",\"severity\":\"warning\",\"message\":\"人物语气需要复核。\",\"evidence\":{\"source\":\"dialogue\"}}]}。"
+                "没有任何问题时只能返回 {\"findings\":[]}，不要放入空对象、字符串或其它字段。"
+                "不要输出 Markdown、解释文字或隐藏思维链。"
             )
             user_prompt = request["user_prompt"]
             call = self._call_llm(system_prompt, user_prompt)

@@ -7,7 +7,7 @@ AA 剧本编译器 · 本地网页界面
 跑起来后浏览器打开 http://127.0.0.1:8770 。只监听本机，不对外。
 只用标准库 + PIL（缩略图），不需要装框架。
 """
-import argparse, hashlib, io, json, mimetypes, os, re, signal, socket, sys, tempfile, threading, traceback, uuid, webbrowser
+import argparse, hashlib, io, json, mimetypes, os, re, signal, socket, subprocess, sys, tempfile, threading, time, traceback, uuid, webbrowser
 from contextlib import ExitStack
 from dataclasses import replace
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -21,7 +21,14 @@ if sys.stderr is not None and hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 from runtime_layout import LAYOUT, prepare_user_state                 # noqa: E402
-from halocue_meta import APP_ID, VERSION                              # noqa: E402
+from halocue_meta import (                                             # noqa: E402
+    APP_ID,
+    DEFAULT_UPDATE_MANIFEST_URL,
+    UPDATE_PUBLIC_KEYS,
+    VERSION,
+)
+from migration import backup_legacy_state, import_legacy_state, legacy_state_path  # noqa: E402
+from update_manager import UpdateError, fetch_manifest, stage_update   # noqa: E402
 
 RUNTIME_LAYOUT = LAYOUT
 
@@ -120,6 +127,8 @@ ASSET_FILE_PICKER = StoryFilePicker(
 )
 
 CFG = {"overrides": None, "aa_data": None, "spine_cli": None}
+UPDATE_LOCK = threading.RLock()
+UPDATE_JOB: dict[str, Any] = {}
 STORY_WORKSPACE = None
 STORY_WORKSPACE_LOCK = threading.RLock()
 HISTORY_ASSET_BROWSER = None
@@ -1442,6 +1451,152 @@ def setup_status():
         "version": VERSION,
         "entry_file": "启动AA自动写剧本.cmd",
     }
+
+
+def _update_state_path() -> Path:
+    return LAYOUT.user_data_root / "update-status.json"
+
+
+def _update_public_keys() -> dict[str, str]:
+    value = str(os.getenv("HALOCUE_UPDATE_PUBLIC_KEYS") or "").strip()
+    if not value:
+        return dict(UPDATE_PUBLIC_KEYS)
+    try:
+        payload = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return {
+        str(key): str(item)
+        for key, item in payload.items()
+        if isinstance(key, str) and isinstance(item, str)
+    } if isinstance(payload, dict) else {}
+
+
+def _write_update_state(payload: dict[str, Any]) -> dict[str, Any]:
+    result = dict(payload)
+    try:
+        _update_state_path().parent.mkdir(parents=True, exist_ok=True)
+        temporary = _update_state_path().with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(result, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, _update_state_path())
+    except OSError:
+        pass
+    with UPDATE_LOCK:
+        UPDATE_JOB.clear()
+        UPDATE_JOB.update(result)
+    return result
+
+
+def _read_update_state() -> dict[str, Any]:
+    with UPDATE_LOCK:
+        current = dict(UPDATE_JOB)
+    try:
+        stored = json.loads(_update_state_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        stored = {}
+    if isinstance(stored, dict):
+        if current:
+            stored.update(current)
+        return stored or current or {"status": "unknown"}
+    return current or {"status": "unknown"}
+
+
+def _update_install_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    explicit = str(os.getenv("HALOCUE_UPDATE_DEV_INSTALL_ROOT") or "").strip()
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    raise UpdateError("开发模式不会替换当前源码目录，请设置 HALOCUE_UPDATE_DEV_INSTALL_ROOT")
+
+
+def _download_update_worker() -> None:
+    try:
+        _write_update_state({"status": "checking", "message": "正在检查签名清单"})
+        manifest = fetch_manifest(
+            str(os.getenv("HALOCUE_UPDATE_MANIFEST_URL") or DEFAULT_UPDATE_MANIFEST_URL),
+            public_keys=_update_public_keys(),
+        )
+        if not manifest.is_newer:
+            _write_update_state({"status": "current", "version": manifest.version})
+            return
+        _write_update_state({
+            "status": "downloading",
+            "version": manifest.version,
+            "archive_size": manifest.archive_size,
+            "message": "正在下载并校验更新包",
+        })
+        staging = LAYOUT.user_data_root / "updates" / "staging"
+        archive, extracted = stage_update(manifest, staging)
+        _write_update_state({
+            "status": "staged",
+            "version": manifest.version,
+            "archive": str(archive),
+            "staged_root": str(extracted),
+            "install_root": str(_update_install_root()),
+            "archive_size": manifest.archive_size,
+            "release_notes_url": manifest.release_notes_url,
+            "message": "更新包已下载并通过校验，可以重启更新",
+        })
+    except (OSError, UpdateError, ValueError) as exc:
+        _write_update_state({"status": "failed", "message": str(exc)})
+
+
+def begin_update_download() -> dict[str, Any]:
+    with UPDATE_LOCK:
+        status = str(UPDATE_JOB.get("status") or "idle")
+        if status in {"checking", "downloading"}:
+            return dict(UPDATE_JOB)
+        if status == "staged" and UPDATE_JOB.get("staged_root"):
+            return dict(UPDATE_JOB)
+        UPDATE_JOB.clear()
+        UPDATE_JOB.update({"status": "checking", "message": "正在检查签名清单"})
+    threading.Thread(target=_download_update_worker, name="halocue-update-download", daemon=True).start()
+    return _read_update_state()
+
+
+def _updater_command(staged_root: Path, install_root: Path) -> list[str]:
+    if getattr(sys, "frozen", False):
+        updater = Path(sys.executable).resolve().parent / "HaloCueUpdater.exe"
+        if not updater.is_file():
+            raise UpdateError("发布包缺少 HaloCueUpdater.exe")
+        return [str(updater), "--pid", str(os.getpid()), "--install-root", str(install_root), "--staged-root", str(staged_root)]
+    return [sys.executable, str(Path(HERE) / "updater.py"), "--pid", str(os.getpid()), "--install-root", str(install_root), "--staged-root", str(staged_root)]
+
+
+def apply_staged_update(server) -> dict[str, Any]:
+    state = _read_update_state()
+    if state.get("status") != "staged":
+        raise UpdateError("当前没有可安装的更新包")
+    staged_root = Path(str(state.get("staged_root") or "")).resolve()
+    staging_root = (LAYOUT.user_data_root / "updates" / "staging").resolve()
+    try:
+        staged_root.relative_to(staging_root)
+    except ValueError as exc:
+        raise UpdateError("更新暂存目录无效") from exc
+    if not staged_root.is_dir():
+        raise UpdateError("更新暂存目录不存在")
+    install_root = _update_install_root()
+    command = _updater_command(staged_root, install_root)
+    flags = 0
+    if os.name == "nt":
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+    subprocess.Popen(command, cwd=str(install_root.parent), close_fds=True, creationflags=flags)
+    _write_update_state({**state, "status": "applying", "message": "更新器已启动，HaloCue 即将退出"})
+
+    def shutdown_process() -> None:
+        time.sleep(0.6)
+        try:
+            server.shutdown()
+        finally:
+            if getattr(sys, "frozen", False) and not os.getenv("HALOCUE_UPDATE_NO_EXIT"):
+                os._exit(0)
+
+    threading.Thread(target=shutdown_process, name="halocue-update-shutdown", daemon=True).start()
+    return {"status": "applying", "version": state.get("version", "")}
 
 
 def _write_settings_config(**updates: str) -> None:
@@ -4234,6 +4389,10 @@ class H(BaseHTTPRequestHandler):
                 f = os.path.join(HERE, "ui.html")
                 return self._send(200, open(f, encoding="utf-8").read(),
                                   "text/html; charset=utf-8")
+            if p in ("/help", "/help/", "/help/index.html"):
+                f = os.path.join(HERE, "help.html")
+                return self._send(200, open(f, encoding="utf-8").read(),
+                                  "text/html; charset=utf-8")
             if p == "/api/state":
                 con = db()
                 st = assetdb.stats(con)
@@ -4261,9 +4420,17 @@ class H(BaseHTTPRequestHandler):
                         )
                         or ""
                     ),
-                    "aa_ok": os.path.isdir(CFG["aa_data"])})
+                    "aa_ok": os.path.isdir(CFG["aa_data"] or "")})
             if p == "/api/setup/status":
                 return self._send(200, setup_status())
+            if p == "/api/update/status":
+                return self._send(200, _read_update_state())
+            if p == "/api/migration/status":
+                try:
+                    payload = json.loads((LAYOUT.user_data_root / "migration-status.json").read_text(encoding="utf-8"))
+                except (OSError, ValueError, TypeError):
+                    payload = {"detected": False, "requires_confirmation": False}
+                return self._send(200, payload)
             if p == "/api/diagnostics/runtime":
                 return self._send(200, runtime_diagnostics())
             if p == "/api/resources/index":
@@ -4683,12 +4850,40 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         p = urlparse(self.path).path
+        if p == "/api/update/download":
+            try:
+                return self._send(200, begin_update_download())
+            except (OSError, UpdateError, ValueError) as exc:
+                return self._send(409, {"ok": False, "status": "failed", "e": str(exc)})
+        if p == "/api/update/apply":
+            try:
+                return self._send(200, apply_staged_update(self.server))
+            except (OSError, UpdateError, ValueError) as exc:
+                return self._send(409, {"ok": False, "status": "failed", "e": str(exc)})
         if p == "/api/runtime/stop":
             if not getattr(self.server, "halocue_allow_api_shutdown", False):
                 return self._send(404, {"ok": False, "e": "not found"})
             self._send(200, {"ok": True})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
+        if p in {"/api/migration/backup", "/api/migration/import", "/api/migration/skip"}:
+            target = LAYOUT.user_data_root / "integrated"
+            legacy = legacy_state_path()
+            try:
+                if legacy is None:
+                    return self._send(404, {"ok": False, "e": "未发现旧版数据目录"})
+                backup_parent = legacy.parent / "HaloCue-backups"
+                if p.endswith("/backup"):
+                    backup = backup_legacy_state(legacy, backup_parent)
+                    return self._send(200, {"ok": True, "backup_root": str(backup)})
+                if p.endswith("/import"):
+                    backup = backup_legacy_state(legacy, backup_parent)
+                    result = import_legacy_state(legacy, target)
+                    result["backup_root"] = str(backup)
+                    return self._send(200, {"ok": True, **result})
+                return self._send(200, {"ok": True, "skipped": True})
+            except (OSError, ValueError) as exc:
+                return self._send(409, {"ok": False, "e": str(exc)})
         n = int(self.headers.get("Content-Length") or 0)
         if p == "/api/story-files/upload":
             if n > 10 * 1024 * 1024:

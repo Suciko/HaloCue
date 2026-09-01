@@ -91,10 +91,229 @@
   }
 }
 
+/* Chapter writing is a manuscript first.  Scene metadata stays as a quiet
+   locator and support panels only appear after an explicit request. */
+.writing-workbench-stage .chapter-continuous {
+  width: min(calc(100% - 56px), 1040px);
+  padding: 20px 0 68px;
+}
+
+.writing-workbench-stage .chapter-continuous-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 0 16px;
+  border-bottom: 1px solid #dfe6ed;
+  padding: 0 0 14px;
+}
+
+.writing-workbench-stage .chapter-continuous-head h2 {
+  margin: 3px 0 0;
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.writing-workbench-stage .chapter-continuous-head .lede {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.chapter-continuous-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.chapter-continuous-actions > .primary,
+.chapter-continuous-actions > .quiet {
+  min-height: 32px;
+  padding: 5px 11px;
+  white-space: nowrap;
+}
+
+.chapter-more-tools {
+  position: relative;
+}
+
+.chapter-more-tools > summary {
+  display: grid;
+  min-height: 32px;
+  place-items: center;
+  border: 1px solid #d5dee8;
+  border-radius: 5px;
+  background: #fff;
+  padding: 5px 10px;
+  color: #607287;
+  cursor: pointer;
+  font-size: 12px;
+  list-style: none;
+}
+
+.chapter-more-tools > summary::-webkit-details-marker { display: none; }
+.chapter-more-tools > summary:hover,
+.chapter-more-tools[open] > summary { border-color: #9eb6cd; background: #f3f7fb; color: #315f8d; }
+
+.chapter-more-tools > div {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  min-width: 128px;
+  gap: 3px;
+  border: 1px solid #d7e0e9;
+  border-radius: 6px;
+  background: #fff;
+  padding: 5px;
+  box-shadow: 0 10px 24px rgba(40, 58, 78, .14);
+}
+
+.chapter-more-tools > div button {
+  width: 100%;
+  min-height: 30px;
+  border: 0;
+  background: transparent;
+  padding: 5px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.chapter-more-tools > div button:hover { background: #f2f6fa; }
+
+.writing-workbench-stage .chapter-manuscript-flow {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.writing-workbench-stage .chapter-manuscript-scene + .chapter-manuscript-scene {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #e4eaf0;
+}
+
+.writing-workbench-stage .chapter-manuscript-scene-head {
+  min-height: 34px;
+  gap: 8px;
+  border-bottom: 0;
+  padding: 4px 0 5px;
+}
+
+.writing-workbench-stage .chapter-manuscript-scene-head > span {
+  color: #8a9bad;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.writing-workbench-stage .chapter-manuscript-scene-head h3 {
+  color: #42556a;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.writing-workbench-stage .chapter-manuscript-reading {
+  padding: 0 0 4px;
+}
+
+.writing-workbench-stage .chapter-reading-block {
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom-color: #edf1f4;
+}
+
+.writing-workbench-stage .chapter-reading-gutter {
+  color: #a5b1bd;
+  font-size: 10px;
+  line-height: 1.7;
+}
+
+.writing-workbench-stage .chapter-reading-meta {
+  margin-bottom: 2px;
+}
+
+.writing-workbench-stage .chapter-reading-copy p {
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.writing-workbench-stage .chapter-reading-block.is-dialogue .chapter-reading-copy p {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.writing-workbench-stage .chapter-reading-block.is-action .chapter-reading-copy p {
+  font-size: 13px;
+}
+
+.writing-workbench-stage .scene-context-panel.scene-context-compact {
+  display: none !important;
+}
+
+.writing-workbench-stage .scene-assets-panel {
+  margin: 8px 0 12px;
+  width: auto;
+  border-top: 1px solid #e5ece8;
+  border-right: 0;
+  border-bottom: 1px solid #e5ece8;
+  border-left: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 0;
+}
+
+.writing-workbench-stage .scene-review-summary {
+  margin: 8px 0 12px;
+  border: 1px solid #e1e7ed;
+  border-radius: 5px;
+  background: #fbfcfd;
+}
+
+.writing-workbench-stage .scene-review-summary > summary {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 10px;
+  color: #627286;
+  cursor: pointer;
+  list-style: none;
+}
+
+.writing-workbench-stage .scene-review-summary > summary::-webkit-details-marker { display: none; }
+.scene-review-summary-label { color: #77899c; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; }
+.scene-review-summary > summary b { color: #4b5f74; font-size: 12px; }
+.scene-review-summary > summary small { overflow: hidden; color: #8493a2; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.scene-review-summary.has-blocker > summary b { color: #a65b37; }
+.scene-review-summary-chevron { color: #8a9aaa; font-size: 14px; transition: transform 160ms ease-out; }
+.scene-review-summary[open] .scene-review-summary-chevron { transform: rotate(180deg); }
+.scene-review-findings-body { border-top: 1px solid #e5ebf0; }
+
+@media (max-width: 760px) {
+  .writing-workbench-stage .chapter-continuous {
+    width: calc(100% - 28px);
+    padding-top: 14px;
+  }
+
+  .writing-workbench-stage .chapter-continuous-head {
+    display: block;
+    padding-bottom: 10px;
+  }
+
+  .writing-workbench-stage .chapter-continuous-head h2 { font-size: 20px; }
+  .chapter-continuous-actions { margin-top: 10px; }
+  .chapter-continuous-actions > .primary { flex: 1 1 auto; }
+  .chapter-more-tools > div { right: auto; left: 0; }
+  .writing-workbench-stage .scene-review-summary > summary { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+}
+
 /* Draft landing surface: keep the next action and the manuscript in front;
    context is available from the inspector, while assets stay one quiet row. */
 .writing-workbench-stage .scene-context-secondary {
-  display: none !important;
+  display: flex !important;
 }
 .writing-workbench-stage .scene-assets-panel {
   grid-template-columns: minmax(0, 1fr) auto !important;
@@ -2405,20 +2624,31 @@
    checkboxes kept compact above it. The old side-by-side change cards made
    every sentence lose its scene context. */
 .writing-workbench-stage .scene-diff-choices {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   gap: 7px;
   padding: 12px 18px 2px;
+  /* A long candidate should not push the actual manuscript and decision
+     controls below several viewport heights. Keep every checkbox reachable
+     in its own compact scroll region. */
+  max-height: min(34vh, 360px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  align-content: start;
 }
 .writing-workbench-stage .scene-diff-choice {
-  display: inline-flex;
-  min-height: 38px;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 54px;
+  align-items: start;
   gap: 7px;
   border: 1px solid #d9e1ea;
   border-radius: 5px;
   background: #fafbfd;
-  padding: 5px 9px;
+  padding: 7px 9px;
   cursor: pointer;
 }
 .writing-workbench-stage .scene-diff-choice:has(input:checked) {
@@ -2426,9 +2656,9 @@
   background: #f0f6fc;
 }
 .writing-workbench-stage .scene-diff-choice input { width: 15px; height: 15px; accent-color: var(--wb-accent); }
-.writing-workbench-stage .scene-diff-choice span { display: grid; gap: 1px; }
+.writing-workbench-stage .scene-diff-choice span { display: grid; min-width: 0; gap: 2px; }
 .writing-workbench-stage .scene-diff-choice b { color: #344b66; font-size: 11px; }
-.writing-workbench-stage .scene-diff-choice small { color: var(--wb-muted); font-size: 10px; }
+.writing-workbench-stage .scene-diff-choice small { display: -webkit-box; overflow: hidden; color: var(--wb-muted); font-size: 10px; line-height: 1.35; text-overflow: ellipsis; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .writing-workbench-stage .scene-full-context {
   margin: 12px 18px 0;
   border: 1px solid #dbe3eb;
@@ -2485,7 +2715,7 @@
 /* Mobile Agent presentation details. Pane sizing and scroll ownership are
    defined once in the final mobile authority block at the end of this file. */
 @media (max-width: 760px) {
-  .writing-workbench-stage .scene-diff-choices { padding-inline: 12px; }
+  .writing-workbench-stage .scene-diff-choices { grid-template-columns: minmax(0, 1fr); padding-inline: 12px; }
   .writing-workbench-stage .scene-full-context { margin-inline: 12px; }
   .writing-workbench-stage .scene-full-context > header { align-items: flex-start; flex-direction: column; gap: 4px; }
 }
@@ -3689,14 +3919,27 @@
 .intent-target span { flex: 1 1 220px; }
 .intent-target span small { display: block; margin-top: 3px; color: #8a765f; font-size: 10px; line-height: 1.35; }
 .intent-target.is-stale { border-color: #dec19f; background: #fffaf3; }
-.agent-intent-confirm-dialog { width: min(460px, calc(100% - 28px)); border: 1px solid #cbd9d3; border-radius: 8px; padding: 22px; color: #263b35; background: #fbfdfc; box-shadow: 0 24px 70px rgba(28, 47, 43, .22); }
+.agent-intent-confirm-dialog { width: min(460px, calc(100% - 28px)); max-height: min(520px, calc(100dvh - 28px)); overflow: auto; border: 1px solid #cbd9d3; border-radius: 8px; padding: 22px; color: #263b35; background: #fbfdfc; box-shadow: 0 24px 70px rgba(28, 47, 43, .22); }
 .agent-intent-confirm-dialog::backdrop { background: rgba(20, 36, 32, .34); }
+.agent-intent-confirm-dialog form { display: grid; gap: 0; }
 .agent-intent-confirm-dialog h2 { margin: 4px 0 10px; font-size: 20px; }
-.agent-intent-confirm-dialog p[data-agent-confirm-request] { margin: 0; color: #5f7068; line-height: 1.55; }
+.agent-intent-confirm-dialog p[data-agent-confirm-summary] { margin: 0; color: #5f7068; line-height: 1.55; }
+.agent-confirm-original-details { margin-top: 14px; border-top: 1px solid #e2ebe6; padding-top: 10px; }
+.agent-confirm-original-details > summary { color: #597268; cursor: pointer; font-size: 12px; font-weight: 650; list-style: none; }
+.agent-confirm-original-details > summary::-webkit-details-marker { display: none; }
+.agent-confirm-original-details > summary::before { content: '›'; display: inline-block; margin-right: 5px; color: #8aa096; font-size: 16px; line-height: 1; transform: translateY(1px); }
+.agent-confirm-original-details[open] > summary::before { transform: rotate(90deg) translateX(-1px); }
+.agent-confirm-original-details p { margin: 9px 0 0; padding: 9px 10px; border: 1px solid #e2ebe6; border-radius: 5px; background: #fff; color: #5f7068; font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
 .agent-intent-confirm-dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
-.onboarding-tour { position: fixed; inset: 0; z-index: 10000; pointer-events: none; }
+@media (max-width: 520px) {
+  .agent-intent-confirm-dialog { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); padding: 18px; }
+  .agent-intent-confirm-dialog h2 { font-size: 18px; line-height: 1.35; }
+  .agent-intent-confirm-dialog .dialog-actions { position: sticky; bottom: -18px; margin-inline: -18px; margin-bottom: -18px; padding: 12px 18px 18px; border-top: 1px solid #e2ebe6; background: #fbfdfc; }
+  .agent-intent-confirm-dialog .dialog-actions button { min-height: 40px; }
+}
+.onboarding-tour { position: fixed; inset: 0; z-index: 10000; pointer-events: auto; }
 .onboarding-tour[hidden] { display: none; }
-.onboarding-highlight { position: fixed; z-index: 10001; border: 2px solid #4d8069; border-radius: 9px; background: transparent; box-shadow: 0 0 0 9999px rgba(18, 31, 27, .54), 0 0 0 5px rgba(255,255,255,.82); transition: left .18s ease, top .18s ease, width .18s ease, height .18s ease; }
+.onboarding-highlight { position: fixed; z-index: 10001; border: 2px solid #4d8069; border-radius: 9px; background: transparent; box-shadow: 0 0 0 9999px rgba(18, 31, 27, .54), 0 0 0 5px rgba(255,255,255,.82); pointer-events: none; transition: left .18s ease, top .18s ease, width .18s ease, height .18s ease; }
 .onboarding-coach { position: fixed; z-index: 10002; box-sizing: border-box; border: 1px solid #c8d8d0; border-radius: 9px; padding: 17px 18px 15px; color: #263b35; background: #fff; box-shadow: 0 18px 50px rgba(22, 42, 34, .26); pointer-events: auto; }
 .onboarding-coach > span { color: #688078; font-size: 11px; font-weight: 750; }
 .onboarding-coach h2 { margin: 5px 0 7px; font: 650 19px/1.3 var(--font-reading); }
@@ -4148,12 +4391,13 @@ body.onboarding-open { overflow: hidden; }
   }
 }
 
-/* Keep the work discussion focused: the runtime label is not a user action,
-   and a single thread should not stretch the rail into an empty column. */
+/* Keep the work discussion focused while letting the thread collection own
+   the available rail height. */
 @media (min-width: 761px) {
   .app-shell.work-agent-stage .work-agent-thread-list {
-    flex: 0 1 auto !important;
-    max-height: min(42vh, 360px);
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    max-height: none;
   }
   .app-shell.work-agent-stage .work-agent-rail-footer {
     padding: 8px 12px 10px !important;
@@ -4360,6 +4604,13 @@ body.onboarding-open { overflow: hidden; }
   border-top: 1px solid #e8edf2;
   border-radius: 0;
 }
+.writing-workbench-stage .scene-inline-review .scene-full-context .scene-context-lines {
+  max-height: min(54vh, 520px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
 .writing-workbench-stage .scene-inline-review .scene-full-context > header {
   padding: 12px 0 9px;
 }
@@ -4446,6 +4697,24 @@ body.onboarding-open { overflow: hidden; }
   }
   .writing-workbench-stage .scene-inline-review .scene-diff-actions {
     padding-inline: 16px;
+  }
+
+  /* Keep the one primary decision reachable while the review body scrolls,
+     with enough separation from the fixed five-item mobile navigation. */
+  .writing-workbench-stage .workspace {
+    scroll-padding-bottom: 156px;
+  }
+  .writing-workbench-stage .scene-inline-review .scene-diff-actions {
+    position: sticky;
+    bottom: 4px;
+    z-index: 4;
+    margin-inline: 0;
+    border: 1px solid #d8e1e9;
+    border-radius: 6px;
+    box-shadow: 0 -6px 18px rgba(33, 45, 60, .09);
+  }
+  .writing-workbench-stage .scene-inline-review .scene-full-context .scene-context-lines {
+    max-height: min(52vh, 440px);
   }
 }
 
@@ -4615,4 +4884,365 @@ body.onboarding-open { overflow: hidden; }
   .user-status-guide .work-guide-main { display:block; }
   .user-status-guide .work-guide-actions { margin-top:12px; }
   .user-status-guide .work-guide-actions .primary { min-height:40px; }
+}
+
+/* Give wide desktop conversations enough reading width to balance the
+   permanent navigation rail. Keep the narrow desktop margins unchanged. */
+@media (min-width: 761px) {
+  .app-shell.work-agent-stage .work-agent-thread {
+    width: min(calc(100% - 40px), 1180px);
+  }
+
+  .app-shell.work-agent-stage .conversation-message,
+  .app-shell.work-agent-stage .proposal-message,
+  .app-shell.work-agent-stage .work-agent-context {
+    max-width: 1120px;
+  }
+
+  .app-shell.work-agent-stage .work-agent-composer {
+    width: min(calc(100% - 40px), 1140px);
+  }
+
+  /* The resource counts are the rail's status strip, not a second panel.
+     Put the divider at the strip edge so no empty band sits above it. */
+  .app-shell.work-agent-stage .work-agent-rail-footer {
+    border-top: 0 !important;
+    padding: 0 12px 8px !important;
+  }
+
+  .app-shell.work-agent-stage .rail-resource-links {
+    margin-top: 0;
+    padding-top: 9px;
+    padding-bottom: 2px;
+  }
+}
+
+/* Resource counts belong with the conversation heading. Keeping them out of
+   a pinned footer removes the detached empty band below a short thread list. */
+.app-shell.work-agent-stage .work-agent-rail-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0 8px;
+}
+
+.app-shell.work-agent-stage .work-agent-rail-head .rail-resource-links-head {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin: 4px 0 0;
+  border-top: 1px solid #dfe5ed;
+  padding: 7px 0 0;
+}
+
+.app-shell.work-agent-stage .work-agent-rail-footer {
+  display: none !important;
+}
+
+@media (max-width: 760px) {
+  .app-shell.work-agent-stage .work-agent-rail-head .rail-resource-links-head {
+    margin-top: 3px;
+    padding-top: 6px;
+  }
+}
+
+/* The final whole-work Agent renderer has a dedicated bottom row for its
+   composer. Keep the conversation as the sole desktop scroll owner; the older
+   page-scroll override left long cards sliding beneath the input surface. */
+@media (min-width: 761px) {
+  .overview-stage.work-agent-stage .workspace {
+    overflow: hidden !important;
+  }
+
+  .overview-stage.work-agent-stage .work-agent-canvas {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto !important;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .overview-stage.work-agent-stage .work-agent-thread {
+    min-height: 0 !important;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding-bottom: 24px !important;
+    scroll-padding-bottom: 24px;
+  }
+
+  .overview-stage.work-agent-stage .work-agent-composer {
+    position: relative !important;
+    bottom: auto;
+  }
+}
+
+/* Keep the audit trail inside the message scroll row; the previous margins
+   let its border overlap the Composer by a few pixels at the bottom edge. */
+.app-shell.work-agent-stage .agent-presentation-summary {
+  box-sizing: border-box;
+  margin: 0 auto;
+  border-bottom: 0;
+}
+
+.app-shell.work-agent-stage .agent-presentation-summary > summary {
+  min-height: 30px;
+  padding: 0 2px;
+}
+
+/* The search shell owns the visible focus ring. Remove the global input ring
+   from the transparent field so focus does not read as two nested selections. */
+.app-shell.work-agent-stage .thread-search input:focus,
+.app-shell.work-agent-stage .thread-search input:focus-visible {
+  border: 0;
+  box-shadow: none;
+  outline: 0;
+}
+
+/* Keep the mobile conversation drawer's heading usable.  The shared mobile
+   shell switches this row to flex, which lets the title collapse when the
+   action buttons are present.  Search must remain discoverable on mobile;
+   opening it then reveals the field below without changing the drawer width. */
+@media (max-width: 760px) {
+  .app-shell.work-agent-stage.mobile-thread-open .work-agent-rail-head {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0 8px;
+    min-height: 58px;
+    padding: 11px 12px 8px;
+  }
+
+  .app-shell.work-agent-stage.mobile-thread-open .work-agent-rail-head > div {
+    min-width: 0;
+  }
+
+  .app-shell.work-agent-stage.mobile-thread-open .work-agent-rail-head h3 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-shell.work-agent-stage.mobile-thread-open .work-agent-rail-head > .rail-head-actions {
+    display: flex !important;
+    align-items: center;
+    justify-self: end;
+    flex: 0 0 auto;
+    gap: 4px;
+  }
+
+  .app-shell.work-agent-stage.mobile-thread-open .rail-thread-search-toggle {
+    display: grid !important;
+  }
+
+  .app-shell.work-agent-stage.mobile-thread-open .rail-new-thread {
+    display: inline-flex !important;
+  }
+
+  .app-shell.work-agent-stage.mobile-thread-open .rail-close-thread {
+    display: grid !important;
+  }
+}
+
+/* Final chapter-writing authority. Older workbench rules remain for legacy
+   surfaces, but the draft itself is one quiet, continuous manuscript. */
+.writing-workbench-stage .chapter-continuous {
+  width: min(calc(100% - 56px), 1040px);
+  margin: 0 auto;
+  padding: 20px 0 68px;
+}
+
+.writing-workbench-stage .chapter-continuous-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 0 16px;
+  border-bottom: 1px solid #dfe6ed;
+  padding: 0 0 14px;
+}
+
+.writing-workbench-stage .chapter-continuous-head h2 {
+  margin: 3px 0 0;
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.writing-workbench-stage .chapter-continuous-head .lede {
+  margin: 4px 0 0;
+  font-size: 11px;
+}
+
+.writing-workbench-stage .chapter-continuous-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.writing-workbench-stage .chapter-continuous-actions > .primary,
+.writing-workbench-stage .chapter-continuous-actions > .quiet {
+  min-height: 32px;
+  padding: 5px 11px;
+  white-space: nowrap;
+}
+
+.writing-workbench-stage .chapter-more-tools { position: relative; }
+
+.writing-workbench-stage .chapter-more-tools > summary {
+  display: grid;
+  min-height: 32px;
+  place-items: center;
+  border: 1px solid #d5dee8;
+  border-radius: 5px;
+  background: #fff;
+  padding: 5px 10px;
+  color: #607287;
+  cursor: pointer;
+  font-size: 12px;
+  list-style: none;
+}
+
+.writing-workbench-stage .chapter-more-tools > summary::-webkit-details-marker { display: none; }
+.writing-workbench-stage .chapter-more-tools > summary:hover,
+.writing-workbench-stage .chapter-more-tools[open] > summary {
+  border-color: #9eb6cd;
+  background: #f3f7fb;
+  color: #315f8d;
+}
+
+.writing-workbench-stage .chapter-more-tools > div {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  min-width: 132px;
+  gap: 3px;
+  border: 1px solid #d7e0e9;
+  border-radius: 6px;
+  background: #fff;
+  padding: 5px;
+  box-shadow: 0 10px 24px rgba(40, 58, 78, .14);
+}
+
+.writing-workbench-stage .chapter-more-tools > div button {
+  width: 100%;
+  min-height: 30px;
+  border: 0;
+  background: transparent;
+  padding: 5px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.writing-workbench-stage .chapter-more-tools > div button:hover { background: #f2f6fa; }
+
+.writing-workbench-stage .chapter-manuscript-flow {
+  display: grid;
+  gap: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.writing-workbench-stage .chapter-manuscript-scene {
+  scroll-margin-top: 18px;
+  background: transparent;
+}
+
+.writing-workbench-stage .chapter-manuscript-scene + .chapter-manuscript-scene {
+  margin-top: 8px;
+  border-top: 1px solid #e4eaf0;
+  padding-top: 10px;
+}
+
+.writing-workbench-stage .chapter-manuscript-scene-head {
+  min-height: 34px;
+  gap: 8px;
+  border-bottom: 0;
+  background: transparent;
+  padding: 4px 0 5px;
+}
+
+.writing-workbench-stage .chapter-manuscript-scene-head > span {
+  color: #8a9bad;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.writing-workbench-stage .chapter-manuscript-scene-head h3 {
+  color: #42556a;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.writing-workbench-stage .chapter-manuscript-reading,
+.writing-workbench-stage .chapter-manuscript-editor {
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.writing-workbench-stage .chapter-reading-block {
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom-color: #edf1f4;
+}
+
+.writing-workbench-stage .chapter-reading-gutter {
+  color: #a5b1bd;
+  font-size: 10px;
+  line-height: 1.7;
+}
+
+.writing-workbench-stage .chapter-reading-meta { margin-bottom: 2px; }
+.writing-workbench-stage .chapter-reading-copy p { font-size: 14px; line-height: 1.65; }
+.writing-workbench-stage .chapter-reading-block.is-dialogue .chapter-reading-copy p { font-size: 14px; font-weight: 600; }
+.writing-workbench-stage .chapter-reading-block.is-action .chapter-reading-copy p { font-size: 13px; }
+
+.writing-workbench-stage .scene-context-panel.scene-context-compact { display: none !important; }
+
+.writing-workbench-stage .scene-review-summary {
+  margin: 8px 0 12px;
+  border: 1px solid #e1e7ed;
+  border-radius: 5px;
+  background: #fbfcfd;
+}
+
+.writing-workbench-stage .scene-review-summary > summary {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 10px;
+  color: #627286;
+  cursor: pointer;
+  list-style: none;
+}
+
+.writing-workbench-stage .scene-review-summary > summary::-webkit-details-marker { display: none; }
+.writing-workbench-stage .scene-review-summary-label { color: #77899c; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; }
+.writing-workbench-stage .scene-review-summary > summary b { color: #4b5f74; font-size: 12px; }
+.writing-workbench-stage .scene-review-summary > summary small { overflow: hidden; color: #8493a2; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.writing-workbench-stage .scene-review-summary.has-blocker > summary b { color: #a65b37; }
+.writing-workbench-stage .scene-review-summary-chevron { color: #8a9aaa; font-size: 14px; transition: transform 160ms ease-out; }
+.writing-workbench-stage .scene-review-summary[open] .scene-review-summary-chevron { transform: rotate(180deg); }
+.writing-workbench-stage .scene-review-findings-body { border-top: 1px solid #e5ebf0; }
+
+@media (max-width: 760px) {
+  .writing-workbench-stage .chapter-continuous {
+    width: calc(100% - 28px);
+    padding: 14px 0 56px;
+  }
+
+  .writing-workbench-stage .chapter-continuous-head {
+    display: block;
+    padding-bottom: 10px;
+  }
+
+  .writing-workbench-stage .chapter-continuous-head h2 { font-size: 20px; }
+  .writing-workbench-stage .chapter-continuous-actions { margin-top: 10px; }
+  .writing-workbench-stage .chapter-continuous-actions > .primary { flex: 1 1 auto; }
+  .writing-workbench-stage .chapter-more-tools > div { right: auto; left: 0; }
 }

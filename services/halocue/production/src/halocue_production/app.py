@@ -35,6 +35,7 @@ RUN_RESOURCE_USAGE_ROUTE = re.compile(r"^/api/v1/production-runs/([^/]+)/resourc
 RUN_ASSETS_ROUTE = re.compile(r"^/api/v1/production-runs/([^/]+)/assets$")
 RUN_ASSET_ROUTE = re.compile(r"^/api/v1/production-runs/([^/]+)/assets/(asset-[0-9a-f]{12})$")
 RUN_ASSET_VALIDATE_ROUTE = re.compile(r"^/api/v1/production-runs/([^/]+)/assets/validate$")
+RUN_ASSET_RECOGNIZE_ROUTE = re.compile(r"^/api/v1/production-runs/([^/]+)/assets/recognize$")
 CUSTOM_ASSET_ROUTE = re.compile(r"^/api/v1/custom-assets/(library-asset-[0-9a-f]{12})$")
 CUSTOM_ASSET_PREVIEW_ROUTE = re.compile(r"^/api/v1/custom-assets/(library-asset-[0-9a-f]{12})/preview$")
 RUN_LIBRARY_ASSET_ROUTE = re.compile(
@@ -216,6 +217,11 @@ class ProductionHandler(BaseHTTPRequestHandler):
                 return 200, self.service.inspect_aa_environment()
             if method == "POST":
                 return 200, self.service.inspect_aa_environment(self._body())
+        if path == "/api/v1/settings/spine-cli":
+            if method == "GET":
+                return 200, self.service.spine_cli_settings()
+            if method == "POST":
+                return 200, self.service.configure_spine_cli(self._body())
         if path == "/api/v1/production-runs":
             if method == "GET":
                 return 200, self.service.list_runs()
@@ -275,6 +281,9 @@ class ProductionHandler(BaseHTTPRequestHandler):
         match = RUN_ASSET_VALIDATE_ROUTE.fullmatch(path)
         if match and method == "POST":
             return 200, self.service.validate_task_asset(match.group(1), self._body())
+        match = RUN_ASSET_RECOGNIZE_ROUTE.fullmatch(path)
+        if match and method == "POST":
+            return 200, self.service.recognize_task_asset(match.group(1), self._body())
         match = RUN_ASSETS_ROUTE.fullmatch(path)
         if match and method == "PUT":
             return 201, self.service.register_task_asset(match.group(1), self._body())

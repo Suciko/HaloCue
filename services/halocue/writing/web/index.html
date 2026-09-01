@@ -8,9 +8,9 @@
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/tokens.css?v=20260817-1">
   <!-- shell.css?v=20260820-37 and shell.css?v=20260824-44 retained for contract compatibility; the resource version below is current. -->
-  <link rel="stylesheet" href="/shell.css?v=20260824-45">
+  <link rel="stylesheet" href="/shell.css?v=20260825-47">
   <!-- writing-workbench.css?v=20260821-39 retained for contract compatibility; the resource version below is current. -->
-  <link rel="stylesheet" href="/writing-workbench.css?v=20260823-70">
+  <link rel="stylesheet" href="/writing-workbench.css?v=20260825-73">
   <link rel="stylesheet" href="/production-embed.css?v=20260823-9">
 </head>
 <body class="app-loading">
@@ -223,7 +223,11 @@
     <form method="dialog">
       <p class="eyebrow">需要你的确认</p>
       <h2 id="agentConfirmTitle" data-agent-confirm-title>确认继续这条请求</h2>
-      <p data-agent-confirm-request>确认后 Agent 才会继续处理；正式作品仍会先以候选形式出现。</p>
+      <p data-agent-confirm-summary>确认后 Agent 才会继续处理；正式作品仍会先以候选形式出现。</p>
+      <details class="agent-confirm-original-details">
+        <summary>查看原始请求</summary>
+        <p data-agent-confirm-original></p>
+      </details>
       <div class="dialog-actions">
         <button value="cancel" class="quiet">先不继续</button>
         <button type="button" class="primary" data-agent-confirm-submit>确认继续</button>
@@ -243,30 +247,39 @@
 
       <div class="settings-body">
         <nav class="settings-nav" aria-label="设置导航">
-          <button type="button" class="settings-nav-btn active" data-tab="models">
-            <span class="settings-nav-mark">模</span>
-            <span>AI 模型服务</span>
-          </button>
-          <button type="button" class="settings-nav-btn" data-tab="aa">
-            <span class="settings-nav-mark">制</span>
-            <span>AA 制作环境</span>
-          </button>
-          <button type="button" class="settings-nav-btn" data-tab="preferences">
-            <span class="settings-nav-mark">风</span>
-            <span>创作与演出偏好</span>
-          </button>
-          <button type="button" class="settings-nav-btn" data-tab="corpus">
-            <span class="settings-nav-mark">资</span>
-            <span>素材与语料索引</span>
-          </button>
-          <button type="button" class="settings-nav-btn" data-tab="conversations">
-            <span class="settings-nav-mark">话</span>
-            <span>对话管理</span>
-          </button>
-          <button type="button" class="settings-nav-btn" data-tab="system">
-            <span class="settings-nav-mark">统</span>
-            <span>系统体检与数据</span>
-          </button>
+          <section class="settings-nav-group" aria-labelledby="settingsGroupConnection">
+            <h3 id="settingsGroupConnection">连接</h3>
+            <button type="button" class="settings-nav-btn active" data-tab="models">
+              <span class="settings-nav-mark">模</span>
+              <span>AI 模型</span>
+            </button>
+            <button type="button" class="settings-nav-btn" data-tab="aa">
+              <span class="settings-nav-mark">制</span>
+              <span>AA 环境</span>
+            </button>
+          </section>
+          <section class="settings-nav-group" aria-labelledby="settingsGroupWriting">
+            <h3 id="settingsGroupWriting">写作</h3>
+            <button type="button" class="settings-nav-btn" data-tab="preferences">
+              <span class="settings-nav-mark">风</span>
+              <span>偏好</span>
+            </button>
+            <button type="button" class="settings-nav-btn" data-tab="conversations">
+              <span class="settings-nav-mark">话</span>
+              <span>对话</span>
+            </button>
+          </section>
+          <section class="settings-nav-group" aria-labelledby="settingsGroupData">
+            <h3 id="settingsGroupData">数据</h3>
+            <button type="button" class="settings-nav-btn" data-tab="corpus">
+              <span class="settings-nav-mark">资</span>
+              <span>资料索引</span>
+            </button>
+            <button type="button" class="settings-nav-btn" data-tab="system">
+              <span class="settings-nav-mark">统</span>
+              <span>体检与数据</span>
+            </button>
+          </section>
         </nav>
 
         <main class="settings-content">
@@ -274,7 +287,7 @@
           <section id="pane-models" class="settings-pane active">
             <div class="pane-lead">
               <h3>大语言模型接入与双域协同</h3>
-              <p>支持配置 DeepSeek、OpenAI、Anthropic Claude、智谱 GLM、Kimi、通义千问或本地 Ollama。API Key 采用 Windows DPAPI 本地强加密保护，支持一键双域指派与即时生效。</p>
+              <p>支持配置常用模型服务商或本地模型。密钥只保存在当前电脑的加密存储中，支持一键分配给写作和 AA 制作。</p>
             </div>
 
             <!-- 当前生效大模型运行状态看板 -->
@@ -287,30 +300,34 @@
                 </div>
                 <span id="activeModelLatencyPill" class="latency-pill">未连接</span>
               </div>
-              <div class="active-model-details-grid" id="activeModelDetailsGrid">
+                <div class="active-model-summary-grid" id="activeModelDetailsGrid">
                 <div class="model-detail-item">
                   <small>当前生效模型</small>
-                  <span id="activeModelIdText">本地模拟规则 (Fake Provider)</span>
+                  <span id="activeModelIdText">本地离线模式</span>
                 </div>
                 <div class="model-detail-item">
                   <small>接入厂商 / 服务商</small>
                   <span id="activeModelVendorText">未配置外部接口</span>
-                </div>
-                <div class="model-detail-item">
-                  <small>接口协议与地址</small>
-                  <span id="activeModelEndpointText">内置本地规则引擎</span>
-                </div>
-                <div class="model-detail-item">
-                  <small>密钥安全存储</small>
-                  <span id="activeModelSecretText">Windows DPAPI 加密保护就绪</span>
                 </div>
                 <div class="model-detail-item wide">
                   <small>已分配生效角色</small>
                   <span id="activeModelScopeText">当前未接入外部模型。请在下方选择厂商预设或填入 API Key 后点击“保存并立即启用”。</span>
                 </div>
               </div>
+              <details class="model-technical-details active-model-technical-details">
+                <summary>技术连接详情</summary>
+                <div class="model-technical-grid">
+                  <div><small>服务地址</small><span id="activeModelEndpointText">未连接</span></div>
+                  <div><small>密钥状态</small><span id="activeModelSecretText">本机加密存储可用</span></div>
+                </div>
+              </details>
             </div>
 
+            <details id="modelConfigDetails" class="model-config-details">
+              <summary class="model-config-summary" data-model-config-toggle>
+                <span><b>配置或更换模型</b><small>首次接入或需要调整时展开</small></span>
+                <strong>展开</strong>
+              </summary>
             <div class="model-config-workspace">
               <aside class="vendor-preset-section" aria-label="模型服务商">
                 <div class="provider-picker-head">
@@ -368,23 +385,26 @@
                   </div>
                   <span id="selectedProviderProtocol" class="provider-protocol-badge">OpenAI 兼容</span>
                 </header>
-              <div class="field-grid">
-                <label>
-                  接口协议
-                  <select id="settingsProvider" name="provider">
-                    <option value="openai">OpenAI 兼容协议 (Chat Completions)</option>
-                    <option value="anthropic">Anthropic Claude 协议 (Messages)</option>
-                  </select>
-                </label>
-                <label>
-                  接口地址 (Base URL)
-                  <input id="settingsBaseUrl" name="base_url" placeholder="https://api.deepseek.com/v1" autocomplete="off" spellcheck="false">
-                </label>
-              </div>
+              <details class="model-technical-details">
+                <summary>技术连接详情</summary>
+                <div class="field-grid">
+                  <label>
+                    接口协议
+                    <select id="settingsProvider" name="provider">
+                      <option value="openai">OpenAI 兼容协议 (Chat Completions)</option>
+                      <option value="anthropic">Anthropic Claude 协议 (Messages)</option>
+                    </select>
+                  </label>
+                  <label>
+                    服务地址
+                    <input id="settingsBaseUrl" name="base_url" placeholder="服务商提供的接口地址" autocomplete="off" spellcheck="false">
+                  </label>
+                </div>
+              </details>
 
               <div class="field-grid">
                 <label class="key-field-wrap">
-                  <span>API Key <span class="dpapi-badge" title="Windows DPAPI 本地加密存储，绝不泄露明文">DPAPI 本地保护</span></span>
+                  <span>API Key <span class="dpapi-badge" title="当前电脑本地加密存储，绝不泄露明文">本地加密保护</span></span>
                   <div class="password-input-group">
                     <input id="settingsApiKey" name="api_key" type="password" placeholder="留空保持已有密钥 / 粘贴新密钥" autocomplete="new-password">
                     <button type="button" class="toggle-password-btn" id="toggleApiKeyVisibility" title="显示/隐藏 Key" aria-label="显示/隐藏 Key">显示</button>
@@ -472,6 +492,7 @@
               </div>
             </form>
             </div>
+            </details>
           </section>
 
           <!-- Tab 2: AA 制作环境 -->
@@ -621,18 +642,18 @@
             <div class="system-status-grid" id="systemDiagnosticsGrid">
               <div class="system-metric">
                 <small>剧本写作服务 (Writing)</small>
-                <strong id="diagWritingPort">端口 8899 · 运行中</strong>
+                <strong id="diagWritingPort">本地写作数据 · 检查中</strong>
               </div>
               <div class="system-metric">
                 <small>AA 制作服务 (Production)</small>
-                <strong id="diagProductionPort">端口 8892 · 检查中</strong>
+                <strong id="diagProductionPort">AA 制作服务 · 检查中</strong>
               </div>
               <div class="system-metric">
                 <small>统一集成网关 (Integrated)</small>
-                <strong id="diagGatewayPort">端口 8910 · 当前宿主</strong>
+                <strong id="diagGatewayPort">集成服务 · 当前宿主</strong>
               </div>
               <div class="system-metric">
-                <small>Windows DPAPI 加密</small>
+                <small>本地密钥保护</small>
                 <strong id="diagDpapiStatus">已启用 (强加密)</strong>
               </div>
             </div>
@@ -679,10 +700,10 @@
 
   <div id="toast" role="status" aria-live="polite"></div>
   <!-- app.js?v=20260821-83, app.js?v=20260822-99, app.js?v=20260823-106, app.js?v=20260824-115, app.js?v=20260824-116 and app.js?v=20260824-117 retained for contract compatibility; the resource version below is current. -->
-  <script src="/app.js?v=20260824-118" defer></script>
-  <!-- writing-workbench.js?v=20260821-39 retained for contract compatibility; the resource version below is current. -->
-  <script src="/writing-workbench.js?v=20260822-65" defer></script>
-  <script src="/shell.js?v=20260816-2" defer></script>
-  <script src="/production-embed.js?v=20260823-9" defer></script>
+  <script src="/app.js?v=20260827-126" defer></script>
+  <!-- writing-workbench.js?v=20260821-39, writing-workbench.js?v=20260822-65 retained for contract compatibility; the resource version below is current. -->
+  <script src="/writing-workbench.js?v=20260825-68" defer></script>
+  <script src="/shell.js?v=20260825-3" defer></script>
+  <script src="/production-embed.js?v=20260827-10" defer></script>
 </body>
 </html>

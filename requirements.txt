@@ -1,4 +1,5 @@
 anthropic>=0.40,<1
+cryptography>=42,<46
 Pillow>=10,<13
 pywin32>=306; sys_platform == "win32"
 pywebview==6.2.1; sys_platform == "win32"

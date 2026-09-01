@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import launcher
 import webui
-from release_smoke import create_synthetic_aa_workspace, tree_digests
+from .release_smoke import create_synthetic_aa_workspace, tree_digests
 from tools import verify_release
 from tools.verify_release import _content_type_matches, _narrator_binding_payload
 

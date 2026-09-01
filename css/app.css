@@ -922,3 +922,15 @@ button:disabled {
   .background-label-fields label.is-wide { grid-column: auto; }
   .background-label-actions button { flex: 1 1 130px; }
 }
+/* Signed update notification.  It is intentionally quiet and non-blocking. */
+.update-notice { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin:0 1.25rem 1rem; padding:.75rem 1rem; border:1px solid rgba(14,165,233,.32); border-radius:.65rem; background:rgba(14,165,233,.08); }
+.update-notice div { display:flex; flex-direction:column; gap:.2rem; }
+.update-notice span { color:var(--muted,#64748b); font-size:.88rem; }
+.update-notice a { text-decoration:none; white-space:nowrap; }
+.notice-actions { display:flex !important; flex-direction:row !important; flex-wrap:wrap; gap:.5rem; justify-content:flex-end; }
+.help-toolbar { display:grid; gap:.75rem; margin:0 0 1rem; padding:0 0 1rem; border-bottom:1px solid var(--line,#e2e8f0); }
+.help-kicker { color:var(--accent,#0ea5e9); font-size:.72rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; }
+.help-search input { width:100%; box-sizing:border-box; }
+.help-filters { display:flex; flex-wrap:wrap; gap:.45rem; }
+.help-filters .is-active { color:var(--accent,#0ea5e9); border-color:currentColor; background:rgba(14,165,233,.08); }
+@media (max-width:640px) { .update-notice { align-items:flex-start; flex-direction:column; margin-inline:.75rem; } }

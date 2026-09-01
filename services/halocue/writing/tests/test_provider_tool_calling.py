@@ -567,13 +567,14 @@ def test_openai_tool_followup_uses_native_tool_message_and_original_call_id(monk
                 "choices": [{"message": {
                     "role": "assistant",
                     "content": None,
-                    "tool_calls": [{
-                        "id": "call-native-1",
-                        "type": "function",
-                        "function": {"name": "read_work_context", "arguments": "{}"},
-                    }],
-                }}],
-            })
+                "tool_calls": [{
+                    "id": "call-native-1",
+                    "type": "function",
+                    "function": {"name": "read_work_context", "arguments": "{}"},
+                }],
+                "reasoning_content": "gateway-private reasoning text",
+            }}],
+        })
         return FakeHTTPResponse({
             "usage": {"prompt_tokens": 30, "completion_tokens": 8},
             "choices": [{"message": {
@@ -605,9 +606,10 @@ def test_openai_tool_followup_uses_native_tool_message_and_original_call_id(monk
     assert result["text"] == "工具结果已经纳入最终判断。"
     followup = bodies[1]
     assert followup["tools"]
-    assert followup["tool_choice"] == "none"
+    assert followup["tool_choice"] == "auto"
     assert [item["role"] for item in followup["messages"]] == ["system", "user", "assistant", "tool"]
     assert followup["messages"][2]["tool_calls"][0]["id"] == "call-native-1"
+    assert "reasoning_content" not in followup["messages"][2]
     tool_message = followup["messages"][3]
     assert tool_message["tool_call_id"] == "call-native-1"
     assert json.loads(tool_message["content"])["output"] == {"artifacts": []}
@@ -654,7 +656,7 @@ def test_anthropic_tool_followup_uses_native_tool_result_and_original_use_id(mon
 
     followup = bodies[1]
     assert followup["tools"]
-    assert followup["tool_choice"] == {"type": "none"}
+    assert followup["tool_choice"] == {"type": "auto"}
     assert [item["role"] for item in followup["messages"]] == ["user", "assistant", "user"]
     assert followup["messages"][1]["content"][0]["id"] == "toolu-native-1"
     tool_result = followup["messages"][2]["content"][0]
@@ -662,6 +664,72 @@ def test_anthropic_tool_followup_uses_native_tool_result_and_original_use_id(mon
     assert tool_result["tool_use_id"] == "toolu-native-1"
     assert tool_result["is_error"] is False
     assert json.loads(tool_result["content"])["output"] == []
+
+
+def test_openai_tool_chain_preserves_each_native_exchange(monkeypatch):
+    bodies = []
+
+    def fake_urlopen(request, timeout):
+        bodies.append(json.loads(request.data.decode("utf-8")))
+        if len(bodies) == 1:
+            return FakeHTTPResponse({"choices": [{"message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "chain-call-1",
+                    "type": "function",
+                    "function": {"name": "read_work_context", "arguments": "{}"},
+                }],
+            }}]})
+        if len(bodies) == 2:
+            return FakeHTTPResponse({"choices": [{"message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "chain-call-2",
+                    "type": "function",
+                    "function": {"name": "search_character_cards", "arguments": '{"query":"凯伊"}'},
+                }],
+            }}]})
+        return FakeHTTPResponse({"choices": [{"message": {
+            "role": "assistant",
+            "content": json.dumps({
+                "text": "已完成连续资料核对。",
+                "questions": [],
+                "reasoning_summary": "两轮工具结果一致。",
+                "ready_for_proposal": False,
+            }, ensure_ascii=False),
+        }}]})
+
+    monkeypatch.setattr("halocue_writing.providers.urllib.request.urlopen", fake_urlopen)
+    current_provider = provider("openai", "https://llm.example/v1")
+    first = current_provider.discuss_work([], {"work_id": "work-chain"})
+    second = current_provider.discuss_work([], {
+        "work_id": "work-chain",
+        "tool_followup": True,
+        "tool_results": [{
+            "tool": "read_work_context", "status": "succeeded", "output": {"artifacts": []}, "error": None,
+        }],
+    })
+    final = current_provider.discuss_work([], {
+        "work_id": "work-chain",
+        "tool_followup": True,
+        "tool_results": [{
+            "tool": "search_character_cards", "status": "succeeded", "output": {"cards": []}, "error": None,
+        }],
+    })
+
+    assert first["tool_calls"][0]["id"] == "chain-call-1"
+    assert second["tool_calls"][0]["id"] == "chain-call-2"
+    assert final["text"] == "已完成连续资料核对。"
+    assert bodies[1]["tool_choice"] == "auto"
+    assert bodies[2]["tool_choice"] == "auto"
+    assert [item["role"] for item in bodies[2]["messages"]] == [
+        "system", "user", "assistant", "tool", "assistant", "tool",
+    ]
+    assert bodies[2]["messages"][2]["tool_calls"][0]["id"] == "chain-call-1"
+    assert bodies[2]["messages"][4]["tool_calls"][0]["id"] == "chain-call-2"
+    assert bodies[2]["messages"][5]["tool_call_id"] == "chain-call-2"
 
 
 def test_provider_runtime_state_is_isolated_between_concurrent_threads(monkeypatch):

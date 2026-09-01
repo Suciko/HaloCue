@@ -222,6 +222,16 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
             body_limit = 128_000_000 if parts in (
                 ["api", "v1", "settings", "backups", "inspect"],
                 ["api", "v1", "settings", "backups", "restore"],
+            ) else 48_000_000 if (
+                parts in (
+                    ["api", "v1", "imports", "aap:preview"],
+                    ["api", "v1", "imports", "aap:stage"],
+                    ["api", "v1", "imports", "aap:adopt"],
+                    ["api", "v1", "imports", "story:preview"],
+                    ["api", "v1", "imports", "story:stage"],
+                    ["api", "v1", "imports", "story:adopt"],
+                )
+                or (len(parts) == 7 and parts[:3] == ["api", "v1", "works"] and parts[4] == "threads" and parts[6] == "attachments")
             ) else 8_000_000
             payload = self._body(body_limit)
             result = None
@@ -254,10 +264,14 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "data": self.service.preview_aap_import(payload)})
             if parts == ["api", "v1", "imports", "aap:stage"]:
                 return self._json({"ok": True, "data": self.service.stage_aap_import(payload)}, 201)
+            if parts == ["api", "v1", "imports", "aap:adopt"]:
+                return self._json({"ok": True, "data": self.service.adopt_aap_import(payload)}, 201)
             if parts == ["api", "v1", "imports", "story:preview"]:
                 return self._json({"ok": True, "data": self.service.preview_story_import(payload)})
             if parts == ["api", "v1", "imports", "story:stage"]:
                 return self._json({"ok": True, "data": self.service.stage_story_import(payload)}, 201)
+            if parts == ["api", "v1", "imports", "story:adopt"]:
+                return self._json({"ok": True, "data": self.service.adopt_story_import(payload)}, 201)
             if parts == ["api", "v1", "feedback"]:
                 result = self.service.submit_feedback(payload)
                 return self._json({"ok": True, "data": result}, 201)
@@ -331,6 +345,8 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
                 result = self.service.import_character_card(parts[3], payload)
             elif len(parts) == 7 and parts[:3] == ["api", "v1", "works"] and parts[4] == "character-cards" and parts[6] == "archive":
                 result = self.service.archive_character_card(parts[3], parts[5], payload)
+            elif len(parts) == 7 and parts[:3] == ["api", "v1", "works"] and parts[4] == "character-cards" and parts[6] == "restore":
+                result = self.service.restore_character_card(parts[3], parts[5], payload)
             elif len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] == "world-bible":
                 result = self.service.save_world_bible(parts[3], payload)
             elif len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] == "world-bible:starter":

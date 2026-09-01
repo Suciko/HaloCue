@@ -35,7 +35,7 @@ from release_smoke import (  # noqa: E402
 
 
 APP_ID = "halocue-local-server-v1"
-VERSION = "0.9.3"
+VERSION = "1.0.0"
 
 
 class VerificationError(RuntimeError):
@@ -372,6 +372,7 @@ def verify(
         extract_root = scenario / "解压后的 程序" / "来自另一台电脑的长路径"
         bundle = _extract_archive(archive, extract_root)
         exe = bundle / "HaloCue.exe"
+        require((bundle / "HaloCueUpdater.exe").is_file(), "archive is missing HaloCueUpdater.exe")
         user_root = scenario / "全新用户 数据" / "HaloCue"
         env = _clean_environment(user_root, workspace.fake_home)
         selection_flag = "--aa-data" if selection_mode == "data" else "--aa-install"

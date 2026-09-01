@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import mimetypes
+import os
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -22,6 +22,7 @@ from .settings_store import SettingsStore
 from .asset_staging import AssetStaging
 from .asset_recognition import recognize as recognize_asset_content
 from .custom_asset_library import CustomAssetLibrary
+from . import spine_rendering
 
 
 INVALID_PROJECT = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -143,6 +144,10 @@ class ProductionService:
     def capabilities(self) -> dict[str, Any]:
         capabilities = self.adapter.capabilities()
         model = self.direction_model_settings.public()["model"]
+        spine = spine_rendering.capability(
+            legacy_root=self.settings.legacy_root,
+            data_dir=self.settings.data_dir,
+        )
         capabilities["ai_preflight"] = {
             "state": "available" if model["configured"] else "not_configured",
             "reason": None if model["configured"] else "model_provider_not_configured",
@@ -171,6 +176,7 @@ class ProductionService:
                 "unsupported_kinds": ["sound"],
                 "requires_confirmation": True,
                 "spine_animation_rendered": False,
+                "spine_rendering": spine,
             },
         }
         capabilities["script_release_handoff"] = {
@@ -426,6 +432,43 @@ class ProductionService:
         )
         return self.aa_workspace_settings()
 
+    def spine_cli_settings(self) -> dict[str, Any]:
+        persisted = self.settings_store.load().get("spine_cli")
+        path = None
+        if persisted:
+            try:
+                path = Path(str(persisted)).expanduser().resolve()
+            except (OSError, ValueError):
+                path = None
+        capability = spine_rendering.capability(
+            legacy_root=self.settings.legacy_root,
+            data_dir=self.settings.data_dir,
+        )
+        persisted_valid = bool(path and path.is_file()) if persisted else False
+        source = "settings" if persisted_valid else (
+            "environment" if os.environ.get("HALOCUE_SPINE_CLI") or os.environ.get("SPINE_CLI") else "none"
+        )
+        configured = persisted_valid or (not persisted and capability["state"] == "available")
+        return {
+            "ok": True,
+            "spine_cli": {
+                "configured": configured,
+                "path": str(path) if path else None,
+                "source": source,
+                "valid": persisted_valid if persisted else capability["state"] == "available",
+            },
+            "capability": capability,
+        }
+
+    def configure_spine_cli(self, payload: dict[str, Any]) -> dict[str, Any]:
+        current = self.settings_store.load()
+        if payload.get("clear") is True:
+            current.pop("spine_cli", None)
+        else:
+            current["spine_cli"] = str(self.settings_store.validate_spine_cli(payload.get("path")))
+        self.settings_store.save(current)
+        return self.spine_cli_settings()
+
     def list_resources(
         self, kind: str, *, query: str = "", offset: int = 0, limit: int = 80
     ) -> dict[str, Any]:
@@ -510,6 +553,19 @@ class ProductionService:
         return {"ok": True, "upload_token": token, "validation": validation}
 
     def recognize_custom_asset(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._recognize_staged_asset(payload)
+
+    def recognize_task_asset(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return a vision proposal for a task upload without registering it.
+
+        Recognition is deliberately kept separate from task registration so a
+        user can inspect, accept, or skip model suggestions before any frozen
+        task resources change.
+        """
+        self._run(run_id)
+        return self._recognize_staged_asset(payload)
+
+    def _recognize_staged_asset(self, payload: dict[str, Any]) -> dict[str, Any]:
         kind, token, source, validation = self._validate_staged_asset(payload)
         if not validation.get("ok"):
             raise ProductionError(
@@ -524,6 +580,13 @@ class ProductionService:
                 "当前 Provider 协议尚不支持音频内容识别；音效仍可按技术参数登记",
                 status=409,
             )
+        render_requested = payload.get("render_spine_preview") is True
+        if render_requested and kind != "character":
+            raise ProductionError(
+                "asset_spine_render_kind_invalid",
+                "只有角色骨骼素材可以渲染表情预览",
+                status=422,
+            )
         model_state = self.direction_model_settings.public().get("model") or {}
         digest = self.custom_assets.recognition_digest({
             "kind": kind,
@@ -531,6 +594,8 @@ class ProductionService:
             "identifier": str(payload.get("identifier") or "").strip(),
             "provider": model_state.get("provider"),
             "model": model_state.get("model"),
+            "render_spine_preview": render_requested,
+            "spine_signature": (validation.get("metadata") or {}).get("spine_signature"),
         })
         cached = self.asset_staging.recognition_for(token, digest)
         if cached:
@@ -545,12 +610,25 @@ class ProductionService:
                     status=409,
                 ) from exc
             raise
+        render_evidence: dict[str, Any] = {}
+        rendered_sources: list[Path] = []
+        if render_requested:
+            rendered = spine_rendering.render_preview(
+                source=source,
+                legacy_root=self.settings.legacy_root,
+                data_dir=self.settings.data_dir,
+                metadata=validation.get("metadata") or {},
+            )
+            rendered_sources = list(rendered.pop("_sources", []) or [])
+            render_evidence = rendered
         proposal = recognize_asset_content(
             provider,
             source=source,
             kind=kind,
             metadata=validation.get("metadata") or {},
             filename=self.asset_staging.filename_for(token),
+            rendered_sources=rendered_sources,
+            render_evidence=render_evidence,
         )
         proposal["digest"] = digest
         self.asset_staging.save_recognition(token, proposal)
@@ -628,9 +706,7 @@ class ProductionService:
                 "asset_validation_failed", "素材没有通过检查，尚未加入制作任务",
                 status=422, details={"issues": result.get("issues", [])},
             )
-        run.state = "waiting_for_review"
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+        self._mark_draft_changed(run)
         detail = self.run_detail(run_id)
         return {
             **result,
@@ -658,6 +734,23 @@ class ProductionService:
         labels = payload.get("labels") or {}
         if not isinstance(labels, dict):
             raise ProductionError("invalid_asset_labels", "素材标签必须是对象")
+        recognition = None
+        recognition_accepted = payload.get("accept_recognition") is True
+        recognition_digest = str(payload.get("recognition_digest") or "").strip()
+        if recognition_digest:
+            recognition = self.asset_staging.recognition_for(token, recognition_digest)
+            if recognition is None:
+                raise ProductionError(
+                    "asset_recognition_stale",
+                    "AI 识别建议已经变化，请重新检查后再采用",
+                    status=409,
+                )
+        if recognition_accepted and recognition is None:
+            raise ProductionError(
+                "asset_recognition_stale",
+                "AI 识别建议尚未准备好，请先查看识别建议或选择跳过",
+                status=409,
+            )
         result = self.adapter.register_task_asset(
             token=str(run.draft_token),
             source=source,
@@ -666,6 +759,8 @@ class ProductionService:
             display_name=str(payload.get("display_name") or "").strip(),
             nickname=str(payload.get("nickname") or "").strip(),
             labels=labels,
+            recognition=recognition,
+            recognition_accepted=recognition_accepted,
             expected_draft_version=self._expected_version(payload),
         )
         if result.get("status") == "rejected":
@@ -674,9 +769,7 @@ class ProductionService:
                 status=422, details={"issues": result.get("issues", [])},
             )
         if result.get("status") == "registered":
-            run.state = "waiting_for_review"
-            run.updated_at = utc_now()
-            self.repository.save_run(run)
+            self._mark_draft_changed(run)
             result["run"] = self.run_detail(run_id)["run"]
             result["draft"] = self.run_detail(run_id)["draft"]
             result["gates"] = self.run_detail(run_id)["gates"]
@@ -692,9 +785,7 @@ class ProductionService:
             token=str(run.draft_token), asset_id=asset_id,
             expected_draft_version=self._expected_version(payload),
         )
-        run.state = "waiting_for_review"
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+        self._mark_draft_changed(run)
         return self.run_detail(run_id)
 
     def run_resource_preview(self, run_id: str, kind: str, key: str) -> ResourcePreview:
@@ -935,6 +1026,16 @@ class ProductionService:
                 presentation = "note"
                 title = kind or "文本"
                 text = str(current.get("text") or current.get("title") or card.get("raw") or "")
+            background_preview_available = (
+                bool(background)
+                and (
+                    self.adapter.task_asset_preview(
+                        str(run.draft_token), "backgrounds", background
+                    )
+                    is not None
+                    or self.resources.preview("backgrounds", background) is not None
+                )
+            )
             frames.append(
                 {
                     "index": index,
@@ -943,6 +1044,7 @@ class ProductionService:
                     "card_kind": kind,
                     "presentation": presentation,
                     "background_key": background,
+                    "background_preview_available": background_preview_available,
                     "cg": (
                         {"background_key": str(cg.get("background_key") or ""), "label": str(cg.get("label") or "CG 段落")}
                         if cg else None
@@ -988,9 +1090,7 @@ class ProductionService:
             action=str(payload.get("action") or "").strip(),
             expected_draft_version=self._expected_version(payload),
         )
-        run.state = "waiting_for_review"
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+        self._mark_draft_changed(run)
         return self.run_detail(run_id)
 
 
@@ -1140,8 +1240,7 @@ class ProductionService:
             mapping=mapping,
             expected_draft_version=expected,
         )
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+        self._mark_draft_changed(run)
         return self.run_detail(run_id)
 
     def approve_review(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1158,9 +1257,22 @@ class ProductionService:
         )
         run.state = "ready_to_compile" if draft["review_ready"] else "waiting_for_review"
         run.current_stage = "review_install"
+        run.pending_build_id = None
+        run.last_build_id = None
+        run.last_installed_project = None
         run.updated_at = utc_now()
         self.repository.save_run(run)
         return self.run_detail(run_id)
+
+    def _mark_draft_changed(self, run: ProductionRun) -> None:
+        """Invalidate build/install claims whenever the editable draft changes."""
+        run.state = "waiting_for_review"
+        run.current_stage = "review_install"
+        run.pending_build_id = None
+        run.last_build_id = None
+        run.last_installed_project = None
+        run.updated_at = utc_now()
+        self.repository.save_run(run)
 
     @staticmethod
     def _expected_version(payload: dict[str, Any]) -> int:
@@ -1191,9 +1303,7 @@ class ProductionService:
             patch=patch,
             expected_draft_version=self._expected_version(payload),
         )
-        run.state = "waiting_for_review"
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+        self._mark_draft_changed(run)
         return self.run_detail(run_id)
 
     def _validate_line_performance(
@@ -1290,9 +1400,7 @@ class ProductionService:
             fields=fields,
             expected_draft_version=self._expected_version(payload),
         )
-        run.state = "waiting_for_review"
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+        self._mark_draft_changed(run)
         return self.run_detail(run_id)
 
     def create_cg_segment(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1312,9 +1420,7 @@ class ProductionService:
             label=str(payload.get("label") or ""),
             expected_draft_version=self._expected_version(payload),
         )
-        run.state = "waiting_for_review"
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+        self._mark_draft_changed(run)
         return self.run_detail(run_id)
 
     def delete_cg_segment(
@@ -1326,9 +1432,7 @@ class ProductionService:
             segment_id=segment_id,
             expected_draft_version=self._expected_version(payload),
         )
-        run.state = "waiting_for_review"
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+        self._mark_draft_changed(run)
         return self.run_detail(run_id)
 
     def move_card(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1343,9 +1447,7 @@ class ProductionService:
             before_card_id=before,
             expected_draft_version=self._expected_version(payload),
         )
-        run.state = "waiting_for_review"
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+        self._mark_draft_changed(run)
         return self.run_detail(run_id)
 
     def delete_card(
@@ -1357,9 +1459,7 @@ class ProductionService:
             card_id=card_id,
             expected_draft_version=self._expected_version(payload),
         )
-        run.state = "waiting_for_review"
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+        self._mark_draft_changed(run)
         return self.run_detail(run_id)
 
     def resolve_background_request(
@@ -1387,9 +1487,7 @@ class ProductionService:
             background_key=background_key,
             expected_draft_version=self._expected_version(payload),
         )
-        run.state = "waiting_for_review"
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+        self._mark_draft_changed(run)
         return self.run_detail(run_id)
 
     def resolve_sound_request(
@@ -1417,9 +1515,7 @@ class ProductionService:
             sound_key=sound_key,
             expected_draft_version=self._expected_version(payload),
         )
-        run.state = "waiting_for_review"
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+        self._mark_draft_changed(run)
         return self.run_detail(run_id)
 
     def validate(self, run_id: str) -> dict[str, Any]:
