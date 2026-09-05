@@ -119,8 +119,8 @@ def test_run_local_successes_grow_only_future_scene_chunks(tmp_path):
         run_fingerprint=fingerprint, context_window_tokens=200_000,
     )
 
-    assert provider.target_sizes == [40, 40, 45, 35]
-    assert result["metrics"]["initial_chunk_limits"]["target"] == 40
+    assert provider.target_sizes == [45, 35, 50, 30]
+    assert result["metrics"]["initial_chunk_limits"]["target"] == 45
     assert any(
         decision["reason"] == "two_efficient_successes"
         for decision in result["metrics"]["chunk_adaptations"]

@@ -48,3 +48,17 @@ def test_chapter_candidate_is_source_bound_and_non_formal(tmp_path: Path):
     assert accepted["revision_id"]
     assert accepted_row["status"] == "accepted"
     assert accepted_row["candidate"]["formal"] is True
+
+
+def test_adaptation_list_is_scoped_to_work_and_newest_first(tmp_path: Path):
+    service = WritingService(tmp_path)
+    first_work = service.create_work({"title": "第一部"})
+    second_work = service.create_work({"title": "第二部"})
+    first_source = source(service, first_work["id"], "第一章\n甲在门口停下。")
+    second_source = source(service, second_work["id"], "第一章\n乙在窗边回头。")
+    older = service.adaptations.create(first_work["id"], {"source_version_id": first_source["id"]})
+    newer = service.adaptations.create(first_work["id"], {"source_version_id": first_source["id"]})
+    service.adaptations.create(second_work["id"], {"source_version_id": second_source["id"]})
+    listed = service.adaptations.list(first_work["id"])
+    assert [item["id"] for item in listed] == [newer["id"], older["id"]]
+    assert all(item["work_id"] == first_work["id"] for item in listed)

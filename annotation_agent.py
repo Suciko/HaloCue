@@ -29,26 +29,54 @@ from annotation_memory import (
 from annotation_protocol import (
     ChunkProtocolError, build_chunk_schema, build_compact_chunk_schema,
     expand_compact_chunk_response, validate_chunk_response,
-    validate_review_patches,
 )
 from annotation_safety import project_effective_annotation_row
 from annotation_telemetry import (
     ReasoningTelemetryWriter, RequestTelemetryWriter, build_request_prompt_hashes,
 )
-from llm import EmptyModelResponseError, OutputCapacityError, RequestDeadlineError, StructuredOutputError
+from llm import (
+    EmptyModelResponseError,
+    ModelConnectionError,
+    ModelGatewayTimeoutError,
+    ModelRateLimitError,
+    ModelServiceUnavailableError,
+    ModelSocketTimeoutError,
+    OutputCapacityError,
+    RequestCancelledError,
+    RequestDeadlineError,
+    StructuredOutputError,
+)
 
 
 _CAPACITY_PROTOCOL_CODES = {"missing_target"}
 
 
-def _classify_chunk_error(exc: Exception) -> str:
+_TRANSIENT_TRANSPORT_ERRORS = (
+    ModelConnectionError,
+    ModelGatewayTimeoutError,
+    ModelRateLimitError,
+    ModelServiceUnavailableError,
+    ModelSocketTimeoutError,
+)
+
+
+def _classify_chunk_error(exc: Exception, *, finish_reason: str = "") -> str:
     if isinstance(exc, OutputCapacityError):
         return "capacity"
     if isinstance(exc, ChunkProtocolError) and exc.code in _CAPACITY_PROTOCOL_CODES:
-        return "capacity"
+        return "capacity" if finish_reason in {"length", "max_tokens"} else "protocol"
     if isinstance(exc, (ChunkProtocolError, StructuredOutputError, EmptyModelResponseError)):
         return "protocol"
     return "fatal"
+
+
+def _transport_retry_delay(exc: Exception, attempt: int, provider: Any) -> float:
+    explicit = getattr(exc, "retry_after", None)
+    if explicit is not None:
+        return min(30.0, max(0.0, float(explicit)))
+    config = getattr(provider, "cfg", None)
+    base = float(config.get("transport_retry_delay", 0.5)) if isinstance(config, dict) else 0.5
+    return min(5.0, max(0.0, base) * (2 ** max(0, attempt - 1)))
 
 
 def _is_request_deadline(exc: Exception) -> bool:
@@ -296,6 +324,7 @@ def run_annotation_agent(
     stats_before = dict(getattr(provider, "stats", {}) or {})
     request_count = 0
     retries = 0
+    transport_retries = 0
     subdivisions = 0
     assign_annotation_ids(items)
     _emit(progress, "planning", 0, 1, "正在分析场景")
@@ -325,20 +354,37 @@ def run_annotation_agent(
         } for scene in story_plan["scenes"][:200]],
     }
     dialogue_items = [item for item in items if item.get("kind") == "line"]
+    line_prompt_chars = sorted(
+        (
+            len(str(item.get("who") or ""))
+            + len(str(item.get("text") or ""))
+            + 96
+        )
+        for item in dialogue_items
+    )
+    visible_window_lines = min(
+        len(line_prompt_chars),
+        annotation_mode_limits(reasoning_mode or "balanced")[2] + before + after,
+    )
+    estimated_prompt_tokens = max(
+        1_000,
+        (
+            len(static_system)
+            + sum(line_prompt_chars[-visible_window_lines:])
+            + len(json.dumps(usage_chain or [], ensure_ascii=False))
+            + (4_000 if getattr(provider, "supports_compact_annotation", False) else 10_000)
+        ) // 3,
+    )
     task_profile = {
         "target_lines": len(dialogue_items),
         "speaker_count": len({str(item.get("who") or "") for item in dialogue_items if item.get("who")}),
-        "resource_complexity": min(
-            10,
-            len(cast or {}) + len(constraints.get("ok_bg") or set()) // 4 + len(usage_chain or []),
-        ),
+        # Only resources selected for this story affect decision complexity.
+        # The full frozen AA catalogue is stable prompt data and must not make
+        # every chunk smaller merely because the user has a large installation.
+        "resource_complexity": min(10, len(usage_chain or [])),
         "context_window_tokens": context_window_tokens,
         "annotation_max_tokens": annotation_max_tokens,
-        "estimated_prompt_tokens": max(
-            1_000,
-            sum(len(str(item.get("who") or "")) + len(str(item.get("text") or "")) for item in items) // 3
-            + len(json.dumps(story_plan, ensure_ascii=False)) // 3,
-        ),
+        "estimated_prompt_tokens": estimated_prompt_tokens,
     }
     estimated_limits = estimate_initial_chunk_limits(task_profile)
     if target is not None or soft_limit is not None or hard_limit is not None:
@@ -388,6 +434,7 @@ def run_annotation_agent(
         for value in (memory.get("progress") or {}).get("completed_target_ids") or []
     )
     request_telemetry: List[Dict[str, Any]] = []
+    request_metric_records: List[Dict[str, Any]] = []
     base_chunk_targets = [
         {str(items[index].get("annotation_id") or "") for index in chunk["target_indices"]}
         for chunk in chunks
@@ -421,6 +468,19 @@ def run_annotation_agent(
         finished = sum(1 for target_ids in base_chunk_targets if target_ids <= completed_target_ids)
         current = min(total, finished + (1 if include_current and finished < total else 0))
         return current, total
+
+    def cancelled_result() -> Dict[str, Any]:
+        current, total = user_progress(include_current=False)
+        _emit(progress, "cancelled", current, total, "标注已暂停，可继续")
+        return {
+            "items": items, "rows_by_id": rows_by_id, "memory": memory,
+            "beats": beats,
+            "metrics": build_metrics(),
+            "diagnostics": diagnostics, "completed_chunks": len(completed),
+            "resumed_chunks": resumed_chunks, "cancelled": True,
+            "timed_out": False,
+            **completion_status(),
+        }
 
     if resumed_chunks:
         current, total = user_progress(include_current=False)
@@ -557,30 +617,116 @@ def run_annotation_agent(
         cache_reports = token_delta("cache_reports")
         cache_read = token_delta("cache_read")
         cache_miss = token_delta("cache_miss")
-        cache_reported = bool(cache_reports)
-        cache_total = (cache_read or 0) + (cache_miss or 0)
+        cache_write = token_delta("cache_write")
         records = [dict(record) for record in request_telemetry[-50:]]
+        metric_records = [dict(record) for record in request_metric_records]
 
-        def record_sum(key):
-            values = [record.get(key) for record in records]
+        def record_sum(key, source=metric_records):
+            values = [record.get(key) for record in source]
             if not any(value is not None for value in values):
                 return None
             return sum(int(value or 0) for value in values)
 
+        def records_report(key, source):
+            usage_records = [
+                record for record in source
+                if record.get("input_tokens") is not None
+                or record.get("output_tokens") is not None
+            ]
+            return bool(usage_records) and all(record.get(key) is not None for record in usage_records)
+
+        input_tokens = token_delta("in")
+        if input_tokens is None:
+            input_tokens = record_sum("input_tokens")
+        output_tokens = token_delta("out")
+        if output_tokens is None:
+            output_tokens = record_sum("output_tokens")
+
+        cache_read_reported = records_report("cache_read_tokens", metric_records)
+        cache_write_reported = records_report("cache_write_tokens", metric_records)
+        cache_reported = bool(cache_reports) or cache_read_reported or cache_write_reported
+        cache_read_tokens = cache_read if cache_read_reported else None
+        if cache_read_tokens is None and cache_read_reported:
+            cache_read_tokens = record_sum("cache_read_tokens")
+        cache_write_tokens = cache_write if cache_write_reported else None
+        if cache_write_tokens is None and cache_write_reported:
+            cache_write_tokens = record_sum("cache_write_tokens")
+        uncached_reported = records_report("uncached_input_tokens", metric_records)
+        uncached_input_tokens = cache_miss if uncached_reported else None
+        if uncached_input_tokens is None and uncached_reported:
+            uncached_input_tokens = record_sum("uncached_input_tokens")
+        cache_total = (
+            (cache_read_tokens or 0) + (uncached_input_tokens or 0)
+            if uncached_reported else 0
+        )
+
+        warm_records = metric_records[1:]
+        warm_read_reported = records_report("cache_read_tokens", warm_records)
+        warm_uncached_reported = records_report("uncached_input_tokens", warm_records)
+        warm_cache_read = record_sum("cache_read_tokens", warm_records) if warm_read_reported else None
+        warm_uncached = (
+            record_sum("uncached_input_tokens", warm_records)
+            if warm_uncached_reported else None
+        )
+        warm_cache_total = (
+            (warm_cache_read or 0) + (warm_uncached or 0)
+            if warm_read_reported and warm_uncached_reported else 0
+        )
+
+        failed_records = [record for record in metric_records if record.get("outcome") == "failed"]
+        failed_request_count = len(failed_records)
+        failed_input_tokens = record_sum("input_tokens", failed_records)
+        failed_output_tokens = record_sum("output_tokens", failed_records)
+        if not failed_records:
+            failed_input_tokens = 0
+            failed_output_tokens = 0
+
+        status = completion_status()
+        completed_targets = int(status["completed_targets"])
+        stable_prefixes = [
+            str(record["stable_prefix_hash"])
+            for record in metric_records if record.get("stable_prefix_hash")
+        ]
+
         return {
             "requests": request_count,
             "retries": retries,
+            "transport_retries": transport_retries,
             "subdivisions": subdivisions,
-            "input_tokens": token_delta("in"),
-            "output_tokens": token_delta("out"),
-            "cache_read_tokens": cache_read if cache_reported else None,
-            "uncached_input_tokens": cache_miss if cache_reported else None,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_read_tokens": cache_read_tokens,
+            "cache_write_tokens": cache_write_tokens,
+            "uncached_input_tokens": uncached_input_tokens,
             "cache_hit_rate": (
-                cache_read / cache_total
-                if cache_reported and cache_total
-                else (0.0 if cache_reported else None)
+                (cache_read_tokens or 0) / cache_total
+                if uncached_reported and cache_total
+                else (0.0 if uncached_reported else None)
             ),
             "cache_reported": cache_reported,
+            "warm_cache_read_tokens": warm_cache_read,
+            "warm_uncached_input_tokens": warm_uncached,
+            "warm_cache_hit_rate": (
+                (warm_cache_read or 0) / warm_cache_total
+                if warm_cache_total else (
+                    0.0 if warm_read_reported and warm_uncached_reported else None
+                )
+            ),
+            "completed_targets": completed_targets,
+            "input_tokens_per_completed_target": (
+                input_tokens / completed_targets
+                if input_tokens is not None and completed_targets else None
+            ),
+            "uncached_input_tokens_per_completed_target": (
+                uncached_input_tokens / completed_targets
+                if uncached_input_tokens is not None and completed_targets else None
+            ),
+            "failed_request_count": failed_request_count,
+            "failed_request_input_tokens": failed_input_tokens,
+            "failed_request_output_tokens": failed_output_tokens,
+            "stable_prefix_consistent": (
+                len(set(stable_prefixes)) <= 1 if stable_prefixes else None
+            ),
             "elapsed_ms": round((time.perf_counter() - started_at) * 1000),
             "actual_model": str(getattr(provider, "model", "") or ""),
             "request_records": records,
@@ -599,7 +745,7 @@ def run_annotation_agent(
         previous_records: Sequence[Mapping[str, Any]],
         previous_reasoning_records: Sequence[Mapping[str, Any]], *, scene_id: str, chunk_id: str,
         current_retry_count: int, current_subdivision_count: int, agent_request_index: int,
-        prompt_hashes: Mapping[str, Any],
+        prompt_hashes: Mapping[str, Any], outcome: str, error_code: Optional[str],
     ) -> None:
         records = list(getattr(provider, "request_records", []) or [])
         reasoning_records = list(getattr(provider, "reasoning_records", []) or [])
@@ -629,9 +775,12 @@ def run_annotation_agent(
                 "agent_request_index": agent_request_index,
                 "retry_count": current_retry_count,
                 "subdivision_count": current_subdivision_count,
+                "outcome": outcome,
+                "error_code": error_code,
                 **dict(prompt_hashes),
                 "adaptation_reason": controller.last_reason,
             })
+            request_metric_records.append(safe)
             request_telemetry.append(safe)
             request_writer.write(safe)
         if len(request_telemetry) > 50:
@@ -721,18 +870,12 @@ def run_annotation_agent(
             chunk = dict(chunk)
             chunk["target_indices"] = pending_indices
             chunk["target_ids"] = [items[index].get("annotation_id") for index in pending_indices]
+            chunk["target_lines"] = [items[index].get("line_no") for index in pending_indices]
             chunk["start_line"] = items[pending_indices[0]].get("line_no")
             chunk["end_line"] = items[pending_indices[-1]].get("line_no")
         if cancelled and cancelled():
-            current, total = user_progress(include_current=False)
-            _emit(progress, "cancelled", current, total, "标注已暂停，可继续")
-            return {
-                "items": items, "rows_by_id": rows_by_id, "memory": memory,
-                "beats": beats,
-                "metrics": build_metrics(),
-                "diagnostics": diagnostics, "completed_chunks": len(completed),
-                "resumed_chunks": resumed_chunks, "cancelled": True,
-            }
+            return cancelled_result()
+        current, total = user_progress()
         if safe_target_limit and len(pending_indices) > safe_target_limit:
             parts = subdivide_chunk(chunk, safe_target_limit)
             for part in reversed(parts):
@@ -782,7 +925,6 @@ def run_annotation_agent(
             if compact_protocol
             else build_chunk_schema([str(item["annotation_id"]) for item in targets])
         )
-        current, total = user_progress()
         _emit(progress, "annotating", current, total,
               f"正在标注第 {current}/{total} 个场景块")
         validated = None
@@ -796,6 +938,17 @@ def run_annotation_agent(
             maximum=annotation_max_tokens,
         )
         reasoning_capacity_retries = 0
+        transport_retry_attempts = 0
+        provider_config = getattr(provider, "cfg", None)
+        max_transport_retries = max(
+            0,
+            min(
+                2,
+                int(provider_config.get("transport_retries", 2))
+                if isinstance(provider_config, dict)
+                else 2,
+            ),
+        )
         while True:
             call_user = user
             if protocol_attempts:
@@ -812,6 +965,8 @@ def run_annotation_agent(
             prompt_hashes = build_request_prompt_hashes(
                 static_system, volatile, call_user, schema, len(targets),
             )
+            request_outcome = "failed"
+            request_error_code = None
             try:
                 request_count += 1
                 with _temporary_reasoning_mode(provider, reasoning_retry_mode):
@@ -844,10 +999,60 @@ def run_annotation_agent(
                             direction["scene_type"] = planned_scene_type(current_scene)
                         if "scene_function" not in intent:
                             direction["scene_function"] = planned_scene_function(current_scene)
+                request_outcome = "succeeded"
                 break
             except Exception as exc:
-                kind = _classify_chunk_error(exc)
+                if isinstance(exc, RequestCancelledError) or (cancelled and cancelled()):
+                    request_error_code = "model_request_cancelled"
+                    return cancelled_result()
+                finish_reason = str(
+                    getattr(provider, "_last_finish_reason", "") or ""
+                )
+                kind = _classify_chunk_error(exc, finish_reason=finish_reason)
                 last_error = exc
+                request_error_code = _chunk_error_code(exc)
+                if (
+                    isinstance(exc, _TRANSIENT_TRANSPORT_ERRORS)
+                    and transport_retry_attempts < max_transport_retries
+                ):
+                    transport_retry_attempts += 1
+                    transport_retries += 1
+                    retries += 1
+                    delay = _transport_retry_delay(
+                        exc, transport_retry_attempts, provider,
+                    )
+                    diagnostics.append({
+                        "code": "transport_retry",
+                        "level": "warning",
+                        "scene_id": str(chunk["scene_id"]),
+                        "chunk_id": chunk_id,
+                        "attempt": transport_retry_attempts,
+                        "delay_ms": round(delay * 1000),
+                        "reason": request_error_code,
+                        "detail": str(exc),
+                    })
+                    if model_activity:
+                        emit_model_activity(
+                            {
+                                "state": "retrying",
+                                "reason": request_error_code,
+                                "transport_attempt": transport_retry_attempts,
+                                "retry_delay_ms": round(delay * 1000),
+                            },
+                            scene_id=str(chunk["scene_id"]),
+                            chunk_id=chunk_id,
+                            current=current,
+                            total=total,
+                            request_index=request_count,
+                            retry_count=retries,
+                            subdivision_count=subdivisions,
+                        )
+                    retry_at = time.monotonic() + delay
+                    while time.monotonic() < retry_at:
+                        if cancelled and cancelled():
+                            return cancelled_result()
+                        time.sleep(min(0.1, retry_at - time.monotonic()))
+                    continue
                 if _is_request_deadline(exc):
                     observe_chunk({"success": False, "reason": "deadline"}, scene_id=str(chunk["scene_id"]), chunk_id=chunk_id)
                     timeout_memory = copy.deepcopy(memory)
@@ -957,6 +1162,8 @@ def run_annotation_agent(
                     current_subdivision_count=subdivisions,
                     agent_request_index=request_count,
                     prompt_hashes=prompt_hashes,
+                    outcome=request_outcome,
+                    error_code=request_error_code,
                 )
         if validated is None:
             subdivision = _next_subdivision_limit(len(targets))
@@ -971,6 +1178,7 @@ def run_annotation_agent(
                 parts = subdivide_chunk(chunk, subdivision)
                 for part in parts:
                     part["_capacity_candidate"] = True
+                    part["_capacity_probe_size"] = subdivision
                 for part in reversed(parts):
                     queue.appendleft(part)
                 diagnostics.append({
@@ -997,6 +1205,8 @@ def run_annotation_agent(
                 continue
             raise AnnotationAgentError("structured_output", str(chunk["scene_id"]), chunk_id, str(last_error))
 
+        if cancelled and cancelled():
+            return cancelled_result()
         observe_chunk(
             {"success": True, "reasoning_content_ratio": success_ratio()},
             scene_id=str(chunk["scene_id"]), chunk_id=chunk_id,
@@ -1039,7 +1249,10 @@ def run_annotation_agent(
         completed_target_ids.update(target_ids)
         completed_this_run += 1
         if chunk.get("_capacity_candidate"):
-            safe_target_limit = len(targets)
+            probe_size = int(chunk.get("_capacity_probe_size") or 0)
+            if len(targets) == probe_size:
+                safe_target_limit = max(safe_target_limit or 0, len(targets))
+                controller.confirm_capacity(safe_target_limit)
 
     return {
         "items": items, "rows_by_id": rows_by_id, "memory": memory,

@@ -33,6 +33,17 @@ It does not contain the writing backend. The integration boundary is a frozen
   secret are separate; a Windows-entered key is protected with current-user
   DPAPI, environment-variable secrets are supported, and no API response
   returns a secret.
+- Direction jobs expose pause, resume, and end controls. A stop signal closes
+  an active model stream when the provider supports it; completed chunks remain
+  resumable and staged results are never committed after a stop.
+- Each direction attempt keeps a sanitized audit in `result.json`, including
+  request counts, retry/subdivision decisions, cache metrics, prompt hashes,
+  and bounded request records. Prompts, source text, API keys, and reasoning
+  text are not included in the public task log.
+- The prompt catalogue is bounded to script-relevant resource candidates while
+  the backend still validates every returned key against the complete frozen
+  resource index. A compatible AI preflight is reused only when its source
+  hash matches the current frozen script.
 
 The 0.9 compatibility modules are loaded from the repository root through the
 explicit `HALOCUE_LEGACY_ROOT` boundary (or the repository default). Runtime

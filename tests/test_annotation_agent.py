@@ -1,4 +1,3 @@
-import copy
 import re
 from contextlib import contextmanager
 
@@ -104,9 +103,9 @@ class RecordingProvider:
 
 def fixture(
     tmp_path, provider, count=70, cancelled=None, progress=None,
-    model_activity=None, **agent_options,
+    model_activity=None, separator_at=None, **agent_options,
 ):
-    items = make_items(count)
+    items = make_items(count, separator_at=separator_at)
     constraints = {
         "ok_bg": {"BG_Street"}, "confirmed_bg": set(),
         "faces_by_id": {"kei": {"00"}}, "sym2cn": {},
@@ -278,6 +277,105 @@ def test_agent_attaches_request_telemetry_to_chunk_without_prompt_text(tmp_path)
     assert "volatile" not in records[0]
 
 
+def test_agent_reports_warm_cache_failed_cost_and_unit_efficiency(tmp_path):
+    class CostProvider(RecordingProvider):
+        def __init__(self):
+            super().__init__()
+            self.request_records = []
+            self.stats = {
+                "in": 0, "out": 0, "cache_read": 0, "cache_miss": 0,
+                "cache_write": 0, "cache_reports": 0, "calls": 0,
+            }
+
+        def complete_json(self, static, volatile, user, schema):
+            response = super().complete_json(static, volatile, user, schema)
+            cache_read = 0 if self.calls == 1 else 80
+            uncached = 100 if self.calls == 1 else 20
+            cache_write = 100 if self.calls == 1 else 0
+            self.stats["in"] += 100
+            self.stats["out"] += 10
+            self.stats["cache_read"] += cache_read
+            self.stats["cache_miss"] += uncached
+            self.stats["cache_write"] += cache_write
+            self.stats["cache_reports"] += 1
+            self.stats["calls"] += 1
+            self.request_records.append({
+                "request_index": self.calls,
+                "input_tokens": 100,
+                "cache_read_tokens": cache_read,
+                "uncached_input_tokens": uncached,
+                "cache_write_tokens": cache_write,
+                "output_tokens": 10,
+            })
+            if self.calls == 1:
+                response["state_delta"] = {"positions": []}
+            return response
+
+    result = fixture(
+        tmp_path, CostProvider(), count=40, separator_at=20,
+        target=20, soft_limit=24, hard_limit=30,
+    )
+    metrics = result["metrics"]
+
+    assert metrics["requests"] == 3
+    assert metrics["cache_write_tokens"] == 100
+    assert metrics["cache_hit_rate"] == pytest.approx(160 / 300)
+    assert metrics["warm_cache_read_tokens"] == 160
+    assert metrics["warm_uncached_input_tokens"] == 40
+    assert metrics["warm_cache_hit_rate"] == pytest.approx(0.8)
+    assert metrics["completed_targets"] == 40
+    assert metrics["input_tokens_per_completed_target"] == pytest.approx(7.5)
+    assert metrics["uncached_input_tokens_per_completed_target"] == pytest.approx(3.5)
+    assert metrics["failed_request_count"] == 1
+    assert metrics["failed_request_input_tokens"] == 100
+    assert metrics["failed_request_output_tokens"] == 10
+    assert metrics["stable_prefix_consistent"] is True
+    assert metrics["request_records"][0]["outcome"] == "failed"
+    assert metrics["request_records"][0]["error_code"] == "invalid_state_delta"
+    assert all(record["outcome"] == "succeeded" for record in metrics["request_records"][1:])
+
+
+def test_cache_read_without_uncached_usage_does_not_invent_a_hit_rate(tmp_path):
+    class ReadOnlyCacheProvider(RecordingProvider):
+        def __init__(self):
+            super().__init__()
+            self.request_records = []
+            self.stats = {
+                "in": 0, "out": 0, "cache_read": 0, "cache_miss": 0,
+                "cache_write": 0, "cache_reports": 0, "calls": 0,
+            }
+
+        def complete_json(self, static, volatile, user, schema):
+            response = super().complete_json(static, volatile, user, schema)
+            self.stats["in"] += 20
+            self.stats["out"] += 5
+            self.stats["cache_read"] += 80
+            self.stats["cache_reports"] += 1
+            self.stats["calls"] += 1
+            self.request_records.append({
+                "request_index": self.calls,
+                "input_tokens": 20,
+                "cache_read_tokens": 80,
+                "cache_write_tokens": 0,
+                "output_tokens": 5,
+            })
+            return response
+
+    result = fixture(
+        tmp_path, ReadOnlyCacheProvider(), count=40, separator_at=20,
+        target=20, soft_limit=24, hard_limit=30,
+    )
+    metrics = result["metrics"]
+
+    assert metrics["cache_reported"] is True
+    assert metrics["cache_read_tokens"] == 160
+    assert metrics["uncached_input_tokens"] is None
+    assert metrics["cache_hit_rate"] is None
+    assert metrics["warm_cache_read_tokens"] == 80
+    assert metrics["warm_uncached_input_tokens"] is None
+    assert metrics["warm_cache_hit_rate"] is None
+
+
 def test_agent_writes_reasoning_diagnostics_outside_checkpoint(tmp_path):
     class ReasoningProvider(RecordingProvider):
         def __init__(self):
@@ -335,11 +433,37 @@ def test_reasoning_cursor_is_independent_from_request_record_cursor(tmp_path):
 def test_structural_failure_retries_without_partial_commit(tmp_path):
     provider = RecordingProvider(omit_last_calls=1)
     result = fixture(tmp_path, provider, count=25)
-    assert provider.calls == 3
-    assert result["completed_chunks"] == 2
+    assert provider.calls == 2
+    assert result["completed_chunks"] == 1
     assert len(result["memory"]["progress"]["completed_target_ids"]) == 25
-    assert result["metrics"]["retries"] == 0
-    assert result["metrics"]["subdivisions"] == 1
+    assert result["metrics"]["retries"] == 1
+    assert result["metrics"]["subdivisions"] == 0
+
+
+def test_transient_transport_errors_retry_without_subdividing(tmp_path):
+    class TransientProvider(RecordingProvider):
+        def __init__(self):
+            super().__init__()
+            self.cfg = {"transport_retry_delay": 0}
+
+        def complete_json(self, static, volatile, user, schema):
+            if self.calls < 2:
+                self.calls += 1
+                raise llm.ModelServiceUnavailableError("temporary gateway failure")
+            return super().complete_json(static, volatile, user, schema)
+
+    events = []
+    provider = TransientProvider()
+    result = fixture(
+        tmp_path, provider, count=25,
+        model_activity=lambda event: events.append(event),
+    )
+
+    assert provider.calls == 3
+    assert result["metrics"]["transport_retries"] == 2
+    assert result["metrics"]["subdivisions"] == 0
+    retry_events = [event for event in events if event.get("state") == "retrying"]
+    assert [event["transport_attempt"] for event in retry_events] == [1, 2]
 
 
 def test_provider_json_failure_subdivides_chunk_instead_of_aborting(tmp_path):
@@ -682,12 +806,14 @@ def test_resume_preserves_dialogue_free_beats_from_completed_chunks(tmp_path):
     assert result["beats"][0]["reason"] == "listener_reaction"
 
 
-def test_cancellation_stops_before_next_call_and_keeps_checkpoint(tmp_path):
+def test_cancellation_quarantines_the_inflight_chunk_result(tmp_path):
     provider = RecordingProvider()
     result = fixture(tmp_path, provider, count=70, cancelled=lambda: provider.calls >= 1)
     assert result["cancelled"] is True
     assert provider.calls == 1
-    assert result["memory"]["progress"]["completed_chunks"] == ["scene-1-chunk-1"]
+    assert result["memory"]["progress"]["completed_chunks"] == []
+    assert result["completed_targets"] == 0
+    assert result["pending_targets"] == 70
 
 
 def test_review_windows_include_chunk_boundaries_and_open_events():
@@ -749,6 +875,27 @@ def test_protocol_error_gets_one_correction_and_never_subdivides(tmp_path):
         fixture(tmp_path, provider, count=25)
 
     assert provider.calls == 2
+    assert "上次响应无效：invalid_state_delta" in provider.requests[1]["user"]
+    assert "保持相同 TARGET" in provider.requests[1]["user"]
+
+
+def test_corrected_protocol_error_does_not_shrink_the_next_scene(tmp_path):
+    class CorrectingProvider(RecordingProvider):
+        def complete_json(self, static, volatile, user, schema):
+            response = super().complete_json(static, volatile, user, schema)
+            if self.calls == 1:
+                response["state_delta"] = {"positions": []}
+            return response
+
+    provider = CorrectingProvider()
+    result = fixture(
+        tmp_path, provider, count=40, separator_at=20,
+        target=20, soft_limit=24, hard_limit=30,
+    )
+
+    assert result["metrics"]["retries"] == 1
+    assert [len(request["target_ids"]) for request in provider.requests] == [20, 20, 20]
+    assert not result["metrics"]["chunk_adaptations"]
 
 
 def test_capacity_success_teaches_remaining_chunks_the_safe_limit(tmp_path):
@@ -776,6 +923,33 @@ def test_capacity_success_teaches_remaining_chunks_the_safe_limit(tmp_path):
         i for i, row in enumerate(provider.requests) if len(row["target_ids"]) <= 10
     )
     assert all(len(row["target_ids"]) <= 10 for row in provider.requests[first_safe:])
+
+
+def test_capacity_remainder_does_not_lower_the_learned_safe_limit(tmp_path):
+    class TenLineProvider(RecordingProvider):
+        def complete_json(self, static, volatile, user, schema):
+            ids = re.findall(r"\[TARGET ([^\]]+)\]", user)
+            if len(ids) > 10:
+                self.calls += 1
+                self.requests.append({"target_ids": ids, "user": user, "volatile": volatile})
+                raise llm.OutputCapacityError("finish_reason=length")
+            return super().complete_json(static, volatile, user, schema)
+
+    provider = TenLineProvider()
+    result = fixture(
+        tmp_path,
+        provider,
+        count=45,
+        separator_at=25,
+        target=25,
+        soft_limit=30,
+        hard_limit=40,
+    )
+
+    assert result["completed_targets"] == 45
+    assert [len(request["target_ids"]) for request in provider.requests] == [
+        25, 20, 10, 10, 5, 10, 10,
+    ]
 
 
 def test_reasoning_mode_does_not_change_chunk_capacity(tmp_path):
@@ -832,6 +1006,29 @@ def test_resume_after_deadline_uses_smaller_target_batches(tmp_path):
     assert resumed["pending_targets"] == 0
     assert resumed_provider.requests
     assert max(len(call["target_ids"]) for call in resumed_provider.requests) <= 12
+
+
+def test_resume_after_deadline_emits_model_activity_before_provider_call(tmp_path):
+    class DeadlineProvider(RecordingProvider):
+        def complete_json(self, static, volatile, user, schema):
+            self.requests.append({
+                "target_ids": re.findall(r"\[TARGET ([^\]]+)\]", user),
+            })
+            raise llm.RequestDeadlineError("deadline")
+
+    first = fixture(tmp_path, DeadlineProvider(), count=25)
+    assert first["timed_out"] is True
+
+    events = []
+    provider = RecordingProvider()
+    resumed = fixture(tmp_path, provider, count=25, model_activity=events.append)
+
+    assert resumed["completed_targets"] == 25
+    assert provider.requests
+    subdivision = next(event for event in events if event["state"] == "subdividing")
+    assert subdivision["reason"] == "learned_safe_limit"
+    assert subdivision["chunk_current"] == 1
+    assert subdivision["chunk_total"] == 1
 
 
 def test_model_activity_adds_chunk_context_to_provider_events(tmp_path):

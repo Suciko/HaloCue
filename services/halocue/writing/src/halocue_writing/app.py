@@ -126,7 +126,8 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
             if len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] == "adaptations":
                 query = parse_qs(urlparse(self.path).query)
                 ids = query.get("id", [])
-                return self._json({"ok": True, "data": [self.service.adaptations.get(item) for item in ids] if ids else []})
+                data = [self.service.adaptations.get(item) for item in ids] if ids else self.service.adaptations.list(parts[3])
+                return self._json({"ok": True, "data": data})
             if len(parts) == 6 and parts[:3] == ["api", "v1", "works"] and parts[4] == "adaptations":
                 return self._json({"ok": True, "data": self.service.adaptations.get(parts[5])})
             if len(parts) == 4 and parts[:3] == ["api", "v1", "intent-plans"]:

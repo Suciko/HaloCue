@@ -1,4 +1,5 @@
 import pytest
+import threading
 
 import llm
 from llm import parse_json_response
@@ -72,3 +73,51 @@ def test_validate_json_schema_accepts_valid_nested_usage_chain():
     assert llm.validate_json_schema(
         {"usage_chain": [{"segment": "开场", "needs": []}]}, schema
     )["usage_chain"][0]["segment"] == "开场"
+
+
+def test_gateway_timeout_is_retryable_transport_error_not_local_deadline():
+    error = llm._provider_http_error(
+        "test-model",
+        504,
+        "gateway timed out",
+        "HTTP 504",
+        headers={"Retry-After": "2"},
+    )
+
+    assert isinstance(error, llm.ModelGatewayTimeoutError)
+    assert not isinstance(error, llm.RequestDeadlineError)
+    assert error.retry_after == 2
+
+
+def test_provider_wall_deadline_closes_active_transport():
+    provider = llm.Provider({})
+    closed = threading.Event()
+
+    class Handle:
+        def close(self):
+            closed.set()
+
+    with provider._track_active_request(Handle(), wall_timeout=0.01) as guard:
+        assert closed.wait(0.5)
+
+    with pytest.raises(llm.RequestDeadlineError):
+        provider._raise_if_request_interrupted(guard)
+
+
+def test_provider_abort_active_request_closes_handle_and_reports_cancellation():
+    provider = llm.Provider({"model": "test-model"})
+    stopped = threading.Event()
+    closed = threading.Event()
+
+    class Handle:
+        def close(self):
+            closed.set()
+
+    provider.bind_cancellation(stopped.is_set)
+    with provider._track_active_request(Handle(), wall_timeout=5) as guard:
+        stopped.set()
+        provider.abort_active_request()
+        assert closed.wait(0.5)
+
+    with pytest.raises(llm.RequestCancelledError):
+        provider._raise_if_request_interrupted(guard)

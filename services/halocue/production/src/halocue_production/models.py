@@ -69,7 +69,13 @@ class ProductionRun:
     source_summary: dict[str, Any] = field(default_factory=dict)
     pending_build_id: str | None = None
     last_build_id: str | None = None
+    last_build_draft_version: int | None = None
     last_installed_project: str | None = None
+    active_job_id: str | None = None
+    active_job_kind: str | None = None
+    active_generation_id: str | None = None
+    last_job_id: str | None = None
+    last_direction_generation_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         value = self.__dict__.copy()
@@ -80,5 +86,39 @@ class ProductionRun:
     def from_dict(cls, value: dict[str, Any]) -> "ProductionRun":
         data = dict(value)
         data.setdefault("pending_build_id", None)
+        data.setdefault("last_build_id", None)
+        data.setdefault("last_build_draft_version", None)
+        data.setdefault("last_installed_project", None)
+        data.setdefault("active_job_id", None)
+        data.setdefault("active_job_kind", None)
+        data.setdefault("active_generation_id", None)
+        data.setdefault("last_job_id", None)
+        data.setdefault("last_direction_generation_id", None)
         data["work_items"] = [WorkItem(**item) for item in data.get("work_items", [])]
         return cls(**data)
+
+
+@dataclass(frozen=True)
+class GenerationFence:
+    run_id: str
+    job_id: str
+    generation_id: str
+    expected_draft_version: int
+
+    def matches(self, run: ProductionRun) -> bool:
+        return (
+            run.run_id == self.run_id
+            and run.active_job_id == self.job_id
+            and run.active_generation_id == self.generation_id
+        )
+
+
+@dataclass(frozen=True)
+class StagedDirectionResult:
+    token: str
+    generation_id: str
+    expected_draft_version: int
+    layout_mode: str
+    source_cards: list[dict[str, Any]]
+    result: dict[str, Any]
+    summary: dict[str, Any]

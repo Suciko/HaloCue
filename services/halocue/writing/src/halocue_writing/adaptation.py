@@ -17,6 +17,20 @@ class AdaptationService:
             if not row: raise NotFound("adaptation",adaptation_id)
             item=self._row(row); chapters=c.execute("SELECT * FROM adaptation_chapters WHERE adaptation_id=? ORDER BY ordinal",(adaptation_id,)).fetchall()
         item["chapters"]=[{**dict(ch),"candidate":json.loads(ch["candidate_json"]),"dependency":json.loads(ch["dependency_json"])} for ch in chapters]; item["plan_digest"]=sha256_text(canonical_json(item["plan"])); return item
+    def list(self, work_id):
+        """Return adaptation summaries for a work in newest-first order.
+
+        The web client needs a stable collection endpoint so it can render the
+        work's adaptation history without knowing task IDs.  Reuse ``get`` to
+        keep the detail shape (including chapter checkpoints and plan digest)
+        identical to the single-task endpoint.
+        """
+        with self.repo.connect() as c:
+            rows = c.execute(
+                "SELECT id FROM adaptations WHERE work_id=? ORDER BY updated_at DESC, id DESC",
+                (work_id,),
+            ).fetchall()
+        return [self.get(row["id"]) for row in rows]
     def create(self,work_id,payload):
         source=self.sources.get(work_id,payload.get("source_version_id"))
         if not source: raise DomainError("adaptation_source_required","请先导入并确认原文范围。",status=409)
