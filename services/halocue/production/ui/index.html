@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="cg-responsive.css">
   <link rel="stylesheet" href="workspace-migration.css">
   <link rel="stylesheet" href="confirm-dialog.css">
+  <link rel="stylesheet" href="direction-profile.css">
 </head>
 <body>
   <div class="app-shell">
@@ -132,6 +133,7 @@
           <label>AA 工程名称<input id="projectName" required maxlength="80" placeholder="例如：凯伊约会篇-第一章"></label>
           <label>剧本文本<textarea id="scriptText" required placeholder="## 场景 01&#10;爱丽丝: 前方发现了新的副本入口！&#10;凯伊: ……先别进去。"></textarea></label>
           <fieldset class="generation-mode-fieldset"><legend>草稿生成方式</legend><label class="mode-choice"><input type="radio" name="generationMode" value="format_only" checked><span><b>仅转换格式</b><small>保留已有演出指令，直接进入映射与审查</small></span></label><label class="mode-choice" id="aiModeChoice"><input type="radio" name="generationMode" value="ai_direction"><span><b>AI 安排演出</b><small id="aiModeState">正在检查演出模型</small></span></label><div class="generation-mode-notice" id="generationModeNotice"><span>当前将按原剧本建立草稿。</span><button type="button" id="configureGenerationModel" class="hidden">配置 AI 模型</button></div></fieldset>
+          <label class="direction-profile-control hidden" id="sourceDirectionProfileControl">新任务演出策略<select id="sourceDirectionProfile"><option value="conservative" selected>简洁（保守）</option><option value="standard">标准（原版）</option></select></label>
           <div class="form-footer"><span id="sourceStatus">支持“角色: 台词”、场景标题和 AA 指令混合格式。</span><span class="source-actions"><button type="button" id="preflightSource">先检查剧本</button><button class="primary" type="submit">建立制作任务</button></span></div>
         </form>
         <section class="preflight-panel hidden" id="sourcePreflight" aria-live="polite"></section>
@@ -157,7 +159,8 @@
 
       <section class="page" id="page-generation">
         <div class="page-lead"><div><small>第三步</small><h3>生成演出草稿</h3><p id="generationDescription">当前任务使用仅转换格式，草稿已经建立。</p></div><span class="mode-badge" id="generationModeBadge">仅转换格式</span></div>
-        <section class="action-panel"><div><small>下一步</small><h3 id="generationActionTitle">打开草稿审查</h3><p id="generationActionCopy">逐卡处理未登记背景、音效和待审内容。</p></div><button class="primary" id="generateOrReview">进入审查</button></section>
+        <div class="direction-profile-bar hidden" id="directionProfileControl"><label class="direction-profile-control">演出策略<select id="directionProfile"><option value="conservative">简洁（保守）</option><option value="standard" selected>标准（原版）</option></select></label></div>
+        <section class="action-panel"><div><small>下一步</small><h3 id="generationActionTitle">打开草稿审查</h3><p id="generationActionCopy">逐卡处理未登记背景、音效和待审内容。</p></div><div class="direction-generation-actions"><button type="button" id="regenerateDirection" hidden>重新生成</button><button class="primary" id="generateOrReview">进入审查</button></div></section>
         <section class="generation-job hidden" id="generationJob" aria-live="polite">
           <header><div><small>后台演出任务</small><h3 id="generationJobTitle">等待开始</h3></div><b id="generationJobState">未运行</b></header>
           <div class="generation-progress" id="generationProgress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="generationProgressBar"></i></div>
