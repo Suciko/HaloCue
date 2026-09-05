@@ -165,6 +165,7 @@ class ProductionService:
 
     def capabilities(self) -> dict[str, Any]:
         capabilities = self.adapter.capabilities()
+        capabilities["teacher_identity"] = self.adapter.teacher_identity_capability()
         model = self.direction_model_settings.public()["model"]
         spine = spine_rendering.capability(
             legacy_root=self.settings.legacy_root,
@@ -1297,6 +1298,18 @@ class ProductionService:
                 background = str(current["arg"]).strip()
             speaker = str(current.get("who") or "").strip()
             mapping = cast.get(speaker) if isinstance(cast.get(speaker), dict) else {"kind": "unset"}
+            speaker_display = {
+                "name": speaker,
+                "mapping_kind": str(mapping.get("kind") or "unset"),
+                "character_id": str(mapping.get("id") or ""),
+            }
+            if mapping.get("role") == "teacher":
+                speaker_display.update(
+                    name=str(mapping.get("name") or speaker),
+                    organization=str(mapping.get("club") or ""),
+                    source_name=speaker,
+                    role="teacher",
+                )
             cg = card.get("cg") if isinstance(card.get("cg"), dict) else None
             annotations = [
                 {"kind": label, "value": str(current.get(key) or "").strip()}
@@ -1310,7 +1323,7 @@ class ProductionService:
                 text = str(current.get("text") or "") if kind == "line" else ""
             elif kind == "line":
                 presentation = "dialogue"
-                title = speaker if mapping.get("kind") != "narrator" else "旁白"
+                title = speaker_display["name"] if mapping.get("kind") != "narrator" else "旁白"
                 text = str(current.get("text") or "")
             elif kind == "scene":
                 presentation = "scene"
@@ -1351,11 +1364,7 @@ class ProductionService:
                         {"background_key": str(cg.get("background_key") or ""), "label": str(cg.get("label") or "CG 段落")}
                         if cg else None
                     ),
-                    "speaker": {
-                        "name": speaker,
-                        "mapping_kind": str(mapping.get("kind") or "unset"),
-                        "character_id": str(mapping.get("id") or ""),
-                    },
+                    "speaker": speaker_display,
                     "title": title,
                     "text": text,
                     "annotations": annotations,
@@ -1545,6 +1554,8 @@ class ProductionService:
                 character = self.adapter.draft_character_detail(
                     str(run.draft_token), identifier
                 )["character"]
+                if character.get("role") == "teacher":
+                    raise ProductionError("teacher_requires_no_portrait", "老师身份不能作为立绘角色绑定", status=409)
                 mapping = dict(mapping)
                 # The task snapshot owns display names. Ignore stale client labels.
                 mapping["name"] = str(character.get("name") or identifier)
@@ -1552,13 +1563,15 @@ class ProductionService:
             expected = int(payload["expected_draft_version"])
         except (KeyError, TypeError, ValueError) as exc:
             raise ProductionError("expected_version_required", "必须提供 expected_draft_version") from exc
-        self.adapter.update_cast_binding(
-            token=str(run.draft_token),
-            speaker=speaker,
-            mapping=mapping,
-            expected_draft_version=expected,
-        )
-        self._mark_draft_changed(run)
+        with self._state_lock:
+            updated = self.adapter.update_cast_binding(
+                token=str(run.draft_token),
+                speaker=speaker,
+                mapping=mapping,
+                expected_draft_version=expected,
+            )
+            if updated["draft_version"] != expected:
+                self._mark_draft_changed(run)
         return self.run_detail(run_id)
 
     def approve_review(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:

@@ -10,6 +10,7 @@ import sys
 import threading
 import mimetypes
 import copy
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,10 @@ class Legacy093Adapter:
         self._load_modules()
         self.store = self._modules["draft_store"].DraftStore(
             base_dir=str(settings.data_dir / "drafts")
+        )
+        self._teacher_module = (
+            importlib.import_module("teacher_identity")
+            if callable(getattr(self.store, "update_teacher_identity", None)) else None
         )
         # Building the labelled resource base can be expensive for a full AA
         # catalogue. Prewarm only that case before accepting HTTP work so
@@ -270,6 +275,25 @@ class Legacy093Adapter:
                 details={"allowed": ["standard", "conservative"]},
             ) from exc
 
+    def teacher_identity_capability(self) -> dict[str, Any]:
+        if not self._teacher_module or not callable(getattr(self.store, "update_teacher_identity", None)):
+            return {"state": "unavailable", "reason": "legacy_teacher_identity_unsupported"}
+        module = self._teacher_module
+        return {
+            "state": "available",
+            "schema_version": module.SCHEMA_VERSION,
+            "presets": copy.deepcopy(list(module.PRESETS)),
+            "presentation": "slot_zero",
+        }
+
+    @contextmanager
+    def _teacher_error_boundary(self):
+        errors = (self._teacher_module.TeacherIdentityError,) if self._teacher_module else ()
+        try:
+            yield
+        except errors as exc:
+            raise ProductionError(exc.code, str(exc), status=exc.status) from exc
+
     @staticmethod
     def public_direction_profile_snapshot(value: Any) -> dict[str, str] | None:
         if not isinstance(value, dict):
@@ -463,14 +487,15 @@ class Legacy093Adapter:
         return result
 
     def _draft_resources(self, token: str) -> dict[str, Any]:
-        resource_file = self.store.get_draft_path(token) / "resources.json"
-        if not resource_file.is_file():
-            return {}
-        try:
-            value = json.loads(resource_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return {}
-        return value if isinstance(value, dict) else {}
+        with self._teacher_error_boundary(), self.store.draft_lock(token):
+            resource_file = self.store.get_draft_path(token) / "resources.json"
+            if not resource_file.is_file():
+                return {}
+            try:
+                value = json.loads(resource_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return {}
+            return value if isinstance(value, dict) else {}
 
     def draft_resource_contains(self, token: str, kind: str, key: str) -> bool:
         resources = self._draft_resources(token)
@@ -589,6 +614,7 @@ class Legacy093Adapter:
                     "club": str(value.get("club") or ""), "spine": str(value.get("spine") or ""),
                     "avatar_key": str(value.get("avatar") or value.get("avatar_key") or ""),
                     "outfit_key": str(value.get("outfit_key") or ""), "face_count": len(faces),
+                    **({"role": "teacher", "portrait": False} if value.get("role") == "teacher" else {}),
                 })
             return rows
         if kind == "cg":
@@ -734,6 +760,7 @@ class Legacy093Adapter:
                 "spine": str(value.get("spine") or ""),
                 "outfit_key": str(value.get("outfit_key") or ""),
                 "faces": faces,
+                **({"role": "teacher", "portrait": False} if value.get("role") == "teacher" else {}),
             },
         }
 
@@ -949,18 +976,20 @@ class Legacy093Adapter:
 
     def draft_detail(self, token: str) -> dict[str, Any]:
         try:
-            draft = self.store.load_draft(token)
+            with self._teacher_error_boundary(), self.store.draft_lock(token):
+                draft = self.store.load_draft(token)
+                cast_data = self.store.load_cast(token)
+                resources = self._draft_resources(token)
         except FileNotFoundError as exc:
             raise ProductionError("draft_not_found", "演出草稿不存在", status=404) from exc
         nodes = self.document.normalize_draft_nodes(
             self.document.parse_document_lossless(draft["edited_text"])
         )
-        cast_data = self.store.load_cast(token)
         cast = cast_data.get("cast") if isinstance(cast_data.get("cast"), dict) else cast_data
         _, diagnostics = self.document.compile_document(
             nodes,
             cast if isinstance(cast, dict) else {},
-            self._draft_resources(token),
+            resources,
         )
         cards = []
         for node, identity in zip(nodes, draft["identities"]):
@@ -1616,7 +1645,7 @@ class Legacy093Adapter:
         mapping: dict[str, Any],
         expected_draft_version: int,
     ) -> dict[str, Any]:
-        allowed_kinds = {"portrait", "voice", "narrator", "unset"}
+        allowed_kinds = {"portrait", "voice", "narrator", "unset", "teacher"}
         kind = str(mapping.get("kind") or "").strip()
         if kind not in allowed_kinds:
             raise ProductionError(
@@ -1624,6 +1653,20 @@ class Legacy093Adapter:
                 "角色映射类型无效",
                 details={"allowed": sorted(allowed_kinds)},
             )
+        if kind == "teacher":
+            if self.teacher_identity_capability()["state"] != "available":
+                raise ProductionError("teacher_identity_unavailable", "当前兼容模块不支持老师身份", status=409)
+            with self._teacher_error_boundary():
+                try:
+                    self.store.update_teacher_identity(
+                        token=token, speaker=speaker, selection=mapping,
+                        expected_draft_version=expected_draft_version,
+                    )
+                except self._modules["draft_store"].RevisionConflictError as exc:
+                    raise ProductionError("revision_conflict", "草稿版本已经变化", status=409) from exc
+                return self.draft_detail(token)
+        if any(key in mapping for key in ("role", "teacher_identity_schema", "teacher_preset_id")):
+            raise ProductionError("invalid_cast_binding", "老师身份须通过明确的老师身份选择保存")
         normalized = dict(mapping)
         if kind == "narrator":
             normalized = {"kind": "narrator", "narrator": True}
@@ -1640,12 +1683,13 @@ class Legacy093Adapter:
         elif not str(mapping.get("id") or "").strip():
             raise ProductionError("cast_id_required", "有立绘角色必须提供 AA 角色 ID")
         try:
-            self.store.update_cast(
-                token=token,
-                speaker=speaker,
-                mapping=normalized,
-                expected_draft_version=expected_draft_version,
-            )
+            with self._teacher_error_boundary():
+                self.store.update_cast(
+                    token=token,
+                    speaker=speaker,
+                    mapping=normalized,
+                    expected_draft_version=expected_draft_version,
+                )
         except self._modules["draft_store"].RevisionConflictError as exc:
             raise ProductionError("revision_conflict", str(exc), status=409) from exc
         return self.draft_detail(token)
@@ -1935,6 +1979,11 @@ class Legacy093Adapter:
                 (input_dir / "edited.txt").write_text(transformed, encoding="utf-8")
                 cast_path = input_dir / "cast.json"
                 cast_data = json.loads(cast_path.read_text(encoding="utf-8"))
+                source_cast = cast_data.get("cast") or {}
+                for alias, binding in list(aliases.items()):
+                    original = source_cast.get(binding.get("id"))
+                    if isinstance(original, dict) and original.get("role") == "teacher":
+                        aliases[alias] = dict(original)
                 cast_data.setdefault("cast", {}).update(aliases)
                 cast_path.write_text(json.dumps(cast_data, ensure_ascii=False, indent=2), encoding="utf-8")
                 (input_dir / "cg-plan.json").write_text(
@@ -1952,7 +2001,7 @@ class Legacy093Adapter:
             raise ProductionError("compile_input_stale", str(exc), status=409) from exc
 
     def execute_compile(self, token: str, build_id: str) -> dict[str, Any]:
-        with _COMPILE_LOCK:
+        with _COMPILE_LOCK, self._teacher_error_boundary():
             script2aap = importlib.import_module("script2aap")
             original_here = script2aap.HERE
             build_bundle = self._modules["build_bundle"]
@@ -1967,7 +2016,8 @@ class Legacy093Adapter:
             script2aap.HERE = str(self.compat_root)
             build_bundle.compile_script = isolated_compile
             try:
-                manager = build_bundle.BuildBundleManager(store=self.store)
+                output_root = self.store.get_draft_path(token) / "builds" / ".tmp" / build_id / "compile-output"
+                manager = build_bundle.BuildBundleManager(store=self.store, output_root=str(output_root))
                 result = manager.execute_build_worker(token, build_id)
                 self._inject_task_assets_into_bundle(token=token, bundle_dir=Path(result["bundle_dir"]))
                 return result
@@ -2049,12 +2099,13 @@ class Legacy093Adapter:
             record_path=str(self.settings.data_dir / "project_install_record.json"),
         )
         try:
-            return manager.install_build(
-                token,
-                build_id,
-                category=category,
-                story_name=story_name,
-            )
+            with self._teacher_error_boundary():
+                return manager.install_build(
+                    token,
+                    build_id,
+                    category=category,
+                    story_name=story_name,
+                )
         except self._modules["install_manager"].AARunningError as exc:
             raise ProductionError("aa_running", str(exc), status=423) from exc
         except self._modules["install_manager"].AAInstallTargetExistsError as exc:
