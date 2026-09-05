@@ -22,3 +22,21 @@ service boundary. Root Python modules are the 0.9 compatibility surface while
 The 0.9 root modules and tests remain the baseline. Migration into the 1.x
 service is incremental; do not copy the root implementation into a second
 package without an explicit ownership decision and regression coverage.
+
+## Language
+
+**Teacher Identity**:
+The production-local presentation identity shared by explicitly bound teacher
+speakers. Its display name and organization may change without replacing the
+identity; it does not redefine a writing-owned character.
+_Avoid_: narrator, slot zero
+
+**Teacher Binding**:
+An explicit association between a source speaker and the task's Teacher
+Identity. Several source spellings may refer to the same identity without
+changing the source dialogue.
+
+**No-Portrait Character**:
+A named speaking character without a visible portrait. A Teacher Identity uses
+this representation for ordinary dialogue, but not every no-portrait character
+is a teacher.

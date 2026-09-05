@@ -26,8 +26,13 @@ from aa_registry import (
 )
 from build_bundle import calc_file_sha256
 from draft_store import DraftStore
-from script2aap import install_transaction
+from script2aap import (
+    assert_no_teacher_portrait_conflict,
+    install_transaction,
+    teacher_overrides_from_resource_index,
+)
 from runtime_layout import LAYOUT
+from teacher_identity import TeacherIdentityError
 
 HERE = LAYOUT.user_data_root if LAYOUT.frozen else Path(__file__).resolve().parent
 
@@ -81,7 +86,9 @@ def _safe_manifest_relative(value: Any, folder: str) -> Optional[PureWindowsPath
     return relative
 
 
-def _merge_install_manifests(*manifests: Dict[str, Any]) -> Dict[str, Any]:
+def _merge_install_manifests(
+    *manifests: Dict[str, Any], teacher_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     merged = {key: [] for key in MANIFEST_LISTS}
     characters: Dict[str, Dict[str, Any]] = {}
     path_keys = {key: set() for key in MANIFEST_LISTS if key != "CharacterOverrides"}
@@ -112,6 +119,8 @@ def _merge_install_manifests(*manifests: Dict[str, Any]) -> Dict[str, Any]:
                 if normalized not in path_keys[key]:
                     merged[key].append(str(value))
                     path_keys[key].add(normalized)
+    for identifier, row in (teacher_overrides or {}).items():
+        characters[identifier] = dict(row)
     merged["CharacterOverrides"] = list(characters.values())
     return merged
 
@@ -177,6 +186,22 @@ def _bundle_resource_index(project_dir: Path) -> Dict[str, Any]:
         return json.loads(index_path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+def _bundle_teacher_overrides(
+    project_dir: Path, referenced_characters: set[str],
+) -> Dict[str, Dict[str, Any]]:
+    """Read HC ownership from the frozen index, not from AA's private manifest."""
+    declarations = {}
+    manifest = load_manifest(project_dir)
+    for identifier, row in teacher_overrides_from_resource_index(_bundle_resource_index(project_dir)).items():
+        matches = [item for item in manifest["CharacterOverrides"] if item.get("Identifier") == identifier]
+        if (len(matches) > 1 or (matches and matches[0] != row)
+                or (identifier in referenced_characters and not matches)):
+            raise TeacherIdentityError("teacher_identity_conflict", "老师导出登记与冻结身份不一致", status=409)
+        if matches:
+            declarations[identifier] = row
+    return declarations
 
 
 def _bundle_character_ids(project_dir: Path) -> set[str]:
@@ -383,6 +408,8 @@ def _repair_install_assets(
     manifest: Dict[str, Any],
 ) -> Dict[str, Any]:
     referenced_backgrounds, referenced_characters = _aap_asset_references(aap_path)
+    teachers = _bundle_teacher_overrides(bundle_project_dir, referenced_characters)
+    assert_no_teacher_portrait_conflict(teachers, [manifest], (project_dir, save_dir, bundle_project_dir))
     _reconcile_simple_assets(manifest, project_dir, save_dir)
     _reconcile_voice_assets(manifest, project_dir, save_dir)
 
@@ -431,6 +458,8 @@ def _repair_install_assets(
             )
     official_identifiers = _bundle_character_ids(bundle_project_dir)
     for identifier in sorted(physical_identifiers | referenced_characters):
+        if identifier in teachers:
+            continue
         existing = by_identifier.get(identifier)
         if existing is not None and (
             _manifest_character_has_assets(project_dir, existing)
@@ -743,6 +772,13 @@ class InstallManager:
         with install_transaction(
             install_target, aap_path=aap_dest, running_probe=self.running_probe
         ):
+            _, referenced_characters = _aap_asset_references(aap_source)
+            teachers = _bundle_teacher_overrides(proj_res_source, referenced_characters)
+            assert_no_teacher_portrait_conflict(
+                teachers, source_manifests,
+                (projects_dir / source_project, saves_dir / source_project, proj_res_source,
+                 proj_res_dest, save_res_dest),
+            )
             if aap_source.is_file():
                 if project_name == source_project:
                     shutil.copy2(aap_source, aap_dest)
@@ -762,7 +798,7 @@ class InstallManager:
                 save_dir=save_res_dest,
                 bundle_project_dir=proj_res_source,
                 aap_path=aap_dest,
-                manifest=_merge_install_manifests(*source_manifests),
+                manifest=_merge_install_manifests(*source_manifests, teacher_overrides=teachers),
             )
             write_manifest_atomic(proj_res_dest, merged_manifest)
             write_manifest_atomic(save_res_dest, merged_manifest)
