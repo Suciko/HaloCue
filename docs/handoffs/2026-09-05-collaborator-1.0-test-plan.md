@@ -112,3 +112,11 @@
 ```
 
 不要把 API Key、完整私人原文或含个人路径的数据库直接发到群里。若需要复现，优先提供脱敏短篇和任务 ID。
+
+## 发送给合作者的版本
+
+- 分支：`feature/1.0-adaptation-workflow`
+- 实现提交：`e519228`（写作 Agent、写作网页、AA 制作服务、制作 UI、兼容层和测试）
+- 远端：`https://github.com/Suciko/HaloCue.git`
+- 本机验证：写作 `641 passed`；制作 `140 passed`；根目录 Agent/LLM/资源检索 `74 passed`；浏览器 phase1、phase3、phase5 均通过。
+- 运行前提：合作者电脑需要自行安装 Python、Node/Playwright 及本机授权的 AA/Spine/FFmpeg 依赖；仓库不携带游戏资源、模型缓存或私人作品。
