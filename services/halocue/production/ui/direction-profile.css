@@ -1,0 +1,43 @@
+.direction-profile-control {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.direction-profile-control select {
+  width: 100%;
+  max-width: 260px;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 8px 32px 8px 10px;
+  color: var(--ink);
+  background: var(--surface);
+  font: inherit;
+}
+
+.direction-profile-control select:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+.direction-profile-bar {
+  padding: 4px 0 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.direction-generation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  gap: 8px;
+  margin-left: 16px;
+}
+
+@media (max-width: 800px) {
+  .direction-generation-actions {
+    margin-left: 0;
+  }
+}

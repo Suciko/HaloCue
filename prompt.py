@@ -10,7 +10,19 @@
 （这部分跨请求不变，会被缓存）。
 """
 
+import hashlib
+
+from direction_profiles import PROFILE_VERSION, normalize_direction_profile
 from director_policy import prompt_policy
+from director_state import (
+    BEAT_REASONS,
+    CONTINUITY_STATES,
+    DIRECTION_REASONS,
+    FOCUS_KINDS,
+    RELATION_DISTANCES,
+    SCENE_FUNCTIONS,
+    SCENE_TYPES,
+)
 
 # ---------------------------------------------------------------- 角色与铁律
 ROLE = """你是蔚蓝档案（Blue Archive）同人剧情的**演出指导**。
@@ -382,12 +394,92 @@ MEMORY_POLICY = """# Agent 记忆规则
 """
 
 
-def build_rules(story_type="auto"):
+CONSERVATIVE_RULES = """# 简洁（保守）演出标注
+
+你只为冻结剧本补充演出草案，原文一个字都不改。不增删行、不改 source_id、不补台词或分支。
+TARGET 的 authored=...、用户明确选择的素材和已有演出指令优先，不覆盖作者意图。
+只能使用本轮资源表和演员表中的有效标识；展示名不是资源编号，不得编造资源、角色、服装或事件。
+
+## 表情与连续性
+复用当前角色和当前服装的现有表情标签，只按所提供的语义与使用语境选择编号。
+不套用其他角色的编号含义，不重新打标、不调用识图模型；裸编号或语义不明时不猜用途。
+同一状态没有新证据就 hold；只有明确的情绪或态度转变才换脸，不按发言次数、标点或关键词轮换。
+正确的已有表情应持续，听众不因别人发言就重置到默认表情。没有更合适的有证据候选时保持原状态。
+face 是持续表情，emo 是瞬时符号，act 是原地身体动作，move 才是位置变化，不互相替代。
+普通对白不需要填满效果；不要为了热闹叠加气泡、动作、特写、背景效果和抖动。
+只有原文或已确认上下文明确支持的外显动作才用 act，可听见的真实事件才用 se；连续事件不重复音效。
+move 仅用于有明确位置变化证据的走位，范围 1-5；shake 只用于真实物理冲击，不能表示心理震撼。
+
+## 人物与画面
+剧情中在场、画面可见和当前发言者是不同概念。五个可见立绘站位编号为 1-5。
+槽 0 不是第六个立绘位，只用于旁白或已登记无立绘角色的对白；不能为了老师说话清空在场立绘。
+优先保持已有站位和可见名单，不因换说话者、段落分块或旁白就切单人镜头、重新排队或清空画面。
+有立绘角色正常发言时应在画面中，明确画外/通讯意图除外；不要自行增减演员或更换服装来凑构图。
+由程序处理基础站位、完整角色状态、碰撞校验和进退场，不输出底层 AA 指令或物理素材路径。
+
+## 背景与场景
+用户指定的有效背景优先；地点、时段和空间未改变时沿用现有背景，不重复输出。
+场景规划 inherited / inherits_from 表示继承，不因分块或换说话者重新选背景。
+真实新场景需要背景时，综合地点、时段、室内外和氛围，选择候选中匹配度最高的有效背景。
+没有完全一致的素材时选最接近的有效候选，不留待用户补空；近似匹配只是供后续审查的建议，不阻断草案。
+不生成 bg_request，不调用图片模型、不新增素材生成费用。bg_request 在完整协议中仅保留空串。
+资源确实缺失、损坏或非法时不得假装可用，由程序校验并报告；不要编造背景来绕过错误。
+每个真实新场景只在首个合适锚点输出 bg/place；trans 仅随真实地点或时间变化使用。
+
+## 独立反应与停顿
+普通对白没有 wait 字段，不生成 #wait，不用气泡或动作冒充停顿。
+仅当本轮 Schema 包含 beats 且原文明确支持独立无台词反应时才输出 beat，否则 beats 为空。
+beat 只能引用本轮允许的 anchor 和演员，不能补台词、额外回答或虚构动作；wait_ms 只属于 beat。
+动作或气泡已有默认节奏时不重复加等待，不为普通登场渐变额外生成 beat。
+"""
+
+
+def _conservative_rules(story_type):
+    normalized = str(story_type or "auto").strip().lower()
+    if normalized not in STORY_PRIORITIES:
+        normalized = "auto"
+    contract = "\n".join([
+        "# 状态字段与输出合同",
+        f"当前剧情类型：{normalized}。类型只帮助理解原文，不强制单人镜头或效果密度。",
+        "严格使用本轮 JSON Schema；紧凑字段 d 或完整字段 direction 只存内部导演状态。",
+        "face / emo / act / fx / se / bg / bg_request / place / shake / bgfx / trans / move / shot",
+        "是行级演出字段，与 i 同级，不能放进 d/direction。",
+        "scene_type / scene_function / emotion_phase / subtext / relation_distance / focus_kind /",
+        "focus_character / reaction_target / visible_characters / continuity / reason",
+        "必须放在 d/direction 内，不能与 i 平级。",
+        "scene_type 只使用：" + " / ".join(SCENE_TYPES),
+        "scene_function 只使用：" + " / ".join(SCENE_FUNCTIONS),
+        "focus_kind 只使用：" + " / ".join(FOCUS_KINDS),
+        "relation_distance 只使用：" + " / ".join(RELATION_DISTANCES),
+        "continuity 对 face / emo / act / fx / bgfx 分层使用：" + " / ".join(CONTINUITY_STATES),
+        "start 建立状态，hold 继承，escalate 仅随证据升级，end 收束，none 不发命令。",
+        "direction.reason 只使用：" + " / ".join(DIRECTION_REASONS),
+        "beat.reason 只使用：" + " / ".join(BEAT_REASONS),
+        "reason 只填短枚举，emotion_phase/subtext 简短且基于原文，不输出分析过程。",
+        "focus_character 使用可显示演员的精确名字；reaction_target 使用演员表精确名字。",
+        "visible_characters 只列应显示的角色，最多五人；省略表示继承，空数组表示明确空镜。",
+    ])
+    return "\n\n".join([CONSERVATIVE_RULES, contract, SHOT, OUTPUT, MEMORY_POLICY])
+
+
+def build_rules(story_type="auto", *, direction_profile="standard"):
+    if normalize_direction_profile(direction_profile) == "conservative":
+        return _conservative_rules(story_type)
     return "\n\n".join([
         ROLE, _story_priority(story_type), DIRECTOR_CONTRACT,
         SHOT, WAIT_POLICY, BACKGROUND_REQUEST, PACING, CAMERA,
         prompt_policy(story_type), DIMENSIONS, FEWSHOT, OUTPUT, MEMORY_POLICY,
     ])
+
+
+def profile_snapshot(direction_profile="standard", *, story_type="auto"):
+    profile = normalize_direction_profile(direction_profile)
+    rules = build_rules(story_type, direction_profile=profile)
+    return {
+        "id": profile,
+        "version": PROFILE_VERSION,
+        "rules_sha256": hashlib.sha256(rules.encode("utf-8")).hexdigest(),
+    }
 
 
 def _labeled_asset(name, labels):
@@ -405,17 +497,20 @@ def _labeled_asset(name, labels):
     return f"{name}={text}" if text else name
 
 
-def build_resources(idx, cast, cast_names, faces_by_id):
+def build_resources(idx, cast, cast_names, faces_by_id, *, direction_profile="standard"):
     """按本章演员表裁剪过的资源清单。模型只看得到用得上的东西。"""
     import tables
+    no_portrait_fields = "se / wait / bg / bgfx / trans / place"
+    if normalize_direction_profile(direction_profile) == "conservative":
+        no_portrait_fields = "se / bg / bgfx / trans / place"
     p = ["\n\n========== 本章可用资源 ==========\n", "\n### 角色与表情\n"]
     for who in cast_names:
         c = cast[who]
         if c.get("narrator"):
-            p.append("- 旁白 —— 无立绘。只能标 se / wait / bg / bgfx / trans / place\n")
+            p.append(f"- 旁白 —— 无立绘。只能标 {no_portrait_fields}\n")
             continue
         if not c.get("portrait"):
-            p.append(f"- {who} —— 只出声、无立绘。只能标 se / wait / bg / bgfx / trans / place\n")
+            p.append(f"- {who} —— 只出声、无立绘。只能标 {no_portrait_fields}\n")
             continue
         capability = faces_by_id.get(c["id"]) or []
         if isinstance(capability, dict):
@@ -478,8 +573,12 @@ def build_resources(idx, cast, cast_names, faces_by_id):
     return "".join(p)
 
 
-def build_system(idx, cast, cast_names, faces_by_id, *, story_type="auto"):
-    return build_rules(story_type) + build_resources(idx, cast, cast_names, faces_by_id)
+def build_system(
+    idx, cast, cast_names, faces_by_id, *, story_type="auto", direction_profile="standard",
+):
+    return build_rules(story_type, direction_profile=direction_profile) + build_resources(
+        idx, cast, cast_names, faces_by_id, direction_profile=direction_profile,
+    )
 
 
 if __name__ == "__main__":
