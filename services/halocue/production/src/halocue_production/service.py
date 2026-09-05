@@ -3,6 +3,7 @@ from __future__ import annotations
 import mimetypes
 import os
 import re
+import threading
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -10,9 +11,18 @@ from typing import Any
 from .config import Settings
 from .errors import ProductionError
 from .direction_models import DirectionModelGateway
-from .jobs import JobRegistry
+from .jobs import JobCancelled, JobPaused, JobRegistry, JobSuperseded
 from .legacy_adapter import Legacy093Adapter
-from .models import ProductionRun, ScriptRelease, WorkItem, content_sha256, new_id, utc_now
+from .models import (
+    GenerationFence,
+    ProductionRun,
+    ScriptRelease,
+    StagedDirectionResult,
+    WorkItem,
+    content_sha256,
+    new_id,
+    utc_now,
+)
 from .model_settings import DirectionModelSettings
 from .repository import ProductionRepository
 from .resource_catalog import ResourceCatalog
@@ -68,6 +78,7 @@ class ProductionService:
         self.direction_models = DirectionModelGateway(
             self.direction_model_settings, settings.legacy_root
         )
+        self._state_lock = threading.RLock()
         self.jobs = JobRegistry(settings.data_dir / "jobs")
         self.asset_staging = AssetStaging(settings.data_dir / "uploads")
         self.custom_assets = CustomAssetLibrary(settings.data_dir / "custom-asset-library")
@@ -75,14 +86,24 @@ class ProductionService:
 
     def _recover_interrupted_runs(self) -> None:
         for run in self.repository.list_runs():
-            recovery_state = {
-                "compiling": "compile_interrupted",
-                "generating_direction": "direction_interrupted",
-            }.get(run.state)
+            job = self.jobs.get(str(run.active_job_id or "")) if run.active_job_id else None
+            if job and job.state == "paused" and run.active_job_kind == "direction_generation":
+                recovery_state = "direction_paused"
+            elif job and job.state == "cancelled":
+                recovery_state = "direction_cancelled" if run.active_job_kind == "direction_generation" else "ready_to_compile"
+            else:
+                recovery_state = {
+                    "compiling": "compile_interrupted",
+                    "generating_direction": "direction_interrupted",
+                }.get(run.state)
             if not recovery_state:
                 continue
             run.state = recovery_state
             run.pending_build_id = None
+            run.last_job_id = run.active_job_id
+            run.active_job_id = None
+            run.active_job_kind = None
+            run.active_generation_id = None
             run.updated_at = utc_now()
             self.repository.save_run(run)
 
@@ -123,7 +144,8 @@ class ProductionService:
         kind = str(source.get("kind"))
         filename: str | None = None
         if kind == "file_upload":
-            filename = Path(str(source.get("filename") or "")).name.strip()
+            normalized_name = str(source.get("filename") or "").replace("\\", "/")
+            filename = Path(normalized_name).name.strip()
             if not filename or Path(filename).suffix.casefold() not in {".txt", ".md", ".markdown"}:
                 raise ProductionError(
                     "source_file_type_unsupported",
@@ -287,82 +309,232 @@ class ProductionService:
     def fetch_direction_models(self, payload: dict[str, Any] | None = None) -> list[str]:
         return self.direction_model_settings.fetch_models(payload)
 
-    def test_direction_model(self) -> tuple[int, dict[str, Any]]:
+    def test_direction_model(self, payload: dict | None = None) -> tuple[int, dict[str, Any]]:
+        candidate = self.direction_model_settings.resolve_candidate(payload) if payload is not None else None
         job = self.jobs.submit(
-            "model_connection_test", self.direction_models.test_connection, retry_context={}
+            "model_connection_test",
+            (lambda: self.direction_models.test_connection(candidate)) if candidate is not None else self.direction_models.test_connection,
+            retry_context={}
         )
         return 202, {"ok": True, "job": self._job_public(job.to_dict())}
 
-    def generate_direction(
-        self, run_id: str, payload: dict[str, Any]
-    ) -> tuple[int, dict[str, Any]]:
-        run = self._run(run_id)
-        if run.source_summary.get("generation_mode") != "ai_direction":
-            raise ProductionError(
-                "direction_mode_not_selected",
-                "该制作任务不是 AI 安排演出模式",
-                status=409,
-            )
-        expected = self._expected_version(payload)
-        detail = self.adapter.draft_detail(str(run.draft_token))
-        if detail["draft_version"] != expected:
-            raise ProductionError("revision_conflict", "草稿版本已经变化", status=409)
-        actor_errors = [
-            issue
-            for issue in detail["diagnostics"]
-            if str(issue.get("code") or "").startswith("actor.")
-            and issue.get("severity") == "error"
-        ]
-        if actor_errors:
-            raise ProductionError(
-                "cast_mapping_required",
-                "AI 安排演出前必须完成角色映射",
-                status=409,
-                details={"count": len(actor_errors)},
-            )
-        story_type = str(payload.get("story_type") or "auto").strip()
-        if story_type not in {"auto", "main", "event", "bond"}:
-            raise ProductionError("invalid_story_type", "剧情类型无效")
-        layout_mode = self._layout_mode(payload.get("layout_mode"))
-        generation_id = new_id("direction")
-        provider = self.direction_models.provider()
-        run.state = "generating_direction"
-        run.current_stage = "generation"
-        run.source_summary["layout_mode"] = layout_mode
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+    def activate_direction_model(self, payload: dict) -> dict:
+        with self.direction_model_settings.activation_lock:
+            candidate = self.direction_model_settings.resolve_candidate(payload)
+            tested = self.direction_models.test_connection(candidate)
+            saved = self.direction_model_settings._save_candidate(candidate, connection_test=tested)
+        return {**saved, "test": tested}
 
-        def work() -> dict[str, Any]:
+    def generate_direction(
+        self,
+        run_id: str,
+        payload: dict[str, Any],
+        *,
+        generation_id: str | None = None,
+        resumed_from_job_id: str | None = None,
+    ) -> tuple[int, dict[str, Any]]:
+        with self._state_lock:
+            run = self._run(run_id)
+            if run.source_summary.get("generation_mode") != "ai_direction":
+                raise ProductionError(
+                    "direction_mode_not_selected",
+                    "该制作任务不是 AI 安排演出模式",
+                    status=409,
+                )
+            expected = self._expected_version(payload)
+            detail = self.adapter.draft_detail(str(run.draft_token))
+            if detail["draft_version"] != expected:
+                raise ProductionError("revision_conflict", "草稿版本已经变化", status=409)
+            active = self._assert_no_other_mutation_job(
+                run,
+                requested_kind="direction_generation",
+                expected_draft_version=expected,
+            )
+            if active:
+                context = active.retry_context if isinstance(active.retry_context, dict) else {}
+                return 202, {
+                    "ok": True,
+                    "job": self._job_public(active.to_dict()),
+                    "generation_id": str(
+                        context.get("generation_id") or run.active_generation_id or ""
+                    ),
+                    "layout_mode": str(
+                        context.get("layout_mode") or run.source_summary.get("layout_mode") or "ai"
+                    ),
+                    "deduplicated": True,
+                }
+            actor_errors = [
+                issue
+                for issue in detail["diagnostics"]
+                if str(issue.get("code") or "").startswith("actor.")
+                and issue.get("severity") == "error"
+            ]
+            if actor_errors:
+                raise ProductionError(
+                    "cast_mapping_required",
+                    "AI 安排演出前必须完成角色映射",
+                    status=409,
+                    details={"count": len(actor_errors)},
+                )
+            story_type = str(payload.get("story_type") or "auto").strip()
+            if story_type not in {"auto", "main", "event", "bond"}:
+                raise ProductionError("invalid_story_type", "剧情类型无效")
+            layout_mode = self._layout_mode(payload.get("layout_mode"))
+            generation_id = generation_id or new_id("direction")
+            job_id = new_id("job")
+            provider = self.direction_models.provider()
+            run.state = "generating_direction"
+            run.current_stage = "generation"
+            run.active_job_id = job_id
+            run.active_job_kind = "direction_generation"
+            run.active_generation_id = generation_id
+            run.source_summary["layout_mode"] = layout_mode
+            run.updated_at = utc_now()
+            self.repository.save_run(run)
+            fence = GenerationFence(
+                run_id=run_id,
+                job_id=job_id,
+                generation_id=generation_id,
+                expected_draft_version=expected,
+            )
+
+        def work(control) -> dict[str, Any]:
+            def progress(phase: str, current: int, total: int, detail: str) -> None:
+                control.report_progress(phase, current, total, detail)
+
+            def model_activity(event: dict[str, Any]) -> None:
+                state = str(event.get("state") or "")
+                if state in {
+                    "waiting", "completed", "retrying", "subdividing", "timed_out",
+                }:
+                    control.record_event({"kind": "model_activity", **dict(event)})
+
+            bind_cancellation = getattr(provider, "bind_cancellation", None)
+            abort_active_request = getattr(provider, "abort_active_request", None)
+            if callable(bind_cancellation):
+                bind_cancellation(control.stop_requested)
+            remove_stop_callback = (
+                control.add_stop_callback(abort_active_request)
+                if callable(abort_active_request)
+                else lambda: None
+            )
             try:
-                result = self.adapter.execute_direction_generation(
+                outcome = self.adapter.execute_direction_generation(
                     token=str(run.draft_token),
                     generation_id=generation_id,
                     provider=provider,
                     expected_draft_version=expected,
                     story_type=story_type,
                     layout_mode=layout_mode,
+                    resume=bool(resumed_from_job_id),
+                    progress=progress,
+                    model_activity=model_activity,
+                    cancelled=control.stop_requested,
                 )
-            except Exception:
-                latest = self._run(run_id)
-                latest.state = "direction_failed"
-                latest.updated_at = utc_now()
-                self.repository.save_run(latest)
+                result = (
+                    outcome.summary
+                    if isinstance(outcome, StagedDirectionResult)
+                    else outcome
+                )
+                with self._state_lock:
+                    latest = self._run(run_id)
+                    if not fence.matches(latest):
+                        if isinstance(outcome, StagedDirectionResult):
+                            result = self.adapter.discard_direction_generation(
+                                outcome,
+                                status="superseded",
+                                error={
+                                    "code": "generation_fence_mismatch",
+                                    "message": "任务提交栅栏已经变化，旧演出结果已丢弃",
+                                    "details": {"generation_id": generation_id},
+                                },
+                            )
+                        if control.cancel_requested():
+                            raise JobCancelled("演出生成已由用户结束", result=result)
+                        if control.pause_requested():
+                            raise JobPaused("演出生成已暂停", result=result)
+                        raise JobSuperseded("草稿已经变化，旧演出结果已丢弃", result=result)
+                    incomplete = bool(
+                        result.get("incomplete")
+                        or result.get("cancelled")
+                        or result.get("timed_out")
+                        or int(result.get("pending_targets") or 0) > 0
+                    )
+                    if incomplete or control.stop_requested():
+                        should_pause = not control.cancel_requested() and (
+                            control.pause_requested()
+                            or result.get("timed_out")
+                            or int(result.get("pending_targets") or 0) > 0
+                        )
+                        if isinstance(outcome, StagedDirectionResult):
+                            result = self.adapter.discard_direction_generation(
+                                outcome,
+                                status="incomplete",
+                                cancelled=control.cancel_requested(),
+                            )
+                        self._clear_active_job(latest, job_id)
+                        latest.state = (
+                            "direction_paused" if should_pause else "direction_cancelled"
+                        )
+                        latest.current_stage = "generation"
+                        latest.updated_at = utc_now()
+                        self.repository.save_run(latest)
+                        if latest.state == "direction_paused":
+                            raise JobPaused(
+                                "演出生成已暂停，检查点已保留", result=result
+                            )
+                        raise JobCancelled("演出生成已结束", result=result)
+                    if isinstance(outcome, StagedDirectionResult):
+                        result = self.adapter.commit_direction_generation(outcome)
+                    self._clear_active_job(latest, job_id)
+                    latest.state = "waiting_for_review"
+                    latest.current_stage = "review_install"
+                    latest.last_direction_generation_id = generation_id
+                    latest.updated_at = utc_now()
+                    self.repository.save_run(latest)
+            except (JobPaused, JobCancelled, JobSuperseded):
                 raise
-            latest = self._run(run_id)
-            latest.state = "waiting_for_review"
-            latest.current_stage = "review_install"
-            latest.updated_at = utc_now()
-            self.repository.save_run(latest)
+            except Exception:
+                with self._state_lock:
+                    latest = self._run(run_id)
+                    if self._clear_active_job(latest, job_id):
+                        if control.pause_requested():
+                            latest.state = "direction_paused"
+                        elif control.cancel_requested():
+                            latest.state = "direction_cancelled"
+                        elif control.superseded_requested():
+                            latest.state = "waiting_for_review"
+                        else:
+                            latest.state = "direction_failed"
+                        latest.updated_at = utc_now()
+                        self.repository.save_run(latest)
+                raise
+            finally:
+                remove_stop_callback()
+                if callable(bind_cancellation):
+                    bind_cancellation(None)
+            metrics = ((result.get("agent") or {}).get("metrics") or {})
+            control.record_event({
+                "kind": "generation_summary",
+                "state": "completed",
+                "generation_id": generation_id,
+                "direction_change_count": int(result.get("direction_change_count") or 0),
+                "metrics": metrics,
+            })
             return {"run_id": run_id, **result}
 
         job = self.jobs.submit(
             "direction_generation",
             work,
             run_id=run_id,
+            job_id=job_id,
+            cooperative=True,
+            resumed_from_job_id=resumed_from_job_id,
             retry_context={
                 "expected_draft_version": expected,
                 "story_type": story_type,
                 "layout_mode": layout_mode,
+                "generation_id": generation_id,
             },
         )
         return 202, {
@@ -370,6 +542,7 @@ class ProductionService:
             "job": self._job_public(job.to_dict()),
             "generation_id": generation_id,
             "layout_mode": layout_mode,
+            "deduplicated": False,
         }
 
     def aa_workspace_settings(self) -> dict[str, Any]:
@@ -931,20 +1104,43 @@ class ProductionService:
 
     def start_ai_preflight(self, run_id: str) -> tuple[int, dict[str, Any]]:
         """Submit a source-only AI review without changing any production state."""
-        run = self._run(run_id)
-        if not self.direction_model_settings.public()["model"]["configured"]:
-            raise ProductionError(
-                "ai_preflight_not_configured",
-                "运行 AI 初审前需要先在设置中配置演出模型",
-                status=409,
-            )
-        preflight_id = new_id("preflight")
-        provider = self.direction_models.provider()
+        with self._state_lock:
+            run = self._run(run_id)
+            if not self.direction_model_settings.public()["model"]["configured"]:
+                raise ProductionError(
+                    "ai_preflight_not_configured",
+                    "运行 AI 初审前需要先在设置中配置演出模型",
+                    status=409,
+                )
+            active = self.jobs.active_for_run(run_id, kind="ai_preflight")
+            if active:
+                return 202, {
+                    "ok": True,
+                    "job": self._job_public(active.to_dict()),
+                    "preflight_id": active.retry_context.get("preflight_id"),
+                    "deduplicated": True,
+                }
+            preflight_id = new_id("preflight")
+            provider = self.direction_models.provider()
 
-        def work() -> dict[str, Any]:
-            result = self.adapter.execute_ai_preflight(
-                token=str(run.draft_token), preflight_id=preflight_id, provider=provider
+        def work(control) -> dict[str, Any]:
+            bind_cancellation = getattr(provider, "bind_cancellation", None)
+            abort_active_request = getattr(provider, "abort_active_request", None)
+            if callable(bind_cancellation):
+                bind_cancellation(control.stop_requested)
+            remove_stop_callback = (
+                control.add_stop_callback(abort_active_request)
+                if callable(abort_active_request)
+                else lambda: None
             )
+            try:
+                result = self.adapter.execute_ai_preflight(
+                    token=str(run.draft_token), preflight_id=preflight_id, provider=provider
+                )
+            finally:
+                remove_stop_callback()
+                if callable(bind_cancellation):
+                    bind_cancellation(None)
             return {
                 "run_id": run_id,
                 "preflight_id": preflight_id,
@@ -952,7 +1148,22 @@ class ProductionService:
                 "ambiguity_count": len(result["analysis"]["ambiguities"]),
             }
 
-        job = self.jobs.submit("ai_preflight", work, run_id=run_id, retry_context={})
+        with self._state_lock:
+            active = self.jobs.active_for_run(run_id, kind="ai_preflight")
+            if active:
+                return 202, {
+                    "ok": True,
+                    "job": self._job_public(active.to_dict()),
+                    "preflight_id": active.retry_context.get("preflight_id"),
+                    "deduplicated": True,
+                }
+            job = self.jobs.submit(
+                "ai_preflight",
+                work,
+                run_id=run_id,
+                retry_context={"preflight_id": preflight_id},
+                cooperative=True,
+            )
         return 202, {"ok": True, "job": self._job_public(job.to_dict()), "preflight_id": preflight_id}
 
     def ai_preflights(self, run_id: str) -> dict[str, Any]:
@@ -966,11 +1177,61 @@ class ProductionService:
     def _run(self, run_id: str) -> ProductionRun:
         return self.repository.get_run(run_id)
 
+    def _active_mutation_job(self, run: ProductionRun):
+        if not run.active_job_id:
+            return None
+        job = self.jobs.get(run.active_job_id)
+        if job and job.state in {"queued", "running", "pausing", "cancelling"}:
+            return job
+        return None
+
+    @staticmethod
+    def _clear_active_job(run: ProductionRun, job_id: str) -> bool:
+        if run.active_job_id != job_id:
+            return False
+        run.last_job_id = job_id
+        run.active_job_id = None
+        run.active_job_kind = None
+        run.active_generation_id = None
+        return True
+
+    def _assert_no_other_mutation_job(
+        self,
+        run: ProductionRun,
+        *,
+        requested_kind: str,
+        expected_draft_version: int,
+    ):
+        active = self._active_mutation_job(run)
+        if not active:
+            return None
+        context = active.retry_context if isinstance(active.retry_context, dict) else {}
+        if (
+            active.kind == requested_kind
+            and int(context.get("expected_draft_version") or -1) == expected_draft_version
+        ):
+            return active
+        raise ProductionError(
+            "run_busy",
+            "当前制作任务已有后台操作，请先等待、暂停或结束它",
+            status=409,
+            details={"job_id": active.job_id, "kind": active.kind, "state": active.state},
+        )
+
     def run_detail(self, run_id: str) -> dict[str, Any]:
         run = self._run(run_id)
         draft = self.adapter.draft_detail(str(run.draft_token)) if run.draft_token else None
         gates = self._gates(run, draft)
-        return {"ok": True, "run": run.to_dict(), "gates": gates, "draft": draft}
+        active_job = self.jobs.get(str(run.active_job_id or "")) if run.active_job_id else None
+        last_job = self.jobs.get(str(run.last_job_id or "")) if run.last_job_id else None
+        return {
+            "ok": True,
+            "run": run.to_dict(),
+            "gates": gates,
+            "draft": draft,
+            "active_job": self._job_public(active_job.to_dict()) if active_job else None,
+            "last_job": self._job_public(last_job.to_dict()) if last_job else None,
+        }
 
     def performance_preview(self, run_id: str) -> dict[str, Any]:
         """Build a read-only, task-local representation for the draft preview.
@@ -1185,25 +1446,41 @@ class ProductionService:
         blockers = []
         if draft["counts"]["blocking_errors"]:
             blockers.append("blocking_diagnostics")
+        if draft["counts"].get("unresolved_issues"):
+            blockers.append("unresolved_issues")
         if draft["counts"]["pending"]:
             blockers.append("pending_review")
         if caps["compile"]["state"] != "available":
             blockers.append("compile_not_configured")
+        build_is_current = bool(run.last_build_id) and (
+            run.last_build_draft_version == int(draft.get("draft_version") or -1)
+        )
+        install_blockers = ([] if run.last_build_id else ["build_missing"])
+        if run.last_build_id and not build_is_current:
+            install_blockers.append("build_stale")
+        if caps["install"]["state"] != "available":
+            install_blockers.append("aa_workspace_not_configured")
         return {
             "preflight": {
-                "passed": draft["counts"]["blocking_errors"] == 0,
-                "blockers": ["blocking_diagnostics"] if draft["counts"]["blocking_errors"] else [],
+                "passed": not (
+                    draft["counts"]["blocking_errors"]
+                    or draft["counts"].get("unresolved_issues")
+                ),
+                "blockers": (
+                    ["blocking_diagnostics"]
+                    if draft["counts"]["blocking_errors"]
+                    else []
+                ) + (
+                    ["unresolved_issues"]
+                    if draft["counts"].get("unresolved_issues")
+                    else []
+                ),
             },
             "compile": {"passed": not blockers, "blockers": blockers},
             "install": {
-                "passed": bool(run.last_build_id)
+                "passed": build_is_current
                 and caps["install"]["state"] == "available",
-                "blockers": ([] if run.last_build_id else ["build_missing"])
-                + (
-                    ["aa_workspace_not_configured"]
-                    if caps["install"]["state"] != "available"
-                    else []
-                ),
+                "blockers": install_blockers,
             },
         }
 
@@ -1255,24 +1532,38 @@ class ProductionService:
         draft = self.adapter.approve_cards(
             token=str(run.draft_token), card_ids=card_ids, expected_draft_version=expected
         )
-        run.state = "ready_to_compile" if draft["review_ready"] else "waiting_for_review"
-        run.current_stage = "review_install"
-        run.pending_build_id = None
-        run.last_build_id = None
-        run.last_installed_project = None
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+        with self._state_lock:
+            latest = self._run(run_id)
+            active = self._active_mutation_job(latest)
+            if active:
+                self.jobs.supersede(active.job_id)
+                self._clear_active_job(latest, active.job_id)
+            latest.state = "ready_to_compile" if draft["review_ready"] else "waiting_for_review"
+            latest.current_stage = "review_install"
+            latest.pending_build_id = None
+            latest.last_build_id = None
+            latest.last_build_draft_version = None
+            latest.last_installed_project = None
+            latest.updated_at = utc_now()
+            self.repository.save_run(latest)
         return self.run_detail(run_id)
 
     def _mark_draft_changed(self, run: ProductionRun) -> None:
         """Invalidate build/install claims whenever the editable draft changes."""
-        run.state = "waiting_for_review"
-        run.current_stage = "review_install"
-        run.pending_build_id = None
-        run.last_build_id = None
-        run.last_installed_project = None
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+        with self._state_lock:
+            latest = self._run(run.run_id)
+            active = self._active_mutation_job(latest)
+            if active:
+                self.jobs.supersede(active.job_id)
+                self._clear_active_job(latest, active.job_id)
+            latest.state = "waiting_for_review"
+            latest.current_stage = "review_install"
+            latest.pending_build_id = None
+            latest.last_build_id = None
+            latest.last_build_draft_version = None
+            latest.last_installed_project = None
+            latest.updated_at = utc_now()
+            self.repository.save_run(latest)
 
     @staticmethod
     def _expected_version(payload: dict[str, Any]) -> int:
@@ -1523,44 +1814,109 @@ class ProductionService:
         return self.adapter.validate(str(run.draft_token))
 
     def compile(self, run_id: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-        run = self._run(run_id)
-        try:
-            expected = int(payload["expected_draft_version"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ProductionError("expected_version_required", "必须提供 expected_draft_version") from exc
-        build_id = self.adapter.create_compile_snapshot(str(run.draft_token), expected)
-        run.state = "compiling"
-        run.current_stage = "review_install"
-        run.pending_build_id = build_id
-        run.updated_at = utc_now()
-        self.repository.save_run(run)
+        expected = self._expected_version(payload)
+        with self._state_lock:
+            run = self._run(run_id)
+            detail = self.adapter.draft_detail(str(run.draft_token))
+            if int(detail.get("draft_version") or -1) != expected:
+                raise ProductionError("revision_conflict", "草稿版本已经变化", status=409)
+            active = self._assert_no_other_mutation_job(
+                run,
+                requested_kind="compile",
+                expected_draft_version=expected,
+            )
+            if active:
+                context = active.retry_context if isinstance(active.retry_context, dict) else {}
+                return 202, {
+                    "ok": True,
+                    "job": self._job_public(active.to_dict()),
+                    "build_id": str(context.get("build_id") or run.pending_build_id or ""),
+                    "deduplicated": True,
+                }
+            build_id = self.adapter.create_compile_snapshot(str(run.draft_token), expected)
+            job_id = new_id("job")
+            run.state = "compiling"
+            run.current_stage = "review_install"
+            run.pending_build_id = build_id
+            run.active_job_id = job_id
+            run.active_job_kind = "compile"
+            run.active_generation_id = None
+            run.updated_at = utc_now()
+            self.repository.save_run(run)
 
-        def work() -> dict[str, Any]:
+        def work(control) -> dict[str, Any]:
             try:
+                if control.stop_requested():
+                    raise JobCancelled("编译已在开始前结束")
                 result = self.adapter.execute_compile(str(run.draft_token), build_id)
             except Exception:
-                latest = self._run(run_id)
-                latest.state = "compile_failed"
-                latest.pending_build_id = None
-                latest.updated_at = utc_now()
-                self.repository.save_run(latest)
+                with self._state_lock:
+                    latest = self._run(run_id)
+                    if self._clear_active_job(latest, job_id):
+                        latest.pending_build_id = None
+                        if control.cancel_requested():
+                            latest.state = "ready_to_compile"
+                        elif control.superseded_requested():
+                            latest.state = "waiting_for_review"
+                        else:
+                            latest.state = "compile_failed"
+                        latest.updated_at = utc_now()
+                        self.repository.save_run(latest)
                 raise
-            else:
+            with self._state_lock:
                 latest = self._run(run_id)
+                current = self.adapter.draft_detail(str(latest.draft_token))
+                stale = (
+                    latest.active_job_id != job_id
+                    or latest.pending_build_id != build_id
+                    or int(current.get("draft_version") or -1) != expected
+                )
+                if stale or control.superseded_requested():
+                    if self._clear_active_job(latest, job_id):
+                        latest.pending_build_id = None
+                        if int(current.get("draft_version") or -1) != expected:
+                            latest.state = "waiting_for_review"
+                        latest.updated_at = utc_now()
+                        self.repository.save_run(latest)
+                    raise JobSuperseded(
+                        "草稿已经变化，旧编译结果已隔离",
+                        result={"run_id": run_id, "build_id": build_id, "bundle": result},
+                    )
+                if control.stop_requested():
+                    self._clear_active_job(latest, job_id)
+                    latest.pending_build_id = None
+                    latest.state = "ready_to_compile"
+                    latest.updated_at = utc_now()
+                    self.repository.save_run(latest)
+                    if control.pause_requested():
+                        raise JobPaused("编译已暂停", result=result)
+                    raise JobCancelled("编译结果已丢弃", result=result)
+                self._clear_active_job(latest, job_id)
                 latest.state = "compiled"
                 latest.pending_build_id = None
                 latest.last_build_id = build_id
+                latest.last_build_draft_version = expected
                 latest.updated_at = utc_now()
                 self.repository.save_run(latest)
-                return {"run_id": run_id, "build_id": build_id, "bundle": result}
+            return {"run_id": run_id, "build_id": build_id, "bundle": result}
 
         job = self.jobs.submit(
             "compile",
             work,
             run_id=run_id,
-            retry_context={"expected_draft_version": expected},
+            retry_context={
+                "expected_draft_version": expected,
+                "build_id": build_id,
+            },
+            job_id=job_id,
+            cooperative=True,
         )
-        return 202, {"ok": True, "job": self._job_public(job.to_dict()), "build_id": build_id}
+        return 202, {
+            "ok": True,
+            "job": self._job_public(job.to_dict()),
+            "build_id": build_id,
+            "deduplicated": False,
+        }
 
     def job_detail(self, job_id: str) -> dict[str, Any]:
         job = self.jobs.get(job_id)
@@ -1569,27 +1925,96 @@ class ProductionService:
         return {"ok": True, "job": self._job_public(job.to_dict())}
 
     def cancel_job(self, job_id: str) -> dict[str, Any]:
-        job = self.jobs.get(job_id)
-        if not job:
-            raise ProductionError("job_not_found", "后台任务不存在", status=404)
-        if not self.jobs.cancel(job_id):
-            raise ProductionError(
-                "job_not_cancellable",
-                "只能取消尚未开始的排队任务；运行中的任务不会被强制终止",
-                status=409,
-                details={"state": job.state},
-            )
-        return {"ok": True, "job": self._job_public(job.to_dict())}
+        with self._state_lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                raise ProductionError("job_not_found", "后台任务不存在", status=404)
+            if job.run_id:
+                run = self._run(job.run_id)
+                if run.active_job_id != job_id:
+                    raise ProductionError(
+                        "job_not_cancellable",
+                        "该任务的结果已经提交，不能再结束",
+                        status=409,
+                        details={"state": job.state},
+                    )
+            if not self.jobs.cancel(job_id):
+                raise ProductionError(
+                    "job_not_cancellable",
+                    "该任务已经结束，不能再次结束",
+                    status=409,
+                    details={"state": job.state},
+                )
+            current = self.jobs.get(job_id)
+            if current:
+                self._settle_immediate_job_control(current)
+        return {"ok": True, "job": self._job_public(current.to_dict())}
+
+    def pause_job(self, job_id: str) -> dict[str, Any]:
+        with self._state_lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                raise ProductionError("job_not_found", "后台任务不存在", status=404)
+            if job.kind != "direction_generation":
+                raise ProductionError(
+                    "job_not_pausable",
+                    "只有 AI 演出生成任务支持保留检查点后暂停",
+                    status=409,
+                    details={"kind": job.kind, "state": job.state},
+                )
+            if job.run_id:
+                run = self._run(job.run_id)
+                if run.active_job_id != job_id:
+                    raise ProductionError(
+                        "job_not_pausable",
+                        "该任务的结果已经提交，不能再暂停",
+                        status=409,
+                        details={"state": job.state},
+                    )
+            if not self.jobs.pause(job_id):
+                raise ProductionError(
+                    "job_not_pausable",
+                    "该任务当前不能暂停",
+                    status=409,
+                    details={"state": job.state},
+                )
+            current = self.jobs.get(job_id)
+            if current:
+                self._settle_immediate_job_control(current)
+        return {"ok": True, "job": self._job_public(current.to_dict())}
+
+    def _settle_immediate_job_control(self, job) -> None:
+        if job.state not in {"paused", "cancelled"} or not job.run_id:
+            return
+        with self._state_lock:
+            run = self._run(job.run_id)
+            if not self._clear_active_job(run, job.job_id):
+                return
+            if job.kind == "direction_generation":
+                run.state = (
+                    "direction_paused" if job.state == "paused" else "direction_cancelled"
+                )
+                run.current_stage = "generation"
+            elif job.kind == "compile":
+                run.pending_build_id = None
+                run.state = "ready_to_compile"
+                run.current_stage = "review_install"
+            run.updated_at = utc_now()
+            self.repository.save_run(run)
 
     def retry_job(self, job_id: str) -> dict[str, Any]:
         """Resubmit a failed stage using only persisted, non-sensitive inputs."""
         job = self.jobs.get(job_id)
         if not job:
             raise ProductionError("job_not_found", "后台任务不存在", status=404)
-        if job.state not in {"failed", "interrupted"}:
+        resumable_direction = (
+            job.kind == "direction_generation"
+            and job.state in {"paused", "cancelled", "failed", "interrupted"}
+        )
+        if job.state not in {"failed", "interrupted"} and not resumable_direction:
             raise ProductionError(
                 "job_not_retryable",
-                "只能重新提交已失败或服务重启中断的任务",
+                "该任务当前不能继续或重试",
                 status=409,
                 details={"state": job.state},
             )
@@ -1635,7 +2060,16 @@ class ProductionService:
             elif kind == "direction_generation":
                 payload["story_type"] = str(context.get("story_type") or "auto")
                 payload["layout_mode"] = str(context.get("layout_mode") or "ai")
-                _, response = self.generate_direction(run_id, payload)
+                generation_id = str(context.get("generation_id") or "").strip() or None
+                reuse_checkpoint = bool(generation_id) and str(
+                    (job.error or {}).get("code") or ""
+                ) != "direction_generation_empty"
+                _, response = self.generate_direction(
+                    run_id,
+                    payload,
+                    generation_id=generation_id if reuse_checkpoint else None,
+                    resumed_from_job_id=job_id if reuse_checkpoint else None,
+                )
             else:
                 _, response = self.compile(run_id, payload)
         else:
@@ -1656,7 +2090,16 @@ class ProductionService:
         kind = str(job.get("kind") or "")
         state = str(job.get("state") or "")
         retry_context = job.get("retry_context") if isinstance(job.get("retry_context"), dict) else {}
-        retryable = state in {"failed", "interrupted"} and (
+        error = job.get("error") if isinstance(job.get("error"), dict) else {}
+        error_code = str(error.get("code") or "")
+        resumable = (
+            kind == "direction_generation"
+            and state in {"paused", "cancelled", "failed", "interrupted"}
+            and bool(job.get("run_id"))
+            and "expected_draft_version" in retry_context
+            and error_code != "direction_generation_empty"
+        )
+        retryable = resumable or (state in {"failed", "interrupted"} and (
             kind == "model_connection_test"
             or (kind == "ai_preflight" and bool(job.get("run_id")))
             or (
@@ -1668,7 +2111,7 @@ class ProductionService:
                     or {"start_card_id", "end_card_id"}.issubset(retry_context)
                 )
             )
-        )
+        ))
         label = {
             "compile": "编译 AA 工程",
             "direction_generation": "AI 安排演出",
@@ -1678,10 +2121,24 @@ class ProductionService:
         }.get(kind, kind or "后台任务")
         if state == "succeeded":
             next_action = {"label": "已完成", "detail": "结果已写回关联任务。", "stage": None}
+        elif state == "paused":
+            next_action = {"label": "继续生成", "detail": "检查点已经保留，继续时只处理尚未完成的分块。", "stage": "generation"}
         elif state == "cancelled":
-            next_action = {"label": "已取消", "detail": "任务尚未开始，未写入任何结果。", "stage": None}
+            next_action = {"label": "已结束", "detail": "未完成结果没有写入草稿；已有检查点仍可继续。", "stage": "generation" if resumable else None}
+        elif state == "superseded":
+            next_action = {"label": "结果已丢弃", "detail": "任务依据的草稿已变化，旧结果没有覆盖新草稿。", "stage": "generation" if kind == "direction_generation" else "review"}
+        elif state in {"pausing", "cancelling"}:
+            next_action = {"label": "正在收尾", "detail": "已发送控制信号并中止当前模型连接。", "stage": "generation" if kind == "direction_generation" else None}
         elif state in {"failed", "interrupted"}:
-            stage = "mapping" if kind == "ai_preflight" else "review" if kind in {"compile", "direction_generation"} else None
+            stage = (
+                "mapping"
+                if kind == "ai_preflight"
+                else "generation"
+                if kind == "direction_generation"
+                else "review"
+                if kind == "compile"
+                else None
+            )
             next_action = {
                 "label": "查看失败原因并回到任务处理",
                 "detail": "修正问题后，从对应步骤重新提交；系统不会自动覆盖现有草稿。",
@@ -1693,7 +2150,16 @@ class ProductionService:
         return {
             **public,
             "retryable": retryable,
-            "retry_label": "重试此阶段" if retryable else None,
+            "resumable": resumable,
+            "can_pause": kind == "direction_generation" and state in {"queued", "running"},
+            "can_cancel": state in {"queued", "running", "pausing"},
+            "retry_label": (
+                "继续生成"
+                if resumable
+                else "重新生成"
+                if retryable and kind == "direction_generation"
+                else "重试此阶段"
+            ) if retryable else None,
             "label": label,
             "next_action": next_action,
         }
@@ -1712,6 +2178,7 @@ class ProductionService:
                 status=409,
                 details={"state": run.state, "last_build_id": run.last_build_id},
             )
+        self._assert_build_matches_current_draft(run)
         result = self.adapter.install(
             token=str(run.draft_token),
             build_id=build_id,
@@ -1737,7 +2204,23 @@ class ProductionService:
                 "只能查看当前制作任务最近一次成功构建的安装信息",
                 status=409,
             )
+        self._assert_build_matches_current_draft(run)
         return run, selected
+
+    def _assert_build_matches_current_draft(self, run: ProductionRun) -> None:
+        detail = self.adapter.draft_detail(str(run.draft_token))
+        current_version = int(detail.get("draft_version") or -1)
+        if run.last_build_draft_version != current_version:
+            raise ProductionError(
+                "build_stale",
+                "该构建来自旧草稿，请重新检查并编译当前版本",
+                status=409,
+                details={
+                    "build_draft_version": run.last_build_draft_version,
+                    "current_draft_version": current_version,
+                    "build_id": run.last_build_id,
+                },
+            )
 
     def install_options(self, run_id: str, build_id: str | None = None) -> dict[str, Any]:
         run, selected = self._installable_build(run_id, build_id)

@@ -11,10 +11,11 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+import halocue_production.legacy_adapter as legacy_adapter_module
 from halocue_production.errors import ProductionError
 from halocue_production.config import Settings
 from halocue_production.service import ProductionService
-from halocue_production.jobs import JobRecord, JobRegistry
+from halocue_production.jobs import JobCancelled, JobRecord, JobRegistry
 from halocue_production.model_settings import DirectionModelSettings
 
 
@@ -757,6 +758,21 @@ def test_ai_preflight_is_read_only_and_persists_a_safe_task_local_result(setting
     after = service.run_detail(created["run"]["run_id"])["draft"]
     assert after["draft_version"] == before["draft_version"]
     assert after["content_revision"] == before["content_revision"]
+    run = service._run(created["run"]["run_id"])
+    stored_draft = service.adapter.store.load_draft(str(run.draft_token))
+    source_text = str(
+        stored_draft.get("source_text") or stored_draft.get("edited_text") or ""
+    )
+    plan, reference = service.adapter._compatible_performance_plan(
+        str(run.draft_token), source_text,
+    )
+    assert plan[0]["location"] == "教室"
+    assert plan[0]["source"] == "ai_preflight"
+    assert reference["scene_count"] == 1
+    assert reference["preflight_id"] == result["items"][0]["preflight_id"]
+    assert service.adapter._compatible_performance_plan(
+        str(run.draft_token), source_text.replace("开始", "变化"),
+    ) == ([], None)
     service.jobs.close()
 
 
@@ -1127,6 +1143,173 @@ def test_ai_direction_background_job_writes_a_reviewable_draft(settings, tmp_pat
     service.jobs.close()
 
 
+def test_incomplete_direction_generation_keeps_checkpoint_audit_without_writing_draft(
+    settings, tmp_path, monkeypatch,
+):
+    configured = configured_resource_settings(settings, tmp_path)
+    service = ProductionService(configured)
+    created = service.create_run(
+        {"project": "未完成演出不写回", "source": {"kind": "inline", "text": "旁白: 原文\n"}}
+    )
+    original = created["draft"]
+
+    class Provider:
+        name = "fake"
+        model = "checkpoint-model"
+        stats = {"in": 120, "out": 8}
+
+    monkeypatch.setattr(
+        service.adapter._modules["annotate"],
+        "annotate_script",
+        lambda *_args, **_kwargs: {
+            "text": "旁白: 部分结果\n",
+            "proposals": [],
+            "diagnostics": [{"code": "request_deadline", "level": "warning", "detail": "timeout"}],
+            "agent": {
+                "pending_targets": 2,
+                "metrics": {
+                    "requests": 3,
+                    "retries": 1,
+                    "subdivisions": 1,
+                    "cache_reported": True,
+                    "cache_read_tokens": 90,
+                    "uncached_input_tokens": 30,
+                    "cache_write_tokens": 30,
+                    "warm_cache_hit_rate": 0.75,
+                    "failed_request_count": 1,
+                    "uncached_input_tokens_per_completed_target": 12.5,
+                },
+            },
+            "incomplete": True,
+            "pending_targets": 2,
+            "direction_change_count": 0,
+        },
+    )
+
+    result = service.adapter.execute_direction_generation(
+        token=created["run"]["draft_token"],
+        generation_id="direction-incomplete-test",
+        provider=Provider(),
+        expected_draft_version=original["draft_version"],
+        story_type="auto",
+        layout_mode="ai",
+    )
+
+    current = service.adapter.draft_detail(created["run"]["draft_token"])
+    attempt = configured.data_dir / "drafts" / created["run"]["draft_token"] / "direction-generations" / "direction-incomplete-test"
+    assert result["status"] == "incomplete"
+    assert result["pending_targets"] == 2
+    assert current["draft_version"] == original["draft_version"]
+    assert next(card for card in current["cards"] if card["kind"] == "line")["current"]["text"] == "原文"
+    assert not (attempt / "annotated.txt").exists()
+    audit = service.adapter.direction_proposals(created["run"]["draft_token"])
+    assert audit["generations"][0]["status"] == "incomplete"
+    assert audit["generations"][0]["metrics"]["requests"] == 3
+    assert audit["generations"][0]["metrics"]["cache_write_tokens"] == 30
+    assert audit["generations"][0]["metrics"]["warm_cache_hit_rate"] == 0.75
+    assert audit["generations"][0]["metrics"]["failed_request_count"] == 1
+    assert audit["generations"][0]["metrics"]["uncached_input_tokens_per_completed_target"] == 12.5
+    assert audit["generations"][0]["diagnostics"][0]["code"] == "request_deadline"
+    service.jobs.close()
+
+
+def test_empty_direction_generation_is_audited_as_failure_without_writing_draft(
+    settings, tmp_path, monkeypatch,
+):
+    configured = configured_resource_settings(settings, tmp_path)
+    service = ProductionService(configured)
+    created = service.create_run(
+        {"project": "空演出不伪装成功", "source": {"kind": "inline", "text": "旁白: 原文\n"}}
+    )
+    original = created["draft"]
+
+    class Provider:
+        name = "fake"
+        model = "empty-model"
+        stats = {}
+
+    monkeypatch.setattr(
+        service.adapter._modules["annotate"],
+        "annotate_script",
+        lambda options, **_kwargs: {
+            "text": Path(options["script"]).read_text(encoding="utf-8"),
+            "proposals": [],
+            "diagnostics": [{"code": "no_effective_direction", "level": "warning"}],
+            "agent": {"metrics": {"requests": 1, "retries": 0, "subdivisions": 0}},
+            "pending_targets": 0,
+            "direction_change_count": 0,
+        },
+    )
+
+    with pytest.raises(ProductionError) as failure:
+        service.adapter.execute_direction_generation(
+            token=created["run"]["draft_token"],
+            generation_id="direction-empty-test",
+            provider=Provider(),
+            expected_draft_version=original["draft_version"],
+            story_type="auto",
+            layout_mode="ai",
+        )
+
+    assert failure.value.code == "direction_generation_empty"
+    current = service.adapter.draft_detail(created["run"]["draft_token"])
+    assert current["draft_version"] == original["draft_version"]
+    audit = service.adapter.direction_proposals(created["run"]["draft_token"])
+    generation = audit["generations"][0]
+    assert generation["status"] == "failed"
+    assert generation["error"]["code"] == "direction_generation_empty"
+    assert generation["metrics"]["requests"] == 1
+    service.jobs.close()
+
+
+def test_direction_failure_surfaces_persisted_sanitized_request_records(
+    settings, tmp_path, monkeypatch,
+):
+    configured = configured_resource_settings(settings, tmp_path)
+    service = ProductionService(configured)
+    created = service.create_run(
+        {"project": "失败请求日志", "source": {"kind": "inline", "text": "旁白: 原文\n"}}
+    )
+
+    class Provider:
+        name = "fake"
+        model = "failure-model"
+        stats = {}
+
+    def fail_after_telemetry(options, **_kwargs):
+        path = Path(options["checkpoint_dir"]) / "annotation-telemetry" / "run-test" / "requests.jsonl"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({
+            "agent_request_index": 1,
+            "chunk_id": "scene-1-chunk-1",
+            "outcome": "failed",
+            "error_code": "model_service_unavailable",
+            "stable_prefix_hash": "safe-hash",
+        }) + "\n", encoding="utf-8")
+        raise RuntimeError("gateway failed")
+
+    monkeypatch.setattr(
+        service.adapter._modules["annotate"], "annotate_script", fail_after_telemetry,
+    )
+    with pytest.raises(ProductionError) as failure:
+        service.adapter.execute_direction_generation(
+            token=created["run"]["draft_token"],
+            generation_id="direction-request-log-test",
+            provider=Provider(),
+            expected_draft_version=created["draft"]["draft_version"],
+            story_type="auto",
+            layout_mode="ai",
+        )
+
+    assert failure.value.details["request_log_files"]
+    audit = service.adapter.direction_proposals(created["run"]["draft_token"])
+    metrics = audit["generations"][0]["metrics"]
+    assert metrics["failed_request_count"] == 1
+    assert metrics["request_records"][0]["error_code"] == "model_service_unavailable"
+    assert "prompt" not in json.dumps(metrics)
+    service.jobs.close()
+
+
 @pytest.mark.parametrize(
     ("requested_mode", "expected_mode"),
     [(None, "ai"), ("pure_ai", "pure_ai"), ("rules", "rules")],
@@ -1161,6 +1344,7 @@ def test_direction_layout_mode_is_forwarded_and_frozen(
             "diagnostics": [],
             "story_type": options["story_type"],
             "agent": {},
+            "direction_change_count": 1,
         }
 
     monkeypatch.setattr(service.direction_models, "provider", lambda: FakeProvider())
@@ -1384,11 +1568,11 @@ def test_ai_direction_does_not_overwrite_user_edits_made_while_running(
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         job = service.job_detail(accepted["job"]["job_id"])["job"]
-        if job["state"] in {"succeeded", "failed"}:
+        if job["state"] in {"succeeded", "failed", "superseded"}:
             break
         time.sleep(0.02)
-    assert job["state"] == "failed"
-    assert job["error"]["code"] == "revision_conflict"
+    assert job["state"] == "superseded"
+    assert job["error"]["code"] == "job_superseded"
     detail = service.run_detail(run_id)
     current = next(card for card in detail["draft"]["cards"] if card["kind"] == "line")
     assert current["current"]["text"] == "用户运行中修改"
@@ -1761,6 +1945,7 @@ def test_real_compile_and_install_use_isolated_workspace(settings, tmp_path):
     run = service._run(run_id)
     run.state = "compiled"
     run.last_build_id = build_id
+    run.last_build_draft_version = approved["draft"]["draft_version"]
     service.repository.save_run(run)
     options = service.install_options(run_id)
     assert options["source_project"] == "隔离构建测试"
@@ -2252,7 +2437,7 @@ def test_aa_environment_can_inspect_and_adopt_data_workspace(settings, tmp_path)
     service.jobs.close()
 
 
-def test_job_registry_cancels_only_queued_jobs(tmp_path):
+def test_job_registry_cancels_queued_and_signals_running_jobs(tmp_path):
     registry = JobRegistry(tmp_path / "jobs")
     started = threading.Event()
     release = threading.Event()
@@ -2267,6 +2452,641 @@ def test_job_registry_cancels_only_queued_jobs(tmp_path):
     queued = registry.submit("queued", lambda: {"ok": True})
     assert registry.cancel(queued.job_id) is True
     assert registry.get(queued.job_id).state == "cancelled"
-    assert registry.cancel(running.job_id) is False
+    assert registry.cancel(running.job_id) is True
+    assert registry.get(running.job_id).state == "cancelling"
     release.set()
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        if registry.get(running.job_id).state == "cancelled":
+            break
+        time.sleep(0.01)
+    assert registry.get(running.job_id).state == "cancelled"
     registry.close()
+
+
+def test_job_stop_callback_interrupts_an_active_provider_handle(tmp_path):
+    registry = JobRegistry(tmp_path / "jobs")
+    started = threading.Event()
+    interrupted = threading.Event()
+
+    def blocking_job(control):
+        remove = control.add_stop_callback(interrupted.set)
+        started.set()
+        try:
+            control.wait_for_stop(timeout=3)
+        finally:
+            remove()
+        return {"ok": True}
+
+    job = registry.submit("blocking", blocking_job, cooperative=True)
+    assert started.wait(timeout=2)
+    assert registry.pause(job.job_id) is True
+    assert interrupted.wait(timeout=0.5)
+    registry.close()
+
+
+def test_duplicate_direction_submission_reuses_the_active_job(
+    settings, tmp_path, monkeypatch,
+):
+    configured = configured_resource_settings(settings, tmp_path)
+    monkeypatch.setenv("HALOCUE_SINGLE_FLIGHT_KEY", "test-secret")
+    service = ProductionService(configured)
+    service.configure_direction_model(
+        {
+            "provider": "openai",
+            "base_url": "https://example.invalid/v1",
+            "model": "test-model",
+            "api_key_env": "HALOCUE_SINGLE_FLIGHT_KEY",
+        }
+    )
+    service.direction_models.provider = lambda: object()
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def slow_generation(**kwargs):
+        calls.append(kwargs["generation_id"])
+        entered.set()
+        release.wait(timeout=5)
+        return {
+            "generation_id": kwargs["generation_id"],
+            "draft_version": kwargs["expected_draft_version"] + 1,
+        }
+
+    monkeypatch.setattr(service.adapter, "execute_direction_generation", slow_generation)
+    created = service.create_run(
+        {
+            "project": "演出任务单飞",
+            "generation_mode": "ai_direction",
+            "source": {"kind": "inline", "text": "旁白: 测试\n"},
+        }
+    )
+    mapped = service.update_cast(
+        created["run"]["run_id"],
+        {
+            "speaker": "旁白",
+            "mapping": {"kind": "narrator"},
+            "expected_draft_version": created["draft"]["draft_version"],
+        },
+    )
+
+    try:
+        _, first = service.generate_direction(
+            created["run"]["run_id"],
+            {"expected_draft_version": mapped["draft"]["draft_version"]},
+        )
+        assert entered.wait(timeout=2)
+        _, duplicate = service.generate_direction(
+            created["run"]["run_id"],
+            {"expected_draft_version": mapped["draft"]["draft_version"]},
+        )
+    finally:
+        release.set()
+
+    assert duplicate["job"]["job_id"] == first["job"]["job_id"]
+    assert duplicate["generation_id"] == first["generation_id"]
+    assert duplicate["deduplicated"] is True
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if service.jobs.get(first["job"]["job_id"]).state == "succeeded":
+            break
+        time.sleep(0.01)
+    assert calls == [first["generation_id"]]
+    service.jobs.close()
+
+
+def test_late_compile_result_cannot_publish_a_stale_build(settings, monkeypatch):
+    service = ProductionService(settings)
+    created = service.create_run(
+        {"project": "旧编译结果隔离", "source": {"kind": "inline", "text": "旁白: 原文\n"}}
+    )
+    run_id = created["run"]["run_id"]
+    mapped = service.update_cast(
+        run_id,
+        {
+            "speaker": "旁白",
+            "mapping": {"kind": "narrator"},
+            "expected_draft_version": created["draft"]["draft_version"],
+        },
+    )
+    approved = service.approve_review(
+        run_id,
+        {
+            "card_ids": None,
+            "expected_draft_version": mapped["draft"]["draft_version"],
+        },
+    )
+    entered = threading.Event()
+    release = threading.Event()
+    monkeypatch.setattr(
+        service.adapter,
+        "create_compile_snapshot",
+        lambda _token, _version: "build-000000000001",
+    )
+
+    def slow_compile(_token, build_id):
+        entered.set()
+        release.wait(timeout=5)
+        return {"build_id": build_id, "bundle_dir": "isolated"}
+
+    monkeypatch.setattr(service.adapter, "execute_compile", slow_compile)
+    _, accepted = service.compile(
+        run_id,
+        {"expected_draft_version": approved["draft"]["draft_version"]},
+    )
+    assert entered.wait(timeout=2)
+    line = next(card for card in approved["draft"]["cards"] if card["kind"] == "line")
+    changed = service.update_card(
+        run_id,
+        line["card_id"],
+        {
+            "patch": {"text": "用户的新版本"},
+            "expected_draft_version": approved["draft"]["draft_version"],
+        },
+    )
+    release.set()
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        job = service.jobs.get(accepted["job"]["job_id"])
+        if job and job.state not in {"queued", "running"}:
+            break
+        time.sleep(0.01)
+
+    detail = service.run_detail(run_id)
+    assert job.state == "superseded"
+    assert detail["run"]["state"] == "waiting_for_review"
+    assert detail["run"]["pending_build_id"] is None
+    assert detail["run"]["last_build_id"] is None
+    assert detail["draft"]["draft_version"] == changed["draft"]["draft_version"]
+    service.jobs.close()
+
+
+def test_install_rejects_a_build_from_an_older_draft(settings, monkeypatch):
+    service = ProductionService(settings)
+    created = service.create_run(
+        {"project": "旧构建禁止安装", "source": {"kind": "inline", "text": "旁白: 测试\n"}}
+    )
+    current_version = created["draft"]["draft_version"]
+    run = service._run(created["run"]["run_id"])
+    run.state = "compiled"
+    run.last_build_id = "build-000000000001"
+    run.last_build_draft_version = current_version - 1
+    service.repository.save_run(run)
+    called = []
+    monkeypatch.setattr(service.adapter, "install", lambda **kwargs: called.append(kwargs))
+
+    with pytest.raises(ProductionError) as error:
+        service.install(run.run_id, {"build_id": run.last_build_id})
+
+    assert error.value.code == "build_stale"
+    assert called == []
+    service.jobs.close()
+
+
+def test_job_registry_cooperatively_cancels_a_running_job(tmp_path):
+    registry = JobRegistry(tmp_path / "jobs")
+    started = threading.Event()
+
+    def work(control):
+        started.set()
+        assert control.wait_for_stop(timeout=2)
+        raise JobCancelled("用户结束任务")
+
+    job = registry.submit("direction_generation", work, cooperative=True)
+    assert started.wait(timeout=2)
+    assert registry.cancel(job.job_id) is True
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        if registry.get(job.job_id).state == "cancelled":
+            break
+        time.sleep(0.01)
+    assert registry.get(job.job_id).state == "cancelled"
+    registry.close()
+
+
+def test_empty_direction_failure_is_retryable_but_not_presented_as_checkpoint_resume():
+    public = ProductionService._job_public(
+        JobRecord(
+            job_id="job-000000000001",
+            kind="direction_generation",
+            state="failed",
+            created_at="2026-09-04T00:00:00+00:00",
+            updated_at="2026-09-04T00:00:01+00:00",
+            run_id="run-000000000001",
+            retry_context={"expected_draft_version": 2, "generation_id": "direction-empty"},
+            error={"code": "direction_generation_empty", "message": "没有有效演出修改"},
+        ).to_dict()
+    )
+
+    assert public["retryable"] is True
+    assert public["resumable"] is False
+    assert public["retry_label"] == "重新生成"
+    assert public["next_action"]["stage"] == "generation"
+
+
+def test_direction_job_can_pause_and_resume_the_same_generation(
+    settings, tmp_path, monkeypatch,
+):
+    configured = configured_resource_settings(settings, tmp_path)
+    monkeypatch.setenv("HALOCUE_RESUME_MODEL_KEY", "test-secret")
+    service = ProductionService(configured)
+    service.configure_direction_model(
+        {
+            "provider": "openai",
+            "base_url": "https://example.invalid/v1",
+            "model": "test-model",
+            "api_key_env": "HALOCUE_RESUME_MODEL_KEY",
+        }
+    )
+    service.direction_models.provider = lambda: object()
+    entered = threading.Event()
+    calls = []
+
+    def resumable_generation(**kwargs):
+        calls.append(
+            {
+                "generation_id": kwargs["generation_id"],
+                "resume": kwargs["resume"],
+            }
+        )
+        if len(calls) == 1:
+            entered.set()
+            while not kwargs["cancelled"]():
+                time.sleep(0.005)
+            return {
+                "generation_id": kwargs["generation_id"],
+                "cancelled": True,
+                "pending_targets": 3,
+                "agent": {"metrics": {"requests": 1}},
+            }
+        return {
+            "generation_id": kwargs["generation_id"],
+            "draft_version": kwargs["expected_draft_version"] + 1,
+            "pending_targets": 0,
+            "agent": {"metrics": {"requests": 1}},
+        }
+
+    monkeypatch.setattr(
+        service.adapter, "execute_direction_generation", resumable_generation
+    )
+    created = service.create_run(
+        {
+            "project": "演出暂停恢复",
+            "generation_mode": "ai_direction",
+            "source": {"kind": "inline", "text": "旁白: 测试\n"},
+        }
+    )
+    mapped = service.update_cast(
+        created["run"]["run_id"],
+        {
+            "speaker": "旁白",
+            "mapping": {"kind": "narrator"},
+            "expected_draft_version": created["draft"]["draft_version"],
+        },
+    )
+    _, accepted = service.generate_direction(
+        created["run"]["run_id"],
+        {"expected_draft_version": mapped["draft"]["draft_version"]},
+    )
+    assert entered.wait(timeout=2)
+    paused = service.pause_job(accepted["job"]["job_id"])
+    assert paused["job"]["state"] in {"pausing", "paused"}
+
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        first_job = service.jobs.get(accepted["job"]["job_id"])
+        if first_job and first_job.state == "paused":
+            break
+        time.sleep(0.01)
+    assert first_job.state == "paused"
+    assert service.run_detail(created["run"]["run_id"])["run"]["state"] == "direction_paused"
+
+    resumed = service.retry_job(first_job.job_id)
+    second_id = resumed["job"]["job_id"]
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        second_job = service.jobs.get(second_id)
+        if second_job and second_job.state == "succeeded":
+            break
+        time.sleep(0.01)
+    assert second_job.state == "succeeded"
+    assert calls == [
+        {"generation_id": accepted["generation_id"], "resume": False},
+        {"generation_id": accepted["generation_id"], "resume": True},
+    ]
+    assert second_job.resumed_from_job_id == first_job.job_id
+    service.jobs.close()
+
+
+def test_direction_job_cancel_wins_over_a_recoverable_pending_checkpoint(
+    settings, tmp_path, monkeypatch,
+):
+    configured = configured_resource_settings(settings, tmp_path)
+    monkeypatch.setenv("HALOCUE_CANCEL_MODEL_KEY", "test-secret")
+    service = ProductionService(configured)
+    service.configure_direction_model(
+        {
+            "provider": "openai",
+            "base_url": "https://example.invalid/v1",
+            "model": "test-model",
+            "api_key_env": "HALOCUE_CANCEL_MODEL_KEY",
+        }
+    )
+    service.direction_models.provider = lambda: object()
+    entered = threading.Event()
+
+    def cancellable_generation(**kwargs):
+        entered.set()
+        while not kwargs["cancelled"]():
+            time.sleep(0.005)
+        return {
+            "generation_id": kwargs["generation_id"],
+            "cancelled": True,
+            "incomplete": True,
+            "pending_targets": 3,
+            "agent": {"metrics": {"requests": 1}},
+        }
+
+    monkeypatch.setattr(
+        service.adapter, "execute_direction_generation", cancellable_generation
+    )
+    created = service.create_run(
+        {
+            "project": "演出明确结束",
+            "generation_mode": "ai_direction",
+            "source": {"kind": "inline", "text": "旁白: 测试\n"},
+        }
+    )
+    mapped = service.update_cast(
+        created["run"]["run_id"],
+        {
+            "speaker": "旁白",
+            "mapping": {"kind": "narrator"},
+            "expected_draft_version": created["draft"]["draft_version"],
+        },
+    )
+    _, accepted = service.generate_direction(
+        created["run"]["run_id"],
+        {"expected_draft_version": mapped["draft"]["draft_version"]},
+    )
+    assert entered.wait(timeout=2)
+    service.cancel_job(accepted["job"]["job_id"])
+
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        job = service.jobs.get(accepted["job"]["job_id"])
+        if job and job.state in {"cancelled", "paused"}:
+            break
+        time.sleep(0.01)
+
+    assert job.state == "cancelled"
+    assert job.progress["phase"] == "cancelled"
+    assert "结束" in job.progress["detail"]
+    assert service.run_detail(created["run"]["run_id"])["run"]["state"] == "direction_cancelled"
+    service.jobs.close()
+
+
+@pytest.mark.parametrize(
+    ("control_method", "expected_job_state", "expected_run_state"),
+    [
+        ("cancel_job", "cancelled", "direction_cancelled"),
+        ("pause_job", "paused", "direction_paused"),
+    ],
+)
+def test_last_inflight_direction_result_cannot_write_after_stop(
+    settings,
+    tmp_path,
+    monkeypatch,
+    control_method,
+    expected_job_state,
+    expected_run_state,
+):
+    configured = configured_resource_settings(settings, tmp_path)
+    monkeypatch.setenv("HALOCUE_FENCE_MODEL_KEY", "test-secret")
+    service = ProductionService(configured)
+    service.configure_direction_model(
+        {
+            "provider": "openai",
+            "base_url": "https://example.invalid/v1",
+            "model": "test-model",
+            "api_key_env": "HALOCUE_FENCE_MODEL_KEY",
+        }
+    )
+
+    class Provider:
+        name = "blocking"
+        model = "blocking-model"
+        stats = {"calls": 1, "in": 10, "out": 10}
+
+    service.direction_models.provider = Provider
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking_annotation(_options, provider_instance=None):
+        assert provider_instance is not None
+        entered.set()
+        assert release.wait(timeout=5)
+        return {
+            "text": "旁白: 迟到结果\n",
+            "story_type": "auto",
+            "proposals": [
+                {
+                    "proposal_id": "prop-late-result",
+                    "type": "applied_pending",
+                    "origin": "model",
+                    "rule": "llm_annotation",
+                    "card_id": "late-card",
+                    "field": "face",
+                    "before": None,
+                    "after": "00",
+                    "state": "pending",
+                }
+            ],
+            "direction_change_count": 1,
+            "pending_targets": 0,
+            "agent": {"metrics": {"requests": 1}},
+            "diagnostics": [],
+        }
+
+    monkeypatch.setattr(
+        service.adapter._modules["annotate"],
+        "annotate_script",
+        blocking_annotation,
+    )
+    created = service.create_run(
+        {
+            "project": f"最终请求{control_method}",
+            "generation_mode": "ai_direction",
+            "source": {"kind": "inline", "text": "旁白: 原文\n"},
+        }
+    )
+    mapped = service.update_cast(
+        created["run"]["run_id"],
+        {
+            "speaker": "旁白",
+            "mapping": {"kind": "narrator"},
+            "expected_draft_version": created["draft"]["draft_version"],
+        },
+    )
+    baseline_version = mapped["draft"]["draft_version"]
+    _, accepted = service.generate_direction(
+        created["run"]["run_id"],
+        {"expected_draft_version": baseline_version},
+    )
+    assert entered.wait(timeout=2)
+
+    getattr(service, control_method)(accepted["job"]["job_id"])
+    release.set()
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        job = service.jobs.get(accepted["job"]["job_id"])
+        if job and job.state == expected_job_state:
+            break
+        time.sleep(0.01)
+
+    detail = service.run_detail(created["run"]["run_id"])
+    assert job.state == expected_job_state
+    assert detail["run"]["state"] == expected_run_state
+    assert detail["draft"]["draft_version"] == baseline_version
+    assert detail["draft"]["cards"][0]["current"]["text"] == "原文"
+    service.jobs.close()
+
+
+def test_direction_commit_rolls_back_when_proposal_audit_write_fails(
+    settings, tmp_path, monkeypatch,
+):
+    configured = configured_resource_settings(settings, tmp_path)
+    service = ProductionService(configured)
+    created = service.create_run(
+        {"project": "提交事务回滚", "source": {"kind": "inline", "text": "旁白: 原文\n"}}
+    )
+    mapped = service.update_cast(
+        created["run"]["run_id"],
+        {
+            "speaker": "旁白",
+            "mapping": {"kind": "narrator"},
+            "expected_draft_version": created["draft"]["draft_version"],
+        },
+    )
+
+    class Provider:
+        name = "fake"
+        model = "fake"
+        stats = {}
+
+    monkeypatch.setattr(
+        service.adapter._modules["annotate"],
+        "annotate_script",
+        lambda *_args, **_kwargs: {
+            "text": "旁白: 迟到结果\n",
+            "proposals": [{
+                "proposal_id": "prop-rollback",
+                "type": "applied_pending",
+                "field": "face",
+                "before": None,
+                "after": "00",
+            }],
+            "direction_change_count": 1,
+            "pending_targets": 0,
+            "agent": {"metrics": {}},
+            "diagnostics": [],
+        },
+    )
+    staged = service.adapter.execute_direction_generation(
+        token=created["run"]["draft_token"],
+        generation_id="direction-rollback-test",
+        provider=Provider(),
+        expected_draft_version=mapped["draft"]["draft_version"],
+        story_type="auto",
+        layout_mode="pure_ai",
+    )
+    original_writer = legacy_adapter_module._write_json_atomic
+
+    def failing_writer(path, value):
+        if path.name == "proposals.json":
+            raise OSError("injected proposal audit failure")
+        return original_writer(path, value)
+
+    monkeypatch.setattr(legacy_adapter_module, "_write_json_atomic", failing_writer)
+    with pytest.raises(OSError, match="injected proposal audit failure"):
+        service.adapter.commit_direction_generation(staged)
+
+    detail = service.adapter.draft_detail(created["run"]["draft_token"])
+    assert detail["draft_version"] == mapped["draft"]["draft_version"]
+    assert detail["cards"][0]["current"]["text"] == "原文"
+    assert service.adapter.store.load_cast(created["run"]["draft_token"]).get(
+        "layout_mode"
+    ) != "pure_ai"
+    service.jobs.close()
+
+
+def test_warning_diagnostics_block_every_review_gate(settings, monkeypatch):
+    service = ProductionService(settings)
+    created = service.create_run(
+        {"project": "校验门一致", "source": {"kind": "inline", "text": "旁白: 测试\n"}}
+    )
+    original = service.adapter.draft_detail(created["run"]["draft_token"])
+    warning_detail = {
+        **original,
+        "review_ready": False,
+        "counts": {
+            **original["counts"],
+            "pending": 0,
+            "blocking_errors": 0,
+            "unresolved_issues": 1,
+        },
+    }
+    monkeypatch.setattr(service.adapter, "draft_detail", lambda _token: warning_detail)
+
+    validation = service.validate(created["run"]["run_id"])
+    gates = service.run_detail(created["run"]["run_id"])["gates"]
+
+    assert validation["review_ready"] is False
+    assert validation["blockers"] == [{"code": "unresolved_issues", "count": 1}]
+    assert gates["preflight"] == {
+        "passed": False,
+        "blockers": ["unresolved_issues"],
+    }
+    assert "unresolved_issues" in gates["compile"]["blockers"]
+    service.jobs.close()
+
+
+@pytest.mark.parametrize(
+    ("operation", "adapter_operation"),
+    [("install_options", "install_options"), ("check_install", "check_install_target")],
+)
+def test_install_preflight_rejects_a_build_from_an_older_draft(
+    settings, monkeypatch, operation, adapter_operation,
+):
+    service = ProductionService(settings)
+    created = service.create_run(
+        {"project": "旧构建禁止预检", "source": {"kind": "inline", "text": "旁白: 测试\n"}}
+    )
+    run = service._run(created["run"]["run_id"])
+    run.state = "compiled"
+    run.last_build_id = "build-000000000001"
+    run.last_build_draft_version = created["draft"]["draft_version"] - 1
+    service.repository.save_run(run)
+    called = []
+    monkeypatch.setattr(
+        service.adapter,
+        adapter_operation,
+        lambda **kwargs: called.append(kwargs) or {"ok": True},
+    )
+
+    with pytest.raises(ProductionError) as error:
+        if operation == "install_options":
+            service.install_options(run.run_id, run.last_build_id)
+        else:
+            service.check_install(
+                run.run_id,
+                {
+                    "build_id": run.last_build_id,
+                    "category": "测试",
+                    "story_name": "测试",
+                },
+            )
+
+    assert error.value.code == "build_stale"
+    assert called == []
+    service.jobs.close()

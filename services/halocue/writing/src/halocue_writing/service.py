@@ -69,7 +69,9 @@ from .release_integrity import (
 )
 from .resource_catalog import ResourceCatalog
 from .aap_import import parse_aap_bytes, parse_aap_payload
-from .story_import import parse_story_bytes, parse_story_payload
+from .story_import import extract_document_paragraphs, parse_story_bytes, parse_story_payload
+from .source_catalog import SourceCatalog
+from .adaptation import AdaptationService
 
 
 class _ProposalAcceptanceStopped(Exception):
@@ -84,6 +86,8 @@ class _ProposalAcceptanceStopped(Exception):
 class WritingService:
     def __init__(self, data_dir: Path, production_url: str = "http://127.0.0.1:8892", official_corpus_dir: Path | None = None):
         self.repo = Repository(data_dir)
+        self.sources = SourceCatalog(self.repo)
+        self.adaptations = AdaptationService(self)
         self.model_settings = WritingModelSettings(data_dir)
         self.preferences = UserPreferencesStore(data_dir)
         self.ba_skill = BaWritingSkillRegistry()
@@ -2116,22 +2120,22 @@ class WritingService:
                 scene["lines"].append(f"{speaker}：{text}" if line.get("is_dialogue") and speaker else text)
             return chapter_groups
 
-        chapter_lookup: dict[str, dict] = {}
         chapter_order: list[dict] = []
-        scene_lookup: dict[tuple[str, str], dict] = {}
+        previous_chapter = previous_scene = None
         for line in lines:
             chapter_title = str(line.get("chapter") or "第一章").strip() or "第一章"
             scene_title = str(line.get("scene") or "正文").strip() or "正文"
-            chapter = chapter_lookup.get(chapter_title)
-            if chapter is None:
+            chapter_key = line.get("chapter_id") or chapter_title
+            scene_key = line.get("scene_id") or scene_title
+            if chapter_key != previous_chapter:
                 chapter = {"title": chapter_title, "scenes": []}
-                chapter_lookup[chapter_title] = chapter
                 chapter_order.append(chapter)
-            scene = scene_lookup.get((chapter_title, scene_title))
-            if scene is None:
+                previous_chapter = chapter_key
+                previous_scene = None
+            if scene_key != previous_scene:
                 scene = {"title": scene_title, "lines": []}
-                scene_lookup[(chapter_title, scene_title)] = scene
                 chapter["scenes"].append(scene)
+                previous_scene = scene_key
             text = str(line.get("text") or "").strip()
             if not text:
                 continue
@@ -4428,7 +4432,10 @@ class WritingService:
     @classmethod
     def _extract_document_text(cls, suffix: str, content: bytes) -> tuple[str, int, bool]:
         try:
-            if suffix in {".txt", ".md"}:
+            if suffix in {".txt", ".docx"}:
+                paragraphs, _ = extract_document_paragraphs(suffix, content)
+                text = "\n\n".join(paragraphs)
+            elif suffix == ".md":
                 for encoding in ("utf-8-sig", "gb18030"):
                     try:
                         text = content.decode(encoding)
@@ -4437,24 +4444,6 @@ class WritingService:
                         continue
                 else:
                     raise DomainError("document_encoding_unsupported", "文本文件必须使用 UTF-8 或 GB18030 编码。", status=415)
-            elif suffix == ".docx":
-                with zipfile.ZipFile(io.BytesIO(content)) as archive:
-                    try:
-                        document_info = archive.getinfo("word/document.xml")
-                    except KeyError as exc:
-                        raise DomainError("attachment_type_mismatch", "文件不是有效的 DOCX 文档。", status=415) from exc
-                    if document_info.file_size > 8_000_000:
-                        raise DomainError("document_too_complex", "DOCX 解压后的正文过大，无法安全读取。", status=413)
-                    root = ElementTree.fromstring(archive.read(document_info))
-                    paragraphs = []
-                    for paragraph in root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"):
-                        line = "".join(
-                            node.text or ""
-                            for node in paragraph.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")
-                        ).strip()
-                        if line:
-                            paragraphs.append(line)
-                    text = "\n\n".join(paragraphs)
             elif suffix == ".aap":
                 try:
                     parsed = json.loads(content.decode("utf-8-sig"))
@@ -12593,6 +12582,8 @@ class WritingService:
             return self._accept_structure_plan_proposal(work_id, proposal_id, payload)
         if proposal["kind"] == "memory_bundle":
             return self._accept_memory_bundle_proposal(work_id, proposal_id, payload)
+        if proposal["kind"] == "adaptation_chapter":
+            return self._accept_adaptation_chapter_proposal(work_id, proposal_id, payload)
         if proposal["kind"] in {"character_card", "world_entity", "world_rule", "canon_fact"}:
             return self._accept_knowledge_proposal(work_id, proposal_id, payload)
 
@@ -12684,6 +12675,40 @@ class WritingService:
             self._bump_work(connection, work_id, version)
         self._schedule_commit_projection(work_id, revision_id)
         return {"revision_id": revision_id, "work": self.get_work(work_id)}
+
+    def _accept_adaptation_chapter_proposal(self, work_id: str, proposal_id: str, payload: dict):
+        """Accept one source-bound screenplay candidate as a formal revision."""
+        expected = int(payload.get("expected_version", -1))
+        with self.repo.transaction() as connection:
+            version = self._check_work_version(connection, work_id, expected)
+            proposal = connection.execute("SELECT * FROM proposals WHERE id=? AND work_id=?", (proposal_id, work_id)).fetchone()
+            if not proposal or proposal["kind"] != "adaptation_chapter":
+                raise NotFound("proposal", proposal_id)
+            if proposal["status"] != "pending":
+                raise DomainError("proposal_not_pending", "候选方案已经处理。", status=409)
+            candidate = json.loads(self._verified_proposal_candidate(proposal))
+            if candidate.get("schema_version") != "adaptation-chapter/1.0" or candidate.get("formal") is not False:
+                raise DomainError("proposal_candidate_invalid", "改编候选格式无效。", status=409)
+            evidence = json.loads(proposal["evidence_json"] or "{}")
+            source = connection.execute("SELECT current_version_id FROM work_sources WHERE work_id=?", (work_id,)).fetchone()
+            if not source or source["current_version_id"] != evidence.get("source_version_id"):
+                raise self._proposal_superseded("原文版本已经更新，请重新生成改编候选。")
+            source_row = connection.execute("SELECT document_json FROM source_versions WHERE id=? AND work_id=?", (source["current_version_id"], work_id)).fetchone()
+            source_document = json.loads(source_row["document_json"] or "{}") if source_row else {}
+            source_chapter = next((item for item in source_document.get("chapters", []) if item.get("id") == evidence.get("source_chapter_id")), None)
+            if not source_chapter or source_chapter.get("content_digest") != evidence.get("source_digest"):
+                raise self._proposal_superseded("原文章节内容已经变化，请重新生成改编候选。")
+            adaptation_chapter = connection.execute("SELECT * FROM adaptation_chapters WHERE id=? AND adaptation_id IN (SELECT id FROM adaptations WHERE work_id=?)", (proposal["scope_id"], work_id)).fetchone()
+            if not adaptation_chapter:
+                raise NotFound("adaptation_chapter", proposal["scope_id"])
+            artifact = self._artifact(connection, work_id, "adaptation_manuscript", "adaptation_chapter", adaptation_chapter["id"])
+            revision_id = self._add_revision(connection, artifact, {"schema_version": "adaptation-manuscript/1.0", "text": candidate["text"], "source_refs": candidate.get("source_refs", []), "deviations": candidate.get("deviations", []), "open_threads": candidate.get("open_threads", []), "source_version_id": candidate["source_version_id"], "source_chapter_id": candidate["source_chapter_id"]}, "user", {"workflow": "adaptation.chapter", "proposal_id": proposal_id, "source_version_id": candidate["source_version_id"], "source_refs": candidate.get("source_refs", [])}, schema_version="adaptation-manuscript/1.0")
+            timestamp = now()
+            connection.execute("UPDATE adaptation_chapters SET status='accepted',candidate_json=?,updated_at=? WHERE id=?", (canonical_json({**candidate, "formal": True, "revision_id": revision_id}), timestamp, adaptation_chapter["id"]))
+            connection.execute("UPDATE proposals SET status='accepted',decided_at=? WHERE id=?", (timestamp, proposal_id))
+            connection.execute("INSERT INTO decisions VALUES (?,?,?,?,?,?,?)", (new_id("decision"), work_id, "proposal", proposal_id, "accepted", str(payload.get("note", "")), timestamp))
+            self._bump_work(connection, work_id, version)
+        return {"revision_id": revision_id, "proposal_id": proposal_id, "work": self.get_work(work_id)}
 
     def _accept_memory_bundle_proposal(self, work_id: str, proposal_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
@@ -14059,11 +14084,10 @@ class WritingService:
 
     def activate_writing_model(self, payload: dict) -> dict:
         """Test and activate one exact candidate without exposing a half-applied state."""
-        tested = self.model_settings.test_connection(payload)
         with self._provider_lock:
-            result = self.model_settings.save(payload, connection_test=tested)
+            result = self.model_settings.activate(payload)
             self.provider = make_writing_provider(self.model_settings, self.ba_prompt_assembler)
-        return {**result, "test": tested, "runtime": self.provider.descriptor()}
+        return {**result, "runtime": self.provider.descriptor()}
 
     def fetch_writing_models(self, payload: dict | None = None) -> list[str]:
         return self.model_settings.fetch_models(payload)

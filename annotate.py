@@ -43,6 +43,7 @@ from direction_rules import (                                  # noqa: E402
     supplement_directions,
 )
 from director_policy import normalize_direction_plan                 # noqa: E402
+from resource_retrieval import build_resource_candidate_index        # noqa: E402
 import prompt as PROMPT                                        # noqa: E402
 import tables                                                  # noqa: E402
 
@@ -960,12 +961,33 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             continue
         seen_id.add(key)
         used.append(w)
+    script_text = open(script_path, encoding="utf-8").read()
     constraints = annotation_constraints(idx, cast, usage_chain=usage_chain)
-    prompt_idx = dict(idx)
-    prompt_idx["bg"] = dict(idx.get("bg", {}))
+    prompt_idx, candidate_manifest = build_resource_candidate_index(
+        idx,
+        script_text,
+        cast_config=cfg,
+        usage_chain=usage_chain,
+    )
     for background in constraints.get("confirmed_bg") or set():
         prompt_idx["bg"].setdefault(background, 0)
     static = build_static(prompt_idx, cast, used, story_type=story_type)
+    full_prompt_idx = dict(idx)
+    full_prompt_idx["bg"] = dict(idx.get("bg", {}))
+    for background in constraints.get("confirmed_bg") or set():
+        full_prompt_idx["bg"].setdefault(background, 0)
+    full_static = build_static(full_prompt_idx, cast, used, story_type=story_type)
+    rules_chars = len(PROMPT.build_rules(story_type))
+    full_resource_chars = max(0, len(full_static) - rules_chars)
+    candidate_resource_chars = max(0, len(static) - rules_chars)
+    candidate_manifest.update({
+        "full_resource_prompt_chars": full_resource_chars,
+        "candidate_resource_prompt_chars": candidate_resource_chars,
+        "resource_prompt_reduction": (
+            1.0 - candidate_resource_chars / full_resource_chars
+            if full_resource_chars else 0.0
+        ),
+    })
 
     print(f"剧本      {script_path}")
     print(f"待标注    {len(todo)} 行台词（全文 {len(dialog)} 行）")
@@ -993,11 +1015,13 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     agent_meta = {}
     annotation_beats = []
     if agent_enabled:
-        script_text = open(script_path, encoding="utf-8").read()
+        source_context_strategy = str(
+            getattr(prov, "cfg", {}).get("source_context_strategy") or "preserve"
+        )
         agent_static = build_annotation_static_system(
             static,
             script_text,
-            source_context_strategy=str(getattr(prov, "cfg", {}).get("source_context_strategy") or "preserve"),
+            source_context_strategy=source_context_strategy,
         )
         model_config = {
             "provider": getattr(prov, "name", provider_name or llmcfg.get("provider") or ""),
@@ -1034,6 +1058,14 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             story_type=story_type,
         )
         diagnostics.extend(agent_result.get("diagnostics") or [])
+        agent_metrics = dict(agent_result.get("metrics") or {})
+        agent_metrics["prompt_optimization"] = {
+            **candidate_manifest,
+            "source_context_strategy": source_context_strategy,
+            "source_script_chars_in_static_prompt": (
+                0 if source_context_strategy == "window" else len(script_text)
+            ),
+        }
         agent_meta = {
             "enabled": True,
             "completed_chunks": agent_result.get("completed_chunks", 0),
@@ -1045,12 +1077,27 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             "pending_targets": int(agent_result.get("pending_targets") or 0),
             "pending_start_line": agent_result.get("pending_start_line"),
             "pending_end_line": agent_result.get("pending_end_line"),
-            "metrics": agent_result.get("metrics") or {},
+            "metrics": agent_metrics,
         }
-        if agent_meta["cancelled"]:
-            return {"text": "", "proposals": [], "diagnostics": diagnostics,
-                    "out": out_path, "agent": agent_meta, "cancelled": True,
-                    "story_type": story_type}
+        incomplete = bool(
+            agent_meta["cancelled"]
+            or agent_meta["timed_out"]
+            or agent_meta["pending_targets"] > 0
+        )
+        if incomplete:
+            return {
+                "text": "",
+                "proposals": [],
+                "diagnostics": diagnostics,
+                "out": out_path,
+                "agent": agent_meta,
+                "cancelled": agent_meta["cancelled"],
+                "timed_out": agent_meta["timed_out"],
+                "incomplete": True,
+                "pending_targets": agent_meta["pending_targets"],
+                "direction_change_count": 0,
+                "story_type": story_type,
+            }
         rows_by_id = agent_result["rows_by_id"]
         annotation_beats = agent_result.get("beats") or []
         for item_index in todo:
@@ -1144,12 +1191,28 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             print("    " + d)
     print(f"\n已写出  {out_path}")
 
+    def meaningful_change(proposal):
+        if proposal.get("type") != "applied_pending":
+            return False
+        before = proposal.get("before")
+        after = proposal.get("after")
+        return before != after and after not in (None, "", False, 0, [], {})
+
+    direction_change_count = sum(
+        1 for proposal in proposals if meaningful_change(proposal)
+    ) + len(annotation_beats)
+
     return {
         "text": final_text,
         "proposals": proposals,
         "diagnostics": diagnostics,
         "out": out_path,
         "agent": agent_meta,
+        "cancelled": False,
+        "timed_out": False,
+        "incomplete": False,
+        "pending_targets": 0,
+        "direction_change_count": direction_change_count,
         "story_type": story_type,
     }
 

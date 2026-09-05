@@ -27,20 +27,30 @@ def estimate_initial_chunk_limits(task_profile: Dict[str, Any]) -> ChunkLimits:
     output_capacity = int(task_profile.get("annotation_max_tokens") or 0)
     prompt_tokens = int(task_profile.get("estimated_prompt_tokens") or 0)
     target = 50
-    if speakers >= 6 or resources >= 6:
-        target -= 15
-    if context and context < 256_000:
+    if speakers >= 10 or resources >= 8:
         target -= 10
-    if output_capacity and output_capacity < 32_000:
-        target -= 10
-    if context and prompt_tokens and prompt_tokens * 5 > context:
+    elif speakers >= 6 or resources >= 5:
         target -= 5
+    if context and context < 64_000:
+        target -= 10
+    elif context and context < 256_000:
+        target -= 5
+    if output_capacity and output_capacity < 8_000:
+        target -= 10
+    elif output_capacity and output_capacity < 32_000:
+        target -= 5
+    if context and prompt_tokens and prompt_tokens * 5 > context:
+        target -= 10
     elif prompt_tokens > 50_000:
         target -= 5
     if target_lines < target:
         target = max(5, target_lines)
     target = max(10, min(50, target))
-    return ChunkLimits(target=target, soft_limit=min(60, target + 5), hard_limit=min(72, target + 12))
+    return ChunkLimits(
+        target=target,
+        soft_limit=min(60, target + 5),
+        hard_limit=min(60, target + 10),
+    )
 
 
 class RunChunkController:
@@ -54,12 +64,33 @@ class RunChunkController:
     def next_limits(self) -> ChunkLimits:
         return self._limits
 
+    def confirm_capacity(self, target: int) -> ChunkLimits:
+        """Keep the largest full subdivision that has actually succeeded."""
+        confirmed = max(1, int(target))
+        if confirmed <= self._limits.target:
+            return self._limits
+        hard_limit = max(confirmed, self._limits.hard_limit)
+        self._limits = ChunkLimits(
+            confirmed,
+            min(hard_limit, max(confirmed, self._limits.soft_limit)),
+            hard_limit,
+        )
+        self._successes = 0
+        self.last_reason = "confirmed_capacity"
+        return self._limits
+
     def observe(self, result: Dict[str, Any]) -> ChunkLimits:
-        if not result.get("success") or result.get("reason") in {"empty_response", "capacity", "deadline", "protocol"}:
+        if not result.get("success"):
             self._successes = 0
-            target = max(5, self._limits.target // 2)
-            self._limits = ChunkLimits(target, min(self._limits.soft_limit, target + 4), min(self._limits.hard_limit, target + 8))
-            self.last_reason = str(result.get("reason") or "failure")
+            reason = str(result.get("reason") or "failure")
+            if reason in {"capacity", "deadline"}:
+                target = max(5, self._limits.target // 2)
+                self._limits = ChunkLimits(
+                    target,
+                    min(self._limits.soft_limit, target + 4),
+                    min(self._limits.hard_limit, target + 8),
+                )
+            self.last_reason = reason
             return self._limits
         ratio_value = result.get("reasoning_content_ratio")
         if ratio_value is None:
@@ -237,6 +268,7 @@ def build_chunks(
                 "chunk_index": chunk_number,
                 "target_indices": indices[start:end],
                 "target_ids": [items[i].get("annotation_id") for i in indices[start:end]],
+                "target_lines": [items[i].get("line_no") for i in indices[start:end]],
                 "start_line": items[indices[start]].get("line_no"),
                 "end_line": items[indices[end - 1]].get("line_no"),
             })
@@ -257,6 +289,12 @@ def subdivide_chunk(chunk: Dict[str, Any], maximum: int) -> List[Dict[str, Any]]
         part["target_indices"] = target_indices
         target_ids = list(chunk.get("target_ids") or [])
         part["target_ids"] = target_ids[offset:offset + maximum] or target_ids_for_indices(target_indices)
+        target_lines = list(chunk.get("target_lines") or [])
+        part_lines = target_lines[offset:offset + maximum]
+        if part_lines:
+            part["target_lines"] = part_lines
+            part["start_line"] = part_lines[0]
+            part["end_line"] = part_lines[-1]
         result.append(part)
     return result
 

@@ -162,7 +162,9 @@ class ProductionHandler(BaseHTTPRequestHandler):
         if path == "/api/v1/settings/direction-model/fetch-models" and method == "POST":
             return 200, {"ok": True, "models": self.service.fetch_direction_models(self._body())}
         if path == "/api/v1/settings/direction-model/test" and method == "POST":
-            return self.service.test_direction_model()
+            return self.service.test_direction_model(self._body())
+        if path == "/api/v1/settings/direction-model:activate" and method == "POST":
+            return 200, self.service.activate_direction_model(self._body())
         if path == "/api/v1/custom-assets":
             if method == "GET":
                 try:
@@ -306,7 +308,9 @@ class ProductionHandler(BaseHTTPRequestHandler):
                 return 200, self.service.job_detail(match.group(1))
             if method == "POST" and query.get("action", [""])[0] == "cancel":
                 return 200, self.service.cancel_job(match.group(1))
-            if method == "POST" and query.get("action", [""])[0] == "retry":
+            if method == "POST" and query.get("action", [""])[0] == "pause":
+                return 200, self.service.pause_job(match.group(1))
+            if method == "POST" and query.get("action", [""])[0] in {"retry", "resume"}:
                 return 202, self.service.retry_job(match.group(1))
         if path == "/api/v1/jobs" and method == "GET":
             return 200, self.service.list_jobs()
@@ -365,7 +369,7 @@ class ProductionHandler(BaseHTTPRequestHandler):
             if method == "GET" and path in {"/", "/index.html"}:
                 self._send_asset(self.ui_root / "index.html")
                 return
-            if method == "GET" and path in {"/app.css", "/layout-mode.css", "/previews.css", "/preflight.css", "/cg-responsive.css", "/workspace-migration.css", "/app.js"}:
+            if method == "GET" and path in {"/app.css", "/layout-mode.css", "/previews.css", "/preflight.css", "/cg-responsive.css", "/workspace-migration.css", "/confirm-dialog.css", "/app.js"}:
                 self._send_asset(self.ui_root / path.lstrip("/"))
                 return
             match = RESOURCE_PREVIEW_ROUTE.fullmatch(path)
