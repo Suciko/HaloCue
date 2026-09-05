@@ -52,8 +52,43 @@ class AdaptationService:
         system, user = build_chapter_prompt(source=source, chapter=chapter, character_mapping=item["plan"].get("character_mapping", {}), unfinished=source.get("completion_state") != "complete")
         provider = self.service.provider
         context = {"source_version": source["id"], "chapter": chapter, "brief": {"characters": list(item["plan"].get("character_mapping", {}).keys())}, "scene_contract": {"title": chapter["title"], "goal": "将本章已提供内容转换为连续剧本候选", "location": "原文既有地点"}, "runtime_character_cards": [], "character_mapping": item["plan"].get("character_mapping", {}), "unfinished": source.get("completion_state") != "complete", "adaptation_prompt": system, "user_prompt": user}
-        text = provider.generate_scene(context)
-        candidate = {"schema_version": "adaptation-chapter/1.0", "text": text, "source_version_id": source["id"], "source_chapter_id": chapter_id, "formal": False, "prompt_contract": "adaptation/1.0"}
         with self.repo.transaction() as c:
-            c.execute("UPDATE adaptation_chapters SET candidate_json=?,status='candidate',updated_at=? WHERE adaptation_id=? AND source_chapter_id=?", (canonical_json(candidate), now(), adaptation_id, chapter_id))
-        return self.get(adaptation_id)
+            row = c.execute("SELECT budget_json FROM adaptations WHERE id=?", (adaptation_id,)).fetchone()
+            budget = json.loads(row[0] or "{}")
+            if int(budget.get("reserved_calls") or 0) >= int(budget.get("max_calls") or 0):
+                raise DomainError("adaptation_budget_exhausted", "本次改编任务的调用预算已用尽。", status=409)
+            budget["reserved_calls"] = int(budget.get("reserved_calls") or 0) + 1
+            c.execute("UPDATE adaptations SET budget_json=?,updated_at=? WHERE id=?", (canonical_json(budget), now(), adaptation_id))
+        try:
+            call = provider._call_llm(system, user) if hasattr(provider, "_call_llm") else None
+            raw_text = call.text if call is not None else provider.generate_scene(context)
+        except Exception:
+            with self.repo.transaction() as c:
+                row = c.execute("SELECT budget_json FROM adaptations WHERE id=?", (adaptation_id,)).fetchone()
+                budget = json.loads(row[0] or "{}")
+                budget["reserved_calls"] = max(0, int(budget.get("reserved_calls") or 0) - 1)
+                c.execute("UPDATE adaptations SET budget_json=?,updated_at=? WHERE id=?", (canonical_json(budget), now(), adaptation_id))
+            raise
+        structured = {}
+        try:
+            parsed = json.loads(raw_text)
+            if isinstance(parsed, dict):
+                structured = parsed
+        except (TypeError, json.JSONDecodeError):
+            pass
+        text = str(structured.get("text") or raw_text).strip()
+        refs = structured.get("source_refs") if isinstance(structured.get("source_refs"), list) else [
+            {"paragraph_id": paragraph["id"], "quote": paragraph["text"][:160]}
+            for paragraph in chapter.get("paragraphs", [])
+        ]
+        candidate = {"schema_version": "adaptation-chapter/1.0", "text": text, "source_version_id": source["id"], "source_chapter_id": chapter_id, "formal": False, "prompt_contract": "adaptation/1.0", "source_refs": refs, "deviations": structured.get("deviations", []), "open_threads": structured.get("open_threads", [])}
+        candidate_id = new_id("proposal")
+        candidate_uri, candidate_hash = self.repo.atomic_write_text(f"artifacts/proposals/{candidate_id}.json", canonical_json(candidate) + "\n")
+        source_digest = next((item["content_digest"] for item in source["chapters"] if item["id"] == chapter_id), "")
+        with self.repo.transaction() as c:
+            chapter_row = c.execute("SELECT id FROM adaptation_chapters WHERE adaptation_id=? AND source_chapter_id=?", (adaptation_id, chapter_id)).fetchone()
+            if not chapter_row:
+                raise NotFound("adaptation_chapter", chapter_id)
+            c.execute("UPDATE adaptation_chapters SET candidate_json=?,status='candidate',updated_at=? WHERE adaptation_id=? AND source_chapter_id=?", (canonical_json({**candidate, "proposal_id": candidate_id}), now(), adaptation_id, chapter_id))
+            c.execute("INSERT INTO proposals (id,work_id,kind,scope_type,scope_id,base_revision_id,candidate_uri,candidate_hash,diff_json,evidence_json,risk,status,provider_json,created_at,decided_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (candidate_id, item["work_id"], "adaptation_chapter", "adaptation_chapter", chapter_row[0], None, candidate_uri, candidate_hash, canonical_json({"format": "adaptation-chapter/1.0", "source_refs": refs}), canonical_json({"source_version_id": source["id"], "source_chapter_id": chapter_id, "source_digest": source_digest}), "medium", "pending", canonical_json(provider.descriptor()), now(), None))
+        return {"adaptation": self.get(adaptation_id), "proposal_id": candidate_id, "candidate": candidate}

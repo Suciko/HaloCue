@@ -27,6 +27,10 @@ The collaborator still needs to review candidate text and decide formal adoption
 
 ## Known follow-up
 
-- Adaptation chapter candidates are intentionally non-formal; wiring their acceptance into the existing Proposal/Revision transaction is the next vertical slice.
+- Adaptation chapter candidates now enter the existing Proposal/Revision transaction. `POST /works/{work_id}/proposals/{proposal_id}/accept` with `expected_version` creates an `adaptation-manuscript/1.0` revision after checking the source version and source digest. The stored candidate remains source-bound and records `formal: true` only after acceptance.
 - UI source/plan/chapter review cards are not a new editor rebuild in this slice; the HTTP contracts are ready for the existing quiet workbench.
 - Existing dirty files from the prior session were present before this branch. Review the focused diff before merging.
+
+## Remote model smoke test
+
+The supplied endpoint `http://59.110.165.151:3000/v1` accepted the key and listed `gemini-3.8-flash`, but calls to all listed Gemini 3.8 Flash variants returned provider error `get_channel_failed` (no available channel). The same endpoint successfully completed a short adaptation smoke test with `deepseek-v4-flash`; this verified the real OpenAI-compatible request, normal `finish_reason`, source references, Proposal creation, and formal Revision acceptance. No key was written to the repository or this handoff.

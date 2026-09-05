@@ -37,8 +37,14 @@ def test_chapter_candidate_is_source_bound_and_non_formal(tmp_path: Path):
     adaptation = service.adaptations.create(work["id"], {"source_version_id": current["id"]})
     adaptation = service.adaptations.approve_plan(adaptation["id"], {"plan_digest": adaptation["plan_digest"]})
     chapter_id = adaptation["selected_chapter_ids"][0]
-    candidate = service.adaptations.generate_chapter_candidate(adaptation["id"], chapter_id)
+    generated = service.adaptations.generate_chapter_candidate(adaptation["id"], chapter_id)
+    candidate = generated["adaptation"]
     row = next(item for item in candidate["chapters"] if item["source_chapter_id"] == chapter_id)
     assert row["status"] == "candidate"
     assert row["candidate"]["formal"] is False
     assert row["candidate"]["source_version_id"] == current["id"]
+    accepted = service.accept_proposal(work["id"], generated["proposal_id"], {"expected_version": work["version"]})
+    accepted_row = next(item for item in service.adaptations.get(adaptation["id"])["chapters"] if item["source_chapter_id"] == chapter_id)
+    assert accepted["revision_id"]
+    assert accepted_row["status"] == "accepted"
+    assert accepted_row["candidate"]["formal"] is True
