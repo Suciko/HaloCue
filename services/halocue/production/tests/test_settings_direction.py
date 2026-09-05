@@ -30,6 +30,8 @@ def test_direction_model_settings_and_presets(tmp_path):
     provider, creds = settings.provider_settings()
     assert provider == "openai"
     assert creds["api_key"] == "sk-direction-test-key"
+    assert creds["source_context_strategy"] == "window"
+    assert creds["transport_retries"] == 2
 
     file_content = json.loads(settings.path.read_text(encoding="utf-8"))
     assert "api_key" not in file_content

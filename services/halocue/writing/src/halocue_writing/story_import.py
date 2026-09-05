@@ -11,18 +11,19 @@ from collections import Counter
 from pathlib import PurePath
 from xml.etree import ElementTree
 
-from .repository import sha256_bytes
+from .repository import sha256_bytes, sha256_text
 
 
 MAX_STORY_BYTES = 16_000_000
 MAX_EXTRACTED_CHARACTERS = 2_000_000
 WORD_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+PARSER_VERSION = "story-parser/1.1"
 CHAPTER_RE = re.compile(
-    r"^\s*(?:第\s*[0-9零〇一二三四五六七八九十百千万两]+\s*[章节卷部篇]|chapter\s+\d+)\b.*$",
+    r"^\s*(?:第\s*[0-9零〇一二三四五六七八九十百千万两]+\s*[章节卷部篇]|chapter\s+\d+\b).*$",
     re.IGNORECASE,
 )
 SCENE_RE = re.compile(
-    r"^\s*(?:第\s*[0-9零〇一二三四五六七八九十百千万两]+\s*[场幕]|场景\s*[0-9零〇一二三四五六七八九十百千万两]+|scene\s+\d+)\b.*$",
+    r"^\s*(?:第\s*[0-9零〇一二三四五六七八九十百千万两]+\s*[场幕]|场景\s*[0-9零〇一二三四五六七八九十百千万两]+|scene\s+\d+\b).*$",
     re.IGNORECASE,
 )
 SPEAKER_RE = re.compile(r"^\s*([^：:\n]{1,20})[：:]\s*(.+)$")
@@ -48,13 +49,18 @@ def _decode_txt(raw: bytes) -> tuple[list[str], str]:
 
 def _docx_paragraph_text(paragraph: ElementTree.Element) -> str:
     parts: list[str] = []
-    for node in paragraph.iter():
-        if node.tag in {WORD_NS + "t", WORD_NS + "delText"} and node.text:
+    def visit(node):
+        if node.tag in {WORD_NS + "del", WORD_NS + "moveFrom", WORD_NS + "instrText"}:
+            return
+        if node.tag == WORD_NS + "t" and node.text:
             parts.append(node.text)
         elif node.tag == WORD_NS + "tab":
             parts.append("\t")
         elif node.tag in {WORD_NS + "br", WORD_NS + "cr"}:
             parts.append("\n")
+        for child in node:
+            visit(child)
+    visit(paragraph)
     return "".join(parts).strip()
 
 
@@ -73,8 +79,23 @@ def _decode_docx(raw: bytes) -> tuple[list[str], str]:
     except (zipfile.BadZipFile, KeyError, ElementTree.ParseError, OSError) as exc:
         raise ValueError("DOCX 无法读取，请先用 Word 或 LibreOffice 重新保存。") from exc
 
-    paragraphs = [text for item in document.iter(WORD_NS + "p") if (text := _docx_paragraph_text(item))]
+    paragraphs = []
+    def visit(node):
+        if node.tag in {WORD_NS + "del", WORD_NS + "moveFrom"}:
+            return
+        if node.tag == WORD_NS + "p":
+            text = _docx_paragraph_text(node)
+            if text:
+                paragraphs.append(text)
+            return
+        for child in node:
+            visit(child)
+    visit(document)
     return paragraphs, "wordprocessingml"
+
+
+def extract_document_paragraphs(suffix: str, raw: bytes) -> tuple[list[str], str]:
+    return _decode_docx(raw) if suffix == ".docx" else _decode_txt(raw)
 
 
 def _analyse_paragraphs(paragraphs: list[str]) -> dict:
@@ -95,7 +116,7 @@ def _analyse_paragraphs(paragraphs: list[str]) -> dict:
     def ensure_chapter() -> dict:
         nonlocal current_chapter
         if current_chapter is None:
-            current_chapter = {"title": "未分章内容", "paragraph_count": 0, "scene_count": 0}
+            current_chapter = {"id": f"chapter-{len(chapters) + 1:06d}", "title": "未分章内容", "paragraph_count": 0, "scene_count": 0}
             chapters.append(current_chapter)
         return current_chapter
 
@@ -104,6 +125,8 @@ def _analyse_paragraphs(paragraphs: list[str]) -> dict:
         chapter = ensure_chapter()
         if current_scene is None:
             current_scene = {
+                "id": f"scene-{len(scenes) + 1:06d}",
+                "chapter_id": chapter["id"],
                 "title": "正文",
                 "chapter_title": chapter["title"],
                 "paragraph_count": 0,
@@ -116,13 +139,15 @@ def _analyse_paragraphs(paragraphs: list[str]) -> dict:
 
     for source_index, paragraph in enumerate(paragraphs, start=1):
         if CHAPTER_RE.match(paragraph):
-            current_chapter = {"title": paragraph, "paragraph_count": 0, "scene_count": 0}
+            current_chapter = {"id": f"chapter-{len(chapters) + 1:06d}", "title": paragraph, "paragraph_count": 0, "scene_count": 0}
             chapters.append(current_chapter)
             current_scene = None
             continue
         if SCENE_RE.match(paragraph):
             chapter = ensure_chapter()
             current_scene = {
+                "id": f"scene-{len(scenes) + 1:06d}",
+                "chapter_id": chapter["id"],
                 "title": paragraph,
                 "chapter_title": chapter["title"],
                 "paragraph_count": 0,
@@ -147,6 +172,10 @@ def _analyse_paragraphs(paragraphs: list[str]) -> dict:
         lines.append(
             {
                 "source_paragraph": source_index,
+                "id": f"paragraph-{source_index:07d}",
+                "chapter_id": chapter["id"],
+                "scene_id": scene["id"],
+                "raw_text": paragraph,
                 "chapter": chapter["title"],
                 "scene": scene["title"],
                 "kind": kind,
@@ -157,7 +186,7 @@ def _analyse_paragraphs(paragraphs: list[str]) -> dict:
 
     suggestions: list[str] = []
     if not explicit_chapters:
-        suggestions.append("没有识别到章节标题；确认前可以先补成“第一章 ……”这样的标题。")
+        suggestions.append("未识别到章节标题，按连续正文保留；改编时自动分析分场。")
     if not explicit_scenes:
         suggestions.append("没有识别到场景标题；系统会先把每章视为一个连续场景。")
     if not characters:
@@ -189,7 +218,7 @@ def parse_story_bytes(filename: str, raw: bytes) -> dict:
     if len(raw) > MAX_STORY_BYTES:
         raise ValueError("TXT 或 DOCX 不能超过 16 MB。")
 
-    paragraphs, encoding = _decode_txt(raw) if suffix == ".txt" else _decode_docx(raw)
+    paragraphs, encoding = extract_document_paragraphs(suffix, raw)
     analysis = _analyse_paragraphs(paragraphs)
     return {
         "schema_version": "story-import/1.0",
@@ -198,6 +227,9 @@ def parse_story_bytes(filename: str, raw: bytes) -> dict:
         "source_digest": sha256_bytes(raw),
         "source_size": len(raw),
         "source_encoding": encoding,
+        "parser_version": PARSER_VERSION,
+        "normalized_text": "\n".join(paragraphs),
+        "normalized_digest": sha256_text("\n".join(paragraphs)),
         "project_title": PurePath(safe_name).stem,
         **analysis,
         "write_boundary": "preview_only_until_user_confirmation",

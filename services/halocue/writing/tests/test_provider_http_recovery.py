@@ -34,7 +34,7 @@ class _ProviderFixtureHandler(BaseHTTPRequestHandler):
         body = json.dumps(
             {
                 "id": "fixture-completion",
-                "choices": [{"message": {"content": "旁白: 走廊的灯亮起。\n"}}],
+                "choices": [{"message": {"content": "旁白: 走廊的灯亮起。\n"}, "finish_reason": "stop"}],
                 "usage": {"prompt_tokens": 17, "completion_tokens": 6},
             }
         ).encode("utf-8")

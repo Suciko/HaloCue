@@ -120,6 +120,15 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "data": self.service.search_resource_catalog(query.get("kind", ["backgrounds"])[0], query.get("q", [""])[0], query.get("limit", [24])[0])})
             if parts == ["api", "v1", "works"]:
                 return self._json({"ok": True, "data": self.service.list_works()})
+            if len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] == "source":
+                query = parse_qs(urlparse(self.path).query)
+                return self._json({"ok": True, "data": self.service.sources.get(parts[3], query.get("version_id", [None])[0])})
+            if len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] == "adaptations":
+                query = parse_qs(urlparse(self.path).query)
+                ids = query.get("id", [])
+                return self._json({"ok": True, "data": [self.service.adaptations.get(item) for item in ids] if ids else []})
+            if len(parts) == 6 and parts[:3] == ["api", "v1", "works"] and parts[4] == "adaptations":
+                return self._json({"ok": True, "data": self.service.adaptations.get(parts[5])})
             if len(parts) == 4 and parts[:3] == ["api", "v1", "intent-plans"]:
                 return self._json({"ok": True, "data": self.service.get_intent_plan(parts[3])})
             if parts == ["api", "v1", "settings", "writing-model"]:
@@ -278,6 +287,17 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
             if parts == ["api", "v1", "works"]:
                 result = self.service.create_work(payload)
                 return self._json({"ok": True, "data": result}, 201)
+            if len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] in {"source:preview", "source:update"}:
+                method = self.service.sources.preview if parts[4] == "source:preview" else self.service.sources.apply
+                return self._json({"ok": True, "data": method(parts[3], payload)})
+            if len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] == "adaptations":
+                return self._json({"ok": True, "data": self.service.adaptations.create(parts[3], payload)}, 201)
+            if len(parts) == 7 and parts[:3] == ["api", "v1", "works"] and parts[4] == "adaptations" and parts[6] == "plan:approve":
+                return self._json({"ok": True, "data": self.service.adaptations.approve_plan(parts[5], payload)})
+            if len(parts) == 7 and parts[:3] == ["api", "v1", "works"] and parts[4] == "adaptations" and parts[6] == "run":
+                return self._json({"ok": True, "data": self.service.adaptations.run(parts[5], payload)}, 202)
+            if len(parts) == 9 and parts[:3] == ["api", "v1", "works"] and parts[4] == "adaptations" and parts[6] == "chapters" and parts[8] == "candidate:generate":
+                return self._json({"ok": True, "data": self.service.adaptations.generate_chapter_candidate(parts[5], parts[7], payload)}, 202)
             if parts == ["api", "v1", "intent"]:
                 result = self.service.plan_intent(payload)
                 return self._json({"ok": True, "data": result}, 202)

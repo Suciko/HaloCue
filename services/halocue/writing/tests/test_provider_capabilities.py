@@ -61,6 +61,7 @@ def _protocol_server(protocol: str):
             )
             if protocol == "anthropic":
                 payload = {
+                    "stop_reason": "end_turn",
                     "usage": {
                         "input_tokens": 120,
                         "output_tokens": 20,
@@ -78,7 +79,7 @@ def _protocol_server(protocol: str):
                             "cached_tokens": 0 if call_number == 1 else 80,
                         },
                     },
-                    "choices": [{"message": {"role": "assistant", "content": reply}}],
+                    "choices": [{"message": {"role": "assistant", "content": reply}, "finish_reason": "stop"}],
                 }
             encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(200)

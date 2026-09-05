@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 from contextlib import contextmanager
 
+import pytest
 from halocue_production.app import create_server
 from halocue_production.service import ProductionService
 from test_service import configured_resource_settings
@@ -114,6 +115,7 @@ def test_http_serves_production_workbench_assets(settings):
         for path, marker, content_type in (
             ("/", "HaloCue", "text/html"),
             ("/app.css", ".app-shell", "text/css"),
+            ("/confirm-dialog.css", ".confirm-dialog-shell", "text/css"),
             ("/app.js", "direction-generation", "javascript"),
         ):
             with urllib.request.urlopen(base + path, timeout=5) as response:
@@ -183,11 +185,12 @@ def test_http_ai_preflight_result_is_empty_until_a_real_model_job_finishes(setti
         assert error["error"]["code"] == "ai_preflight_not_configured"
 
 
-def test_http_job_retry_action_uses_the_job_route(settings):
+@pytest.mark.parametrize("action", ["retry", "pause", "resume"])
+def test_http_job_control_actions_use_the_job_route(settings, action):
     with api(settings) as base:
         status, _, error = request(
             base,
-            "/api/v1/jobs/job-000000000000?action=retry",
+            f"/api/v1/jobs/job-000000000000?action={action}",
             {},
             "POST",
         )

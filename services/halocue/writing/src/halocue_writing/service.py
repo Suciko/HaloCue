@@ -69,7 +69,9 @@ from .release_integrity import (
 )
 from .resource_catalog import ResourceCatalog
 from .aap_import import parse_aap_bytes, parse_aap_payload
-from .story_import import parse_story_bytes, parse_story_payload
+from .story_import import extract_document_paragraphs, parse_story_bytes, parse_story_payload
+from .source_catalog import SourceCatalog
+from .adaptation import AdaptationService
 
 
 class _ProposalAcceptanceStopped(Exception):
@@ -84,6 +86,8 @@ class _ProposalAcceptanceStopped(Exception):
 class WritingService:
     def __init__(self, data_dir: Path, production_url: str = "http://127.0.0.1:8892", official_corpus_dir: Path | None = None):
         self.repo = Repository(data_dir)
+        self.sources = SourceCatalog(self.repo)
+        self.adaptations = AdaptationService(self)
         self.model_settings = WritingModelSettings(data_dir)
         self.preferences = UserPreferencesStore(data_dir)
         self.ba_skill = BaWritingSkillRegistry()
@@ -2116,22 +2120,22 @@ class WritingService:
                 scene["lines"].append(f"{speaker}：{text}" if line.get("is_dialogue") and speaker else text)
             return chapter_groups
 
-        chapter_lookup: dict[str, dict] = {}
         chapter_order: list[dict] = []
-        scene_lookup: dict[tuple[str, str], dict] = {}
+        previous_chapter = previous_scene = None
         for line in lines:
             chapter_title = str(line.get("chapter") or "第一章").strip() or "第一章"
             scene_title = str(line.get("scene") or "正文").strip() or "正文"
-            chapter = chapter_lookup.get(chapter_title)
-            if chapter is None:
+            chapter_key = line.get("chapter_id") or chapter_title
+            scene_key = line.get("scene_id") or scene_title
+            if chapter_key != previous_chapter:
                 chapter = {"title": chapter_title, "scenes": []}
-                chapter_lookup[chapter_title] = chapter
                 chapter_order.append(chapter)
-            scene = scene_lookup.get((chapter_title, scene_title))
-            if scene is None:
+                previous_chapter = chapter_key
+                previous_scene = None
+            if scene_key != previous_scene:
                 scene = {"title": scene_title, "lines": []}
-                scene_lookup[(chapter_title, scene_title)] = scene
                 chapter["scenes"].append(scene)
+                previous_scene = scene_key
             text = str(line.get("text") or "").strip()
             if not text:
                 continue
@@ -4428,7 +4432,10 @@ class WritingService:
     @classmethod
     def _extract_document_text(cls, suffix: str, content: bytes) -> tuple[str, int, bool]:
         try:
-            if suffix in {".txt", ".md"}:
+            if suffix in {".txt", ".docx"}:
+                paragraphs, _ = extract_document_paragraphs(suffix, content)
+                text = "\n\n".join(paragraphs)
+            elif suffix == ".md":
                 for encoding in ("utf-8-sig", "gb18030"):
                     try:
                         text = content.decode(encoding)
@@ -4437,24 +4444,6 @@ class WritingService:
                         continue
                 else:
                     raise DomainError("document_encoding_unsupported", "文本文件必须使用 UTF-8 或 GB18030 编码。", status=415)
-            elif suffix == ".docx":
-                with zipfile.ZipFile(io.BytesIO(content)) as archive:
-                    try:
-                        document_info = archive.getinfo("word/document.xml")
-                    except KeyError as exc:
-                        raise DomainError("attachment_type_mismatch", "文件不是有效的 DOCX 文档。", status=415) from exc
-                    if document_info.file_size > 8_000_000:
-                        raise DomainError("document_too_complex", "DOCX 解压后的正文过大，无法安全读取。", status=413)
-                    root = ElementTree.fromstring(archive.read(document_info))
-                    paragraphs = []
-                    for paragraph in root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"):
-                        line = "".join(
-                            node.text or ""
-                            for node in paragraph.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")
-                        ).strip()
-                        if line:
-                            paragraphs.append(line)
-                    text = "\n\n".join(paragraphs)
             elif suffix == ".aap":
                 try:
                     parsed = json.loads(content.decode("utf-8-sig"))
@@ -14059,11 +14048,10 @@ class WritingService:
 
     def activate_writing_model(self, payload: dict) -> dict:
         """Test and activate one exact candidate without exposing a half-applied state."""
-        tested = self.model_settings.test_connection(payload)
         with self._provider_lock:
-            result = self.model_settings.save(payload, connection_test=tested)
+            result = self.model_settings.activate(payload)
             self.provider = make_writing_provider(self.model_settings, self.ba_prompt_assembler)
-        return {**result, "test": tested, "runtime": self.provider.descriptor()}
+        return {**result, "runtime": self.provider.descriptor()}
 
     def fetch_writing_models(self, payload: dict | None = None) -> list[str]:
         return self.model_settings.fetch_models(payload)
