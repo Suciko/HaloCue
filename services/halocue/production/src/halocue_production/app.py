@@ -369,7 +369,7 @@ class ProductionHandler(BaseHTTPRequestHandler):
             if method == "GET" and path in {"/", "/index.html"}:
                 self._send_asset(self.ui_root / "index.html")
                 return
-            if method == "GET" and path in {"/app.css", "/layout-mode.css", "/previews.css", "/preflight.css", "/cg-responsive.css", "/workspace-migration.css", "/confirm-dialog.css", "/app.js"}:
+            if method == "GET" and path in {"/app.css", "/direction-profile.css", "/layout-mode.css", "/previews.css", "/preflight.css", "/cg-responsive.css", "/workspace-migration.css", "/confirm-dialog.css", "/app.js"}:
                 self._send_asset(self.ui_root / path.lstrip("/"))
                 return
             match = RESOURCE_PREVIEW_ROUTE.fullmatch(path)
