@@ -94,6 +94,13 @@ def _select(
     return sorted(selected)
 
 
+def rank_background_candidates(index: Mapping[str, Any], query: str) -> list[tuple[float, str]]:
+    """Rank frozen keys using existing labels; scores are not probabilities."""
+    return _ranked_candidates(
+        list(index.get("bg") or {}), index.get("bg_label") or {}, query, _terms(query),
+    )
+
+
 def build_resource_candidate_index(
     index: Mapping[str, Any],
     source_text: str,

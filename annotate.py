@@ -9,7 +9,13 @@ script2aap.py。任何超出资源表的标注都会被丢弃并告警——模�
   python annotate.py 剧本.txt -o 剧本.annotated.txt [--cast cast.json] [--provider openai]
   python annotate.py 剧本.txt --range 1-80          只标注前 80 行（先试水）
 """
-import argparse, hashlib, json, os, re, sys, uuid
+import argparse
+import hashlib
+import json
+import os
+import re
+import sys
+import uuid
 from typing import Any, Dict, List, Mapping
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -29,9 +35,9 @@ from annotation_memory import (                                 # noqa: E402
 from annotation_agent import run_annotation_agent               # noqa: E402
 from annotation_safety import (                                 # noqa: E402
     FX_PARTS as _FX_PARTS,
-    filter_annotation_row,
-    is_face_allowed,
-    is_fx_allowed,
+    filter_annotation_row as filter_annotation_row,
+    is_face_allowed as is_face_allowed,
+    is_fx_allowed as is_fx_allowed,
     project_effective_annotation_row,
 )
 from director_state import normalize_director                   # noqa: E402
@@ -44,6 +50,8 @@ from direction_rules import (                                  # noqa: E402
 )
 from director_policy import normalize_direction_plan                 # noqa: E402
 from resource_retrieval import build_resource_candidate_index        # noqa: E402
+from direction_profiles import DirectionProfileChanged, normalize_direction_profile  # noqa: E402
+from conservative_backgrounds import ConservativeBackgroundPolicy    # noqa: E402
 import prompt as PROMPT                                        # noqa: E402
 import tables                                                  # noqa: E402
 
@@ -561,7 +569,7 @@ SCHEMA = {
     "additionalProperties": False,
 }
 
-def build_static(idx, cast, cast_names, *, story_type="auto"):
+def build_static(idx, cast, cast_names, *, story_type="auto", direction_profile="standard"):
     """跨请求不变的系统提示词 —— 这部分会被缓存。规则正文在 prompt.py。"""
     capabilities = idx.get("face_capabilities") or {}
     if capabilities:
@@ -595,13 +603,15 @@ def build_static(idx, cast, cast_names, *, story_type="auto"):
                 ),
             }
         return PROMPT.build_system(
-            idx, cast, cast_names, faces_by_id, story_type=story_type
+            idx, cast, cast_names, faces_by_id, story_type=story_type,
+            direction_profile=direction_profile,
         )
     faces_by_id = {c["identifier"]: c["faces"] for c in idx["characters"] if c["faces"]}
     for ident, fs in (idx.get("faces_used") or {}).items():
         faces_by_id.setdefault(ident, fs)
     return PROMPT.build_system(
-        idx, cast, cast_names, faces_by_id, story_type=story_type
+        idx, cast, cast_names, faces_by_id, story_type=story_type,
+        direction_profile=direction_profile,
     )
 
 
@@ -789,6 +799,9 @@ def apply_annotation_response_row(
 ):
     """Apply one validated model row through the existing resource guards."""
     diagnostic_sink = diagnostics if diagnostics is not None else []
+    conservative = constraints.get("direction_profile") == "conservative"
+    if conservative and row.get("_background_review"):
+        diagnostic_sink.append(dict(row["_background_review"]))
     character = cast[item["who"]]
     portrait = character.get("portrait") and not character.get("narrator")
     item["_speaker_has_portrait"] = bool(portrait)
@@ -818,9 +831,12 @@ def apply_annotation_response_row(
     }
     applied_clean = apply_model_directions(item, clean)
     for field_name, field_value in applied_clean.items():
+        fallback = conservative and field_name == "bg" and row.get("_background_origin")
         proposals.append(build_proposal(
-            card_id=card_id, p_type="applied_pending", origin="model",
-            rule="llm_annotation", field_name=field_name,
+            card_id=card_id, p_type="applied_pending",
+            origin="deterministic_fallback" if fallback else "model",
+            rule="conservative_background" if fallback else "llm_annotation",
+            field_name=field_name,
             before=before_values.get(field_name), after=field_value,
         ))
     for rejected_item in rejected_details:
@@ -923,6 +939,11 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     range_str = options.get("range")
     dry_run = options.get("dry_run", False)
     story_type = normalize_story_type(options.get("story_type"))
+    direction_profile = normalize_direction_profile(options.get("direction_profile"))
+    profile_snapshot = PROMPT.profile_snapshot(direction_profile, story_type=story_type)
+    frozen_profile = options.get("direction_profile_snapshot")
+    if frozen_profile is not None and frozen_profile != profile_snapshot:
+        raise DirectionProfileChanged()
     raw_usage_chain = options.get("usage_chain")
     usage_chain = raw_usage_chain[:80] if isinstance(raw_usage_chain, list) else []
     usage_chain_context = ""
@@ -962,7 +983,15 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         seen_id.add(key)
         used.append(w)
     script_text = open(script_path, encoding="utf-8").read()
+    background_policy = (
+        ConservativeBackgroundPolicy(items, idx, cfg, usage_chain)
+        if direction_profile == "conservative" else None
+    )
     constraints = annotation_constraints(idx, cast, usage_chain=usage_chain)
+    if direction_profile == "conservative":
+        constraints["direction_profile"] = direction_profile
+        constraints["ok_bg"] = set(idx.get("bg") or {})
+        constraints["confirmed_bg"] &= constraints["ok_bg"]
     prompt_idx, candidate_manifest = build_resource_candidate_index(
         idx,
         script_text,
@@ -971,16 +1000,19 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     )
     for background in constraints.get("confirmed_bg") or set():
         prompt_idx["bg"].setdefault(background, 0)
-    static = build_static(prompt_idx, cast, used, story_type=story_type)
+    static = build_static(prompt_idx, cast, used, story_type=story_type, direction_profile=direction_profile)
     full_prompt_idx = dict(idx)
     full_prompt_idx["bg"] = dict(idx.get("bg", {}))
     for background in constraints.get("confirmed_bg") or set():
         full_prompt_idx["bg"].setdefault(background, 0)
-    full_static = build_static(full_prompt_idx, cast, used, story_type=story_type)
-    rules_chars = len(PROMPT.build_rules(story_type))
+    full_static = build_static(full_prompt_idx, cast, used, story_type=story_type, direction_profile=direction_profile)
+    rules_chars = len(PROMPT.build_rules(story_type, direction_profile=direction_profile))
     full_resource_chars = max(0, len(full_static) - rules_chars)
     candidate_resource_chars = max(0, len(static) - rules_chars)
     candidate_manifest.update({
+        "direction_profile": profile_snapshot,
+        "static_prompt_sha256": hashlib.sha256(static.encode("utf-8")).hexdigest(),
+        "rules_prompt_chars": rules_chars,
         "full_resource_prompt_chars": full_resource_chars,
         "candidate_resource_prompt_chars": candidate_resource_chars,
         "resource_prompt_reduction": (
@@ -1001,6 +1033,8 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         return {
             "text": "", "proposals": [], "diagnostics": [], "out": out_path,
             "story_type": story_type,
+            "direction_profile": direction_profile,
+            "direction_profile_snapshot": profile_snapshot,
         }
 
     prov = provider_instance or make_provider(llm_path, provider_name)
@@ -1039,6 +1073,14 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             model_config,
             story_type=story_type, director_version="stateful-v1",
         )
+        if direction_profile == "conservative":
+            fingerprint["direction_profile"] = profile_snapshot
+            fingerprint["static_prompt_sha256"] = hashlib.sha256(static.encode("utf-8")).hexdigest()
+            fingerprint["background_plan_sha256"] = hashlib.sha256(json.dumps(
+                {"default_bg": cfg.get("default_bg"), "scene_bg": cfg.get("scene_bg"),
+                 "usage_chain": usage_chain},
+                ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")).hexdigest()
         checkpoint_dir = options.get("checkpoint_dir") or os.path.join(HERE, "out", "annotation-checkpoints")
         agent_result = run_annotation_agent(
             items, provider=prov, static_system=agent_static, cast=cast,
@@ -1056,6 +1098,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             annotation_max_tokens=int(getattr(prov, "cfg", {}).get("annotation_max_tokens") or getattr(prov, "cfg", {}).get("max_tokens", 16000)),
             context_window_tokens=int(getattr(prov, "cfg", {}).get("context_window_tokens") or 0) or None,
             story_type=story_type,
+            background_policy=background_policy,
         )
         diagnostics.extend(agent_result.get("diagnostics") or [])
         agent_metrics = dict(agent_result.get("metrics") or {})
@@ -1097,6 +1140,8 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
                 "pending_targets": agent_meta["pending_targets"],
                 "direction_change_count": 0,
                 "story_type": story_type,
+                "direction_profile": direction_profile,
+                "direction_profile_snapshot": profile_snapshot,
             }
         rows_by_id = agent_result["rows_by_id"]
         annotation_beats = agent_result.get("beats") or []
@@ -1109,6 +1154,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
                 applied += 1
         print(f"  已标注 {applied}/{len(todo)} 行（Agent）")
     else:
+        current_background = ""
         for start in range(0, len(todo), n):
             batch = todo[start:start + n]
             head = todo[max(0, start - ctx):start]
@@ -1119,7 +1165,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
                     + build_batch_context(items, head)
                 )
                 cumulative = build_face_usage_summary(items, todo[:start])
-                if cumulative:
+                if cumulative and direction_profile == "standard":
                     vol += "\n本章截至此处的 face 分布（语义正确优先，并避免少数编号霸占）：\n" + cumulative
             if usage_chain_context:
                 vol += ("\n\n" if vol else "") + usage_chain_context
@@ -1129,7 +1175,25 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
                 response = prov.complete_json(static, vol, body, SCHEMA)
             except LLMError as error:
                 raise RuntimeError(f"调用失败: {error}")
-            for row in annotation_rows(response):
+            response_rows = annotation_rows(response)
+            if background_policy is not None:
+                mapped = {
+                    items[batch[row["i"]]]["annotation_id"]: row
+                    for row in response_rows
+                    if isinstance(row.get("i"), int) and 0 <= row["i"] < len(batch)
+                }
+                for position, item_index in enumerate(batch):
+                    mapped.setdefault(items[item_index]["annotation_id"], {"i": position})
+                mapped = background_policy.apply(
+                    mapped, [items[i] for i in batch], current_background,
+                )
+                response_rows = list(mapped.values())
+                for item_index in batch:
+                    current_background = (
+                        mapped[items[item_index]["annotation_id"]].get("_background_effective")
+                        or current_background
+                    )
+            for row in response_rows:
                 row_index = row.get("i")
                 if not isinstance(row_index, int) or not 0 <= row_index < len(batch):
                     continue
@@ -1141,13 +1205,13 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             done = min(start + n, len(todo))
             print(f"  已标注 {done}/{len(todo)} 行")
 
-    if not agent_enabled:
+    if not agent_enabled and direction_profile == "standard":
         normalize_contextual_sounds(items, idx)
     # The Agent already made the semantic decision. Keyword supplementation is
     # retained only for the legacy stateless path and must not refill an
     # intentional blank in a stateful run.
     supplements, supplement_diagnostics = (
-        ([], []) if agent_enabled else apply_direction_supplements(items, cast)
+        ([], []) if agent_enabled or direction_profile == "conservative" else apply_direction_supplements(items, cast)
     )
     diagnostics.extend(supplement_diagnostics)
     for change in supplements:
@@ -1163,7 +1227,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
                 after=change["after"],
             )
         )
-    if agent_enabled:
+    if agent_enabled or direction_profile == "conservative":
         annotation_beats, policy_diagnostics = normalize_direction_plan(items, annotation_beats)
         diagnostics.extend(policy_diagnostics)
     else:
@@ -1214,6 +1278,8 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         "pending_targets": 0,
         "direction_change_count": direction_change_count,
         "story_type": story_type,
+        "direction_profile": direction_profile,
+        "direction_profile_snapshot": profile_snapshot,
     }
 
 
@@ -1226,6 +1292,7 @@ def main(provider_instance=None):
     ap.add_argument("--llm", default=os.path.join(HERE, "llm.json"))
     ap.add_argument("--provider", help="覆盖 llm.json 里的 provider")
     ap.add_argument("--story-type", choices=sorted(_STORY_TYPES), default="auto")
+    ap.add_argument("--direction-profile", choices=("standard", "conservative"), default="standard")
     ap.add_argument("--range", help="只处理这些台词行，如 1-80")
     ap.add_argument("--dry-run", action="store_true", help="只打印将要发送的提示词，不调 API")
     a = ap.parse_args()
@@ -1238,6 +1305,7 @@ def main(provider_instance=None):
         "llm": a.llm,
         "provider": a.provider,
         "story_type": a.story_type,
+        "direction_profile": a.direction_profile,
         "range": a.range,
         "dry_run": a.dry_run,
     }
