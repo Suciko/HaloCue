@@ -154,6 +154,35 @@ GET  /api/v1/jobs/{job_id}
 
 ### Teacher identity presets
 
+### Teacher presentation
+
+Teacher dialogue can be presented either as the regular named slot-0 line or as
+one authored **Sel** answer. Choose this explicitly in the mapping request:
+
+```json
+{
+  "kind": "teacher",
+  "schema_version": "teacher-identity/1.0",
+  "preset_id": "teacher_shale",
+  "presentation": {"schema_version": "teacher-presentation/1.0", "mode": "sel_single"}
+}
+```
+
+`slot_zero` is the default and remains byte-compatible with older tasks.
+`sel_single` creates one native `SelectionNodeData` with one answer and fifteen
+empty strings, preserving the same stable source card and teacher ID. The answer
+continues linearly to the next node; it does not invent alternate branches. A
+teacher line with unsupported control text is blocked with
+`teacher_reply_unsafe_text`; empty text uses `teacher_reply_empty`. Existing
+ordinary voices are never converted. The selection and reply are preview-only
+until review passes, and switching back to slot 0 invalidates the old build.
+
+The capability response exposes `teacher_presentation` with the two modes. Sel
+format evidence and field provenance are recorded in
+[`docs/compatibility/aa-single-selection.md`](../../docs/compatibility/aa-single-selection.md).
+Native AA playback remains manual acceptance; the public tests use synthetic
+SelectionNodeData fixtures.
+
 Select a source speaker explicitly in the mapping dialog, choose Teacher, then
 save one of the four presets or a custom name/organization. Opening the dialog
 does not create a character. These settings need no model, AA executable or
