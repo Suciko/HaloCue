@@ -12,6 +12,8 @@ import urllib.request
 
 from .agent_tools import AgentToolRegistry
 from .errors import DomainError
+from .provider_response import validate_completion
+from .conversation_summary import RECENT_MESSAGE_COUNT
 
 
 @dataclass(frozen=True)
@@ -1210,6 +1212,7 @@ class LLMWritingProvider(WritingProvider):
 
         with self._open_with_retry(req) as resp:
             data = json.loads(resp.read().decode("utf-8"))
+            validate_completion(data, self.provider_type, allow_tools=bool(tools))
             usage = self._capture_usage(data)
             self._thread_state.last_usage = usage
             if self.provider_type == "anthropic":
@@ -1551,7 +1554,7 @@ class LLMWritingProvider(WritingProvider):
                     "整个用户回合最多允许三轮工具调用，绝不因此修改正式资料。"
                 )
             user_prompt = f"作品上下文: {json.dumps(work_context, ensure_ascii=False)}\n历史消息:\n" + "\n".join(
-                f"{m.get('role')}: {m.get('text', '')}" for m in messages[-8:]
+                f"{m.get('role')}: {m.get('text', '')}" for m in messages[-RECENT_MESSAGE_COUNT:]
             )
             call = self._call_llm(
                 system_prompt,
@@ -1664,7 +1667,7 @@ class LLMWritingProvider(WritingProvider):
             user_prompt = request["user_prompt"]
             call = self._call_llm(system_prompt, user_prompt)
             data = self._parse_json_object(call.text)
-            raw_findings = data.get("findings", [])
+            raw_findings = data.get("findings")
             if not isinstance(raw_findings, list):
                 raise DomainError("provider_output_invalid", "场景审查结果必须包含 findings 数组。", status=502)
             findings = []
@@ -1713,7 +1716,7 @@ class LLMWritingProvider(WritingProvider):
         try:
             call = self._call_llm(system_prompt, request["user_prompt"])
             data = self._parse_json_object(call.text)
-            raw_findings = data.get("findings", [])
+            raw_findings = data.get("findings")
             if not isinstance(raw_findings, list):
                 raise DomainError("provider_output_invalid", "作品级审查结果必须包含 findings 数组。", status=502)
             findings = []

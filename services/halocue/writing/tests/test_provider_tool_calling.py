@@ -23,6 +23,10 @@ PROMPT_ASSEMBLER = BaWritingPromptAssembler(_PROMPT_REGISTRY)
 class FakeHTTPResponse:
     def __init__(self, payload):
         self.payload = payload
+        for choice in payload.get("choices", []):
+            choice.setdefault("finish_reason", "tool_calls" if choice.get("message", {}).get("tool_calls") else "stop")
+        if "content" in payload:
+            payload.setdefault("stop_reason", "tool_use" if any(block.get("type") == "tool_use" for block in payload["content"]) else "end_turn")
 
     def __enter__(self):
         return self

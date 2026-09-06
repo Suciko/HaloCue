@@ -14,8 +14,8 @@ class ModelTestResponse:
     status = 200
 
     def __init__(self, body: dict | None = None):
-        self.body = body or {
-            "choices": [{"message": {"content": "pong"}}],
+        self.body = body if body is not None else {
+            "choices": [{"message": {"content": "pong"}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 2, "completion_tokens": 1},
         }
 

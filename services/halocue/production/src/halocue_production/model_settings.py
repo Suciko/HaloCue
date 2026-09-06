@@ -3,7 +3,11 @@ from __future__ import annotations
 import base64
 import ctypes
 import json
+import threading
 import os
+import hashlib
+import uuid
+from datetime import datetime, timezone
 from ctypes import wintypes
 from pathlib import Path
 from typing import Any
@@ -216,6 +220,53 @@ class DirectionModelSettings:
     def __init__(self, data_dir: Path) -> None:
         self.path = data_dir / "direction-model.json"
         self.secret = ModelSecretStore(data_dir / "secrets" / "direction-model.dpapi")
+        self.activation_lock = threading.RLock()
+
+    def _secret_store(self, config: dict) -> ModelSecretStore:
+        reference = config.get("credential_revision")
+        if not reference:
+            return self.secret
+        if not isinstance(reference, str) or len(reference) != 32 or any(c not in "0123456789abcdef" for c in reference):
+            raise ProductionError("model_settings_corrupted", "模型密钥版本无效。", status=500)
+        return ModelSecretStore(self.path.parent / "secrets" / f"direction-{reference}.dpapi")
+
+    def resolve_candidate(self, payload: dict | None = None, *, require_model: bool = True) -> dict:
+        requested = dict(payload or {})
+        stored = self._load_public()
+        candidate = {**stored, **requested}
+        provider = str(candidate.get("provider") or "openai").strip().lower()
+        default_url = "https://api.anthropic.com/v1" if provider == "anthropic" else "https://api.openai.com/v1"
+        candidate["provider"] = provider
+        raw_url = requested.get("base_url") if "base_url" in requested else (
+            stored.get("base_url") if provider == stored.get("provider", "openai") else default_url
+        )
+        candidate["base_url"] = self.normalize_url(str(raw_url or default_url))
+        parsed = urlparse(candidate["base_url"])
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+            raise ProductionError("invalid_model_base_url", "模型接口地址无效。")
+        old_provider = str(stored.get("provider") or "openai")
+        old_default = "https://api.anthropic.com/v1" if old_provider == "anthropic" else "https://api.openai.com/v1"
+        same_endpoint = provider == old_provider and candidate["base_url"] == self.normalize_url(str(stored.get("base_url") or old_default))
+        key = str(requested.get("api_key") or "").strip()
+        env_name = str(requested.get("api_key_env") or "").strip()
+        if key and env_name and key != os.environ.get(env_name, ""):
+            env_name = ""
+        if not key and env_name:
+            key = os.environ.get(env_name, "")
+        if not key and same_endpoint and not env_name and requested.get("clear_secret") is not True:
+            key = self._secret_store(stored).load() or ""
+            if not key:
+                env_name = str(stored.get("api_key_env") or "")
+                key = os.environ.get(env_name, "")
+        candidate["api_key"] = key
+        candidate["api_key_env"] = env_name
+        if not key and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise ProductionError("model_secret_required", "请为当前接口提供 API Key；切换接口不会沿用旧密钥。", status=409)
+        if require_model:
+            return {**self._validated(candidate), "api_key": key}
+        if provider not in PROVIDERS:
+            raise ProductionError("invalid_model_provider", "模型协议无效。")
+        return candidate
 
     def _load_public(self) -> dict[str, Any]:
         if not self.path.is_file():
@@ -227,6 +278,28 @@ class DirectionModelSettings:
                 "model_settings_corrupted", "演出模型设置损坏", status=500
             ) from exc
         return value if isinstance(value, dict) else {}
+
+    @staticmethod
+    def normalize_url(raw_url: str) -> str:
+        parsed = urlparse(str(raw_url or "").strip().rstrip("/"))
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ProductionError("invalid_model_base_url", "模型接口地址无效。")
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ProductionError("invalid_model_base_url", "模型接口端口无效。") from exc
+        host = parsed.hostname.lower()
+        host = f"[{host}]" if ":" in host else host
+        if port and port != (443 if parsed.scheme == "https" else 80):
+            host += f":{port}"
+        path = parsed.path.rstrip("/")
+        for suffix in ("/chat/completions", "/messages", "/models"):
+            if path.endswith(suffix):
+                path = path[:-len(suffix)]
+                break
+        if not path and host == "api.anthropic.com":
+            path = "/v1"
+        return f"{parsed.scheme}://{host}{path}"
 
     @staticmethod
     def _validated(payload: dict[str, Any]) -> dict[str, Any]:
@@ -260,6 +333,7 @@ class DirectionModelSettings:
         if not 5 <= timeout <= 600:
             raise ProductionError("invalid_model_limits", "timeout 必须在 5 到 600 秒之间")
         return {
+            "preset_id": str(payload.get("preset_id") or "custom"),
             "provider": provider,
             "base_url": base_url,
             "model": model,
@@ -279,12 +353,12 @@ class DirectionModelSettings:
         env_name = str(value.get("api_key_env") or "")
         secret_source = (
             "dpapi"
-            if self.secret.exists()
+            if self._secret_store(value).exists()
             else "environment"
             if env_name and bool(os.environ.get(env_name))
             else "none"
         )
-        is_local = bool(value.get("preset_id") == "ollama" or "127.0.0.1" in str(value.get("base_url", "")))
+        is_local = urlparse(str(value.get("base_url") or "")).hostname in {"localhost", "127.0.0.1", "::1"}
         configured = bool(value.get("provider") and value.get("model") and (secret_source != "none" or is_local))
         return {
             "ok": True,
@@ -297,43 +371,40 @@ class DirectionModelSettings:
             "presets": VENDOR_PRESETS,
         }
 
-    def save(self, payload: dict[str, Any]) -> dict[str, Any]:
-        public = self._validated(payload)
-        api_key = str(payload.get("api_key") or "").strip()
-        if payload.get("clear_secret") is True:
-            self.secret.clear()
-        env_secret = bool(
-            public.get("api_key_env")
-            and os.environ.get(str(public["api_key_env"]))
-        )
-        is_local = bool(public.get("preset_id") == "ollama" or "127.0.0.1" in str(public.get("base_url", "")))
-        if not api_key and not self.secret.exists() and not env_secret and not is_local:
-            raise ProductionError(
-                "model_secret_required",
-                "必须提供 API Key 或已设置的密钥环境变量",
-            )
-        if api_key:
-            self.secret.save(api_key)
+    def save(self, payload: dict[str, Any], *, connection_test: dict | None = None) -> dict[str, Any]:
+        with self.activation_lock:
+            return self._save_candidate(self.resolve_candidate(payload), connection_test=connection_test)
+
+    def _save_candidate(self, candidate: dict, *, connection_test: dict | None = None) -> dict:
+        public = self._validated(candidate)
+        api_key = candidate["api_key"]
+        public["credential_revision"] = uuid.uuid4().hex
+        if api_key and not public["api_key_env"]:
+            self._secret_store(public).save(api_key)
+        public["config_revision"] = uuid.uuid4().hex
+        public["config_digest"] = "sha256:" + hashlib.sha256(json.dumps(public, sort_keys=True).encode("utf-8")).hexdigest()
+        public["activation_status"] = "active" if connection_test else "saved_unverified"
+        if connection_test:
+            public["last_tested_at"] = datetime.now(timezone.utc).isoformat()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_suffix(".json.tmp")
+        temporary = self.path.with_suffix(f".{uuid.uuid4().hex}.tmp")
         temporary.write_text(
             json.dumps(public, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         os.replace(temporary, self.path)
+        if api_key and not public["api_key_env"]:
+            try:
+                self.secret.save(api_key)
+            except Exception:
+                pass
         return self.public()
 
     def fetch_models(self, payload: dict[str, Any] | None = None) -> list[str]:
         import urllib.request
-        req_data = payload or {}
+        req_data = self.resolve_candidate(payload, require_model=False)
         provider = str(req_data.get("provider") or "").strip().lower()
         base_url = str(req_data.get("base_url") or "").strip().rstrip("/")
         api_key = str(req_data.get("api_key") or "").strip()
-
-        if not api_key:
-            api_key = self.secret.load() or ""
-        public_cfg = self._load_public()
-        provider = provider or public_cfg.get("provider", "openai")
-        base_url = base_url or public_cfg.get("base_url", "")
 
         if provider == "anthropic":
             return [
@@ -379,7 +450,9 @@ class DirectionModelSettings:
                 "AI 安排演出的模型尚未配置",
                 status=409,
             )
-        secret = self.secret.load()
+        secret = self._secret_store(public).load() or os.environ.get(str(public.get("api_key_env") or ""), "")
         if secret:
             public["api_key"] = secret
+        public.setdefault("source_context_strategy", "window")
+        public.setdefault("transport_retries", 2)
         return str(public["provider"]), public

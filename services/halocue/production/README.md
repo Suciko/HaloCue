@@ -33,6 +33,17 @@ It does not contain the writing backend. The integration boundary is a frozen
   secret are separate; a Windows-entered key is protected with current-user
   DPAPI, environment-variable secrets are supported, and no API response
   returns a secret.
+- Direction jobs expose pause, resume, and end controls. A stop signal closes
+  an active model stream when the provider supports it; completed chunks remain
+  resumable and staged results are never committed after a stop.
+- Each direction attempt keeps a sanitized audit in `result.json`, including
+  request counts, retry/subdivision decisions, cache metrics, prompt hashes,
+  and bounded request records. Prompts, source text, API keys, and reasoning
+  text are not included in the public task log.
+- The prompt catalogue is bounded to script-relevant resource candidates while
+  the backend still validates every returned key against the complete frozen
+  resource index. A compatible AI preflight is reused only when its source
+  hash matches the current frozen script.
 
 The 0.9 compatibility modules are loaded from the repository root through the
 explicit `HALOCUE_LEGACY_ROOT` boundary (or the repository default). Runtime
@@ -77,7 +88,7 @@ local 8892 API origin; regular use should open the same-origin 8892 URL above.
 ## Browser workflow
 
 1. Paste an existing script and create a frozen `ScriptRelease`.
-2. Resolve each detected speaker as an AA portrait, a voice-only role, a
+2. Resolve each detected speaker as an AA portrait, a teacher identity, a voice-only role, a
    narrator, or deliberately unmapped. Portrait selection is per speaker;
    its Spine, portrait, and faces are not global settings.
 3. For format-only tasks, enter review directly. For AI-direction tasks, the
@@ -141,6 +152,96 @@ POST /api/v1/production-runs/{run_id}/install
 GET  /api/v1/jobs/{job_id}
 ```
 
+### Teacher identity presets
+
+### Teacher presentation
+
+Teacher dialogue can be presented either as the regular named slot-0 line or as
+one authored **Sel** answer. Choose this explicitly in the mapping request:
+
+```json
+{
+  "kind": "teacher",
+  "schema_version": "teacher-identity/1.0",
+  "preset_id": "teacher_shale",
+  "presentation": {"schema_version": "teacher-presentation/1.0", "mode": "sel_single"}
+}
+```
+
+`slot_zero` is the default and remains byte-compatible with older tasks.
+`sel_single` creates one native `SelectionNodeData` with one answer and fifteen
+empty strings, preserving the same stable source card and teacher ID. The answer
+continues linearly to the next node; it does not invent alternate branches. A
+teacher line with unsupported control text is blocked with
+`teacher_reply_unsafe_text`; empty text uses `teacher_reply_empty`. Existing
+ordinary voices are never converted. The selection and reply are preview-only
+until review passes, and switching back to slot 0 invalidates the old build.
+
+The capability response exposes `teacher_presentation` with the two modes. Sel
+format evidence and field provenance are recorded in
+[`docs/compatibility/aa-single-selection.md`](../../docs/compatibility/aa-single-selection.md).
+Native AA playback remains manual acceptance; the public tests use synthetic
+SelectionNodeData fixtures.
+
+Select a source speaker explicitly in the mapping dialog, choose Teacher, then
+save one of the four presets or a custom name/organization. Opening the dialog
+does not create a character. These settings need no model, AA executable or
+portrait upload. They prepare a production-local no-portrait character before
+generation; they do not rename the source speaker or writing release.
+
+| `preset_id` | Name | Organization |
+| --- | --- | --- |
+| `sensei_shale` | sensei | 沙勒 |
+| `sensei_xialai` | sensei | 夏莱 |
+| `teacher_shale` | 老师 | 沙勒 |
+| `teacher_xialai` | 老师 | 夏莱 |
+| `custom` | User supplied, required | User supplied, may be empty |
+
+Existing `POST /api/v1/production-runs/{run_id}/cast-bindings` request:
+
+```json
+{
+  "speaker": "SourceTeacher",
+  "expected_draft_version": 1,
+  "mapping": {
+    "kind": "teacher",
+    "schema_version": "teacher-identity/1.0",
+    "preset_id": "teacher_shale"
+  }
+}
+```
+
+For `custom`, also supply `display_name` and optionally `organization` in the
+mapping. Each is single-line text of at most 80 characters. Presets do not accept
+overridden display fields. The server, not the client, assigns the stable
+`hc-teacher-<32 lowercase hex digits>` character ID.
+
+The response's `draft.cast.teacher_identity` freezes the identity. Explicitly
+bound source aliases share it; changing its name/organization updates those
+aliases after confirmation. Ordinary voice-only roles are never automatically
+converted. Repeating an unchanged choice keeps the ID, versions and review;
+real changes require review again and supersede an active generation. The
+compiler registers AA `CharacterOverrides` and slot 0 references this ID,
+including in CG dialogue, without consuming any of the five portrait positions.
+
+Capabilities expose `teacher_identity` with `state`, `schema_version`, `presets`
+and `presentation: "slot_zero"`. Older external compatibility modules report
+`unavailable`, while other mapping kinds remain usable. No route or database
+schema was replaced. Single-response Sel presentation is a separate follow-up.
+
+Stable errors include `400 teacher_identity_version_unsupported`,
+`invalid_teacher_identity`, `invalid_teacher_preset`, `teacher_speaker_not_found`;
+`409 revision_conflict`, `teacher_identity_conflict`, `teacher_identity_corrupt`,
+`teacher_identity_journal_corrupt`, `teacher_identity_unavailable`,
+`teacher_requires_no_portrait`; and `500 teacher_identity_write_failed`,
+`teacher_identity_recovery_failed`, `teacher_identity_durability_uncertain`.
+For an uncertain durability response, reload the draft before retrying. A
+corrupt recovery journal is preserved for repair rather than silently discarded.
+
+Teacher changes use a recoverable five-file transaction in the draft directory.
+Old BuildBundles remain immutable and installation is always a separate action.
+Native AA playback is manual acceptance; automated tests use synthetic fixtures.
+
 ### Review cards
 
 ```text
@@ -197,6 +298,69 @@ conversion. `ai_direction` uses the model Provider and credentials owned by
 HaloCue 1.0; when the Provider is not configured the UI keeps the mode
 selectable and takes the user to the model settings instead of silently
 disabling the choice.
+
+### Direction presets
+
+`direction_profile` is independent from `generation_mode`, `story_type`, and
+the existing `layout_mode` compatibility field. Supported presets:
+
+| ID | Workbench label | Policy |
+| --- | --- | --- |
+| `standard` | 标准（原版） | Existing prompt and missing-background review workflow. |
+| `conservative` | 简洁（保守） | Stable presentation, existing expression labels, best available frozen backgrounds. |
+
+Create requests without this field remain `standard`. New workbench imports
+explicitly select `conservative`; reopening an old run does not change it.
+Generation requests without the field inherit the run's persisted selection.
+
+Example body for `POST /api/v1/production-runs/{run_id}/direction-generation`:
+
+```json
+{
+  "expected_draft_version": 2,
+  "story_type": "auto",
+  "direction_profile": "conservative"
+}
+```
+
+The server pins a `direction_profile_snapshot` before calling the model:
+
+```json
+{
+  "id": "conservative",
+  "version": "1.0",
+  "rules_sha256": "6bcc19fcda1e65617d3d69639ac5834f6147585f9b8fcef6067841f3d6c5dddf"
+}
+```
+
+This sample identifies the `auto` rules. The profile version covers its policy;
+change it when policy behavior changes. The actual rules hash, full static
+prompt hash, resource hash, and background-plan hash also guard checkpoint
+reuse. Clients cannot replace the server-owned snapshot by posting another one.
+The snapshot is exposed in job/audit responses without prompt text or secrets.
+
+Active requests only deduplicate within the same profile/rules. Pause/retry
+retains the old snapshot; switching requires a new generation and confirmation
+in the workbench. Rule upgrades reject old recovery with
+`409 direction_profile_changed`; invalid selections use
+`400 invalid_direction_profile`, active mismatches use
+`409 direction_profile_conflict`. Capability discovery reports available
+presets; older external annotation modules retain Standard and reject
+Conservative with `409 direction_profile_unavailable`.
+
+Conservative generation retains a valid model-selected background. If omitted,
+the backend ranks the frozen labels using scene context, respects authored and
+confirmed selections and inherited scenes, then supplies an available fallback.
+Approximate matches become `background_approximate_match` review advice, not
+image-generation requests. Ranking scores are not confidence probabilities.
+Empty catalogues and unresolved references fail with stable
+`background_catalog_empty` / `background_not_in_manifest` codes. No additional
+vision or image-provider call is introduced, and source dialogue is unchanged.
+
+Regeneration works from the current draft and preserves its existing authored
+directions; it is not a reset to the original release. Results still require
+review, and compilation never implicitly installs the build. Real-provider
+quality and monetary savings require a separate user-authorized comparison.
 
 ## Ownership boundary
 

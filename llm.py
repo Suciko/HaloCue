@@ -10,8 +10,13 @@
 static_system 是跨请求不变的部分（资源表），会被缓存；volatile_system 放会变的内容。
 加新家只要再写一个 Provider 子类并在 make_provider 里登记。
 """
-import json, os, sys, time
+import json
+import os
+import socket
+import threading
+import time
 from contextlib import contextmanager
+from email.utils import parsedate_to_datetime
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -22,10 +27,16 @@ class LLMError(RuntimeError):
     code = "llm_error"
     retryable = True
 
-    def __init__(self, message: str, *, model: str = "", http_status=None):
+    def __init__(
+        self, message: str, *, model: str = "", http_status=None,
+        retry_after: float | None = None,
+    ):
         super().__init__(message)
         self.model = str(model or "")
         self.http_status = int(http_status) if http_status is not None else None
+        self.retry_after = (
+            max(0.0, float(retry_after)) if retry_after is not None else None
+        )
 
 
 class InsufficientQuotaError(LLMError):
@@ -58,6 +69,27 @@ class ModelConnectionError(LLMError):
 class ModelServiceUnavailableError(LLMError):
     code = "model_service_unavailable"
     retryable = True
+
+
+class ModelGatewayTimeoutError(LLMError):
+    """A remote proxy or gateway timed out before the model completed."""
+
+    code = "model_gateway_timeout"
+    retryable = True
+
+
+class ModelSocketTimeoutError(LLMError):
+    """The transport stopped producing bytes before its socket deadline."""
+
+    code = "model_connection_timeout"
+    retryable = True
+
+
+class RequestCancelledError(LLMError):
+    """The caller stopped an active provider request."""
+
+    code = "model_request_cancelled"
+    retryable = False
 
 
 class EmptyModelResponseError(LLMError):
@@ -107,9 +139,35 @@ _QUOTA_ERROR_MARKERS = (
 )
 
 
-def _provider_http_error(model: str, status: int, message: str, formatted: str) -> LLMError:
+def _retry_after_seconds(headers) -> float | None:
+    if headers is None:
+        return None
+    try:
+        value = headers.get("Retry-After")
+    except AttributeError:
+        return None
+    if value in (None, ""):
+        return None
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        try:
+            retry_at = parsedate_to_datetime(str(value))
+            now = parsedate_to_datetime(time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime()))
+            return max(0.0, (retry_at - now).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+
+def _provider_http_error(
+    model: str, status: int, message: str, formatted: str, *, headers=None,
+) -> LLMError:
     normalized = str(message or "").casefold()
-    kwargs = {"model": model, "http_status": status}
+    kwargs = {
+        "model": model,
+        "http_status": status,
+        "retry_after": _retry_after_seconds(headers),
+    }
     if any(marker in normalized for marker in _QUOTA_ERROR_MARKERS):
         return InsufficientQuotaError(formatted, **kwargs)
     if status == 401:
@@ -119,10 +177,17 @@ def _provider_http_error(model: str, status: int, message: str, formatted: str) 
     if status == 429:
         return ModelRateLimitError(formatted, **kwargs)
     if status in {408, 504, 524}:
-        return RequestDeadlineError(formatted, **kwargs)
+        return ModelGatewayTimeoutError(formatted, **kwargs)
     if status in {500, 502, 503}:
         return ModelServiceUnavailableError(formatted, **kwargs)
     return LLMError(formatted, **kwargs)
+
+
+def _is_socket_timeout(exc: Exception) -> bool:
+    reason = getattr(exc, "reason", None)
+    return isinstance(exc, (TimeoutError, socket.timeout)) or isinstance(
+        reason, (TimeoutError, socket.timeout)
+    )
 
 
 def _emit_activity(callback, state, **fields):
@@ -257,6 +322,74 @@ class Provider:
             "cache_reports": 0,
             "calls": 0,
         }
+        self._active_request_lock = threading.RLock()
+        self._active_request_handle = None
+        self._cancelled_callback = None
+
+    def bind_cancellation(self, callback):
+        self._cancelled_callback = callback if callable(callback) else None
+
+    def _request_cancelled(self) -> bool:
+        callback = self._cancelled_callback
+        return bool(callback and callback())
+
+    @staticmethod
+    def _close_request_handle(handle) -> None:
+        close = getattr(handle, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
+
+    def abort_active_request(self) -> None:
+        with self._active_request_lock:
+            handle = self._active_request_handle
+        if handle is not None:
+            self._close_request_handle(handle)
+
+    @contextmanager
+    def _track_active_request(self, handle, *, wall_timeout: float | None = None):
+        finished = threading.Event()
+        deadline_fired = threading.Event()
+        with self._active_request_lock:
+            self._active_request_handle = handle
+
+        def deadline_watchdog() -> None:
+            if finished.wait(max(0.01, float(wall_timeout or 0))):
+                return
+            with self._active_request_lock:
+                if self._active_request_handle is not handle:
+                    return
+                deadline_fired.set()
+            self._close_request_handle(handle)
+
+        watcher = None
+        if wall_timeout:
+            watcher = threading.Thread(
+                target=deadline_watchdog,
+                name="halocue-model-deadline",
+                daemon=True,
+            )
+            watcher.start()
+        guard = {"deadline_fired": deadline_fired}
+        try:
+            yield guard
+        finally:
+            finished.set()
+            with self._active_request_lock:
+                if self._active_request_handle is handle:
+                    self._active_request_handle = None
+
+    def _raise_if_request_interrupted(self, guard, *, elapsed_prefix: str = "请求") -> None:
+        if self._request_cancelled():
+            raise RequestCancelledError(
+                f"{self.model} {elapsed_prefix}已由用户停止", model=self.model,
+            )
+        if guard and guard["deadline_fired"].is_set():
+            raise RequestDeadlineError(
+                f"{self.model} {elapsed_prefix}超过本地墙钟截止时间", model=self.model,
+            )
 
     def _key(self):
         direct = str(self.cfg.get("api_key") or "").strip()
@@ -374,7 +507,9 @@ class AnthropicProvider(Provider):
         except ImportError:
             raise LLMError("没装 anthropic SDK，先跑:  pip install anthropic")
         self._sdk = anthropic
-        client_options = {"api_key": self._key()}
+        self.timeout = max(1, int(cfg.get("timeout") or 180))
+        self.wall_timeout = max(1, int(cfg.get("wall_timeout") or 300))
+        client_options = {"api_key": self._key(), "timeout": self.timeout}
         if cfg.get("base_url"):
             client_options["base_url"] = cfg["base_url"]
         self.client = anthropic.Anthropic(**client_options)
@@ -462,10 +597,23 @@ class AnthropicProvider(Provider):
 
         try:
             with self.client.messages.stream(**kw) as stream:
-                msg = stream.get_final_message()
+                with self._track_active_request(
+                    stream, wall_timeout=getattr(self, "wall_timeout", 300),
+                ) as guard:
+                    msg = stream.get_final_message()
+                self._raise_if_request_interrupted(guard)
         except self._sdk.APIStatusError as e:
             formatted = f"Anthropic 返回 {e.status_code}: {e.message}"
-            raise _provider_http_error(self.model, e.status_code, str(e.message), formatted) from e
+            headers = getattr(getattr(e, "response", None), "headers", None)
+            raise _provider_http_error(
+                self.model, e.status_code, str(e.message), formatted, headers=headers,
+            ) from e
+        except Exception:
+            if self._request_cancelled():
+                raise RequestCancelledError(
+                    f"{self.model} 请求已由用户停止", model=self.model,
+                )
+            raise
 
         u = msg.usage
         self._record_anthropic_usage(u)
@@ -473,6 +621,10 @@ class AnthropicProvider(Provider):
         text = "".join(b.text for b in msg.content if b.type == "text")
         finish_reason = str(getattr(msg, "stop_reason", "") or "unknown")
         reasoning_text = self._record_anthropic_response(msg, text=text, finish_reason=finish_reason)
+        if finish_reason == "max_tokens":
+            raise OutputCapacityError(
+                f"{self.model} Anthropic 调用输出被截断（stop_reason=max_tokens）"
+            )
         if not text.strip():
             raise EmptyModelResponseError(
                 f"Anthropic 调用返回了空文本（finish_reason={finish_reason}）",
@@ -499,10 +651,23 @@ class AnthropicProvider(Provider):
                   output_config={"format": {"type": "json_schema", "schema": schema}})
         try:
             with self.client.messages.stream(**kw) as stream:
-                msg = stream.get_final_message()
+                with self._track_active_request(
+                    stream, wall_timeout=getattr(self, "wall_timeout", 300),
+                ) as guard:
+                    msg = stream.get_final_message()
+                self._raise_if_request_interrupted(guard)
         except self._sdk.APIStatusError as e:
             formatted = f"Anthropic 返回 {e.status_code}: {e.message}"
-            raise _provider_http_error(self.model, e.status_code, str(e.message), formatted) from e
+            headers = getattr(getattr(e, "response", None), "headers", None)
+            raise _provider_http_error(
+                self.model, e.status_code, str(e.message), formatted, headers=headers,
+            ) from e
+        except Exception:
+            if self._request_cancelled():
+                raise RequestCancelledError(
+                    f"{self.model} 请求已由用户停止", model=self.model,
+                )
+            raise
 
         u = msg.usage
         self._record_anthropic_usage(u)
@@ -547,39 +712,52 @@ class AnthropicProvider(Provider):
         chunks = []
         received_chars = 0
         first_delta_ms = None
+        guard = None
         try:
             with self.client.messages.stream(**kw) as stream:
-                for delta in stream.text_stream:
-                    delta = str(delta or "")
-                    if not delta:
-                        continue
-                    chunks.append(delta)
-                    received_chars += len(delta)
-                    elapsed_ms = max(0, int(time.time() * 1000) - started_ms)
-                    if first_delta_ms is None:
-                        first_delta_ms = elapsed_ms
-                    _emit_activity(
-                        on_activity,
-                        "receiving",
-                        model=self.model,
-                        request_started_at_ms=started_ms,
-                        elapsed_ms=elapsed_ms,
-                        first_delta_ms=first_delta_ms,
-                        received_chars=received_chars,
-                        finish_reason="",
-                    )
-                msg = stream.get_final_message()
+                with self._track_active_request(
+                    stream, wall_timeout=getattr(self, "wall_timeout", 300),
+                ) as guard:
+                    for delta in stream.text_stream:
+                        delta = str(delta or "")
+                        if not delta:
+                            continue
+                        chunks.append(delta)
+                        received_chars += len(delta)
+                        elapsed_ms = max(0, int(time.time() * 1000) - started_ms)
+                        if first_delta_ms is None:
+                            first_delta_ms = elapsed_ms
+                        _emit_activity(
+                            on_activity,
+                            "receiving",
+                            model=self.model,
+                            request_started_at_ms=started_ms,
+                            elapsed_ms=elapsed_ms,
+                            first_delta_ms=first_delta_ms,
+                            received_chars=received_chars,
+                            finish_reason="",
+                        )
+                    msg = stream.get_final_message()
+                self._raise_if_request_interrupted(guard)
         except Exception as exc:
-            api_error = getattr(self._sdk, "APIStatusError", None)
+            self._raise_if_request_interrupted(guard)
+            api_error = getattr(getattr(self, "_sdk", None), "APIStatusError", None)
             if api_error is not None and isinstance(exc, api_error):
                 formatted = f"Anthropic 返回 {exc.status_code}: {exc.message}"
-                raise _provider_http_error(self.model, exc.status_code, str(exc.message), formatted) from exc
+                headers = getattr(getattr(exc, "response", None), "headers", None)
+                raise _provider_http_error(
+                    self.model, exc.status_code, str(exc.message), formatted, headers=headers,
+                ) from exc
             raise
 
         self._record_anthropic_usage(msg.usage)
         finish_reason = str(getattr(msg, "stop_reason", "") or "unknown")
         text = "".join(chunks)
         reasoning_text = self._record_anthropic_response(msg, text=text, finish_reason=finish_reason)
+        if finish_reason == "max_tokens":
+            raise OutputCapacityError(
+                f"{self.model} Anthropic 调用输出被截断（stop_reason=max_tokens）"
+            )
         if not text.strip():
             raise EmptyModelResponseError(
                 f"Anthropic 调用返回了空文本（finish_reason={finish_reason}）",
@@ -713,9 +891,14 @@ class OpenAIProvider(Provider):
                 **({"Content-Type": "application/json; charset=utf-8"} if body is not None else {}),
             },
         )
+        guard = None
         try:
             with urlopen(request, timeout=self.timeout) as response:
-                raw = response.read()
+                with self._track_active_request(
+                    response, wall_timeout=self.wall_timeout,
+                ) as guard:
+                    raw = response.read()
+                self._raise_if_request_interrupted(guard)
         except HTTPError as exc:
             try:
                 error_payload = json.loads(exc.read().decode("utf-8", errors="replace"))
@@ -725,12 +908,17 @@ class OpenAIProvider(Provider):
             formatted = f"{self.model} 接口返回 HTTP {exc.code}: {message}"
             if exc.code == 400 and "response_format" in message.lower():
                 raise UnsupportedResponseFormatError(formatted) from exc
-            raise _provider_http_error(self.model, exc.code, message, formatted) from exc
-        except (URLError, TimeoutError, OSError) as exc:
-            reason = getattr(exc, "reason", None) or str(exc)
-            raise ModelConnectionError(
-                f"{self.model} 无法连接模型接口: {reason}", model=self.model,
+            raise _provider_http_error(
+                self.model, exc.code, message, formatted, headers=exc.headers,
             ) from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            self._raise_if_request_interrupted(guard)
+            reason = getattr(exc, "reason", None) or str(exc)
+            error_type = ModelSocketTimeoutError if _is_socket_timeout(exc) else ModelConnectionError
+            raise error_type(f"{self.model} 无法连接模型接口: {reason}", model=self.model) from exc
+        except Exception:
+            self._raise_if_request_interrupted(guard)
+            raise
         try:
             result = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -878,45 +1066,76 @@ class OpenAIProvider(Provider):
         activity.setdefault("first_content_ms", None)
         activity.setdefault("reasoning_chars", 0)
         activity.setdefault("content_chars", 0)
+        guard = None
         try:
             with urlopen(request, timeout=self.timeout) as response:
-                for raw_line in response:
-                    line = raw_line.decode("utf-8", errors="replace") if isinstance(raw_line, bytes) else str(raw_line)
-                    line = line.strip()
-                    if not line or not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        event = json.loads(data)
-                    except (TypeError, ValueError, json.JSONDecodeError) as exc:
-                        raise LLMError(f"{self.model} 流式接口返回了非法 SSE JSON") from exc
-                    if isinstance(event.get("usage"), dict):
-                        usage = event["usage"]
-                    choices = event.get("choices") or []
-                    choice = choices[0] if choices and isinstance(choices[0], dict) else {}
-                    if choice.get("finish_reason"):
-                        finish_reason = str(choice["finish_reason"])
-                    delta = choice.get("delta") or {}
-                    if time.monotonic() - started_monotonic > self.wall_timeout:
-                        raise RequestDeadlineError(
-                            f"{self.model} 请求超过 {self.wall_timeout} 秒截止时间",
-                            model=self.model,
-                        )
-                    reasoning = delta.get("reasoning_content") if isinstance(delta, dict) else ""
-                    reasoning = str(reasoning or "")
-                    elapsed_ms = max(0, int(time.time() * 1000) - started_ms)
-                    if reasoning:
-                        reasoning_chars += len(reasoning)
-                        reasoning_chunks.append(reasoning)
-                        if first_reasoning_ms is None:
-                            first_reasoning_ms = elapsed_ms
-                            activity["first_reasoning_ms"] = first_reasoning_ms
-                        activity["reasoning_chars"] = reasoning_chars
+                with self._track_active_request(
+                    response, wall_timeout=self.wall_timeout,
+                ) as guard:
+                    for raw_line in response:
+                        line = raw_line.decode("utf-8", errors="replace") if isinstance(raw_line, bytes) else str(raw_line)
+                        line = line.strip()
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            event = json.loads(data)
+                        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                            raise LLMError(f"{self.model} 流式接口返回了非法 SSE JSON") from exc
+                        if isinstance(event.get("usage"), dict):
+                            usage = event["usage"]
+                        choices = event.get("choices") or []
+                        choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+                        if choice.get("finish_reason"):
+                            finish_reason = str(choice["finish_reason"])
+                        delta = choice.get("delta") or {}
+                        reasoning = delta.get("reasoning_content") if isinstance(delta, dict) else ""
+                        reasoning = str(reasoning or "")
+                        elapsed_ms = max(0, int(time.time() * 1000) - started_ms)
+                        if reasoning:
+                            reasoning_chars += len(reasoning)
+                            reasoning_chunks.append(reasoning)
+                            if first_reasoning_ms is None:
+                                first_reasoning_ms = elapsed_ms
+                                activity["first_reasoning_ms"] = first_reasoning_ms
+                            activity["reasoning_chars"] = reasoning_chars
+                            _emit_activity(
+                                activity["callback"], "reasoning", model=self.model,
+                                request_started_at_ms=started_ms, elapsed_ms=elapsed_ms,
+                                first_delta_ms=activity["first_delta_ms"],
+                                first_reasoning_ms=first_reasoning_ms,
+                                first_content_ms=first_content_ms,
+                                received_chars=activity["received_chars"],
+                                reasoning_chars=reasoning_chars,
+                                content_chars=activity["received_chars"],
+                                finish_reason=finish_reason,
+                            )
+                        content = delta.get("content") if isinstance(delta, dict) else ""
+                        if isinstance(content, list):
+                            content = "".join(
+                                str(block.get("text") or "")
+                                for block in content
+                                if isinstance(block, dict)
+                            )
+                        content = str(content or "")
+                        if not content:
+                            continue
+                        chunks.append(content)
+                        activity["received_chars"] += len(content)
+                        if first_content_ms is None:
+                            first_content_ms = elapsed_ms
+                            activity["first_content_ms"] = first_content_ms
+                        activity["content_chars"] = activity["received_chars"]
+                        if activity["first_delta_ms"] is None:
+                            activity["first_delta_ms"] = elapsed_ms
                         _emit_activity(
-                            activity["callback"], "reasoning", model=self.model,
-                            request_started_at_ms=started_ms, elapsed_ms=elapsed_ms,
+                            activity["callback"],
+                            "receiving",
+                            model=self.model,
+                            request_started_at_ms=started_ms,
+                            elapsed_ms=elapsed_ms,
                             first_delta_ms=activity["first_delta_ms"],
                             first_reasoning_ms=first_reasoning_ms,
                             first_content_ms=first_content_ms,
@@ -925,38 +1144,7 @@ class OpenAIProvider(Provider):
                             content_chars=activity["received_chars"],
                             finish_reason=finish_reason,
                         )
-                    content = delta.get("content") if isinstance(delta, dict) else ""
-                    if isinstance(content, list):
-                        content = "".join(
-                            str(block.get("text") or "")
-                            for block in content
-                            if isinstance(block, dict)
-                        )
-                    content = str(content or "")
-                    if not content:
-                        continue
-                    chunks.append(content)
-                    activity["received_chars"] += len(content)
-                    if first_content_ms is None:
-                        first_content_ms = elapsed_ms
-                        activity["first_content_ms"] = first_content_ms
-                    activity["content_chars"] = activity["received_chars"]
-                    if activity["first_delta_ms"] is None:
-                        activity["first_delta_ms"] = elapsed_ms
-                    _emit_activity(
-                        activity["callback"],
-                        "receiving",
-                        model=self.model,
-                        request_started_at_ms=started_ms,
-                        elapsed_ms=elapsed_ms,
-                        first_delta_ms=activity["first_delta_ms"],
-                        first_reasoning_ms=first_reasoning_ms,
-                        first_content_ms=first_content_ms,
-                        received_chars=activity["received_chars"],
-                        reasoning_chars=reasoning_chars,
-                        content_chars=activity["received_chars"],
-                        finish_reason=finish_reason,
-                    )
+                self._raise_if_request_interrupted(guard)
         except HTTPError as exc:
             try:
                 error_payload = json.loads(exc.read().decode("utf-8", errors="replace"))
@@ -966,12 +1154,17 @@ class OpenAIProvider(Provider):
             formatted = f"{self.model} 接口返回 HTTP {exc.code}: {message}"
             if exc.code == 400 and "response_format" in message.lower():
                 raise UnsupportedResponseFormatError(formatted) from exc
-            raise _provider_http_error(self.model, exc.code, message, formatted) from exc
-        except (URLError, TimeoutError, OSError) as exc:
-            reason = getattr(exc, "reason", None) or str(exc)
-            raise ModelConnectionError(
-                f"{self.model} 无法连接模型接口: {reason}", model=self.model,
+            raise _provider_http_error(
+                self.model, exc.code, message, formatted, headers=exc.headers,
             ) from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            self._raise_if_request_interrupted(guard)
+            reason = getattr(exc, "reason", None) or str(exc)
+            error_type = ModelSocketTimeoutError if _is_socket_timeout(exc) else ModelConnectionError
+            raise error_type(f"{self.model} 无法连接模型接口: {reason}", model=self.model) from exc
+        except Exception:
+            self._raise_if_request_interrupted(guard)
+            raise
 
         self._last_finish_reason = finish_reason
         text = "".join(chunks)

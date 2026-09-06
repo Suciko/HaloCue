@@ -5,6 +5,7 @@ from annotation_chunks import (
     context_indices,
     estimate_initial_chunk_limits,
     RunChunkController,
+    subdivide_chunk,
 )
 
 
@@ -78,6 +79,20 @@ def test_chunk_uses_bounded_past_and_future_windows():
     assert future == list(range(60, 70))
 
 
+def test_subdivision_recomputes_the_reported_source_span():
+    items = make_items([("凯伊", f"第{i}句。") for i in range(7)])
+    scene = build_scene_map(items)[0]
+    chunk = build_chunks(items, [scene], target=7, soft_limit=7, hard_limit=7)[0]
+
+    parts = subdivide_chunk(chunk, 3)
+
+    assert [(part["start_line"], part["end_line"]) for part in parts] == [
+        (1, 3),
+        (4, 6),
+        (7, 7),
+    ]
+
+
 def test_default_chunks_target_forty_to_fifty_with_hard_cap_sixty():
     items = make_items([("凯伊", f"第{i}句。") for i in range(241)])
     scenes = build_scene_map(items)
@@ -113,15 +128,39 @@ def test_initial_chunk_limits_consider_output_capacity_and_prompt_cost():
     assert constrained.hard_limit <= 40
 
 
-def test_chunk_controller_requires_two_successes_before_growth_and_shrinks_on_failure():
+def test_typical_long_script_keeps_useful_initial_chunk_size():
+    limits = estimate_initial_chunk_limits({
+        "target_lines": 240,
+        "speaker_count": 5,
+        "resource_complexity": 2,
+        "context_window_tokens": 128_000,
+        "annotation_max_tokens": 16_000,
+        "estimated_prompt_tokens": 12_000,
+    })
+
+    assert limits.target >= 30
+    assert limits.hard_limit <= 60
+
+
+def test_chunk_controller_only_shrinks_for_capacity_signals():
     controller = RunChunkController(target=20, soft_limit=24, hard_limit=30)
     assert controller.next_limits().target == 20
     controller.observe({"success": True, "reasoning_content_ratio": 1.0})
     assert controller.next_limits().target == 20
     controller.observe({"success": True, "reasoning_content_ratio": 1.0})
     assert controller.next_limits().target > 20
+
+    stable_target = controller.next_limits().target
     controller.observe({"success": False, "reason": "empty_response"})
-    assert controller.next_limits().target < 24
+    assert controller.next_limits().target == stable_target
+    controller.observe({"success": False, "reason": "protocol"})
+    assert controller.next_limits().target == stable_target
+
+    controller.observe({"success": False, "reason": "capacity"})
+    capacity_target = controller.next_limits().target
+    assert capacity_target < stable_target
+    controller.observe({"success": False, "reason": "deadline"})
+    assert controller.next_limits().target < capacity_target
 
 
 def test_chunk_controller_does_not_treat_high_reasoning_ratio_as_capacity_failure():

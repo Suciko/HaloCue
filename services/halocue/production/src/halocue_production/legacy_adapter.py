@@ -10,13 +10,14 @@ import sys
 import threading
 import mimetypes
 import copy
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from .config import Settings
 from . import cg_advice, cg_segments
 from .errors import ProductionError
-from .models import new_id, utc_now
+from .models import StagedDirectionResult, new_id, utc_now
 from .name_baseline import CharacterNameBaseline
 from .resource_previews import ResourcePreviewCatalog
 
@@ -25,6 +26,15 @@ _IMPORT_LOCK = threading.RLock()
 _COMPILE_LOCK = threading.RLock()
 AA_WORKSPACE_DIRS = ("projects", "saves", "overrides", "settings")
 RESOURCE_SNAPSHOT_PREWARM_BYTES = 8 * 1024 * 1024
+
+
+def _write_json_atomic(path: Path, value: Any) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
 
 
 class Legacy093Adapter:
@@ -51,6 +61,10 @@ class Legacy093Adapter:
         self._load_modules()
         self.store = self._modules["draft_store"].DraftStore(
             base_dir=str(settings.data_dir / "drafts")
+        )
+        self._teacher_module = (
+            importlib.import_module("teacher_identity")
+            if callable(getattr(self.store, "update_teacher_identity", None)) else None
         )
         # Building the labelled resource base can be expensive for a full AA
         # catalogue. Prewarm only that case before accepting HTTP work so
@@ -189,6 +203,8 @@ class Legacy093Adapter:
         return copy.deepcopy(self._resource_snapshot)
 
     def capabilities(self) -> dict[str, Any]:
+        prompt_module = self._modules["annotate"].PROMPT
+        profiles_supported = callable(getattr(prompt_module, "profile_snapshot", None))
         resource_ready = bool(
             self.settings.resource_index and self.settings.resource_index.is_file()
         )
@@ -208,6 +224,14 @@ class Legacy093Adapter:
             },
             "script_import": {"state": "available"},
             "performance_draft": {"state": "available"},
+            "direction_profiles": {
+                "version": getattr(prompt_module, "PROFILE_VERSION", "1.0"),
+                "default_api": "standard",
+                "default_new_project_ui": "conservative" if profiles_supported else "standard",
+                "items": [
+                    {"id": "standard", "label": "标准（原版）"},
+                ] + ([{"id": "conservative", "label": "简洁（保守）"}] if profiles_supported else []),
+            },
             "generation_modes": {
                 "format_only": {"state": "available"},
                 "ai_direction": {
@@ -225,6 +249,90 @@ class Legacy093Adapter:
                 "aa_workspace": aa_ready,
             },
         }
+
+    def direction_profile_snapshot(
+        self, value: Any = None, *, story_type: str = "auto"
+    ) -> dict[str, str]:
+        prompt_module = self._modules["annotate"].PROMPT
+        snapshot = getattr(prompt_module, "profile_snapshot", None)
+        if not callable(snapshot):
+            if value == "conservative":
+                raise ProductionError(
+                    "direction_profile_unavailable", "当前兼容模块尚不支持简洁演出模式", status=409,
+                )
+            if value is None or value == "standard":
+                return {
+                    "id": "standard", "version": "1.0",
+                    "rules_sha256": hashlib.sha256(prompt_module.build_rules(story_type).encode("utf-8")).hexdigest(),
+                }
+            raise ProductionError("invalid_direction_profile", "演出模式无效")
+        try:
+            return snapshot(value, story_type=story_type)
+        except ValueError as exc:
+            raise ProductionError(
+                "invalid_direction_profile",
+                "演出模式无效",
+                details={"allowed": ["standard", "conservative"]},
+            ) from exc
+
+    def teacher_identity_capability(self) -> dict[str, Any]:
+        if not self._teacher_module or not callable(getattr(self.store, "update_teacher_identity", None)):
+            return {"state": "unavailable", "reason": "legacy_teacher_identity_unsupported"}
+        module = self._teacher_module
+        return {
+            "state": "available",
+            "schema_version": module.SCHEMA_VERSION,
+            "presets": copy.deepcopy(list(module.PRESETS)),
+            "presentation": "slot_zero",
+        }
+
+    def teacher_presentation_capability(self) -> dict[str, Any]:
+        supported = (self.teacher_identity_capability()["state"] == "available"
+                     and getattr(self._teacher_module, "PRESENTATION_SCHEMA_VERSION", None) == "teacher-presentation/1.0"
+                     and getattr(self._modules["build_bundle"], "TEACHER_REPLY_PLAN_SCHEMA_VERSION", None) == "teacher-reply-plan/1.0")
+        if not supported:
+            return {"state": "unavailable", "reason": "legacy_teacher_presentation_unsupported"}
+        return {
+            "state": "available", "schema_version": "teacher-presentation/1.0", "default_mode": "slot_zero",
+            "modes": [{"id": "slot_zero", "label": "槽 0 对白"}, {"id": "sel_single", "label": "Sel 回答"}],
+        }
+
+    def teacher_presentation(self, cast_data: dict[str, Any]) -> dict[str, str]:
+        if self.teacher_presentation_capability()["state"] != "available":
+            if cast_data.get("teacher_presentation"):
+                raise ProductionError("teacher_presentation_unavailable", "当前兼容模块不支持此老师呈现设置", status=409)
+            return {"schema_version": "teacher-presentation/1.0", "mode": "slot_zero"}
+        with self._teacher_error_boundary():
+            return importlib.import_module("teacher_presentation").effective_teacher_presentation(cast_data)
+
+    def teacher_reply(self, card_id: str, text: str) -> dict[str, str]:
+        with self._teacher_error_boundary():
+            importlib.import_module("teacher_reply_plan").validate_reply_text(text)
+            return {**importlib.import_module("teacher_presentation").teacher_reply_ids(card_id),
+                    "source_card_id": card_id, "text": text}
+
+    @contextmanager
+    def _teacher_error_boundary(self):
+        errors = (self._teacher_module.TeacherIdentityError,) if self._teacher_module else ()
+        try:
+            yield
+        except errors as exc:
+            raise ProductionError(exc.code, str(exc), status=exc.status) from exc
+
+    @staticmethod
+    def public_direction_profile_snapshot(value: Any) -> dict[str, str] | None:
+        if not isinstance(value, dict):
+            return None
+        if (
+            not isinstance(value.get("id"), str)
+            or value["id"] not in {"standard", "conservative"}
+            or not isinstance(value.get("version"), str)
+            or not re.fullmatch(r"[0-9]+\.[0-9]+", value["version"])
+            or not isinstance(value.get("rules_sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", value["rules_sha256"])
+        ):
+            return None
+        return {key: value[key] for key in ("id", "version", "rules_sha256")}
 
     def discover_aa_environment(self, selection: str | None = None) -> dict[str, Any]:
         discovery = self._modules["aa_install_discovery"].discover_aa(
@@ -367,7 +475,7 @@ class Legacy093Adapter:
 
     def create_performance_draft(
         self, *, project: str, text: str, speakers: list[str], cg_keys: list[str] | None = None
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | StagedDirectionResult:
         token = new_id("draft")
         cast = self.initial_cast(speakers)
         result = self.store.create_draft(
@@ -404,14 +512,15 @@ class Legacy093Adapter:
         return result
 
     def _draft_resources(self, token: str) -> dict[str, Any]:
-        resource_file = self.store.get_draft_path(token) / "resources.json"
-        if not resource_file.is_file():
-            return {}
-        try:
-            value = json.loads(resource_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return {}
-        return value if isinstance(value, dict) else {}
+        with self._teacher_error_boundary(), self.store.draft_lock(token):
+            resource_file = self.store.get_draft_path(token) / "resources.json"
+            if not resource_file.is_file():
+                return {}
+            try:
+                value = json.loads(resource_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return {}
+            return value if isinstance(value, dict) else {}
 
     def draft_resource_contains(self, token: str, kind: str, key: str) -> bool:
         resources = self._draft_resources(token)
@@ -530,6 +639,7 @@ class Legacy093Adapter:
                     "club": str(value.get("club") or ""), "spine": str(value.get("spine") or ""),
                     "avatar_key": str(value.get("avatar") or value.get("avatar_key") or ""),
                     "outfit_key": str(value.get("outfit_key") or ""), "face_count": len(faces),
+                    **({"role": "teacher", "portrait": False} if value.get("role") == "teacher" else {}),
                 })
             return rows
         if kind == "cg":
@@ -675,6 +785,7 @@ class Legacy093Adapter:
                 "spine": str(value.get("spine") or ""),
                 "outfit_key": str(value.get("outfit_key") or ""),
                 "faces": faces,
+                **({"role": "teacher", "portrait": False} if value.get("role") == "teacher" else {}),
             },
         }
 
@@ -890,19 +1001,32 @@ class Legacy093Adapter:
 
     def draft_detail(self, token: str) -> dict[str, Any]:
         try:
-            draft = self.store.load_draft(token)
+            with self._teacher_error_boundary(), self.store.draft_lock(token):
+                draft = self.store.load_draft(token)
+                cast_data = self.store.load_cast(token)
+                resources = self._draft_resources(token)
         except FileNotFoundError as exc:
             raise ProductionError("draft_not_found", "演出草稿不存在", status=404) from exc
         nodes = self.document.normalize_draft_nodes(
             self.document.parse_document_lossless(draft["edited_text"])
         )
-        cast_data = self.store.load_cast(token)
         cast = cast_data.get("cast") if isinstance(cast_data.get("cast"), dict) else cast_data
         _, diagnostics = self.document.compile_document(
             nodes,
             cast if isinstance(cast, dict) else {},
-            self._draft_resources(token),
+            resources,
         )
+        teacher_mode = self.teacher_presentation(cast_data)["mode"]
+        if teacher_mode == "sel_single":
+            for node, identity in zip(nodes, draft["identities"]):
+                mapping = cast.get(node.fields.get("who")) or {}
+                if node.kind != "line" or mapping.get("role") != "teacher":
+                    continue
+                try:
+                    self.teacher_reply(identity["card_id"], str(node.fields.get("text") or ""))
+                except ProductionError as exc:
+                    diagnostics.append({"code": exc.code, "message": str(exc), "severity": "error",
+                                        "card_id": identity["card_id"], "line_no": node.line_no})
         cards = []
         for node, identity in zip(nodes, draft["identities"]):
             card_id = identity["card_id"]
@@ -952,7 +1076,7 @@ class Legacy093Adapter:
             "cards": cards,
             "diagnostics": diagnostics,
             "counts": counts,
-            "cast": self.store.load_cast(token),
+            "cast": cast_data,
             "cg_segments": segments,
             "review_ready": not any(
                 counts[key] for key in ("pending", "unresolved_issues", "blocking_errors")
@@ -1096,9 +1220,14 @@ class Legacy093Adapter:
         analysis = self._validate_ai_preflight_result(result, line_count=len(lines))
         record = {
             "kind": "ai_preflight",
+            "plan_version": 1,
             "preflight_id": preflight_id,
             "created_at": utc_now(),
-            "source": {"kind": "frozen_source", "line_count": len(lines)},
+            "source": {
+                "kind": "frozen_source",
+                "line_count": len(lines),
+                "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            },
             "model": {"provider": str(getattr(provider, "name", "")), "name": str(getattr(provider, "model", ""))},
             "analysis": analysis,
         }
@@ -1137,6 +1266,51 @@ class Legacy093Adapter:
             })
         return {"ok": True, "kind": "ai_preflight_results", "read_only": True, "items": items}
 
+    def _compatible_performance_plan(
+        self, token: str, source_text: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        root = self.store.get_draft_path(token) / "ai-preflights"
+        source_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+        candidates: list[dict[str, Any]] = []
+        for path in root.glob("preflight-*.json") if root.is_dir() else []:
+            try:
+                record = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            source = record.get("source") if isinstance(record.get("source"), dict) else {}
+            analysis = record.get("analysis") if isinstance(record.get("analysis"), dict) else {}
+            if (
+                record.get("kind") != "ai_preflight"
+                or int(record.get("plan_version") or 0) != 1
+                or source.get("sha256") != source_hash
+                or not isinstance(analysis.get("scenes"), list)
+            ):
+                continue
+            candidates.append(record)
+        if not candidates:
+            return [], None
+        record = max(candidates, key=lambda item: str(item.get("created_at") or ""))
+        scenes = []
+        for index, scene in enumerate((record.get("analysis") or {}).get("scenes") or [], 1):
+            if not isinstance(scene, dict):
+                continue
+            scenes.append({
+                "segment": f"AI 初审场景 {index}",
+                "start": int(scene.get("start_line") or 0),
+                "end": int(scene.get("end_line") or 0),
+                "location": str(scene.get("location") or ""),
+                "time": str(scene.get("time") or ""),
+                "reason": str(scene.get("background_need") or ""),
+                "needs": [],
+                "source": "ai_preflight",
+            })
+        return scenes, {
+            "plan_version": 1,
+            "preflight_id": str(record.get("preflight_id") or ""),
+            "scene_count": len(scenes),
+            "source_sha256": source_hash,
+        }
+
     @staticmethod
     def _proposal_value_public(value: Any) -> str | None:
         """Keep the audit useful without exposing arbitrary model payloads."""
@@ -1151,6 +1325,7 @@ class Legacy093Adapter:
         generations: list[dict[str, Any]] = []
         if not root.is_dir():
             return {"ok": True, "total": 0, "generations": []}
+        current_revision = self.draft_detail(token).get("content_revision")
         for attempt_dir in sorted((item for item in root.iterdir() if item.is_dir()), reverse=True):
             result_file = attempt_dir / "result.json"
             proposals_file = attempt_dir / "proposals.json"
@@ -1173,7 +1348,6 @@ class Legacy093Adapter:
                     continue
                 safe_card_id = str(proposal.get("safe_card_id") or "")
                 content_revision = proposal.get("based_on_content_revision")
-                current_revision = self.draft_detail(token).get("content_revision")
                 safe = bool(
                     proposal_type == "applied_pending"
                     and safe_card_id
@@ -1202,12 +1376,85 @@ class Legacy093Adapter:
                         "apply_reason": reason,
                     }
                 )
+            raw_metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
+            public_metrics = {
+                key: raw_metrics.get(key)
+                for key in (
+                    "requests", "retries", "transport_retries", "subdivisions", "input_tokens", "output_tokens",
+                    "cache_read_tokens", "cache_write_tokens", "uncached_input_tokens",
+                    "cache_hit_rate", "cache_reported", "warm_cache_read_tokens",
+                    "warm_uncached_input_tokens", "warm_cache_hit_rate",
+                    "failed_request_count", "failed_request_input_tokens",
+                    "failed_request_output_tokens", "input_tokens_per_completed_target",
+                    "uncached_input_tokens_per_completed_target", "stable_prefix_consistent",
+                    "elapsed_ms", "completed_targets", "total_targets",
+                )
+                if key in raw_metrics
+            }
+            if isinstance(raw_metrics.get("prompt_optimization"), dict):
+                optimization = raw_metrics["prompt_optimization"]
+                public_metrics["prompt_optimization"] = {
+                    key: optimization.get(key)
+                    for key in (
+                        "version", "background_count", "sound_count",
+                        "full_background_count", "full_sound_count",
+                        "full_resource_prompt_chars", "candidate_resource_prompt_chars",
+                        "resource_prompt_reduction", "source_context_strategy",
+                        "source_script_chars_in_static_prompt",
+                    )
+                    if key in optimization
+                }
+            if isinstance(raw_metrics.get("request_records"), list):
+                public_metrics["request_records"] = [
+                    {
+                        str(key)[:80]: value
+                        for key, value in record.items()
+                        if key not in {
+                            "prompt", "user", "volatile", "static_system",
+                            "reasoning_text",
+                        }
+                    }
+                    for record in raw_metrics["request_records"][-50:]
+                    if isinstance(record, dict)
+                ]
+            public_diagnostics = []
+            for diagnostic in result.get("diagnostics") or []:
+                if not isinstance(diagnostic, dict):
+                    continue
+                public_diagnostics.append({
+                    key: str(diagnostic.get(key) or "")[:500]
+                    for key in ("code", "level", "message", "detail", "scene_id", "chunk_id")
+                    if diagnostic.get(key) not in (None, "")
+                })
+                if len(public_diagnostics) >= 50:
+                    break
+            raw_error = result.get("error") if isinstance(result.get("error"), dict) else None
+            public_error = None
+            if raw_error:
+                public_error = {
+                    "code": str(raw_error.get("code") or "direction_generation_failed")[:160],
+                    "message": str(raw_error.get("message") or "演出生成失败")[:1000],
+                    "type": str(raw_error.get("type") or "")[:160],
+                }
             generations.append(
                 {
                     "generation_id": str(result.get("generation_id") or attempt_dir.name),
                     "model": str(result.get("model") or ""),
                     "story_type": str(result.get("story_type") or "auto"),
+                    "layout_mode": str(result.get("layout_mode") or "ai"),
+                    "direction_profile": (
+                        "conservative" if result.get("direction_profile") == "conservative"
+                        else "standard"
+                    ),
+                    "direction_profile_snapshot": self.public_direction_profile_snapshot(
+                        result.get("direction_profile_snapshot")
+                    ),
+                    "status": str(result.get("status") or "succeeded"),
                     "draft_version": result.get("draft_version"),
+                    "pending_targets": int(result.get("pending_targets") or 0),
+                    "metrics": public_metrics,
+                    "diagnostics": public_diagnostics,
+                    "error": public_error,
                     "proposal_count": len(public_items),
                     "proposals": public_items,
                 }
@@ -1434,7 +1681,7 @@ class Legacy093Adapter:
         mapping: dict[str, Any],
         expected_draft_version: int,
     ) -> dict[str, Any]:
-        allowed_kinds = {"portrait", "voice", "narrator", "unset"}
+        allowed_kinds = {"portrait", "voice", "narrator", "unset", "teacher"}
         kind = str(mapping.get("kind") or "").strip()
         if kind not in allowed_kinds:
             raise ProductionError(
@@ -1442,6 +1689,22 @@ class Legacy093Adapter:
                 "角色映射类型无效",
                 details={"allowed": sorted(allowed_kinds)},
             )
+        if kind == "teacher":
+            if self.teacher_identity_capability()["state"] != "available":
+                raise ProductionError("teacher_identity_unavailable", "当前兼容模块不支持老师身份", status=409)
+            if "presentation" in mapping and self.teacher_presentation_capability()["state"] != "available":
+                raise ProductionError("teacher_presentation_unavailable", "当前兼容模块不支持老师呈现设置", status=409)
+            with self._teacher_error_boundary():
+                try:
+                    self.store.update_teacher_identity(
+                        token=token, speaker=speaker, selection=mapping,
+                        expected_draft_version=expected_draft_version,
+                    )
+                except self._modules["draft_store"].RevisionConflictError as exc:
+                    raise ProductionError("revision_conflict", "草稿版本已经变化", status=409) from exc
+                return self.draft_detail(token)
+        if any(key in mapping for key in ("role", "teacher_identity_schema", "teacher_preset_id", "presentation")):
+            raise ProductionError("invalid_cast_binding", "老师身份须通过明确的老师身份选择保存")
         normalized = dict(mapping)
         if kind == "narrator":
             normalized = {"kind": "narrator", "narrator": True}
@@ -1458,12 +1721,13 @@ class Legacy093Adapter:
         elif not str(mapping.get("id") or "").strip():
             raise ProductionError("cast_id_required", "有立绘角色必须提供 AA 角色 ID")
         try:
-            self.store.update_cast(
-                token=token,
-                speaker=speaker,
-                mapping=normalized,
-                expected_draft_version=expected_draft_version,
-            )
+            with self._teacher_error_boundary():
+                self.store.update_cast(
+                    token=token,
+                    speaker=speaker,
+                    mapping=normalized,
+                    expected_draft_version=expected_draft_version,
+                )
         except self._modules["draft_store"].RevisionConflictError as exc:
             raise ProductionError("revision_conflict", str(exc), status=409) from exc
         return self.draft_detail(token)
@@ -1698,6 +1962,13 @@ class Legacy093Adapter:
                     "count": detail["counts"]["blocking_errors"],
                 }
             )
+        if detail["counts"].get("unresolved_issues"):
+            blockers.append(
+                {
+                    "code": "unresolved_issues",
+                    "count": detail["counts"]["unresolved_issues"],
+                }
+            )
         if detail["counts"]["pending"]:
             blockers.append(
                 {"code": "pending_review", "count": detail["counts"]["pending"]}
@@ -1719,47 +1990,64 @@ class Legacy093Adapter:
                 details=capabilities,
             )
         detail = self.draft_detail(token)
-        if detail["counts"]["blocking_errors"] or detail["counts"]["pending"]:
+        if (
+            detail["counts"]["blocking_errors"]
+            or detail["counts"].get("unresolved_issues")
+            or detail["counts"]["pending"]
+        ):
             raise ProductionError(
                 "review_pending",
                 "草稿仍有待审卡片或未解决错误",
                 status=409,
                 details=detail["counts"],
             )
-        draft_dir = self.store.get_draft_path(token)
         try:
-            self.store.assert_review_ready(token)
-            manager = self._modules["build_bundle"].BuildBundleManager(store=self.store)
-            build_id = manager.create_compile_snapshot(token, expected_draft_version)
-            source = draft_dir / "edited.txt"
-            identities = json.loads((draft_dir / "identity.json").read_text(encoding="utf-8"))
-            segments = cg_segments.load(draft_dir / "cg-segments.json")
-            if segments:
-                transformed, aliases = cg_segments.transform_for_compile(
-                    text=source.read_text(encoding="utf-8"), identities=identities, segments=segments
-                )
-                input_dir = draft_dir / "builds" / ".tmp" / build_id / "input"
-                (input_dir / "edited.txt").write_text(transformed, encoding="utf-8")
-                cast_path = input_dir / "cast.json"
-                cast_data = json.loads(cast_path.read_text(encoding="utf-8"))
-                cast_data.setdefault("cast", {}).update(aliases)
-                cast_path.write_text(json.dumps(cast_data, ensure_ascii=False, indent=2), encoding="utf-8")
-                (input_dir / "cg-plan.json").write_text(
-                    json.dumps({"segments": segments, "mode": "named_slot_zero_no_portraits"}, ensure_ascii=False, indent=2), encoding="utf-8"
-                )
-            return build_id
+            with self._teacher_error_boundary(), self.store.draft_lock(token):
+                return self._create_compile_snapshot_locked(token, expected_draft_version)
         except self._modules["draft_store"].ReviewPendingError as exc:
             raise ProductionError(
-                getattr(exc, "code", "review_pending"),
-                str(exc),
-                status=409,
+                getattr(exc, "code", "review_pending"), str(exc), status=409,
                 details=getattr(exc, "counts", {}),
             ) from exc
         except self._modules["build_bundle"].CompileInputStaleError as exc:
             raise ProductionError("compile_input_stale", str(exc), status=409) from exc
 
+    def _create_compile_snapshot_locked(self, token: str, expected_draft_version: int) -> str:
+        draft_dir = self.store.get_draft_path(token)
+        self.store.assert_review_ready(token)
+        manager = self._modules["build_bundle"].BuildBundleManager(store=self.store)
+        build_id = manager.create_compile_snapshot(token, expected_draft_version)
+        input_dir = draft_dir / "builds" / ".tmp" / build_id / "input"
+        source = input_dir / "edited.txt"
+        identities = json.loads((input_dir / "identity.json").read_text(encoding="utf-8"))
+        segments = cg_segments.load(draft_dir / "cg-segments.json")
+        if segments:
+            transformed, aliases = cg_segments.transform_for_compile(
+                text=source.read_text(encoding="utf-8"), identities=identities, segments=segments
+            )
+            cast_path = input_dir / "cast.json"
+            cast_data = json.loads(cast_path.read_text(encoding="utf-8"))
+            source_cast = cast_data.get("cast") or {}
+            for alias, binding in list(aliases.items()):
+                original = source_cast.get(binding.get("id"))
+                if isinstance(original, dict) and original.get("role") == "teacher":
+                    aliases[alias] = dict(original)
+            cast_data.setdefault("cast", {}).update(aliases)
+            reply_plan_path = input_dir / "teacher-reply-plan.json"
+            if reply_plan_path.is_file():
+                reply_plan = importlib.import_module("teacher_reply_plan").retarget_reply_plan(
+                    json.loads(reply_plan_path.read_text(encoding="utf-8")), transformed, cast_data,
+                )
+                _write_json_atomic(reply_plan_path, reply_plan)
+            source.write_text(transformed, encoding="utf-8")
+            _write_json_atomic(cast_path, cast_data)
+            _write_json_atomic(input_dir / "cg-plan.json", {
+                "segments": segments, "mode": "named_slot_zero_no_portraits",
+            })
+        return build_id
+
     def execute_compile(self, token: str, build_id: str) -> dict[str, Any]:
-        with _COMPILE_LOCK:
+        with _COMPILE_LOCK, self._teacher_error_boundary():
             script2aap = importlib.import_module("script2aap")
             original_here = script2aap.HERE
             build_bundle = self._modules["build_bundle"]
@@ -1774,7 +2062,8 @@ class Legacy093Adapter:
             script2aap.HERE = str(self.compat_root)
             build_bundle.compile_script = isolated_compile
             try:
-                manager = build_bundle.BuildBundleManager(store=self.store)
+                output_root = self.store.get_draft_path(token) / "builds" / ".tmp" / build_id / "compile-output"
+                manager = build_bundle.BuildBundleManager(store=self.store, output_root=str(output_root))
                 result = manager.execute_build_worker(token, build_id)
                 self._inject_task_assets_into_bundle(token=token, bundle_dir=Path(result["bundle_dir"]))
                 return result
@@ -1856,12 +2145,13 @@ class Legacy093Adapter:
             record_path=str(self.settings.data_dir / "project_install_record.json"),
         )
         try:
-            return manager.install_build(
-                token,
-                build_id,
-                category=category,
-                story_name=story_name,
-            )
+            with self._teacher_error_boundary():
+                return manager.install_build(
+                    token,
+                    build_id,
+                    category=category,
+                    story_name=story_name,
+                )
         except self._modules["install_manager"].AARunningError as exc:
             raise ProductionError("aa_running", str(exc), status=423) from exc
         except self._modules["install_manager"].AAInstallTargetExistsError as exc:
@@ -1951,29 +2241,89 @@ class Legacy093Adapter:
         expected_draft_version: int,
         story_type: str,
         layout_mode: str,
+        direction_profile: str = "standard",
+        direction_profile_snapshot: dict[str, str] | None = None,
+        resume: bool = False,
+        progress: Any = None,
+        model_activity: Any = None,
+        cancelled: Any = None,
     ) -> dict[str, Any]:
+        current_profile = self.direction_profile_snapshot(direction_profile, story_type=story_type)
+        if direction_profile_snapshot is not None and direction_profile_snapshot != current_profile:
+            raise ProductionError(
+                "direction_profile_changed",
+                "演出规则版本已经变化，请发起新的生成任务",
+                status=409,
+            )
+        direction_profile_snapshot = current_profile
+        direction_profile = current_profile["id"]
         draft_dir = self.store.get_draft_path(token)
+        detail = self.draft_detail(token)
+        if int(detail.get("draft_version") or -1) != int(expected_draft_version):
+            raise ProductionError(
+                "revision_conflict",
+                "AI 生成所基于的草稿版本已经变化",
+                status=409,
+            )
+        source_cards = detail.get("cards") or []
+        attempt_dir = draft_dir / "direction-generations" / generation_id
+        if resume:
+            attempt_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            try:
+                attempt_dir.mkdir(parents=True, exist_ok=False)
+            except FileExistsError as exc:
+                raise ProductionError(
+                    "direction_generation_exists",
+                    "该演出生成记录已经存在，只能通过继续任务复用它",
+                    status=409,
+                    details={"generation_id": generation_id},
+                ) from exc
+        profile_path = attempt_dir / "direction-profile.json"
+        if resume:
+            if profile_path.is_file():
+                try:
+                    saved_profile = json.loads(profile_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError) as exc:
+                    raise ProductionError(
+                        "direction_profile_changed", "原任务的演出模式记录不可读取", status=409
+                    ) from exc
+            else:
+                saved_profile = self.direction_profile_snapshot("standard", story_type=story_type)
+            if saved_profile != direction_profile_snapshot:
+                raise ProductionError(
+                    "direction_profile_changed",
+                    "原任务的演出模式或规则版本不一致，不能继续旧任务",
+                    status=409,
+                )
+        if not profile_path.is_file():
+            _write_json_atomic(profile_path, direction_profile_snapshot)
+        cast_path = draft_dir / "cast.json"
         with self.store.draft_lock(token):
-            cast_path = draft_dir / "cast.json"
             cast_data = (
                 json.loads(cast_path.read_text(encoding="utf-8"))
                 if cast_path.is_file()
                 else {}
             )
-            cast_data["layout_mode"] = layout_mode
-            temporary = cast_path.with_suffix(".json.tmp")
-            temporary.write_text(
-                json.dumps(cast_data, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            os.replace(temporary, cast_path)
-        source_cards = self.draft_detail(token).get("cards") or []
-        attempt_dir = draft_dir / "direction-generations" / generation_id
-        attempt_dir.mkdir(parents=True, exist_ok=False)
+        cast_data["layout_mode"] = layout_mode
+        staged_cast_path = attempt_dir / "cast.json"
+        _write_json_atomic(staged_cast_path, cast_data)
         source = attempt_dir / "source.txt"
         output = attempt_dir / "annotated.txt"
-        source.write_text(
-            (draft_dir / "edited.txt").read_text(encoding="utf-8"), encoding="utf-8"
+        current_source = (draft_dir / "edited.txt").read_text(encoding="utf-8")
+        performance_plan, performance_plan_ref = self._compatible_performance_plan(
+            token, current_source,
         )
+        if source.is_file():
+            if source.read_text(encoding="utf-8") != current_source:
+                raise ProductionError(
+                    "revision_conflict",
+                    "当前草稿与演出检查点的源文本不一致，不能继续旧任务",
+                    status=409,
+                    details={"generation_id": generation_id},
+                )
+        else:
+            source.write_text(current_source, encoding="utf-8")
         resource_index = draft_dir / "resources.json"
         if not resource_index.is_file():
             raise ProductionError(
@@ -1994,65 +2344,320 @@ class Legacy093Adapter:
                 status=409,
                 details={"missing": missing},
             )
-        result = self._modules["annotate"].annotate_script(
-            {
-                "script": str(source),
-                "out": str(output),
-                "cast": str(draft_dir / "cast.json"),
-                "index": str(resource_index),
-                "agent_enabled": True,
-                "checkpoint_dir": str(attempt_dir / "checkpoints"),
-                "story_type": story_type,
+        def audit_summary(
+            result: dict[str, Any] | None,
+            *,
+            status: str,
+            error: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            value = result if isinstance(result, dict) else {}
+            agent = value.get("agent") if isinstance(value.get("agent"), dict) else {}
+            return {
+                "generation_id": generation_id,
+                "status": status,
+                "story_type": value.get("story_type") or story_type,
                 "layout_mode": layout_mode,
-            },
-            provider_instance=provider,
-        )
-        if result.get("cancelled") or not str(result.get("text") or "").strip():
-            raise ProductionError(
-                "direction_generation_incomplete",
-                "AI 安排演出没有产生可写回的完整草稿",
-                status=409,
-                details={"agent": result.get("agent") or {}},
-            )
-        # Keep the exact model output beside this generation attempt.  The
-        # public API later redacts it to a small, read-only audit surface.
+                "direction_profile": direction_profile,
+                "direction_profile_snapshot": direction_profile_snapshot,
+                "agent": agent,
+                "metrics": agent.get("metrics") if isinstance(agent.get("metrics"), dict) else {},
+                "diagnostics": list(value.get("diagnostics") or []),
+                "proposal_count": len(value.get("proposals") or []),
+                "direction_change_count": int(value.get("direction_change_count") or 0),
+                "cancelled": bool(value.get("cancelled")),
+                "timed_out": bool(value.get("timed_out")),
+                "incomplete": bool(value.get("incomplete")),
+                "pending_targets": int(
+                    value.get("pending_targets")
+                    or agent.get("pending_targets")
+                    or 0
+                ),
+                "provider": str(getattr(provider, "name", "")),
+                "model": str(getattr(provider, "model", "")),
+                "usage": dict(getattr(provider, "stats", {}) or {}),
+                "error": error,
+            }
+
+        def persisted_request_records() -> tuple[list[dict[str, Any]], list[str]]:
+            records: list[dict[str, Any]] = []
+            paths: list[str] = []
+            checkpoint_root = attempt_dir / "checkpoints"
+            for path in sorted(checkpoint_root.rglob("requests.jsonl")) if checkpoint_root.is_dir() else []:
+                try:
+                    paths.append(str(path.relative_to(attempt_dir)))
+                except ValueError:
+                    paths.append(path.name)
+                try:
+                    lines = path.read_text(encoding="utf-8").splitlines()
+                except OSError:
+                    continue
+                for line in lines[-100:]:
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(record, dict):
+                        records.append(record)
+            return records[-100:], paths
+
+        _write_json_atomic(attempt_dir / "result.json", audit_summary(None, status="running"))
         try:
-            updated = self.store.update_draft_content(
-                token=token,
-                new_text=result["text"],
-                expected_draft_version=expected_draft_version,
-                is_content_change=True,
+            result = self._modules["annotate"].annotate_script(
+                {
+                    "script": str(source),
+                    "out": str(output),
+                    "cast": str(staged_cast_path),
+                    "index": str(resource_index),
+                    "agent_enabled": True,
+                    "checkpoint_dir": str(attempt_dir / "checkpoints"),
+                    "story_type": story_type,
+                    "layout_mode": layout_mode,
+                    "direction_profile": direction_profile,
+                    "direction_profile_snapshot": direction_profile_snapshot,
+                    "usage_chain": performance_plan,
+                    "progress": progress,
+                    "model_activity": model_activity,
+                    "cancelled": cancelled,
+                },
+                provider_instance=provider,
             )
+        except Exception as exc:
+            request_records, request_log_files = persisted_request_records()
+            exception_details = getattr(exc, "details", None)
+            error = {
+                "code": str(getattr(exc, "code", "direction_generation_failed")),
+                "message": str(exc),
+                "type": type(exc).__name__,
+                "details": {
+                    **(exception_details if isinstance(exception_details, dict) else {}),
+                    "request_log_files": request_log_files,
+                },
+            }
+            failure_result = {
+                "agent": {
+                    "metrics": {
+                        "requests": len(request_records),
+                        "failed_request_count": sum(
+                            1 for record in request_records
+                            if record.get("outcome") == "failed"
+                        ),
+                        "request_records": request_records,
+                    },
+                },
+            }
+            _write_json_atomic(
+                attempt_dir / "result.json",
+                audit_summary(failure_result, status="failed", error=error),
+            )
+            if isinstance(exc, ProductionError):
+                raise
+            contract_errors = {
+                "direction_profile_changed": "演出规则版本已经变化，请发起新的生成任务",
+                "background_catalog_empty": "冻结素材清单中没有可用背景，请先配置背景素材",
+                "background_not_in_manifest": "所选背景不在冻结素材清单中，草稿未被修改",
+            }
+            code = str(getattr(exc, "code", ""))
+            if code in contract_errors:
+                raise ProductionError(code, contract_errors[code], status=409) from exc
+            raise ProductionError(
+                "direction_generation_failed",
+                f"AI 安排演出失败：{exc}",
+                status=502,
+                details={
+                    "generation_id": generation_id,
+                    "type": type(exc).__name__,
+                    "result_file": str(attempt_dir / "result.json"),
+                    "request_log_files": request_log_files,
+                },
+            ) from exc
+
+        incomplete = bool(
+            result.get("incomplete")
+            or result.get("cancelled")
+            or result.get("timed_out")
+            or int(result.get("pending_targets") or 0) > 0
+            or not str(result.get("text") or "").strip()
+        )
+        if performance_plan_ref:
+            agent = result.setdefault("agent", {})
+            if isinstance(agent, dict):
+                agent["performance_plan"] = performance_plan_ref
+        if incomplete:
+            result["incomplete"] = True
+            summary = audit_summary(result, status="incomplete")
+            _write_json_atomic(attempt_dir / "result.json", summary)
+            return summary
+
+        effective_proposals = [
+            proposal
+            for proposal in (result.get("proposals") or [])
+            if isinstance(proposal, dict)
+            and proposal.get("type") == "applied_pending"
+            and proposal.get("before") != proposal.get("after")
+            and proposal.get("after") not in (None, "", False, 0, [], {})
+        ]
+        direction_change_count = max(
+            int(result.get("direction_change_count") or 0),
+            len(effective_proposals),
+        )
+        result["direction_change_count"] = direction_change_count
+        if direction_change_count == 0:
+            summary = audit_summary(
+                result,
+                status="failed",
+                error={
+                    "code": "direction_generation_empty",
+                    "message": "模型完成了请求，但没有生成任何有效演出修改",
+                    "type": "ProductionError",
+                    "details": {},
+                },
+            )
+            _write_json_atomic(attempt_dir / "result.json", summary)
+            raise ProductionError(
+                "direction_generation_empty",
+                "模型没有生成任何有效演出修改，草稿未被覆盖",
+                status=422,
+                details={
+                    "generation_id": generation_id,
+                    "agent": result.get("agent") or {},
+                    "diagnostics": result.get("diagnostics") or [],
+                },
+            )
+        output.write_text(str(result["text"]), encoding="utf-8")
+        staged_summary = audit_summary(result, status="staged")
+        _write_json_atomic(attempt_dir / "result.json", staged_summary)
+        return StagedDirectionResult(
+            token=token,
+            generation_id=generation_id,
+            expected_draft_version=expected_draft_version,
+            layout_mode=layout_mode,
+            source_cards=[dict(card) for card in source_cards if isinstance(card, dict)],
+            result=dict(result),
+            summary=staged_summary,
+        )
+
+    def discard_direction_generation(
+        self,
+        staged: StagedDirectionResult,
+        *,
+        status: str,
+        cancelled: bool = False,
+        error: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        summary = dict(staged.summary)
+        summary.update({"status": status, "cancelled": cancelled, "error": error})
+        attempt_dir = (
+            self.store.get_draft_path(staged.token)
+            / "direction-generations"
+            / staged.generation_id
+        )
+        _write_json_atomic(attempt_dir / "result.json", summary)
+        return summary
+
+    def commit_direction_generation(
+        self,
+        staged: StagedDirectionResult,
+    ) -> dict[str, Any]:
+        result = staged.result
+        draft_dir = self.store.get_draft_path(staged.token)
+        attempt_dir = draft_dir / "direction-generations" / staged.generation_id
+        proposals_path = attempt_dir / "proposals.json"
+        tracked_paths = [
+            draft_dir / name
+            for name in (
+                "edited.txt",
+                "identity.json",
+                "diagnostics.json",
+                "session.json",
+                "cast.json",
+            )
+        ] + [proposals_path]
+
+        def restore(snapshot: dict[Path, bytes | None]) -> None:
+            for path, content in snapshot.items():
+                if content is None:
+                    path.unlink(missing_ok=True)
+                    continue
+                temporary = path.with_suffix(path.suffix + ".rollback.tmp")
+                temporary.write_bytes(content)
+                os.replace(temporary, path)
+
+        try:
+            with self.store.draft_lock(staged.token):
+                snapshot = {
+                    path: path.read_bytes() if path.is_file() else None
+                    for path in tracked_paths
+                }
+                try:
+                    updated = self.store.update_draft_content(
+                        token=staged.token,
+                        new_text=result["text"],
+                        expected_draft_version=staged.expected_draft_version,
+                        is_content_change=True,
+                    )
+                    cast_path = draft_dir / "cast.json"
+                    cast_data = (
+                        json.loads(cast_path.read_text(encoding="utf-8"))
+                        if cast_path.is_file()
+                        else {}
+                    )
+                    cast_data["layout_mode"] = staged.layout_mode
+                    _write_json_atomic(cast_path, cast_data)
+                    anchored_proposals = self._anchor_direction_proposals(
+                        token=staged.token,
+                        proposals=result.get("proposals") or [],
+                        source_cards=staged.source_cards,
+                        content_revision=int(
+                            (updated.get("session") or {}).get("content_revision") or 0
+                        ),
+                    )
+                    _write_json_atomic(proposals_path, anchored_proposals)
+                    summary = {**staged.summary, "status": "succeeded"}
+                    summary.update({
+                        "proposal_count": len(anchored_proposals),
+                        "diagnostic_count": len(result.get("diagnostics") or []),
+                        "draft_version": (updated.get("session") or {}).get("draft_version"),
+                    })
+                    _write_json_atomic(attempt_dir / "result.json", summary)
+                except Exception:
+                    restore(snapshot)
+                    raise
         except self._modules["draft_store"].RevisionConflictError as exc:
+            _write_json_atomic(
+                attempt_dir / "result.json",
+                {
+                    **staged.summary,
+                    "status": "superseded",
+                    "error": {
+                        "code": "revision_conflict",
+                        "message": "AI 生成期间草稿已被修改，结果未写回",
+                        "type": type(exc).__name__,
+                        "details": {"generation_id": staged.generation_id},
+                    },
+                },
+            )
             raise ProductionError(
                 "revision_conflict",
                 "AI 生成期间草稿已被修改，结果已保留但未覆盖当前草稿",
                 status=409,
-                details={"generation_id": generation_id},
+                details={"generation_id": staged.generation_id},
             ) from exc
-        anchored_proposals = self._anchor_direction_proposals(
-            token=token,
-            proposals=result.get("proposals") or [],
-            source_cards=source_cards,
-            content_revision=int((updated.get("session") or {}).get("content_revision") or 0),
-        )
-        (attempt_dir / "proposals.json").write_text(
-            json.dumps(anchored_proposals, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        summary = {
-            "generation_id": generation_id,
-            "story_type": result.get("story_type"),
-            "layout_mode": layout_mode,
-            "agent": result.get("agent") or {},
-            "proposal_count": len(result.get("proposals") or []),
-            "diagnostic_count": len(result.get("diagnostics") or []),
-            "provider": str(getattr(provider, "name", "")),
-            "model": str(getattr(provider, "model", "")),
-            "usage": dict(getattr(provider, "stats", {}) or {}),
-            "draft_version": (updated.get("session") or {}).get("draft_version"),
-        }
-        (attempt_dir / "result.json").write_text(
-            json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        except Exception as exc:
+            try:
+                _write_json_atomic(
+                    attempt_dir / "result.json",
+                    {
+                        **staged.summary,
+                        "status": "failed",
+                        "error": {
+                            "code": "direction_commit_failed",
+                            "message": str(exc),
+                            "type": type(exc).__name__,
+                            "details": {"generation_id": staged.generation_id},
+                        },
+                    },
+                )
+            except OSError:
+                pass
+            raise
         return summary

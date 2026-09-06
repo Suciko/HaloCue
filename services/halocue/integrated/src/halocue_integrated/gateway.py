@@ -125,6 +125,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 1,
             )
         if target == "production" and clean_path == "/app.js" and "javascript" in content_type:
+            # Git on Windows may serve CRLF source to both script variants.
+            body = body.replace(b"\r\n", b"\n")
             marker = (
                 b'const API_ROOT = location.port === "8891"\n'
                 b'    ? "http://127.0.0.1:8892/api/v1"\n'

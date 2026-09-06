@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from halocue_writing.aap_import import parse_aap_payload
+from halocue_writing.aap_import import parse_aap_payload, parse_aap_bytes
 
 
 def _payload() -> dict:
@@ -37,3 +37,16 @@ def test_aap_preview_rejects_non_aap_file():
     payload["filename"] = "story.txt"
     with pytest.raises(ValueError, match=r"\.aap"):
         parse_aap_payload(payload)
+
+
+def test_aap_preview_reports_selection_answers_that_are_not_imported_as_dialogue():
+    project = json.loads(base64.b64decode(_payload()["content_base64"]))
+    project["nodes"]["$values"].append({
+        "$type": "SelectionNodeData, Assembly-CSharp", "Guid": "sel-synthetic",
+        "selectionTexts": {"$values": ["An authored answer."] + [""] * 15},
+        "ConnectionsTo": {"$values": ["next"]},
+    })
+    preview = parse_aap_bytes("selection.aap", json.dumps(project).encode())
+    assert preview["counts"]["lines"] == 2
+    assert any("Sel" in warning and "1" in warning for warning in preview["warnings"])
+    assert preview["write_boundary"] == "preview_only_until_user_confirmation"

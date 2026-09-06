@@ -72,6 +72,7 @@
 .asset-library-shell { width: min(880px, calc(100vw - 30px)); }
 .asset-library-shell header p { margin: 6px 0 0; color: var(--muted); line-height: 1.55; }
 .dialog-header-actions { display: flex; align-items: center; gap: 8px; }
+.dialog-header-actions > button { flex: 0 0 auto; white-space: nowrap; }
 .asset-import-shell { width: min(720px, calc(100vw - 30px)); }
 .asset-import-shell header p { margin: 6px 0 0; color: var(--muted); line-height: 1.55; }
 .import-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 18px 0; }

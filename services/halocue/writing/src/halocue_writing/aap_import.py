@@ -54,6 +54,10 @@ def parse_aap_bytes(filename: str, raw: bytes) -> dict:
     backgrounds: Counter[str] = Counter()
     sounds: Counter[str] = Counter()
     warnings: list[str] = []
+    selection_nodes = [node for node in _values(payload.get("nodes"))
+                       if isinstance(node, dict) and str(node.get("$type") or "").split(",", 1)[0] == "SelectionNodeData"]
+    if selection_nodes:
+        warnings.append(f"工程含 {len(selection_nodes)} 个 Sel 选择节点；回答和连接未作为普通对白导入，请回到原工程检查。")
     lines = []
     for index, (scene_title, script) in enumerate(_scripts(payload), start=1):
         scene = scene_map.setdefault(scene_title, {"title": scene_title, "line_count": 0, "first_line": index, "last_line": index})

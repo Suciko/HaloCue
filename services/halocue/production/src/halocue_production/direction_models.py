@@ -17,8 +17,11 @@ class DirectionModelGateway:
         self.settings = settings
         self.legacy_root = legacy_root
 
-    def provider(self):
-        provider_name, provider_settings = self.settings.provider_settings()
+    def provider(self, candidate: dict | None = None):
+        provider_name, provider_settings = (
+            (candidate["provider"], candidate) if candidate is not None
+            else self.settings.provider_settings()
+        )
         legacy = str(self.legacy_root)
         if legacy not in sys.path:
             sys.path.insert(0, legacy)
@@ -35,8 +38,8 @@ class DirectionModelGateway:
                 details={"type": type(exc).__name__},
             ) from exc
 
-    def test_connection(self) -> dict[str, Any]:
-        provider = self.provider()
+    def test_connection(self, candidate: dict | None = None) -> dict[str, Any]:
+        provider = self.provider(candidate) if candidate is not None else self.provider()
         schema = {
             "type": "object",
             "properties": {"ok": {"type": "boolean"}},
@@ -58,6 +61,8 @@ class DirectionModelGateway:
                 status=502,
                 details={"model": str(getattr(exc, "model", "") or "")},
             ) from exc
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            raise ProductionError("model_connection_failed", "模型未返回有效的连接测试结果。", status=502)
         return {
             "ok": True,
             "connection": {

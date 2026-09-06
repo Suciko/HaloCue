@@ -1,0 +1,14 @@
+{
+  "$type": "SelectionNodeData, Assembly-CSharp",
+  "selectionTexts": {
+    "$type": "System.Collections.Generic.List`1[[System.String, mscorlib]], mscorlib",
+    "$values": ["Synthetic answer.", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]
+  },
+  "Guid": "29b02742-282a-4ed1-a599-70ec7d7f839e",
+  "ConnectionsTo": {
+    "$type": "System.Collections.Generic.List`1[[System.Guid, mscorlib]], mscorlib",
+    "$values": ["70e70773-1b1b-4f83-be64-8c1a4cfa6755"]
+  },
+  "X": 0.0,
+  "Y": -600.0
+}

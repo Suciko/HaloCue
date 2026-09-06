@@ -87,7 +87,7 @@ def test_activate_writing_model_http_is_identity_consistent_and_atomic_on_401(
             return False
 
         def read(self):
-            return b'{"choices":[{"message":{"content":"pong"}}]}'
+            return b'{"choices":[{"message":{"content":"pong"},"finish_reason":"stop"}]}'
 
     def routed_urlopen(target, *args, **kwargs):
         url = target.full_url if isinstance(target, urllib.request.Request) else str(target)

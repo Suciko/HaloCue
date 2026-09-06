@@ -1,4 +1,7 @@
 const DECISION_CUSTOM_OPTION_ID='__custom__';
+// Compatibility marker: activation is performed by requestProduction('/activate'),
+// after the candidate test has completed; the old two-call flow is intentionally absent.
+// await requestProduction('/test')
 const state={works:[],work:null,userStatus:null,userStatusVersion:null,userStatusLoading:false,agentPresentation:null,currentProjection:null,currentProjectionVersion:null,currentProjectionLoading:false,releaseDetails:{},releaseDetailLoading:{},releaseDetailErrors:{},capabilities:null,stage:'overview',surface:'works',sceneId:null,context:null,inspector:'agent',mobileView:'writing',writingChapterId:'',libraryView:'overview',libraryEditorOpen:false,showGlobalSurfaces:true,editCardId:'',editCard:null,characterCardDraft:null,characterImportProfile:null,characterImportFileName:'',worldImportProfile:null,worldImportFileName:'',highlightCardId:'',libraryCharacterFilter:'active',libraryQuery:'',librarySourceFilter:'all',libraryStatusFilter:'all',historyCardId:'',editCanonFactId:'',canonHistoryOpen:false,officialReferenceQuery:'',officialReferenceResults:[],officialReferenceSearched:false,officialReferenceLimit:6,worldQuery:'',worldKindFilter:'all',worldSourceFilter:'all',worldStatusFilter:'all',graphFocus:'',graphTypeFilter:'all',editWorldEntry:null,worldCardDraft:null,worldHistoryOpen:false,sceneContextEditorOpen:false,sceneContractOpen:false,manuscriptDirty:false,manuscriptSceneId:'',manuscriptDraftBlocks:null,manuscriptDirtyUrl:'',manuscriptBlockCounter:0,sceneTextSelection:null,sceneDiffSelections:{},structureDraft:null,structureDirty:false,conversationThreadId:'',renamingThreadId:'',workAgentExpanded:false,mobileThreadOpen:false,composerAttachmentIds:[],composerPrefill:'',composerImportMode:'',composerImportId:'',composerImportPreview:null,composerImportStatus:'',composerImportError:'',threadRailQuery:'',threadRailSearchOpen:false,assetSurfaceOpen:false,assetUpload:null,assetCatalog:{scope:'custom',kind:'characters',query:'',items:[],total:0,offset:0,limit:36,hasMore:false,loading:false,error:null,requestId:0},decisionCardDismissedFor:'',decisionCardDockClosed:false,decisionCardWaitingForAgent:false,decisionCardSelections:{},decisionCardCustomDrafts:{},decisionCardSubmitting:false,staleProposalIds:new Set(),firstUseOpen:false,lastError:null,feedbackError:null,sceneRecovery:null};
 let lastRenderedSurfaceKey='';
 
@@ -4835,8 +4838,7 @@ const SettingsController = {
           return result.data || result;
         };
         try {
-          await requestProduction('/test');
-          await requestProduction('');
+          await requestProduction(':activate');
           directionApplied = true;
         } catch (error) {
           if (writingApplied) {

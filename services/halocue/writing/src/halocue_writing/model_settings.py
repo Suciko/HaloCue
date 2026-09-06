@@ -6,6 +6,8 @@ import hashlib
 import json
 import os
 import time
+import threading
+import uuid
 import urllib.error
 import urllib.request
 from ctypes import wintypes
@@ -15,6 +17,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .errors import DomainError
+from .provider_response import validate_completion
 
 
 PROVIDERS = {"openai", "anthropic"}
@@ -222,6 +225,52 @@ class WritingModelSettings:
         self.data_dir = data_dir
         self.path = data_dir / "writing-model.json"
         self.secret = ModelSecretStore(data_dir / "secrets" / "writing-model.dpapi")
+        self._activation_lock = threading.RLock()
+
+    def _secret_store(self, config: dict) -> ModelSecretStore:
+        reference = config.get("credential_revision")
+        if not reference:
+            return self.secret
+        if not isinstance(reference, str) or len(reference) != 32 or any(c not in "0123456789abcdef" for c in reference):
+            raise DomainError("model_settings_corrupted", "模型密钥版本无效。", status=500)
+        return ModelSecretStore(self.path.parent / "secrets" / f"writing-{reference}.dpapi")
+
+    def resolve_candidate(self, payload: dict | None = None, *, require_model: bool = True) -> dict:
+        requested = dict(payload or {})
+        stored = self._load_public()
+        candidate = {**stored, **requested}
+        provider = str(candidate.get("provider") or "openai").strip().lower()
+        default_url = "https://api.anthropic.com/v1" if provider == "anthropic" else "https://api.openai.com/v1"
+        candidate["provider"] = provider
+        raw_url = requested.get("base_url") if "base_url" in requested else (
+            stored.get("base_url") if provider == stored.get("provider", "openai") else default_url
+        )
+        candidate["base_url"] = self.normalize_url(str(raw_url or default_url))
+        old_provider = str(stored.get("provider") or "openai")
+        old_default = "https://api.anthropic.com/v1" if old_provider == "anthropic" else "https://api.openai.com/v1"
+        same_endpoint = provider == old_provider and candidate["base_url"] == self.normalize_url(str(stored.get("base_url") or old_default))
+        key = str(requested.get("api_key") or "").strip()
+        env_name = str(requested.get("api_key_env") or "").strip()
+        if key and env_name and key != os.environ.get(env_name, ""):
+            env_name = ""
+        if not key and env_name:
+            key = os.environ.get(env_name, "")
+        if not key and same_endpoint and not env_name and requested.get("clear_secret") is not True:
+            key = self._secret_store(stored).load() or ""
+            if not key:
+                env_name = str(stored.get("api_key_env") or "")
+                key = os.environ.get(env_name, "")
+        candidate["api_key"] = key
+        candidate["api_key_env"] = env_name
+        parsed = urlparse(candidate["base_url"])
+        local = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+        if not key and not local:
+            raise DomainError("model_secret_required", "请为当前接口提供 API Key；切换接口不会沿用旧密钥。", status=409)
+        if require_model:
+            return {**self._validated(candidate), "api_key": key}
+        if provider not in PROVIDERS:
+            raise DomainError("invalid_model_provider", "模型协议无效。")
+        return candidate
 
     def _load_public(self) -> dict[str, Any]:
         if not self.path.is_file():
@@ -247,6 +296,7 @@ class WritingModelSettings:
                 "reasoning_mode",
                 "input_cost_per_million",
                 "output_cost_per_million",
+                "credential_revision",
             )
         }
         encoded = json.dumps(
@@ -282,11 +332,28 @@ class WritingModelSettings:
         if not cleaned:
             return ""
         parsed = urlparse(cleaned)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise DomainError("invalid_model_base_url", "模型接口地址必须是有效的 HTTP(S) URL")
         if parsed.username or parsed.password:
             raise DomainError("invalid_model_base_url", "模型接口地址不能包含账号或密码")
-        return cleaned
+        if parsed.query or parsed.fragment:
+            raise DomainError("invalid_model_base_url", "模型接口地址不能包含查询参数或片段")
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise DomainError("invalid_model_base_url", "模型接口端口无效") from exc
+        host = parsed.hostname.lower()
+        host = f"[{host}]" if ":" in host else host
+        if port and port != (443 if parsed.scheme == "https" else 80):
+            host += f":{port}"
+        path = parsed.path.rstrip("/")
+        for suffix in ("/chat/completions", "/messages", "/models"):
+            if path.endswith(suffix):
+                path = path[:-len(suffix)]
+                break
+        if not path and host == "api.anthropic.com":
+            path = "/v1"
+        return f"{parsed.scheme}://{host}{path}"
 
     @classmethod
     def _validated(cls, payload: dict[str, Any]) -> dict[str, Any]:
@@ -336,13 +403,13 @@ class WritingModelSettings:
         env_name = str(value.get("api_key_env") or "")
         secret_source = (
             "dpapi"
-            if self.secret.exists()
+            if self._secret_store(value).exists()
             else "environment"
             if env_name and bool(os.environ.get(env_name))
             else "none"
         )
         # Ollama / local can be configured without key
-        is_local = bool(value.get("preset_id") == "ollama" or "127.0.0.1" in str(value.get("base_url", "")))
+        is_local = urlparse(str(value.get("base_url") or "")).hostname in {"localhost", "127.0.0.1", "::1"}
         configured = bool(value.get("provider") and value.get("model") and (secret_source != "none" or is_local))
         if value:
             value = {
@@ -371,20 +438,16 @@ class WritingModelSettings:
         *,
         connection_test: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        public_cfg = self._validated(payload)
+        with self._activation_lock:
+            return self._save_candidate(self.resolve_candidate(payload), connection_test=connection_test)
+
+    def _save_candidate(self, candidate: dict, *, connection_test: dict | None = None) -> dict:
+        public_cfg = self._validated(candidate)
         previous = self._load_public()
-        api_key = str(payload.get("api_key") or "").strip()
-        if payload.get("clear_secret") is True:
-            self.secret.clear()
-        env_secret = bool(
-            public_cfg.get("api_key_env")
-            and os.environ.get(str(public_cfg["api_key_env"]))
-        )
-        is_local = bool(public_cfg.get("preset_id") == "ollama" or "127.0.0.1" in str(public_cfg.get("base_url", "")))
-        if not api_key and not self.secret.exists() and not env_secret and not is_local:
-            raise DomainError("model_secret_required", "必须提供 API Key 或已设置的密钥环境变量")
-        if api_key:
-            self.secret.save(api_key)
+        api_key = candidate["api_key"]
+        public_cfg["credential_revision"] = uuid.uuid4().hex
+        if api_key and not public_cfg["api_key_env"]:
+            self._secret_store(public_cfg).save(api_key)
         public_cfg["settings_version"] = max(0, int(previous.get("settings_version") or 0)) + 1
         public_cfg["config_revision"] = f"model-config-{public_cfg['settings_version']}"
         public_cfg["config_digest"] = self._config_digest(public_cfg)
@@ -404,25 +467,33 @@ class WritingModelSettings:
                 "last_test_latency_ms": previous.get("last_test_latency_ms"),
             })
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_suffix(".json.tmp")
+        temporary = self.path.with_suffix(f".{uuid.uuid4().hex}.tmp")
         temporary.write_text(
             json.dumps(public_cfg, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         os.replace(temporary, self.path)
+        # Keep the legacy inspection path synchronized for older local tooling;
+        # runtime resolution remains bound to credential_revision above.
+        if api_key and not public_cfg["api_key_env"]:
+            try:
+                self.secret.save(api_key)
+            except Exception:
+                pass
         return self.public()
 
     def activate(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Test the exact candidate first; only a passing candidate is persisted."""
-        self._validated(payload)
-        tested = self.test_connection(payload)
-        saved = self.save(payload, connection_test=tested)
-        return {**saved, "test": tested}
+        with self._activation_lock:
+            candidate = self.resolve_candidate(payload)
+            tested = self.test_connection(candidate)
+            saved = self._save_candidate(candidate, connection_test=tested)
+            return {**saved, "test": tested}
 
     def get_credentials(self) -> dict[str, Any]:
         public_cfg = self._load_public()
         if not public_cfg:
             return {}
-        secret = self.secret.load()
+        secret = self._secret_store(public_cfg).load()
         if not secret and public_cfg.get("api_key_env"):
             secret = os.environ.get(str(public_cfg["api_key_env"]))
         return {
@@ -436,16 +507,10 @@ class WritingModelSettings:
         return provider, creds
 
     def fetch_models(self, payload: dict[str, Any] | None = None) -> list[str]:
-        req_data = payload or {}
+        req_data = self.resolve_candidate(payload, require_model=False)
         provider = str(req_data.get("provider") or "").strip().lower()
         base_url = str(req_data.get("base_url") or "").strip().rstrip("/")
         api_key = str(req_data.get("api_key") or "").strip()
-
-        # fallback to stored
-        stored = self.get_credentials()
-        provider = provider or stored.get("provider", "openai")
-        base_url = base_url or stored.get("base_url", "")
-        api_key = api_key or stored.get("api_key", "")
 
         if provider == "anthropic":
             # Anthropic models are standard, return curated list
@@ -486,17 +551,11 @@ class WritingModelSettings:
             ) from exc
 
     def test_connection(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        req_data = payload or {}
+        req_data = self.resolve_candidate(payload)
         provider = str(req_data.get("provider") or "").strip().lower()
         base_url = str(req_data.get("base_url") or "").strip().rstrip("/")
         model = str(req_data.get("model") or "").strip()
         api_key = str(req_data.get("api_key") or "").strip()
-
-        stored = self.get_credentials()
-        provider = provider or stored.get("provider", "openai")
-        base_url = base_url or stored.get("base_url", "")
-        model = model or stored.get("model", "")
-        api_key = api_key or stored.get("api_key", "")
 
         if not model:
             raise DomainError("model_required", "请先选择或填写要测试的模型名称")
@@ -509,7 +568,7 @@ class WritingModelSettings:
                 endpoint = f"{base_url or 'https://api.anthropic.com/v1'}/messages"
                 req_body = json.dumps({
                     "model": model,
-                    "max_tokens": 10,
+                    "max_tokens": 256,
                     "messages": [{"role": "user", "content": "Ping"}],
                 }).encode("utf-8")
                 req = urllib.request.Request(endpoint, data=req_body, method="POST")
@@ -520,7 +579,7 @@ class WritingModelSettings:
                 endpoint = f"{base_url or 'https://api.openai.com/v1'}/chat/completions"
                 req_body = json.dumps({
                     "model": model,
-                    "max_tokens": 10,
+                    "max_tokens": 256,
                     "messages": [{"role": "user", "content": "Ping"}],
                 }).encode("utf-8")
                 req = urllib.request.Request(endpoint, data=req_body, method="POST")
@@ -530,6 +589,10 @@ class WritingModelSettings:
 
             with urllib.request.urlopen(req, timeout=15) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
+                validate_completion(body, provider)
+                content = body.get("content") if provider == "anthropic" else body["choices"][0]["message"].get("content")
+                if not content:
+                    raise DomainError("provider_output_invalid", "连接测试没有返回有效内容。", status=502)
                 latency_ms = round((time.monotonic() - started) * 1000)
                 diagnostic_steps.append({"step": "network", "status": "passed", "label": "接口网络可达"})
                 diagnostic_steps.append({"step": "auth", "status": "passed", "label": "鉴权有效"})
@@ -570,6 +633,8 @@ class WritingModelSettings:
                 status=502,
                 details={"diagnostics": diagnostic_steps, "raw": err_body[:300]},
             ) from exc
+        except DomainError:
+            raise
         except Exception as exc:
             diagnostic_steps.append({
                 "step": "error",

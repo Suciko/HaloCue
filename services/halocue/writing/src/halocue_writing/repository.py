@@ -84,6 +84,30 @@ class Repository:
           stable_order_key TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL,
           version INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS source_versions (
+          id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works(id),
+          parent_version_id TEXT, mode TEXT NOT NULL, source_digest TEXT NOT NULL,
+          original_uri TEXT NOT NULL, normalized_uri TEXT NOT NULL,
+          document_json TEXT NOT NULL, changes_json TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS adaptations (
+          id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works(id),
+          source_version_id TEXT NOT NULL, contract_version TEXT NOT NULL,
+          status TEXT NOT NULL, selected_chapter_ids_json TEXT NOT NULL,
+          plan_json TEXT NOT NULL, budget_json TEXT NOT NULL,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS adaptation_chapters (
+          id TEXT PRIMARY KEY, adaptation_id TEXT NOT NULL REFERENCES adaptations(id),
+          source_chapter_id TEXT NOT NULL, ordinal INTEGER NOT NULL, status TEXT NOT NULL,
+          candidate_json TEXT NOT NULL, dependency_json TEXT NOT NULL,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS source_versions_work ON source_versions(work_id,created_at);
+        CREATE TABLE IF NOT EXISTS work_sources (
+          work_id TEXT PRIMARY KEY REFERENCES works(id),
+          current_version_id TEXT NOT NULL REFERENCES source_versions(id)
+        );
         CREATE TABLE IF NOT EXISTS chapters (
           id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works(id),
           volume_id TEXT NOT NULL REFERENCES volumes(id),

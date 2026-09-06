@@ -4,10 +4,13 @@
   const state = {
     currentRun: null,
     currentDraft: null,
+    currentJob: null,
+    directionProfile: "standard",
     gates: null,
     capabilities: null,
     selectedCard: null,
     selectedSpeaker: null,
+    teacherMappingContext: null,
     characterCatalog: [],
     currentStage: "source",
     filter: "all",
@@ -25,19 +28,27 @@
     characterCatalogRunId: null,
     performancePreview: null,
     previewIndex: 0,
+    previewCompleted: false,
     busy: false,
     sourceMode: "writing",
     sourceFileName: null,
     upstreamRelease: null,
     aaEnvironment: null,
     spineCli: null,
+    jobActionPending: null,
   };
+  const IS_STANDALONE_PRODUCTION = location.port === "8892";
   const API_ROOT = location.port === "8891"
     ? "http://127.0.0.1:8892/api/v1"
     : "/api/v1";
+  const DEFAULT_API_TIMEOUT_MS = 30000;
+  const JOB_POLL_TIMEOUT_MS = 15000;
+  const TRANSIENT_JOB_POLL_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 
   let pendingConfirmation = null;
   let confirmationOpener = null;
+  let busyDepth = 0;
+  const jobPolls = new Map();
 
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -93,6 +104,17 @@
     try { localStorage.setItem("halocue.layoutMode", selectedLayoutMode()); } catch (_) { /* unavailable */ }
   }
 
+  function savedRunId() {
+    try { return localStorage.getItem("halocue.currentRunId") || ""; } catch (_) { return ""; }
+  }
+
+  function rememberRun(run) {
+    try {
+      if (run?.run_id) localStorage.setItem("halocue.currentRunId", run.run_id);
+      else localStorage.removeItem("halocue.currentRunId");
+    } catch (_) { /* unavailable */ }
+  }
+
   function toast(message, tone = "normal") {
     const element = $("#toast");
     const embeddedShell = document.querySelector(".embedded-production-shell");
@@ -108,29 +130,71 @@
   }
 
   async function api(path, options = {}) {
-    const response = await fetch(`${API_ROOT}${path}`, {
-      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-      ...options,
-    });
-    let payload = {};
-    try { payload = await response.json(); } catch (_) { /* empty response */ }
-    if (!response.ok || payload.ok === false) {
-      const error = payload.error || { code: "request_failed", message: `请求失败（${response.status}）`, details: {} };
-      const failure = new Error(error.message || error.code);
-      failure.code = error.code;
-      failure.details = error.details || {};
-      failure.status = response.status;
-      throw failure;
+    const {
+      timeoutMs = DEFAULT_API_TIMEOUT_MS,
+      signal: upstreamSignal,
+      headers: optionHeaders,
+      ...fetchOptions
+    } = options;
+    const controller = new AbortController();
+    let timedOut = false;
+    const abortFromUpstream = () => controller.abort(upstreamSignal?.reason);
+    if (upstreamSignal) upstreamSignal.addEventListener("abort", abortFromUpstream, { once: true });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, Math.max(1, Number(timeoutMs) || DEFAULT_API_TIMEOUT_MS));
+    try {
+      const response = await fetch(`${API_ROOT}${path}`, {
+        headers: { "Content-Type": "application/json", ...(optionHeaders || {}) },
+        ...fetchOptions,
+        signal: controller.signal,
+      });
+      let payload = {};
+      try { payload = await response.json(); } catch (_) { /* empty response */ }
+      if (!response.ok || payload.ok === false) {
+        const error = payload.error || { code: "request_failed", message: `请求失败（${response.status}）`, details: {} };
+        const failure = new Error(error.message || error.code);
+        failure.code = error.code;
+        failure.details = error.details || {};
+        failure.status = response.status;
+        throw failure;
+      }
+      return payload;
+    } catch (error) {
+      if (timedOut && error?.name === "AbortError") {
+        const failure = new Error("请求等待超时，后台任务可能仍在运行，正在重新获取状态。");
+        failure.code = "request_timeout";
+        failure.status = 0;
+        throw failure;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      if (upstreamSignal) upstreamSignal.removeEventListener("abort", abortFromUpstream);
     }
-    return payload;
   }
 
   function setBusy(value) {
-    state.busy = value;
-    document.body.classList.toggle("is-busy", value);
-    $$('button[type="submit"], button.primary').forEach((button) => {
-      if (button.id !== "compileButton" || !value) button.disabled = value || button.dataset.locked === "true";
+    busyDepth = value ? busyDepth + 1 : Math.max(0, busyDepth - 1);
+    const busy = busyDepth > 0;
+    if (busy === state.busy) return;
+    state.busy = busy;
+    document.body.classList.toggle("is-busy", busy);
+    syncWorkflowControlStates();
+    if (busy) {
+      $$('button:not([disabled])').forEach((button) => {
+        button.dataset.busyDisabled = "true";
+        button.disabled = true;
+      });
+      return;
+    }
+    $$('button[data-busy-disabled="true"]').forEach((button) => {
+      delete button.dataset.busyDisabled;
+      button.disabled = false;
     });
+    syncWorkflowControlStates();
+    renderGenerationJob();
   }
 
   function handleError(error) {
@@ -145,6 +209,18 @@
   async function refreshCapabilities() {
     const [health, caps] = await Promise.all([api("/health"), api("/capabilities")]);
     state.capabilities = caps.capabilities;
+    const profiles = state.capabilities.direction_profiles;
+    const allowedProfiles = new Set((profiles?.items || [{ id: "standard" }]).map(item => item.id));
+    const defaultProfile = profiles?.default_new_project_ui || "standard";
+    $$('#sourceDirectionProfile option, #directionProfile option').forEach((option) => {
+      option.disabled = !allowedProfiles.has(option.value);
+      if (option.parentElement.id === "sourceDirectionProfile") {
+        option.defaultSelected = option.value === defaultProfile;
+      }
+    });
+    if (!allowedProfiles.has($("#sourceDirectionProfile").value)) {
+      $("#sourceDirectionProfile").value = defaultProfile;
+    }
     const status = $("#serviceState");
     status.textContent = `${health.service} · ${health.version}`;
     status.classList.add("online");
@@ -198,8 +274,10 @@
       ? speakers.filter((speaker) => mappingFor(speaker).kind === "unset").length
       : 0;
     const mappingDone = !!run && missingMappings === 0;
-    const generationDone = mappingDone && !!draft
-      && !["generating_direction", "direction_failed"].includes(run.state);
+    const directionRequired = run?.source_summary?.generation_mode === "ai_direction";
+    const generationDone = mappingDone && !!draft && (
+      !directionRequired || !!run.last_direction_generation_id
+    );
     const reviewDone = run?.state === "installed";
     const done = {
       source: !!run,
@@ -214,7 +292,15 @@
       recommendedLabel = `处理 ${missingMappings} 位未映射说话者`;
     } else if (run && !generationDone) {
       recommendedStage = "generation";
-      recommendedLabel = run.state === "generating_direction" ? "查看演出生成状态" : "完成生成准备";
+      recommendedLabel = run.state === "generating_direction"
+        ? "查看演出生成状态"
+        : run.state === "direction_paused"
+          ? "继续未完成的演出生成"
+          : ["direction_failed", "direction_interrupted"].includes(run.state)
+            ? "查看错误并继续生成"
+            : run.state === "direction_cancelled"
+              ? "继续或重新生成演出"
+              : "完成生成准备";
     } else if (run && !reviewDone) {
       recommendedStage = "review";
       recommendedLabel = state.gates?.compile?.passed ? "编译并安装 AA 工程" : "继续逐卡审查";
@@ -237,6 +323,14 @@
     const snapshot = workflowSnapshot();
     if (["generation", "review"].includes(stage) && snapshot.missingMappings > 0) {
       return { allowed: false, reason: `请先完成 ${snapshot.missingMappings} 位说话者的角色映射。` };
+    }
+    if (stage === "review" && !snapshot.done.generation) {
+      return {
+        allowed: false,
+        reason: state.currentRun.state === "generating_direction"
+          ? "演出仍在生成；请先等待完成，或在生成页暂停/结束任务。"
+          : "演出生成尚未完成，请先在生成页继续或重新开始。",
+      };
     }
     if (stage === "review" && !state.currentDraft) {
       return { allowed: false, reason: "草稿还没有载入，请先完成生成准备。" };
@@ -285,7 +379,9 @@
     const labels = {
       waiting_for_review: "等待审查", ready_to_compile: "可以编译", compiling: "正在编译",
       compiled: "编译完成", installed: "已安装", generating_direction: "正在生成演出",
-      direction_failed: "演出生成失败", compile_failed: "编译失败"
+      direction_failed: "演出生成失败", direction_paused: "演出已暂停",
+      direction_cancelled: "演出已结束", direction_interrupted: "演出生成中断",
+      compile_failed: "编译失败", compile_interrupted: "编译中断"
     };
     $("#sideState").textContent = run ? (labels[run.state] || run.state) : "等待剧本";
     $("#sideDetail").textContent = run
@@ -305,8 +401,10 @@
     draft_missing: "演出草稿尚未建立",
     blocking_diagnostics: "草稿仍有阻断问题",
     pending_review: "仍有卡片等待审查",
+    unresolved_issues: "草稿仍有未解决警告",
     compile_not_configured: "编译环境尚未配置",
     build_missing: "尚未生成可安装构建",
+    build_stale: "当前构建来自旧草稿",
     aa_workspace_not_configured: "AA 工作区尚未配置",
   };
 
@@ -336,7 +434,11 @@
       installed: "已经安装",
       generating_direction: "正在生成演出",
       direction_failed: "演出生成失败",
+      direction_paused: "演出已暂停",
+      direction_cancelled: "演出已结束",
+      direction_interrupted: "演出生成中断",
       compile_failed: "编译失败",
+      compile_interrupted: "编译中断",
     };
     const sourceOrigin = origin
       ? `<section class="overview-origin from-writing" aria-label="写作端交接信息">
@@ -365,18 +467,70 @@
     if (!dialog.open) dialog.showModal();
   }
 
+  function adoptRunResult(result, { replaceJob = false } = {}) {
+    const selectedId = state.selectedCard?.card_id;
+    const previousRun = state.currentRun;
+    state.currentRun = result.run || state.currentRun;
+    if (previousRun?.run_id !== state.currentRun?.run_id
+      || previousRun?.source_summary?.direction_profile !== state.currentRun?.source_summary?.direction_profile) {
+      state.directionProfile = state.currentRun?.source_summary?.direction_profile === "conservative"
+        ? "conservative" : "standard";
+    }
+    if (Object.prototype.hasOwnProperty.call(result, "draft")) state.currentDraft = result.draft;
+    if (Object.prototype.hasOwnProperty.call(result, "gates")) state.gates = result.gates;
+    if (replaceJob || Object.prototype.hasOwnProperty.call(result, "active_job")) {
+      state.currentJob = result.active_job || result.last_job || null;
+    }
+    if (state.currentJob?.kind === "direction_generation" && jobIsActive(state.currentJob)) {
+      state.directionProfile = directionJobProfile();
+    }
+    state.selectedCard = state.currentDraft?.cards?.find((card) => card.card_id === selectedId) || null;
+    rememberRun(state.currentRun);
+  }
+
+  function trackActiveRunJob(result) {
+    const job = result?.active_job;
+    if (!job || ["succeeded", "failed", "interrupted", "paused", "cancelled", "superseded"].includes(job.state)) return;
+    pollJob(job.job_id, job.label || "后台任务").catch(handleError);
+  }
+
+  function currentRunOpeningStage() {
+    const snapshot = workflowSnapshot();
+    if (snapshot.missingMappings) return "mapping";
+    if (!snapshot.done.generation) return "generation";
+    return "review";
+  }
+
+  async function restoreSavedRun() {
+    const runId = savedRunId();
+    if (!runId) return false;
+    try {
+      const result = await api(`/production-runs/${encodeURIComponent(runId)}`);
+      adoptRunResult(result, { replaceJob: true });
+      await loadTaskPreflight();
+      updateShell();
+      showStage(currentRunOpeningStage(), { force: true });
+      trackActiveRunJob(result);
+      return true;
+    } catch (error) {
+      if (error.code === "run_not_found" || error.status === 404) {
+        rememberRun(null);
+        return false;
+      }
+      throw error;
+    }
+  }
+
   async function refreshCurrentRun() {
     if (!state.currentRun?.run_id) return;
     const result = await api(`/production-runs/${encodeURIComponent(state.currentRun.run_id)}`);
-    state.currentRun = result.run;
-    state.currentDraft = result.draft;
-    state.gates = result.gates;
-    state.selectedCard = state.currentDraft?.cards?.find((card) => card.card_id === state.selectedCard?.card_id) || null;
+    adoptRunResult(result, { replaceJob: true });
     await loadTaskPreflight();
     updateShell();
     renderMapping();
     renderGeneration();
     renderReview();
+    trackActiveRunJob(result);
   }
 
   async function loadRuns() {
@@ -391,7 +545,7 @@
     try {
       const result = await api("/production-runs");
       if (!result.items?.length) { list.innerHTML = '<p class="empty">暂无制作任务</p>'; return; }
-      const stateLabels = { waiting_for_review: "等待审查", ready_to_compile: "可以编译", compiling: "正在编译", compiled: "编译完成", installed: "已安装", generating_direction: "正在生成演出", direction_failed: "演出生成失败", compile_failed: "编译失败" };
+      const stateLabels = { waiting_for_review: "等待审查", ready_to_compile: "可以编译", compiling: "正在编译", compiled: "编译完成", installed: "已安装", generating_direction: "正在生成演出", direction_failed: "演出生成失败", direction_paused: "演出已暂停", direction_cancelled: "演出已结束", direction_interrupted: "演出生成中断", compile_failed: "编译失败", compile_interrupted: "编译中断" };
       list.innerHTML = result.items.slice(0, 8).map((run) => `<button class="run-row" data-run-id="${esc(run.run_id)}">
         <span><strong>${esc(run.project)}</strong><small>${esc(stateLabels[run.state] || "处理中")}</small></span><b>打开</b></button>`).join("");
       $$("[data-run-id]").forEach((button) => button.addEventListener("click", () => openRun(button.dataset.runId)));
@@ -414,11 +568,11 @@
   async function openRun(runId) {
     try {
       const result = await api(`/production-runs/${encodeURIComponent(runId)}`);
-      state.currentRun = result.run; state.currentDraft = result.draft; state.gates = result.gates;
+      adoptRunResult(result, { replaceJob: true });
       await loadTaskPreflight();
       updateShell();
-      const next = result.draft?.review_ready ? "review" : "mapping";
-      showStage(next, { force: true });
+      showStage(currentRunOpeningStage(), { force: true });
+      trackActiveRunJob(result);
     } catch (error) { handleError(error); }
   }
 
@@ -432,6 +586,7 @@
         project: $("#projectName").value.trim(),
         source: sourcePayload(),
         generation_mode: $('input[name="generationMode"]:checked')?.value || "format_only",
+        direction_profile: $("#sourceDirectionProfile").value,
       };
     } catch (error) {
       handleError(error);
@@ -443,11 +598,12 @@
     setBusy(true);
     try {
       const result = await api("/production-runs", { method: "POST", body: JSON.stringify(payload) });
-      state.currentRun = result.run; state.currentDraft = result.draft; state.gates = result.gates;
+      adoptRunResult(result, { replaceJob: true });
       await loadTaskPreflight();
       updateShell(); await loadRuns(); showStage("mapping", { force: true });
       toast("制作任务已建立，开始确认角色映射。");
       form.reset();
+      updateGenerationModeUi();
       state.sourceFileName = null;
       state.upstreamRelease = null;
       $("#activeSourceBadge")?.classList.add("hidden");
@@ -478,6 +634,10 @@
   async function loadWritingWorksAndReleases() {
     const grid = $("#writingReleasesGrid");
     if (!grid) return;
+    if (IS_STANDALONE_PRODUCTION) {
+      grid.innerHTML = '<div class="writing-releases-empty"><p>当前处于独立 AA 制作模式，可通过上方“从本机文件导入”直接载入剧本。</p></div>';
+      return;
+    }
     try {
       grid.innerHTML = '<p class="empty">正在获取写作工作台作品与定稿...</p>';
       const response = await fetch("/api/v1/works", { headers: { "Accept": "application/json" } });
@@ -732,6 +892,7 @@
 
   function updateGenerationModeUi() {
     const selected = $('input[name="generationMode"]:checked')?.value || "format_only";
+    $("#sourceDirectionProfileControl")?.classList.toggle("hidden", selected !== "ai_direction");
     const aiReady = state.capabilities?.generation_modes?.ai_direction?.state === "available";
     const notice = $("#generationModeNotice");
     const button = $("#configureGenerationModel");
@@ -786,6 +947,7 @@
 
   function mappingLabel(mapping) {
     if (!mapping || mapping.kind === "unset") return "尚未映射";
+    if (mapping.role === "teacher") return `${mapping.name || "老师"}${mapping.club ? ` / ${mapping.club}` : ""}`;
     if (mapping.kind === "narrator") return "旁白（不显示角色）";
     if (mapping.kind === "voice") return mapping.display_name || "无立绘角色";
     return `${mapping.name || mapping.display_name || mapping.id || "已选择"}${mapping.spine ? ` · ${mapping.spine}` : ""}`;
@@ -793,6 +955,7 @@
 
   function mappingStatusLabel(mapping) {
     if (!mapping || mapping.kind === "unset") return "尚未映射";
+    if (mapping.role === "teacher") return `老师 · ${mappingLabel(mapping)}`;
     if (mapping.kind === "narrator") return "旁白";
     if (mapping.kind === "voice") return "无立绘角色";
     return mapping.name || "已选立绘角色";
@@ -817,6 +980,7 @@
 
   function mappingEvidence(mapping) {
     if (!mapping || mapping.kind === "unset") return ["尚未选择角色资源"];
+    if (mapping.role === "teacher") return ["老师身份已登记", "无立绘，不占用站位"];
     if (mapping.kind === "narrator") return ["旁白，不使用角色服装"];
     if (mapping.kind === "voice") return ["语音角色，不显示角色立绘"];
     const resource = mappingResource(mapping) || mapping;
@@ -1008,7 +1172,7 @@
     $("#mappingCount").textContent = `${speakers.length} 位说话者`;
     const missing = speakers.filter((speaker) => mappingFor(speaker).kind === "unset").length;
     $("#mappingStatus").textContent = missing ? `${missing} 位说话者尚未映射` : "所有说话者已经有处理方式，可以继续。";
-    $("#mappingContinue").disabled = missing > 0;
+    $("#mappingContinue").disabled = state.busy || missing > 0;
     $("#mappingList").innerHTML = speakers.length ? speakers.map((speaker) => {
       const mapping = mappingFor(speaker);
       const resource = mappingResource(mapping);
@@ -1026,11 +1190,126 @@
 
   async function openMapping(speaker) {
     state.selectedSpeaker = speaker;
+    state.teacherMappingContext = {
+      runId: state.currentRun.run_id, speaker, draftVersion: state.currentDraft.draft_version,
+    };
     $("#mappingDialogTitle").textContent = `为“${speaker}”选择映射`;
     $("#characterSearch").value = "";
     $("#mappingDialogStatus").textContent = "下面只显示本任务创建时冻结的角色；选择后只会更新当前说话者。";
+    const capability = teacherCapability();
+    $("#chooseTeacherIdentity").hidden = !capability;
+    $("#teacherPreset").innerHTML = (capability?.presets || []).map((preset) =>
+      `<option value="${esc(preset.id)}">${esc(preset.id === "custom" ? "自定义" : `${preset.display_name} / ${preset.organization}`)}</option>`).join("");
+    const identity = state.currentDraft.cast?.teacher_identity;
+    $("#teacherPreset").value = identity?.preset_id || "teacher_shale";
+    if (!$("#teacherPreset").value) $("#teacherPreset").selectedIndex = 0;
+    $("#teacherDisplayName").value = identity?.display_name || "";
+    $("#teacherDisplayName").setCustomValidity("");
+    $("#teacherOrganization").value = identity?.organization || "";
+    const presentation = teacherPresentationMode();
+    $$('#teacherPresentationControl input').forEach((input) => { input.checked = input.value === presentation; });
+    $("#teacherPresentationControl").classList.toggle("hidden", !teacherPresentationCapability());
+    showTeacherIdentity(!!capability && mappingFor(speaker).role === "teacher");
     $("#mappingDialog").showModal();
     await searchCharacters("");
+  }
+
+  function teacherCapability() {
+    const capability = state.capabilities?.teacher_identity;
+    return capability?.schema_version === "teacher-identity/1.0"
+      && capability.presentation === "slot_zero" && Array.isArray(capability.presets)
+      && capability.presets.length ? capability : null;
+  }
+
+  function teacherPresentationCapability() {
+    const capability = state.capabilities?.teacher_presentation;
+    const modes = Array.isArray(capability?.modes)
+      ? capability.modes.map((mode) => typeof mode === "string" ? mode : mode?.id) : [];
+    return capability?.state === "available" && capability.schema_version === "teacher-presentation/1.0"
+      && ["slot_zero", "sel_single"].every((mode) => modes.includes(mode)) ? capability : null;
+  }
+
+  function teacherPresentationMode() {
+    return state.currentDraft?.cast?.teacher_presentation?.mode || "slot_zero";
+  }
+
+  function teacherPresentationBlocked() {
+    const stored = state.currentDraft?.cast?.teacher_presentation;
+    return !!stored && (stored.schema_version !== "teacher-presentation/1.0"
+      || !["slot_zero", "sel_single"].includes(stored.mode)
+      || (stored.mode !== "slot_zero" && !teacherPresentationCapability()));
+  }
+
+  function showTeacherIdentity(show) {
+    const visible = show && !!teacherCapability();
+    $("#teacherIdentityForm").classList.toggle("hidden", !visible);
+    $("#characterResults").classList.toggle("hidden", visible);
+    $("#characterSearch").classList.toggle("hidden", visible);
+    $("#chooseTeacherIdentity").setAttribute("aria-expanded", String(visible));
+    $("#mappingDialogStatus").textContent = visible ? "" : "选择后只会更新当前说话者的映射。";
+    updateTeacherPreset();
+  }
+
+  function updateTeacherPreset() {
+    const custom = $("#teacherPreset").value === "custom";
+    const blocked = teacherPresentationBlocked();
+    $("#teacherCustomFields").classList.toggle("hidden", !custom);
+    $("#teacherPreset").disabled = blocked;
+    $("#teacherDisplayName").disabled = !custom || blocked;
+    $("#teacherOrganization").disabled = !custom || blocked;
+    $("#saveTeacherIdentity").disabled = blocked || state.busy;
+    $$('#teacherPresentationControl input').forEach((input) => { input.disabled = blocked; });
+    const identity = state.currentDraft?.cast?.teacher_identity;
+    $("#saveTeacherIdentity").textContent = identity ? "保存老师身份" : "创建并绑定老师";
+    const aliases = Object.entries(state.currentDraft?.cast?.cast || {})
+      .filter(([, mapping]) => mapping.role === "teacher").map(([speaker]) => speaker);
+    $("#teacherIdentityScope").textContent = blocked
+      ? `当前已保存${teacherPresentationMode() === "sel_single" ? " Sel 回答" : "的老师呈现配置"}，此后端不支持修改；已有配置保持不变。`
+      : aliases.length
+        ? `本任务共用同一老师身份，已绑定：${aliases.join("、")}。名称、组织和台词呈现修改将同步生效。`
+        : `将为“${state.selectedSpeaker}”登记无立绘老师身份。`;
+  }
+
+  async function saveTeacherIdentity(event) {
+    event.preventDefault();
+    if (!teacherCapability() || teacherPresentationBlocked() || state.busy || pendingConfirmation) return;
+    const mapping = {
+      kind: "teacher", schema_version: "teacher-identity/1.0", preset_id: $("#teacherPreset").value,
+    };
+    if (teacherPresentationCapability()) {
+      mapping.presentation = {
+        schema_version: "teacher-presentation/1.0",
+        mode: $('#teacherPresentationControl input:checked')?.value,
+      };
+    }
+    if (mapping.preset_id === "custom") {
+      mapping.display_name = $("#teacherDisplayName").value.trim();
+      mapping.organization = $("#teacherOrganization").value.trim();
+      if (!mapping.display_name) {
+        $("#teacherDisplayName").setCustomValidity("请输入老师名称。");
+        $("#teacherDisplayName").reportValidity();
+        return;
+      }
+    }
+    const identity = state.currentDraft?.cast?.teacher_identity;
+    const preset = teacherCapability().presets.find((item) => item.id === mapping.preset_id);
+    const displayName = mapping.preset_id === "custom" ? mapping.display_name : preset?.display_name;
+    const organization = mapping.preset_id === "custom" ? mapping.organization : preset?.organization;
+    const aliases = Object.entries(state.currentDraft?.cast?.cast || {})
+      .filter(([, item]) => item.role === "teacher").map(([speaker]) => speaker);
+    const identityChanged = identity && (identity.display_name !== displayName || identity.organization !== organization);
+    const presentationChanged = mapping.presentation && mapping.presentation.mode !== teacherPresentationMode();
+    if (identity && aliases.length && (identityChanged || presentationChanged)) {
+      const presentationNotice = presentationChanged
+        ? `台词将统一改为${mapping.presentation.mode === "sel_single" ? " Sel 回答" : "普通对白（槽 0）"}，相关卡片需要重新审查。` : "";
+      const accepted = await askConfirmation({
+        title: "更新共用的老师身份？",
+        body: `“${aliases.join("”、“")}”将同步显示为“${displayName}${organization ? ` / ${organization}` : "（无组织）"}”。${presentationNotice}原剧本中的名称和台词保持不变。`,
+        confirmLabel: "更新老师身份",
+      });
+      if (!accepted) return;
+    }
+    await saveMapping(mapping, state.teacherMappingContext);
   }
 
   async function searchCharacters(query) {
@@ -1039,7 +1318,9 @@
         ? `/production-runs/${encodeURIComponent(state.currentRun.run_id)}/resources/characters?q=${encodeURIComponent(query)}&limit=30`
         : `/resources/characters?q=${encodeURIComponent(query)}&limit=30`;
       const result = await api(path);
-      const rows = result.items || [];
+      const rows = (result.items || []).filter((item) => item.role !== "teacher"
+        && item.source !== "halocue_teacher"
+        && item.identifier !== state.currentDraft?.cast?.teacher_identity?.character_id);
       state.characterCatalog = rows;
       state.characterCatalogRunId = state.currentRun?.run_id || null;
       $("#characterResults").innerHTML = rows.length ? rows.map((item) => `<button type="button" class="character-row resource-row" data-character-id="${esc(item.identifier)}" data-character-name="${esc(item.name)}" aria-label="选择 ${esc(item.name)} 映射给当前说话者">
@@ -1051,21 +1332,253 @@
     } catch (error) { $("#mappingDialogStatus").textContent = error.message; }
   }
 
-  async function saveMapping(mapping) {
-    if (!state.selectedSpeaker || !state.currentDraft) return;
+  async function saveMapping(mapping, context = null) {
+    if (!state.selectedSpeaker || !state.currentDraft || state.busy) return;
+    const speaker = context?.speaker || state.selectedSpeaker;
+    const runId = context?.runId || state.currentRun.run_id;
+    const version = context?.draftVersion ?? state.currentDraft.draft_version;
+    setBusy(true);
     try {
-      const result = await api(`/production-runs/${state.currentRun.run_id}/cast-bindings`, {
-        method: "POST", body: JSON.stringify({ speaker: state.selectedSpeaker, mapping, expected_draft_version: state.currentDraft.draft_version })
+      const result = await api(`/production-runs/${encodeURIComponent(runId)}/cast-bindings`, {
+        method: "POST", body: JSON.stringify({ speaker, mapping, expected_draft_version: version })
       });
-      state.currentRun = result.run; state.currentDraft = result.draft; state.gates = result.gates;
+      adoptRunResult(result);
+      state.characterCatalogRunId = null;
       await loadTaskPreflight();
-      $("#mappingDialog").close(); updateShell(); renderMapping(); renderGeneration(); toast(`已更新 ${state.selectedSpeaker} 的映射`);
-    } catch (error) { handleError(error); }
+      $("#mappingDialog").close(); updateShell(); renderMapping(); renderGeneration(); toast(`已更新 ${speaker} 的映射`);
+    } catch (error) {
+      $("#mappingDialogStatus").textContent = error.code === "revision_conflict"
+        ? "草稿已更新，请关闭后重新确认映射。" : error.message || "保存失败，请稍后重试。";
+      await handleError(error);
+    } finally { setBusy(false); }
+  }
+
+  const terminalJobStates = new Set([
+    "succeeded", "failed", "interrupted", "paused", "cancelled", "superseded",
+  ]);
+
+  const jobStateLabels = {
+    queued: "等待执行",
+    running: "正在执行",
+    pausing: "正在暂停",
+    paused: "已暂停",
+    cancelling: "正在结束",
+    cancelled: "已结束",
+    succeeded: "已完成",
+    failed: "失败",
+    interrupted: "服务重启中断",
+    superseded: "旧结果已丢弃",
+  };
+
+  function jobIsActive(job) {
+    return !!job && !terminalJobStates.has(job.state);
+  }
+
+  function directionJobProfile(job = state.currentJob) {
+    const profile = job?.direction_profile_snapshot?.id || job?.direction_profile;
+    return profile === "conservative" ? "conservative" : "standard";
+  }
+
+  function canResumeSelectedDirection() {
+    return state.currentJob?.kind === "direction_generation"
+      && state.currentJob.run_id === state.currentRun?.run_id
+      && state.currentJob.resumable
+      && directionJobProfile() === state.directionProfile;
+  }
+
+  function syncWorkflowControlStates() {
+    const snapshot = workflowSnapshot();
+    const mapping = $("#mappingContinue");
+    if (mapping) {
+      mapping.disabled = state.busy || !state.currentRun || snapshot.missingMappings > 0;
+    }
+
+    const directionActive = state.currentJob?.kind === "direction_generation"
+      && jobIsActive(state.currentJob);
+    const generation = $("#generateOrReview");
+    if (generation) {
+      generation.disabled = state.busy || !state.currentRun || !state.currentDraft
+        || !!state.currentDraft?.counts?.blocking_errors
+        || !!state.jobActionPending
+        || !!$("#directionProfile").selectedOptions[0]?.disabled
+        || directionActive
+        || state.currentRun?.state === "compiling";
+    }
+    $$('#layoutModeFieldset input[name="layoutMode"]').forEach((input) => {
+      input.disabled = state.busy || directionActive;
+    });
+    $("#sourceDirectionProfile").disabled = state.busy;
+    $("#directionProfile").disabled = state.busy || directionActive
+      || !!state.jobActionPending || state.currentRun?.state === "compiling";
+    $("#regenerateDirection").disabled = generation?.disabled !== false;
+
+    const compiling = state.currentRun?.state === "compiling"
+      || (state.currentJob?.kind === "compile" && jobIsActive(state.currentJob));
+    const compile = $("#compileButton");
+    if (compile) {
+      compile.disabled = state.busy || !state.gates?.compile?.passed || compiling;
+      compile.textContent = compiling ? "正在编译" : "编译 AA 工程";
+    }
+  }
+
+  function generationMetrics(job) {
+    const result = job?.result || {};
+    if (result.metrics && typeof result.metrics === "object") return result.metrics;
+    if (result.agent?.metrics && typeof result.agent.metrics === "object") return result.agent.metrics;
+    const summary = [...(job?.events || [])].reverse().find((event) => event.kind === "generation_summary");
+    return summary?.metrics || {};
+  }
+
+  function numberLabel(value) {
+    if (value === null || value === undefined || value === "") return "尚未上报";
+    return Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN") : "尚未上报";
+  }
+
+  function cacheLabel(metrics) {
+    if (metrics.cache_reported !== true) return "服务未上报";
+    const parts = [];
+    if (metrics.cache_hit_rate !== null && metrics.cache_hit_rate !== undefined && Number.isFinite(Number(metrics.cache_hit_rate))) {
+      parts.push(`${Math.round(Number(metrics.cache_hit_rate) * 100)}%`);
+    } else {
+      parts.push("命中率未上报");
+    }
+    if (metrics.cache_read_tokens !== null && metrics.cache_read_tokens !== undefined) {
+      parts.push(`读取 ${numberLabel(metrics.cache_read_tokens)}`);
+    }
+    if (metrics.cache_write_tokens !== null && metrics.cache_write_tokens !== undefined) {
+      parts.push(`写入 ${numberLabel(metrics.cache_write_tokens)}`);
+    }
+    return parts.join(" · ");
+  }
+
+  function warmCacheLabel(metrics) {
+    if (metrics.warm_cache_hit_rate === null || metrics.warm_cache_hit_rate === undefined || !Number.isFinite(Number(metrics.warm_cache_hit_rate))) {
+      return "供应商未上报";
+    }
+    const prefix = metrics.stable_prefix_consistent === false ? "前缀变化 · " : "";
+    return `${prefix}${Math.round(Number(metrics.warm_cache_hit_rate) * 100)}% · 命中 ${numberLabel(metrics.warm_cache_read_tokens)} · 未缓存 ${numberLabel(metrics.warm_uncached_input_tokens)}`;
+  }
+
+  function failedCostLabel(metrics) {
+    if (metrics.failed_request_count === null || metrics.failed_request_count === undefined) return "尚未上报";
+    const tokens = metrics.failed_request_input_tokens === null || metrics.failed_request_input_tokens === undefined
+      ? "Token 未上报"
+      : `输入 ${numberLabel(metrics.failed_request_input_tokens)} · 输出 ${numberLabel(metrics.failed_request_output_tokens)}`;
+    return `${numberLabel(metrics.failed_request_count)} 次 · ${tokens}`;
+  }
+
+  function unitCostLabel(metrics) {
+    const value = metrics.uncached_input_tokens_per_completed_target;
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) return "供应商未上报";
+    return `${numberLabel(Math.round(Number(value) * 10) / 10)} 未缓存输入 / 条`;
+  }
+
+  function promptOptimizationLabel(metrics) {
+    const optimization = metrics.prompt_optimization;
+    if (!optimization) return "尚未上报";
+    const reduction = Number(optimization.resource_prompt_reduction);
+    const resource = Number.isFinite(reduction)
+      ? `资源提示减少 ${Math.max(0, Math.round(reduction * 100))}%`
+      : "资源提示已裁剪";
+    const source = optimization.source_context_strategy === "window"
+      ? "剧本按窗口发送"
+      : "全文前缀";
+    return `${resource} · ${source} · ${numberLabel(optimization.background_count)} 背景 / ${numberLabel(optimization.sound_count)} 音效`;
+  }
+
+  function jobLogRows(job, metrics) {
+    const rows = (job?.events || []).map((event) => {
+      const detail = event.detail || event.message || event.reason || event.state || event.kind || "状态更新";
+      const context = [
+        event.chunk_current && event.chunk_total ? `块 ${event.chunk_current}/${event.chunk_total}` : "",
+        event.request_index ? `请求 ${event.request_index}` : "",
+        event.retry_count ? `重试 ${event.retry_count}` : "",
+        event.subdivision_count ? `细分 ${event.subdivision_count}` : "",
+      ].filter(Boolean).join(" · ");
+      const time = event.at ? new Date(event.at).toLocaleTimeString("zh-CN", { hour12: false }) : "运行中";
+      return `<div class="job-log-row ${event.level === "error" ? "error" : ""}"><time>${esc(time)}</time><p><strong>${esc(detail)}</strong>${context ? `<br>${esc(context)}` : ""}</p></div>`;
+    });
+    (metrics.request_records || []).forEach((record, index) => {
+      const request = record.agent_request_index || record.request_index || index + 1;
+      const failed = record.outcome === "failed";
+      const usage = [
+        failed ? `失败 ${record.error_code || "unknown"}` : record.outcome === "succeeded" ? "成功" : "",
+        record.input_tokens != null ? `输入 ${numberLabel(record.input_tokens)}` : "",
+        record.output_tokens != null ? `输出 ${numberLabel(record.output_tokens)}` : "",
+        record.cache_read_tokens != null ? `缓存 ${numberLabel(record.cache_read_tokens)}` : "",
+        record.finish_reason ? `结束 ${record.finish_reason}` : "",
+      ].filter(Boolean).join(" · ");
+      rows.push(`<div class="job-log-row ${failed ? "error" : ""}"><time>请求 ${esc(request)}</time><p><strong>${esc(record.chunk_id || record.scene_id || "模型调用")}</strong>${usage ? `<br>${esc(usage)}` : ""}</p></div>`);
+    });
+    if (job?.error) {
+      const details = job.error.details && Object.keys(job.error.details).length
+        ? `\n${JSON.stringify(job.error.details, null, 2)}` : "";
+      rows.push(`<div class="job-log-row error"><time>错误</time><p><strong>${esc(job.error.code || "job_failed")} · ${esc(job.error.message || "任务失败")}</strong>${job.error.traceback || details ? `<pre class="job-log-error">${esc((job.error.traceback || "") + details)}</pre>` : ""}</p></div>`);
+    }
+    return rows;
+  }
+
+  function renderGenerationJob() {
+    const panel = $("#generationJob");
+    const job = state.currentJob;
+    const visible = job?.kind === "direction_generation" && job.run_id === state.currentRun?.run_id;
+    panel.classList.toggle("hidden", !visible);
+    if (!visible) return;
+    const progress = job.progress || {};
+    const percent = job.state === "succeeded" ? 100 : Math.max(0, Math.min(100, Number(progress.percent || 0)));
+    const progressNode = $("#generationProgress");
+    progressNode.classList.toggle("indeterminate", !progress.total && !terminalJobStates.has(job.state));
+    progressNode.setAttribute("aria-valuenow", String(Math.round(percent)));
+    $("#generationProgressBar").style.width = `${percent}%`;
+    panel.dataset.state = job.state;
+    $("#generationJobState").textContent = jobStateLabels[job.state] || job.state;
+    const titles = {
+      queued: "演出任务正在排队",
+      running: "AI 正在安排演出",
+      pausing: "正在保存检查点并暂停",
+      paused: "演出任务已经暂停",
+      cancelling: "正在结束演出任务",
+      cancelled: "演出任务已经结束",
+      succeeded: "演出草稿已经生成",
+      failed: "演出生成失败",
+      interrupted: "演出任务被服务重启中断",
+      superseded: "旧演出结果已丢弃",
+    };
+    $("#generationJobTitle").textContent = titles[job.state] || job.label || "演出任务";
+    const count = progress.total
+      ? ` · ${numberLabel(progress.current)} / ${numberLabel(progress.total)} 个场景块`
+      : "";
+    $("#generationJobDetail").textContent = `${progress.detail || job.next_action?.detail || "等待后台状态更新。"}${count}`;
+
+    const metrics = generationMetrics(job);
+    $("#generationMetrics").innerHTML = [
+      ["模型请求", numberLabel(metrics.requests)],
+      ["恢复动作", `${numberLabel(metrics.retries)} 次重试（传输 ${numberLabel(metrics.transport_retries)}） · ${numberLabel(metrics.subdivisions)} 次细分`],
+      ["Token", `${numberLabel(metrics.input_tokens)} 输入 · ${numberLabel(metrics.output_tokens)} 输出`],
+      ["提示缓存", cacheLabel(metrics)],
+      ["暖缓存", warmCacheLabel(metrics)],
+      ["失败消耗", failedCostLabel(metrics)],
+      ["单位产出", unitCostLabel(metrics)],
+      ["输入裁剪", promptOptimizationLabel(metrics)],
+    ].map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join("");
+
+    const pending = state.jobActionPending;
+    $("#pauseGeneration").hidden = !job.can_pause;
+    $("#pauseGeneration").disabled = state.busy || !!pending || !job.can_pause;
+    $("#resumeGeneration").hidden = !canResumeSelectedDirection();
+    $("#resumeGeneration").disabled = state.busy || !!pending || !canResumeSelectedDirection();
+    $("#cancelGeneration").hidden = !job.can_cancel;
+    $("#cancelGeneration").disabled = state.busy || !!pending || !job.can_cancel;
+    const rows = jobLogRows(job, metrics);
+    $("#generationLogCount").textContent = String(rows.length);
+    $("#generationLog").innerHTML = rows.join("") || '<p class="empty">等待第一条运行记录。</p>';
   }
 
   function renderGeneration() {
     if (!state.currentRun || !state.currentDraft) return;
     const mode = state.currentRun.source_summary?.generation_mode || "format_only";
+    $("#directionProfileControl").classList.toggle("hidden", mode !== "ai_direction");
+    $("#directionProfile").value = state.directionProfile;
     setLayoutMode(state.currentRun.source_summary?.layout_mode || savedLayoutMode());
     $("#layoutModeFieldset")?.classList.toggle("hidden", mode !== "ai_direction");
     $("#generationModeBadge").textContent = mode === "ai_direction" ? "AI 安排演出" : "仅转换格式";
@@ -1077,7 +1590,24 @@
     ];
     $("#generationGates").innerHTML = cards.map(([label, value, pass]) => `<div class="gate-card ${pass ? "pass" : "block"}"><small>${label}</small><b>${esc(value)}</b><small>${pass ? "可以继续" : "需要处理"}</small></div>`).join("");
     const action = $("#generateOrReview");
-    if (mode === "ai_direction" && state.currentRun.state === "waiting_for_review") {
+    const hasCompletedDirection = !!state.currentRun.last_direction_generation_id;
+    const directionActive = state.currentJob?.kind === "direction_generation"
+      && jobIsActive(state.currentJob);
+    const resumable = state.currentJob?.kind === "direction_generation" && state.currentJob.resumable;
+    $("#regenerateDirection").hidden = mode !== "ai_direction" || !hasCompletedDirection || directionActive;
+    if (mode === "ai_direction" && directionActive) {
+      $("#generationActionTitle").textContent = "AI 正在安排演出";
+      $("#generationActionCopy").textContent = "可以在下方查看实时进度、请求记录，或暂停和结束任务。";
+      action.textContent = "生成中";
+    } else if (mode === "ai_direction" && resumable && !canResumeSelectedDirection()) {
+      $("#generationActionTitle").textContent = "按新策略重新生成";
+      $("#generationActionCopy").textContent = "旧任务及其检查点保留，新策略将创建独立的生成任务。";
+      action.textContent = "按新策略重新生成";
+    } else if (mode === "ai_direction" && resumable) {
+      $("#generationActionTitle").textContent = "继续未完成的演出任务";
+      $("#generationActionCopy").textContent = "继续时会复用同一检查点，只处理尚未完成的分块。";
+      action.textContent = "继续生成";
+    } else if (mode === "ai_direction" && !hasCompletedDirection) {
       $("#generationActionTitle").textContent = "运行 AI 安排演出";
       $("#generationActionCopy").textContent = "后台任务会保留检查点，完成后回到逐卡审查。";
       action.textContent = "开始安排演出";
@@ -1086,13 +1616,44 @@
       $("#generationActionCopy").textContent = "逐卡处理未登记背景、音效和待审内容。";
       action.textContent = "进入审查";
     }
-    action.disabled = !!state.currentDraft.counts?.blocking_errors || state.currentRun.state === "generating_direction";
+    syncWorkflowControlStates();
+    renderGenerationJob();
   }
 
-  async function startGeneration() {
-    if (!state.currentRun || !state.currentDraft) return;
+  async function startGeneration({ restart = false } = {}) {
+    if (!state.currentRun || !state.currentDraft || state.busy || state.jobActionPending) return;
     const mode = state.currentRun.source_summary?.generation_mode;
     if (mode !== "ai_direction") { showStage("review", { force: true }); return; }
+    if (state.currentJob?.kind === "direction_generation" && jobIsActive(state.currentJob)) return;
+    if (!restart && canResumeSelectedDirection()) {
+      await resumeGenerationJob();
+      return;
+    }
+    const previousDirection = state.currentJob?.kind === "direction_generation"
+      && state.currentJob.run_id === state.currentRun.run_id;
+    if (state.currentRun.last_direction_generation_id) {
+      if (!restart && (!previousDirection || !state.currentJob.resumable)) {
+        showStage("review", { force: true });
+        return;
+      }
+    }
+    const runId = state.currentRun.run_id;
+    const draftVersion = state.currentDraft.draft_version;
+    const profile = state.directionProfile;
+    if (previousDirection || restart) {
+      const profileLabel = profile === "conservative" ? "简洁（保守）" : "标准（原版）";
+      if (!await askConfirmation({
+        title: "重新生成演出草稿？",
+        body: `将按${profileLabel}基于当前草稿新建生成任务，保留已有指令，不复用旧检查点。完成后需要重新审查，可能产生新的模型费用。`,
+        confirmLabel: "重新生成",
+      })) return;
+      if (state.currentRun?.run_id !== runId || state.currentDraft?.draft_version !== draftVersion
+        || state.directionProfile !== profile || state.busy || state.jobActionPending
+        || jobIsActive(state.currentJob)) {
+        toast("当前任务已变化，请检查后重新发起。", "warning");
+        return;
+      }
+    }
     setBusy(true);
     try {
       const result = await api(`/production-runs/${state.currentRun.run_id}/direction-generation`, {
@@ -1100,12 +1661,77 @@
           expected_draft_version: state.currentDraft.draft_version,
           story_type: "auto",
           layout_mode: selectedLayoutMode(),
+          direction_profile: state.directionProfile,
         })
       });
+      state.currentJob = result.job;
       state.currentRun.source_summary.layout_mode = result.layout_mode || selectedLayoutMode();
       rememberLayoutMode();
-      showStage("review", { force: true }); await pollJob(result.job.job_id, "演出安排");
-    } catch (error) { handleError(error); } finally { setBusy(false); }
+      await refreshCurrentRun();
+      showStage("generation", { force: true });
+      pollJob(result.job.job_id, "演出安排").catch(handleError);
+    } catch (error) { handleError(error); } finally { setBusy(false); renderGeneration(); }
+  }
+
+  async function pauseGenerationJob() {
+    const job = state.currentJob;
+    if (!job?.can_pause || state.jobActionPending) return;
+    state.jobActionPending = "pause";
+    renderGenerationJob();
+    try {
+      const result = await api(`/jobs/${encodeURIComponent(job.job_id)}?action=pause`, { method: "POST", body: "{}" });
+      state.currentJob = result.job;
+      toast("已请求暂停；正在中止当前模型连接并保存检查点。", "warning");
+    } catch (error) {
+      handleError(error);
+    } finally {
+      state.jobActionPending = null;
+      renderGeneration();
+    }
+  }
+
+  async function resumeGenerationJob() {
+    const job = state.currentJob;
+    if (!canResumeSelectedDirection() || state.jobActionPending) return;
+    state.jobActionPending = "resume";
+    renderGenerationJob();
+    try {
+      const result = await api(`/jobs/${encodeURIComponent(job.job_id)}?action=resume`, { method: "POST", body: "{}" });
+      state.currentJob = result.job;
+      await refreshCurrentRun();
+      showStage("generation", { force: true });
+      pollJob(result.job.job_id, "演出安排").catch(handleError);
+      toast("已从检查点继续生成。", "normal");
+    } catch (error) {
+      handleError(error);
+    } finally {
+      state.jobActionPending = null;
+      renderGeneration();
+    }
+  }
+
+  async function cancelGenerationJob() {
+    const job = state.currentJob;
+    if (!job?.can_cancel || state.jobActionPending) return;
+    const confirmed = await askConfirmation({
+      title: "结束当前演出任务？",
+      body: "未完成内容不会写入草稿；已经完成的分块检查点会保留，之后仍可继续。",
+      confirmLabel: "结束任务",
+      danger: true,
+    });
+    if (!confirmed) return;
+    state.jobActionPending = "cancel";
+    renderGenerationJob();
+    try {
+      const result = await api(`/jobs/${encodeURIComponent(job.job_id)}?action=cancel`, { method: "POST", body: "{}" });
+      state.currentJob = result.job;
+      toast("已请求结束；迟到的模型结果不会覆盖草稿。", "warning");
+    } catch (error) {
+      handleError(error);
+    } finally {
+      state.jobActionPending = null;
+      renderGeneration();
+    }
   }
 
   function cardStatus(card) {
@@ -1160,11 +1786,9 @@
     }).join("") : '<p class="empty">当前筛选没有卡片。</p>';
     $$("[data-card-id]").forEach((button) => button.addEventListener("click", () => selectCard(button.dataset.cardId)));
     const canCompile = !!state.gates?.compile?.passed;
-    const compile = $("#compileButton");
-    compile.disabled = !canCompile || state.currentRun?.state === "compiling";
-    compile.dataset.locked = compile.disabled ? "true" : "false";
     $("#compileGate").textContent = canCompile ? "可以编译" : "等待审查";
     $("#compileBlockers").textContent = canCompile ? "草稿已通过后端编译门，可以生成 AA 工程。" : (state.gates?.compile?.blockers || []).join("、") || "完成角色映射、处理请求并审查全部卡片。";
+    syncWorkflowControlStates();
     renderReviewWorkflow(pending, canCompile);
     if (state.selectedCard) renderInspector();
   }
@@ -1195,7 +1819,8 @@
       $("#previewOpenCard").disabled = true;
       return;
     }
-    const isCg = frame.presentation === "cg";
+    const isCg = frame.presentation === "cg" || !!frame.cg;
+    const isTeacherReply = frame.presentation === "teacher_selection";
     const background = frame.background_key && frame.background_preview_available === true
       ? `<img class="preview-stage-image" src="${esc(previewResourceUrl("backgrounds", frame.background_key))}" alt="" loading="lazy" decoding="async">`
       : "";
@@ -1204,16 +1829,38 @@
       ? `<div class="preview-annotations">${frame.annotations.map((item) => `<span>${esc(item.kind)}：${esc(item.value)}</span>`).join("")}</div>`
       : "";
     const statusLabel = frame.review_state === "approved" ? "已审" : "待审";
+    const organization = frame.speaker?.role === "teacher" && frame.speaker.organization
+      ? `<small class="preview-speaker-organization">${esc(frame.speaker.organization)}</small>` : "";
+    const reply = frame.teacher_reply;
+    const dialogue = isTeacherReply
+      ? state.previewCompleted
+        ? '<div class="preview-reply-complete" role="status">本段预览结束</div>'
+        : reply?.reply_id && typeof reply.text === "string"
+          ? `<button type="button" class="preview-teacher-reply" data-teacher-reply-id="${esc(reply.reply_id)}">${esc(reply.text)}</button>`
+          : '<div class="preview-reply-complete" role="status">老师回答暂不可预览</div>'
+      : `<div class="preview-dialogue ${isCg ? "is-cg" : ""}"><small>${esc(isCg ? "CG 空镜段落" : frame.presentation === "request" ? "需要处理" : frame.presentation === "direction" ? "演出指令" : "当前台词")}</small><strong>${esc(frame.title || "未命名卡片")}</strong>${organization}<p>${esc(frame.text || "此卡没有可显示的文本。")}</p>${annotations}</div>`;
     target.className = `performance-preview-frame presentation-${esc(frame.presentation)}`;
-    target.innerHTML = `<section class="preview-stage">${background}<div class="preview-stage-overlay"></div><div class="preview-progress">${state.previewIndex + 1} / ${frames.length} · 第 ${esc(frame.line_no || "-")} 张 · ${esc(statusLabel)}</div>${cg}<div class="preview-dialogue ${isCg ? "is-cg" : ""}"><small>${esc(isCg ? "CG 空镜段落" : frame.presentation === "request" ? "需要处理" : frame.presentation === "direction" ? "演出指令" : "当前台词")}</small><strong>${esc(frame.title || "未命名卡片")}</strong><p>${esc(frame.text || "此卡没有可显示的文本。")}</p>${annotations}</div></section><div class="preview-card-strip" aria-label="草稿卡片定位">${frames.map((item, index) => `<button type="button" class="${index === state.previewIndex ? "active" : ""}" data-preview-index="${index}" aria-label="跳到第 ${esc(item.line_no || "-")} 张卡片">${esc(String(item.line_no || index + 1).padStart(2, "0"))}</button>`).join("")}</div>`;
-    status.textContent = `当前展示第 ${frame.line_no || "-"} 张卡片；预览是只读的，修改请回到这张卡。`;
+    target.innerHTML = `<section class="preview-stage">${background}<div class="preview-stage-overlay"></div><div class="preview-progress">${state.previewIndex + 1} / ${frames.length} · 第 ${esc(frame.line_no || "-")} 张 · ${esc(statusLabel)}</div>${cg}${dialogue}</section><div class="preview-card-strip" aria-label="草稿卡片定位">${frames.map((item, index) => `<button type="button" class="${index === state.previewIndex ? "active" : ""}" data-preview-index="${index}" aria-label="跳到第 ${esc(item.line_no || "-")} 张卡片">${esc(String(item.line_no || index + 1).padStart(2, "0"))}</button>`).join("")}</div>`;
+    status.textContent = state.previewCompleted ? "本段预览结束，草稿没有被修改。"
+      : `当前展示第 ${frame.line_no || "-"} 张卡片；预览是只读的，修改请回到这张卡。`;
     $("#previewPrevious").disabled = state.previewIndex === 0;
-    $("#previewNext").disabled = state.previewIndex >= frames.length - 1;
+    $("#previewNext").disabled = (isTeacherReply && !state.previewCompleted)
+      || state.previewIndex >= frames.length - 1;
     $("#previewOpenCard").disabled = !frame.card_id;
     $$('[data-preview-index]').forEach((button) => button.addEventListener("click", () => {
       state.previewIndex = Number(button.dataset.previewIndex) || 0;
+      state.previewCompleted = false;
       renderPerformancePreview();
     }));
+    target.querySelector('[data-teacher-reply-id]')?.addEventListener("click", () => {
+      if (state.performancePreview?.frames?.[state.previewIndex]?.teacher_reply?.reply_id !== reply.reply_id) return;
+      if (state.previewIndex < frames.length - 1) stepPerformancePreview(1);
+      else {
+        state.previewCompleted = true;
+        renderPerformancePreview();
+      }
+      (target.querySelector('[data-teacher-reply-id]') || $("#previewOpenCard"))?.focus();
+    });
   }
 
   async function openPerformancePreview() {
@@ -1221,6 +1868,7 @@
     const dialog = $("#performancePreviewDialog");
     state.performancePreview = null;
     state.previewIndex = 0;
+    state.previewCompleted = false;
     $("#performancePreview").className = "performance-preview-empty";
     $("#performancePreview").innerHTML = "<strong>正在读取当前草稿</strong><p>预览会使用本任务冻结的背景、CG 和角色映射。</p>";
     $("#performancePreviewStatus").textContent = "正在读取，不会修改草稿。";
@@ -1252,15 +1900,39 @@
       status.textContent = "没有调用 AI，也没有修改草稿。";
       return;
     }
-    if (!audit.total) {
+    if (!generations.length) {
       target.className = "direction-proposals-empty";
-      target.innerHTML = "<strong>本次 AI 没有留下单独的演出建议</strong><p>这可能表示模型没有增加可审计标注。请直接在逐卡审查器检查台词、素材和演出字段。</p>";
-      status.textContent = "建议记录为空，草稿没有被此窗口修改。";
+      target.innerHTML = "<strong>还没有 AI 演出运行记录</strong><p>完成或中止一次 AI 演出任务后，可在这里查看结果摘要。</p>";
+      status.textContent = "没有重新调用模型，也没有修改草稿。";
       return;
     }
     target.className = "";
-    target.innerHTML = `<section class="proposal-summary"><strong>共 ${audit.total} 条 AI 演出建议</strong><p>“已写入草稿”仍需逐卡审查。只有能唯一对应到当前台词的建议才显示“保留/撤销”；其余建议只读，避免草稿调整后误改内容。</p></section>${generations.map((generation) => `<section class="proposal-generation"><header><div><h4>一次生成记录 · ${esc(generation.proposal_count)} 条建议</h4><small>本次生成仅供审查，不会在这里直接修改草稿</small></div></header><ul class="proposal-list">${(generation.proposals || []).map((proposal) => { const suggested = proposal.type === "suggested_fix"; const before = proposal.before || "未设置"; const after = proposal.after || "未设置"; const action = proposal.can_apply_safely ? `<div class="proposal-actions"><button type="button" data-proposal-action="approve" data-proposal-id="${esc(proposal.proposal_id)}">保留这项标注</button><button type="button" class="danger" data-proposal-action="reject" data-proposal-id="${esc(proposal.proposal_id)}">撤销并恢复原值</button></div>` : ""; return `<li class="proposal-item ${suggested ? "suggested" : "applied"}"><div><strong>${esc(proposalFieldLabel(proposal.field))}：${esc(after)}</strong><p>${suggested ? "模型提出了这个值，但系统没有把它写入草稿。" : "模型已把这个值写进生成后的草稿，仍需要你在逐卡审查中确认。"}</p><div class="proposal-change"><span>原值：${esc(before)}</span><span>建议值：${esc(after)}</span></div><p>${esc(proposal.apply_reason)}</p>${action}</div><b>${suggested ? "仅供参考" : proposal.can_apply_safely ? "可确认或撤销" : "已写入草稿"}</b></li>`; }).join("")}</ul></section>`).join("")}`;
-    status.textContent = "当前演出建议只读；不会修改草稿。";
+    target.innerHTML = `<section class="proposal-summary"><strong>${audit.total ? `共 ${audit.total} 条 AI 演出建议` : "AI 没有生成可写入的演出修改"}</strong><p>每次运行的状态、请求与错误都会保留。只有能唯一对应到当前台词的建议才允许保留或撤销。</p></section>${generations.map((generation) => {
+      const metrics = generation.metrics || {};
+      const generationLabels = { succeeded: "已完成", incomplete: "未完成", failed: "失败", superseded: "旧结果已丢弃" };
+      const auditDetails = [
+        `状态 ${generationLabels[generation.status] || generation.status || "未知"}`,
+        `请求 ${numberLabel(metrics.requests)}`,
+        `重试 ${numberLabel(metrics.retries)}`,
+        `细分 ${numberLabel(metrics.subdivisions)}`,
+        `缓存 ${cacheLabel(metrics)}`,
+      ].join(" · ");
+      const error = generation.error
+        ? `<div class="proposal-generation-error"><strong>${esc(generation.error.code || "direction_generation_failed")}</strong><p>${esc(generation.error.message || "演出生成失败")}</p></div>`
+        : "";
+      const diagnostics = (generation.diagnostics || []).length
+        ? `<details class="proposal-generation-diagnostics"><summary>生成诊断（${generation.diagnostics.length}）</summary><ul>${generation.diagnostics.map((item) => `<li><strong>${esc(item.code || item.level || "诊断")}</strong><span>${esc(item.message || item.detail || "")}</span></li>`).join("")}</ul></details>`
+        : "";
+      const proposals = (generation.proposals || []).map((proposal) => {
+        const suggested = proposal.type === "suggested_fix";
+        const before = proposal.before || "未设置";
+        const after = proposal.after || "未设置";
+        const action = proposal.can_apply_safely ? `<div class="proposal-actions"><button type="button" data-proposal-action="approve" data-proposal-id="${esc(proposal.proposal_id)}">保留这项标注</button><button type="button" class="danger" data-proposal-action="reject" data-proposal-id="${esc(proposal.proposal_id)}">撤销并恢复原值</button></div>` : "";
+        return `<li class="proposal-item ${suggested ? "suggested" : "applied"}"><div><strong>${esc(proposalFieldLabel(proposal.field))}：${esc(after)}</strong><p>${suggested ? "模型提出了这个值，但系统没有把它写入草稿。" : "模型已把这个值写进生成后的草稿，仍需要你在逐卡审查中确认。"}</p><div class="proposal-change"><span>原值：${esc(before)}</span><span>建议值：${esc(after)}</span></div><p>${esc(proposal.apply_reason)}</p>${action}</div><b>${suggested ? "仅供参考" : proposal.can_apply_safely ? "可确认或撤销" : "已写入草稿"}</b></li>`;
+      }).join("");
+      return `<section class="proposal-generation state-${esc(generation.status || "unknown")}"><header><div><h4>一次生成记录 · ${esc(generation.proposal_count)} 条建议</h4><small>${esc(auditDetails)}</small></div></header>${error}${diagnostics}${proposals ? `<ul class="proposal-list">${proposals}</ul>` : '<p class="proposal-generation-empty">这次运行没有产生可写入的建议，草稿未被覆盖。</p>'}</section>`;
+    }).join("")}`;
+    status.textContent = "运行记录只读；打开此窗口不会修改草稿或调用模型。";
     $$('[data-proposal-action]').forEach((button) => button.addEventListener("click", () => decideDirectionProposal(button.dataset.proposalId, button.dataset.proposalAction)));
   }
 
@@ -1295,6 +1967,7 @@
   function stepPerformancePreview(delta) {
     const frames = state.performancePreview?.frames || [];
     state.previewIndex = Math.max(0, Math.min(frames.length - 1, state.previewIndex + delta));
+    state.previewCompleted = false;
     renderPerformancePreview();
   }
 
@@ -1938,29 +2611,72 @@
   async function validateDraft() {
     try {
       const result = await api(`/production-runs/${state.currentRun.run_id}/validate`, { method: "POST", body: "{}" });
-      await refreshCurrentRun(); toast(result.valid ? "检查通过。" : "检查完成：仍有需要处理的问题。", result.valid ? "normal" : "warning");
+      await refreshCurrentRun(); toast(result.review_ready ? "检查通过。" : "检查完成：仍有需要处理的问题。", result.review_ready ? "normal" : "warning");
     } catch (error) { handleError(error); }
   }
 
   async function pollJob(jobId, label) {
-    for (let attempt = 0; attempt < 180; attempt += 1) {
-      const result = await api(`/jobs/${encodeURIComponent(jobId)}`);
-      const job = result.job;
-      toast(`${label}：${job.state === "succeeded" ? "已完成" : job.state === "failed" ? "失败" : "后台处理中"}`);
-      if (job.state === "succeeded") { await refreshCurrentRun(); return job; }
-      if (["failed", "interrupted"].includes(job.state)) throw Object.assign(new Error(job.error?.message || `${label}未完成`), { code: job.error?.code || "job_failed" });
-      await new Promise((resolve) => setTimeout(resolve, 700));
-    }
-    throw Object.assign(new Error(`${label}超时，请在后台任务中查看状态。`), { code: "job_timeout" });
+    if (jobPolls.has(jobId)) return jobPolls.get(jobId);
+    const polling = (async () => {
+      let offlineDelay = 1000;
+      while (true) {
+        let job;
+        try {
+          const result = await api(`/jobs/${encodeURIComponent(jobId)}`, {
+            timeoutMs: JOB_POLL_TIMEOUT_MS,
+          });
+          job = result.job;
+          offlineDelay = 1000;
+        } catch (error) {
+          if (
+            error.code === "job_not_found"
+            || (error.status && !TRANSIENT_JOB_POLL_STATUSES.has(error.status))
+          ) throw error;
+          if (state.currentJob?.job_id === jobId) {
+            state.currentJob.progress = { ...(state.currentJob.progress || {}), detail: "连接暂时中断，正在继续获取后台状态。" };
+            renderGeneration();
+          }
+          await new Promise((resolve) => setTimeout(resolve, offlineDelay));
+          offlineDelay = Math.min(5000, offlineDelay + 1000);
+          continue;
+        }
+        if (job.run_id === state.currentRun?.run_id && ["direction_generation", "compile"].includes(job.kind)) {
+          state.currentJob = job;
+          renderGeneration();
+          renderReview();
+        }
+        if (terminalJobStates.has(job.state)) {
+          if (job.run_id === state.currentRun?.run_id) await refreshCurrentRun();
+          if (job.state === "succeeded") toast(`${label}已完成。`);
+          else if (job.state === "paused") toast(`${label}已暂停，检查点已保留。`, "warning");
+          else if (job.state === "cancelled") toast(`${label}已结束，未完成内容没有写入草稿。`, "warning");
+          else if (job.state === "superseded") toast(`${label}的旧结果已丢弃。`, "warning");
+          if (["failed", "interrupted"].includes(job.state)) {
+            throw Object.assign(new Error(job.error?.message || `${label}未完成`), {
+              code: job.error?.code || "job_failed",
+              details: job.error?.details || {},
+            });
+          }
+          return job;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    })();
+    jobPolls.set(jobId, polling);
+    try { return await polling; } finally { jobPolls.delete(jobId); }
   }
 
   async function compileRun() {
     if (!state.currentRun || !state.currentDraft) return;
+    const button = $("#compileButton");
+    button.disabled = true;
     try {
       const result = await api(`/production-runs/${state.currentRun.run_id}/compile`, { method: "POST", body: JSON.stringify({ expected_draft_version: state.currentDraft.draft_version }) });
+      state.currentJob = result.job;
+      await refreshCurrentRun();
       await pollJob(result.job.job_id, "AA 编译");
       renderReview(); renderInstallPanel();
-    } catch (error) { handleError(error); }
+    } catch (error) { handleError(error); } finally { renderReview(); }
   }
 
   function renderInstallPanel() {
@@ -1979,11 +2695,7 @@
   }
 
   function applyRun(result) {
-    const selectedId = state.selectedCard?.card_id;
-    state.currentRun = result.run;
-    state.currentDraft = result.draft;
-    state.gates = result.gates;
-    state.selectedCard = result.draft?.cards?.find((card) => card.card_id === selectedId) || null;
+    adoptRunResult(result);
     loadTaskPreflight();
     updateShell(); renderMapping(); renderGeneration(); renderReview();
   }
@@ -2128,55 +2840,127 @@
     try { const result = await api("/settings/direction-model/test", { method: "POST", body: "{}" }); $("#modelStatus").textContent = "连接测试已提交到后台任务。"; await pollJob(result.job.job_id, "模型连接测试"); $("#modelStatus").textContent = "连接测试完成。"; } catch (error) { handleError(error); }
   }
 
+  function taskProgressMarkup(job) {
+    const progress = job.progress || {};
+    const percent = job.state === "succeeded"
+      ? 100
+      : Math.max(0, Math.min(100, Number(progress.percent || 0)));
+    if (!jobIsActive(job) && !progress.total && !percent) return "";
+    const count = progress.total
+      ? `${numberLabel(progress.current)} / ${numberLabel(progress.total)}`
+      : jobIsActive(job) ? "处理中" : `${Math.round(percent)}%`;
+    return `<div class="task-progress-row"><progress max="100" value="${Math.round(percent)}"></progress><span>${esc(count)}</span></div>`;
+  }
+
+  function taskMetricsMarkup(job, metrics) {
+    if (job.kind !== "direction_generation") return "";
+    return `<dl class="task-metrics"><div><dt>请求</dt><dd>${esc(numberLabel(metrics.requests))}</dd></div><div><dt>重试 / 细分</dt><dd>${esc(numberLabel(metrics.retries))}（传输 ${esc(numberLabel(metrics.transport_retries))}） / ${esc(numberLabel(metrics.subdivisions))}</dd></div><div><dt>Token</dt><dd>${esc(numberLabel(metrics.input_tokens))} / ${esc(numberLabel(metrics.output_tokens))}</dd></div><div><dt>缓存</dt><dd>${esc(cacheLabel(metrics))}</dd></div><div><dt>暖缓存</dt><dd>${esc(warmCacheLabel(metrics))}</dd></div><div><dt>失败消耗</dt><dd>${esc(failedCostLabel(metrics))}</dd></div><div><dt>单位产出</dt><dd>${esc(unitCostLabel(metrics))}</dd></div><div><dt>输入裁剪</dt><dd>${esc(promptOptimizationLabel(metrics))}</dd></div></dl>`;
+  }
+
+  async function runTaskJobAction(button) {
+    if (button.disabled) return;
+    const jobId = button.dataset.taskJobId;
+    const action = button.dataset.taskJobAction;
+    const stateBefore = button.dataset.taskJobState;
+    if (["resume", "retry"].includes(action)
+      && button.dataset.taskOwnerRun === state.currentRun?.run_id
+      && button.dataset.taskDirectionProfile
+      && button.dataset.taskDirectionProfile !== state.directionProfile) {
+      $("#tasksDialog").close();
+      showStage("generation", { force: true });
+      toast("当前演出策略已变更，请确认新建生成任务，或选回旧策略继续。", "warning");
+      return;
+    }
+    if (action === "cancel" && stateBefore !== "queued") {
+      const confirmed = await askConfirmation({
+        title: "结束这个后台任务？",
+        body: "已完成的检查点会保留；未完成结果不会写回当前草稿。",
+        confirmLabel: "结束任务",
+        danger: true,
+      });
+      if (!confirmed) return;
+    }
+    button.disabled = true;
+    try {
+      const result = await api(`/jobs/${encodeURIComponent(jobId)}?action=${encodeURIComponent(action)}`, {
+        method: "POST",
+        body: "{}",
+      });
+      const job = result.job;
+      if (job?.run_id === state.currentRun?.run_id) {
+        state.currentJob = job;
+        await refreshCurrentRun();
+      }
+      await renderTasks();
+      if (job && jobIsActive(job)) {
+        pollJob(job.job_id, job.label || "后台任务").catch(handleError);
+      }
+      const messages = {
+        pause: "已请求暂停，正在中止当前模型连接并保存检查点。",
+        cancel: stateBefore === "queued" ? "排队任务已取消。" : "已请求结束任务。",
+        resume: "已从已保存的检查点继续。",
+        retry: "已重新提交该阶段，旧任务记录仍会保留。",
+      };
+      toast(messages[action] || "任务状态已更新。", action === "pause" || action === "cancel" ? "warning" : "normal");
+    } catch (error) {
+      button.disabled = false;
+      handleError(error);
+    }
+  }
+
   async function renderTasks() {
+    const refresh = $("#refreshTasks");
+    refresh.disabled = true;
     try {
       const result = await api("/jobs");
-      const labels = { queued: "等待执行", running: "正在执行", succeeded: "已完成", failed: "失败", interrupted: "服务重启中断", cancelled: "已取消" };
       $("#taskList").innerHTML = result.items?.length ? result.items.slice(0, 30).map((job) => {
+        const metrics = generationMetrics(job);
         const failed = ["failed", "interrupted"].includes(job.state);
         const detail = failed ? (job.error?.message || "任务未完成，请查看关联制作任务。") : (job.next_action?.detail || "等待状态更新。");
         const actions = [];
-        if (job.state === "queued") {
-          actions.push(`<button type="button" data-cancel-job="${esc(job.job_id)}">取消排队</button>`);
+        if (job.can_pause) {
+          actions.push(`<button type="button" data-task-job-id="${esc(job.job_id)}" data-task-job-action="pause" data-task-job-state="${esc(job.state)}">暂停</button>`);
         }
-        if (job.retryable) {
-          actions.push(`<button type="button" class="primary" data-retry-job="${esc(job.job_id)}">${esc(job.retry_label || "重试此阶段")}</button>`);
+        if (job.can_cancel) {
+          actions.push(`<button type="button" class="danger-button" data-task-job-id="${esc(job.job_id)}" data-task-job-action="cancel" data-task-job-state="${esc(job.state)}">${job.state === "queued" ? "取消排队" : "结束"}</button>`);
+        }
+        if (job.resumable) {
+          const profileChanged = job.kind === "direction_generation" && job.run_id === state.currentRun?.run_id
+            && directionJobProfile(job) !== state.directionProfile;
+          actions.push(`<button type="button" class="primary" data-task-job-id="${esc(job.job_id)}" data-task-job-action="resume" data-task-job-state="${esc(job.state)}" data-task-owner-run="${esc(job.run_id)}" data-task-direction-profile="${job.kind === "direction_generation" ? directionJobProfile(job) : ""}">${esc(profileChanged ? "查看生成策略" : job.retry_label || "继续生成")}</button>`);
+        } else if (job.retryable) {
+          actions.push(`<button type="button" class="primary" data-task-job-id="${esc(job.job_id)}" data-task-job-action="retry" data-task-job-state="${esc(job.state)}">${esc(job.retry_label || "重试此阶段")}</button>`);
         }
         if (job.run_id && job.next_action?.stage) {
           actions.push(`<button type="button" class="task-open-run" data-task-run-id="${esc(job.run_id)}" data-task-stage="${esc(job.next_action.stage)}">打开关联任务</button>`);
         }
         const action = actions.length ? `<div class="task-row-actions">${actions.join("")}</div>` : "";
         const association = job.run_id ? "关联当前制作任务" : "后台任务";
-        return `<article class="task-row task-${esc(job.state)}"><div><div class="task-row-top"><strong>${esc(job.label || job.kind)}</strong><b>${esc(labels[job.state] || job.state)}</b></div><small>${association}</small><p>${esc(detail)}</p></div>${action}</article>`;
+        const rows = jobLogRows(job, metrics);
+        const diagnostics = rows.length
+          ? `<details class="task-diagnostics"><summary>运行与错误记录（${rows.length}）</summary><div class="task-log-rows">${rows.join("")}</div></details>`
+          : "";
+        return `<article class="task-row task-${esc(job.state)}"><div><div class="task-row-top"><strong>${esc(job.label || job.kind)}</strong><b>${esc(jobStateLabels[job.state] || job.state)}</b></div><small>${association}</small><p>${esc(detail)}</p>${taskProgressMarkup(job)}${taskMetricsMarkup(job, metrics)}${diagnostics}</div>${action}</article>`;
       }).join("") : '<p class="empty">暂无后台任务。</p>';
       $$("[data-task-run-id]").forEach((button) => button.addEventListener("click", () => openRunFromTask(button.dataset.taskRunId, button.dataset.taskStage)));
-      $$('[data-cancel-job]').forEach((button) => button.addEventListener("click", async () => {
-        try { await api(`/jobs/${encodeURIComponent(button.dataset.cancelJob)}?action=cancel`, { method: "POST", body: "{}" }); await renderTasks(); toast("排队任务已取消。"); } catch (error) { handleError(error); }
-      }));
-      $$('[data-retry-job]').forEach((button) => button.addEventListener("click", async () => {
-        button.disabled = true;
-        try {
-          await api(`/jobs/${encodeURIComponent(button.dataset.retryJob)}?action=retry`, { method: "POST", body: "{}" });
-          await renderTasks();
-          toast("已重新提交该阶段，旧任务记录仍会保留。");
-        } catch (error) {
-          button.disabled = false;
-          handleError(error);
-        }
-      }));
-    } catch (error) { handleError(error); }
+      $$('[data-task-job-action]').forEach((button) => button.addEventListener("click", () => runTaskJobAction(button)));
+    } catch (error) {
+      $("#taskList").innerHTML = `<p class="empty">后台任务读取失败：${esc(error.message || "请稍后重试")}</p>`;
+      handleError(error);
+    } finally {
+      refresh.disabled = false;
+    }
   }
 
   async function openRunFromTask(runId, stage) {
     try {
       const result = await api(`/production-runs/${encodeURIComponent(runId)}`);
-      state.currentRun = result.run;
-      state.currentDraft = result.draft;
-      state.gates = result.gates;
+      adoptRunResult(result, { replaceJob: true });
       await loadTaskPreflight();
       $("#tasksDialog").close();
       updateShell();
       showStage(stage || "review", { force: true });
+      trackActiveRunJob(result);
       toast("已打开关联制作任务，请按当前提示继续处理。", "warning");
     } catch (error) { handleError(error); }
   }
@@ -2214,6 +2998,14 @@
   $("#refreshRun").addEventListener("click", () => refreshCurrentRun().catch(handleError));
   $("#mappingContinue").addEventListener("click", () => showStage("generation"));
   $("#generateOrReview").addEventListener("click", startGeneration);
+  $("#regenerateDirection").addEventListener("click", () => startGeneration({ restart: true }));
+  $("#directionProfile").addEventListener("change", (event) => {
+    state.directionProfile = event.target.value === "conservative" ? "conservative" : "standard";
+    renderGeneration();
+  });
+  $("#pauseGeneration").addEventListener("click", pauseGenerationJob);
+  $("#resumeGeneration").addEventListener("click", resumeGenerationJob);
+  $("#cancelGeneration").addEventListener("click", cancelGenerationJob);
   $$('#layoutModeFieldset input[name="layoutMode"]').forEach((input) => input.addEventListener("change", rememberLayoutMode));
   $("#validateDraft").addEventListener("click", validateDraft);
   $("#approveAll").addEventListener("click", () => approveCards(null));
@@ -2228,6 +3020,11 @@
   $("#createCgSegment").addEventListener("click", createCgSegment);
   $("#cgSearch").addEventListener("input", (event) => searchCgResources(event.target.value));
   $("#characterSearch").addEventListener("input", (event) => searchCharacters(event.target.value));
+  $("#chooseTeacherIdentity").addEventListener("click", () => showTeacherIdentity(true));
+  $("#cancelTeacherIdentity").addEventListener("click", () => showTeacherIdentity(false));
+  $("#teacherPreset").addEventListener("change", updateTeacherPreset);
+  $("#teacherIdentityForm").addEventListener("submit", saveTeacherIdentity);
+  $("#teacherDisplayName").addEventListener("input", (event) => event.target.setCustomValidity(""));
   $("#resourceSearch").addEventListener("input", (event) => searchResources(event.target.value));
   $("#openAssetLibrary").addEventListener("click", openAssetLibrary);
   $("#openAssetImport").addEventListener("click", openAssetImport);
@@ -2284,6 +3081,7 @@
         loadRuns(),
         loadWritingWorksAndReleases()
       ]);
+      await restoreSavedRun();
     } catch (error) {
       $("#serviceState").textContent = "后端未连接";
       handleError(error);

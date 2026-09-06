@@ -84,11 +84,13 @@ def test_background_facets_are_hidden_outside_background_asset_tab():
 
 
 def test_resource_previews_are_csp_safe_and_gated_by_catalog_metadata():
+    production_html = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
     production_script = (ROOT / "ui" / "app.js").read_text(encoding="utf-8")
     embedded_script = (
         ROOT.parent / "writing" / "web" / "production-embed.js"
     ).read_text(encoding="utf-8")
 
+    assert "style=" not in production_html
     assert "preview_available" in production_script
     assert "onerror=" not in production_script
     assert 'style="background-image' not in production_script
@@ -301,3 +303,71 @@ def test_recent_run_list_failure_keeps_a_single_recoverable_action():
     assert 'class="text-button run-list-retry">重新读取任务</button>' in production_script
     assert 'retry.disabled = true;' in production_script
     assert ".run-list-error" in production_styles
+
+
+def test_long_direction_jobs_have_recoverable_controls_and_refresh_restore():
+    html = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+    script = (ROOT / "ui" / "app.js").read_text(encoding="utf-8")
+
+    for control in ("pauseGeneration", "resumeGeneration", "cancelGeneration"):
+        assert f'id="{control}"' in html
+        assert f'$("#{control}").addEventListener("click"' in script
+    assert "async function restoreSavedRun()" in script
+    assert "await restoreSavedRun();" in script
+    assert 'localStorage.getItem("halocue.currentRunId")' in script
+    assert 'pollJob(job.job_id, job.label || "后台任务")' in script
+    assert "for (let attempt = 0; attempt < 180" not in script
+
+
+def test_api_timeout_and_job_polling_recover_from_transient_http_failures():
+    script = (ROOT / "ui" / "app.js").read_text(encoding="utf-8")
+
+    assert "const DEFAULT_API_TIMEOUT_MS = 30000;" in script
+    assert "const JOB_POLL_TIMEOUT_MS = 15000;" in script
+    assert "new AbortController()" in script
+    assert 'failure.code = "request_timeout";' in script
+    assert "new Set([408, 429, 500, 502, 503, 504])" in script
+    assert "!TRANSIENT_JOB_POLL_STATUSES.has(error.status)" in script
+
+
+def test_generation_and_compile_buttons_are_derived_from_current_state():
+    script = (ROOT / "ui" / "app.js").read_text(encoding="utf-8")
+
+    assert "function syncWorkflowControlStates()" in script
+    assert 'button.dataset.busyDisabled = "true";' in script
+    assert "dataset.locked" not in script
+    assert "!!run.last_direction_generation_id" in script
+    assert "if (state.currentRun.last_direction_generation_id)" in script
+    assert 'compile.textContent = compiling ? "正在编译" : "编译 AA 工程";' in script
+
+
+def test_job_surfaces_expose_progress_cost_and_failure_diagnostics():
+    script = (ROOT / "ui" / "app.js").read_text(encoding="utf-8")
+    styles = (ROOT / "ui" / "app.css").read_text(encoding="utf-8")
+    preview_styles = (ROOT / "ui" / "previews.css").read_text(encoding="utf-8")
+
+    assert 'pausing: "正在暂停"' in script
+    assert 'cancelling: "正在结束"' in script
+    assert 'superseded: "旧结果已丢弃"' in script
+    assert 'data-task-job-action="pause"' in script
+    assert 'data-task-job-action="resume"' in script
+    assert 'data-task-job-action="cancel"' in script
+    assert "jobLogRows(job, metrics)" in script
+    assert "cacheLabel(metrics)" in script
+    assert "warmCacheLabel(metrics)" in script
+    assert "failedCostLabel(metrics)" in script
+    assert "unitCostLabel(metrics)" in script
+    assert "promptOptimizationLabel(metrics)" in script
+    assert 'record.outcome === "failed"' in script
+    assert "job.error.traceback" in script
+    assert ".task-progress-row" in styles
+    assert ".task-log-rows" in styles
+    assert ".dialog-header-actions > button { flex: 0 0 auto; white-space: nowrap; }" in preview_styles
+
+
+def test_standalone_production_does_not_probe_the_missing_writing_api():
+    script = (ROOT / "ui" / "app.js").read_text(encoding="utf-8")
+
+    assert 'const IS_STANDALONE_PRODUCTION = location.port === "8892";' in script
+    assert "if (IS_STANDALONE_PRODUCTION)" in script
+    assert "当前处于独立 AA 制作模式" in script
