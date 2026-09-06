@@ -49,6 +49,9 @@ from teacher_identity import (                                 # noqa: E402
     TeacherIdentityError,
     teacher_override_from_mapping,
 )
+from teacher_presentation import effective_teacher_presentation  # noqa: E402
+from teacher_reply_plan import validate_reply_plan                # noqa: E402
+from aa_teacher_selection import apply_teacher_selections         # noqa: E402
 
 T_PROJ = "ProjectData, Assembly-CSharp"
 T_NODES = "System.Collections.Generic.List`1[[NodeData, Assembly-CSharp]], mscorlib"
@@ -1012,6 +1015,8 @@ def wire_voices(flat, project, proj_res, src_dir, id2name):
     os.makedirs(vdir, exist_ok=True)
     lines = []
     for s in flat:
+        if not s["voice"]:
+            continue
         ch = s["characters"]["$values"][s["speakerSlotNum"]]
         who = id2name.get(ch["name"], ch["name"]) if ch["name"] else "-"
         lines.append(f"{s['voice']} => [{who}] {s['text']}")
@@ -1031,6 +1036,8 @@ def wire_voices(flat, project, proj_res, src_dir, id2name):
             if re.fullmatch(r"\d+", stem):
                 by_index[int(stem)] = p
         for i, s in enumerate(flat):
+            if not s["voice"]:
+                continue
             src = pool.get(s["voice"]) or by_index.get(i) or by_index.get(i + 1)
             if not src:
                 continue
@@ -1377,6 +1384,11 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
     aa_data = aa_data or P["data"]
 
     cfg, cast, id2name = load_cast(cast_path)
+    reply_plan = None
+    if effective_teacher_presentation(cfg)["mode"] == "sel_single":
+        reply_plan = validate_reply_plan(
+            options.get("teacher_reply_plan"), Path(script_path).read_text(encoding="utf-8"), cfg,
+        )
     teacher_overrides = _teacher_cast_overrides(cast)
     build_index = json.load(open(index_path, encoding="utf-8"))
     frozen_teachers = teacher_overrides_from_resource_index(build_index)
@@ -1428,6 +1440,12 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
 
         first_bg = flat[0]["bgFriendlyName"] if flat else cfg.get("default_bg", "BG_Black")
         proj = wrap_project(scenes, project, first_bg, idx.get("bg", {}))
+        if reply_plan is not None:
+            proj = apply_teacher_selections(proj, reply_plan)
+            flat = [
+                row for node in proj["nodes"]["$values"]
+                for row in node.get("Scripts", {}).get("$values", [])
+            ]
         spk = {}
         for s in flat:
             n = s["characters"]["$values"][s["speakerSlotNum"]]["name"]

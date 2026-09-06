@@ -286,6 +286,31 @@ class Legacy093Adapter:
             "presentation": "slot_zero",
         }
 
+    def teacher_presentation_capability(self) -> dict[str, Any]:
+        supported = (self.teacher_identity_capability()["state"] == "available"
+                     and getattr(self._teacher_module, "PRESENTATION_SCHEMA_VERSION", None) == "teacher-presentation/1.0"
+                     and getattr(self._modules["build_bundle"], "TEACHER_REPLY_PLAN_SCHEMA_VERSION", None) == "teacher-reply-plan/1.0")
+        if not supported:
+            return {"state": "unavailable", "reason": "legacy_teacher_presentation_unsupported"}
+        return {
+            "state": "available", "schema_version": "teacher-presentation/1.0", "default_mode": "slot_zero",
+            "modes": [{"id": "slot_zero", "label": "槽 0 对白"}, {"id": "sel_single", "label": "Sel 回答"}],
+        }
+
+    def teacher_presentation(self, cast_data: dict[str, Any]) -> dict[str, str]:
+        if self.teacher_presentation_capability()["state"] != "available":
+            if cast_data.get("teacher_presentation"):
+                raise ProductionError("teacher_presentation_unavailable", "当前兼容模块不支持此老师呈现设置", status=409)
+            return {"schema_version": "teacher-presentation/1.0", "mode": "slot_zero"}
+        with self._teacher_error_boundary():
+            return importlib.import_module("teacher_presentation").effective_teacher_presentation(cast_data)
+
+    def teacher_reply(self, card_id: str, text: str) -> dict[str, str]:
+        with self._teacher_error_boundary():
+            importlib.import_module("teacher_reply_plan").validate_reply_text(text)
+            return {**importlib.import_module("teacher_presentation").teacher_reply_ids(card_id),
+                    "source_card_id": card_id, "text": text}
+
     @contextmanager
     def _teacher_error_boundary(self):
         errors = (self._teacher_module.TeacherIdentityError,) if self._teacher_module else ()
@@ -991,6 +1016,17 @@ class Legacy093Adapter:
             cast if isinstance(cast, dict) else {},
             resources,
         )
+        teacher_mode = self.teacher_presentation(cast_data)["mode"]
+        if teacher_mode == "sel_single":
+            for node, identity in zip(nodes, draft["identities"]):
+                mapping = cast.get(node.fields.get("who")) or {}
+                if node.kind != "line" or mapping.get("role") != "teacher":
+                    continue
+                try:
+                    self.teacher_reply(identity["card_id"], str(node.fields.get("text") or ""))
+                except ProductionError as exc:
+                    diagnostics.append({"code": exc.code, "message": str(exc), "severity": "error",
+                                        "card_id": identity["card_id"], "line_no": node.line_no})
         cards = []
         for node, identity in zip(nodes, draft["identities"]):
             card_id = identity["card_id"]
@@ -1040,7 +1076,7 @@ class Legacy093Adapter:
             "cards": cards,
             "diagnostics": diagnostics,
             "counts": counts,
-            "cast": self.store.load_cast(token),
+            "cast": cast_data,
             "cg_segments": segments,
             "review_ready": not any(
                 counts[key] for key in ("pending", "unresolved_issues", "blocking_errors")
@@ -1656,6 +1692,8 @@ class Legacy093Adapter:
         if kind == "teacher":
             if self.teacher_identity_capability()["state"] != "available":
                 raise ProductionError("teacher_identity_unavailable", "当前兼容模块不支持老师身份", status=409)
+            if "presentation" in mapping and self.teacher_presentation_capability()["state"] != "available":
+                raise ProductionError("teacher_presentation_unavailable", "当前兼容模块不支持老师呈现设置", status=409)
             with self._teacher_error_boundary():
                 try:
                     self.store.update_teacher_identity(
@@ -1665,7 +1703,7 @@ class Legacy093Adapter:
                 except self._modules["draft_store"].RevisionConflictError as exc:
                     raise ProductionError("revision_conflict", "草稿版本已经变化", status=409) from exc
                 return self.draft_detail(token)
-        if any(key in mapping for key in ("role", "teacher_identity_schema", "teacher_preset_id")):
+        if any(key in mapping for key in ("role", "teacher_identity_schema", "teacher_preset_id", "presentation")):
             raise ProductionError("invalid_cast_binding", "老师身份须通过明确的老师身份选择保存")
         normalized = dict(mapping)
         if kind == "narrator":
@@ -1963,42 +2001,50 @@ class Legacy093Adapter:
                 status=409,
                 details=detail["counts"],
             )
-        draft_dir = self.store.get_draft_path(token)
         try:
-            self.store.assert_review_ready(token)
-            manager = self._modules["build_bundle"].BuildBundleManager(store=self.store)
-            build_id = manager.create_compile_snapshot(token, expected_draft_version)
-            source = draft_dir / "edited.txt"
-            identities = json.loads((draft_dir / "identity.json").read_text(encoding="utf-8"))
-            segments = cg_segments.load(draft_dir / "cg-segments.json")
-            if segments:
-                transformed, aliases = cg_segments.transform_for_compile(
-                    text=source.read_text(encoding="utf-8"), identities=identities, segments=segments
-                )
-                input_dir = draft_dir / "builds" / ".tmp" / build_id / "input"
-                (input_dir / "edited.txt").write_text(transformed, encoding="utf-8")
-                cast_path = input_dir / "cast.json"
-                cast_data = json.loads(cast_path.read_text(encoding="utf-8"))
-                source_cast = cast_data.get("cast") or {}
-                for alias, binding in list(aliases.items()):
-                    original = source_cast.get(binding.get("id"))
-                    if isinstance(original, dict) and original.get("role") == "teacher":
-                        aliases[alias] = dict(original)
-                cast_data.setdefault("cast", {}).update(aliases)
-                cast_path.write_text(json.dumps(cast_data, ensure_ascii=False, indent=2), encoding="utf-8")
-                (input_dir / "cg-plan.json").write_text(
-                    json.dumps({"segments": segments, "mode": "named_slot_zero_no_portraits"}, ensure_ascii=False, indent=2), encoding="utf-8"
-                )
-            return build_id
+            with self._teacher_error_boundary(), self.store.draft_lock(token):
+                return self._create_compile_snapshot_locked(token, expected_draft_version)
         except self._modules["draft_store"].ReviewPendingError as exc:
             raise ProductionError(
-                getattr(exc, "code", "review_pending"),
-                str(exc),
-                status=409,
+                getattr(exc, "code", "review_pending"), str(exc), status=409,
                 details=getattr(exc, "counts", {}),
             ) from exc
         except self._modules["build_bundle"].CompileInputStaleError as exc:
             raise ProductionError("compile_input_stale", str(exc), status=409) from exc
+
+    def _create_compile_snapshot_locked(self, token: str, expected_draft_version: int) -> str:
+        draft_dir = self.store.get_draft_path(token)
+        self.store.assert_review_ready(token)
+        manager = self._modules["build_bundle"].BuildBundleManager(store=self.store)
+        build_id = manager.create_compile_snapshot(token, expected_draft_version)
+        input_dir = draft_dir / "builds" / ".tmp" / build_id / "input"
+        source = input_dir / "edited.txt"
+        identities = json.loads((input_dir / "identity.json").read_text(encoding="utf-8"))
+        segments = cg_segments.load(draft_dir / "cg-segments.json")
+        if segments:
+            transformed, aliases = cg_segments.transform_for_compile(
+                text=source.read_text(encoding="utf-8"), identities=identities, segments=segments
+            )
+            cast_path = input_dir / "cast.json"
+            cast_data = json.loads(cast_path.read_text(encoding="utf-8"))
+            source_cast = cast_data.get("cast") or {}
+            for alias, binding in list(aliases.items()):
+                original = source_cast.get(binding.get("id"))
+                if isinstance(original, dict) and original.get("role") == "teacher":
+                    aliases[alias] = dict(original)
+            cast_data.setdefault("cast", {}).update(aliases)
+            reply_plan_path = input_dir / "teacher-reply-plan.json"
+            if reply_plan_path.is_file():
+                reply_plan = importlib.import_module("teacher_reply_plan").retarget_reply_plan(
+                    json.loads(reply_plan_path.read_text(encoding="utf-8")), transformed, cast_data,
+                )
+                _write_json_atomic(reply_plan_path, reply_plan)
+            source.write_text(transformed, encoding="utf-8")
+            _write_json_atomic(cast_path, cast_data)
+            _write_json_atomic(input_dir / "cg-plan.json", {
+                "segments": segments, "mode": "named_slot_zero_no_portraits",
+            })
+        return build_id
 
     def execute_compile(self, token: str, build_id: str) -> dict[str, Any]:
         with _COMPILE_LOCK, self._teacher_error_boundary():

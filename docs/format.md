@@ -56,7 +56,7 @@
   "voice": "8ef7c7b1-...-fe9c",    // 配音槽 GUID -> voices/<guid>.ogg
   "transition": 0,                 // 过渡 ID，见 tables.TRANSITION
   "bgmId": 999,                    // 999 = 静音
-  "selectionGroup": 0,             // 分支选项组（本工具尚未支持）
+  "selectionGroup": 0,             // 普通对白保持 0；单回答 Sel 使用独立 SelectionNodeData
   "additionalPrompt": "#wait;2000",
   "characters": { "$values": [ /* 固定 6 项：0 为无立绘说话槽，1–5 为可见站位 */ ] },
   "speakerSlotNum": 3,
@@ -260,5 +260,6 @@ AA 内置角色（韩文名那批）的立绘在 Addressables 包里，磁盘上
 
 ## 尚未支持
 
-- **分支选项**（`selectionGroup`）—— 手上所有工程都是线性的，没有样本
+- **多分支选项**（`selectionGroup`）—— 仍不支持；单回答老师 Sel 使用独立 `SelectionNodeData`
+  节点（一个回答、一个出边），见 [AA 单回答证据](compatibility/aa-single-selection.md)。
 - `bgmId` 的完整对照表 —— 只知道 999 = 静音

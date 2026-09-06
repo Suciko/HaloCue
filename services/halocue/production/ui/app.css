@@ -10,9 +10,22 @@
 .teacher-identity-form label{display:grid;gap:7px;font-size:13px;font-weight:700;min-width:0}
 .teacher-identity-form input,.teacher-identity-form select{width:100%;min-width:0}
 .teacher-custom-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.teacher-presentation-control{min-width:0;margin:0;padding:0;border:0}
+.teacher-presentation-control legend{margin-bottom:7px;padding:0;font-size:13px;font-weight:700}
+.teacher-presentation-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid var(--line)}
+.teacher-presentation-options label{display:flex;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:8px;line-height:1.5;cursor:pointer}
+.teacher-presentation-options label+label{border-left:1px solid var(--line)}
+.teacher-presentation-options label:has(input:checked){background:#edf3ef;color:var(--green)}
+.teacher-presentation-options label:has(input:focus-visible){outline:2px solid var(--green);outline-offset:-2px}
+.teacher-presentation-options input{width:14px;height:14px;margin:0;padding:0;flex:0 0 auto;accent-color:var(--green)}
 .teacher-identity-form .dialog-status{margin:0;line-height:1.65;overflow-wrap:anywhere}
 .teacher-identity-form .dialog-footer{flex-wrap:wrap}
 .preview-dialogue .preview-speaker-organization{margin-top:4px;overflow-wrap:anywhere}
+.performance-preview-frame.presentation-teacher_selection .preview-stage{align-items:center;justify-content:center;padding-top:64px;padding-bottom:40px}
+.preview-teacher-reply,.preview-reply-complete{position:relative;z-index:1;width:min(650px,100%);min-height:48px;padding:16px 20px;border:1px solid #c9d9df;border-left:4px solid #557f95;background:#f8fbfc;color:#213e4d;font-size:16px;line-height:1.65;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere}
+.preview-teacher-reply:hover{border-color:#557f95;background:#edf5f8}
+.preview-teacher-reply:focus-visible{outline:2px solid #79b5d3;outline-offset:3px}
+.preview-reply-complete{text-align:center;color:#455c66}
 @media(max-width:480px){.teacher-custom-fields{grid-template-columns:minmax(0,1fr)}.teacher-identity-form .dialog-footer{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.teacher-identity-form .dialog-footer>button{min-width:0;min-height:40px;line-height:1.4}}
 @media(max-width:800px){#page-mapping .sticky-actions{margin:18px 0 0;padding:12px 0 0}}
 

@@ -166,6 +166,7 @@ class ProductionService:
     def capabilities(self) -> dict[str, Any]:
         capabilities = self.adapter.capabilities()
         capabilities["teacher_identity"] = self.adapter.teacher_identity_capability()
+        capabilities["teacher_presentation"] = self.adapter.teacher_presentation_capability()
         model = self.direction_model_settings.public()["model"]
         spine = spine_rendering.capability(
             legacy_root=self.settings.legacy_root,
@@ -1287,6 +1288,7 @@ class ProductionService:
         cast_data = detail.get("cast") if isinstance(detail.get("cast"), dict) else {}
         cast = cast_data.get("cast") if isinstance(cast_data.get("cast"), dict) else {}
         background = str(cast_data.get("default_bg") or "BG_Black")
+        teacher_mode = self.adapter.teacher_presentation(cast_data)["mode"]
         frames: list[dict[str, Any]] = []
         for index, card in enumerate(detail.get("cards") or []):
             if not isinstance(card, dict):
@@ -1351,6 +1353,10 @@ class ProductionService:
                     or self.resources.preview("backgrounds", background) is not None
                 )
             )
+            teacher_reply = None
+            if kind == "line" and mapping.get("role") == "teacher" and teacher_mode == "sel_single":
+                teacher_reply = self.adapter.teacher_reply(str(card.get("card_id") or ""), text)
+                presentation = "teacher_selection"
             frames.append(
                 {
                     "index": index,
@@ -1365,6 +1371,7 @@ class ProductionService:
                         if cg else None
                     ),
                     "speaker": speaker_display,
+                    **({"teacher_reply": teacher_reply} if teacher_reply else {}),
                     "title": title,
                     "text": text,
                     "annotations": annotations,

@@ -9,6 +9,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = "teacher-identity/1.0"
+PRESENTATION_SCHEMA_VERSION = "teacher-presentation/1.0"
 PRESETS = (
     {"id": "sensei_shale", "display_name": "sensei", "organization": "沙勒"},
     {"id": "sensei_xialai", "display_name": "sensei", "organization": "夏莱"},
@@ -110,6 +111,8 @@ def prepare_teacher_binding(
     speaker: str,
     selection: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    from teacher_presentation import effective_teacher_presentation, validate_teacher_presentation
+
     if not isinstance(selection, dict):
         raise TeacherIdentityError("invalid_teacher_identity", "老师身份请求须为对象")
     if selection.get("schema_version") != SCHEMA_VERSION:
@@ -122,6 +125,7 @@ def prepare_teacher_binding(
         "preset_id",
         "display_name",
         "organization",
+        "presentation",
     }:
         raise TeacherIdentityError("invalid_teacher_identity", "老师身份请求字段无效")
     preset = next((p for p in PRESETS if p["id"] == selection.get("preset_id")), None)
@@ -138,7 +142,16 @@ def prepare_teacher_binding(
         name, organization = preset["display_name"], preset["organization"]
     if not isinstance(cast_data, dict) or not isinstance(resources, dict):
         raise TeacherIdentityError("teacher_identity_corrupt", "演员或资源声明不可读取", status=409)
+    old_presentation = effective_teacher_presentation(cast_data)
+    presentation = (
+        validate_teacher_presentation(selection["presentation"])
+        if "presentation" in selection
+        else old_presentation
+    )
+    presentation_changed = presentation != old_presentation
     updated = copy.deepcopy(cast_data)
+    if presentation_changed:
+        updated["teacher_presentation"] = presentation
     catalogue = copy.deepcopy(resources)
     actors = updated.setdefault("cast", {})
     characters = catalogue.setdefault("characters", [])
@@ -229,7 +242,7 @@ def prepare_teacher_binding(
             "teacher_identity_schema": SCHEMA_VERSION,
             "teacher_preset_id": preset["id"],
         }
-        if actors.get(alias) != binding:
+        if actors.get(alias) != binding or presentation_changed:
             affected.append(alias)
         actors[alias] = binding
     resource = {
