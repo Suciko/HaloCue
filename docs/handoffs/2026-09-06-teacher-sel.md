@@ -100,6 +100,23 @@ writing text.
 
 ## Delivery
 
-This branch is ready for focused commits and a stacked PR against
-`codex/1.0-teacher-identity` / PR #35. Do not merge #35 or this branch
-automatically; review them in dependency order.
+Code commits:
+
+- `2bf090b`: versioned presentation/reply contracts, deterministic Sel graph
+  projection, compiler/validator and writing import warning.
+- `b62a817`: production capabilities, mapping persistence, preview, service
+  integration and browser controls/tests.
+- `2c096c2`: README, evidence and this handoff.
+
+PR: https://github.com/Suciko/HaloCue/pull/37 (base
+`codex/1.0-teacher-identity`, head `codex/1.0-teacher-sel`). The remote branch
+tip is `2c096c2ff6a74bd9c52aa0331ead686c94d37bfc`, verified against local Git
+objects. GitHub Git Data upload was used after Git HTTPS reset the connection;
+no force update or shared-branch merge occurred.
+
+Final focused run: **251 passed**; production full suite **224 passed**; writing
+and integrated suites **655 passed**. `node --check app.js`, new-file Ruff
+formatting and `git diff --check` pass. Root baseline limitations remain one
+pre-existing release-workflow assertion and 26 missing-Chromium setup errors.
+
+Do not merge #35 or this branch automatically; review in dependency order.
