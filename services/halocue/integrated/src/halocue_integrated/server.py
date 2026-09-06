@@ -81,6 +81,7 @@ class IntegratedRuntime:
         self.gateway.server_close()
         self.writing_server.shutdown()
         self.writing_server.server_close()
+        self.writing_service.close()
         self.production_server.shutdown()
         self.production_server.server_close()
         self.production_service.jobs.close()
