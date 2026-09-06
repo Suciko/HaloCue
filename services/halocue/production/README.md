@@ -209,6 +209,69 @@ HaloCue 1.0; when the Provider is not configured the UI keeps the mode
 selectable and takes the user to the model settings instead of silently
 disabling the choice.
 
+### Direction presets
+
+`direction_profile` is independent from `generation_mode`, `story_type`, and
+the existing `layout_mode` compatibility field. Supported presets:
+
+| ID | Workbench label | Policy |
+| --- | --- | --- |
+| `standard` | 标准（原版） | Existing prompt and missing-background review workflow. |
+| `conservative` | 简洁（保守） | Stable presentation, existing expression labels, best available frozen backgrounds. |
+
+Create requests without this field remain `standard`. New workbench imports
+explicitly select `conservative`; reopening an old run does not change it.
+Generation requests without the field inherit the run's persisted selection.
+
+Example body for `POST /api/v1/production-runs/{run_id}/direction-generation`:
+
+```json
+{
+  "expected_draft_version": 2,
+  "story_type": "auto",
+  "direction_profile": "conservative"
+}
+```
+
+The server pins a `direction_profile_snapshot` before calling the model:
+
+```json
+{
+  "id": "conservative",
+  "version": "1.0",
+  "rules_sha256": "6bcc19fcda1e65617d3d69639ac5834f6147585f9b8fcef6067841f3d6c5dddf"
+}
+```
+
+This sample identifies the `auto` rules. The profile version covers its policy;
+change it when policy behavior changes. The actual rules hash, full static
+prompt hash, resource hash, and background-plan hash also guard checkpoint
+reuse. Clients cannot replace the server-owned snapshot by posting another one.
+The snapshot is exposed in job/audit responses without prompt text or secrets.
+
+Active requests only deduplicate within the same profile/rules. Pause/retry
+retains the old snapshot; switching requires a new generation and confirmation
+in the workbench. Rule upgrades reject old recovery with
+`409 direction_profile_changed`; invalid selections use
+`400 invalid_direction_profile`, active mismatches use
+`409 direction_profile_conflict`. Capability discovery reports available
+presets; older external annotation modules retain Standard and reject
+Conservative with `409 direction_profile_unavailable`.
+
+Conservative generation retains a valid model-selected background. If omitted,
+the backend ranks the frozen labels using scene context, respects authored and
+confirmed selections and inherited scenes, then supplies an available fallback.
+Approximate matches become `background_approximate_match` review advice, not
+image-generation requests. Ranking scores are not confidence probabilities.
+Empty catalogues and unresolved references fail with stable
+`background_catalog_empty` / `background_not_in_manifest` codes. No additional
+vision or image-provider call is introduced, and source dialogue is unchanged.
+
+Regeneration works from the current draft and preserves its existing authored
+directions; it is not a reset to the original release. Results still require
+review, and compilation never implicitly installs the build. Real-provider
+quality and monetary savings require a separate user-authorized comparison.
+
 ## Ownership boundary
 
 The future writing service owns ideas, outlines, prose, and revisions until it

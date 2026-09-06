@@ -5,6 +5,7 @@
     currentRun: null,
     currentDraft: null,
     currentJob: null,
+    directionProfile: "standard",
     gates: null,
     capabilities: null,
     selectedCard: null,
@@ -178,6 +179,7 @@
     if (busy === state.busy) return;
     state.busy = busy;
     document.body.classList.toggle("is-busy", busy);
+    syncWorkflowControlStates();
     if (busy) {
       $$('button:not([disabled])').forEach((button) => {
         button.dataset.busyDisabled = "true";
@@ -205,6 +207,18 @@
   async function refreshCapabilities() {
     const [health, caps] = await Promise.all([api("/health"), api("/capabilities")]);
     state.capabilities = caps.capabilities;
+    const profiles = state.capabilities.direction_profiles;
+    const allowedProfiles = new Set((profiles?.items || [{ id: "standard" }]).map(item => item.id));
+    const defaultProfile = profiles?.default_new_project_ui || "standard";
+    $$('#sourceDirectionProfile option, #directionProfile option').forEach((option) => {
+      option.disabled = !allowedProfiles.has(option.value);
+      if (option.parentElement.id === "sourceDirectionProfile") {
+        option.defaultSelected = option.value === defaultProfile;
+      }
+    });
+    if (!allowedProfiles.has($("#sourceDirectionProfile").value)) {
+      $("#sourceDirectionProfile").value = defaultProfile;
+    }
     const status = $("#serviceState");
     status.textContent = `${health.service} · ${health.version}`;
     status.classList.add("online");
@@ -453,11 +467,20 @@
 
   function adoptRunResult(result, { replaceJob = false } = {}) {
     const selectedId = state.selectedCard?.card_id;
+    const previousRun = state.currentRun;
     state.currentRun = result.run || state.currentRun;
+    if (previousRun?.run_id !== state.currentRun?.run_id
+      || previousRun?.source_summary?.direction_profile !== state.currentRun?.source_summary?.direction_profile) {
+      state.directionProfile = state.currentRun?.source_summary?.direction_profile === "conservative"
+        ? "conservative" : "standard";
+    }
     if (Object.prototype.hasOwnProperty.call(result, "draft")) state.currentDraft = result.draft;
     if (Object.prototype.hasOwnProperty.call(result, "gates")) state.gates = result.gates;
     if (replaceJob || Object.prototype.hasOwnProperty.call(result, "active_job")) {
       state.currentJob = result.active_job || result.last_job || null;
+    }
+    if (state.currentJob?.kind === "direction_generation" && jobIsActive(state.currentJob)) {
+      state.directionProfile = directionJobProfile();
     }
     state.selectedCard = state.currentDraft?.cards?.find((card) => card.card_id === selectedId) || null;
     rememberRun(state.currentRun);
@@ -561,6 +584,7 @@
         project: $("#projectName").value.trim(),
         source: sourcePayload(),
         generation_mode: $('input[name="generationMode"]:checked')?.value || "format_only",
+        direction_profile: $("#sourceDirectionProfile").value,
       };
     } catch (error) {
       handleError(error);
@@ -577,6 +601,7 @@
       updateShell(); await loadRuns(); showStage("mapping", { force: true });
       toast("制作任务已建立，开始确认角色映射。");
       form.reset();
+      updateGenerationModeUi();
       state.sourceFileName = null;
       state.upstreamRelease = null;
       $("#activeSourceBadge")?.classList.add("hidden");
@@ -865,6 +890,7 @@
 
   function updateGenerationModeUi() {
     const selected = $('input[name="generationMode"]:checked')?.value || "format_only";
+    $("#sourceDirectionProfileControl")?.classList.toggle("hidden", selected !== "ai_direction");
     const aiReady = state.capabilities?.generation_modes?.ai_direction?.state === "available";
     const notice = $("#generationModeNotice");
     const button = $("#configureGenerationModel");
@@ -1217,6 +1243,18 @@
     return !!job && !terminalJobStates.has(job.state);
   }
 
+  function directionJobProfile(job = state.currentJob) {
+    const profile = job?.direction_profile_snapshot?.id || job?.direction_profile;
+    return profile === "conservative" ? "conservative" : "standard";
+  }
+
+  function canResumeSelectedDirection() {
+    return state.currentJob?.kind === "direction_generation"
+      && state.currentJob.run_id === state.currentRun?.run_id
+      && state.currentJob.resumable
+      && directionJobProfile() === state.directionProfile;
+  }
+
   function syncWorkflowControlStates() {
     const snapshot = workflowSnapshot();
     const mapping = $("#mappingContinue");
@@ -1230,12 +1268,18 @@
     if (generation) {
       generation.disabled = state.busy || !state.currentRun || !state.currentDraft
         || !!state.currentDraft?.counts?.blocking_errors
+        || !!state.jobActionPending
+        || !!$("#directionProfile").selectedOptions[0]?.disabled
         || directionActive
         || state.currentRun?.state === "compiling";
     }
     $$('#layoutModeFieldset input[name="layoutMode"]').forEach((input) => {
       input.disabled = state.busy || directionActive;
     });
+    $("#sourceDirectionProfile").disabled = state.busy;
+    $("#directionProfile").disabled = state.busy || directionActive
+      || !!state.jobActionPending || state.currentRun?.state === "compiling";
+    $("#regenerateDirection").disabled = generation?.disabled !== false;
 
     const compiling = state.currentRun?.state === "compiling"
       || (state.currentJob?.kind === "compile" && jobIsActive(state.currentJob));
@@ -1390,8 +1434,8 @@
     const pending = state.jobActionPending;
     $("#pauseGeneration").hidden = !job.can_pause;
     $("#pauseGeneration").disabled = state.busy || !!pending || !job.can_pause;
-    $("#resumeGeneration").hidden = !job.resumable;
-    $("#resumeGeneration").disabled = state.busy || !!pending || !job.resumable;
+    $("#resumeGeneration").hidden = !canResumeSelectedDirection();
+    $("#resumeGeneration").disabled = state.busy || !!pending || !canResumeSelectedDirection();
     $("#cancelGeneration").hidden = !job.can_cancel;
     $("#cancelGeneration").disabled = state.busy || !!pending || !job.can_cancel;
     const rows = jobLogRows(job, metrics);
@@ -1402,6 +1446,8 @@
   function renderGeneration() {
     if (!state.currentRun || !state.currentDraft) return;
     const mode = state.currentRun.source_summary?.generation_mode || "format_only";
+    $("#directionProfileControl").classList.toggle("hidden", mode !== "ai_direction");
+    $("#directionProfile").value = state.directionProfile;
     setLayoutMode(state.currentRun.source_summary?.layout_mode || savedLayoutMode());
     $("#layoutModeFieldset")?.classList.toggle("hidden", mode !== "ai_direction");
     $("#generationModeBadge").textContent = mode === "ai_direction" ? "AI 安排演出" : "仅转换格式";
@@ -1417,10 +1463,15 @@
     const directionActive = state.currentJob?.kind === "direction_generation"
       && jobIsActive(state.currentJob);
     const resumable = state.currentJob?.kind === "direction_generation" && state.currentJob.resumable;
+    $("#regenerateDirection").hidden = mode !== "ai_direction" || !hasCompletedDirection || directionActive;
     if (mode === "ai_direction" && directionActive) {
       $("#generationActionTitle").textContent = "AI 正在安排演出";
       $("#generationActionCopy").textContent = "可以在下方查看实时进度、请求记录，或暂停和结束任务。";
       action.textContent = "生成中";
+    } else if (mode === "ai_direction" && resumable && !canResumeSelectedDirection()) {
+      $("#generationActionTitle").textContent = "按新策略重新生成";
+      $("#generationActionCopy").textContent = "旧任务及其检查点保留，新策略将创建独立的生成任务。";
+      action.textContent = "按新策略重新生成";
     } else if (mode === "ai_direction" && resumable) {
       $("#generationActionTitle").textContent = "继续未完成的演出任务";
       $("#generationActionCopy").textContent = "继续时会复用同一检查点，只处理尚未完成的分块。";
@@ -1438,18 +1489,39 @@
     renderGenerationJob();
   }
 
-  async function startGeneration() {
-    if (!state.currentRun || !state.currentDraft || state.busy) return;
+  async function startGeneration({ restart = false } = {}) {
+    if (!state.currentRun || !state.currentDraft || state.busy || state.jobActionPending) return;
     const mode = state.currentRun.source_summary?.generation_mode;
     if (mode !== "ai_direction") { showStage("review", { force: true }); return; }
-    if (state.currentRun.last_direction_generation_id) {
-      showStage("review", { force: true });
-      return;
-    }
     if (state.currentJob?.kind === "direction_generation" && jobIsActive(state.currentJob)) return;
-    if (state.currentJob?.kind === "direction_generation" && state.currentJob.resumable) {
+    if (!restart && canResumeSelectedDirection()) {
       await resumeGenerationJob();
       return;
+    }
+    const previousDirection = state.currentJob?.kind === "direction_generation"
+      && state.currentJob.run_id === state.currentRun.run_id;
+    if (state.currentRun.last_direction_generation_id) {
+      if (!restart && (!previousDirection || !state.currentJob.resumable)) {
+        showStage("review", { force: true });
+        return;
+      }
+    }
+    const runId = state.currentRun.run_id;
+    const draftVersion = state.currentDraft.draft_version;
+    const profile = state.directionProfile;
+    if (previousDirection || restart) {
+      const profileLabel = profile === "conservative" ? "简洁（保守）" : "标准（原版）";
+      if (!await askConfirmation({
+        title: "重新生成演出草稿？",
+        body: `将按${profileLabel}基于当前草稿新建生成任务，保留已有指令，不复用旧检查点。完成后需要重新审查，可能产生新的模型费用。`,
+        confirmLabel: "重新生成",
+      })) return;
+      if (state.currentRun?.run_id !== runId || state.currentDraft?.draft_version !== draftVersion
+        || state.directionProfile !== profile || state.busy || state.jobActionPending
+        || jobIsActive(state.currentJob)) {
+        toast("当前任务已变化，请检查后重新发起。", "warning");
+        return;
+      }
     }
     setBusy(true);
     try {
@@ -1458,6 +1530,7 @@
           expected_draft_version: state.currentDraft.draft_version,
           story_type: "auto",
           layout_mode: selectedLayoutMode(),
+          direction_profile: state.directionProfile,
         })
       });
       state.currentJob = result.job;
@@ -1488,7 +1561,7 @@
 
   async function resumeGenerationJob() {
     const job = state.currentJob;
-    if (!job?.resumable || state.jobActionPending) return;
+    if (!canResumeSelectedDirection() || state.jobActionPending) return;
     state.jobActionPending = "resume";
     renderGenerationJob();
     try {
@@ -2633,6 +2706,15 @@
     const jobId = button.dataset.taskJobId;
     const action = button.dataset.taskJobAction;
     const stateBefore = button.dataset.taskJobState;
+    if (["resume", "retry"].includes(action)
+      && button.dataset.taskOwnerRun === state.currentRun?.run_id
+      && button.dataset.taskDirectionProfile
+      && button.dataset.taskDirectionProfile !== state.directionProfile) {
+      $("#tasksDialog").close();
+      showStage("generation", { force: true });
+      toast("当前演出策略已变更，请确认新建生成任务，或选回旧策略继续。", "warning");
+      return;
+    }
     if (action === "cancel" && stateBefore !== "queued") {
       const confirmed = await askConfirmation({
         title: "结束这个后台任务？",
@@ -2687,7 +2769,9 @@
           actions.push(`<button type="button" class="danger-button" data-task-job-id="${esc(job.job_id)}" data-task-job-action="cancel" data-task-job-state="${esc(job.state)}">${job.state === "queued" ? "取消排队" : "结束"}</button>`);
         }
         if (job.resumable) {
-          actions.push(`<button type="button" class="primary" data-task-job-id="${esc(job.job_id)}" data-task-job-action="resume" data-task-job-state="${esc(job.state)}">${esc(job.retry_label || "继续生成")}</button>`);
+          const profileChanged = job.kind === "direction_generation" && job.run_id === state.currentRun?.run_id
+            && directionJobProfile(job) !== state.directionProfile;
+          actions.push(`<button type="button" class="primary" data-task-job-id="${esc(job.job_id)}" data-task-job-action="resume" data-task-job-state="${esc(job.state)}" data-task-owner-run="${esc(job.run_id)}" data-task-direction-profile="${job.kind === "direction_generation" ? directionJobProfile(job) : ""}">${esc(profileChanged ? "查看生成策略" : job.retry_label || "继续生成")}</button>`);
         } else if (job.retryable) {
           actions.push(`<button type="button" class="primary" data-task-job-id="${esc(job.job_id)}" data-task-job-action="retry" data-task-job-state="${esc(job.state)}">${esc(job.retry_label || "重试此阶段")}</button>`);
         }
@@ -2758,6 +2842,11 @@
   $("#refreshRun").addEventListener("click", () => refreshCurrentRun().catch(handleError));
   $("#mappingContinue").addEventListener("click", () => showStage("generation"));
   $("#generateOrReview").addEventListener("click", startGeneration);
+  $("#regenerateDirection").addEventListener("click", () => startGeneration({ restart: true }));
+  $("#directionProfile").addEventListener("change", (event) => {
+    state.directionProfile = event.target.value === "conservative" ? "conservative" : "standard";
+    renderGeneration();
+  });
   $("#pauseGeneration").addEventListener("click", pauseGenerationJob);
   $("#resumeGeneration").addEventListener("click", resumeGenerationJob);
   $("#cancelGeneration").addEventListener("click", cancelGenerationJob);

@@ -275,6 +275,11 @@ def _effective_director_rows(
         effective, _clean, _dropped, _details = project_effective_annotation_row(
             row, item, character, constraints,
         )
+        if (
+            constraints.get("direction_profile") == "conservative"
+            and row.get("_background_effective") in set(constraints.get("ok_bg") or ())
+        ):
+            effective["bg"] = row["_background_effective"]
         effective_rows.append(effective)
     return effective_rows
 
@@ -319,6 +324,7 @@ def run_annotation_agent(
     reasoning_mode: Optional[str] = None, annotation_max_tokens: Optional[int] = None,
     context_window_tokens: Optional[int] = None,
     story_type: str = "auto",
+    background_policy: Any = None,
 ) -> Dict[str, Any]:
     started_at = time.perf_counter()
     stats_before = dict(getattr(provider, "stats", {}) or {})
@@ -905,6 +911,7 @@ def run_annotation_agent(
             None,
         )
         if current_scene and str((memory.get("scene") or {}).get("id") or "") != scene_id:
+            previous_direction = copy.deepcopy(memory.get("direction") or {})
             scene_context = dict(current_scene)
             scene_context["scene_type"] = planned_scene_type(current_scene)
             scene_context["scene_function"] = planned_scene_function(current_scene)
@@ -912,6 +919,11 @@ def run_annotation_agent(
                 memory, scene_context,
                 str(current_scene.get("evidence") or current_scene.get("opening_text") or ""),
             )
+            if background_policy is not None:
+                if background_policy.inherits_scene(targets):
+                    memory["direction"] = previous_direction
+                else:
+                    memory["direction"]["background"] = previous_direction.get("background")
         relevant_events = retrieve_events(memory.get("events") or [], targets, chunk["scene_id"], limit=8)
         volatile, user = assemble_chunk_context(
             items, chunk, memory, relevant_events, usage_chain,
@@ -1212,6 +1224,11 @@ def run_annotation_agent(
             scene_id=str(chunk["scene_id"]), chunk_id=chunk_id,
         )
 
+        if background_policy is not None:
+            validated["lines_by_id"] = background_policy.apply(
+                validated["lines_by_id"], targets,
+                (memory.get("direction") or {}).get("background", ""),
+            )
         next_rows = copy.deepcopy(rows_by_id)
         next_rows.update(validated["lines_by_id"])
         next_beats = copy.deepcopy(beats)

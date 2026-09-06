@@ -1046,6 +1046,7 @@
       "/production/preflight.css",
       "/production/cg-responsive.css",
       "/production/workspace-migration.css",
+      "/production/direction-profile.css",
       "/production-embed.css",
     ];
     const styleLoads = styleUrls.map(stylesheet);

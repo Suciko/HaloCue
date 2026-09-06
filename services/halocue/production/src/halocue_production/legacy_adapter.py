@@ -198,6 +198,8 @@ class Legacy093Adapter:
         return copy.deepcopy(self._resource_snapshot)
 
     def capabilities(self) -> dict[str, Any]:
+        prompt_module = self._modules["annotate"].PROMPT
+        profiles_supported = callable(getattr(prompt_module, "profile_snapshot", None))
         resource_ready = bool(
             self.settings.resource_index and self.settings.resource_index.is_file()
         )
@@ -217,6 +219,14 @@ class Legacy093Adapter:
             },
             "script_import": {"state": "available"},
             "performance_draft": {"state": "available"},
+            "direction_profiles": {
+                "version": getattr(prompt_module, "PROFILE_VERSION", "1.0"),
+                "default_api": "standard",
+                "default_new_project_ui": "conservative" if profiles_supported else "standard",
+                "items": [
+                    {"id": "standard", "label": "标准（原版）"},
+                ] + ([{"id": "conservative", "label": "简洁（保守）"}] if profiles_supported else []),
+            },
             "generation_modes": {
                 "format_only": {"state": "available"},
                 "ai_direction": {
@@ -234,6 +244,46 @@ class Legacy093Adapter:
                 "aa_workspace": aa_ready,
             },
         }
+
+    def direction_profile_snapshot(
+        self, value: Any = None, *, story_type: str = "auto"
+    ) -> dict[str, str]:
+        prompt_module = self._modules["annotate"].PROMPT
+        snapshot = getattr(prompt_module, "profile_snapshot", None)
+        if not callable(snapshot):
+            if value == "conservative":
+                raise ProductionError(
+                    "direction_profile_unavailable", "当前兼容模块尚不支持简洁演出模式", status=409,
+                )
+            if value is None or value == "standard":
+                return {
+                    "id": "standard", "version": "1.0",
+                    "rules_sha256": hashlib.sha256(prompt_module.build_rules(story_type).encode("utf-8")).hexdigest(),
+                }
+            raise ProductionError("invalid_direction_profile", "演出模式无效")
+        try:
+            return snapshot(value, story_type=story_type)
+        except ValueError as exc:
+            raise ProductionError(
+                "invalid_direction_profile",
+                "演出模式无效",
+                details={"allowed": ["standard", "conservative"]},
+            ) from exc
+
+    @staticmethod
+    def public_direction_profile_snapshot(value: Any) -> dict[str, str] | None:
+        if not isinstance(value, dict):
+            return None
+        if (
+            not isinstance(value.get("id"), str)
+            or value["id"] not in {"standard", "conservative"}
+            or not isinstance(value.get("version"), str)
+            or not re.fullmatch(r"[0-9]+\.[0-9]+", value["version"])
+            or not isinstance(value.get("rules_sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", value["rules_sha256"])
+        ):
+            return None
+        return {key: value[key] for key in ("id", "version", "rules_sha256")}
 
     def discover_aa_environment(self, selection: str | None = None) -> dict[str, Any]:
         discovery = self._modules["aa_install_discovery"].discover_aa(
@@ -1327,6 +1377,13 @@ class Legacy093Adapter:
                     "model": str(result.get("model") or ""),
                     "story_type": str(result.get("story_type") or "auto"),
                     "layout_mode": str(result.get("layout_mode") or "ai"),
+                    "direction_profile": (
+                        "conservative" if result.get("direction_profile") == "conservative"
+                        else "standard"
+                    ),
+                    "direction_profile_snapshot": self.public_direction_profile_snapshot(
+                        result.get("direction_profile_snapshot")
+                    ),
                     "status": str(result.get("status") or "succeeded"),
                     "draft_version": result.get("draft_version"),
                     "pending_targets": int(result.get("pending_targets") or 0),
@@ -2087,11 +2144,22 @@ class Legacy093Adapter:
         expected_draft_version: int,
         story_type: str,
         layout_mode: str,
+        direction_profile: str = "standard",
+        direction_profile_snapshot: dict[str, str] | None = None,
         resume: bool = False,
         progress: Any = None,
         model_activity: Any = None,
         cancelled: Any = None,
     ) -> dict[str, Any]:
+        current_profile = self.direction_profile_snapshot(direction_profile, story_type=story_type)
+        if direction_profile_snapshot is not None and direction_profile_snapshot != current_profile:
+            raise ProductionError(
+                "direction_profile_changed",
+                "演出规则版本已经变化，请发起新的生成任务",
+                status=409,
+            )
+        direction_profile_snapshot = current_profile
+        direction_profile = current_profile["id"]
         draft_dir = self.store.get_draft_path(token)
         detail = self.draft_detail(token)
         if int(detail.get("draft_version") or -1) != int(expected_draft_version):
@@ -2114,6 +2182,25 @@ class Legacy093Adapter:
                     status=409,
                     details={"generation_id": generation_id},
                 ) from exc
+        profile_path = attempt_dir / "direction-profile.json"
+        if resume:
+            if profile_path.is_file():
+                try:
+                    saved_profile = json.loads(profile_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError) as exc:
+                    raise ProductionError(
+                        "direction_profile_changed", "原任务的演出模式记录不可读取", status=409
+                    ) from exc
+            else:
+                saved_profile = self.direction_profile_snapshot("standard", story_type=story_type)
+            if saved_profile != direction_profile_snapshot:
+                raise ProductionError(
+                    "direction_profile_changed",
+                    "原任务的演出模式或规则版本不一致，不能继续旧任务",
+                    status=409,
+                )
+        if not profile_path.is_file():
+            _write_json_atomic(profile_path, direction_profile_snapshot)
         cast_path = draft_dir / "cast.json"
         with self.store.draft_lock(token):
             cast_data = (
@@ -2173,6 +2260,8 @@ class Legacy093Adapter:
                 "status": status,
                 "story_type": value.get("story_type") or story_type,
                 "layout_mode": layout_mode,
+                "direction_profile": direction_profile,
+                "direction_profile_snapshot": direction_profile_snapshot,
                 "agent": agent,
                 "metrics": agent.get("metrics") if isinstance(agent.get("metrics"), dict) else {},
                 "diagnostics": list(value.get("diagnostics") or []),
@@ -2214,6 +2303,7 @@ class Legacy093Adapter:
                         records.append(record)
             return records[-100:], paths
 
+        _write_json_atomic(attempt_dir / "result.json", audit_summary(None, status="running"))
         try:
             result = self._modules["annotate"].annotate_script(
                 {
@@ -2225,6 +2315,8 @@ class Legacy093Adapter:
                     "checkpoint_dir": str(attempt_dir / "checkpoints"),
                     "story_type": story_type,
                     "layout_mode": layout_mode,
+                    "direction_profile": direction_profile,
+                    "direction_profile_snapshot": direction_profile_snapshot,
                     "usage_chain": performance_plan,
                     "progress": progress,
                     "model_activity": model_activity,
@@ -2262,6 +2354,14 @@ class Legacy093Adapter:
             )
             if isinstance(exc, ProductionError):
                 raise
+            contract_errors = {
+                "direction_profile_changed": "演出规则版本已经变化，请发起新的生成任务",
+                "background_catalog_empty": "冻结素材清单中没有可用背景，请先配置背景素材",
+                "background_not_in_manifest": "所选背景不在冻结素材清单中，草稿未被修改",
+            }
+            code = str(getattr(exc, "code", ""))
+            if code in contract_errors:
+                raise ProductionError(code, contract_errors[code], status=409) from exc
             raise ProductionError(
                 "direction_generation_failed",
                 f"AI 安排演出失败：{exc}",

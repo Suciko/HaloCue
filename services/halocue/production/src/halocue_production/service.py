@@ -332,6 +332,7 @@ class ProductionService:
         *,
         generation_id: str | None = None,
         resumed_from_job_id: str | None = None,
+        frozen_direction_profile: dict[str, str] | None = None,
     ) -> tuple[int, dict[str, Any]]:
         with self._state_lock:
             run = self._run(run_id)
@@ -345,6 +346,24 @@ class ProductionService:
             detail = self.adapter.draft_detail(str(run.draft_token))
             if detail["draft_version"] != expected:
                 raise ProductionError("revision_conflict", "草稿版本已经变化", status=409)
+            story_type = str(payload.get("story_type") or "auto").strip()
+            if story_type not in {"auto", "main", "event", "bond"}:
+                raise ProductionError("invalid_story_type", "剧情类型无效")
+            layout_mode = self._layout_mode(payload.get("layout_mode"))
+            direction_profile_snapshot = self.adapter.direction_profile_snapshot(
+                payload.get("direction_profile", run.source_summary.get("direction_profile")),
+                story_type=story_type,
+            )
+            if (
+                frozen_direction_profile is not None
+                and frozen_direction_profile != direction_profile_snapshot
+            ):
+                raise ProductionError(
+                    "direction_profile_changed",
+                    "原任务的演出规则版本已经变化，请发起新的生成任务",
+                    status=409,
+                )
+            direction_profile = direction_profile_snapshot["id"]
             active = self._assert_no_other_mutation_job(
                 run,
                 requested_kind="direction_generation",
@@ -352,6 +371,18 @@ class ProductionService:
             )
             if active:
                 context = active.retry_context if isinstance(active.retry_context, dict) else {}
+                active_profile = context.get("direction_profile_snapshot")
+                if active_profile is None:
+                    active_profile = self.adapter.direction_profile_snapshot(
+                        context.get("direction_profile"),
+                        story_type=str(context.get("story_type") or "auto"),
+                    )
+                if active_profile != direction_profile_snapshot:
+                    raise ProductionError(
+                        "direction_profile_conflict",
+                        "正在运行的任务使用不同演出模式或规则，请先暂停或结束它",
+                        status=409,
+                    )
                 return 202, {
                     "ok": True,
                     "job": self._job_public(active.to_dict()),
@@ -361,6 +392,8 @@ class ProductionService:
                     "layout_mode": str(
                         context.get("layout_mode") or run.source_summary.get("layout_mode") or "ai"
                     ),
+                    "direction_profile": direction_profile,
+                    "direction_profile_snapshot": direction_profile_snapshot,
                     "deduplicated": True,
                 }
             actor_errors = [
@@ -376,10 +409,6 @@ class ProductionService:
                     status=409,
                     details={"count": len(actor_errors)},
                 )
-            story_type = str(payload.get("story_type") or "auto").strip()
-            if story_type not in {"auto", "main", "event", "bond"}:
-                raise ProductionError("invalid_story_type", "剧情类型无效")
-            layout_mode = self._layout_mode(payload.get("layout_mode"))
             generation_id = generation_id or new_id("direction")
             job_id = new_id("job")
             provider = self.direction_models.provider()
@@ -389,6 +418,7 @@ class ProductionService:
             run.active_job_kind = "direction_generation"
             run.active_generation_id = generation_id
             run.source_summary["layout_mode"] = layout_mode
+            run.source_summary["direction_profile"] = direction_profile
             run.updated_at = utc_now()
             self.repository.save_run(run)
             fence = GenerationFence(
@@ -426,6 +456,8 @@ class ProductionService:
                     expected_draft_version=expected,
                     story_type=story_type,
                     layout_mode=layout_mode,
+                    direction_profile=direction_profile,
+                    direction_profile_snapshot=direction_profile_snapshot,
                     resume=bool(resumed_from_job_id),
                     progress=progress,
                     model_activity=model_activity,
@@ -519,6 +551,7 @@ class ProductionService:
                 "state": "completed",
                 "generation_id": generation_id,
                 "direction_change_count": int(result.get("direction_change_count") or 0),
+                "direction_profile_snapshot": direction_profile_snapshot,
                 "metrics": metrics,
             })
             return {"run_id": run_id, **result}
@@ -535,6 +568,8 @@ class ProductionService:
                 "story_type": story_type,
                 "layout_mode": layout_mode,
                 "generation_id": generation_id,
+                "direction_profile": direction_profile,
+                "direction_profile_snapshot": direction_profile_snapshot,
             },
         )
         return 202, {
@@ -542,6 +577,8 @@ class ProductionService:
             "job": self._job_public(job.to_dict()),
             "generation_id": generation_id,
             "layout_mode": layout_mode,
+            "direction_profile": direction_profile,
+            "direction_profile_snapshot": direction_profile_snapshot,
             "deduplicated": False,
         }
 
@@ -1003,6 +1040,9 @@ class ProductionService:
         return {"ok": True, "run_id": run_id, "usage": usage}
 
     def create_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        direction_profile = self.adapter.direction_profile_snapshot(
+            payload.get("direction_profile")
+        )["id"]
         generation_mode = str(payload.get("generation_mode") or "format_only").strip()
         if generation_mode not in {"format_only", "ai_direction"}:
             raise ProductionError(
@@ -1064,6 +1104,7 @@ class ProductionService:
             ],
         )
         run.source_summary["generation_mode"] = generation_mode
+        run.source_summary["direction_profile"] = direction_profile
         self.repository.save_run(run)
         result = self.run_detail(run.run_id)
         if upstream_release:
@@ -2060,6 +2101,7 @@ class ProductionService:
             elif kind == "direction_generation":
                 payload["story_type"] = str(context.get("story_type") or "auto")
                 payload["layout_mode"] = str(context.get("layout_mode") or "ai")
+                payload["direction_profile"] = context.get("direction_profile", "standard")
                 generation_id = str(context.get("generation_id") or "").strip() or None
                 reuse_checkpoint = bool(generation_id) and str(
                     (job.error or {}).get("code") or ""
@@ -2069,6 +2111,7 @@ class ProductionService:
                     payload,
                     generation_id=generation_id if reuse_checkpoint else None,
                     resumed_from_job_id=job_id if reuse_checkpoint else None,
+                    frozen_direction_profile=context.get("direction_profile_snapshot"),
                 )
             else:
                 _, response = self.compile(run_id, payload)
@@ -2147,6 +2190,16 @@ class ProductionService:
         else:
             next_action = {"label": "正在执行", "detail": "完成后任务状态会自动更新。", "stage": None}
         public = {key: value for key, value in job.items() if key != "retry_context"}
+        if kind == "direction_generation":
+            public["direction_profile"] = (
+                "conservative" if retry_context.get("direction_profile") == "conservative"
+                else "standard"
+            )
+            snapshot = Legacy093Adapter.public_direction_profile_snapshot(
+                retry_context.get("direction_profile_snapshot")
+            )
+            if snapshot is not None:
+                public["direction_profile_snapshot"] = snapshot
         return {
             **public,
             "retryable": retryable,
