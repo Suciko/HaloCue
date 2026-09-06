@@ -33,6 +33,14 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - name: Install dependencies
         run: python -m pip install -r requirements-dev.txt
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg --version=9.0.1 --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Command ffprobe -ErrorAction Stop | Select-Object Source
+          ffprobe -version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install Playwright Chromium
         run: python -m playwright install chromium
       - name: Read release version
