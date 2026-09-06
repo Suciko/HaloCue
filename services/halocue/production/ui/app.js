@@ -28,6 +28,7 @@
     characterCatalogRunId: null,
     performancePreview: null,
     previewIndex: 0,
+    previewCompleted: false,
     busy: false,
     sourceMode: "writing",
     sourceFileName: null,
@@ -1205,6 +1206,9 @@
     $("#teacherDisplayName").value = identity?.display_name || "";
     $("#teacherDisplayName").setCustomValidity("");
     $("#teacherOrganization").value = identity?.organization || "";
+    const presentation = teacherPresentationMode();
+    $$('#teacherPresentationControl input').forEach((input) => { input.checked = input.value === presentation; });
+    $("#teacherPresentationControl").classList.toggle("hidden", !teacherPresentationCapability());
     showTeacherIdentity(!!capability && mappingFor(speaker).role === "teacher");
     $("#mappingDialog").showModal();
     await searchCharacters("");
@@ -1215,6 +1219,25 @@
     return capability?.schema_version === "teacher-identity/1.0"
       && capability.presentation === "slot_zero" && Array.isArray(capability.presets)
       && capability.presets.length ? capability : null;
+  }
+
+  function teacherPresentationCapability() {
+    const capability = state.capabilities?.teacher_presentation;
+    const modes = Array.isArray(capability?.modes)
+      ? capability.modes.map((mode) => typeof mode === "string" ? mode : mode?.id) : [];
+    return capability?.state === "available" && capability.schema_version === "teacher-presentation/1.0"
+      && ["slot_zero", "sel_single"].every((mode) => modes.includes(mode)) ? capability : null;
+  }
+
+  function teacherPresentationMode() {
+    return state.currentDraft?.cast?.teacher_presentation?.mode || "slot_zero";
+  }
+
+  function teacherPresentationBlocked() {
+    const stored = state.currentDraft?.cast?.teacher_presentation;
+    return !!stored && (stored.schema_version !== "teacher-presentation/1.0"
+      || !["slot_zero", "sel_single"].includes(stored.mode)
+      || (stored.mode !== "slot_zero" && !teacherPresentationCapability()));
   }
 
   function showTeacherIdentity(show) {
@@ -1229,24 +1252,36 @@
 
   function updateTeacherPreset() {
     const custom = $("#teacherPreset").value === "custom";
+    const blocked = teacherPresentationBlocked();
     $("#teacherCustomFields").classList.toggle("hidden", !custom);
-    $("#teacherDisplayName").disabled = !custom;
-    $("#teacherOrganization").disabled = !custom;
+    $("#teacherPreset").disabled = blocked;
+    $("#teacherDisplayName").disabled = !custom || blocked;
+    $("#teacherOrganization").disabled = !custom || blocked;
+    $("#saveTeacherIdentity").disabled = blocked || state.busy;
+    $$('#teacherPresentationControl input').forEach((input) => { input.disabled = blocked; });
     const identity = state.currentDraft?.cast?.teacher_identity;
     $("#saveTeacherIdentity").textContent = identity ? "保存老师身份" : "创建并绑定老师";
     const aliases = Object.entries(state.currentDraft?.cast?.cast || {})
       .filter(([, mapping]) => mapping.role === "teacher").map(([speaker]) => speaker);
-    $("#teacherIdentityScope").textContent = aliases.length
-      ? `本任务共用同一老师身份，已绑定：${aliases.join("、")}。名称和组织修改将同步生效。`
-      : `将为“${state.selectedSpeaker}”登记无立绘老师身份。`;
+    $("#teacherIdentityScope").textContent = blocked
+      ? `当前已保存${teacherPresentationMode() === "sel_single" ? " Sel 回答" : "的老师呈现配置"}，此后端不支持修改；已有配置保持不变。`
+      : aliases.length
+        ? `本任务共用同一老师身份，已绑定：${aliases.join("、")}。名称、组织和台词呈现修改将同步生效。`
+        : `将为“${state.selectedSpeaker}”登记无立绘老师身份。`;
   }
 
   async function saveTeacherIdentity(event) {
     event.preventDefault();
-    if (!teacherCapability() || state.busy || pendingConfirmation) return;
+    if (!teacherCapability() || teacherPresentationBlocked() || state.busy || pendingConfirmation) return;
     const mapping = {
       kind: "teacher", schema_version: "teacher-identity/1.0", preset_id: $("#teacherPreset").value,
     };
+    if (teacherPresentationCapability()) {
+      mapping.presentation = {
+        schema_version: "teacher-presentation/1.0",
+        mode: $('#teacherPresentationControl input:checked')?.value,
+      };
+    }
     if (mapping.preset_id === "custom") {
       mapping.display_name = $("#teacherDisplayName").value.trim();
       mapping.organization = $("#teacherOrganization").value.trim();
@@ -1262,10 +1297,14 @@
     const organization = mapping.preset_id === "custom" ? mapping.organization : preset?.organization;
     const aliases = Object.entries(state.currentDraft?.cast?.cast || {})
       .filter(([, item]) => item.role === "teacher").map(([speaker]) => speaker);
-    if (identity && aliases.length && (identity.display_name !== displayName || identity.organization !== organization)) {
+    const identityChanged = identity && (identity.display_name !== displayName || identity.organization !== organization);
+    const presentationChanged = mapping.presentation && mapping.presentation.mode !== teacherPresentationMode();
+    if (identity && aliases.length && (identityChanged || presentationChanged)) {
+      const presentationNotice = presentationChanged
+        ? `台词将统一改为${mapping.presentation.mode === "sel_single" ? " Sel 回答" : "普通对白（槽 0）"}，相关卡片需要重新审查。` : "";
       const accepted = await askConfirmation({
         title: "更新共用的老师身份？",
-        body: `“${aliases.join("”、“")}”将同步显示为“${displayName}${organization ? ` / ${organization}` : "（无组织）"}”。原剧本中的名称和台词保持不变。`,
+        body: `“${aliases.join("”、“")}”将同步显示为“${displayName}${organization ? ` / ${organization}` : "（无组织）"}”。${presentationNotice}原剧本中的名称和台词保持不变。`,
         confirmLabel: "更新老师身份",
       });
       if (!accepted) return;
@@ -1780,7 +1819,8 @@
       $("#previewOpenCard").disabled = true;
       return;
     }
-    const isCg = frame.presentation === "cg";
+    const isCg = frame.presentation === "cg" || !!frame.cg;
+    const isTeacherReply = frame.presentation === "teacher_selection";
     const background = frame.background_key && frame.background_preview_available === true
       ? `<img class="preview-stage-image" src="${esc(previewResourceUrl("backgrounds", frame.background_key))}" alt="" loading="lazy" decoding="async">`
       : "";
@@ -1791,16 +1831,36 @@
     const statusLabel = frame.review_state === "approved" ? "已审" : "待审";
     const organization = frame.speaker?.role === "teacher" && frame.speaker.organization
       ? `<small class="preview-speaker-organization">${esc(frame.speaker.organization)}</small>` : "";
+    const reply = frame.teacher_reply;
+    const dialogue = isTeacherReply
+      ? state.previewCompleted
+        ? '<div class="preview-reply-complete" role="status">本段预览结束</div>'
+        : reply?.reply_id && typeof reply.text === "string"
+          ? `<button type="button" class="preview-teacher-reply" data-teacher-reply-id="${esc(reply.reply_id)}">${esc(reply.text)}</button>`
+          : '<div class="preview-reply-complete" role="status">老师回答暂不可预览</div>'
+      : `<div class="preview-dialogue ${isCg ? "is-cg" : ""}"><small>${esc(isCg ? "CG 空镜段落" : frame.presentation === "request" ? "需要处理" : frame.presentation === "direction" ? "演出指令" : "当前台词")}</small><strong>${esc(frame.title || "未命名卡片")}</strong>${organization}<p>${esc(frame.text || "此卡没有可显示的文本。")}</p>${annotations}</div>`;
     target.className = `performance-preview-frame presentation-${esc(frame.presentation)}`;
-    target.innerHTML = `<section class="preview-stage">${background}<div class="preview-stage-overlay"></div><div class="preview-progress">${state.previewIndex + 1} / ${frames.length} · 第 ${esc(frame.line_no || "-")} 张 · ${esc(statusLabel)}</div>${cg}<div class="preview-dialogue ${isCg ? "is-cg" : ""}"><small>${esc(isCg ? "CG 空镜段落" : frame.presentation === "request" ? "需要处理" : frame.presentation === "direction" ? "演出指令" : "当前台词")}</small><strong>${esc(frame.title || "未命名卡片")}</strong>${organization}<p>${esc(frame.text || "此卡没有可显示的文本。")}</p>${annotations}</div></section><div class="preview-card-strip" aria-label="草稿卡片定位">${frames.map((item, index) => `<button type="button" class="${index === state.previewIndex ? "active" : ""}" data-preview-index="${index}" aria-label="跳到第 ${esc(item.line_no || "-")} 张卡片">${esc(String(item.line_no || index + 1).padStart(2, "0"))}</button>`).join("")}</div>`;
-    status.textContent = `当前展示第 ${frame.line_no || "-"} 张卡片；预览是只读的，修改请回到这张卡。`;
+    target.innerHTML = `<section class="preview-stage">${background}<div class="preview-stage-overlay"></div><div class="preview-progress">${state.previewIndex + 1} / ${frames.length} · 第 ${esc(frame.line_no || "-")} 张 · ${esc(statusLabel)}</div>${cg}${dialogue}</section><div class="preview-card-strip" aria-label="草稿卡片定位">${frames.map((item, index) => `<button type="button" class="${index === state.previewIndex ? "active" : ""}" data-preview-index="${index}" aria-label="跳到第 ${esc(item.line_no || "-")} 张卡片">${esc(String(item.line_no || index + 1).padStart(2, "0"))}</button>`).join("")}</div>`;
+    status.textContent = state.previewCompleted ? "本段预览结束，草稿没有被修改。"
+      : `当前展示第 ${frame.line_no || "-"} 张卡片；预览是只读的，修改请回到这张卡。`;
     $("#previewPrevious").disabled = state.previewIndex === 0;
-    $("#previewNext").disabled = state.previewIndex >= frames.length - 1;
+    $("#previewNext").disabled = (isTeacherReply && !state.previewCompleted)
+      || state.previewIndex >= frames.length - 1;
     $("#previewOpenCard").disabled = !frame.card_id;
     $$('[data-preview-index]').forEach((button) => button.addEventListener("click", () => {
       state.previewIndex = Number(button.dataset.previewIndex) || 0;
+      state.previewCompleted = false;
       renderPerformancePreview();
     }));
+    target.querySelector('[data-teacher-reply-id]')?.addEventListener("click", () => {
+      if (state.performancePreview?.frames?.[state.previewIndex]?.teacher_reply?.reply_id !== reply.reply_id) return;
+      if (state.previewIndex < frames.length - 1) stepPerformancePreview(1);
+      else {
+        state.previewCompleted = true;
+        renderPerformancePreview();
+      }
+      (target.querySelector('[data-teacher-reply-id]') || $("#previewOpenCard"))?.focus();
+    });
   }
 
   async function openPerformancePreview() {
@@ -1808,6 +1868,7 @@
     const dialog = $("#performancePreviewDialog");
     state.performancePreview = null;
     state.previewIndex = 0;
+    state.previewCompleted = false;
     $("#performancePreview").className = "performance-preview-empty";
     $("#performancePreview").innerHTML = "<strong>正在读取当前草稿</strong><p>预览会使用本任务冻结的背景、CG 和角色映射。</p>";
     $("#performancePreviewStatus").textContent = "正在读取，不会修改草稿。";
@@ -1906,6 +1967,7 @@
   function stepPerformancePreview(delta) {
     const frames = state.performancePreview?.frames || [];
     state.previewIndex = Math.max(0, Math.min(frames.length - 1, state.previewIndex + delta));
+    state.previewCompleted = false;
     renderPerformancePreview();
   }
 

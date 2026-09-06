@@ -204,6 +204,7 @@
     <form id="teacherIdentityForm" class="teacher-identity-form hidden">
       <label>老师名称 / 组织<select id="teacherPreset"></select></label>
       <div id="teacherCustomFields" class="teacher-custom-fields hidden"><label>自定义名称<input id="teacherDisplayName" maxlength="80" autocomplete="off" required></label><label>自定义组织<input id="teacherOrganization" maxlength="80" autocomplete="off" placeholder="可留空"></label></div>
+      <fieldset id="teacherPresentationControl" class="teacher-presentation-control hidden"><legend>老师台词呈现</legend><div class="teacher-presentation-options"><label><input type="radio" name="teacherPresentation" value="slot_zero" checked><span>普通对白（槽 0）</span></label><label><input type="radio" name="teacherPresentation" value="sel_single"><span>Sel 回答</span></label></div></fieldset>
       <p id="teacherIdentityScope" class="dialog-status" aria-live="polite"></p>
       <footer class="dialog-footer"><button type="button" id="cancelTeacherIdentity">返回角色列表</button><button type="submit" class="primary" id="saveTeacherIdentity">创建并绑定老师</button></footer>
     </form>

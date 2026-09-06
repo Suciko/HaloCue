@@ -40,3 +40,11 @@ changing the source dialogue.
 A named speaking character without a visible portrait. A Teacher Identity uses
 this representation for ordinary dialogue, but not every no-portrait character
 is a teacher.
+
+**Teacher Presentation**:
+The task-wide choice of how explicitly bound teacher dialogue is shown, without
+changing the teacher's identity or the authored story.
+
+**Single Answer**:
+One authored teacher line presented as a clickable response that continues the
+same story. It is not a choice between alternative story branches.
