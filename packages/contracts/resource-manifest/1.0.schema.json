@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Suciko/HaloCue/contracts/resource-manifest/1.0.schema.json",
+  "title": "HaloCue resource manifest",
+  "description": "Local, hash-verified resource references for AA and MMT presentations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "manifest_id", "resources"],
+  "properties": {
+    "schema_version": {
+      "const": "resource-manifest/1.0"
+    },
+    "manifest_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/resource"
+      },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resource_id",
+        "role",
+        "uri",
+        "uri_scope",
+        "sha256",
+        "provenance",
+        "lookup"
+      ],
+      "properties": {
+        "resource_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._/-]*$",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "character_portrait",
+            "character_face",
+            "character_avatar",
+            "background",
+            "cg",
+            "voice",
+            "bgm",
+            "sfx",
+            "ui",
+            "effect"
+          ]
+        },
+        "uri": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "uri_scope": {
+          "type": "string",
+          "enum": ["external", "project-local", "public-fixture"]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[A-Fa-f0-9]{64}$"
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "source_ref", "redistribution_scope"],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["user-owned", "authorized-pack", "synthetic"]
+            },
+            "source_ref": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "evidence_ref": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "redistribution_scope": {
+              "type": "string",
+              "enum": ["local-only", "authorized-only", "public-fixture"]
+            }
+          }
+        },
+        "lookup": {
+          "type": "object",
+          "description": "Observable adapter keys and relative locations; never a machine-specific absolute path.",
+          "additionalProperties": false,
+          "required": ["adapter", "logical_key", "relative_path"],
+          "properties": {
+            "adapter": {
+              "type": "string",
+              "enum": ["aa", "mmt", "storyforge", "generic"]
+            },
+            "logical_key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "relative_path": {
+              "type": "string",
+              "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/|\\\\)\\.\\.(?:/|\\\\|$)).+$",
+              "maxLength": 2048
+            }
+          }
+        }
+      }
+    }
+  }
+}

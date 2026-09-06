@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://halocue.local/contracts/conversation-knowledge-proposal-1.2.schema.json",
+  "title": "HaloCue conversation knowledge proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "operation", "scope_id", "base_revision_id", "content", "source_thread_id", "source_agent_run_id", "source_preview_message_id", "source_message_ids", "conversation_summary_digest", "document_citations", "field_changes", "conflicts", "impact_preview"],
+  "properties": {
+    "schema_version": {"const": "conversation-knowledge-proposal/1.2"},
+    "kind": {"enum": ["character_card", "world_card", "world_rule", "canon_fact"]},
+    "operation": {"enum": ["create", "update", "retire"]},
+    "scope_id": {"type": "string", "minLength": 1},
+    "base_revision_id": {"type": ["string", "null"]},
+    "content": {"type": "object"},
+    "source_thread_id": {"type": "string", "minLength": 1},
+    "source_agent_run_id": {"type": ["string", "null"]},
+    "source_preview_message_id": {"type": "string", "minLength": 1},
+    "source_message_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "conversation_summary_digest": {"type": ["string", "null"]},
+    "document_citations": {"type": "array", "items": {"type": "object"}},
+    "field_changes": {"type": "array", "items": {"type": "object", "required": ["key", "field", "before", "after"]}},
+    "conflicts": {"type": "array", "items": {"type": "object"}},
+    "impact_preview": {"$ref": "proposal-impact-1.0.schema.json"}
+  }
+}

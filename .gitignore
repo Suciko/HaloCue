@@ -83,3 +83,56 @@ aa_resources.json
 *.swp
 .DS_Store
 Thumbs.db
+
+# ============================================================
+#  HaloCue 1.x workspace
+# ============================================================
+
+# JavaScript / TypeScript tooling
+node_modules/
+.pnpm-store/
+.npm/
+*.tsbuildinfo
+coverage/
+.vite/
+
+# Rust / Tauri tooling
+target/
+src-tauri/target/
+Cargo.lock
+!apps/desktop-client/src-tauri/Cargo.lock
+
+# Local 1.x runtime state and project data
+.halocue/
+.halo-workspace/
+*.halocue-project
+*.storyforge
+*.storyforge.bak*
+*.mmt.local
+
+# Local model and TTS caches
+.models/
+models/
+tts-cache/
+*.onnx
+*.safetensors
+*.gguf
+
+# Research archives and large external inputs
+research-inputs/
+external-inputs/
+*.7z
+*.zip
+*.tar
+*.tar.gz
+*.apk
+*.aab
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Generated handoff and acceptance output
+docs/handoffs/_generated/
+artifacts/
+acceptance-output/

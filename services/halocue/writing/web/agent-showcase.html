@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HaloCue Agent 工作台</title>
+  <link rel="stylesheet" href="agent-showcase.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="HaloCue 首页">HC</a>
+      <div class="project-title">
+        <span class="eyebrow">Agent 工作台</span>
+        <strong>第二章 · 玻璃温室</strong>
+      </div>
+      <div class="top-meta" aria-label="会话状态">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span>交互原型 · 未连接正式资料库</span>
+        <button class="icon-button" type="button" title="更多选项" aria-label="更多选项"><span class="more-glyph" aria-hidden="true"></span></button>
+      </div>
+    </header>
+
+    <aside class="thread-rail" aria-label="对话列表">
+      <div class="rail-heading">
+        <span class="eyebrow">当前任务</span>
+        <button class="new-thread" type="button" title="新建对话" aria-label="新建对话">+</button>
+      </div>
+      <nav>
+        <button class="thread-item active" type="button">
+          <span class="thread-index">02</span>
+          <span><b>校准人物与世界设定</b><small>刚刚 · 2 项待确认</small></span>
+        </button>
+        <button class="thread-item" type="button">
+          <span class="thread-index">01</span>
+          <span><b>检查第二幕节奏</b><small>18 分钟前 · 已完成</small></span>
+        </button>
+      </nav>
+      <div class="rail-note">
+        <span class="eyebrow">审阅原则</span>
+        <p>Agent 只能提出资料库变更。所有写入都需要你的确认。</p>
+      </div>
+    </aside>
+
+    <main class="conversation" id="conversation">
+      <section class="conversation-head">
+        <div>
+          <span class="eyebrow">资料一致性检查</span>
+          <h1>校准人物与世界设定</h1>
+        </div>
+        <span class="run-badge">本轮 38 秒</span>
+      </section>
+
+      <article class="message user-message">
+        <div class="message-mark">你</div>
+        <div class="message-body">
+          <p>检查刚写完的温室片段。把能从正文确认的人物变化补进角色卡；如果出现新的稳定规则，也整理成世界卡。先给我看，不要直接写入。</p>
+        </div>
+      </article>
+
+      <article class="message assistant-message">
+        <div class="message-mark assistant-mark">A</div>
+        <div class="message-body">
+          <div class="assistant-label"><strong>HaloCue Agent</strong><span>完成分析</span></div>
+          <p>我核对了第二章第 3 场与现有资料库。正文让星野对“封闭空间”的反应更明确，但没有改变她一贯的回避式表达；这适合补充角色卡，而不是覆盖原描述。</p>
+          <p>另外，温室的门禁在两个相邻段落中遵循同一条机制，可以建立为世界规则。下面是两项可独立审阅的提案，我尚未写入任何资料。</p>
+
+          <div class="tool-activity" aria-label="工具活动摘要">
+            <span class="tool-icon" aria-hidden="true"></span>
+            <div class="tool-activity-copy">
+              <b>执行了 4 个步骤，均已完成</b>
+              <div class="tool-step-list" aria-label="本轮工具动作">
+                <span>读取场景正文</span><span>检索星野人物卡</span><span>检查世界规则冲突</span><span>建立资料变更候选</span>
+              </div>
+            </div>
+            <button class="details-toggle" type="button" aria-expanded="false" aria-controls="technical-details">
+              <span class="toggle-label">技术详情</span><span class="chevron" aria-hidden="true"></span>
+            </button>
+          </div>
+
+          <div class="technical-details" id="technical-details" hidden>
+            <div class="detail-grid">
+              <div><span>检索范围</span><code>chapter-02/scene-03</code></div>
+              <div><span>资料快照</span><code>library@2026-08-16T16:42</code></div>
+              <div><span>证据片段</span><code>L118–L146, L203–L214</code></div>
+              <div><span>写入模式</span><code>proposal_only</code></div>
+            </div>
+            <ol class="trace-list">
+              <li><time>00:02</time><code>read_scene_revision</code><span>读取场景正文，定位人物反应与环境机制。</span><b>完成</b></li>
+              <li><time>00:11</time><code>search_character_cards</code><span>匹配“星野”角色卡并检查语义冲突。</span><b>完成</b></li>
+              <li><time>00:24</time><code>find_world_rule_conflicts</code><span>检索已有门禁规则，未发现同义条目。</span><b>完成</b></li>
+              <li><time>00:38</time><code>create_knowledge_proposal</code><span>生成 2 项待审提案，未执行写入。</span><b>完成</b></li>
+            </ol>
+          </div>
+
+          <section class="proposal-card" data-proposal="character" aria-labelledby="character-title">
+            <header class="proposal-head">
+              <div class="proposal-type">角色卡更新 · Proposal</div>
+              <div class="proposal-heading">
+                <span class="entity-mark">星</span>
+                <div><h2 id="character-title">小鸟游星野</h2><p>3 项更新建议 · 2 项直接证据 · 1 项行为推断</p></div>
+              </div>
+              <span class="proposal-status status-pending">待确认</span>
+            </header>
+
+            <div class="field-table" role="table" aria-label="角色卡字段变更">
+              <div class="field-row field-table-head" role="row">
+                <span role="columnheader">选择</span><span role="columnheader">字段</span><span role="columnheader">变更</span><span role="columnheader">来源</span><span role="columnheader">状态</span>
+              </div>
+              <label class="field-row" role="row">
+                <span><input type="checkbox" checked aria-label="选择触发因素字段"></span>
+                <span class="field-name">触发因素</span>
+                <span class="diff-cell"><del>不愿被迫停留</del><ins>不愿被迫停留；封闭空间会放大警觉</ins></span>
+                <span class="source-cell"><span class="evidence-label direct"><i aria-hidden="true"></i>正文直接证据 · L118</span><button type="button" class="source-link" data-source="第 3 场 · L118–126">查看证据</button></span>
+                <span><b class="row-status">待确认</b></span>
+              </label>
+              <label class="field-row" role="row">
+                <span><input type="checkbox" checked aria-label="选择外在反应字段"></span>
+                <span class="field-name">外在反应</span>
+                <span class="diff-cell"><ins>先确认出口，再用玩笑转移紧张</ins></span>
+                <span class="source-cell"><span class="evidence-label direct"><i aria-hidden="true"></i>正文直接证据 · L131</span><button type="button" class="source-link" data-source="第 3 场 · L131–146">查看证据</button></span>
+                <span><b class="row-status">待确认</b></span>
+              </label>
+              <label class="field-row" role="row">
+                <span><input type="checkbox" aria-label="选择写作提示字段"></span>
+                <span class="field-name">写作提示</span>
+                <span class="diff-cell"><ins>不要让她直接承认恐惧</ins></span>
+                <span class="source-cell"><span class="evidence-label inferred"><i aria-hidden="true">◇</i>Agent 推断</span><small>来源：前文 4 次行为模式</small><button type="button" class="source-link" data-source="由 L118–146 的连续行为推断">查看依据</button></span>
+                <span><b class="row-status status-inferred">需判断</b></span>
+              </label>
+            </div>
+
+            <section class="impact-preview" aria-label="影响预览">
+              <header><span>影响预览</span><b>将影响 3 个写作环节</b></header>
+              <div class="impact-list"><span>人物卡 · 触发因素</span><span>写作 Agent · 场景行为约束</span><span>一致性检查 · 后续章节</span></div>
+            </section>
+            <div class="proposal-footer">
+              <div class="selection-summary"><strong data-selected-count>已选择 2 / 3</strong><span class="decision-note" aria-live="polite">推断项默认未选</span></div>
+              <div class="proposal-actions">
+                <button class="button button-quiet" type="button" data-decision="reject">驳回</button>
+                <button class="button button-secondary" type="button" data-select-all>全部选择</button>
+                <button class="button button-primary" type="button" data-decision="apply">应用 2 项修改</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="proposal-card" data-proposal="world" aria-labelledby="world-title">
+            <header class="proposal-head world-head">
+              <div class="proposal-type">新建世界卡 · Proposal</div>
+              <div class="proposal-heading">
+                <span class="entity-mark world-mark">界</span>
+                <div><h2 id="world-title">温室夜间门禁</h2><p>新规则 · 基沃托斯 / 阿拜多斯自治区 · 尚未写入</p></div>
+              </div>
+              <span class="proposal-status status-pending">待确认</span>
+            </header>
+
+            <div class="world-summary">
+              <p>夜间闭馆后，温室外门只接受登记过的学生证；从内部转动机械旋钮仍可直接开门，断电不会使人员被困。</p>
+              <div class="conflict-line"><span class="conflict-status clear"><i aria-hidden="true"></i>未发现冲突</span><span>已检查 2 条相关设定</span></div>
+              <div class="world-facts">
+                <label><input type="checkbox" checked><span><b>适用范围</b><small>阿拜多斯旧校舍温室</small></span><strong class="row-status">待确认</strong></label>
+                <label><input type="checkbox" checked><span><b>生效条件</b><small>闭馆后至次日开放前</small></span><strong class="row-status">待确认</strong></label>
+                <label><input type="checkbox" checked><span><b>例外规则</b><small>内部机械旋钮不受电控门禁影响</small></span><strong class="row-status">待确认</strong></label>
+              </div>
+            </div>
+
+            <button class="evidence-toggle" type="button" aria-expanded="false" aria-controls="world-evidence">
+              <span>查看证据与冲突检查</span><span class="chevron" aria-hidden="true"></span>
+            </button>
+            <div class="evidence-panel" id="world-evidence" hidden>
+              <blockquote>“刷卡器在红灯里拒绝了她。星野没有再试，只伸手拧下门内侧那枚旧旋钮。锁舌随即退开。”</blockquote>
+              <div class="evidence-meta"><span>第二章第 3 场 · L203–214</span><b>未发现冲突</b></div>
+            </div>
+
+            <section class="impact-preview" aria-label="影响预览">
+              <header><span>影响预览</span><b>将影响 3 个写作环节</b></header>
+              <div class="impact-list"><span>世界模型 · 夜间访问权限</span><span>写作 Agent · 场景门禁规则</span><span>一致性检查 · 后续章节</span></div>
+            </section>
+            <div class="proposal-footer">
+              <div class="selection-summary"><strong data-selected-count>已选择 3 / 3</strong><span class="decision-note" aria-live="polite">3 个字段均有正文直接证据</span></div>
+              <div class="proposal-actions">
+                <button class="button button-quiet" type="button" data-decision="reject">驳回</button>
+                <button class="button button-secondary" type="button" data-select-all>取消全选</button>
+                <button class="button button-primary" type="button" data-decision="apply">应用 3 项修改</button>
+              </div>
+            </div>
+          </section>
+
+          <p class="assistant-closing">你可以逐项选择，也可以直接接受或驳回整张提案。完成后，我会把决定记录到本轮工作日志。</p>
+        </div>
+      </article>
+    </main>
+
+    <aside class="context-panel" aria-label="本轮摘要">
+      <section>
+        <span class="eyebrow">本轮摘要</span>
+        <div class="summary-count"><strong id="pending-count">2</strong><span>项提案<br>等待确认</span></div>
+      </section>
+      <section>
+        <h2>引用资料</h2>
+        <ul class="reference-list">
+          <li><span>章</span><div><b>第二章 · 玻璃温室</b><small>当前正文</small></div></li>
+          <li><span>角</span><div><b>小鸟游星野</b><small>角色卡 v4</small></div></li>
+          <li><span>世</span><div><b>阿拜多斯旧校舍</b><small>世界卡 v2</small></div></li>
+        </ul>
+      </section>
+      <section>
+        <h2>权限</h2>
+        <div class="permission-row"><span>读取资料</span><b>允许</b></div>
+        <div class="permission-row"><span>提出变更</span><b>允许</b></div>
+        <div class="permission-row"><span>自动写入</span><b class="denied">关闭</b></div>
+      </section>
+    </aside>
+
+    <div class="source-popover" id="source-popover" role="dialog" aria-modal="false" aria-labelledby="source-title" hidden>
+      <button class="popover-close" type="button" aria-label="关闭">×</button>
+      <span class="eyebrow">证据定位</span>
+      <h2 id="source-title">第 3 场 · L118–126</h2>
+      <p>星野停在门边，先抬眼确认了玻璃顶棚两侧的通风窗，又把手搭在门把上。她笑着说只是嫌这里闷，指节却一直没有松开。</p>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </div>
+  <script src="agent-showcase.js"></script>
+</body>
+</html>

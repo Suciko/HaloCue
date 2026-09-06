@@ -1,0 +1,41 @@
+:root {
+  /* HaloCue writing workbench: one canonical token source. */
+  --font-ui: "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  --font-reading: "Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "STSong", "Songti SC", "SimSun", serif;
+  --paper: #fbf9f4;
+  --paper-2: #f2ede2;
+  --surface: #ffffff;
+  --surface-soft: #f7f6f1;
+  --line: #e3e5de;
+  --line-strong: #cbd4cb;
+  --ink: #132622;
+  --ink-2: #29423a;
+  --muted: #697a73;
+  --accent: #1a705c;
+  --accent-hover: #155b4b;
+  --accent-soft: #e7f1ec;
+  --action: #2f65a5;
+  --action-hover: #25568e;
+  --action-soft: #edf2fa;
+  --action-line: #b9c9df;
+  --green: var(--accent);
+  --green-soft: var(--accent-soft);
+  --success: #2f7d5c;
+  --success-soft: #eaf5ef;
+  --amber: #a96d20;
+  --amber-soft: #fff5df;
+  --red: #b45146;
+  --white: #ffffff;
+  --shadow: 0 10px 30px rgba(19, 38, 34, .09);
+  --ease-out: cubic-bezier(.23, 1, .32, 1);
+}
+
+html,
+body,
+button,
+input,
+select,
+textarea {
+  font-family: var(--font-ui);
+  letter-spacing: 0;
+}

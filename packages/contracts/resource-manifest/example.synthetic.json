@@ -1,0 +1,40 @@
+{
+  "schema_version": "resource-manifest/1.0",
+  "manifest_id": "synthetic-aa-scene",
+  "resources": [
+    {
+      "resource_id": "synthetic/background/classroom",
+      "role": "background",
+      "uri": "fixtures/synthetic/classroom.png",
+      "uri_scope": "public-fixture",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "provenance": {
+        "kind": "synthetic",
+        "source_ref": "HaloCue test fixture",
+        "redistribution_scope": "public-fixture"
+      },
+      "lookup": {
+        "adapter": "aa",
+        "logical_key": "background/classroom",
+        "relative_path": "backgrounds/synthetic/classroom.png"
+      }
+    },
+    {
+      "resource_id": "synthetic/character/alice/portrait",
+      "role": "character_portrait",
+      "uri": "fixtures/synthetic/alice.png",
+      "uri_scope": "public-fixture",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "provenance": {
+        "kind": "synthetic",
+        "source_ref": "HaloCue test fixture",
+        "redistribution_scope": "public-fixture"
+      },
+      "lookup": {
+        "adapter": "aa",
+        "logical_key": "character/1500001/portrait",
+        "relative_path": "characters/1500001/alice.png"
+      }
+    }
+  ]
+}

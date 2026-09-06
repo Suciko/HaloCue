@@ -14,6 +14,7 @@ distribution or recognized native runtime component is missing from this file.
 |---|---|
 | `PyInstaller` bootloader | GPL-2.0 with the PyInstaller bootloader exception |
 | `anthropic` | MIT |
+| `cryptography` | Apache-2.0 OR BSD-3-Clause |
 | `anyio` | MIT |
 | `distro` | Apache-2.0 |
 | `docstring_parser` | MIT |

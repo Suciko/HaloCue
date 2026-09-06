@@ -1,0 +1,81 @@
+name: Product or architecture proposal
+description: Propose a product idea, architecture concern, compatibility observation, or workflow improvement.
+title: "proposal: "
+labels:
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for new ideas and concerns. Do not attach API keys, private paths, user projects, game assets, decompiled source, or raw private chat logs.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Proposal kind
+      options:
+        - product direction
+        - architecture
+        - contract or schema
+        - compatibility
+        - performance
+        - workflow or Skill
+    validations:
+      required: true
+  - type: dropdown
+    id: release
+    attributes:
+      label: Target release
+      options:
+        - 1.0 runtime
+        - 1.1 video-first studio
+        - 1.2 AI GalGame
+        - cross-version
+        - 0.9 compatibility
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Owning context
+      options:
+        - client
+        - backend
+        - contracts
+        - ba-editor
+        - ai-galgame
+        - legacy-0.9
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: State the smallest change that could be reviewed.
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: User problem and evidence
+      description: Explain who is affected, why now, and link observations, commits, tests, or external references.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and constraints
+      description: Include AAP compatibility, MMT composition, performance, licensing, and data-boundary implications when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable outcomes and tests. Avoid a multi-year umbrella task.
+    validations:
+      required: true
+  - type: input
+    id: owner
+    attributes:
+      label: Suggested owner or reviewer
+      placeholder: "@handle or maintainer/collaborator"

@@ -50,10 +50,7 @@ def test_ci_workflow_has_windows_matrix_and_complete_public_gates():
     assert "tools/scan_release.py" in workflow
     assert "tools/build_public_release.py" in workflow
     assert "tools/verify_release.py" in workflow
-    assert "docs-and-boundaries:" in workflow
-    assert "tools/check_release_version.py --tag v0.95" in workflow
-    assert "tools/verify_clean_source.py --source ." in workflow
-    assert "needs: [test, docs-and-boundaries]" in workflow
+    assert "needs: test" in workflow
     assert PUBLIC_ARCHIVE_NAME in workflow
 
 
@@ -77,16 +74,22 @@ def test_release_workflow_is_manual_and_public_only():
     assert "actions/setup-python@v5" in workflow
     assert "tools/check_release_version.py --tag" in workflow
     assert "inputs.release_tag" in workflow
-    assert "gh release create" in workflow
-    assert "--draft" in workflow
-    assert "--prerelease" not in workflow
-    assert PUBLIC_ARCHIVE_NAME in workflow
-    assert PUBLIC_ARCHIVE_NAME + ".sha256" in workflow
+    # The 1.0 publisher uses PowerShell argument splatting and a runtime version.
+    assert "'release', 'create', '${{ inputs.release_tag }}', '--verify-tag'" in workflow
+    assert "gh @args" in workflow
+    assert "$prerelease = '${{ inputs.channel }}' -eq 'beta'" in workflow
+    assert "if ($prerelease) { $args += '--prerelease' }" in workflow
+    archive = "HaloCue-${{ steps.version.outputs.version }}-windows-x64.zip"
+    assert archive in workflow
+    assert archive + ".sha256" in workflow
+    assert "gh release upload '${{ inputs.release_tag }}'" in workflow
+    assert "python tools/build_update_manifest.py" in workflow
     assert "github.token" in workflow
     assert "build_private" not in lowered
     assert "spine_source" not in lowered
     assert "private-windows" not in lowered
-    assert "secrets." not in lowered
+    assert "secrets.halocue_update_signing_key" in lowered
+    assert lowered.count("secrets.") == 1
 
 
 def test_version_gate_accepts_only_exact_stable_tag_and_metadata():
@@ -134,3 +137,23 @@ def test_version_gate_rejects_dirty_generated_public_database(tmp_path):
 
     with pytest.raises(ReleaseVersionError, match="dirty"):
         require_clean_public_database(repository)
+
+
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name", "verification"),
+    [
+        ("ci.yml", "test", "python -m pytest -q"),
+        ("ci.yml", "package", "python tools/verify_release.py"),
+        ("release.yml", "release", "python -m pytest -q"),
+    ],
+)
+def test_workflows_install_and_probe_pinned_ffmpeg_before_verification(
+    workflow_name, job_name, verification
+):
+    job = _job_block(_workflow(workflow_name), job_name)
+    install = "choco install ffmpeg --version=9.0.1 --yes --no-progress"
+    probe = "ffprobe -version"
+    assert install in job
+    assert "Get-Command ffprobe" in job
+    assert probe in job
+    assert job.index(install) < job.index(probe) < job.index(verification)

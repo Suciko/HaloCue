@@ -4,20 +4,20 @@ import os
 import re
 import subprocess
 
+import pytest
+
 
 HERE = Path(__file__).resolve().parents[1]
 UI = HERE / "ui.html"
 HARNESS = HERE / "tests" / "ui_runtime_harness.js"
 
 
-def run_runtime(script):
-    # The product intentionally displays local time; make the test's local
-    # timezone explicit so the expected value is stable on CI runners.
-    environment = os.environ.copy()
-    environment["TZ"] = "Asia/Shanghai"
+def run_runtime(script, *, timezone=None):
+    env = os.environ.copy()
+    if timezone is not None:
+        env["TZ"] = timezone
     return json.loads(subprocess.check_output(
-        ["node", "-e", script, str(HARNESS)], text=True, encoding="utf-8",
-        env=environment,
+        ["node", "-e", script, str(HARNESS)], text=True, encoding="utf-8", env=env
     ))
 
 
@@ -72,7 +72,11 @@ const h=createHarness({storyAssets:assets,reviewWorkspace:review,preview:preview
     assert "story-a" not in result["error"]
 
 
-def test_startup_and_recent_story_resume_render_only_one_current_workspace():
+@pytest.mark.parametrize(
+    ("timezone", "expected_time"),
+    [("UTC", "09:30"), ("Asia/Shanghai", "17:30")],
+)
+def test_startup_and_recent_story_resume_render_only_one_current_workspace(timezone, expected_time):
     """The empty CTA, rich recent entry, and safe-token resume are visible behavior."""
     script = r'''
 const {createHarness}=require(process.argv[1]);const calls=[];
@@ -80,11 +84,11 @@ const recent={story_token:'story-b',source_name:'第二章.txt',project:'第二�
 const h=createHarness({recent:[recent],request:async(p)=>{calls.push(p);if(p==='/api/stories/recent')return [recent];if(p==='/api/story/current?story_token=story-b')return Object.assign({},recent);if(p==='/api/drafts')return [];if(p.startsWith('/api/story/assets'))return {characters:[],backgrounds:[],sounds:[],bgms:[]};return {profiles:[]};}});
 (async()=>{await h.load();const startup={cta:h.get('#storyContextAction').textContent,assetEmpty:h.get('#storyAssetStrip').classList.contains('is-empty')};const list=h.get('#recentStories').children[1];const entry=list.children[0];await entry.click();await h.drain();console.log(JSON.stringify({startup,entry:{source:entry.children[0].children[0].textContent,project:entry.children[0].children[1].textContent,time:entry.children[0].children[2].textContent,resume:entry.children[1].textContent},story:h.window.StoryStore.get(),currentCalls:calls.filter(x=>x.startsWith('/api/story/current?'))}));})();
 '''
-    result = run_runtime(script)
+    result = run_runtime(script, timezone=timezone)
     assert result["startup"] == {"cta": "打开剧情文件", "assetEmpty": True}
     assert result["entry"] == {
         "source": "第二章.txt", "project": "AA 工程：第二章工程",
-        "time": "最近打开：08/01 17:30", "resume": "继续",
+        "time": f"最近打开：08/01 {expected_time}", "resume": "继续",
     }
     assert result["story"]["story_token"] == "story-b"
     assert result["currentCalls"] == ["/api/story/current?story_token=story-b"]

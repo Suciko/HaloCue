@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a narrow, demonstrable vertical slice.
+title: "feat: "
+labels:
+  - needs-triage
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Owning area
+      options:
+        - client
+        - backend
+        - contracts
+        - ba-editor
+        - ai-galgame
+        - legacy-0.9
+    validations:
+      required: true
+  - type: textarea
+    id: story
+    attributes:
+      label: User story
+      description: As a user, I want ..., so that ...
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable, testable outcomes.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and constraints
+      description: Link blocking issues and state license/data boundaries.
+    validations:
+      required: true

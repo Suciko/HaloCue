@@ -1,0 +1,12 @@
+.cg-material-picker .character-results {
+  max-height: min(40vh, 360px);
+  overflow: auto;
+  padding-right: 4px;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 800px) {
+  .cg-material-picker .character-results {
+    max-height: 36vh;
+  }
+}

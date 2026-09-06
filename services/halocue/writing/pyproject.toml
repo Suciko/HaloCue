@@ -1,0 +1,10 @@
+[project]
+name = "halocue-writing"
+version = "0.1.0"
+description = "Isolated HaloCue 1.0 writing workspace"
+requires-python = ">=3.11"
+dependencies = ["pypdf>=5.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

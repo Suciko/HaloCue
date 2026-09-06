@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a reproducible problem in HaloCue.
+title: "bug: "
+labels:
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove API keys, personal paths, project content, game assets, and raw logs before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.9.3 or commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - client
+        - backend
+        - contracts
+        - ba-editor
+        - ai-galgame
+        - legacy-0.9
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Give the smallest deterministic reproduction.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Environment and checks
+      description: Include OS, tool versions, and commands already run.
+    validations:
+      required: true

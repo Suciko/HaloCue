@@ -1,0 +1,10 @@
+# Default review ownership. Replace placeholders with the collaborators' GitHub
+# handles before enabling required review rules on the remote repository.
+* @Suciko
+
+# Shared contracts require both streams to review once collaborators are added.
+/packages/contracts/ @Suciko
+/packages/project-model/ @Suciko
+/contexts/ba-editor/ @Suciko
+/apps/desktop-client/ @Suciko
+/services/halocue/ @Suciko

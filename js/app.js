@@ -309,9 +309,12 @@
     const choose = $('#chooseStoryButton');
     const analyzeButton = $('#analyzeStoryButton');
     const contextButton = $('#storyContextAction');
-    if (choose) choose.disabled = !state.aaConnected;
+    // Opening a story is a local, read-only import and does not require an AA
+    // executable. Keep the first useful action available while analysis and
+    // AA-dependent operations remain gated until the workspace is connected.
+    if (choose) choose.disabled = false;
     if (analyzeButton) analyzeButton.disabled = !state.aaConnected;
-    if (contextButton) contextButton.disabled = !state.aaConnected;
+    if (contextButton) contextButton.disabled = false;
     const message = $('#aaSetupGateMessage');
     if (message) message.textContent = state.aaConnected
       ? 'AA 主程序已连接。'
@@ -345,12 +348,99 @@
     await recentStories.refresh();
     return story;
   }
-  async function openScript(trigger) {
-    if (!state.aaConnected) {
-      setDrawer('settings', true);
-      await loadAAData();
-      return null;
+
+  function renderUpdateStatus(result) {
+    const notice = $('#updateNotice');
+    if (!notice) return;
+    const title = $('#updateNoticeTitle');
+    const detail = $('#updateNoticeDetail');
+    const status = $('#updateNoticeStatus');
+    const download = $('#updateDownload');
+    const apply = $('#updateApply');
+    const manual = $('#updateManualDownload');
+    if (manual && result && result.archive_url) manual.href = result.archive_url;
+    if (!result || !['available', 'checking', 'downloading', 'staged', 'applying', 'failed'].includes(result.status)) { notice.hidden = true; return; }
+    notice.hidden = false;
+    if (result.status === 'available') {
+      if (title) title.textContent = '发现新版本';
+      if (detail) detail.textContent = ' · ' + result.version + ' 已准备好，确认后下载并替换程序。';
+      if (status) status.textContent = '';
+      if (download) { download.hidden = false; download.disabled = false; download.textContent = '下载并校验'; }
+      if (apply) apply.hidden = true;
+      if (manual) manual.hidden = !result.archive_url;
+    } else if (result.status === 'checking' || result.status === 'downloading') {
+      if (title) title.textContent = '正在准备更新';
+      if (detail) detail.textContent = result.version ? ' · ' + result.version : '';
+      if (status) status.textContent = result.message || '请稍候…';
+      if (download) { download.disabled = true; download.textContent = result.status === 'downloading' ? '下载中…' : '检查中…'; }
+      if (apply) apply.hidden = true;
+      if (manual) manual.hidden = true;
+    } else if (result.status === 'staged') {
+      if (title) title.textContent = '更新包已准备好';
+      if (detail) detail.textContent = ' · ' + result.version;
+      if (status) status.textContent = result.message || '已通过完整性校验。';
+      if (download) download.hidden = true;
+      if (apply) { apply.hidden = false; apply.disabled = false; apply.textContent = '退出并更新'; }
+      if (manual) manual.hidden = true;
+    } else if (result.status === 'applying') {
+      if (title) title.textContent = '正在切换版本';
+      if (detail) detail.textContent = '';
+      if (status) status.textContent = result.message || 'HaloCue 即将退出，更新器会自动完成替换。';
+      if (download) download.hidden = true;
+      if (apply) { apply.hidden = false; apply.disabled = true; apply.textContent = '更新中…'; }
+      if (manual) manual.hidden = true;
+    } else if (result.status === 'failed') {
+      if (title) title.textContent = '更新未完成';
+      if (detail) detail.textContent = '';
+      if (status) status.textContent = result.message || '旧版本仍然可以使用。';
+      if (download) { download.hidden = false; download.disabled = false; download.textContent = '重试更新'; }
+      if (apply) apply.hidden = true;
+      if (manual) manual.hidden = !result.archive_url;
     }
+  }
+  async function loadUpdateStatus() {
+    try { renderUpdateStatus(await request('/api/update/status')); } catch (_) { /* 更新服务不可用不应影响本地工作台 */ }
+  }
+  async function pollUpdateStatus() {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await new Promise(function (resolve) { setTimeout(resolve, 500); });
+      try {
+        const result = await request('/api/update/status');
+        renderUpdateStatus(result);
+        if (!['checking', 'downloading'].includes(result.status)) return result;
+      } catch (_) { return null; }
+    }
+    return null;
+  }
+  async function downloadUpdate() {
+    const button = $('#updateDownload');
+    if (button) { button.disabled = true; button.textContent = '准备中…'; }
+    try {
+      renderUpdateStatus(await post('/api/update/download', {}));
+      const result = await pollUpdateStatus();
+      if (result) renderUpdateStatus(result);
+    } catch (error) {
+      renderUpdateStatus({status: 'failed', message: error.message});
+    }
+  }
+  async function applyUpdate() {
+    const button = $('#updateApply');
+    if (button) { button.disabled = true; button.textContent = '正在退出…'; }
+    try {
+      renderUpdateStatus(await post('/api/update/apply', {}));
+    } catch (error) {
+      renderUpdateStatus({status: 'failed', message: error.message});
+    }
+  }
+  async function loadMigrationStatus() {
+    const notice = $('#migrationNotice');
+    if (!notice) return;
+    try {
+      const result = await request('/api/migration/status');
+      if (result.requires_confirmation) notice.hidden = false;
+    } catch (_) { /* migration status is advisory */ }
+  }
+  async function openScript(trigger) {
     state.browseMode = 'script'; $('#browseTitle').textContent = '选择剧情文本';
     if (storyFilePicker) { activeFilePicker = storyFilePicker; storyFilePicker.open(trigger); return; }
     openModal('#mBrowse', trigger); await browse($('#path').value.trim());
@@ -369,7 +459,10 @@
       const story = await post('/api/stories/open', {file_token: selection.file_token, project: sourceName(name)});
       if (!isCurrentTransition(transition)) return null;
       if (!await replaceStory(story, {transition: transition, fileToken: selection.file_token, sourcePath: name})) return null;
-      await recentStories.refresh(); await analyze(); return story;
+      await recentStories.refresh();
+      if (state.aaConnected) await analyze();
+      else $('#s1info').textContent = '剧情已打开。连接 AA 主程序后可继续初审和制作。';
+      return story;
     } catch (error) { if (isCurrentTransition(transition)) { $('#s1info').textContent = error.message; setScriptScanProgress('workspace', '无法打开剧情：' + error.message, true); } return null; }
   }
   async function openRecent(story) {
@@ -2611,7 +2704,7 @@
     'use-base-for-vision': function () { return saveVisionMode('base'); },
     'disable-vision-model': function () { return saveVisionMode('disabled'); },
     'close-model-layer': function () { $('#modelSelectionLayer').hidden = true; $('#modelRoleOverview').hidden = false; },
-    'open-help-api': function () {
+    'migration-backup': async function () { try { const result = await post('/api/migration/backup', {}); alert('备份已创建：' + result.backup_root); } catch (error) { alert('备份失败：' + error.message); } }, 'migration-import': async function () { try { const result = await post('/api/migration/import', {}); alert('迁移完成，已导入 ' + (result.imported || []).length + ' 个文件。'); $('#migrationNotice').hidden = true; } catch (error) { alert('迁移失败：' + error.message); } }, 'migration-skip': function () { $('#migrationNotice').hidden = true; }, 'open-help-api': function () {
       const template = $('#helpApiModelsTemplate'); const sections = $('#helpDrawer .help-sections');
       if (template && sections && !$('#helpApiModels')) sections.appendChild(template.content.cloneNode(true));
       setDrawer('help', true);
@@ -2638,6 +2731,17 @@
   actions['cast-voice'] = function () { return castSetKind('voice'); };
   actions['close-browse'] = function () { if (activeFilePicker) activeFilePicker.close(); else closeModal('#mBrowse'); activeFilePicker = storyFilePicker; };
   actions['new-profile'] = openProviderLayer;
+  function currentHelpTarget() {
+    if (state.review && state.review.token) return '#proposal-review';
+    if (state.backgroundJob) return '#asset-troubleshooting';
+    if (state.preflight) return '#proposal-review';
+    if (state.analysis) return '#writing';
+    return '#start';
+  }
+  actions['open-help'] = function () { if (window.location && typeof window.location === 'object') window.location.href = '/help' + currentHelpTarget(); else setDrawer('help', true); };
+  actions['open-help-api'] = function () { if (window.location && typeof window.location === 'object') window.location.href = '/help#ai'; else setDrawer('help', true); };
+  actions['download-update'] = downloadUpdate;
+  actions['apply-update'] = applyUpdate;
   actions['discover-models'] = async function () {
     $('#modelStatus').textContent = '正在读取可用模型…';
     clearDiscoveredModels();
@@ -2768,7 +2872,7 @@
   window.AppRuntime.pollAAIndex = pollAAIndex;
   window.addEventListener('load', function () {
     if (localStorage.getItem('aa-welcome-dismissed-v1') === '1') $('#welcomePanel').hidden = true;
-    loadSetupStatus(); loadState(); loadProfiles().catch(function () {}); loadModelWorkbench(); recentStories.refresh();
+    loadSetupStatus(); loadState(); loadUpdateStatus(); loadMigrationStatus(); if (window.HaloCueHelpCenter) window.HaloCueHelpCenter.mount($('#helpDrawer')); loadProfiles().catch(function () {}); loadModelWorkbench(); recentStories.refresh();
     const savedReview = readActiveReview();
     if (savedReview && savedReview.draft_token) restoreActiveReview();
   });

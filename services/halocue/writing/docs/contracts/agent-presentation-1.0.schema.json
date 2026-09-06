@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://halocue.local/contracts/agent-presentation-1.0.schema.json",
+  "title": "HaloCue Agent presentation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "work", "thread", "guidance", "integrity", "snapshot", "events", "cursor"],
+  "properties": {
+    "schema_version": {"const": "agent-presentation/1.0"},
+    "work": {"$ref": "#/$defs/work"},
+    "thread": {"$ref": "#/$defs/thread"},
+    "guidance": {"$ref": "#/$defs/guidance"},
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete", "issues", "presentation_digest"],
+      "properties": {
+        "complete": {"type": "boolean"},
+        "issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}},
+        "presentation_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["work_version", "thread_version", "writing_pack_version"],
+      "properties": {
+        "work_version": {"type": "integer"},
+        "thread_version": {"type": "integer"},
+        "writing_pack_version": {"type": ["string", "null"]},
+        "provider_runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "provider": {"type": "string"}, "model": {"type": "string"},
+            "settings_version": {"type": "integer"}, "config_revision": {"type": "string"},
+            "config_digest": {"type": "string"}, "is_simulation": {"type": "boolean"},
+            "can_call_model": {"type": "boolean"}
+          }
+        }
+      }
+    },
+    "events": {"type": "array", "items": {"$ref": "#/$defs/event"}},
+    "cursor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["next", "has_more", "watermark"],
+      "properties": {"next": {"type": ["string", "null"]}, "has_more": {"type": "boolean"}, "watermark": {"type": "string"}}
+    }
+  },
+  "$defs": {
+    "work": {
+      "type": "object", "additionalProperties": false, "required": ["id", "title", "version"],
+      "properties": {"id": {"type": "string"}, "title": {"type": "string"}, "version": {"type": "integer"}}
+    },
+    "thread": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "work_id", "scope_type", "scope_id", "title", "status", "phase", "permission_mode", "version", "archived_message_count", "created_at", "updated_at"],
+      "properties": {
+        "id": {"type": "string"}, "work_id": {"type": "string"}, "scope_type": {"type": "string"}, "scope_id": {"type": "string"}, "title": {"type": "string"}, "status": {"type": "string"}, "phase": {"type": "string"}, "permission_mode": {"type": "string"}, "version": {"type": "integer"}, "archived_message_count": {"type": "integer"}, "created_at": {"type": "string"}, "updated_at": {"type": "string"}
+      }
+    },
+    "guidance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_schema_version", "work_version", "scope", "outcome", "phase", "headline", "blockers", "primary_action"],
+      "properties": {
+        "source_schema_version": {"const": "writing-harness-status/1.0"},
+        "work_version": {"type": "integer"},
+        "scope": {
+          "type": "object", "additionalProperties": false, "required": ["type", "id"],
+          "properties": {"type": {"enum": ["work", "chapter", "scene"]}, "id": {"type": "string"}}
+        },
+        "outcome": {"enum": ["ready", "in_progress", "needs_user", "blocked", "completed"]},
+        "phase": {"type": "string"},
+        "headline": {"type": "string"},
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["id", "message"],
+            "properties": {"id": {"type": "string"}, "message": {"type": "string"}}
+          }
+        },
+        "primary_action": {"$ref": "#/$defs/action"}
+      }
+    },
+    "action": {
+      "type": "object", "additionalProperties": false, "required": ["id", "label", "enabled"],
+      "properties": {
+        "id": {"type": "string"}, "label": {"type": "string"}, "enabled": {"type": "boolean"},
+        "target_id": {"type": "string"}
+      }
+    },
+    "issue": {
+      "type": "object", "additionalProperties": false, "required": ["code", "source", "id", "message"],
+      "properties": {"code": {"type": "string"}, "source": {"type": "string"}, "id": {"type": "string"}, "message": {"type": "string"}}
+    },
+    "event": {
+      "type": "object", "additionalProperties": false,
+      "required": ["event_id", "event_type", "occurred_at", "state", "source_status", "scope", "refs"],
+      "properties": {
+        "event_id": {"type": "string"},
+        "event_type": {"enum": ["message.user", "message.assistant", "run.started", "run.reasoning_summary", "run.waiting_user", "run.completed", "run.failed", "run.cancelled", "tool.started", "tool.summary", "tool.failed", "artifact.presented", "proposal.presented", "proposal.decided", "proposal.stale", "recovery.available", "work_item.created", "work_item.updated", "attempt.started", "attempt.finished"]},
+        "occurred_at": {"type": "string"}, "state": {"type": "string"}, "source_status": {"type": "string"},
+        "scope": {"type": "object", "required": ["type", "id"], "properties": {"type": {"type": "string"}, "id": {"type": "string"}}},
+        "refs": {"type": "object", "additionalProperties": {"type": "string"}}, "summary": {"type": "string"},
+        "details": {"type": "object", "properties": {"card": {"$ref": "#/$defs/card"}}}
+      }
+    },
+    "card": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "component", "title", "status", "operation", "summary", "sources"],
+      "properties": {
+        "schema_version": {"const": "agent-card/1.0"},
+        "component": {"enum": ["DirectionProposalCard", "CharacterProposalCard", "WorldEntityProposalCard", "WorldRuleProposalCard", "CanonProposalCard"]},
+        "title": {"type": "string"}, "status": {"type": "string"}, "operation": {"type": "string"}, "summary": {"type": "string"},
+        "direction": {
+          "type": "object", "additionalProperties": false,
+          "required": ["central_conflict", "theme", "options"],
+          "properties": {"central_conflict": {"type": "string"}, "theme": {"type": "string"}, "options": {"type": "array", "items": {"type": "string"}}}
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["key", "label", "selected"],
+            "properties": {"key": {"type": "string"}, "label": {"type": "string"}, "before": {}, "after": {}, "selected": {"type": "boolean"}}
+          }
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["type", "label", "ref"],
+            "properties": {"type": {"enum": ["direct_evidence", "agent_inference"]}, "label": {"type": "string"}, "ref": {"type": "string"}}
+          }
+        },
+        "conflict_summary": {
+          "type": "object", "additionalProperties": false, "required": ["status", "count", "blocking_count"],
+          "properties": {"status": {"enum": ["clear", "review", "blocking"]}, "count": {"type": "integer"}, "blocking_count": {"type": "integer"}}
+        },
+        "impact": {
+          "type": "array",
+          "items": {"type": "object", "additionalProperties": false, "required": ["id", "label"], "properties": {"id": {"type": "string"}, "label": {"type": "string"}}}
+        },
+        "impact_refs": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "id", "label", "effect", "status"],
+            "properties": {
+              "kind": {"type": "string"}, "id": {"type": "string"}, "label": {"type": "string"},
+              "effect": {"type": "string"}, "status": {"type": "string"}
+            }
+          }
+        },
+        "decision": {
+          "type": "object", "additionalProperties": false,
+          "required": ["proposal_id", "can_apply", "partial_accept_supported", "expected_work_version", "candidate_hash"],
+          "properties": {
+            "proposal_id": {"type": "string"}, "can_apply": {"type": "boolean"}, "partial_accept_supported": {"type": "boolean"},
+            "expected_work_version": {"type": "integer"}, "candidate_hash": {"type": "string"}, "impact_digest": {"type": "string"}
+          }
+        }
+      }
+    }
+  }
+}

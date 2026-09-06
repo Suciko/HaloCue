@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://halocue.local/contracts/script-release-1.0.schema.json",
+  "title": "HaloCue ScriptRelease Manifest 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release_id",
+    "work_id",
+    "display_version",
+    "content_hash",
+    "writing_pack_version",
+    "ba_writing_source_digest",
+    "source_set_digest",
+    "scenes",
+    "dependency_refs",
+    "memory_maintenance",
+    "gate_snapshot_ids",
+    "released_by",
+    "released_at"
+  ],
+  "properties": {
+    "schema_version": {"const": "script-release/1.0"},
+    "release_id": {"type": "string", "minLength": 1},
+    "work_id": {"type": "string", "minLength": 1},
+    "display_version": {"type": "string", "minLength": 1},
+    "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "writing_pack_version": {"type": "string", "minLength": 1},
+    "ba_writing_source_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "source_set_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "scenes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scene_id", "revision_id", "title", "content_hash"],
+        "properties": {
+          "scene_id": {"type": "string", "minLength": 1},
+          "revision_id": {"type": "string", "minLength": 1},
+          "title": {"type": "string"},
+          "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "asset_references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scene_id", "references", "digest"],
+        "properties": {
+          "scene_id": {"type": "string", "minLength": 1},
+          "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "references": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["reference_id", "asset_kind", "source_type", "source_asset_id", "display_name", "source_version", "content_hash", "content_hash_kind", "source_snapshot", "production_copy"],
+              "properties": {
+                "reference_id": {"type": "string", "minLength": 1},
+                "asset_kind": {"type": "string", "enum": ["background", "character", "sound", "cg"]},
+                "source_type": {"type": "string", "enum": ["resource_index", "custom_library"]},
+                "source_asset_id": {"type": "string", "minLength": 1},
+                "display_name": {"type": "string", "minLength": 1},
+                "source_version": {"type": "string", "minLength": 1},
+                "content_hash": {"type": "string", "minLength": 1},
+                "content_hash_kind": {"type": "string", "minLength": 1},
+                "source_snapshot": {"type": "object"},
+                "production_copy": {"type": ["object", "null"]}
+              }
+            }
+          }
+        }
+      }
+    },
+    "dependency_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "scope_type", "scope_id", "revision_id", "content_hash"],
+        "properties": {
+          "kind": {"type": "string"},
+          "scope_type": {"type": "string"},
+          "scope_id": {"type": "string"},
+          "revision_id": {"type": "string"},
+          "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "memory_maintenance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scene_id", "revision_id", "work_item_id", "status", "decision", "complete"],
+        "properties": {
+          "scene_id": {"type": "string", "minLength": 1},
+          "revision_id": {"type": "string", "minLength": 1},
+          "work_item_id": {"type": ["string", "null"]},
+          "status": {"type": "string", "minLength": 1},
+          "decision": {"type": ["string", "null"]},
+          "complete": {"type": "boolean"}
+        }
+      }
+    },
+    "gate_snapshot_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "released_by": {"type": "string", "minLength": 1},
+    "released_at": {"type": "string", "format": "date-time"}
+  }
+}

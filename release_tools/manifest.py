@@ -26,7 +26,9 @@ _PUBLIC_DIRECTORIES = {
 _PUBLIC_ROOT_FILES = {
     ".gitignore",
     "CHANGELOG.md",
+    "help.html",
     "HaloCue.spec",
+    "HaloCueUpdater.spec",
     "LICENSE",
     "README.md",
     "SECURITY.md",

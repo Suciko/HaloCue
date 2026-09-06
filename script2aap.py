@@ -44,6 +44,14 @@ from aa_project_assets import (                                # noqa: E402
 )
 from asset_validation import validate_spine                  # noqa: E402
 from document import parse_document_lossless, compile_document  # noqa: E402
+from teacher_identity import (                                 # noqa: E402
+    SCHEMA_VERSION,
+    TeacherIdentityError,
+    teacher_override_from_mapping,
+)
+from teacher_presentation import effective_teacher_presentation  # noqa: E402
+from teacher_reply_plan import validate_reply_plan                # noqa: E402
+from aa_teacher_selection import apply_teacher_selections         # noqa: E402
 
 T_PROJ = "ProjectData, Assembly-CSharp"
 T_NODES = "System.Collections.Generic.List`1[[NodeData, Assembly-CSharp]], mscorlib"
@@ -1007,6 +1015,8 @@ def wire_voices(flat, project, proj_res, src_dir, id2name):
     os.makedirs(vdir, exist_ok=True)
     lines = []
     for s in flat:
+        if not s["voice"]:
+            continue
         ch = s["characters"]["$values"][s["speakerSlotNum"]]
         who = id2name.get(ch["name"], ch["name"]) if ch["name"] else "-"
         lines.append(f"{s['voice']} => [{who}] {s['text']}")
@@ -1026,6 +1036,8 @@ def wire_voices(flat, project, proj_res, src_dir, id2name):
             if re.fullmatch(r"\d+", stem):
                 by_index[int(stem)] = p
         for i, s in enumerate(flat):
+            if not s["voice"]:
+                continue
             src = pool.get(s["voice"]) or by_index.get(i) or by_index.get(i + 1)
             if not src:
                 continue
@@ -1037,6 +1049,65 @@ def wire_voices(flat, project, proj_res, src_dir, id2name):
         if extra > 0:
             warn(0, f"配音目录里有 {extra} 个文件没对上任何台词（命名要么用 guid，要么用序号）")
     return listing, n, overrides
+
+
+def assert_no_teacher_portrait_conflict(identifiers, manifests, directories):
+    """Reject portrait collisions before a managed no-portrait declaration writes."""
+    identifiers = set(identifiers)
+    for manifest in manifests:
+        for row in manifest.get("CharacterOverrides", []):
+            if str(row.get("Identifier") or "") in identifiers and any(
+                row.get(key) for key in (
+                    "CharacterReference", "OriginalIdentifier", "SpinePortraitPath", "SmallPortraitPath",
+                )
+            ):
+                raise TeacherIdentityError("teacher_identity_conflict", "老师标识与已有立绘登记冲突", status=409)
+    for directory in directories:
+        for identifier in identifiers:
+            if (Path(directory) / "characters" / identifier).exists():
+                raise TeacherIdentityError("teacher_identity_conflict", "老师标识与已有角色文件冲突", status=409)
+
+
+def _teacher_cast_overrides(cast):
+    overrides = {}
+    for mapping in cast.values():
+        row = teacher_override_from_mapping(mapping)
+        if row is not None:
+            identifier = row["Identifier"]
+            if identifier in overrides and overrides[identifier] != row:
+                raise TeacherIdentityError("teacher_identity_conflict", "老师别名身份不一致", status=409)
+            overrides[identifier] = row
+    for mapping in cast.values():
+        if mapping.get("id") in overrides and mapping.get("role") != "teacher":
+            raise TeacherIdentityError("teacher_identity_conflict", "老师标识已被其他角色绑定", status=409)
+    return overrides
+
+
+def teacher_overrides_from_resource_index(index):
+    """Validate HC no-portrait declarations without adding fields to AA's schema."""
+    overrides = {}
+    resources = index.get("characters", [])
+    for resource in resources:
+        if not isinstance(resource, dict):
+            continue
+        if resource.get("role") != "teacher" and resource.get("source") != "halocue_teacher":
+            continue
+        if (resource.get("role") != "teacher" or resource.get("source") != "halocue_teacher"
+                or resource.get("spine") or resource.get("faces")
+                or resource.get("face_capabilities") or resource.get("avatar") or resource.get("outfit_key")):
+            raise TeacherIdentityError("teacher_identity_conflict", "老师资源声明与立绘冲突", status=409)
+        row = teacher_override_from_mapping({
+            "role": "teacher", "kind": "voice", "id": resource.get("identifier"),
+            "name": resource.get("name"), "club": resource.get("club"),
+            "portrait": resource.get("portrait"), "narrator": False,
+            "teacher_identity_schema": SCHEMA_VERSION, "teacher_preset_id": "custom",
+        })
+        identifier = row["Identifier"]
+        matches = [item for item in resources if isinstance(item, dict) and item.get("identifier") == identifier]
+        if len(matches) != 1 or (index.get("face_capabilities") or {}).get(identifier):
+            raise TeacherIdentityError("teacher_identity_conflict", "老师资源标识重复或存在立绘能力", status=409)
+        overrides[identifier] = row
+    return overrides
 
 
 def finalize_project_manifest(
@@ -1055,6 +1126,10 @@ def finalize_project_manifest(
     directories = (project, os.path.abspath(mirror_dir)) if mirror_dir else (project,)
     if mirror_dir:
         os.makedirs(directories[1], exist_ok=True)
+    teacher_overrides = _teacher_cast_overrides(cast)
+    assert_no_teacher_portrait_conflict(
+        teacher_overrides, [load_manifest(directory) for directory in directories], directories,
+    )
 
     for c in cast.values():
         identifier = str(c.get("id") or "")
@@ -1083,6 +1158,7 @@ def finalize_project_manifest(
     ]
     for c in cast.values():
         identifier = str(c.get("id") or "")
+        teacher_row = teacher_override_from_mapping(c)
         if (
             c.get("narrator")
             or identifier not in used
@@ -1103,6 +1179,15 @@ def finalize_project_manifest(
             "SpinePortraitPath": None,
             "SmallPortraitPath": None,
         }
+        if teacher_row is not None:
+            for manifest, known in zip(manifests, by_identifier):
+                existing = known.get(identifier)
+                if existing is None:
+                    manifest["CharacterOverrides"].append(teacher_row.copy())
+                    known[identifier] = manifest["CharacterOverrides"][-1]
+                else:
+                    existing.update(teacher_row)
+            continue
         # A draft may carry only the persisted Spine signature/outfit binding.
         # Recover the server-owned registration path from the project files so
         # the generated AA manifest remains executable after a rebuild.
@@ -1299,8 +1384,17 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
     aa_data = aa_data or P["data"]
 
     cfg, cast, id2name = load_cast(cast_path)
-    restore_registered_cast_assets(cast, aa_data)
+    reply_plan = None
+    if effective_teacher_presentation(cfg)["mode"] == "sel_single":
+        reply_plan = validate_reply_plan(
+            options.get("teacher_reply_plan"), Path(script_path).read_text(encoding="utf-8"), cfg,
+        )
+    teacher_overrides = _teacher_cast_overrides(cast)
     build_index = json.load(open(index_path, encoding="utf-8"))
+    frozen_teachers = teacher_overrides_from_resource_index(build_index)
+    if any(frozen_teachers.get(identifier) != row for identifier, row in teacher_overrides.items()):
+        raise TeacherIdentityError("teacher_identity_conflict", "老师绑定与冻结资源声明不一致", status=409)
+    restore_registered_cast_assets(cast, aa_data)
     project = validate_windows_path_component(
         out_name or os.path.splitext(os.path.basename(script_path))[0],
         label="project name",
@@ -1328,6 +1422,11 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
     )
 
     with transaction:
+        directories = (proj_res, install_target.save_dir) if install_target else (proj_res,)
+        assert_no_teacher_portrait_conflict(
+            teacher_overrides,
+            [load_manifest(directory) for directory in directories], directories,
+        )
         idx = merge_project_registered_assets(build_index, proj_res)
         events = parse_script(script_path, cast)
         scenes = build(events, cfg, cast, idx, project)
@@ -1341,6 +1440,12 @@ def compile_script(options: dict, *, running_probe=None) -> dict:
 
         first_bg = flat[0]["bgFriendlyName"] if flat else cfg.get("default_bg", "BG_Black")
         proj = wrap_project(scenes, project, first_bg, idx.get("bg", {}))
+        if reply_plan is not None:
+            proj = apply_teacher_selections(proj, reply_plan)
+            flat = [
+                row for node in proj["nodes"]["$values"]
+                for row in node.get("Scripts", {}).get("$values", [])
+            ]
         spk = {}
         for s in flat:
             n = s["characters"]["$values"][s["speakerSlotNum"]]["name"]
