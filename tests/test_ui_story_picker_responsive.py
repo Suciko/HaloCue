@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Real Chromium checks for the cross-device story picker."""
 
+import json
+import os
 import socket
 import subprocess
 import sys
@@ -11,6 +13,8 @@ from pathlib import Path
 import pytest
 
 sync_playwright = pytest.importorskip("playwright.sync_api").sync_playwright
+
+import assetdb
 
 
 HERE = Path(__file__).resolve().parents[1]
@@ -30,6 +34,26 @@ def app_url(tmp_path_factory):
     aa_data = tmp_path_factory.mktemp("story-picker-aa") / "data"
     for name in ("projects", "saves", "overrides", "settings"):
         (aa_data / name).mkdir(parents=True)
+    state = tmp_path_factory.mktemp("story-picker-state")
+    assetdb.connect(state / "aa_assets.db").close()
+    install = state / "AzureArchive" / "App"
+    executable = install / "AzureArchive.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"MZ")
+    unity_data = install / "AzureArchive_Data"
+    unity_data.mkdir()
+    (unity_data / "app.info").write_text(
+        "foxxlight\nAzureArchive\n", encoding="utf-8"
+    )
+    (state / "aa_config.json").write_text(
+        json.dumps({
+            "aa_executable": str(executable),
+            "aa_data": str(aa_data),
+        }),
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment["HALOCUE_USER_DATA_DIR"] = str(state)
     process = subprocess.Popen(
         [
             sys.executable, "webui.py", "--no-browser", "--port", str(port),
@@ -40,6 +64,7 @@ def app_url(tmp_path_factory):
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
+        env=environment,
     )
     deadline = time.time() + 20
     while time.time() < deadline:
@@ -71,6 +96,8 @@ def browser():
 def _open_picker(page, app_url, width):
     page.set_viewport_size({"width": width, "height": 820})
     page.goto(app_url, wait_until="networkidle")
+    setup = page.request.get(app_url + "/api/setup/status").json()
+    assert setup["aa"]["program"]["status"] == "recognized", setup
     page.get_by_role("button", name="选择文件").click()
     page.locator("#storyPickerHost").wait_for()
 

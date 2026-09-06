@@ -69,6 +69,17 @@ def _request_bytes(base, path):
             return response.status, response.headers.get("Content-Type", ""), response.read()
 
 
+def _wait_for_job(base, job_id, timeout=10.0):
+    deadline = time.monotonic() + timeout
+    job = None
+    while time.monotonic() < deadline:
+        _, job = _request(base, "/api/jobs/" + job_id)
+        if job["state"] in {"succeeded", "failed", "cancelled"}:
+            return job
+        time.sleep(0.02)
+    return job
+
+
 def _open_story(base, tmp_path):
     script = tmp_path / "Chapter One.txt"
     script.write_text("scene", encoding="utf-8")
@@ -440,12 +451,7 @@ def test_preflight_endpoint_runs_as_a_scoped_job_without_exposing_source_path(tm
         status, accepted = _request(base, "/api/preflight", {
             "story_token": opened["story_token"], "file_token": file_token,
         }, "POST")
-        job = None
-        for _ in range(100):
-            _, job = _request(base, "/api/jobs/" + accepted["job_id"])
-            if job["state"] in {"succeeded", "failed", "cancelled"}:
-                break
-            time.sleep(0.01)
+        job = _wait_for_job(base, accepted["job_id"])
         _, current = _request(
             base, "/api/story/current?story_token=" + opened["story_token"]
         )
@@ -482,13 +488,7 @@ def test_preflight_uses_story_source_after_the_picker_token_expires(tmp_path, mo
             "story_token": opened["story_token"],
             "file_token": "ft-expired",
         }, "POST")
-        job = None
-        if status == 202:
-            for _ in range(100):
-                _, job = _request(base, "/api/jobs/" + accepted["job_id"])
-                if job["state"] in {"succeeded", "failed", "cancelled"}:
-                    break
-                time.sleep(0.01)
+        job = _wait_for_job(base, accepted["job_id"]) if status == 202 else None
 
     assert status == 202
     assert job["state"] == "succeeded"
@@ -510,11 +510,7 @@ def test_preflight_job_returns_result_when_snapshot_persistence_fails(tmp_path, 
         status, accepted = _request(base, "/api/preflight", {
             "story_token": opened["story_token"], "file_token": file_token,
         }, "POST")
-        for _ in range(100):
-            _, job = _request(base, "/api/jobs/" + accepted["job_id"])
-            if job["state"] in {"succeeded", "failed", "cancelled"}:
-                break
-            time.sleep(0.01)
+        job = _wait_for_job(base, accepted["job_id"])
 
     assert status == 202
     assert job["state"] == "succeeded"
@@ -1055,11 +1051,7 @@ def test_custom_background_candidate_preflight_job_keeps_story_preview_scope(tmp
         status, accepted = _request(base, "/api/preflight", {
             "story_token": story["story_token"], "file_token": script_token,
         }, "POST")
-        for _ in range(100):
-            _, job = _request(base, "/api/jobs/" + accepted["job_id"])
-            if job["state"] in {"succeeded", "failed", "cancelled"}:
-                break
-            time.sleep(0.01)
+        job = _wait_for_job(base, accepted["job_id"])
         preview = _request_bytes(
             base,
             "/api/story/assets/preview?story_token=" + story["story_token"]

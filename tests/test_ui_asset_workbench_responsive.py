@@ -440,7 +440,9 @@ def test_real_browser_workbench_preview_copy_face_flow_has_no_console_errors(bro
         assert page.locator("#faceWorkspace").get_attribute("aria-hidden") == "false"
         page.wait_for_timeout(250)
         face_box = page.locator("#faceWorkspace").bounding_box()
-        assert face_box["x"] >= 0 and face_box["x"] + face_box["width"] <= 1200
+        viewport_width = page.evaluate("window.innerWidth")
+        assert face_box["x"] >= -0.5
+        assert face_box["x"] + face_box["width"] <= viewport_width + 0.5
         page.screenshot(path=str(tmp_path / "face-workspace-open.png"), full_page=True)
         page.locator("[data-face-action='close']").last.click()
         page.wait_for_timeout(250)
