@@ -27,6 +27,7 @@ USER_CONTENT_ROOTS = (
     "imports",
     "references",
     "releases",
+    "sources",
 )
 REQUIRED_TABLES = {
     "works",
@@ -44,6 +45,8 @@ CONTENT_REFERENCES = (
     ("conversation_attachments", "content_uri"),
     ("reference_files", "content_uri"),
     ("agent_runs", "input_snapshot_uri"),
+    ("source_versions", "original_uri"),
+    ("source_versions", "normalized_uri"),
 )
 
 
@@ -78,7 +81,7 @@ class WritingBackupManager:
             "work_titles": db_summary["work_titles"],
             "file_count": len(files),
             "uncompressed_bytes": sum(item["byte_size"] for item in files),
-            "includes": ["作品数据库", "正文与版本", "资料与附件", "Agent 运行记录", "定稿"],
+            "includes": ["作品数据库", "正文与版本", "资料与附件", "Agent 运行记录", "定稿", "原文与标准化来源文件"],
             "excludes": ["API Key", "模型设置", "AA 制作工作区设置"],
             "files": files,
         }
@@ -172,7 +175,10 @@ class WritingBackupManager:
         stage = Path(tempfile.mkdtemp(prefix="halocue-restore-stage-", dir=self.data_dir.parent))
         rollback = Path(tempfile.mkdtemp(prefix="halocue-restore-rollback-", dir=self.data_dir.parent))
         moved_roots: list[str] = []
-        database_replaced = False
+        installed_roots: list[str] = []
+        database_restore_started = False
+        preserve_rollback = False
+        safety_path: Path | None = None
         try:
             with zipfile.ZipFile(io.BytesIO(content), "r") as archive:
                 for info in archive.infolist():
@@ -200,29 +206,50 @@ class WritingBackupManager:
                     os.replace(current, previous)
                     moved_roots.append(root_name)
                 os.replace(incoming, current)
+                installed_roots.append(root_name)
 
             current_db = self.data_dir / "writing.db"
             previous_db = rollback / "writing.db"
             previous_db.write_bytes(self._database_snapshot())
+            # The restore call can fail after touching the destination (for
+            # example during finalization); compensate any attempted write.
+            database_restore_started = True
             self._restore_database(incoming_data / "writing.db", current_db)
-            database_replaced = True
             return {**summary, "restored": True, "safety_backup": safety_path.name}
         except Exception:
-            for root_name in USER_CONTENT_ROOTS:
-                current = self.data_dir / root_name
-                previous = rollback / root_name
-                if current.exists():
-                    shutil.rmtree(current, ignore_errors=True)
-                if previous.exists():
-                    os.replace(previous, current)
-            current_db = self.data_dir / "writing.db"
-            previous_db = rollback / "writing.db"
-            if database_replaced and previous_db.exists():
-                self._restore_database(previous_db, current_db)
+            try:
+                # Only undo completed transitions. An early failure must not
+                # delete directories that never left the original workspace.
+                for root_name in reversed(USER_CONTENT_ROOTS):
+                    current = self.data_dir / root_name
+                    previous = rollback / root_name
+                    if root_name in installed_roots:
+                        shutil.rmtree(current)
+                    if root_name in moved_roots:
+                        os.replace(previous, current)
+                current_db = self.data_dir / "writing.db"
+                previous_db = rollback / "writing.db"
+                if database_restore_started and previous_db.exists():
+                    self._restore_database(previous_db, current_db)
+            except Exception as rollback_error:
+                # A failed compensation is not disposable temporary data.
+                # Keep remaining originals and tell the caller where they are.
+                preserve_rollback = True
+                raise DomainError(
+                    "backup_restore_rollback_failed",
+                    "恢复失败且自动回滚未完成。请停止写入并保留回滚目录及恢复前备份，"
+                    "不要再次尝试覆盖恢复。",
+                    status=500,
+                    details={
+                        "rollback_path": str(rollback),
+                        "safety_backup": safety_path.name if safety_path else None,
+                    },
+                ) from rollback_error
             raise
         finally:
             shutil.rmtree(stage, ignore_errors=True)
-            shutil.rmtree(rollback, ignore_errors=True)
+            if not preserve_rollback:
+                shutil.rmtree(rollback, ignore_errors=True)
 
     def _database_snapshot(self) -> bytes:
         descriptor, temporary_name = tempfile.mkstemp(prefix="halocue-writing-", suffix=".db")
