@@ -4340,6 +4340,17 @@ const SettingsController = {
       this.renderProviderPresets();
     });
 
+    this.modelDraftEndpoint = this.modelEndpointIdentity();
+    this.modelDraftRevision = 0;
+    for (const id of ['settingsApiKey', 'settingsModelName']) {
+      document.getElementById(id)?.addEventListener('input', () => this.invalidateModelResult());
+    }
+    for (const id of ['settingsProvider', 'settingsBaseUrl']) {
+      for (const eventName of ['input', 'change']) {
+        document.getElementById(id)?.addEventListener(eventName, () => this.syncModelEndpoint());
+      }
+    }
+
     // Fetch Models button
     document.getElementById('fetchModelsBtn')?.addEventListener('click', async () => {
       await this.fetchModels();
@@ -4355,6 +4366,14 @@ const SettingsController = {
       e.preventDefault();
       await this.saveModel(e.target);
     });
+
+    for (const eventName of ['input', 'change']) {
+      document.getElementById('aaWorkspaceInput')?.addEventListener(eventName, () => {
+        this.resetAaInspection();
+        const inspect = document.getElementById('inspectAaBtn');
+        if (inspect && !this.aaAdoptionPending) inspect.disabled = false;
+      });
+    }
 
     // AA Inspector button
     document.getElementById('inspectAaBtn')?.addEventListener('click', async () => {
@@ -4589,6 +4608,7 @@ const SettingsController = {
 
     if (providerEl && model.provider) providerEl.value = model.provider;
     if (baseUrlEl && model.base_url !== undefined) baseUrlEl.value = model.base_url;
+    this.syncModelEndpoint();
     if (modelNameEl && model.model) modelNameEl.value = model.model;
     if (maxTokensEl && model.max_tokens) maxTokensEl.value = model.max_tokens;
     if (timeoutEl && model.timeout) timeoutEl.value = model.timeout;
@@ -4654,11 +4674,80 @@ const SettingsController = {
     if (protocol) protocol.textContent = preset?.provider === 'anthropic' ? 'Anthropic Messages' : 'OpenAI 兼容';
   },
 
-  selectPreset(presetId) {
-    this.activePresetId = presetId;
+  modelEndpointIdentity(provider, baseUrl) {
+    const protocol = String(provider ?? document.getElementById('settingsProvider')?.value ?? 'openai').trim().toLowerCase();
+    const raw = String(baseUrl ?? document.getElementById('settingsBaseUrl')?.value ?? '').trim().replace(/\/+$/, '');
+    try {
+      const url = new URL(raw);
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return `${protocol}|invalid:${raw}`;
+      // Keep path spelling: unlike URL.pathname the backend does not resolve
+      // dot-segments. Only fold its documented endpoint suffixes/trailing slash.
+      if (raw.includes('\\')) return `${protocol}|invalid:${raw}`;
+      let path = (raw.match(/^https?:\/\/[^/]+(\/.*)?$/i)?.[1] || '').replace(/\/+$/, '');
+      path = path.replace(/\/(chat\/completions|messages|models)$/, '');
+      if (!path && url.hostname === 'api.anthropic.com') path = '/v1';
+      return `${protocol}|${url.origin}${path}`;
+    } catch (_) {
+      return `${protocol}|invalid:${raw}`;
+    }
+  },
 
+  syncModelEndpoint() {
+    const endpoint = this.modelEndpointIdentity();
+    if (this.modelDraftEndpoint !== undefined && endpoint !== this.modelDraftEndpoint) {
+      this.clearTypedModelKey();
+      this.invalidateModelResult();
+    }
+    this.modelDraftEndpoint = endpoint;
+  },
+
+  invalidateModelResult() {
+    this.modelDraftRevision = (this.modelDraftRevision || 0) + 1;
+    const card = document.getElementById('modelDiagnosticsCard');
+    if (card) { card.innerHTML = ''; card.classList.add('hidden'); }
+  },
+
+  modelRequestSnapshot() {
+    return {
+      revision: this.modelDraftRevision || 0,
+      endpoint: this.modelEndpointIdentity(),
+      model: document.getElementById('settingsModelName')?.value || '',
+    };
+  },
+
+  modelRequestIsCurrent(snapshot) {
+    return snapshot.revision === (this.modelDraftRevision || 0)
+      && snapshot.endpoint === this.modelEndpointIdentity()
+      && snapshot.model === (document.getElementById('settingsModelName')?.value || '');
+  },
+
+  modelCredentialFields() {
+    // Also guard programmatic field changes immediately before every send.
+    this.syncModelEndpoint();
+    const preset = this.cachedPresets.find(item => item.id === this.activePresetId);
+    const samePresetEndpoint = preset && this.modelEndpointIdentity(preset.provider, preset.base_url) === this.modelDraftEndpoint;
+    return {
+      provider: document.getElementById('settingsProvider')?.value || 'openai',
+      base_url: document.getElementById('settingsBaseUrl')?.value || '',
+      api_key: document.getElementById('settingsApiKey')?.value || '',
+      api_key_env: samePresetEndpoint ? (preset.api_key_env || '') : '',
+    };
+  },
+
+  clearTypedModelKey() {
+    const key = document.getElementById('settingsApiKey');
+    if (key) { key.value = ''; key.type = 'password'; }
+    const toggle = document.getElementById('toggleApiKeyVisibility');
+    if (toggle) toggle.textContent = '显示';
+    const hint = document.getElementById('apiKeyStatusHint');
+    if (hint) hint.textContent = '连接地址或协议已变化，已清除未保存的 Key；请为当前接口重新填写。';
+  },
+
+  selectPreset(presetId) {
     const preset = this.cachedPresets.find(p => p.id === presetId);
     if (!preset) return;
+    this.invalidateModelResult();
+    this.activePresetId = presetId;
     this.renderProviderPresets();
     this.updateSelectedProviderSummary(preset);
 
@@ -4669,6 +4758,7 @@ const SettingsController = {
 
     if (providerEl) providerEl.value = preset.provider;
     if (baseUrlEl) baseUrlEl.value = preset.base_url;
+    this.syncModelEndpoint();
     if (modelNameEl) modelNameEl.value = preset.default_model || (preset.models && preset.models[0]) || '';
 
     if (datalist && preset.models) {
@@ -4680,9 +4770,9 @@ const SettingsController = {
 
   async fetchModels() {
     const btn = document.getElementById('fetchModelsBtn');
-    const baseUrl = document.getElementById('settingsBaseUrl')?.value || '';
-    const apiKey = document.getElementById('settingsApiKey')?.value || '';
-    const provider = document.getElementById('settingsProvider')?.value || 'openai';
+    const credentials = this.modelCredentialFields();
+    const provider = credentials.provider;
+    const snapshot = this.modelRequestSnapshot();
 
     if (btn) {
       btn.disabled = true;
@@ -4692,8 +4782,9 @@ const SettingsController = {
     try {
       const res = await api('/settings/writing-model/fetch-models', {
         method: 'POST',
-        body: JSON.stringify({ base_url: baseUrl, api_key: apiKey, provider })
+        body: JSON.stringify(credentials)
       });
+      if (!this.modelRequestIsCurrent(snapshot)) return;
       const models = res.models || [];
       const datalist = document.getElementById('settingsModelDatalist');
       if (datalist && models.length) {
@@ -4706,6 +4797,7 @@ const SettingsController = {
         toast('接口返回了空模型列表，请手动输入');
       }
     } catch (e) {
+      if (!this.modelRequestIsCurrent(snapshot)) return;
       toast(e.message || '获取模型列表失败', true);
     } finally {
       if (btn) {
@@ -4718,10 +4810,9 @@ const SettingsController = {
   async testConnection() {
     const btn = document.getElementById('testConnectionBtn');
     const diagCard = document.getElementById('modelDiagnosticsCard');
-    const baseUrl = document.getElementById('settingsBaseUrl')?.value || '';
-    const apiKey = document.getElementById('settingsApiKey')?.value || '';
-    const provider = document.getElementById('settingsProvider')?.value || 'openai';
+    const credentials = this.modelCredentialFields();
     const model = document.getElementById('settingsModelName')?.value || '';
+    const snapshot = this.modelRequestSnapshot();
 
     if (!model) {
       toast('请先输入或选择要测试的模型名称', true);
@@ -4740,9 +4831,10 @@ const SettingsController = {
     try {
       const res = await api('/settings/writing-model/test', {
         method: 'POST',
-        body: JSON.stringify({ base_url: baseUrl, api_key: apiKey, provider, model })
+        body: JSON.stringify({ ...credentials, model })
       });
 
+      if (!this.modelRequestIsCurrent(snapshot)) return;
       if (diagCard) {
         diagCard.className = 'diagnostics-card';
         diagCard.innerHTML = `
@@ -4762,6 +4854,7 @@ const SettingsController = {
       if (latencyPill) latencyPill.textContent = `${res.latency_ms}ms · 正常`;
       toast(`连接成功，往返延迟 ${res.latency_ms}ms`);
     } catch (e) {
+      if (!this.modelRequestIsCurrent(snapshot)) return;
       if (diagCard) {
         diagCard.className = 'diagnostics-card error';
         const details = e.details?.diagnostics || [];
@@ -4802,11 +4895,8 @@ const SettingsController = {
       const formData = new FormData(form);
       const payload = {
         preset_id: this.activePresetId,
-        api_key_env: this.cachedPresets.find(item => item.id === this.activePresetId)?.api_key_env || '',
-        provider: formData.get('provider'),
-        base_url: formData.get('base_url'),
+        ...this.modelCredentialFields(),
         model: formData.get('model'),
-        api_key: formData.get('api_key'),
         max_tokens: parseInt(formData.get('max_tokens') || '8192', 10),
         timeout: parseInt(formData.get('timeout') || '120', 10),
         reasoning_mode: formData.get('reasoning_mode') || 'balanced',
@@ -4892,64 +4982,106 @@ const SettingsController = {
     }
   },
 
-  async inspectAa() {
-    const input = document.getElementById('aaWorkspaceInput');
+  resetAaInspection(message = '路径已更改，请重新检测后再采用。') {
+    this.aaInspection = null;
+    this.aaInspectionRevision = (this.aaInspectionRevision || 0) + 1;
+    const button = document.getElementById('adoptAaBtn');
+    if (button) { button.disabled = true; button.textContent = '采用此工作区'; }
     const card = document.getElementById('aaEnvironmentCard');
-    const adoptBtn = document.getElementById('adoptAaBtn');
-    const raw = (input?.value || '').trim();
-
     if (card) {
-      card.className = 'environment-status-card';
-      card.innerHTML = '<p>正在检查 AzureArchive 路径与工作区有效性...</p>';
+      card.className = 'environment-status-card empty';
+      card.innerHTML = `<p>${esc(message)}</p>`;
     }
+  },
 
+  aaInspectionIsCurrent(revision, selection) {
+    return revision === this.aaInspectionRevision
+      && selection === (document.getElementById('aaWorkspaceInput')?.value || '').trim();
+  },
+
+  async inspectAa() {
+    if (this.aaAdoptionPending) return;
+    const raw = (document.getElementById('aaWorkspaceInput')?.value || '').trim();
+    const card = document.getElementById('aaEnvironmentCard');
+    const button = document.getElementById('inspectAaBtn');
+    this.resetAaInspection('正在检查 AzureArchive 路径与工作区有效性...');
+    const revision = this.aaInspectionRevision;
+    if (button) button.disabled = true;
     try {
       const resp = await fetch('/production/api/v1/settings/aa-environment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ selection: raw })
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ selection: raw }),
       });
       const data = await resp.json();
+      if (!this.aaInspectionIsCurrent(revision, raw)) return;
       if (!resp.ok || data.ok === false) throw new Error(data.error?.message || 'AA 环境探测失败');
-
       const result = data.data || data;
+      const environment = result.environment || {};
+      const workspace = environment.workspace || {};
+      if (workspace.valid !== true || typeof workspace.path !== 'string' || !workspace.path.trim()) {
+        throw new Error(environment.issues?.[0]?.message || '未检测到有效 AA 工作区，请检查目录结构。');
+      }
+      this.aaInspection = { selection: raw, path: workspace.path, revision };
       if (card) {
         card.className = 'environment-status-card valid';
-        card.innerHTML = `
-          <strong class="environment-valid-title">检测到有效的 AzureArchive 制作环境</strong>
-          <p>工作区路径: <code>${result.workspace_path || result.resolved_workspace || raw}</code></p>
-          <small>结构完整: projects, saves, overrides, settings 就绪。</small>
-        `;
+        card.innerHTML = `<strong class="environment-valid-title">检测到有效的 AzureArchive 工作区</strong>
+          <p>工作区路径: <code>${esc(workspace.path)}</code></p>
+          <small>检测通过不等于资源完整；采用时会再次校验目录结构。</small>`;
       }
-      if (adoptBtn) adoptBtn.disabled = false;
-      toast('AA 制作环境检测通过');
+      const adopt = document.getElementById('adoptAaBtn');
+      if (adopt) adopt.disabled = false;
+      toast('AA 工作区检测通过');
     } catch (e) {
+      if (!this.aaInspectionIsCurrent(revision, raw)) return;
       if (card) {
         card.className = 'environment-status-card';
-        card.innerHTML = `
-          <strong class="environment-error-title">未检测到有效 AA 工作区</strong>
-          <p>${e.message || '请确认目录是否存在且为标准的 AzureArchive data 结构'}</p>
-        `;
+        card.innerHTML = `<strong class="environment-error-title">未检测到有效 AA 工作区</strong><p>${esc(e.message || 'AA 环境探测失败')}</p>`;
       }
-      if (adoptBtn) adoptBtn.disabled = true;
       toast(e.message || 'AA 检测失败', true);
+    } finally {
+      if (button && revision === this.aaInspectionRevision) button.disabled = false;
     }
   },
 
   async adoptAa() {
+    if (this.aaAdoptionPending) return;
+    const inspected = this.aaInspection;
+    if (!inspected || !this.aaInspectionIsCurrent(inspected.revision, inspected.selection)) {
+      this.resetAaInspection();
+      toast('请先检测当前路径，确认有效后再采用。', true);
+      return;
+    }
+    const button = document.getElementById('adoptAaBtn');
     const input = document.getElementById('aaWorkspaceInput');
-    const raw = (input?.value || '').trim();
+    const inspectButton = document.getElementById('inspectAaBtn');
+    this.aaAdoptionPending = true;
+    if (button) { button.disabled = true; button.textContent = '正在采用...'; }
+    if (input) input.disabled = true;
+    if (inspectButton) inspectButton.disabled = true;
     try {
       const resp = await fetch('/production/api/v1/settings/aa-workspace', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aa_data: raw })
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        // Use the resolved data directory, not the original EXE/install input.
+        body: JSON.stringify({ path: inspected.path }),
       });
       const data = await resp.json();
       if (!resp.ok || data.ok === false) throw new Error(data.error?.message || '采用工作区失败');
+      const workspace = (data.data || data).aa_workspace;
+      if (workspace?.valid !== true || workspace.path !== inspected.path) {
+        throw new Error('工作区采用结果不一致，请重新检测并确认当前生效目录。');
+      }
+      if (!this.aaInspectionIsCurrent(inspected.revision, inspected.selection)) return;
+      this.aaInspection = null;
+      if (button) button.textContent = '已采用';
       toast('已成功采用并绑定该 AzureArchive 制作工作区');
     } catch (e) {
+      if (!this.aaInspectionIsCurrent(inspected.revision, inspected.selection)) return;
+      this.resetAaInspection('采用未完成，请重新检测后重试。');
       toast(e.message || '采用 AA 工作区失败', true);
+    } finally {
+      this.aaAdoptionPending = false;
+      if (input) input.disabled = false;
+      if (inspectButton) inspectButton.disabled = false;
     }
   },
 
