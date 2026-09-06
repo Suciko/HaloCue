@@ -17,6 +17,9 @@ from draft_store import DraftStore, calc_sha256
 from document import parse_document_lossless
 from script2aap import compile_script
 from runtime_layout import LAYOUT
+from teacher_reply_plan import make_reply_plan
+
+TEACHER_REPLY_PLAN_SCHEMA_VERSION = "teacher-reply-plan/1.0"
 
 HERE = LAYOUT.user_data_root if LAYOUT.frozen else Path(__file__).resolve().parent
 
@@ -125,6 +128,16 @@ class BuildBundleManager:
                 raise FileNotFoundError(f"Draft resource index missing: {token}")
             shutil.copy2(resource_index, input_dir / "resources.json")
 
+            reply_plan = make_reply_plan(
+                (input_dir / "edited.txt").read_text(encoding="utf-8"),
+                json.loads((input_dir / "identity.json").read_text(encoding="utf-8")),
+                json.loads(cast_path.read_text(encoding="utf-8")),
+            )
+            if reply_plan is not None:
+                (input_dir / "teacher-reply-plan.json").write_text(
+                    json.dumps(reply_plan, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+
             return build_id
 
     def execute_build_worker(self, token: str, build_id: str) -> Dict[str, Any]:
@@ -158,6 +171,10 @@ class BuildBundleManager:
                 "output_root": str(self.output_root),
                 "aa_data": self.aa_data,
                 "install": False,
+                "teacher_reply_plan": (
+                    json.loads((input_dir / "teacher-reply-plan.json").read_text(encoding="utf-8"))
+                    if (input_dir / "teacher-reply-plan.json").is_file() else None
+                ),
             }
         )
 
@@ -204,6 +221,9 @@ class BuildBundleManager:
             json.dumps({"valid": True, "diagnostics": []}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+        if (input_dir / "teacher-reply-plan.json").is_file():
+            shutil.copy2(input_dir / "teacher-reply-plan.json", output_bundle_tmp / "teacher-reply-plan.json")
 
         # 计算全文件 hash 生成 files.json
         files_manifest = []

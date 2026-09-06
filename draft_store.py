@@ -829,7 +829,9 @@ class DraftStore:
             (draft_dir / "edited.txt").write_text(new_text, encoding="utf-8")
 
             # 更新 text_fingerprint
-            identities_data[target_index]["text_fingerprint"] = compute_text_fingerprint(target_node.raw if not target_node.dirty else new_text)
+            identities_data[target_index]["text_fingerprint"] = compute_text_fingerprint(
+                serialize_document([target_node])
+            )
 
             session["draft_version"] += 1
             session["content_revision"] += 1

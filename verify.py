@@ -11,6 +11,7 @@ from pathlib import Path, PureWindowsPath
 from aa_registry import load_manifest
 from asset_validation import validate_spine
 from tables import bg_id
+from aa_teacher_selection import SELECTION_TYPE, selection_node_errors
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -21,7 +22,7 @@ SCRIPT_KEYS = ["$type", "text", "popup", "bgEffect", "bgName", "bgFriendlyName",
 CHAR_KEYS = ["$type", "name", "faceId", "startingPos", "endingPos",
              "emoticon", "action", "effect", "appear", "shapeOverride"]
 NODE_TYPES = {"EntryNodeData, Assembly-CSharp", "ScriptNodeData, Assembly-CSharp",
-              "ExitNodeData, Assembly-CSharp"}
+              "ExitNodeData, Assembly-CSharp", SELECTION_TYPE}
 
 errs, warns = [], []
 
@@ -293,6 +294,31 @@ def scripts_of(proj):
     return out
 
 
+def _selection_graph_has_cycle(nodes):
+    byguid = {node["Guid"]: node for node in nodes}
+    colors = {}
+    for start in byguid:
+        stack = [(start, False)]
+        while stack:
+            identifier, finished = stack.pop()
+            if identifier not in byguid:
+                continue
+            if finished:
+                colors[identifier] = 2
+                continue
+            if colors.get(identifier) == 1:
+                return True
+            if colors.get(identifier) == 2:
+                continue
+            colors[identifier] = 1
+            stack.append((identifier, True))
+            connections = byguid[identifier].get("ConnectionsTo")
+            values = connections.get("$values") if isinstance(connections, dict) else None
+            if isinstance(values, list):
+                stack.extend((value, False) for value in values if isinstance(value, str))
+    return False
+
+
 def check(proj):
     if proj.get("$type") != "ProjectData, Assembly-CSharp":
         errs.append("根节点 $type 不对")
@@ -302,6 +328,10 @@ def check(proj):
 
     nodes = proj["nodes"]["$values"]
     guids = {n["Guid"] for n in nodes}
+    if len(guids) != len(nodes):
+        errs.append("node_identity_duplicate")
+    if any(node["$type"] == SELECTION_TYPE for node in nodes) and _selection_graph_has_cycle(nodes):
+        errs.append("selection_graph_cycle")
     entries = [n for n in nodes if n["$type"].startswith("EntryNodeData")]
     exits = [n for n in nodes if n["$type"].startswith("ExitNodeData")]
     if len(entries) != 1:
@@ -314,6 +344,9 @@ def check(proj):
     for n in nodes:
         if n["$type"] not in NODE_TYPES:
             errs.append(f"未知节点类型 {n['$type']}")
+        if n["$type"] == SELECTION_TYPE:
+            errs.extend(selection_node_errors(n, guids))
+            continue
         for g in n["ConnectionsTo"]["$values"]:
             if g not in guids:
                 errs.append(f"节点 {n['Guid'][:8]} 指向不存在的 {g[:8]}")
@@ -323,10 +356,13 @@ def check(proj):
     byguid = {n["Guid"]: n for n in nodes}
     while stack:
         g = stack.pop()
-        if g in seen:
+        if g in seen or g not in byguid:
             continue
         seen.add(g)
-        stack += byguid[g]["ConnectionsTo"]["$values"]
+        connections = byguid[g].get("ConnectionsTo")
+        values = connections.get("$values") if isinstance(connections, dict) else None
+        if isinstance(values, list):
+            stack += [value for value in values if isinstance(value, str)]
     for n in nodes:
         if n["Guid"] not in seen:
             warns.append(f"节点 {n.get('NodeName') or n['Guid'][:8]} 从入口不可达")
