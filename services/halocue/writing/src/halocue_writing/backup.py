@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from .errors import DomainError
+from .workspace_access import workspace_access, workspace_operation
 
 
 BACKUP_FORMAT = "halocue-writing-backup/1.0"
@@ -57,7 +58,9 @@ def _digest(content: bytes) -> str:
 class WritingBackupManager:
     def __init__(self, data_dir: Path):
         self.data_dir = Path(data_dir).resolve()
+        self.data_access = workspace_access(self.data_dir)
 
+    @workspace_operation
     def export(self) -> tuple[str, bytes, dict]:
         created_at = datetime.now(timezone.utc).isoformat()
         entries: dict[str, bytes] = {"data/writing.db": self._database_snapshot()}
@@ -168,18 +171,25 @@ class WritingBackupManager:
             }
 
     def restore(self, content: bytes, expected_hash: str) -> dict:
-        summary = self.inspect_bytes(content)
-        if not expected_hash or expected_hash != summary["backup_hash"]:
-            raise DomainError("backup_changed", "备份内容与刚才预检的文件不一致，请重新选择。", status=409)
+        with self.data_access.maintenance():
+            summary = self.inspect_bytes(content)
+            if not expected_hash or expected_hash != summary["backup_hash"]:
+                raise DomainError("backup_changed", "备份内容与刚才预检的文件不一致，请重新选择。", status=409)
+            with self.data_access.restoring():
+                return self._restore_checked(content, summary)
 
-        stage = Path(tempfile.mkdtemp(prefix="halocue-restore-stage-", dir=self.data_dir.parent))
-        rollback = Path(tempfile.mkdtemp(prefix="halocue-restore-rollback-", dir=self.data_dir.parent))
+    def _restore_checked(self, content: bytes, summary: dict) -> dict:
+        stage: Path | None = None
+        rollback: Path | None = None
         moved_roots: list[str] = []
         installed_roots: list[str] = []
         database_restore_started = False
         preserve_rollback = False
         safety_path: Path | None = None
         try:
+            stage = Path(tempfile.mkdtemp(prefix="halocue-restore-stage-", dir=self.data_dir.parent))
+            rollback = Path(tempfile.mkdtemp(prefix="halocue-restore-rollback-", dir=self.data_dir.parent))
+            self.data_access.record_restore_paths(stage=stage, rollback=rollback)
             with zipfile.ZipFile(io.BytesIO(content), "r") as archive:
                 for info in archive.infolist():
                     if info.is_dir() or info.filename == "manifest.json":
@@ -195,6 +205,7 @@ class WritingBackupManager:
             temporary_safety = safety_path.with_suffix(safety_path.suffix + ".tmp")
             temporary_safety.write_bytes(safety_content)
             os.replace(temporary_safety, safety_path)
+            self.data_access.record_restore_paths(stage=stage, rollback=rollback, safety_backup=safety_path)
 
             incoming_data = stage / "data"
             for root_name in USER_CONTENT_ROOTS:
@@ -216,22 +227,19 @@ class WritingBackupManager:
             database_restore_started = True
             self._restore_database(incoming_data / "writing.db", current_db)
             return {**summary, "restored": True, "safety_backup": safety_path.name}
-        except Exception:
+        except BaseException:
             try:
                 # Only undo completed transitions. An early failure must not
                 # delete directories that never left the original workspace.
                 for root_name in reversed(USER_CONTENT_ROOTS):
                     current = self.data_dir / root_name
-                    previous = rollback / root_name
                     if root_name in installed_roots:
                         shutil.rmtree(current)
                     if root_name in moved_roots:
-                        os.replace(previous, current)
-                current_db = self.data_dir / "writing.db"
-                previous_db = rollback / "writing.db"
-                if database_restore_started and previous_db.exists():
-                    self._restore_database(previous_db, current_db)
-            except Exception as rollback_error:
+                        os.replace(rollback / root_name, current)
+                if database_restore_started:
+                    self._restore_database(rollback / "writing.db", self.data_dir / "writing.db")
+            except BaseException as rollback_error:
                 # A failed compensation is not disposable temporary data.
                 # Keep remaining originals and tell the caller where they are.
                 preserve_rollback = True
@@ -245,10 +253,12 @@ class WritingBackupManager:
                         "safety_backup": safety_path.name if safety_path else None,
                     },
                 ) from rollback_error
+            self.data_access.rollback_completed()
             raise
         finally:
-            shutil.rmtree(stage, ignore_errors=True)
-            if not preserve_rollback:
+            if stage is not None:
+                shutil.rmtree(stage, ignore_errors=True)
+            if rollback is not None and not preserve_rollback:
                 shutil.rmtree(rollback, ignore_errors=True)
 
     def _database_snapshot(self) -> bytes:

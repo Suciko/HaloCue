@@ -10,6 +10,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from .workspace_access import workspace_access, workspace_operation
+
 
 COMMIT_PROJECTION_KINDS = (
     "summary",
@@ -41,6 +43,11 @@ def sha256_bytes(content: bytes) -> str:
 
 class Repository:
     def __init__(self, data_dir: Path):
+        self.data_access = workspace_access(data_dir)
+        with self.data_access.operation():
+            self._initialize(data_dir)
+
+    def _initialize(self, data_dir):
         self.data_dir = Path(data_dir).resolve()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.artifact_dir = self.data_dir / "artifacts"
@@ -53,6 +60,12 @@ class Repository:
         self._init_schema()
         self.recover_attempts()
 
+    @workspace_operation
+    def initialize_after_restore(self):
+        """Reopen restored schema/state without invalidating consumer references."""
+        self._init_schema()
+        return self.recover_attempts()
+
     def connect(self):
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
@@ -61,16 +74,17 @@ class Repository:
 
     @contextmanager
     def transaction(self):
-        connection = self.connect()
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            yield connection
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
+        with self.data_access.operation():
+            connection = self.connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                yield connection
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
 
     def _init_schema(self):
         schema = """
@@ -1377,6 +1391,7 @@ class Repository:
             ).rowcount
         return changed == 1
 
+    @workspace_operation
     def atomic_write_bytes(self, relative: str, content: bytes) -> tuple[str, str]:
         target = (self.data_dir / relative).resolve()
         if self.data_dir not in target.parents:
@@ -1390,6 +1405,7 @@ class Repository:
         os.replace(temporary, target)
         return str(target.relative_to(self.data_dir)).replace("\\", "/"), sha256_bytes(content)
 
+    @workspace_operation
     def atomic_write_text(self, relative_uri: str, content: str) -> tuple[str, str]:
         target = (self.data_dir / relative_uri).resolve()
         if self.data_dir not in target.parents:
@@ -1407,6 +1423,7 @@ class Repository:
                 os.unlink(temporary)
         return relative_uri.replace("\\", "/"), sha256_text(content)
 
+    @workspace_operation
     def read_text(self, uri: str) -> str:
         path = (self.data_dir / uri).resolve()
         if self.data_dir not in path.parents:

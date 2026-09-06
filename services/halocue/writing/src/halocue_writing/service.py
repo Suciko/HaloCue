@@ -72,6 +72,7 @@ from .aap_import import parse_aap_bytes, parse_aap_payload
 from .story_import import extract_document_paragraphs, parse_story_bytes, parse_story_payload
 from .source_catalog import SourceCatalog
 from .adaptation import AdaptationService
+from .workspace_access import workspace_access, workspace_operation
 
 
 class _ProposalAcceptanceStopped(Exception):
@@ -85,6 +86,11 @@ class _ProposalAcceptanceStopped(Exception):
 
 class WritingService:
     def __init__(self, data_dir: Path, production_url: str = "http://127.0.0.1:8892", official_corpus_dir: Path | None = None):
+        self.data_access = workspace_access(data_dir)
+        with self.data_access.operation():
+            self._initialize(data_dir, production_url, official_corpus_dir)
+
+    def _initialize(self, data_dir, production_url, official_corpus_dir):
         self.repo = Repository(data_dir)
         self.sources = SourceCatalog(self.repo)
         self.adaptations = AdaptationService(self)
@@ -106,8 +112,6 @@ class WritingService:
             corpus_dir = Path(__file__).resolve().parents[3] / "05-官方演出语料库" / "records"
         self.official_references = OfficialReferenceCatalog(corpus_dir)
         self.resource_catalog = ResourceCatalog(data_dir)
-        self._agent_threads: dict[str, threading.Thread] = {}
-        self._agent_threads_lock = threading.Lock()
         self._provider_lock = threading.Lock()
         self._data_maintenance_lock = threading.Lock()
         self._release_handoff_lock = threading.Lock()
@@ -144,9 +148,18 @@ class WritingService:
         ):
             self.agent_dispatcher.register(operation, self._dispatch_workflow_operation)
 
+    @workspace_operation
     def start(self):
         """Start recoverable background Agent work for the server process."""
         started = self.agent_dispatcher.start()
+        self._reconcile_dispatcher_state()
+        return {
+            **started,
+            "commit_projection_reconciliation": dict(self._commit_projection_reconciliation),
+            "background_knowledge_reconciliation": dict(self._background_knowledge_reconciliation),
+        }
+
+    def _reconcile_dispatcher_state(self):
         with self._data_maintenance_lock:
             if not self._commit_projection_reconciled:
                 self._commit_projection_reconciliation = self._reconcile_commit_projections()
@@ -157,16 +170,12 @@ class WritingService:
             or self._background_knowledge_reconciliation["queued_count"]
         ):
             self.agent_dispatcher.notify()
-        return {
-            **started,
-            "commit_projection_reconciliation": dict(self._commit_projection_reconciliation),
-            "background_knowledge_reconciliation": dict(self._background_knowledge_reconciliation),
-        }
 
     def close(self, timeout: float = 5.0):
         """Stop claiming new Agent work and wait a bounded time for the worker."""
         return self.agent_dispatcher.close(timeout=timeout)
 
+    @workspace_operation
     def health(self):
         return {
             "ok": True,
@@ -219,6 +228,7 @@ class WritingService:
             )
         return pinned, identity
 
+    @workspace_operation
     def capabilities(self):
         return {
             "api_version": "1.0",
@@ -278,6 +288,7 @@ class WritingService:
         digest = str(self.ba_skill.descriptor().get("source_digest") or "")
         return digest if digest.startswith("sha256:") else f"sha256:{digest}"
 
+    @workspace_operation
     def get_harness_status(
         self,
         work_id: str,
@@ -294,6 +305,7 @@ class WritingService:
             thread_id=thread_id,
         )
 
+    @workspace_operation
     def diagnose_writing_harness(self, work_id: str) -> dict:
         return self.writing_harness.doctor(
             work_id,
@@ -304,15 +316,19 @@ class WritingService:
             },
         )
 
+    @workspace_operation
     def ensure_commit_projection(self, work_id: str, revision_id: str) -> dict:
         return self.commit_projection.ensure(work_id, revision_id)
 
+    @workspace_operation
     def get_commit_projection(self, work_id: str, revision_id: str) -> dict:
         return self.commit_projection.get(work_id, revision_id)
 
+    @workspace_operation
     def get_current_projection(self, work_id: str) -> dict:
         return self.current_projection.get(work_id)
 
+    @workspace_operation
     def search_commit_projections(
         self,
         work_id: str,
@@ -328,6 +344,7 @@ class WritingService:
             limit=limit,
         )
 
+    @workspace_operation
     def run_commit_projection(
         self,
         work_id: str,
@@ -342,6 +359,7 @@ class WritingService:
             postprocess=self._postprocess_commit_projection,
         )
 
+    @workspace_operation
     def retry_commit_projection(self, work_id: str, revision_id: str) -> dict:
         return self.commit_projection.retry(
             work_id,
@@ -350,6 +368,7 @@ class WritingService:
             postprocess=self._postprocess_commit_projection,
         )
 
+    @workspace_operation
     def skip_commit_projection(
         self,
         work_id: str,
@@ -564,6 +583,7 @@ class WritingService:
             "errors": errors,
         }
 
+    @workspace_operation
     def agent_tool_catalog(self):
         return {
             "schema_version": "agent-tools/1.0",
@@ -584,6 +604,7 @@ class WritingService:
             "write_boundary": "formal_artifacts_require_proposal_acceptance",
         }
 
+    @workspace_operation
     def agent_usage(self, work_id: str):
         with self.repo.connect() as connection:
             if not connection.execute("SELECT 1 FROM works WHERE id=?", (work_id,)).fetchone():
@@ -629,6 +650,7 @@ class WritingService:
             "currency": "USD", "cost_is_estimate": True,
         }
 
+    @workspace_operation
     def get_agent_run(self, work_id: str, run_id: str):
         with self.repo.connect() as connection:
             row = connection.execute(
@@ -647,6 +669,7 @@ class WritingService:
             run["timeline"] = self._agent_run_timeline(connection, run, run["tool_calls"])
         return run
 
+    @workspace_operation
     def get_agent_presentation(self, work_id: str, thread_id: str, *, limit: int = 100, cursor: str | None = None):
         """Return a read-only, bounded Agent workbench projection."""
         for _ in range(2):
@@ -795,6 +818,7 @@ class WritingService:
             "events": ordered,
         }
 
+    @workspace_operation
     def get_proposal_impact(self, work_id: str, proposal_id: str):
         with self.repo.connect() as connection:
             proposal = connection.execute(
@@ -861,6 +885,7 @@ class WritingService:
                 },
             }
 
+    @workspace_operation
     def cancel_agent_run(self, work_id: str, run_id: str):
         timestamp = now()
         failure = {
@@ -1251,6 +1276,7 @@ class WritingService:
             return self.discover_scene_knowledge(work_id, scope_id, dispatched_request)
         raise DomainError("agent_operation_not_registered", "Agent 工作流未注册。", status=409)
 
+    @workspace_operation
     def enqueue_agent_operation(self, work_id: str, payload: dict):
         operation = str(payload.get("operation") or "").strip()
         allowed = {
@@ -1287,6 +1313,7 @@ class WritingService:
         self.agent_dispatcher.notify()
         return self._public_agent_job(work_id, queued)
 
+    @workspace_operation
     def get_agent_job(self, work_id: str, job_id: str):
         with self.repo.connect() as connection:
             row = connection.execute(
@@ -1296,6 +1323,7 @@ class WritingService:
             raise NotFound("agent_job", job_id)
         return self._public_agent_job(work_id, self.repo._agent_work_row(row))
 
+    @workspace_operation
     def cancel_agent_job(self, work_id: str, job_id: str):
         current = self.get_agent_job(work_id, job_id)
         if current.get("agent_run_id"):
@@ -1321,6 +1349,7 @@ class WritingService:
             "updated_at": job.get("updated_at"),
         }
 
+    @workspace_operation
     def enqueue_conversation_message(self, work_id: str, thread_id: str, payload: dict):
         """Persist the request, then return once its fixed AgentRun exists."""
         with self.repo.connect() as connection:
@@ -1394,6 +1423,7 @@ class WritingService:
                 return dict(row)
         return None
 
+    @workspace_operation
     def redirect_agent_run(self, work_id: str, run_id: str, payload: dict):
         text = str(payload.get("text") or "").strip()
         idempotency_key = str(payload.get("idempotency_key") or "").strip()
@@ -1472,6 +1502,7 @@ class WritingService:
             status=409, details={"agent_run_id": run_id},
         )
 
+    @workspace_operation
     def retry_agent_run(self, work_id: str, run_id: str, payload: dict):
         idempotency_key = str(payload.get("idempotency_key") or "").strip()
         if not idempotency_key:
@@ -1929,6 +1960,7 @@ class WritingService:
         result["retried_from_agent_run_id"] = run["id"]
         return result
 
+    @workspace_operation
     def search_official_references(self, query: str, limit: int = 12):
         bounded = max(1, min(int(limit or 12), 30))
         return {
@@ -1937,27 +1969,32 @@ class WritingService:
             "items": self.official_references.search(query, bounded),
         }
 
+    @workspace_operation
     def resource_catalog_public(self) -> dict:
         return self.resource_catalog.descriptor()
 
+    @workspace_operation
     def search_resource_catalog(self, kind: str, query: str = "", limit: int = 24) -> dict:
         try:
             return self.resource_catalog.search(kind, query, limit)
         except ValueError as exc:
             raise DomainError("resource_kind_unsupported", "暂不支持这种资源类型。", status=400) from exc
 
+    @workspace_operation
     def lookup_resource_catalog(self, kind: str, keys: list[str]) -> dict:
         try:
             return self.resource_catalog.lookup(kind, keys)
         except ValueError as exc:
             raise DomainError("resource_kind_unsupported", "暂不支持这种资源类型。", status=400) from exc
 
+    @workspace_operation
     def resource_catalog_facets(self, kind: str) -> dict:
         try:
             return self.resource_catalog.facets(kind)
         except ValueError as exc:
             raise DomainError("resource_kind_unsupported", "暂不支持这种资源类型。", status=400) from exc
 
+    @workspace_operation
     def import_resource_catalog(self, payload: dict) -> dict:
         source_path = Path(str(payload.get("source_path") or "").strip()).expanduser()
         if not source_path.is_file():
@@ -1985,6 +2022,7 @@ class WritingService:
         except (OSError, ValueError, sqlite3.DatabaseError) as exc:
             raise DomainError("resource_catalog_import_failed", "资源数据库导入失败，1.0 数据库没有改变。", status=422) from exc
 
+    @workspace_operation
     def save_resource_override(self, payload: dict) -> dict:
         try:
             return self.resource_catalog.save_override(
@@ -1998,12 +2036,14 @@ class WritingService:
             status = 409 if code == "resource_override_conflict" else 422
             raise DomainError(code, "资源修正未保存；基础资源库没有改变。", status=status) from exc
 
+    @workspace_operation
     def preview_aap_import(self, payload: dict) -> dict:
         try:
             return parse_aap_payload(payload)
         except ValueError as exc:
             raise DomainError("aap_preview_failed", str(exc), status=422) from exc
 
+    @workspace_operation
     def stage_aap_import(self, payload: dict) -> dict:
         if payload.get("confirm") is not True:
             raise DomainError("aap_confirmation_required", "预览通过后，仍需明确确认才能暂存导入草稿。", status=409)
@@ -2026,12 +2066,14 @@ class WritingService:
         self._record_staged_import(import_id=import_id, kind="aap", preview=preview)
         return {"schema_version": "story-import/1.0", "import_id": import_id, "filename": preview["filename"], "status": "staged_draft", "preview": preview, "write_boundary": "staged_import_only_no_formal_revision"}
 
+    @workspace_operation
     def preview_story_import(self, payload: dict) -> dict:
         try:
             return parse_story_payload(payload)
         except ValueError as exc:
             raise DomainError("story_import_preview_failed", str(exc), status=422) from exc
 
+    @workspace_operation
     def stage_story_import(self, payload: dict) -> dict:
         if payload.get("confirm") is not True:
             raise DomainError(
@@ -2288,6 +2330,7 @@ class WritingService:
         result["work"] = self.get_work(work_id)
         return result
 
+    @workspace_operation
     def adopt_aap_import(self, payload: dict) -> dict:
         if payload.get("confirm") is not True:
             raise DomainError("aap_confirmation_required", "请先确认导入预览，再建立正式作品。", status=409)
@@ -2296,6 +2339,7 @@ class WritingService:
             raise DomainError("import_id_invalid", "导入编号无效。", status=422)
         return self._adopt_staged_import(import_id=import_id, source_kind="aap", title=payload.get("title"))
 
+    @workspace_operation
     def adopt_story_import(self, payload: dict) -> dict:
         if payload.get("confirm") is not True:
             raise DomainError("story_import_confirmation_required", "请先确认导入预览，再建立正式作品。", status=409)
@@ -2304,6 +2348,7 @@ class WritingService:
             raise DomainError("import_id_invalid", "导入编号无效。", status=422)
         return self._adopt_staged_import(import_id=import_id, source_kind="story", title=payload.get("title"))
 
+    @workspace_operation
     def list_works(self):
         with self.repo.connect() as connection:
             return self.repo.rows(connection.execute("SELECT * FROM works ORDER BY updated_at DESC"))
@@ -2559,6 +2604,7 @@ class WritingService:
             scene = connection.execute("SELECT title FROM scenes WHERE id=?", (scene_id,)).fetchone()
             return {"chapter_id": chapter["id"], "chapter_title": chapter["title"], "scene_id": scene_id, "scene_title": scene["title"], "work_version": int(work["version"]) + 1}
 
+    @workspace_operation
     def plan_intent(self, payload: dict) -> dict:
         text = str(payload.get("message") or payload.get("text") or "").strip()
         if not text:
@@ -2755,6 +2801,7 @@ class WritingService:
         projected["result"] = result
         return projected
 
+    @workspace_operation
     def confirm_intent(self, plan_id: str, payload: dict) -> dict:
         if payload.get("confirmed") is not True:
             raise DomainError("confirmation_required", "需要明确确认后才能继续这条高风险请求。", status=409)
@@ -2773,6 +2820,7 @@ class WritingService:
             connection.execute("UPDATE intent_plans SET status='running',result_json=?,updated_at=? WHERE id=?", (canonical_json(result), now(), plan_id))
         return self.get_intent_plan(plan_id)
 
+    @workspace_operation
     def retry_intent(self, plan_id: str, payload: dict) -> dict:
         """Resume a blocked scene Intent from its original message and stable target."""
         expected = int(payload.get("expected_version", -1))
@@ -2851,6 +2899,7 @@ class WritingService:
             )
         return self.get_intent_plan(plan_id)
 
+    @workspace_operation
     def get_intent_plan(self, plan_id: str) -> dict:
         with self.repo.connect() as connection:
             row = connection.execute("SELECT * FROM intent_plans WHERE id=?", (plan_id,)).fetchone()
@@ -2860,6 +2909,7 @@ class WritingService:
         work = self.get_work(plan["work_id"])
         return {**self._project_intent_plan_execution(plan, work), "work": work}
 
+    @workspace_operation
     def submit_feedback(self, payload: dict):
         category = str(payload.get("category", "usability")).strip()
         if category not in {"bug", "usability", "suggestion", "runtime_error", "generation_quality"}:
@@ -2959,6 +3009,7 @@ class WritingService:
                 )
             return {"status": "pending", "error": message}
 
+    @workspace_operation
     def sync_pending_feedback(self, limit: int = 20) -> dict:
         if not self.feedback_remote_url:
             return {"status": "disabled", "synced": 0, "pending": 0}
@@ -3494,6 +3545,7 @@ class WritingService:
             return scope
         raise DomainError("invalid_thread_scope", "当前对话作用域无效。", status=409)
 
+    @workspace_operation
     def create_work(self, payload: dict):
         idea = str(payload.get("idea", "")).strip()
         title = str(payload.get("title", "")).strip() or idea[:24]
@@ -3567,6 +3619,7 @@ class WritingService:
             return result["work"]
         return self.get_work(work_id)
 
+    @workspace_operation
     def get_work(self, work_id: str):
         with self.repo.connect() as connection:
             work = self.repo.row(connection.execute("SELECT * FROM works WHERE id=?", (work_id,)).fetchone())
@@ -3735,6 +3788,7 @@ class WritingService:
             work["harness"] = self.get_harness_status(work_id)
             return work
 
+    @workspace_operation
     def get_user_work_status(self, work_id: str) -> dict:
         """Return the small, human-facing status projection for a work.
 
@@ -4100,6 +4154,7 @@ class WritingService:
             )
         return content
 
+    @workspace_operation
     def compare_artifact_revisions(
         self,
         work_id: str,
@@ -4181,6 +4236,7 @@ class WritingService:
         }
         return {**core, "comparison_digest": sha256_text(canonical_json(core))}
 
+    @workspace_operation
     def list_memories(self, work_id: str):
         with self.repo.connect() as connection:
             if not connection.execute("SELECT 1 FROM works WHERE id=?", (work_id,)).fetchone():
@@ -4195,6 +4251,7 @@ class WritingService:
             raise RevisionConflict(expected_version, row["version"])
         return row["version"]
 
+    @workspace_operation
     def list_archived_conversations(self, query: str = "") -> list[dict]:
         normalized_query = str(query or "").strip()[:120]
         with self.repo.connect() as connection:
@@ -4346,6 +4403,7 @@ class WritingService:
                 self._cancel_agent_for_authorization_change(run_id, exc)
             raise
 
+    @workspace_operation
     def create_conversation_thread(self, work_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
         scope_type = str(payload.get("scope_type", "work")).strip() or "work"
@@ -4392,6 +4450,7 @@ class WritingService:
             self._bump_work(connection, work_id, version)
         return {"thread_id": thread_id, "work": self.get_work(work_id)}
 
+    @workspace_operation
     def update_conversation_thread(self, work_id: str, thread_id: str, payload: dict):
         expected = int(payload.get("expected_thread_version", -1))
         with self.repo.transaction() as connection:
@@ -4496,6 +4555,7 @@ class WritingService:
             result["context_policy"] = "task_relevant_retrieval"
         return result
 
+    @workspace_operation
     def create_conversation_attachment(self, work_id: str, thread_id: str, payload: dict):
         expected = int(payload.get("expected_thread_version", -1))
         filename = Path(str(payload.get("filename", "attachment"))).name[:120] or "attachment"
@@ -4553,6 +4613,7 @@ class WritingService:
             )
         return {"attachment_id": attachment_id, "work": self.get_work(work_id)}
 
+    @workspace_operation
     def get_conversation_attachment(self, work_id: str, attachment_id: str):
         with self.repo.connect() as connection:
             row = connection.execute(
@@ -4566,6 +4627,7 @@ class WritingService:
             raise NotFound("conversation_attachment", attachment_id)
         return row["media_type"], path.read_bytes()
 
+    @workspace_operation
     def post_conversation_message(self, work_id: str, thread_id: str, payload: dict):
         expected = int(payload.get("expected_thread_version", -1))
         text = str(payload.get("text", "")).strip()
@@ -5059,6 +5121,7 @@ class WritingService:
             "work": self.get_work(work_id),
         }
 
+    @workspace_operation
     def generate_scene_proposal_from_conversation(self, work_id: str, thread_id: str, payload: dict):
         """Turn one persisted scene discussion into a reviewable scene Proposal."""
         expected_version = int(payload.get("expected_version", -1))
@@ -5596,6 +5659,7 @@ class WritingService:
             **({"custom_text": custom_text} if custom_text else {}),
         }
 
+    @workspace_operation
     def update_conversation_settings(self, work_id: str, thread_id: str, payload: dict):
         expected = int(payload.get("expected_thread_version", -1))
         permission_mode = str(payload.get("permission_mode", "review")).strip()
@@ -5913,6 +5977,7 @@ class WritingService:
             )
         return refs
 
+    @workspace_operation
     def propose_conversation_knowledge(self, work_id: str, thread_id: str, payload: dict):
         """Turn an Agent discussion draft into an auditable knowledge Proposal."""
         _fallback_provider, proposal_provider = self._capture_provider()
@@ -6565,6 +6630,7 @@ class WritingService:
                 )
         return superseded_ids
 
+    @workspace_operation
     def organize_conversation_proposal(self, work_id: str, thread_id: str, payload: dict):
         provider = self.provider
         with self.repo.connect() as connection:
@@ -7774,6 +7840,7 @@ class WritingService:
             "revision_id": revision["id"],
         }
 
+    @workspace_operation
     def save_brief(self, work_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
         intent_only = bool(payload.get("intent_only", False))
@@ -7804,6 +7871,7 @@ class WritingService:
             self._bump_work(connection, work_id, version)
         return {"revision_id": revision_id, "work": self.get_work(work_id)}
 
+    @workspace_operation
     def generate_blueprint(self, work_id: str, payload: dict):
         provider = self.provider
         expected = int(payload.get("expected_version", -1))
@@ -7835,6 +7903,7 @@ class WritingService:
             self._bump_work(connection, work_id, version)
         return {"revision_id": revision_id, "simulation": provider.is_simulation, "work": self.get_work(work_id)}
 
+    @workspace_operation
     def confirm_blueprint(self, work_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
         mode = str(payload.get("mode", "")).strip()
@@ -7924,6 +7993,7 @@ class WritingService:
             "work": self.get_work(work_id),
         }
 
+    @workspace_operation
     def save_work_canon(self, work_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
         canon = self._normalize_work_canon_payload(payload)
@@ -8067,6 +8137,7 @@ class WritingService:
         artifact = self._artifact(connection, work_id, "character_card", "character", card_id)
         return self._add_revision(connection, artifact, card, created_by, provenance)
 
+    @workspace_operation
     def save_character_card(self, work_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
         card = self._normalize_character_card_payload(payload)
@@ -8086,6 +8157,7 @@ class WritingService:
         self._schedule_commit_projection(work_id, revision_id)
         return {"card_id": card_id, "revision_id": revision_id, "work": self.get_work(work_id)}
 
+    @workspace_operation
     def validate_character_card_import(self, work_id: str, payload: dict) -> dict:
         # Resolve the work up front so validation never appears to succeed for a stale target.
         with self.repo.connect() as connection:
@@ -8112,6 +8184,7 @@ class WritingService:
                 matches.append({"card_id": row["scope_id"], "name": content.get("name", ""), "revision_id": revision["id"]})
         return matches
 
+    @workspace_operation
     def import_character_card(self, work_id: str, payload: dict) -> dict:
         expected = int(payload.get("expected_version", -1))
         parsed = parse_import_payload(payload)
@@ -8174,6 +8247,7 @@ class WritingService:
             "work": self.get_work(work_id),
         }
 
+    @workspace_operation
     def archive_character_card(self, work_id: str, card_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
         with self.repo.transaction() as connection:
@@ -8196,6 +8270,7 @@ class WritingService:
         self._schedule_commit_projection(work_id, revision_id)
         return {"card_id": card_id, "revision_id": revision_id, "work": self.get_work(work_id)}
 
+    @workspace_operation
     def restore_character_card(self, work_id: str, card_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
         with self.repo.transaction() as connection:
@@ -8407,6 +8482,7 @@ class WritingService:
             bible["import_metadata"] = dict(payload["import_metadata"])
         return bible
 
+    @workspace_operation
     def save_world_bible(self, work_id: str, payload: dict):
         """Save world rules and timeline as a distinct versioned artifact, never as chat text."""
         expected = int(payload.get("expected_version", -1))
@@ -8448,6 +8524,7 @@ class WritingService:
                 matches.append({"incoming": imported.get("name", ""), "card_id": candidates[0].get("id")})
         return matches
 
+    @workspace_operation
     def validate_world_card_import(self, work_id: str, payload: dict) -> dict:
         with self.repo.connect() as connection:
             if not connection.execute("SELECT 1 FROM works WHERE id=?", (work_id,)).fetchone():
@@ -8457,6 +8534,7 @@ class WritingService:
         preview["can_import"] = parsed.report["status"] == "PASS"
         return preview
 
+    @workspace_operation
     def import_world_card(self, work_id: str, payload: dict) -> dict:
         expected = int(payload.get("expected_version", -1))
         parsed = parse_world_import_payload(payload)
@@ -8522,6 +8600,7 @@ class WritingService:
             "work": saved["work"],
         }
 
+    @workspace_operation
     def apply_ba_world_starter(self, work_id: str, payload: dict):
         """Create a work-owned, editable BA setting starter at an explicit user action.
 
@@ -8584,6 +8663,7 @@ class WritingService:
             "work": self.get_work(work_id),
         }
 
+    @workspace_operation
     def create_reference_file(self, work_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
         title = str(payload.get("title", "")).strip()
@@ -8600,6 +8680,7 @@ class WritingService:
             self._bump_work(connection, work_id, version)
         return {"reference_file_id": ref_id, "work": self.get_work(work_id)}
 
+    @workspace_operation
     def import_official_reference(self, work_id: str, payload: dict):
         """Copy one selected corpus excerpt into the work-owned evidence library."""
         expected = int(payload.get("expected_version", -1))
@@ -9150,6 +9231,7 @@ class WritingService:
             "max_same_speaker_turns": max_speaker_streak,
         }
 
+    @workspace_operation
     def review_scene(self, work_id: str, scene_id: str, payload: dict):
         provider = self.provider
         expected = int(payload.get("expected_version", -1))
@@ -9386,6 +9468,7 @@ class WritingService:
             self._bump_work(connection, work_id, version)
         return {"gate_id": gate_id, "agent_run_id": run_id, "simulation": provider.is_simulation, "metrics": review_metrics, "findings": created, "work": self.get_work(work_id)}
 
+    @workspace_operation
     def review_release(self, work_id: str, payload: dict):
         """Run the read-only semantic review, then evaluate the immutable release gate."""
         provider = self.provider
@@ -9393,6 +9476,7 @@ class WritingService:
             work_id, payload, "release.review", provider=provider
         )
 
+    @workspace_operation
     def review_continuity(self, work_id: str, payload: dict):
         """Review ordered scene revisions without mutating manuscript or formal knowledge."""
         provider = self.provider
@@ -9400,6 +9484,7 @@ class WritingService:
             work_id, payload, "continuity.review", provider=provider
         )
 
+    @workspace_operation
     def resolve_review_finding(self, work_id: str, finding_id: str, payload: dict):
         """Record a human decision for a finding; never silently removes audit evidence."""
         expected = int(payload.get("expected_version", -1))
@@ -9425,6 +9510,7 @@ class WritingService:
             self._bump_work(connection, work_id, version)
         return {"finding_id": finding_id, "work": self.get_work(work_id)}
 
+    @workspace_operation
     def create_chapter(self, work_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
         title = str(payload.get("title", "")).strip() or "第一章"
@@ -9478,6 +9564,7 @@ class WritingService:
             self._bump_work(connection, work_id, version)
         return {"chapter_id": chapter_id, "work": self.get_work(work_id)}
 
+    @workspace_operation
     def set_writing_target(self, work_id: str, payload: dict):
         """Persist the chapter the Writing surface is currently responsible for."""
         expected = int(payload.get("expected_version", -1))
@@ -9517,6 +9604,7 @@ class WritingService:
             self._bump_work(connection, work_id, version)
         return {"revision_id": revision_id, "work": self.get_work(work_id)}
 
+    @workspace_operation
     def create_volume(self, work_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
         title = str(payload.get("title", "")).strip() or "未命名卷"
@@ -9666,6 +9754,7 @@ class WritingService:
             )
         return normalized
 
+    @workspace_operation
     def set_scene_asset_references(self, work_id: str, scene_id: str, payload: dict):
         """Replace the user-selected asset references for one Scene.
 
@@ -9749,6 +9838,7 @@ class WritingService:
             "work": self.get_work(work_id),
         }
 
+    @workspace_operation
     def suggest_scene_assets(self, work_id: str, scene_id: str) -> dict:
         """Return read-only, local-rule suggestions for the current scene.
 
@@ -9828,6 +9918,7 @@ class WritingService:
                 "suggestions": suggestions,
             }
 
+    @workspace_operation
     def create_scene(self, work_id: str, chapter_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
         title = str(payload.get("title", "")).strip() or "未命名场景"
@@ -9889,6 +9980,7 @@ class WritingService:
             self._bump_work(connection, work_id, version)
         return {"scene_id": scene_id, "work": self.get_work(work_id)}
 
+    @workspace_operation
     def reorder_structure(self, work_id: str, payload: dict):
         """Persist chapter order and scene placement without changing scene identity.
 
@@ -10102,6 +10194,7 @@ class WritingService:
             raise DomainError("provider_output_invalid", "模型没有返回可用正文，未创建 Proposal。", status=502)
         return "\n".join(normalized) + "\n"
 
+    @workspace_operation
     def update_scene_contract(self, work_id: str, scene_id: str, payload: dict):
         """Revise one Scene's generative boundary without editing manuscript text."""
         expected = int(payload.get("expected_version", -1))
@@ -10203,6 +10296,7 @@ class WritingService:
             result.append(item_id)
         return result
 
+    @workspace_operation
     def configure_scene_context(self, work_id: str, scene_id: str, payload: dict):
         """Persist the exact work-owned inputs a scene is allowed to assemble.
 
@@ -10551,6 +10645,7 @@ class WritingService:
             "segments": unique,
         }
 
+    @workspace_operation
     def assemble_context(self, work_id: str, scene_id: str):
         with self.repo.connect() as connection:
             scene = connection.execute("SELECT * FROM scenes WHERE id=? AND work_id=?", (scene_id, work_id)).fetchone()
@@ -10891,6 +10986,7 @@ class WritingService:
                 (canonical_json(failure), timestamp, agent_run_id),
             )
 
+    @workspace_operation
     def generate_scene_candidate(self, work_id: str, scene_id: str, payload: dict):
         """Compatibility scene candidate flow backed by a durable AgentRun."""
         expected = int(payload.get("expected_version", -1))
@@ -11110,6 +11206,7 @@ class WritingService:
             "work": self.get_work(work_id),
         }
 
+    @workspace_operation
     def run_scene_agent(self, work_id: str, scene_id: str, payload: dict):
         """Run one constrained ba-writing Agent turn and return a Proposal, never a direct edit."""
         expected = int(payload.get("expected_version", -1))
@@ -11424,6 +11521,7 @@ class WritingService:
             raise DomainError("stale_text_selection", "选中的正文已不是当前修订，请重新选择后再试。", status=409)
         return {"quote": quote, "start": start, "end": end}
 
+    @workspace_operation
     def run_scene_rewrite_agent(self, work_id: str, scene_id: str, payload: dict):
         """Create a full-scene rewrite Proposal from a pinned accepted revision.
 
@@ -11749,6 +11847,7 @@ class WritingService:
         sweep_input["digest"] = sha256_text(canonical_json(sweep_input))
         return sweep_input
 
+    @workspace_operation
     def sweep_chapter_memory(self, work_id: str, chapter_id: str, payload: dict):
         provider = self.provider
         return self._run_chapter_memory_sweep(
@@ -11970,6 +12069,7 @@ class WritingService:
             "work": self.get_work(work_id),
         }
 
+    @workspace_operation
     def discover_scene_knowledge(self, work_id: str, scene_id: str, payload: dict):
         """Discover review-only WorkCanon suggestions without opening a user task."""
 
@@ -12169,6 +12269,7 @@ class WritingService:
             "simulation": provider.is_simulation,
         }
 
+    @workspace_operation
     def generate_memory_proposal(self, work_id: str, scene_id: str, payload: dict):
         provider = self.provider
         expected = int(payload.get("expected_version", -1))
@@ -12474,6 +12575,7 @@ class WritingService:
             "work": self.get_work(work_id),
         }
 
+    @workspace_operation
     def accept_proposal(self, work_id: str, proposal_id: str, payload: dict):
         try:
             result = self._accept_proposal(work_id, proposal_id, payload)
@@ -13413,6 +13515,7 @@ class WritingService:
             self._bump_work(connection, work_id, version)
         return {"revision_id": revision_id, "work": self.get_work(work_id)}
 
+    @workspace_operation
     def save_scene_manuscript(self, work_id: str, scene_id: str, payload: dict):
         """Create a manuscript Revision from user-edited stable SceneBlocks."""
         expected = int(payload.get("expected_version", -1))
@@ -13534,12 +13637,15 @@ class WritingService:
             self._bump_work(connection, work_id, version)
         return {"memory_id": memory_id, "lifecycle_status": lifecycle, "work": self.get_work(work_id)}
 
+    @workspace_operation
     def archive_memory(self, work_id: str, memory_id: str, payload: dict):
         return self._set_memory_lifecycle(work_id, memory_id, payload, "archived")
 
+    @workspace_operation
     def restore_memory(self, work_id: str, memory_id: str, payload: dict):
         return self._set_memory_lifecycle(work_id, memory_id, payload, "active")
 
+    @workspace_operation
     def skip_scene_memory_maintenance(self, work_id: str, scene_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
         note = str(payload.get("note") or "本场没有需要沉淀的长期记忆。").strip()
@@ -13596,6 +13702,7 @@ class WritingService:
             "work": self.get_work(work_id),
         }
 
+    @workspace_operation
     def reject_proposal(self, work_id: str, proposal_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
         with self.repo.transaction() as connection:
@@ -13622,6 +13729,7 @@ class WritingService:
             self._bump_work(connection, work_id, version)
         return {"work": self.get_work(work_id)}
 
+    @workspace_operation
     def freeze_release(self, work_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
         with self.repo.transaction() as connection:
@@ -13787,10 +13895,12 @@ class WritingService:
         verified = verify_script_release(self.repo, release)
         return verified["manifest"], verified["text"]
 
+    @workspace_operation
     def handoff_release(self, release_id: str):
         with self._release_handoff_lock:
             return self._handoff_release_locked(release_id)
 
+    @workspace_operation
     def production_asset_capabilities(self) -> dict:
         """Probe the production service without claiming that asset copies exist."""
         request = urllib.request.Request(self.production_url + "/api/v1/capabilities", method="GET")
@@ -13838,6 +13948,7 @@ class WritingService:
             "upstream_schema_version": data.get("schema_version") if isinstance(data, dict) else None,
         }
 
+    @workspace_operation
     def production_asset_status(self, release_id: str) -> dict:
         with self.repo.connect() as connection:
             release = self.repo.row(connection.execute("SELECT * FROM script_releases WHERE id=?", (release_id,)).fetchone())
@@ -13881,6 +13992,7 @@ class WritingService:
             "capability": capability,
         }
 
+    @workspace_operation
     def reconcile_production_asset_copies(self, release_id: str, usage: dict | None = None) -> dict:
         """Persist only an explicit, identity-matched ProductionRun asset receipt."""
         with self.repo.connect() as connection:
@@ -14065,6 +14177,7 @@ class WritingService:
                 return item["run_id"]
         return None
 
+    @workspace_operation
     def get_release(self, release_id: str):
         with self.repo.connect() as connection:
             release = self.repo.row(connection.execute("SELECT * FROM script_releases WHERE id=?", (release_id,)).fetchone())
@@ -14073,15 +14186,18 @@ class WritingService:
             release["manifest"], release["text"] = self._read_release_material(release)
             return release
 
+    @workspace_operation
     def writing_model_settings_public(self) -> dict:
         return self.model_settings.public()
 
+    @workspace_operation
     def configure_writing_model(self, payload: dict) -> dict:
         with self._provider_lock:
             result = self.model_settings.save(payload)
             self.provider = make_writing_provider(self.model_settings, self.ba_prompt_assembler)
         return result
 
+    @workspace_operation
     def activate_writing_model(self, payload: dict) -> dict:
         """Test and activate one exact candidate without exposing a half-applied state."""
         with self._provider_lock:
@@ -14089,18 +14205,23 @@ class WritingService:
             self.provider = make_writing_provider(self.model_settings, self.ba_prompt_assembler)
         return {**result, "runtime": self.provider.descriptor()}
 
+    @workspace_operation
     def fetch_writing_models(self, payload: dict | None = None) -> list[str]:
         return self.model_settings.fetch_models(payload)
 
+    @workspace_operation
     def test_writing_model(self, payload: dict | None = None) -> dict:
         return self.model_settings.test_connection(payload)
 
+    @workspace_operation
     def user_preferences(self) -> dict:
         return {"ok": True, "preferences": self.preferences.load()}
 
+    @workspace_operation
     def save_user_preferences(self, payload: dict) -> dict:
         return {"ok": True, "preferences": self.preferences.save(payload)}
 
+    @workspace_operation
     def system_diagnostics(self) -> dict:
         provider_runtime = self.provider.descriptor()
         real_provider_ready = bool(provider_runtime.get("can_call_model")) and not bool(
@@ -14149,10 +14270,12 @@ class WritingService:
             },
         }
 
+    @workspace_operation
     def export_writing_backup(self) -> tuple[str, bytes, dict]:
         with self._data_maintenance_lock:
             return WritingBackupManager(self.repo.data_dir).export()
 
+    @workspace_operation
     def inspect_writing_backup(self, payload: dict) -> dict:
         _, summary = WritingBackupManager(self.repo.data_dir).inspect_payload(payload)
         return summary
@@ -14164,25 +14287,37 @@ class WritingService:
                 "恢复会替换当前全部作品，必须经过明确确认。",
                 status=409,
             )
-        with self._agent_threads_lock:
-            active_runs = [run_id for run_id, thread in self._agent_threads.items() if thread.is_alive()]
-        if active_runs:
+        with self.data_access.maintenance():
+            return self._restore_writing_backup(payload)
+
+    def _restore_writing_backup(self, payload):
+        # Admission is already exclusive, so a ready job cannot be claimed
+        # between this check and the restore. Do not silently discard queues.
+        with self.repo.connect() as connection:
+            pending = connection.execute(
+                "SELECT id FROM agent_dispatch_jobs WHERE status IN ('ready', 'running') LIMIT 20"
+            ).fetchall()
+        if pending:
             raise DomainError(
                 "backup_restore_busy",
-                "仍有 Agent 任务正在运行，请等待任务结束后再恢复备份。",
+                "仍有待执行或运行中的任务，请先完成或取消任务后再恢复。",
                 status=409,
-                details={"active_agent_run_ids": active_runs},
+                details={"pending_job_ids": [row["id"] for row in pending]},
             )
         manager = WritingBackupManager(self.repo.data_dir)
         content, summary = manager.inspect_payload(payload)
         expected_hash = str(payload.get("expected_backup_hash") or "")
         if expected_hash != summary["backup_hash"]:
             raise DomainError("backup_changed", "备份内容与刚才预检的文件不一致，请重新选择。", status=409)
-        with self._data_maintenance_lock:
+        with self.data_access.restoring():
             result = manager.restore(content, expected_hash)
-            # Connections are short lived, so swapping the database is safe once
-            # active Agent threads have drained. Recreate repository-owned runtime
-            # material after the replacement.
-            self.repo = Repository(self.repo.data_dir)
+            # Preserve repository identity: catalogs, projections and the dispatcher
+            # must not retain a different repository after restoration.
+            self.repo.initialize_after_restore()
             self.ba_skill_pack = self.ba_skill.materialize(self.repo)
-        return result
+            self._commit_projection_reconciled = False
+            if self.agent_dispatcher.descriptor()["running"]:
+                # A concurrent close may already have stopped this worker.
+                # Reconcile/notify only; restore must never restart it.
+                self._reconcile_dispatcher_state()
+            return result

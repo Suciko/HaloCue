@@ -6,6 +6,7 @@ import difflib
 import json
 from collections import defaultdict, deque
 
+from .workspace_access import workspace_operation
 from .errors import DomainError, NotFound
 from .repository import canonical_json, new_id, now, sha256_text
 from .story_import import parse_story_payload
@@ -34,7 +35,9 @@ def source_windows(chapters: list[dict], max_characters: int = 10000) -> list[di
 class SourceCatalog:
     def __init__(self, repo):
         self.repo = repo
+        self.data_access = repo.data_access
 
+    @workspace_operation
     def get(self, work_id: str, version_id: str | None = None, *, connection=None):
         if connection is None:
             with self.repo.connect() as current:
@@ -64,6 +67,7 @@ class SourceCatalog:
         content = "\n".join(p["text"] for p in paragraphs)
         return {"id": old["id"] if old else new_id("source-chapter"), "title": parsed["title"], "paragraphs": paragraphs, "content_digest": sha256_text(content), "characters": len(content)}
 
+    @workspace_operation
     def prepare(self, work_id: str, payload: dict):
         previous = self.get(work_id)
         mode = str(payload.get("mode") or "append")
@@ -111,10 +115,12 @@ class SourceCatalog:
         preview_digest = sha256_text(canonical_json({"base": expected, "source": parsed["source_digest"], "mode": mode, "selected": selected, "completion": completion, "provided_scope": document["provided_scope"]}))
         return {"duplicate": False, "base_version_id": expected, "document": document, "changes": changes, "preview_digest": preview_digest, "mode": mode, "normalized_text": parsed["normalized_text"]}
 
+    @workspace_operation
     def preview(self, work_id: str, payload: dict):
         prepared = self.prepare(work_id, payload)
         return {k: v for k, v in prepared.items() if k != "normalized_text"}
 
+    @workspace_operation
     def apply(self, work_id: str, payload: dict):
         prepared = self.prepare(work_id, payload)
         if payload.get("preview_digest") != prepared["preview_digest"]:

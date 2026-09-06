@@ -144,6 +144,14 @@ def test_full_writing_backup_restores_database_and_content_files(tmp_path):
         }],
     })
 
+    # A live restore must not discard queued work. Finish the deterministic
+    # projection created by save_work_canon before taking/restoring the backup.
+    for _ in range(20):
+        if not service.agent_dispatcher.run_once()["handled"]:
+            break
+    else:
+        pytest.fail("synthetic projection queue did not settle")
+
     filename, content, summary = service.export_writing_backup()
 
     assert filename.endswith(".halocue")

@@ -93,6 +93,13 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
+            with self.service.data_access.operation():
+                return self._dispatch_GET()
+        except DomainError as error:
+            return self._error(error)
+
+    def _dispatch_GET(self):
+        try:
             parts = self._parts()
             if parts == ["api", "v1", "health"]:
                 return self._json(self.service.health())
@@ -227,6 +234,17 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
             self._error(DomainError("internal_error", "写作服务发生内部错误。", status=500, details={"type": type(exc).__name__}))
 
     def do_POST(self):
+        # Restore acquires exclusive admission itself; never upgrade a shared
+        # request after it may have read the old workspace.
+        if self._parts() == ["api", "v1", "settings", "backups", "restore"]:
+            return self._dispatch_POST()
+        try:
+            with self.service.data_access.operation():
+                return self._dispatch_POST()
+        except DomainError as error:
+            return self._error(error)
+
+    def _dispatch_POST(self):
         try:
             parts = self._parts()
             body_limit = 128_000_000 if parts in (
