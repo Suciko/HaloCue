@@ -10,6 +10,7 @@
     capabilities: null,
     selectedCard: null,
     selectedSpeaker: null,
+    teacherMappingContext: null,
     characterCatalog: [],
     currentStage: "source",
     filter: "all",
@@ -945,6 +946,7 @@
 
   function mappingLabel(mapping) {
     if (!mapping || mapping.kind === "unset") return "尚未映射";
+    if (mapping.role === "teacher") return `${mapping.name || "老师"}${mapping.club ? ` / ${mapping.club}` : ""}`;
     if (mapping.kind === "narrator") return "旁白（不显示角色）";
     if (mapping.kind === "voice") return mapping.display_name || "无立绘角色";
     return `${mapping.name || mapping.display_name || mapping.id || "已选择"}${mapping.spine ? ` · ${mapping.spine}` : ""}`;
@@ -952,6 +954,7 @@
 
   function mappingStatusLabel(mapping) {
     if (!mapping || mapping.kind === "unset") return "尚未映射";
+    if (mapping.role === "teacher") return `老师 · ${mappingLabel(mapping)}`;
     if (mapping.kind === "narrator") return "旁白";
     if (mapping.kind === "voice") return "无立绘角色";
     return mapping.name || "已选立绘角色";
@@ -976,6 +979,7 @@
 
   function mappingEvidence(mapping) {
     if (!mapping || mapping.kind === "unset") return ["尚未选择角色资源"];
+    if (mapping.role === "teacher") return ["老师身份已登记", "无立绘，不占用站位"];
     if (mapping.kind === "narrator") return ["旁白，不使用角色服装"];
     if (mapping.kind === "voice") return ["语音角色，不显示角色立绘"];
     const resource = mappingResource(mapping) || mapping;
@@ -1185,11 +1189,88 @@
 
   async function openMapping(speaker) {
     state.selectedSpeaker = speaker;
+    state.teacherMappingContext = {
+      runId: state.currentRun.run_id, speaker, draftVersion: state.currentDraft.draft_version,
+    };
     $("#mappingDialogTitle").textContent = `为“${speaker}”选择映射`;
     $("#characterSearch").value = "";
     $("#mappingDialogStatus").textContent = "下面只显示本任务创建时冻结的角色；选择后只会更新当前说话者。";
+    const capability = teacherCapability();
+    $("#chooseTeacherIdentity").hidden = !capability;
+    $("#teacherPreset").innerHTML = (capability?.presets || []).map((preset) =>
+      `<option value="${esc(preset.id)}">${esc(preset.id === "custom" ? "自定义" : `${preset.display_name} / ${preset.organization}`)}</option>`).join("");
+    const identity = state.currentDraft.cast?.teacher_identity;
+    $("#teacherPreset").value = identity?.preset_id || "teacher_shale";
+    if (!$("#teacherPreset").value) $("#teacherPreset").selectedIndex = 0;
+    $("#teacherDisplayName").value = identity?.display_name || "";
+    $("#teacherDisplayName").setCustomValidity("");
+    $("#teacherOrganization").value = identity?.organization || "";
+    showTeacherIdentity(!!capability && mappingFor(speaker).role === "teacher");
     $("#mappingDialog").showModal();
     await searchCharacters("");
+  }
+
+  function teacherCapability() {
+    const capability = state.capabilities?.teacher_identity;
+    return capability?.schema_version === "teacher-identity/1.0"
+      && capability.presentation === "slot_zero" && Array.isArray(capability.presets)
+      && capability.presets.length ? capability : null;
+  }
+
+  function showTeacherIdentity(show) {
+    const visible = show && !!teacherCapability();
+    $("#teacherIdentityForm").classList.toggle("hidden", !visible);
+    $("#characterResults").classList.toggle("hidden", visible);
+    $("#characterSearch").classList.toggle("hidden", visible);
+    $("#chooseTeacherIdentity").setAttribute("aria-expanded", String(visible));
+    $("#mappingDialogStatus").textContent = visible ? "" : "选择后只会更新当前说话者的映射。";
+    updateTeacherPreset();
+  }
+
+  function updateTeacherPreset() {
+    const custom = $("#teacherPreset").value === "custom";
+    $("#teacherCustomFields").classList.toggle("hidden", !custom);
+    $("#teacherDisplayName").disabled = !custom;
+    $("#teacherOrganization").disabled = !custom;
+    const identity = state.currentDraft?.cast?.teacher_identity;
+    $("#saveTeacherIdentity").textContent = identity ? "保存老师身份" : "创建并绑定老师";
+    const aliases = Object.entries(state.currentDraft?.cast?.cast || {})
+      .filter(([, mapping]) => mapping.role === "teacher").map(([speaker]) => speaker);
+    $("#teacherIdentityScope").textContent = aliases.length
+      ? `本任务共用同一老师身份，已绑定：${aliases.join("、")}。名称和组织修改将同步生效。`
+      : `将为“${state.selectedSpeaker}”登记无立绘老师身份。`;
+  }
+
+  async function saveTeacherIdentity(event) {
+    event.preventDefault();
+    if (!teacherCapability() || state.busy || pendingConfirmation) return;
+    const mapping = {
+      kind: "teacher", schema_version: "teacher-identity/1.0", preset_id: $("#teacherPreset").value,
+    };
+    if (mapping.preset_id === "custom") {
+      mapping.display_name = $("#teacherDisplayName").value.trim();
+      mapping.organization = $("#teacherOrganization").value.trim();
+      if (!mapping.display_name) {
+        $("#teacherDisplayName").setCustomValidity("请输入老师名称。");
+        $("#teacherDisplayName").reportValidity();
+        return;
+      }
+    }
+    const identity = state.currentDraft?.cast?.teacher_identity;
+    const preset = teacherCapability().presets.find((item) => item.id === mapping.preset_id);
+    const displayName = mapping.preset_id === "custom" ? mapping.display_name : preset?.display_name;
+    const organization = mapping.preset_id === "custom" ? mapping.organization : preset?.organization;
+    const aliases = Object.entries(state.currentDraft?.cast?.cast || {})
+      .filter(([, item]) => item.role === "teacher").map(([speaker]) => speaker);
+    if (identity && aliases.length && (identity.display_name !== displayName || identity.organization !== organization)) {
+      const accepted = await askConfirmation({
+        title: "更新共用的老师身份？",
+        body: `“${aliases.join("”、“")}”将同步显示为“${displayName}${organization ? ` / ${organization}` : "（无组织）"}”。原剧本中的名称和台词保持不变。`,
+        confirmLabel: "更新老师身份",
+      });
+      if (!accepted) return;
+    }
+    await saveMapping(mapping, state.teacherMappingContext);
   }
 
   async function searchCharacters(query) {
@@ -1198,7 +1279,9 @@
         ? `/production-runs/${encodeURIComponent(state.currentRun.run_id)}/resources/characters?q=${encodeURIComponent(query)}&limit=30`
         : `/resources/characters?q=${encodeURIComponent(query)}&limit=30`;
       const result = await api(path);
-      const rows = result.items || [];
+      const rows = (result.items || []).filter((item) => item.role !== "teacher"
+        && item.source !== "halocue_teacher"
+        && item.identifier !== state.currentDraft?.cast?.teacher_identity?.character_id);
       state.characterCatalog = rows;
       state.characterCatalogRunId = state.currentRun?.run_id || null;
       $("#characterResults").innerHTML = rows.length ? rows.map((item) => `<button type="button" class="character-row resource-row" data-character-id="${esc(item.identifier)}" data-character-name="${esc(item.name)}" aria-label="选择 ${esc(item.name)} 映射给当前说话者">
@@ -1210,16 +1293,25 @@
     } catch (error) { $("#mappingDialogStatus").textContent = error.message; }
   }
 
-  async function saveMapping(mapping) {
-    if (!state.selectedSpeaker || !state.currentDraft) return;
+  async function saveMapping(mapping, context = null) {
+    if (!state.selectedSpeaker || !state.currentDraft || state.busy) return;
+    const speaker = context?.speaker || state.selectedSpeaker;
+    const runId = context?.runId || state.currentRun.run_id;
+    const version = context?.draftVersion ?? state.currentDraft.draft_version;
+    setBusy(true);
     try {
-      const result = await api(`/production-runs/${state.currentRun.run_id}/cast-bindings`, {
-        method: "POST", body: JSON.stringify({ speaker: state.selectedSpeaker, mapping, expected_draft_version: state.currentDraft.draft_version })
+      const result = await api(`/production-runs/${encodeURIComponent(runId)}/cast-bindings`, {
+        method: "POST", body: JSON.stringify({ speaker, mapping, expected_draft_version: version })
       });
-      state.currentRun = result.run; state.currentDraft = result.draft; state.gates = result.gates;
+      adoptRunResult(result);
+      state.characterCatalogRunId = null;
       await loadTaskPreflight();
-      $("#mappingDialog").close(); updateShell(); renderMapping(); renderGeneration(); toast(`已更新 ${state.selectedSpeaker} 的映射`);
-    } catch (error) { handleError(error); }
+      $("#mappingDialog").close(); updateShell(); renderMapping(); renderGeneration(); toast(`已更新 ${speaker} 的映射`);
+    } catch (error) {
+      $("#mappingDialogStatus").textContent = error.code === "revision_conflict"
+        ? "草稿已更新，请关闭后重新确认映射。" : error.message || "保存失败，请稍后重试。";
+      await handleError(error);
+    } finally { setBusy(false); }
   }
 
   const terminalJobStates = new Set([
@@ -1697,8 +1789,10 @@
       ? `<div class="preview-annotations">${frame.annotations.map((item) => `<span>${esc(item.kind)}：${esc(item.value)}</span>`).join("")}</div>`
       : "";
     const statusLabel = frame.review_state === "approved" ? "已审" : "待审";
+    const organization = frame.speaker?.role === "teacher" && frame.speaker.organization
+      ? `<small class="preview-speaker-organization">${esc(frame.speaker.organization)}</small>` : "";
     target.className = `performance-preview-frame presentation-${esc(frame.presentation)}`;
-    target.innerHTML = `<section class="preview-stage">${background}<div class="preview-stage-overlay"></div><div class="preview-progress">${state.previewIndex + 1} / ${frames.length} · 第 ${esc(frame.line_no || "-")} 张 · ${esc(statusLabel)}</div>${cg}<div class="preview-dialogue ${isCg ? "is-cg" : ""}"><small>${esc(isCg ? "CG 空镜段落" : frame.presentation === "request" ? "需要处理" : frame.presentation === "direction" ? "演出指令" : "当前台词")}</small><strong>${esc(frame.title || "未命名卡片")}</strong><p>${esc(frame.text || "此卡没有可显示的文本。")}</p>${annotations}</div></section><div class="preview-card-strip" aria-label="草稿卡片定位">${frames.map((item, index) => `<button type="button" class="${index === state.previewIndex ? "active" : ""}" data-preview-index="${index}" aria-label="跳到第 ${esc(item.line_no || "-")} 张卡片">${esc(String(item.line_no || index + 1).padStart(2, "0"))}</button>`).join("")}</div>`;
+    target.innerHTML = `<section class="preview-stage">${background}<div class="preview-stage-overlay"></div><div class="preview-progress">${state.previewIndex + 1} / ${frames.length} · 第 ${esc(frame.line_no || "-")} 张 · ${esc(statusLabel)}</div>${cg}<div class="preview-dialogue ${isCg ? "is-cg" : ""}"><small>${esc(isCg ? "CG 空镜段落" : frame.presentation === "request" ? "需要处理" : frame.presentation === "direction" ? "演出指令" : "当前台词")}</small><strong>${esc(frame.title || "未命名卡片")}</strong>${organization}<p>${esc(frame.text || "此卡没有可显示的文本。")}</p>${annotations}</div></section><div class="preview-card-strip" aria-label="草稿卡片定位">${frames.map((item, index) => `<button type="button" class="${index === state.previewIndex ? "active" : ""}" data-preview-index="${index}" aria-label="跳到第 ${esc(item.line_no || "-")} 张卡片">${esc(String(item.line_no || index + 1).padStart(2, "0"))}</button>`).join("")}</div>`;
     status.textContent = `当前展示第 ${frame.line_no || "-"} 张卡片；预览是只读的，修改请回到这张卡。`;
     $("#previewPrevious").disabled = state.previewIndex === 0;
     $("#previewNext").disabled = state.previewIndex >= frames.length - 1;
@@ -2864,6 +2958,11 @@
   $("#createCgSegment").addEventListener("click", createCgSegment);
   $("#cgSearch").addEventListener("input", (event) => searchCgResources(event.target.value));
   $("#characterSearch").addEventListener("input", (event) => searchCharacters(event.target.value));
+  $("#chooseTeacherIdentity").addEventListener("click", () => showTeacherIdentity(true));
+  $("#cancelTeacherIdentity").addEventListener("click", () => showTeacherIdentity(false));
+  $("#teacherPreset").addEventListener("change", updateTeacherPreset);
+  $("#teacherIdentityForm").addEventListener("submit", saveTeacherIdentity);
+  $("#teacherDisplayName").addEventListener("input", (event) => event.target.setCustomValidity(""));
   $("#resourceSearch").addEventListener("input", (event) => searchResources(event.target.value));
   $("#openAssetLibrary").addEventListener("click", openAssetLibrary);
   $("#openAssetImport").addEventListener("click", openAssetImport);

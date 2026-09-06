@@ -88,7 +88,7 @@ local 8892 API origin; regular use should open the same-origin 8892 URL above.
 ## Browser workflow
 
 1. Paste an existing script and create a frozen `ScriptRelease`.
-2. Resolve each detected speaker as an AA portrait, a voice-only role, a
+2. Resolve each detected speaker as an AA portrait, a teacher identity, a voice-only role, a
    narrator, or deliberately unmapped. Portrait selection is per speaker;
    its Spine, portrait, and faces are not global settings.
 3. For format-only tasks, enter review directly. For AI-direction tasks, the
@@ -151,6 +151,67 @@ POST /api/v1/production-runs/{run_id}/compile
 POST /api/v1/production-runs/{run_id}/install
 GET  /api/v1/jobs/{job_id}
 ```
+
+### Teacher identity presets
+
+Select a source speaker explicitly in the mapping dialog, choose Teacher, then
+save one of the four presets or a custom name/organization. Opening the dialog
+does not create a character. These settings need no model, AA executable or
+portrait upload. They prepare a production-local no-portrait character before
+generation; they do not rename the source speaker or writing release.
+
+| `preset_id` | Name | Organization |
+| --- | --- | --- |
+| `sensei_shale` | sensei | 沙勒 |
+| `sensei_xialai` | sensei | 夏莱 |
+| `teacher_shale` | 老师 | 沙勒 |
+| `teacher_xialai` | 老师 | 夏莱 |
+| `custom` | User supplied, required | User supplied, may be empty |
+
+Existing `POST /api/v1/production-runs/{run_id}/cast-bindings` request:
+
+```json
+{
+  "speaker": "SourceTeacher",
+  "expected_draft_version": 1,
+  "mapping": {
+    "kind": "teacher",
+    "schema_version": "teacher-identity/1.0",
+    "preset_id": "teacher_shale"
+  }
+}
+```
+
+For `custom`, also supply `display_name` and optionally `organization` in the
+mapping. Each is single-line text of at most 80 characters. Presets do not accept
+overridden display fields. The server, not the client, assigns the stable
+`hc-teacher-<32 lowercase hex digits>` character ID.
+
+The response's `draft.cast.teacher_identity` freezes the identity. Explicitly
+bound source aliases share it; changing its name/organization updates those
+aliases after confirmation. Ordinary voice-only roles are never automatically
+converted. Repeating an unchanged choice keeps the ID, versions and review;
+real changes require review again and supersede an active generation. The
+compiler registers AA `CharacterOverrides` and slot 0 references this ID,
+including in CG dialogue, without consuming any of the five portrait positions.
+
+Capabilities expose `teacher_identity` with `state`, `schema_version`, `presets`
+and `presentation: "slot_zero"`. Older external compatibility modules report
+`unavailable`, while other mapping kinds remain usable. No route or database
+schema was replaced. Single-response Sel presentation is a separate follow-up.
+
+Stable errors include `400 teacher_identity_version_unsupported`,
+`invalid_teacher_identity`, `invalid_teacher_preset`, `teacher_speaker_not_found`;
+`409 revision_conflict`, `teacher_identity_conflict`, `teacher_identity_corrupt`,
+`teacher_identity_journal_corrupt`, `teacher_identity_unavailable`,
+`teacher_requires_no_portrait`; and `500 teacher_identity_write_failed`,
+`teacher_identity_recovery_failed`, `teacher_identity_durability_uncertain`.
+For an uncertain durability response, reload the draft before retrying. A
+corrupt recovery journal is preserved for repair rather than silently discarded.
+
+Teacher changes use a recoverable five-file transaction in the draft directory.
+Old BuildBundles remain immutable and installation is always a separate action.
+Native AA playback is manual acceptance; automated tests use synthetic fixtures.
 
 ### Review cards
 

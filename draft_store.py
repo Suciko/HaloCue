@@ -25,6 +25,8 @@ from draft_identity import (
 )
 from story_workspace import normalize_bgm_policy
 from runtime_layout import LAYOUT
+from teacher_identity import TeacherIdentityError, prepare_teacher_binding
+from teacher_identity_store import commit_teacher_transaction, recover_teacher_transaction
 
 HERE = LAYOUT.user_data_root if LAYOUT.frozen else Path(__file__).resolve().parent
 _DRAFT_LOCKS_GUARD = threading.Lock()
@@ -201,6 +203,7 @@ class DraftStore:
             local_lock = _DRAFT_LOCKS.setdefault(lock_key, threading.RLock())
         with local_lock:
             draft_dir.mkdir(parents=True, exist_ok=True)
+            recover_teacher_transaction(draft_dir)
             yield
 
     def create_draft(
@@ -323,6 +326,11 @@ class DraftStore:
 
         cast 变化会影响编译结果，因此同时递增 content_revision。
         """
+        if isinstance(mapping, dict) and (
+            mapping.get("role") == "teacher" or mapping.get("kind") == "teacher"
+            or "teacher_identity_schema" in mapping or "teacher_preset_id" in mapping
+        ):
+            raise TeacherIdentityError("invalid_teacher_identity", "请通过老师身份设置创建或修改老师")
         draft_dir = self.get_draft_path(token)
         with self.draft_lock(token):
             session_file = draft_dir / "session.json"
@@ -337,6 +345,9 @@ class DraftStore:
             cast = {}
             if cast_file.is_file():
                 cast = json.loads(cast_file.read_text(encoding="utf-8"))
+            teacher = cast.get("teacher_identity")
+            if isinstance(teacher, dict) and mapping.get("id") == teacher.get("character_id"):
+                raise TeacherIdentityError("teacher_identity_conflict", "老师身份不能作为普通角色绑定", status=409)
             cast.setdefault("cast", {})[speaker] = mapping
             cast_file.write_text(json.dumps(cast, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -374,6 +385,67 @@ class DraftStore:
                 "identities": identities_data,
                 "diagnostics": diagnostics,
                 "identity_rebuilt": False,
+            }
+
+    def update_teacher_identity(
+        self,
+        token: str,
+        speaker: str,
+        selection: Dict[str, Any],
+        expected_draft_version: int,
+    ) -> Dict[str, Any]:
+        """Prepare one no-portrait identity before generation, preserving source identity."""
+        if type(expected_draft_version) is not int or expected_draft_version < 1:
+            raise TeacherIdentityError("invalid_teacher_identity", "草稿版本须为正整数")
+        draft_dir = self.get_draft_path(token)
+        with self.draft_lock(token):
+            try:
+                session = json.loads((draft_dir / "session.json").read_text(encoding="utf-8"))
+                if not isinstance(session, dict) or any(
+                    type(session.get(key)) is not int or session[key] < 1
+                    for key in ("draft_version", "content_revision")
+                ):
+                    raise TeacherIdentityError("teacher_identity_corrupt", "草稿版本记录无效", status=409)
+                if session["draft_version"] != expected_draft_version:
+                    raise RevisionConflictError("Draft version mismatch")
+                cast = json.loads((draft_dir / "cast.json").read_text(encoding="utf-8"))
+                resources_file = draft_dir / "resources.json"
+                resources = json.loads(resources_file.read_text(encoding="utf-8")) if resources_file.exists() else {}
+                edited_text = (draft_dir / "edited.txt").read_text(encoding="utf-8")
+                identity_text = (draft_dir / "identity.json").read_text(encoding="utf-8")
+                identities = json.loads(identity_text)
+            except (OSError, json.JSONDecodeError, KeyError, TypeError, UnicodeError) as exc:
+                raise TeacherIdentityError("teacher_identity_corrupt", "草稿声明不可读取", status=409) from exc
+            nodes = _parse_draft_nodes(edited_text)
+            if not isinstance(speaker, str) or speaker not in {
+                node.fields.get("who") for node in nodes if node.kind == "line"
+            }:
+                raise TeacherIdentityError("teacher_speaker_not_found", "请选择草稿中的说话人")
+            if (
+                not isinstance(identities, list) or len(nodes) != len(identities)
+                or calc_sha256(edited_text) != session.get("edited_sha256")
+                or calc_sha256(identity_text) != session.get("identity_sha256")
+                or any(not isinstance(card, dict) or card.get("text_fingerprint") != compute_text_fingerprint(node.raw)
+                       for node, card in zip(nodes, identities))
+            ):
+                raise TeacherIdentityError("teacher_identity_corrupt", "草稿内容或卡片身份校验失败", status=409)
+            updated_cast, updated_resources, affected = prepare_teacher_binding(cast, resources, speaker, selection)
+            if updated_cast == cast and updated_resources == resources:
+                return self._load_draft_locked(token, cast=cast)
+            for node, card in zip(nodes, identities):
+                if node.kind == "line" and node.fields.get("who") in affected:
+                    card["review_state"] = "pending"
+            _, diagnostics = compile_document(nodes, self._diagnostic_cast(token, updated_cast), {})
+            session["draft_version"] += 1
+            session["content_revision"] += 1
+            session["identity_sha256"] = calc_sha256(json.dumps(identities, ensure_ascii=False, indent=2))
+            commit_teacher_transaction(draft_dir, {
+                "cast.json": updated_cast, "resources.json": updated_resources,
+                "identity.json": identities, "diagnostics.json": diagnostics, "session.json": session,
+            })
+            return {
+                "session": session, "edited_text": edited_text, "identities": identities,
+                "diagnostics": diagnostics, "identity_rebuilt": False,
             }
 
     def load_draft(self, token: str, cast: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

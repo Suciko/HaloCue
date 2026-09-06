@@ -115,6 +115,7 @@ def test_http_serves_production_workbench_assets(settings):
         for path, marker, content_type in (
             ("/", "HaloCue", "text/html"),
             ("/app.css", ".app-shell", "text/css"),
+            ("/direction-profile.css", ".direction-profile-control", "text/css"),
             ("/confirm-dialog.css", ".confirm-dialog-shell", "text/css"),
             ("/app.js", "direction-generation", "javascript"),
         ):

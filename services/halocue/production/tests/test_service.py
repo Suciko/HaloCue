@@ -106,8 +106,9 @@ def test_execute_compile_keeps_snapshot_index_and_enables_snapshot_layout(
         return {}
 
     class ManagerProbe:
-        def __init__(self, *, store):
+        def __init__(self, *, store, output_root):
             self.store = store
+            assert Path(output_root).is_relative_to(store.get_draft_path("draft-test"))
 
         def execute_build_worker(self, token, build_id):
             build_bundle.compile_script({"index": "snapshot/resources.json"})
