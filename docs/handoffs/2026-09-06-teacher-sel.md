@@ -107,10 +107,11 @@ Code commits:
 - `b62a817`: production capabilities, mapping persistence, preview, service
   integration and browser controls/tests.
 - `2c096c2`: README, evidence and this handoff.
+- `2c25db8`: document the independent SelectionNodeData format in `docs/format.md`.
 
 PR: https://github.com/Suciko/HaloCue/pull/37 (base
 `codex/1.0-teacher-identity`, head `codex/1.0-teacher-sel`). The remote branch
-tip is `2c096c2ff6a74bd9c52aa0331ead686c94d37bfc`, verified against local Git
+tip is `2c25db8d90530e4126a99fc2137ca3a9a524df05`, verified against local Git
 objects. GitHub Git Data upload was used after Git HTTPS reset the connection;
 no force update or shared-branch merge occurred.
 
