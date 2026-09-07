@@ -55,3 +55,9 @@ audit diagnostics. Existing generation/cancel fences still own final publication
 
 Helper write scope can be delegated: reaction_integrity.py plus tests; main owns
 annotate insertion/render and production adoption. No alternative standalone timeline.
+
+## Executed
+
+4d01195 includes placement,sidecar validator and production publication mapping.
+Review trans correction and1709-test unchanged-commit regression accepted; exact
+boundaries and evidence: `docs/handoffs/2026-09-07-reaction-integrity.md`.

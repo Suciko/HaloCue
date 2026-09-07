@@ -155,8 +155,8 @@
       "id": "03-D01",
       "summary": "经过合法性校验的非对白反应 beat 可继承不含目标角色的持有镜头，编译只剩等待而丢失目标表情/动作。",
       "review_severity": "P1",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "4d01195：反应节点单行camera目标，before节点保留原文前缀含trans承接；渲染sidecar→本地编译核验目标/表情/动作/等待，失败不写输出且制作409带来源定位；审计关联源卡。只保证生成快照，不限制后续作者显式编辑或等同AA实播。"
     },
     {
       "id": "03-D02",
@@ -460,14 +460,14 @@
       "note": ""
     }
   ],
-  "latest_verified_code": "dba22d77f748372712b8d8e1845966444b466ec6",
+  "latest_verified_code": "4d0119558c3a15b65520660a146954bf02475a03",
   "latest_regression": {
-    "passed": 1629,
+    "passed": 1709,
     "source_unchanged": true,
     "real_provider": false,
     "real_AA_playback": false,
     "production_data_roots": "isolated test fixtures",
-    "scope": "writing/production/integrated plus preserved prompts and root compiler/resource diagnostics"
+    "scope": "services plus preserved prompts, compiler/resource/terminal and reaction integrity"
   },
   "latest_focused_after_planning": {
     "commit": "0811a4a7e1e27d55393f88f79224fe61da3fa8a",
