@@ -244,9 +244,11 @@ def test_first_work_prose_save_links_to_existing_direction_conversation(tmp_path
                 assert c.execute("SELECT COUNT(*) FROM agent_runs").fetchone()[0] == 0
             panel.get_by_role("button", name="完善写作方向与发布条件", exact=True).click()
             page.locator("#workConversationForm textarea").wait_for(state="visible")
-            assert (
-                "不要续写未提供的内容"
-                in page.locator("#workConversationForm textarea").input_value()
+            # The underlying textarea is visible as soon as the dialog closes;
+            # navigation still awaits its work fetch. Wait for the actual prefill.
+            import re
+            pw.expect(page.locator("#workConversationForm textarea")).to_have_value(
+                re.compile(".*不要续写未提供的内容.*"), timeout=5000
             )
             assert page.evaluate("state.stage==='overview'")
             with writing.repo.connect() as c:
