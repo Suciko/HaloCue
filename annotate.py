@@ -963,6 +963,22 @@ def apply_direction_supplements(items, cast):
         }]
 
 
+def ordered_annotation_speakers(items, todo, cast):
+    """Frequency first, first authored occurrence for ties, one name per identity."""
+    frequency = {}
+    for index in todo:
+        who = items[index]["who"]
+        frequency[who] = frequency.get(who, 0) + 1
+    used, seen_id = [], set()
+    # Dict insertion order supplies the stable first-source tie-breaker.
+    for who in sorted(frequency, key=lambda name: -frequency[name]):
+        identity = cast[who].get("id") or "旁白"
+        if identity not in seen_id:
+            seen_id.add(identity)
+            used.append(who)
+    return used
+
+
 def annotate_script(options: dict, provider_instance=None) -> dict:
     """演出标注纯函数接口（剥离 sys.argv 与全局状态）"""
     script_path = options["script"]
@@ -1009,14 +1025,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         lo, hi = int(m.group(1)) - 1, int(m.group(2))
     todo = dialog[lo:hi]
 
-    used, seen_id = [], set()
-    for w in sorted({items[i]["who"] for i in todo},
-                    key=lambda w: -sum(1 for i in todo if items[i]["who"] == w)):
-        key = cast[w].get("id") or "旁白"
-        if key in seen_id:
-            continue
-        seen_id.add(key)
-        used.append(w)
+    used = ordered_annotation_speakers(items, todo, cast)
     script_text = open(script_path, encoding="utf-8").read()
     background_policy = (
         ConservativeBackgroundPolicy(items, idx, cfg, usage_chain)
@@ -1112,6 +1121,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         )
         # Checkpoint identity is not a prompt policy. Both profiles must pin
         # every input that can change the actual request/plan on resume.
+        fingerprint["speaker_order_version"] = "frequency-first-mention/1"
         fingerprint["effective_static_sha256"] = hashlib.sha256(agent_static.encode("utf-8")).hexdigest()
         fingerprint["planning_sha256"] = hashlib.sha256(json.dumps(
             {"default_bg": cfg.get("default_bg"), "scene_bg": cfg.get("scene_bg"),
