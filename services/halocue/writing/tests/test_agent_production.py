@@ -334,6 +334,11 @@ def test_provider_tool_call_is_dispatched_then_followed_up_in_one_agent_run(tmp_
         "cache_read_tokens": 25,
         "cache_write_tokens": 5,
         "estimated_cost": pytest.approx(0.003),
+        "schema_version": "provider-usage/1.0",
+        "usage_status": "legacy_unknown",
+        "cache_status": "unknown",
+        "cost_status": "partial",
+        "input_tokens_semantics": "unknown",
     }
     assert [(item["tool_name"], item["status"]) for item in run["tool_calls"]] == [
         ("read_work_context", "succeeded")

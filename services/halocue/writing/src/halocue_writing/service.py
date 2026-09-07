@@ -30,6 +30,7 @@ from .memory_store import (
 )
 from .official_reference_catalog import OfficialReferenceCatalog
 from .providers import FakeWritingProvider, make_writing_provider
+from .provider_usage import normalize_usage, merge_usage
 from .agent_tools import AgentToolRegistry, ToolExecutionContext
 from .document_context import index_attachment, normalize_text, retrieve_context
 from .conversation_summary import (
@@ -622,35 +623,33 @@ class WritingService:
                 "SELECT status,COUNT(*) AS count FROM agent_runs WHERE work_id=? GROUP BY status ORDER BY status",
                 (work_id,),
             ))
-        totals = {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "cache_read_tokens": 0,
-            "cache_write_tokens": 0,
-            "estimated_cost": 0.0,
-        }
+        total = {}
+        unknown_usage_count = 0
         priced_run_count = 0
         for row in policies:
             try:
                 policy = json.loads(row["policy_json"] or "{}")
             except json.JSONDecodeError:
-                continue
-            usage = policy.get("usage") if isinstance(policy.get("usage"), dict) else {}
-            for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"):
-                totals[key] += max(0, int(usage.get(key) or 0))
-            if usage.get("estimated_cost") is not None:
-                totals["estimated_cost"] += max(0.0, float(usage["estimated_cost"]))
+                policy = {}
+            usage = normalize_usage(policy.get("usage") if isinstance(policy, dict) else {})
+            if usage["usage_status"] != "reported":
+                unknown_usage_count += 1
+            if usage["estimated_cost"] is not None:
                 priced_run_count += 1
-        input_tokens = int(totals["input_tokens"])
-        cache_read = int(totals["cache_read_tokens"])
-        denominator = input_tokens
+            total = merge_usage(total, usage)
+        total = normalize_usage(total)
+        input_tokens = total["input_tokens"]
+        cache_read = total["cache_read_tokens"]
         return {
             "schema_version": "agent-usage/1.0", "work_id": work_id,
-            "input_tokens": input_tokens, "output_tokens": int(totals["output_tokens"]),
-            "cache_read_tokens": cache_read, "cache_write_tokens": int(totals["cache_write_tokens"]),
-            "cache_hit_rate": round(cache_read / denominator, 4) if denominator else 0,
-            "estimated_cost": round(float(totals["estimated_cost"]), 6),
+            **{key: total[key] for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "usage_status", "cache_status", "input_tokens_semantics", "cost_status")},
+            "cache_hit_rate": round(cache_read / input_tokens, 4) if input_tokens else 0,
+            # Backwards-compatible known subtotal; completeness is stated separately.
+            "estimated_cost": round(float(total["estimated_cost"] or 0), 6),
             "cost_available": priced_run_count > 0,
+            "unknown_usage_run_count": unknown_usage_count,
+            "priced_run_count": priced_run_count,
+            "accounting_scope": "recorded_logical_calls",
             "runs_by_status": {item["status"]: item["count"] for item in statuses},
             "currency": "USD", "cost_is_estimate": True,
         }
@@ -3053,7 +3052,9 @@ class WritingService:
         *, provider: dict | None = None, proposal_id: str | None = None,
         agent_run_id: str | None = None, usage: dict | None = None,
     ) -> str:
-        usage = usage if isinstance(usage, dict) else {}
+        usage = normalize_usage(usage)
+        if role == "assistant":
+            content = {**content, "provider_usage": usage}
         ordinal = connection.execute(
             "SELECT COALESCE(MAX(ordinal),0)+1 FROM conversation_messages WHERE thread_id=?",
             (thread_id,),
@@ -3098,30 +3099,49 @@ class WritingService:
             summary = self._refresh_conversation_summary(connection, thread_id)
         return validate_conversation_summary(connection, thread_id, summary)
 
+    @contextmanager
+    def _provider_usage_scope(self, provider, run_id: str):
+        """Persist usage only; never revive cancelled runs or permit late artifacts.
+
+        One observation covers a logical provider method, not hidden transport retries.
+        """
+        reset = getattr(provider, "reset_usage", None)
+        if callable(reset):
+            reset()
+        failure = None
+        try:
+            yield
+        except Exception as error:
+            failure = error
+            raise
+        finally:
+            usage = self._provider_usage(provider)
+            if failure is not None:
+                if isinstance(failure, DomainError):
+                    failure.details = {**failure.details, "usage": usage}
+                else:
+                    failure.provider_usage = usage
+            try:
+                with self.repo.transaction() as connection:
+                    row = connection.execute("SELECT policy_json FROM agent_runs WHERE id=?", (run_id,)).fetchone()
+                    if row:
+                        policy = json.loads(row["policy_json"] or "{}")
+                        policy["usage"] = merge_usage(policy.get("usage") or {}, usage)
+                        connection.execute("UPDATE agent_runs SET policy_json=? WHERE id=?", (canonical_json(policy), run_id))
+            except Exception:
+                if failure is None:
+                    raise
+                failure.add_note("Usage audit persistence failed; original provider error preserved.")
+
     def _provider_usage(self, provider=None) -> dict:
         provider = provider or self.provider
         getter = getattr(provider, "last_usage", None)
         value = getter() if callable(getter) else getattr(provider, "_last_usage", {})
-        if not isinstance(value, dict):
-            return {}
-        estimated_cost = value.get("estimated_cost")
-        return {
-            "input_tokens": max(0, int(value.get("input_tokens") or 0)),
-            "output_tokens": max(0, int(value.get("output_tokens") or 0)),
-            "cache_read_tokens": max(0, int(value.get("cache_read_tokens") or 0)),
-            "cache_write_tokens": max(0, int(value.get("cache_write_tokens") or 0)),
-            "estimated_cost": max(0.0, float(estimated_cost)) if estimated_cost is not None else None,
-        }
+        return normalize_usage(value)
 
     @staticmethod
     def _merge_usage(first: dict, second: dict) -> dict:
-        merged = {
-            key: int(first.get(key) or 0) + int(second.get(key) or 0)
-            for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
-        }
-        costs = [value.get("estimated_cost") for value in (first, second) if value.get("estimated_cost") is not None]
-        merged["estimated_cost"] = sum(float(value) for value in costs) if costs else None
-        return merged
+        return merge_usage(first, second)
 
     def _conversation_task_contract(self, connection, work_id: str, requested_scope: dict | None = None) -> dict:
         """Resolve the active director task from persisted work state.
@@ -3741,6 +3761,11 @@ class WritingService:
                 ))
                 for message in thread["messages"]:
                     message["content"] = json.loads(message.pop("content_json"))
+                    if message.get("role") == "assistant":
+                        observation = message["content"].get("provider_usage")
+                        if not isinstance(observation, dict):
+                            observation = {key: message.get(key) for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "estimated_cost") if message.get(key) is not None}
+                        message.update(normalize_usage(observation))
                     message["provider"] = json.loads(message.pop("provider_json")) if message.get("provider_json") else None
                 thread["attachments"] = self.repo.rows(connection.execute(
                     "SELECT id,message_id,filename,media_type,content_hash,byte_size,status,created_at FROM conversation_attachments WHERE thread_id=? ORDER BY created_at",
@@ -4800,11 +4825,13 @@ class WritingService:
                         "simulation": provider.is_simulation, "cancelled": True,
                         "work": self.get_work(work_id),
                     }
-                reply = self._validate_discussion_reply(
-                    provider.discuss_work(history, provider_context)
-                )
+                with self._provider_usage_scope(provider, run_id):
+                    reply = self._validate_discussion_reply(
+                        provider.discuss_work(history, provider_context)
+                    )
                 usage = self._provider_usage(provider)
         except Exception as exc:
+            usage = self._provider_usage(provider)
             provider_failure = {
                 "code": getattr(exc, "code", "provider_failed"),
                 "type": type(exc).__name__,
@@ -4911,17 +4938,18 @@ class WritingService:
                                 "simulation": provider.is_simulation, "cancelled": True,
                                 "work": self.get_work(work_id),
                             }
-                        followup = self._validate_discussion_reply(
-                            provider.discuss_work(
-                                history,
-                                {
-                                    **provider_context,
-                                    "tool_followup": True,
-                                    "tool_round": tool_round,
-                                    "tool_results": current_reply.get("tool_results", []),
-                                },
+                        with self._provider_usage_scope(provider, run_id):
+                            followup = self._validate_discussion_reply(
+                                provider.discuss_work(
+                                    history,
+                                    {
+                                        **provider_context,
+                                        "tool_followup": True,
+                                        "tool_round": tool_round,
+                                        "tool_results": current_reply.get("tool_results", []),
+                                    },
+                                )
                             )
-                        )
                         usage = self._merge_usage(usage, self._provider_usage(provider))
                     followup["tool_activity"] = list(accumulated_activity)
                     followup["tool_results"] = list(accumulated_payloads)
@@ -4930,6 +4958,7 @@ class WritingService:
                     current_reply = followup
                     reply = followup
                 except Exception as exc:
+                    usage = self._merge_usage(usage, self._provider_usage(provider))
                     provider_failure = {
                         "code": getattr(exc, "code", "provider_failed"),
                         "type": type(exc).__name__,
@@ -7054,7 +7083,7 @@ class WritingService:
                 (attempt_id, work_item_id, 1, provider.kind, snapshot_digest, "started", None, None, timestamp, None),
             )
         try:
-            with self._provider_lock:
+            with self._provider_lock, self._provider_usage_scope(provider, agent_run_id):
                 raw_plan = provider.generate_structure_plan(messages, structure_context)
                 usage = self._provider_usage(provider)
             plan = self._validate_structure_plan(raw_plan)
@@ -8986,9 +9015,11 @@ class WritingService:
             if not review_pack["scenes"] or any(not item["revision_id"] for item in review_pack["scenes"]):
                 provider_findings = []
             elif workflow == "continuity.review":
-                provider_findings = provider.review_continuity(review_pack)
+                with self._provider_usage_scope(provider, run_id):
+                    provider_findings = provider.review_continuity(review_pack)
             else:
-                provider_findings = provider.review_release(review_pack)
+                with self._provider_usage_scope(provider, run_id):
+                    provider_findings = provider.review_release(review_pack)
         except Exception as exc:
             error_code = exc.code if isinstance(exc, DomainError) else "provider_failed"
             error = {"code": error_code, "type": type(exc).__name__}
@@ -9330,7 +9361,8 @@ class WritingService:
 
         self._notify_agent_run_started(payload, run_id)
         try:
-            provider_findings = provider.review_scene(context, text)
+            with self._provider_usage_scope(provider, run_id):
+                provider_findings = provider.review_scene(context, text)
         except Exception as exc:
             error_code = exc.code if isinstance(exc, DomainError) else "provider_failed"
             error = {"code": error_code, "type": type(exc).__name__}
@@ -11102,7 +11134,7 @@ class WritingService:
 
         self._notify_agent_run_started(payload, agent_run_id)
         try:
-            with self._provider_lock:
+            with self._provider_lock, self._provider_usage_scope(provider, agent_run_id):
                 candidate = self._normalize_official_script(
                     provider.generate_scene(context),
                     context,
@@ -11334,7 +11366,7 @@ class WritingService:
                     "discussion_constraints": discussion_constraints,
                     "scene_conversation_context": scene_conversation_context,
                 }
-                with self._provider_lock:
+                with self._provider_lock, self._provider_usage_scope(provider, run_id):
                     candidate = self._normalize_official_script(
                         provider.generate_scene(provider_context),
                         context,
@@ -11644,7 +11676,7 @@ class WritingService:
                     "discussion_constraints": discussion_constraints,
                     "scene_conversation_context": scene_conversation_context,
                 }
-                with self._provider_lock:
+                with self._provider_lock, self._provider_usage_scope(provider, run_id):
                     candidate = self._normalize_official_script(
                         provider.rewrite_scene(provider_context, base_text, instruction),
                         provider_context,
@@ -11948,7 +11980,7 @@ class WritingService:
 
         self._notify_agent_run_started(payload, agent_run_id)
         try:
-            with self._provider_lock:
+            with self._provider_lock, self._provider_usage_scope(provider, agent_run_id):
                 raw_bundle = provider.sweep_memory_bundle(sweep_input)
                 usage = self._provider_usage(provider)
             block_index = {
@@ -12177,7 +12209,7 @@ class WritingService:
 
         self._notify_agent_run_started(payload, agent_run_id)
         try:
-            with self._provider_lock:
+            with self._provider_lock, self._provider_usage_scope(provider, agent_run_id):
                 raw_bundle = provider.extract_memory_bundle(discovery_input)
                 usage = self._provider_usage(provider)
             scene_block_ids = {
@@ -12423,7 +12455,7 @@ class WritingService:
 
         self._notify_agent_run_started(payload, agent_run_id)
         try:
-            with self._provider_lock:
+            with self._provider_lock, self._provider_usage_scope(provider, agent_run_id):
                 raw_bundle = provider.extract_memory_bundle(memory_context)
                 usage = self._provider_usage(provider)
             scene_block_ids = {

@@ -13,6 +13,7 @@ import urllib.request
 from .agent_tools import AgentToolRegistry
 from .errors import DomainError
 from .provider_response import validate_completion
+from .provider_usage import token_count
 from .conversation_summary import RECENT_MESSAGE_COUNT
 
 
@@ -944,50 +945,47 @@ class LLMWritingProvider(WritingProvider):
         )
 
     def _capture_usage(self, data: dict) -> ProviderUsageSnapshot:
-        usage_reported = isinstance(data.get("usage"), dict)
-        usage = data.get("usage") if usage_reported else {}
-        cache_signal_reported = False
+        usage = data.get("usage") if isinstance(data, dict) else None
+        usage = usage if isinstance(usage, dict) else {}
+        invalid = False
+
+        def count(mapping, name, default=0):
+            nonlocal invalid
+            if name not in mapping:
+                return default
+            value, valid = token_count(mapping[name])
+            invalid |= not valid
+            return value
+
+        primary = ("input_tokens", "output_tokens") if self.provider_type == "anthropic" else ("prompt_tokens", "completion_tokens")
+        known = sum(name in usage for name in primary)
+        status = "reported" if known == 2 else "partial" if known else "not_reported"
+        output_tokens = count(usage, primary[1])
         if self.provider_type == "anthropic":
-            uncached_input = int(usage.get("input_tokens") or 0)
-            output_tokens = int(usage.get("output_tokens") or 0)
-            cache_signal_reported = (
-                "cache_read_input_tokens" in usage
-                or "cache_creation_input_tokens" in usage
-            )
-            cache_read = int(usage.get("cache_read_input_tokens") or 0)
-            cache_write = int(usage.get("cache_creation_input_tokens") or 0)
+            uncached_input = count(usage, "input_tokens")
+            cache_read = count(usage, "cache_read_input_tokens")
+            cache_write = count(usage, "cache_creation_input_tokens")
             input_tokens = uncached_input + cache_read + cache_write
+            cache_signal = "cache_read_input_tokens" in usage or "cache_creation_input_tokens" in usage
         else:
-            details = usage.get("prompt_tokens_details") if isinstance(usage.get("prompt_tokens_details"), dict) else {}
-            input_tokens = int(usage.get("prompt_tokens") or 0)
-            output_tokens = int(usage.get("completion_tokens") or 0)
-            # OpenAI-compatible gateways use both the nested OpenAI field and
-            # the flat Gemini relay fields.  Prefer an explicit flat value,
-            # while retaining compatibility with the older nested contract.
-            flat_cache_read = usage.get("prompt_cache_hit_tokens")
-            flat_cache_miss = usage.get("prompt_cache_miss_tokens")
-            nested_cache_read = details.get("cached_tokens")
-            cache_read_value = flat_cache_read if flat_cache_read is not None else nested_cache_read
-            cache_signal_reported = cache_read_value is not None or flat_cache_miss is not None
-            cache_read = int(cache_read_value or 0)
+            input_tokens = count(usage, "prompt_tokens")
+            details = usage.get("prompt_tokens_details")
+            if details is not None and not isinstance(details, dict):
+                invalid = True
+            details = details if isinstance(details, dict) else {}
+            cache_read = count(usage, "prompt_cache_hit_tokens") if "prompt_cache_hit_tokens" in usage else count(details, "cached_tokens")
             cache_write = 0
-            uncached_input = (
-                max(0, int(flat_cache_miss or 0))
-                if flat_cache_miss is not None
-                else max(0, input_tokens - cache_read)
-            )
-        if cache_signal_reported:
-            cache_status = "supported_hit" if cache_read > 0 else "supported_miss"
-        elif not usage_reported:
-            cache_status = "unknown"
-        elif self.cache_support == "unsupported":
-            cache_status = "unsupported"
-        elif self.cache_support == "supported":
-            cache_status = "supported_miss"
-        else:
-            cache_status = "unknown"
+            cache_signal = any(k in usage for k in ("prompt_cache_hit_tokens", "prompt_cache_miss_tokens")) or "cached_tokens" in details
+            uncached_input = count(usage, "prompt_cache_miss_tokens") if "prompt_cache_miss_tokens" in usage else max(0, input_tokens-cache_read)
+            if cache_read > input_tokens or ("prompt_cache_miss_tokens" in usage and cache_read+uncached_input != input_tokens):
+                invalid = True
+        if invalid:
+            status = "invalid"
+        cache_status = ("supported_hit" if cache_read else "supported_miss") if cache_signal and not invalid else (
+            "unsupported" if usage and self.cache_support == "unsupported" else "unknown"
+        )
         estimated_cost = None
-        if usage_reported and (self.input_cost_per_million or self.output_cost_per_million):
+        if status == "reported" and (self.input_cost_per_million or self.output_cost_per_million):
             estimated_cost = (
                 uncached_input * self.input_cost_per_million
                 + cache_read * self.input_cost_per_million * self.cache_read_cost_multiplier
@@ -995,13 +993,9 @@ class LLMWritingProvider(WritingProvider):
                 + output_tokens * self.output_cost_per_million
             ) / 1_000_000
         return ProviderUsageSnapshot(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cache_read_tokens=cache_read,
-            cache_write_tokens=cache_write,
-            estimated_cost=estimated_cost,
-            usage_status="reported" if usage_reported else "not_reported",
-            cache_status=cache_status,
+            input_tokens=input_tokens, output_tokens=output_tokens,
+            cache_read_tokens=cache_read, cache_write_tokens=cache_write,
+            estimated_cost=estimated_cost, usage_status=status, cache_status=cache_status,
         )
 
     @staticmethod
@@ -1154,7 +1148,22 @@ class LLMWritingProvider(WritingProvider):
             })
         return messages
 
-    def _call_llm(
+    def reset_usage(self):
+        self._thread_state.last_usage = ProviderUsageSnapshot()
+
+    def _call_llm(self, system_prompt, user_prompt, tools=None, tool_results=None) -> LLMCallResult:
+        self.reset_usage()
+        try:
+            return self._call_llm_impl(system_prompt, user_prompt, tools, tool_results)
+        except Exception as error:
+            usage = self.last_usage()
+            if isinstance(error, DomainError):
+                error.details = {**error.details, "usage": usage}
+            else:
+                error.provider_usage = usage
+            raise
+
+    def _call_llm_impl(
         self,
         system_prompt: str,
         user_prompt: str,
@@ -1223,9 +1232,9 @@ class LLMWritingProvider(WritingProvider):
 
         with self._open_with_retry(req) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            validate_completion(data, self.provider_type, allow_tools=bool(tools))
             usage = self._capture_usage(data)
             self._thread_state.last_usage = usage
+            validate_completion(data, self.provider_type, allow_tools=bool(tools))
             if self.provider_type == "anthropic":
                 content_blocks = data.get("content", [])
                 normalized_calls = self._validate_tool_calls(tuple(
@@ -1332,6 +1341,8 @@ class LLMWritingProvider(WritingProvider):
 
     def _provider_failure(self, operation: str, exc: Exception | None = None):
         details = {"operation": operation, "provider": self.provider_type, "model": self.model}
+        if exc is not None and isinstance(getattr(exc, "provider_usage", None), dict):
+            details["usage"] = exc.provider_usage
         failure_kind = "provider_error"
         message = f"模型未能完成{operation}，本次没有回退为模拟结果。"
         if exc is not None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import json
+from contextlib import nullcontext
 from .workspace_access import workspace_operation
 from .errors import DomainError, NotFound
 from .repository import canonical_json, new_id, now, sha256_text
@@ -334,8 +335,10 @@ class AdaptationService:
             # Once dispatched, a failure/timeout may already have consumed provider
             # resources. Keep the attempt charged; do not refund it to zero usage.
             # This bounds logical candidate attempts, not transport-level retries.
-            call = provider._call_llm(system, user) if hasattr(provider, "_call_llm") else None
-            raw_text = call.text if call is not None else provider.generate_scene(context)
+            scope = (payload or {}).get("_usage_scope")
+            with scope() if callable(scope) else nullcontext():
+                call = provider._call_llm(system, user) if hasattr(provider, "_call_llm") else None
+                raw_text = call.text if call is not None else provider.generate_scene(context)
         try:
             structured = json.loads(raw_text)
         except (TypeError, json.JSONDecodeError) as exc:

@@ -2314,20 +2314,9 @@ function sceneProposalRuntimeMarkup(proposal){
   const identity=provider.display_name||provider.model||provider.provider||'Provider 未记录';
   const generatedConfig=provider.config_revision||((provider.settings_version||'')?`model-config-${provider.settings_version}`:'');
   const configDrift=Boolean(generatedConfig&&currentProvider.config_revision&&generatedConfig!==currentProvider.config_revision);
-  const tokens=Number(usage.input_tokens||0)+Number(usage.output_tokens||0);
-  const usageLabel=tokens?` · ${Number(usage.input_tokens||0).toLocaleString()} 输入 / ${Number(usage.output_tokens||0).toLocaleString()} 输出 token`:'';
-  const cache=usage.cache_read_tokens||usage.cache_write_tokens
-    ? ` · 缓存读 ${Number(usage.cache_read_tokens||0).toLocaleString()} / 写 ${Number(usage.cache_write_tokens||0).toLocaleString()}`
-    : '';
-  const cacheStatus=String(usage.cache_status||usage.cache?.status||'').trim();
-  const cacheLabel=cacheStatus?`缓存 ${cacheStatus}`:'缓存未报告';
-  const cost=Number(usage.estimated_cost);
-  const costLabel=Number.isFinite(cost)&&usage.estimated_cost!==null&&usage.estimated_cost!==undefined
-    ? `费用估算 ${cost.toFixed(6)}`
-    : '费用未报告';
   const configLabel=generatedConfig?`生成配置 ${generatedConfig}${configDrift?' · 当前配置已变化':''}`:'';
   const driftNote=configDrift?'<small class="proposal-runtime-note" title="候选固定在生成时配置；当前配置变化不会自动重跑，采纳前仍会校验正文基准版本">候选已固定，不会自动重跑；采纳前校验正文基准版本</small>':'';
-  return `<details class="proposal-runtime-details"><summary>运行详情</summary><div class="proposal-runtime-meta" data-proposal-runtime><span class="${simulation?'is-simulation':'is-live'}">${simulation?'模拟 Provider':'真实 Provider'}</span><span class="proposal-runtime-identity"><small>生成时模型</small>${esc(identity)}</span>${configLabel?`<small class="proposal-runtime-config${configDrift?' is-drifted':''}">${esc(configLabel)}</small>`:''}${driftNote}<small>${run?`运行 ${esc(run.id)}${usageLabel}${cache}`:'运行证据待同步'}</small><small class="proposal-runtime-evidence">${cacheLabel} · ${costLabel}</small></div></details>`;
+  return `<details class="proposal-runtime-details"><summary>运行详情</summary><div class="proposal-runtime-meta" data-proposal-runtime><span class="${simulation?'is-simulation':'is-live'}">${simulation?'模拟 Provider':'真实 Provider'}</span><span class="proposal-runtime-identity"><small>生成时模型</small>${esc(identity)}</span>${configLabel?`<small class="proposal-runtime-config${configDrift?' is-drifted':''}">${esc(configLabel)}</small>`:''}${driftNote}<small>${run?`运行 ${esc(run.id)}`:'运行证据待同步'}</small><small class="proposal-runtime-evidence">${agentUsageMarkup(usage)}</small></div></details>`;
 }
 
 function sceneProposalImpactMarkup(proposal){
@@ -3962,19 +3951,27 @@ function compactTokenCount(value){
 }
 
 function agentUsageMarkup(message={}){
+  const status=message.usage_status||message.content?.provider_usage?.usage_status||'legacy_unknown';
+  const cacheStatus=message.cache_status||message.content?.provider_usage?.cache_status||'unknown';
+  const costStatus=message.cost_status||message.content?.provider_usage?.cost_status||'partial';
+  if(status==='not_reported')return '<span class="agent-usage-empty">用量未报告 · 不代表零消耗</span>';
+  if(status==='invalid')return '<span class="agent-usage-empty">用量格式无效 · 无法可靠估算</span>';
   const input=message.input_tokens,output=message.output_tokens,cacheRead=message.cache_read_tokens,cacheWrite=message.cache_write_tokens,cost=message.estimated_cost;
   const hasUsage=[input,output,cacheRead,cacheWrite,cost].some(value=>value!==null&&value!==undefined);
   if(!hasUsage)return'<span class="agent-usage-empty">用量未返回</span>';
   const parts=[];
+  if(status==='partial'||status==='legacy_unknown')parts.push('<span class="agent-usage-empty">统计不完整</span>');
   if(input!==null&&input!==undefined)parts.push(`<span title="模型输入 Tokens">输入 <b>${esc(compactTokenCount(input))}</b></span>`);
   if(output!==null&&output!==undefined)parts.push(`<span title="模型输出 Tokens">输出 <b>${esc(compactTokenCount(output))}</b></span>`);
-  if(cacheRead!==null&&cacheRead!==undefined){
+  if(cacheStatus==='unknown')parts.push('<span class="agent-usage-empty">缓存状态未知</span>');
+  else if(cacheStatus==='unsupported')parts.push('<span class="agent-usage-empty">不支持缓存</span>');
+  else if(cacheRead!==null&&cacheRead!==undefined){
     const read=Number(cacheRead)||0,total=Number(input)||0;
     const ratio=total>0?Math.round(read/total*100):0;
     parts.push(`<span class="agent-cache ${read>0?'hit':'miss'}" title="缓存读取 ${esc(String(read))} Tokens">${read>0?`缓存命中 <b>${ratio}%</b>`:'缓存未命中'}</span>`);
   }
   if(cacheWrite!==null&&cacheWrite!==undefined&&Number(cacheWrite)>0)parts.push(`<span title="新写入缓存 Tokens">缓存写入 <b>${esc(compactTokenCount(cacheWrite))}</b></span>`);
-  if(cost!==null&&cost!==undefined&&Number.isFinite(Number(cost)))parts.push(`<span title="Provider 返回的估算成本">估算 <b>$${Number(cost).toFixed(Number(cost)<0.01?4:2)}</b></span>`);
+  if(cost!==null&&cost!==undefined&&Number.isFinite(Number(cost)))parts.push(`<span title="按配置单价估算的已记录用量；不覆盖未报告请求">${costStatus==='complete_estimate'?'估算':'已报告部分'} <b>$${Number(cost).toFixed(Number(cost)<0.01?4:2)}</b></span>`);
   return parts.join('');
 }
 
@@ -4051,13 +4048,13 @@ function workAgentToolMarkup(content={},message={}){
   if(status==='failed'){
     const action=agentFailureNeedsRecovery(run)?failureView.action==='settings'?'<button type="button" class="quiet" data-action="settings">打开模型设置</button>':failureView.action==='reload'?'<button type="button" class="quiet" data-agent-reload-work>重新加载工作台</button>':run?`<button type="button" class="quiet" data-agent-retry-run="${esc(run.id)}">重试本轮</button>`:'':'';
     const historyNote=action?'正式资料没有修改，失败输入已经保存。':'这次失败已由后续对话接续；失败输入和运行记录仍可追溯。';
-    return `<section class="agent-failure-card"><span class="agent-failure-mark" aria-hidden="true">错</span><div><b>${esc(failureView.title)}</b><p>${esc(failureView.message)}</p><small>${esc(historyNote)}</small><details class="agent-technical"${failureView.technicalOpen?' open':''}><summary>技术详情</summary><div class="agent-technical-body"><div class="agent-technical-meta"><span>${esc(scopeLabel)}</span><span>${esc(permissionLabel)}</span>${run?.id?`<code>${esc(run.id)}</code>`:''}</div>${reasoningContent}${technicalRows?`<ol class="agent-technical-tools">${technicalRows}</ol>`:''}</div></details></div>${action}</section>`;
+    return `<section class="agent-failure-card"><span class="agent-failure-mark" aria-hidden="true">错</span><div><b>${esc(failureView.title)}</b><p>${esc(failureView.message)}</p><small>${esc(historyNote)}</small><details class="agent-technical"${failureView.technicalOpen?' open':''}><summary>技术详情</summary><div class="agent-technical-body"><div class="agent-usage">${agentUsageMarkup(run?.policy?.usage||message)}</div><div class="agent-technical-meta"><span>${esc(scopeLabel)}</span><span>${esc(permissionLabel)}</span>${run?.id?`<code>${esc(run.id)}</code>`:''}</div>${reasoningContent}${technicalRows?`<ol class="agent-technical-tools">${technicalRows}</ol>`:''}</div></details></div>${action}</section>`;
   }
   const active=['running','queued'].includes(status);
   const elapsed=agentRunElapsedLabel(run);
   const thinkingLabel=active?'正在思考…':`已思考${elapsed?` ${elapsed}`:''}`;
   const publicSummary=reasoning.summary||summary;
-  const technical=technicalRows||run?.id?`<details class="agent-technical"><summary>运行详情</summary><div class="agent-technical-body"><div class="agent-technical-meta"><span>${esc(scopeLabel)}</span><span>${esc(permissionLabel)}</span>${run?.id?`<code>${esc(run.id)}</code>`:''}</div>${technicalRows?`<ol class="agent-technical-tools">${technicalRows}</ol>`:''}</div></details>`:'';
+  const technical=technicalRows||run?.id?`<details class="agent-technical"><summary>运行详情</summary><div class="agent-technical-body"><div class="agent-usage">${agentUsageMarkup(run?.policy?.usage||message)}</div><div class="agent-technical-meta"><span>${esc(scopeLabel)}</span><span>${esc(permissionLabel)}</span>${run?.id?`<code>${esc(run.id)}</code>`:''}</div>${technicalRows?`<ol class="agent-technical-tools">${technicalRows}</ol>`:''}</div></details>`:'';
   return `<details class="agent-thinking" data-status="${esc(status)}"><summary><span class="agent-thinking-indicator" aria-hidden="true"></span><span>${esc(thinkingLabel)}</span><span class="agent-thinking-toggle" aria-hidden="true"></span></summary><div class="agent-thinking-body"><p>${esc(publicSummary)}</p>${technical}</div></details>`;
 }
 

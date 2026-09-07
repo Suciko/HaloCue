@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from .errors import DomainError, NotFound
 from .repository import Repository, canonical_json, sha256_text
+from .provider_usage import normalize_usage
 
 
 SCHEMA_VERSION = "agent-presentation/1.0"
@@ -344,8 +345,8 @@ class AgentPresentationQuery:
                 text = str(content.get("text") or content.get("summary") or "").strip()
                 details = {"role": role, "kind": message.get("kind"), "content": self._safe_content(content)}
                 usage = {key: message.get(key) for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "estimated_cost") if message.get(key) is not None}
-                if usage:
-                    details["usage"] = usage
+                if role == "assistant":
+                    details["usage"] = normalize_usage(content.get("provider_usage") if isinstance(content.get("provider_usage"), dict) else usage)
                 if message.get("archived_at"):
                     details["context_archived"] = True
                 refs = {"thread_id": thread_id, "message_id": message["id"]}

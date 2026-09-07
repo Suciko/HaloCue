@@ -315,6 +315,7 @@ class AdaptationJobs:
                     "_provider_instance": provider,
                     "_expected_provider": identity,
                     "_commit_guard": guard,
+                    "_usage_scope": lambda: self.service._provider_usage_scope(provider, run_id),
                     "_candidate_committed": lambda c, ident: self._finish(c, job, ident),
                 },
             )
