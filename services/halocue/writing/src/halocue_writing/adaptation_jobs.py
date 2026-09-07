@@ -87,6 +87,13 @@ class AdaptationJobs:
         # Reading the public descriptor does not wait for an unrelated model call.
         # The worker verifies this identity against its actual captured provider.
         provider_runtime = self.service.provider.descriptor()
+        if "expected_provider" in payload and (
+            not isinstance(payload["expected_provider"], dict)
+            or canonical_json(payload["expected_provider"]) != canonical_json(provider_runtime)
+        ):
+            raise DomainError(
+                "provider_config_changed", "模型已变化，请重新查看当前模型后确认生成。", status=409
+            )
         if retry_snapshot is not None:
             provider_runtime = retry_snapshot["provider_runtime"]
         agent_id, item_id, attempt_id, job_id = (

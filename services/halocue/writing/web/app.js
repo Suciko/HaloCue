@@ -225,29 +225,62 @@ function renderAapImportDialog(){
   const suggestions=preview?(preview.warnings||preview.repair_suggestions||[]):[];
   const units=preview?(isAap?`${preview.counts.scenes} 场 · ${preview.counts.lines} 行`:`${preview.counts.chapters} 章 · ${preview.counts.scenes} 场 · ${preview.counts.paragraphs} 段`):'';
   const people=preview?(isAap?`${preview.counts.characters} 位角色 · ${preview.counts.backgrounds} 个背景`:`${preview.counts.characters} 位角色 · ${preview.counts.dialogues} 段对白`):'';
-  dialog.innerHTML=`<header><div><p class="eyebrow">导入已有内容</p><h2>先检查，再交给 Agent</h2><p>TXT、DOCX 和 .aap 会先检查结构，再加入当前作品的 Agent 对话。Agent 只会提出剧本候选，正式正文仍需你确认。</p></div><button type="button" class="icon-button" data-aap-close aria-label="关闭导入">×</button></header>
-    <section class="aap-import-file"><label class="aap-import-drop"><input type="file" accept=".txt,text/plain,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.aap,application/json" data-aap-file><b>${flow.filename||'选择 TXT、DOCX 或 .aap'}</b><span>文稿最大 16 MB，AA 工程最大 32 MB</span></label></section>
+  dialog.innerHTML=`<header><div><p class="eyebrow">导入已有内容</p><h2>选择原文或 AA 工程</h2><p>TXT、DOCX 进入原文改编工作台：确认范围后逐章生成、审查并采纳到场景。.aap 保留工程检查与 Agent 转换流程。</p></div><button type="button" class="icon-button" data-aap-close aria-label="关闭导入">×</button></header>
+    <section class="aap-import-file"><label class="aap-import-drop"><input type="file" accept=".txt,text/plain,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.aap,application/json" data-aap-file><b>${esc(flow.filename||'选择 TXT、DOCX 或 .aap')}</b><span>文稿最大 16 MB，AA 工程最大 32 MB</span></label></section>
     ${flow.error?`<p class="aap-import-error" role="alert">${esc(flow.error)}</p>`:''}
     ${preview?`<section class="aap-import-preview" aria-live="polite"><div class="aap-import-summary"><div><span>${isAap?'工程':'文稿'}</span><b>${esc(preview.project_title)}</b></div><div><span>识别到</span><b>${units}</b></div><div><span>${isAap?'角色与资源':'正文内容'}</span><b>${people}</b></div></div><h3>导入前预览</h3><ul class="aap-import-scenes">${(preview.scenes||[]).slice(0,12).map(scene=>`<li><b>${esc(scene.title)}</b><span>${scene.line_count??scene.paragraph_count??0} ${isAap?'行':'段'}</span></li>`).join('')||'<li>没有识别到场景</li>'}</ul>${suggestions.length?`<details class="aap-import-warnings"><summary>${suggestions.length} 项需要确认</summary><ul>${suggestions.map(item=>`<li>${esc(item)}</li>`).join('')}</ul></details>`:'<p class="aap-import-ok">没有发现需要人工补充的结构提示。</p>'}<details class="aap-import-boundary"><summary>导入边界</summary><p>确认后会保留原文件和解析预览，并把文件加入当前 Agent 对话。不会自动发送，也不会静默修改正式作品、正文、资料或发布版本。</p></details></section>`:''}
-    <footer class="aap-import-actions"><button type="button" class="quiet" data-aap-close>取消</button>${preview?`<button type="button" class="primary" data-aap-confirm ${flow.staging?'disabled':''}>${flow.staging?'正在加入 Agent':'交给 Agent 转换'}</button>`:''}</footer>`;
+    <footer class="aap-import-actions"><button type="button" class="quiet" data-open-adaptation>继续原文改编</button><button type="button" class="quiet" data-aap-close>取消</button>${preview?`<button type="button" class="primary" data-aap-confirm ${flow.staging?'disabled':''}>${flow.staging?'正在加入 Agent':'交给 Agent 转换'}</button>`:''}</footer>`;
   if(!dialog.open)dialog.showModal();
 }
 
 async function readAapImportFile(file){
   if(!file)return;
-  aapImportState={filename:file.name,preview:null,error:'',staging:false};
+  const flow={filename:file.name,preview:null,error:'',staging:false};
+  const workId=state.work?.id||null;
+  aapImportState=flow;
+  const current=()=>aapImportState===flow&&(state.work?.id||null)===workId&&aapImportDialog().open;
   renderAapImportDialog();
   try{
     const suffix=file.name.toLowerCase().split('.').pop();
     if(!['aap','txt','docx'].includes(suffix))throw new Error('请选择 TXT、DOCX 或 .aap 文件。');
     const isAap=suffix==='aap';
     if(file.size>(isAap?32000000:16000000))throw new Error(isAap?'.aap 文件不能超过 32 MB。':'文稿不能超过 16 MB。');
-    const payload={filename:file.name,content_base64:characterImportBase64(await file.arrayBuffer())};
-    aapImportState.payload=payload;
-    aapImportState.importKind=isAap?'aap':'story';
-    aapImportState.preview=await api(`/imports/${aapImportState.importKind}:preview`,{method:'POST',body:JSON.stringify(payload)});
-  }catch(error){aapImportState.error=error.message||'无法读取导入文件。'}
-  renderAapImportDialog();
+    const bytes=await file.arrayBuffer();
+    if(!current())return;
+    const payload={filename:file.name,content_base64:characterImportBase64(bytes)};
+    if(!isAap){openAdaptationWorkbench(payload);return;}
+    flow.payload=payload;
+    flow.importKind='aap';
+    const preview=await api('/imports/aap:preview',{method:'POST',body:JSON.stringify(payload)});
+    if(!current())return;
+    flow.preview=preview;
+  }catch(error){if(current())flow.error=error.message||'无法读取导入文件。'}
+  if(current())renderAapImportDialog();
+}
+
+let adaptationWorkbench = null;
+function openAdaptationWorkbench(payload=null){
+  const enter=()=>{
+    if(typeof window.createAdaptationWorkbench!=='function'){toast('改编工作台尚未加载，请刷新页面后重试。',true);return}
+    if(!adaptationWorkbench)adaptationWorkbench=window.createAdaptationWorkbench({
+      api,encode:characterImportBase64,getWork:()=>state.work,
+      guard:action=>state.manuscriptDirty?requestManuscriptNavigation(action):action(),
+      setWork:work=>{state.work=work;state.works=[work,...state.works.filter(item=>item.id!==work.id)];render();},
+      navigate:async(workId,sceneId)=>{
+        if(!workId||state.work?.id!==workId)return;
+        const fresh=await api('/works/'+workId);
+        if(state.work?.id!==workId)return;
+        state.work=fresh;state.surface=sceneId?'writing':'works';state.mobileView='writing';
+        if(sceneId){state.sceneId=sceneId;state.writingChapterId=fresh.chapters.find(ch=>ch.scenes?.some(sc=>sc.id===sceneId))?.id||'';state.stage='draft';}
+        else {state.surface='works';state.stage='overview';state.inspector='agent';state.composerPrefill='请围绕我已导入的原文讨论创作方向，帮助整理一份待确认的故事方案。不要续写未提供的内容，也不要直接修改正式正文。';}
+        render();
+        if(!sceneId){toast('在创作对话中讨论方向，再整理并采纳方案；这里不会自动发送或调用模型。');requestAnimationFrame(()=>document.querySelector('#workConversationForm textarea')?.focus());}
+      },
+    });
+    aapImportDialog().close();aapImportState=null;
+    void adaptationWorkbench.open(payload);
+  };
+  if(state.manuscriptDirty)requestManuscriptNavigation(enter);else enter();
 }
 
 function openAapImportDialog(){aapImportState=null;renderAapImportDialog()}
@@ -299,6 +332,7 @@ async function confirmAapImport(){
 }
 
 window.addEventListener('click',event=>{
+  if(event.target.closest?.('[data-open-adaptation]')){event.preventDefault();event.stopImmediatePropagation();openAdaptationWorkbench();return}
   const open=event.target.closest?.('[data-aap-import],[data-open-import-dialog]');
   if(open){event.preventDefault();event.stopImmediatePropagation();open.closest('details')?.removeAttribute('open');openAapImportDialog();return}
   const close=event.target.closest?.('[data-aap-close]');
@@ -5802,7 +5836,7 @@ function renderWorkAgentComposer(thread, task, proposal){
   const staged=(state.composerAttachmentIds||[]).map(id=>attachments.find(item=>item.id===id)).filter(Boolean);
   const activeRun=workAgentActiveRun(thread);
   const action=activeRun?`<div class="composer-running-actions"><button class="agent-stop-button" type="button" data-agent-cancel-run="${esc(activeRun.id)}" title="停止生成" aria-label="停止生成"><span aria-hidden="true"></span></button><button class="send-button" type="submit">转向</button></div>`:'<button class="send-button" type="submit">发送</button>';
-  return `<form id="workConversationForm" class="conversation-composer work-agent-composer ${activeRun?'is-running':''}">${composerImportMarkup()}<div class="composer-attachments">${staged.map(composerAttachmentMarkup).join('')}</div><label><span class="sr-only">给创作导演发送消息</span><textarea name="text" required placeholder="${activeRun?'补充一条转向要求；提交后会停止当前轮并按新要求继续。':'告诉 Agent 你的想法，或要求它创建人物卡、世界规则和故事方向……'}">${esc(state.composerPrefill||'')}</textarea></label><div class="composer-actions"><div class="composer-tools"><button type="button" class="mobile-thread-trigger composer-thread-trigger" data-mobile-thread-toggle title="查看对话列表" aria-label="查看对话列表"><span class="thread-list-glyph" aria-hidden="true"></span></button><details class="attachment-menu"><summary title="添加附件" aria-label="添加附件">＋</summary><div class="attachment-popover"><button type="button" data-attachment-upload="image"><b>上传图片</b><span>PNG、JPEG、WebP、GIF · 5 MB</span></button><button type="button" data-attachment-upload="document"><b>上传文档</b><span>TXT、Markdown、PDF、DOCX · 10 MB</span></button><button type="button" data-open-import-dialog><b>导入小说 / AAP</b><span>先预览，再交给 Agent 转换</span></button></div></details>${renderPermissionMenu(thread)}${renderConversationAction(task,proposal)}${agentRuntimeBarMarkup(thread)}</div><input id="workAgentImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden><input id="workAgentDocumentInput" type="file" accept=".txt,.md,.pdf,.docx,.aap,text/plain,text/markdown,application/pdf,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>${action}</div></form>`;
+  return `<form id="workConversationForm" class="conversation-composer work-agent-composer ${activeRun?'is-running':''}">${composerImportMarkup()}<div class="composer-attachments">${staged.map(composerAttachmentMarkup).join('')}</div><label><span class="sr-only">给创作导演发送消息</span><textarea name="text" required placeholder="${activeRun?'补充一条转向要求；提交后会停止当前轮并按新要求继续。':'告诉 Agent 你的想法，或要求它创建人物卡、世界规则和故事方向……'}">${esc(state.composerPrefill||'')}</textarea></label><div class="composer-actions"><div class="composer-tools"><button type="button" class="mobile-thread-trigger composer-thread-trigger" data-mobile-thread-toggle title="查看对话列表" aria-label="查看对话列表"><span class="thread-list-glyph" aria-hidden="true"></span></button><details class="attachment-menu"><summary title="添加附件" aria-label="添加附件">＋</summary><div class="attachment-popover"><button type="button" data-attachment-upload="image"><b>上传图片</b><span>PNG、JPEG、WebP、GIF · 5 MB</span></button><button type="button" data-attachment-upload="document"><b>上传文档</b><span>TXT、Markdown、PDF、DOCX · 10 MB</span></button><button type="button" data-open-import-dialog><b>导入小说 / AAP</b><span>小说逐章改编；AAP 保留工程转换</span></button></div></details>${renderPermissionMenu(thread)}${renderConversationAction(task,proposal)}${agentRuntimeBarMarkup(thread)}</div><input id="workAgentImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden><input id="workAgentDocumentInput" type="file" accept=".txt,.md,.pdf,.docx,.aap,text/plain,text/markdown,application/pdf,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>${action}</div></form>`;
 }
 
 function agentPresentationMarkup(){

@@ -99,6 +99,17 @@ class AdaptationService:
             }
             for ch in chapters
         ]
+        # Read-only projection for older candidates whose immutable payload predates
+        # target pinning. The UI must not guess from its display/volume order.
+        with self.repo.connect() as connection:
+            for chapter in item["chapters"]:
+                try:
+                    chapter["resolved_target"] = resolve_target(
+                        connection, item["work_id"], chapter
+                    )
+                except DomainError as error:
+                    chapter["resolved_target"] = None
+                    chapter["target_error"] = {"code": error.code, "message": error.message}
         item["plan_digest"] = sha256_text(canonical_json(item["plan"]))
         return item
 

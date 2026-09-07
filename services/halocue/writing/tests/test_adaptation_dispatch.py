@@ -437,3 +437,27 @@ def test_expired_adaptation_preserves_running_summary_for_queued_sibling(tmp_pat
             "SELECT status FROM production_runs WHERE work_id=? AND kind='creation'", (work["id"],)
         ).fetchone()
     assert run["status"] == "running"
+
+
+def test_enqueue_honors_provider_identity_confirmed_in_ui(tmp_path, monkeypatch):
+    service, work, source, plan = prepared(tmp_path)
+    expected = service.provider.descriptor()
+    replacement = ReplyProvider("not called")
+    replacement.descriptor = lambda: {
+        "kind": "synthetic-real",
+        "is_simulation": False,
+        "config_digest": "changed",
+    }
+    service.provider = replacement
+    monkeypatch.setattr(service.agent_dispatcher, "start", lambda: None)
+    with pytest.raises(DomainError) as rejected:
+        queue(service, work, source, plan, expected_provider=expected)
+    assert rejected.value.code == "provider_config_changed"
+    with service.repo.connect() as c:
+        assert (
+            c.execute(
+                "SELECT COUNT(*) FROM agent_dispatch_jobs WHERE operation='adaptation.chapter.generate'"
+            ).fetchone()[0]
+            == 0
+        )
+    assert replacement.calls == 0

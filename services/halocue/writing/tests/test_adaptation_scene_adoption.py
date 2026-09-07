@@ -412,3 +412,14 @@ def test_explicit_legacy_promotion_is_available_through_http(tmp_path):
         server.server_close()
         thread.join(3)
         service.close()
+
+
+def test_adaptation_detail_exposes_canonical_target_for_legacy_candidate(tmp_path):
+    service, work, source, plan = prepared(tmp_path)
+    generated = candidate(service, source, plan)
+    adopted = service.accept_proposal(
+        work["id"], generated["proposal_id"], {"expected_version": work["version"]}
+    )
+    result = service.adaptations.get(plan["id"])["chapters"][0]
+    assert result["resolved_target"]["scene_id"] == adopted["scene_id"]
+    assert result["resolved_target"]["base_revision_id"] == adopted["revision_id"]
