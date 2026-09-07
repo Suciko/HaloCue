@@ -71,6 +71,7 @@ from .resource_catalog import ResourceCatalog
 from .aap_import import parse_aap_bytes, parse_aap_payload
 from .story_import import extract_document_paragraphs, parse_story_bytes, parse_story_payload
 from .source_catalog import SourceCatalog
+from .adaptation_jobs import AdaptationJobs, OPERATION as ADAPTATION_OPERATION
 from .adaptation import AdaptationService, validate_chapter_candidate
 from .asset_references import source_reference_snapshot
 from .workspace_access import workspace_access, workspace_operation
@@ -95,6 +96,7 @@ class WritingService:
         self.repo = Repository(data_dir)
         self.sources = SourceCatalog(self.repo)
         self.adaptations = AdaptationService(self)
+        self.adaptation_jobs = AdaptationJobs(self)
         self.model_settings = WritingModelSettings(data_dir)
         self.preferences = UserPreferencesStore(data_dir)
         self.ba_skill = BaWritingSkillRegistry()
@@ -134,6 +136,7 @@ class WritingService:
         self.current_projection = CurrentWorkProjection(self.repo)
         self.writing_harness = WritingHarness(self.repo)
         self.agent_presentation = AgentPresentationQuery(self.repo)
+        self.agent_dispatcher.register(ADAPTATION_OPERATION, self.adaptation_jobs.dispatch)
         self.agent_dispatcher.register("conversation.message", self._dispatch_conversation_message)
         self.agent_dispatcher.register("commit.projection", self._dispatch_commit_projection)
         for operation in (
@@ -1597,6 +1600,8 @@ class WritingService:
             if run["status"] not in {"failed", "cancelled"}:
                 raise DomainError("agent_run_not_retryable", "只有失败或已取消的 Agent 运行可以重试。", status=409)
             policy = json.loads(run["policy_json"])
+            if policy.get("workflow") == ADAPTATION_OPERATION:
+                return self.adaptation_jobs.retry(work_id, run, payload)
             if run["scope_type"] == "scene" and policy.get("workflow") in {
                 "scene.candidate.generate", "scene.draft.generate", "scene.draft.rewrite", "scene.review",
             }:

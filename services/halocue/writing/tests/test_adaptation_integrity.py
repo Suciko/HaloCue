@@ -332,10 +332,19 @@ def test_http_candidate_validation_reports_contract_failure_without_acceptance(t
         request = urllib.request.Request(
             url, data=b"{}", headers={"Content-Type": "application/json"}
         )
-        with pytest.raises(urllib.error.HTTPError) as rejected:
-            urllib.request.urlopen(request, timeout=5)
-        assert rejected.value.code == 502
-        assert json.loads(rejected.value.read())["error"]["code"] == "provider_output_invalid"
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 202
+            queued = json.loads(response.read())["data"]
+        import time
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            run = service.get_agent_run(work["id"], queued["agent_run_id"])
+            if run["status"] == "failed":
+                break
+            time.sleep(0.01)
+        assert run["status"] == "failed"
+        assert run["failure"]["code"] == "provider_output_invalid"
+        assert not service.get_work(work["id"])["proposals"]
         assert service.adaptations.get(plan["id"])["chapters"][0]["status"] == "planned"
     finally:
         server.shutdown()

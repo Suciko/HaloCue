@@ -1202,6 +1202,7 @@ class Repository:
             "retryable": True,
         })
         resumable_bound_operations = {
+            "adaptation.chapter.generate",
             "conversation.message",
             "scene.candidate.generate",
             "scene.draft.generate",
@@ -1214,6 +1215,18 @@ class Repository:
             "knowledge.discover",
         }
         with self.transaction() as connection:
+            # The candidate/run transaction may commit just before the worker dies.
+            # Reconcile its durable receipt rather than execute the provider again.
+            connection.execute(
+                """UPDATE agent_dispatch_jobs
+                   SET status='succeeded',lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,
+                       updated_at=?
+                   WHERE operation='adaptation.chapter.generate' AND status='running'
+                     AND lease_expires_at<=? AND cancel_requested_at IS NULL
+                     AND agent_run_id IN (SELECT id FROM agent_runs WHERE status='completed'
+                                          AND proposal_id IS NOT NULL)""",
+                (timestamp, timestamp),
+            )
             expired = connection.execute(
                 """SELECT id,agent_run_id,operation FROM agent_dispatch_jobs
                    WHERE status='running' AND lease_expires_at IS NOT NULL
@@ -1226,6 +1239,8 @@ class Repository:
             ]
             interrupted_ids = [row["id"] for row in interrupted]
             interrupted_run_ids = [row["agent_run_id"] for row in interrupted]
+            adaptation_job_ids = {row["id"] for row in interrupted if row["operation"] == "adaptation.chapter.generate"}
+            adaptation_creation_ids = set()
             for job_id, run_id in zip(interrupted_ids, interrupted_run_ids):
                 connection.execute(
                     """UPDATE agent_dispatch_jobs
@@ -1253,10 +1268,22 @@ class Repository:
                            WHERE id=? AND status IN ('ready','queued','running')""",
                         (interrupted_error, timestamp, item["id"]),
                     )
+                    if job_id in adaptation_job_ids:
+                        adaptation_creation_ids.add(item["run_id"])
                     connection.execute(
                         "UPDATE production_runs SET status='failed',updated_at=? WHERE id=? AND status='running'",
                         (timestamp, item["run_id"]),
                     )
+            # Recompute after all expired siblings transition, independent of row order.
+            for creation_id in adaptation_creation_ids:
+                states = {row[0] for row in connection.execute(
+                    "SELECT status FROM work_items WHERE run_id=?", (creation_id,)
+                )}
+                summary = "running" if states & {"ready", "queued", "running"} else (
+                    "waiting_user" if "waiting_user" in states else "failed"
+                )
+                connection.execute("UPDATE production_runs SET status=?,updated_at=? WHERE id=?",
+                                   (summary, timestamp, creation_id))
             requeued = connection.execute(
                 """UPDATE agent_dispatch_jobs
                    SET status='ready',lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,

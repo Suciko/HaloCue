@@ -327,9 +327,9 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
             if len(parts) == 7 and parts[:3] == ["api", "v1", "works"] and parts[4] == "adaptations" and parts[6] == "plan:approve":
                 return self._json({"ok": True, "data": self.service.adaptations.approve_plan(parts[5], payload)})
             if len(parts) == 7 and parts[:3] == ["api", "v1", "works"] and parts[4] == "adaptations" and parts[6] == "run":
-                return self._json({"ok": True, "data": self.service.adaptations.run(parts[5], payload)}, 202)
+                return self._json({"ok": True, "data": self.service.adaptations.run(parts[5], payload)})
             if len(parts) == 9 and parts[:3] == ["api", "v1", "works"] and parts[4] == "adaptations" and parts[6] == "chapters" and parts[8] == "candidate:generate":
-                return self._json({"ok": True, "data": self.service.adaptations.generate_chapter_candidate(parts[5], parts[7], payload)}, 202)
+                return self._json({"ok": True, "data": self.service.adaptation_jobs.enqueue(parts[3], parts[5], parts[7], payload)}, 202)
             if parts == ["api", "v1", "intent"]:
                 result = self.service.plan_intent(payload)
                 return self._json({"ok": True, "data": result}, 202)

@@ -266,7 +266,7 @@ class AdaptationService:
             character_mapping=item["plan"].get("character_mapping", {}),
             unfinished=source.get("completion_state") != "complete",
         )
-        provider, provider_identity = self.service._capture_provider()
+        provider, provider_identity = self.service._provider_for_request(payload or {})
         context = {
             "source_version": source["id"],
             "chapter": chapter,
@@ -282,45 +282,49 @@ class AdaptationService:
             "adaptation_prompt": system,
             "user_prompt": user,
         }
-        with self.repo.transaction() as c:
-            chapter_row = c.execute(
-                "SELECT id FROM adaptation_chapters WHERE adaptation_id=? AND source_chapter_id=?",
-                (adaptation_id, chapter_id),
-            ).fetchone()
-            if not chapter_row:
-                raise NotFound("adaptation_chapter", chapter_id)
-            scope_id = chapter_row["id"]
-            base_row = c.execute(
-                "SELECT current_revision_id FROM artifacts WHERE work_id=? AND kind='adaptation_manuscript' AND scope_type='adaptation_chapter' AND scope_id=?",
-                (item["work_id"], scope_id),
-            ).fetchone()
-            base_revision_id = base_row["current_revision_id"] if base_row else None
-            current_source = c.execute(
-                "SELECT current_version_id FROM work_sources WHERE work_id=?", (item["work_id"],)
-            ).fetchone()
-            if not current_source or current_source["current_version_id"] != source["id"]:
-                raise DomainError(
-                    "adaptation_inputs_changed",
-                    "原文版本已更新，请基于当前原文重新创建改编任务。",
-                    status=409,
-                )
-            row = c.execute(
-                "SELECT budget_json FROM adaptations WHERE id=?", (adaptation_id,)
-            ).fetchone()
-            budget = json.loads(row[0] or "{}")
-            if int(budget.get("reserved_calls") or 0) >= int(budget.get("max_calls") or 0):
-                raise DomainError(
-                    "adaptation_budget_exhausted", "本次改编任务的调用预算已用尽。", status=409
-                )
-            budget["reserved_calls"] = int(budget.get("reserved_calls") or 0) + 1
-            c.execute(
-                "UPDATE adaptations SET budget_json=?,updated_at=? WHERE id=?",
-                (canonical_json(budget), now(), adaptation_id),
-            )
-        # Once dispatched, a failure/timeout may already have consumed provider
-        # resources. Keep the attempt charged; do not refund it to zero usage.
-        # This bounds logical candidate attempts, not transport-level retries.
         with self.service._provider_lock:
+            with self.repo.transaction() as c:
+                guard = (payload or {}).get("_commit_guard")
+                if callable(guard):
+                    guard(c)
+                chapter_row = c.execute(
+                    "SELECT id FROM adaptation_chapters WHERE adaptation_id=? AND source_chapter_id=?",
+                    (adaptation_id, chapter_id),
+                ).fetchone()
+                if not chapter_row:
+                    raise NotFound("adaptation_chapter", chapter_id)
+                scope_id = chapter_row["id"]
+                base_row = c.execute(
+                    "SELECT current_revision_id FROM artifacts WHERE work_id=? AND kind='adaptation_manuscript' AND scope_type='adaptation_chapter' AND scope_id=?",
+                    (item["work_id"], scope_id),
+                ).fetchone()
+                base_revision_id = base_row["current_revision_id"] if base_row else None
+                current_source = c.execute(
+                    "SELECT current_version_id FROM work_sources WHERE work_id=?",
+                    (item["work_id"],),
+                ).fetchone()
+                if not current_source or current_source["current_version_id"] != source["id"]:
+                    raise DomainError(
+                        "adaptation_inputs_changed",
+                        "原文版本已更新，请基于当前原文重新创建改编任务。",
+                        status=409,
+                    )
+                row = c.execute(
+                    "SELECT budget_json FROM adaptations WHERE id=?", (adaptation_id,)
+                ).fetchone()
+                budget = json.loads(row[0] or "{}")
+                if int(budget.get("reserved_calls") or 0) >= int(budget.get("max_calls") or 0):
+                    raise DomainError(
+                        "adaptation_budget_exhausted", "本次改编任务的调用预算已用尽。", status=409
+                    )
+                budget["reserved_calls"] = int(budget.get("reserved_calls") or 0) + 1
+                c.execute(
+                    "UPDATE adaptations SET budget_json=?,updated_at=? WHERE id=?",
+                    (canonical_json(budget), now(), adaptation_id),
+                )
+            # Once dispatched, a failure/timeout may already have consumed provider
+            # resources. Keep the attempt charged; do not refund it to zero usage.
+            # This bounds logical candidate attempts, not transport-level retries.
             call = provider._call_llm(system, user) if hasattr(provider, "_call_llm") else None
             raw_text = call.text if call is not None else provider.generate_scene(context)
         try:
@@ -347,6 +351,9 @@ class AdaptationService:
             (item["content_digest"] for item in source["chapters"] if item["id"] == chapter_id), ""
         )
         with self.repo.transaction() as c:
+            guard = (payload or {}).get("_commit_guard")
+            if callable(guard):
+                guard(c)
             current_source = c.execute(
                 "SELECT current_version_id FROM work_sources WHERE work_id=?", (item["work_id"],)
             ).fetchone()
@@ -403,6 +410,9 @@ class AdaptationService:
                     None,
                 ),
             )
+            committed = (payload or {}).get("_candidate_committed")
+            if callable(committed):
+                committed(c, candidate_id)
         return {
             "adaptation": self.get(adaptation_id),
             "proposal_id": candidate_id,
