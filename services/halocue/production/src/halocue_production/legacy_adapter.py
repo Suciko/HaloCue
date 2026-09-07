@@ -440,6 +440,12 @@ class Legacy093Adapter:
             if node.kind == "unknown" and str(node.raw).lstrip().startswith("@"):
                 issues.append({"severity": "error", "code": "invalid_directive", "line_no": node.line_no, "message": f"第 {node.line_no} 行的 AA 指令格式无法识别。", "action": "请使用“@指令 参数”的格式后重新检查。"})
 
+        # Share the lossless Pending check with compile_document. Static
+        # preflight has no cast yet; parsed dialogue is its consumption event.
+        from diagnostics import unconsumed_prefix_diagnostics
+
+        issues.extend(unconsumed_prefix_diagnostics(nodes))
+
         if not meaningful:
             format_summary = {"kind": "empty", "label": "空剧本", "confidence": "low", "message": "没有读到可转换内容。请先输入剧本文本。"}
         elif len(dialogue_nodes) >= 2:

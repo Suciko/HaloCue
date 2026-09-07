@@ -586,8 +586,9 @@ def test_source_preflight_explains_structure_without_creating_persistent_work(se
     assert [(item["name"], item["count"]) for item in result["speakers"]] == [("凯伊", 1), ("爱丽丝", 1)]
     assert result["scenes"] == [{"title": "放学后的走廊", "line_no": 1}]
     assert {item["code"] for item in result["directives"]["issues"]} == {
-        "missing_directive_argument", "unknown_directive"
+        "missing_directive_argument", "unknown_directive", "dir.unconsumed"
     }
+    assert [(item["code"], item["line_no"]) for item in result["directives"]["issues"] if item["code"] == "dir.unconsumed"] == [("dir.unconsumed", 4)]
     assert not service.repository.list_runs()
     assert not list((settings.data_dir / "releases").glob("*"))
     service.jobs.close()
