@@ -6,7 +6,7 @@ import os
 import sqlite3
 import tempfile
 import uuid
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -1009,6 +1009,7 @@ class Repository:
             ).fetchone()
             return {"created": True, "job": self._agent_work_row(row)}
 
+    @workspace_operation
     def claim_agent_work(self, *, lease_owner: str, lease_seconds: float = 30) -> dict:
         """Atomically claim the oldest available job; return ``{claimed, job}``."""
         lease_owner = str(lease_owner or "").strip()
@@ -1017,15 +1018,20 @@ class Repository:
         if lease_seconds <= 0:
             raise ValueError("lease_seconds must be positive")
         timestamp = now()
+        candidate_query = """SELECT id FROM agent_dispatch_jobs
+            WHERE status='ready' AND cancel_requested_at IS NULL AND available_at<=?
+            ORDER BY available_at,created_at,id LIMIT 1"""
+        # Idle polls must not compete for SQLite's writer lock. Close this read
+        # connection before claiming; another worker may win after the probe.
+        with closing(self.connect()) as connection:
+            if connection.execute(candidate_query, (timestamp,)).fetchone() is None:
+                return {"claimed": False, "job": None}
+        timestamp = now()
         expires_at = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
         lease_token = uuid.uuid4().hex
         with self.transaction() as connection:
-            row = connection.execute(
-                """SELECT id FROM agent_dispatch_jobs
-                   WHERE status='ready' AND cancel_requested_at IS NULL AND available_at<=?
-                   ORDER BY available_at,created_at,id LIMIT 1""",
-                (timestamp,),
-            ).fetchone()
+            # Only this authoritative query/update awards a lease.
+            row = connection.execute(candidate_query, (timestamp,)).fetchone()
             if not row:
                 return {"claimed": False, "job": None}
             changed = connection.execute(
