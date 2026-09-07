@@ -15,6 +15,7 @@ from pathlib import Path
 from types import ModuleType
 
 from .errors import ProductionError
+from .legacy_module_manifest import FIRST_PARTY_MODULES
 
 CORE_MODULES = (
     "document",
@@ -65,21 +66,44 @@ def _code_root(selected: Path) -> Path:
         return selected
     # The data root can intentionally contain only an asset catalog/AA configuration.
     # Do not insert it on sys.path or claim its version marker identifies loaded code.
-    return _bundled_root()
+    bundled = _bundled_root()
+    if bundled is None:
+        raise ProductionError(
+            "legacy_adapter_unavailable",
+            "数据目录不包含兼容源码，当前安装中也未找到内置实现；请配置完整兼容源码目录后重新启动。",
+            status=503,
+            details={"legacy_root": str(selected)},
+        )
+    return bundled
 
 
-def _bundled_root() -> Path:
+@lru_cache(maxsize=1)
+def _bundled_root() -> Path | None:
     if getattr(sys, "_MEIPASS", None):
         return Path(sys._MEIPASS).resolve()
-    return Path(__file__).resolve().parents[5]
+    # Source checkouts and installed packages have different parent depths.
+    # Find an actual colocated implementation rather than guessing by index.
+    for parent in Path(__file__).resolve().parents:
+        if all(
+            any(path.is_file() for path in _paths(parent, name))
+            for name in ("document", "draft_store", "annotate")
+        ):
+            return parent
+    return None
 
 
 @lru_cache(maxsize=16)
 def _module_names(root: Path) -> frozenset[str]:
     # Include the shipped family too: a file missing from the selected checkout
     # must not silently become a transitive import from the bundled implementation.
-    return frozenset(CORE_MODULES + LAZY_MODULES) | frozenset(
-        path.stem for directory in {root, _bundled_root()} for path in directory.glob("*.py")
+    directories = {root}
+    bundled = _bundled_root()
+    if bundled is not None:
+        directories.add(bundled)
+    return (
+        FIRST_PARTY_MODULES
+        | frozenset(CORE_MODULES + LAZY_MODULES)
+        | frozenset(path.stem for directory in directories for path in directory.glob("*.py"))
     )
 
 

@@ -300,3 +300,54 @@ error = rejected(lambda: capability(legacy_root=a, data_dir=base/'settings'))
 assert error.code == 'legacy_module_origin_mismatch'
 """,
     )
+
+
+def test_explicit_checkout_does_not_require_repository_shaped_package_install(tmp_path):
+    probe(
+        tmp_path,
+        r"""
+from halocue_production import legacy_modules
+a = checkout('a')
+legacy_modules.__file__ = str(Path(base.anchor)/'installed'/'halocue_production'/'legacy_modules.py')
+instance = adapter(a, 'explicit')
+assert instance.document.ORIGIN == 'a'
+assert instance.capabilities()['legacy_adapter']['code_root'] == str(a)
+""",
+    )
+
+
+def test_data_only_selection_without_bundled_code_has_actionable_error(tmp_path):
+    probe(
+        tmp_path,
+        r"""
+from halocue_production import legacy_modules
+data = base/'data-only'; data.mkdir()
+legacy_modules.__file__ = str(Path(base.anchor)/'installed'/'halocue_production'/'legacy_modules.py')
+try:
+    adapter(data, 'no-code')
+except ProductionError as error:
+    assert error.code == 'legacy_adapter_unavailable'
+    assert '源码' in str(error)
+else:
+    raise AssertionError('must not guess an unrelated import search root')
+""",
+    )
+
+
+def test_installed_package_keeps_missing_transitive_family_guard(tmp_path):
+    probe(
+        tmp_path,
+        r"""
+from halocue_production import legacy_modules
+a = checkout('a')
+legacy_modules.__file__ = str(Path(base.anchor)/'installed'/'halocue_production'/'legacy_modules.py')
+(a/'document.py').write_text('import annotation_memory\nORIGIN = "a"\n')
+rejected(lambda: adapter(a, 'explicit'))
+""",
+    )
+
+
+def test_shipped_manifest_covers_root_modules():
+    from halocue_production.legacy_module_manifest import FIRST_PARTY_MODULES
+
+    assert {path.stem for path in ROOT.glob("*.py")} <= FIRST_PARTY_MODULES
