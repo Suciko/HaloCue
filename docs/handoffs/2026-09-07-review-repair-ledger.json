@@ -7,7 +7,8 @@
   "notes": [
     "Statuses are bounded engineering claims, not global AA/provider acceptance.",
     "Full raw reviewer reports remain local; this is an implementation ledger.",
-    "Future features are not automatically required to close the maintenance goal."
+    "Future features are not automatically required to close the maintenance goal.",
+    "Evidence correction: pre-91663f5 synthetic resource indexes did not isolate legacy_root/aa_assets.db. Earlier pass totals are real, but synthetic-only claims were too strong; no before-hash proves the local catalog unchanged. See 2026-09-07-handoff-replay-ui.md. New fixture roots isolate production/integrated data."
   ],
   "items": [
     {
@@ -42,15 +43,15 @@
       "id": "01-005",
       "summary": "生产 run 已落盘但素材回执写入失败时，正常写作重试只查询，不重建缺失回执。",
       "review_severity": "P2",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "91663f5/72f24aa：已有run但缺回执时普通handoff重放冻结输入，补齐后核对；UI提供独立重试/副本状态，保留制作导航。含重启/坏schema/错run/作者引用删除/自定义副本回归；依赖不可用仍明确失败。"
     },
     {
       "id": "01-006",
       "summary": "生产交接幂等检查和创建不是原子操作，并发相同 release 会生成两个 run。",
       "review_severity": "P2",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "91663f5：本地目录内协作调用按上游release的OS文件锁覆盖查重、创建、回执；线程/多实例/Windows进程锁退出测试。非所有制作状态的跨进程安全；锁等待无超时，POSIX未运行验证。"
     },
     {
       "id": "01-007",
@@ -459,11 +460,12 @@
       "note": ""
     }
   ],
-  "latest_verified_code": "12389a254c2effa6b1a383263ef89652c40c67bd",
+  "latest_verified_code": "72f24aa055634ad65faa4fa21336eb453485ca2a",
   "latest_regression": {
-    "passed": 1146,
+    "passed": 1181,
     "real_provider": false,
     "real_AA_playback": false,
-    "source_unchanged": true
+    "source_unchanged": true,
+    "production_data_roots": "isolated test fixtures"
   }
 }

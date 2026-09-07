@@ -145,3 +145,11 @@ Local evidence:
 The next autonomous slice should target `02-001`, `02-003`, `02-004` and the related
 memory-source validation before broadening feature scope. Keep the ledger current and
 retain the known limitations of each accepted fix. Main remains unmerged.
+
+## Test-data isolation correction (2026-09-07)
+
+Later review found that synthetic resource indexes did not isolate the repository
+legacy asset database. Earlier passing counts remain actual results, but claims of
+fully synthetic-only service runs are too strong. No prior hash proves the local
+catalog unchanged. See `2026-09-07-handoff-replay-ui.md` for scope, corrected fixtures
+and the1181-test unchanged-commit regression. No real AA playback was performed.

@@ -103,3 +103,11 @@ Next-slice independent synthetic probes already reproduced 01-006 (four failures
 two unrelated-release successes) and 01-005 (two failures before/after restart).
 They do not change this commit's verification scope; the required repairs remain
 open. See the next handoff-replay plan. The whole autonomous goal is not complete.
+
+## Test-data isolation correction (2026-09-07)
+
+Later review found that synthetic resource indexes did not isolate the repository
+legacy asset database. Earlier passing counts remain actual results, but claims of
+fully synthetic-only service runs are too strong. No prior hash proves the local
+catalog unchanged. See `2026-09-07-handoff-replay-ui.md` for scope, corrected fixtures
+and the1181-test unchanged-commit regression. No real AA playback was performed.

@@ -77,3 +77,11 @@ Maintainer-local evidence under the workspace-level `output/autonomous-20260907/
 `verified-regression-45b58bc.log`, `verified-regression-45b58bc.json`, and
 `adaptation-memory-lint.json`. These are not collaborator prerequisites; the exact
 reproduction command and stable commit above are authoritative shared references.
+
+## Test-data isolation correction (2026-09-07)
+
+Later review found that synthetic resource indexes did not isolate the repository
+legacy asset database. Earlier passing counts remain actual results, but claims of
+fully synthetic-only service runs are too strong. No prior hash proves the local
+catalog unchanged. See `2026-09-07-handoff-replay-ui.md` for scope, corrected fixtures
+and the1181-test unchanged-commit regression. No real AA playback was performed.

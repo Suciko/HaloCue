@@ -90,3 +90,8 @@ A small public-template-method split is preferable to double locking: base
 create_run obtains the identity guard and dispatches to self._create_run; integrated
 moves its override to _create_run and calls super()._create_run. That spans both
 stages without recursively reacquiring an OS file lock.
+
+## Executed
+
+Implemented in91663f5/72f24aa. Backend/UI scoped reviews and1181-test unchanged-commit
+regression accepted; evidence and limits in `docs/handoffs/2026-09-07-handoff-replay-ui.md`.
