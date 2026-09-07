@@ -115,7 +115,7 @@
       "summary": "改编候选绕过持久 AgentDispatcher，同步 HTTP 调用结束才返回 202；没有逐次执行身份/取消恢复，异常统一退回调用计数。",
       "review_severity": "P2",
       "status": "partial_or_mitigated",
-      "note": "45b58bc：失败不退还已派发逻辑候选次数；持久Agent身份、异步HTTP、取消/恢复尚未实现。"
+      "note": "6076ac0：章节HTTP202接入持久AgentDispatcher/AgentRun/任务尝试，固定输入与严格模型身份，取消/租约/原文计划正文漂移围栏，重启明确重试与已提交回执恢复，正常与恢复摘要保持活跃同级任务。逻辑失败调用不退还，完整usage/物理重试统计及输入限制仍待后续。1832项固定源码回归通过；02-007UI/正式场景链仍未完成。"
     },
     {
       "id": "02-006",
@@ -129,7 +129,7 @@
       "summary": "普通导入入口走附件/聊天分支，专用改编 API 未接到现有按钮；采纳的 adaptation_manuscript 也没有进入冻结发布所消费的场景正文链。",
       "review_severity": "P1",
       "status": "pending",
-      "note": ""
+      "note": "普通导入UI及adaptation→正式scene_script→发布仍待实现；6076ac0仅完成持久章节执行。下一步详见2026-09-07-adaptation-scene-adoption计划，不能凭202或单独artifact采纳接口宣称链路已闭合。"
     },
     {
       "id": "02-008",

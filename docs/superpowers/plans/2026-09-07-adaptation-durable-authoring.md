@@ -92,3 +92,13 @@ then fixed-source broad regression. SliceA alone leaves02-007 pending. Final clo
 requires one synthetic browser/API-to-frozen-release-to-Production vertical trace,
 not only fake state handlers or a collection of separately passing endpoint tests.
 Unknown real literary/AA playback quality and provider behavior stay explicit.
+
+
+## Slice A implementation record
+
+6076ac0 implements durable queued chapter generation and local-coverage HTTP semantics.
+Scoped review findings (simulation→real replacement, retry dedup race, recovery sibling
+summary) are corrected.22 new cases plus existing broad suite:1832passed717.12s on
+unchanged source. Physical usage/input limits remain separate incomplete findings;
+no complete accounting claim. SliceB/C remain unimplemented. Detailed next plan:
+`2026-09-07-adaptation-scene-adoption.md`. Handoff: durable-dispatch document.
