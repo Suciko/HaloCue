@@ -210,6 +210,9 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
                         limit=query.get("limit", [8])[0],
                     ),
                 })
+            if len(parts) == 7 and parts[:3] == ["api", "v1", "works"] and parts[4] == "agent-runs" and parts[6] == "requests":
+                query = parse_qs(urlparse(self.path).query)
+                return self._json({"ok": True, "data": self.service.request_ledger.for_run(parts[3], parts[5], after_id=query.get("after", [None])[0])})
             if len(parts) == 6 and parts[:3] == ["api", "v1", "works"] and parts[4] == "agent-runs":
                 return self._json({"ok": True, "data": self.service.get_agent_run(parts[3], parts[5])})
             if len(parts) == 7 and parts[:3] == ["api", "v1", "works"] and parts[4] == "threads" and parts[6] == "agent-presentation":

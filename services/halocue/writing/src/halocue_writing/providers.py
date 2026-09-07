@@ -3,6 +3,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import json
+import io
+import uuid
+from contextlib import contextmanager
 import re
 import socket
 import threading
@@ -1148,20 +1151,67 @@ class LLMWritingProvider(WritingProvider):
             })
         return messages
 
+    @contextmanager
+    def observe_requests(self, observer):
+        previous = getattr(self._thread_state, "request_observer", None)
+        self._thread_state.request_observer = observer
+        try:
+            yield
+        finally:
+            self._thread_state.request_observer = previous
+
     def reset_usage(self):
         self._thread_state.last_usage = ProviderUsageSnapshot()
 
+    def _finish_physical_attempt(self, status, error=None, usage=None):
+        frame = getattr(self._thread_state, "request_frame", None)
+        event = frame.get("active") if frame else None
+        if event is None:
+            return
+        # Freeze the original terminal outcome before delivery. Observer retries
+        # must not turn a successful HTTP response into a failed transport record.
+        if "terminal" not in frame:
+            code = str(getattr(error, "code", type(error).__name__)) if error is not None else None
+            frame["terminal"] = {"phase":"finished", "id":event["id"], "status":status,
+                                 "usage":usage if usage is not None else self.last_usage(), "error_code":code}
+        terminal = frame["terminal"]
+        observer = getattr(self._thread_state, "request_observer", None)
+        if observer:
+            for delivery in range(2):
+                try:
+                    observer(dict(terminal))
+                    break
+                except Exception as cause:
+                    if delivery == 0 and not isinstance(cause, DomainError):
+                        continue  # Replay the receipt only, never the network request.
+                    failure = DomainError("request_accounting_unavailable", "请求已执行，但用量记录暂未确认；请刷新记录，不要盲目重发。", status=503)
+                    failure.pending_request_record = dict(terminal)
+                    failure.provider_usage = terminal["usage"]
+                    raise failure from cause
+        frame.pop("active", None)
+        frame.pop("terminal", None)
+
     def _call_llm(self, system_prompt, user_prompt, tools=None, tool_results=None) -> LLMCallResult:
         self.reset_usage()
+        previous = getattr(self._thread_state, "request_frame", None)
+        self._thread_state.request_frame = {"logical_id":"logical-"+uuid.uuid4().hex, "ordinal":0}
         try:
-            return self._call_llm_impl(system_prompt, user_prompt, tools, tool_results)
-        except Exception as error:
-            usage = self.last_usage()
-            if isinstance(error, DomainError):
-                error.details = {**error.details, "usage": usage}
+            try:
+                result = self._call_llm_impl(system_prompt, user_prompt, tools, tool_results)
+            except Exception as error:
+                usage = self.last_usage()
+                if not hasattr(error, "pending_request_record"):
+                    self._finish_physical_attempt("rejected" if isinstance(error, DomainError) else "failed", error, usage)
+                if isinstance(error, DomainError):
+                    error.details = {**error.details, "usage": usage}
+                else:
+                    error.provider_usage = usage
+                raise
             else:
-                error.provider_usage = usage
-            raise
+                self._finish_physical_attempt("succeeded", usage=result.usage.as_dict())
+                return result
+        finally:
+            self._thread_state.request_frame = previous
 
     def _call_llm_impl(
         self,
@@ -1329,11 +1379,42 @@ class LLMWritingProvider(WritingProvider):
         return isinstance(exc, (TimeoutError, socket.timeout))
 
     def _open_with_retry(self, request: urllib.request.Request):
-        """Retry only failures that can plausibly succeed without user action."""
+        """Persist an intent for each actual transport attempt, including retries."""
         for attempt in range(self.request_attempts):
+            frame = getattr(self._thread_state, "request_frame", None)
+            observer = getattr(self._thread_state, "request_observer", None)
+            self.reset_usage()
+            if frame is not None:
+                frame["ordinal"] += 1
+                event = {"phase":"started", "id":"request-"+uuid.uuid4().hex,
+                         "logical_id":frame["logical_id"], "ordinal":frame["ordinal"],
+                         "provider":self.descriptor()}
+                if observer:
+                    observer(event)  # Fail closed before sending if the intent cannot persist.
+                frame["active"] = event
             try:
                 return urllib.request.urlopen(request, timeout=self.timeout)
             except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+                if isinstance(exc, urllib.error.HTTPError):
+                    # Preserve bounded diagnostic bytes for the existing error formatter;
+                    # the ledger receives only parsed usage and a status code, not this body.
+                    body = b""
+                    try:
+                        body = exc.read(65537)
+                    except Exception:
+                        pass  # Diagnostic IO must not replace the original HTTP status.
+                    finally:
+                        try:
+                            exc.close()
+                        except Exception:
+                            pass
+                    try:
+                        if len(body) <= 65536:
+                            self._thread_state.last_usage = self._capture_usage(json.loads(body.decode("utf-8")))
+                    except (ValueError, TypeError):
+                        pass  # Keep bounded raw bytes for the existing diagnostic formatter.
+                    exc.read = io.BytesIO(body[:65536]).read
+                self._finish_physical_attempt("failed", exc)
                 if not self._is_transient_request_error(exc) or attempt + 1 >= self.request_attempts:
                     raise
                 time.sleep(self._retry_delay(exc, attempt))

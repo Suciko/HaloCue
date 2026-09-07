@@ -432,6 +432,8 @@ class Repository:
         connection = self.connect()
         try:
             connection.executescript(schema)
+            from .request_ledger import SCHEMA as REQUEST_SCHEMA
+            connection.executescript(REQUEST_SCHEMA)
             self._migrate_domain_schema(connection)
             connection.commit()
         finally:

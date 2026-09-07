@@ -127,3 +127,57 @@ def test_live_failed_conversation_details_do_not_report_zero_consumption():
     )
     assert "技术详情" in result.stdout
     assert "不代表零消耗" in result.stdout
+
+
+def test_live_details_prefer_physical_retry_summary_to_last_response():
+    source = (Path(__file__).resolve().parents[1] / "web/app.js").read_text(encoding="utf-8")
+    helpers = source[
+        source.index("function compactTokenCount(") : source.index(
+            "function agentRuntimeBarMarkup("
+        )
+    ]
+    renderer = source[
+        source.index("function sceneProposalRuntimeMarkup(") : source.index(
+            "function sceneProposalImpactMarkup("
+        )
+    ]
+    observed = {
+        "physical_request_count": 2,
+        "logical_request_count": 1,
+        "unknown_usage_count": 1,
+        "pending_count": 0,
+        "totals": {
+            "input_tokens": 10,
+            "output_tokens": 2,
+            "estimated_cost": 0.01,
+            "usage_status": "partial",
+            "cost_status": "partial",
+            "cache_status": "unknown",
+        },
+    }
+    run = {
+        "id": "run",
+        "proposal_id": "proposal",
+        "policy": {
+            "usage": {
+                "estimated_cost": 0.01,
+                "usage_status": "reported",
+                "cost_status": "complete_estimate",
+            }
+        },
+        "request_usage": observed,
+    }
+    script = (
+        "const esc=String;const state="
+        + json.dumps({"work": {"agent_runs": [run]}, "capabilities": {"providers": []}})
+        + ";"
+        + helpers
+        + renderer
+        + "console.log(sceneProposalRuntimeMarkup({id:'proposal'}));"
+    )
+    result = subprocess.run(
+        ["node", "-e", script], capture_output=True, text=True, encoding="utf-8", check=True
+    )
+    assert "HTTP 请求 2" in result.stdout
+    assert "1 次未报告用量" in result.stdout
+    assert "已报告部分" in result.stdout

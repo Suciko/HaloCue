@@ -13,7 +13,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from xml.etree import ElementTree
@@ -31,6 +31,7 @@ from .memory_store import (
 from .official_reference_catalog import OfficialReferenceCatalog
 from .providers import FakeWritingProvider, make_writing_provider
 from .provider_usage import normalize_usage, merge_usage
+from .request_ledger import RequestLedger
 from .agent_tools import AgentToolRegistry, ToolExecutionContext
 from .document_context import index_attachment, normalize_text, retrieve_context
 from .conversation_summary import (
@@ -96,6 +97,8 @@ class WritingService:
 
     def _initialize(self, data_dir, production_url, official_corpus_dir):
         self.repo = Repository(data_dir)
+        self.request_ledger = RequestLedger(self.repo)
+        self.request_ledger.recover_interrupted()
         self.sources = SourceCatalog(self.repo)
         self.adaptations = AdaptationService(self)
         self.adaptation_jobs = AdaptationJobs(self)
@@ -616,13 +619,14 @@ class WritingService:
             if not connection.execute("SELECT 1 FROM works WHERE id=?", (work_id,)).fetchone():
                 raise NotFound("work", work_id)
             policies = connection.execute(
-                "SELECT policy_json FROM agent_runs WHERE work_id=?",
+                "SELECT id,policy_json FROM agent_runs WHERE work_id=?",
                 (work_id,),
             ).fetchall()
             statuses = self.repo.rows(connection.execute(
                 "SELECT status,COUNT(*) AS count FROM agent_runs WHERE work_id=? GROUP BY status ORDER BY status",
                 (work_id,),
             ))
+            request_summaries = self.request_ledger.summaries(connection, work_id)
         total = {}
         unknown_usage_count = 0
         priced_run_count = 0
@@ -631,7 +635,8 @@ class WritingService:
                 policy = json.loads(row["policy_json"] or "{}")
             except json.JSONDecodeError:
                 policy = {}
-            usage = normalize_usage(policy.get("usage") if isinstance(policy, dict) else {})
+            observed = request_summaries.get(row["id"])
+            usage = observed["totals"] if observed else normalize_usage(policy.get("usage") if isinstance(policy, dict) else {})
             if usage["usage_status"] != "reported":
                 unknown_usage_count += 1
             if usage["estimated_cost"] is not None:
@@ -649,7 +654,12 @@ class WritingService:
             "cost_available": priced_run_count > 0,
             "unknown_usage_run_count": unknown_usage_count,
             "priced_run_count": priced_run_count,
-            "accounting_scope": "recorded_logical_calls",
+            "physical_request_count": sum(v["physical_request_count"] for v in request_summaries.values()),
+            "logical_request_count": sum(v["logical_request_count"] for v in request_summaries.values()),
+            "unknown_physical_request_count": sum(v["unknown_usage_count"] for v in request_summaries.values()),
+            "pending_physical_request_count": sum(v["pending_count"] for v in request_summaries.values()),
+            "untracked_run_count": len(policies) - len(request_summaries),
+            "accounting_scope": "writing_http_attempts_plus_legacy_summaries" if request_summaries else "recorded_logical_calls",
             "runs_by_status": {item["status"]: item["count"] for item in statuses},
             "currency": "USD", "cost_is_estimate": True,
         }
@@ -671,6 +681,7 @@ class WritingService:
             for call in run["tool_calls"]:
                 call["error"] = json.loads(call.pop("error_json")) if call.get("error_json") else None
             run["timeline"] = self._agent_run_timeline(connection, run, run["tool_calls"])
+        run["request_usage"] = self.request_ledger.for_run(work_id, run_id)["summary"]
         return run
 
     @workspace_operation
@@ -3109,8 +3120,12 @@ class WritingService:
         if callable(reset):
             reset()
         failure = None
+        observe = getattr(provider, "observe_requests", None)
+        def observer(event):
+            return self.request_ledger.observe(run_id, event)
         try:
-            yield
+            with observe(observer) if callable(observe) else nullcontext():
+                yield
         except Exception as error:
             failure = error
             raise
@@ -3127,6 +3142,9 @@ class WritingService:
                     if row:
                         policy = json.loads(row["policy_json"] or "{}")
                         policy["usage"] = merge_usage(policy.get("usage") or {}, usage)
+                        pending = getattr(failure, "pending_request_record", None)
+                        if isinstance(pending, dict):
+                            policy.setdefault("pending_request_records", {})[pending["id"]] = pending
                         connection.execute("UPDATE agent_runs SET policy_json=? WHERE id=?", (canonical_json(policy), run_id))
             except Exception:
                 if failure is None:
@@ -3744,7 +3762,9 @@ class WritingService:
                         "SELECT * FROM job_attempts WHERE work_item_id=? ORDER BY ordinal", (item["id"],)
                     ))
             work["agent_runs"] = self.repo.rows(connection.execute("SELECT * FROM agent_runs WHERE work_id=? ORDER BY created_at DESC", (work_id,)))
+            request_summaries = self.request_ledger.summaries(connection, work_id)
             for agent_run in work["agent_runs"]:
+                agent_run["request_usage"] = request_summaries.get(agent_run["id"])
                 agent_run["policy"] = json.loads(agent_run.pop("policy_json"))
                 agent_run["failure"] = json.loads(agent_run.pop("failure_json")) if agent_run.get("failure_json") else None
                 agent_run["tool_calls"] = self.repo.rows(connection.execute("SELECT * FROM agent_tool_calls WHERE agent_run_id=? ORDER BY ordinal", (agent_run["id"],)))
@@ -5067,7 +5087,7 @@ class WritingService:
         with self._authorized_agent_result_transaction(
             run_id, work_id, thread_id, policy_snapshot
         ) as connection:
-            current_run = connection.execute("SELECT status FROM agent_runs WHERE id=?", (run_id,)).fetchone()
+            current_run = connection.execute("SELECT status,policy_json FROM agent_runs WHERE id=?", (run_id,)).fetchone()
             if not current_run:
                 raise DomainError("agent_run_missing", "Agent 运行记录不存在。", status=409)
             if current_run["status"] != "running":
@@ -5095,6 +5115,7 @@ class WritingService:
                 (
                     run_status,
                     canonical_json({
+                        **json.loads(current_run["policy_json"] or "{}"),
                         "mode": thread_snapshot["permission_mode"], "phase": thread_snapshot["phase"],
                         "thread_id": thread_id,
                         "task_id": task_contract.get("id"), "write_boundary": "proposal_only",

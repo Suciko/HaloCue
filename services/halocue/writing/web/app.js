@@ -2309,14 +2309,14 @@ function sceneProposalRuntimeMarkup(proposal){
   const run=(state.work?.agent_runs||[]).find(item=>item.proposal_id===proposal?.id);
   const provider=proposal?.provider||run?.policy?.provider_runtime||{};
   const currentProvider=state.capabilities?.providers?.[0]||{};
-  const usage=run?.policy?.usage||{};
+  const usage=agentObservedUsage(run);
   const simulation=Boolean(provider.is_simulation);
   const identity=provider.display_name||provider.model||provider.provider||'Provider 未记录';
   const generatedConfig=provider.config_revision||((provider.settings_version||'')?`model-config-${provider.settings_version}`:'');
   const configDrift=Boolean(generatedConfig&&currentProvider.config_revision&&generatedConfig!==currentProvider.config_revision);
   const configLabel=generatedConfig?`生成配置 ${generatedConfig}${configDrift?' · 当前配置已变化':''}`:'';
   const driftNote=configDrift?'<small class="proposal-runtime-note" title="候选固定在生成时配置；当前配置变化不会自动重跑，采纳前仍会校验正文基准版本">候选已固定，不会自动重跑；采纳前校验正文基准版本</small>':'';
-  return `<details class="proposal-runtime-details"><summary>运行详情</summary><div class="proposal-runtime-meta" data-proposal-runtime><span class="${simulation?'is-simulation':'is-live'}">${simulation?'模拟 Provider':'真实 Provider'}</span><span class="proposal-runtime-identity"><small>生成时模型</small>${esc(identity)}</span>${configLabel?`<small class="proposal-runtime-config${configDrift?' is-drifted':''}">${esc(configLabel)}</small>`:''}${driftNote}<small>${run?`运行 ${esc(run.id)}`:'运行证据待同步'}</small><small class="proposal-runtime-evidence">${agentUsageMarkup(usage)}</small></div></details>`;
+  return `<details class="proposal-runtime-details"><summary>运行详情</summary><div class="proposal-runtime-meta" data-proposal-runtime><span class="${simulation?'is-simulation':'is-live'}">${simulation?'模拟 Provider':'真实 Provider'}</span><span class="proposal-runtime-identity"><small>生成时模型</small>${esc(identity)}</span>${configLabel?`<small class="proposal-runtime-config${configDrift?' is-drifted':''}">${esc(configLabel)}</small>`:''}${driftNote}<small>${run?`运行 ${esc(run.id)}`:'运行证据待同步'}</small><small class="proposal-runtime-evidence">${agentUsageMarkup(usage)}</small>${agentRequestUsageMarkup(run)}</div></details>`;
 }
 
 function sceneProposalImpactMarkup(proposal){
@@ -3950,6 +3950,15 @@ function compactTokenCount(value){
   return String(count);
 }
 
+function agentRequestUsageMarkup(run){
+  const ledger=run?.request_usage;
+  if(!ledger?.physical_request_count)return '<small class="agent-usage-empty">物理请求未记录；旧版或独立调用的覆盖范围未知</small>';
+  return `<small class="agent-request-coverage">HTTP 请求 ${esc(ledger.physical_request_count)} · 逻辑请求 ${esc(ledger.logical_request_count)} · ${esc(ledger.unknown_usage_count)} 次未报告用量${ledger.pending_count?` · ${esc(ledger.pending_count)} 次仍在等待结果或记录确认`:''}${ledger.pending_receipt_count?` · ${esc(ledger.pending_receipt_count)} 份已收到的结果待同步记录`:""}。仅覆盖已接入的写作请求。</small>`;
+}
+function agentObservedUsage(run,fallback={}){
+  return run?.request_usage?.physical_request_count?run.request_usage.totals:(run?.policy?.usage||fallback);
+}
+
 function agentUsageMarkup(message={}){
   const status=message.usage_status||message.content?.provider_usage?.usage_status||'legacy_unknown';
   const cacheStatus=message.cache_status||message.content?.provider_usage?.cache_status||'unknown';
@@ -4048,13 +4057,13 @@ function workAgentToolMarkup(content={},message={}){
   if(status==='failed'){
     const action=agentFailureNeedsRecovery(run)?failureView.action==='settings'?'<button type="button" class="quiet" data-action="settings">打开模型设置</button>':failureView.action==='reload'?'<button type="button" class="quiet" data-agent-reload-work>重新加载工作台</button>':run?`<button type="button" class="quiet" data-agent-retry-run="${esc(run.id)}">重试本轮</button>`:'':'';
     const historyNote=action?'正式资料没有修改，失败输入已经保存。':'这次失败已由后续对话接续；失败输入和运行记录仍可追溯。';
-    return `<section class="agent-failure-card"><span class="agent-failure-mark" aria-hidden="true">错</span><div><b>${esc(failureView.title)}</b><p>${esc(failureView.message)}</p><small>${esc(historyNote)}</small><details class="agent-technical"${failureView.technicalOpen?' open':''}><summary>技术详情</summary><div class="agent-technical-body"><div class="agent-usage">${agentUsageMarkup(run?.policy?.usage||message)}</div><div class="agent-technical-meta"><span>${esc(scopeLabel)}</span><span>${esc(permissionLabel)}</span>${run?.id?`<code>${esc(run.id)}</code>`:''}</div>${reasoningContent}${technicalRows?`<ol class="agent-technical-tools">${technicalRows}</ol>`:''}</div></details></div>${action}</section>`;
+    return `<section class="agent-failure-card"><span class="agent-failure-mark" aria-hidden="true">错</span><div><b>${esc(failureView.title)}</b><p>${esc(failureView.message)}</p><small>${esc(historyNote)}</small><details class="agent-technical"${failureView.technicalOpen?' open':''}><summary>技术详情</summary><div class="agent-technical-body"><div class="agent-usage">${agentUsageMarkup(agentObservedUsage(run,message))}${agentRequestUsageMarkup(run)}</div><div class="agent-technical-meta"><span>${esc(scopeLabel)}</span><span>${esc(permissionLabel)}</span>${run?.id?`<code>${esc(run.id)}</code>`:''}</div>${reasoningContent}${technicalRows?`<ol class="agent-technical-tools">${technicalRows}</ol>`:''}</div></details></div>${action}</section>`;
   }
   const active=['running','queued'].includes(status);
   const elapsed=agentRunElapsedLabel(run);
   const thinkingLabel=active?'正在思考…':`已思考${elapsed?` ${elapsed}`:''}`;
   const publicSummary=reasoning.summary||summary;
-  const technical=technicalRows||run?.id?`<details class="agent-technical"><summary>运行详情</summary><div class="agent-technical-body"><div class="agent-usage">${agentUsageMarkup(run?.policy?.usage||message)}</div><div class="agent-technical-meta"><span>${esc(scopeLabel)}</span><span>${esc(permissionLabel)}</span>${run?.id?`<code>${esc(run.id)}</code>`:''}</div>${technicalRows?`<ol class="agent-technical-tools">${technicalRows}</ol>`:''}</div></details>`:'';
+  const technical=technicalRows||run?.id?`<details class="agent-technical"><summary>运行详情</summary><div class="agent-technical-body"><div class="agent-usage">${agentUsageMarkup(agentObservedUsage(run,message))}${agentRequestUsageMarkup(run)}</div><div class="agent-technical-meta"><span>${esc(scopeLabel)}</span><span>${esc(permissionLabel)}</span>${run?.id?`<code>${esc(run.id)}</code>`:''}</div>${technicalRows?`<ol class="agent-technical-tools">${technicalRows}</ol>`:''}</div></details>`:'';
   return `<details class="agent-thinking" data-status="${esc(status)}"><summary><span class="agent-thinking-indicator" aria-hidden="true"></span><span>${esc(thinkingLabel)}</span><span class="agent-thinking-toggle" aria-hidden="true"></span></summary><div class="agent-thinking-body"><p>${esc(publicSummary)}</p>${technical}</div></details>`;
 }
 
