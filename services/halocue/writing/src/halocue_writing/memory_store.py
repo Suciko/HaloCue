@@ -109,7 +109,7 @@ def validate_provider_knowledge_suggestions(
     return suggestions
 
 
-def validate_provider_memory_bundle(value: dict, *, scene_id: str) -> dict:
+def validate_provider_memory_bundle(value: dict, *, scene_id: str, scene_block_ids: set[str] | None = None) -> dict:
     if not isinstance(value, dict):
         raise DomainError("provider_output_invalid", "模型返回的长期记忆候选不是对象。", status=502)
     raw_items = value.get("items")
@@ -158,6 +158,15 @@ def validate_provider_memory_bundle(value: dict, *, scene_id: str) -> dict:
             str(item).strip() for item in raw.get("source_block_ids", [])
             if str(item).strip()
         ] if isinstance(raw.get("source_block_ids"), list) else []
+        if scene_block_ids is not None:
+            raw_ids = raw.get("source_block_ids")
+            if (not isinstance(raw_ids, list) or not raw_ids
+                    or any(not isinstance(block_id, str) or not block_id.strip() for block_id in raw_ids)
+                    or not set(source_block_ids).issubset(scene_block_ids)):
+                raise DomainError(
+                    "provider_output_invalid", "长期记忆必须引用固定场景修订中存在的正文块。",
+                    status=502, details={"index": index, "scene_id": scene_id, "field": "source_block_ids"},
+                )
         items.append({
             "kind": kind,
             "operation": operation,

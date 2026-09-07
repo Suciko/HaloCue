@@ -652,6 +652,17 @@ class FakeWritingProvider(WritingProvider):
         }
 
     def generate_scene(self, context: dict) -> str:
+        if "adaptation_prompt" in context:
+            chapter = context["chapter"]
+            return json.dumps({
+                "schema_version": "adaptation-chapter/1.0",
+                "text": "旁白: 以下内容仅为合成流程测试。\n" + "\n".join(
+                    "旁白: " + item["text"] for item in chapter["paragraphs"]
+                ),
+                "source_refs": [{"paragraph_id": item["id"], "quote": item["text"][:160]}
+                                for item in chapter["paragraphs"]],
+                "deviations": [], "open_threads": [],
+            }, ensure_ascii=False)
         contract = context["scene_contract"]
         characters = [card.get("name") for card in context.get("runtime_character_cards", []) if card.get("name")]
         if not characters:

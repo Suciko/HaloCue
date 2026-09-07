@@ -71,7 +71,7 @@ from .resource_catalog import ResourceCatalog
 from .aap_import import parse_aap_bytes, parse_aap_payload
 from .story_import import extract_document_paragraphs, parse_story_bytes, parse_story_payload
 from .source_catalog import SourceCatalog
-from .adaptation import AdaptationService
+from .adaptation import AdaptationService, validate_chapter_candidate
 from .workspace_access import workspace_access, workspace_operation
 
 
@@ -12305,7 +12305,14 @@ class WritingService:
             source_revision = connection.execute(
                 "SELECT * FROM revisions WHERE id=?", (scene["current_revision_id"],)
             ).fetchone()
-            manuscript = json.loads(self.repo.read_text(source_revision["content_uri"]))
+            manuscript = self._verified_revision_content(source_revision, artifact_id=source_revision["artifact_id"])
+            if not isinstance(manuscript.get("blocks"), list):
+                manuscript = {
+                    **manuscript,
+                    "blocks": self._scene_blocks_from_text(
+                        str(manuscript.get("text") or ""), source_revision["id"],
+                    ),
+                }
             existing_memories = memory_projection_rows(connection, work_id)
             memory_context = {
                 "schema_version": "memory-extract-input/1.0",
@@ -12407,12 +12414,14 @@ class WritingService:
             with self._provider_lock:
                 raw_bundle = provider.extract_memory_bundle(memory_context)
                 usage = self._provider_usage(provider)
-            bundle = validate_provider_memory_bundle(raw_bundle, scene_id=scene_id)
             scene_block_ids = {
                 str(item.get("id"))
                 for item in manuscript.get("blocks", [])
                 if isinstance(item, dict) and item.get("id")
             }
+            bundle = validate_provider_memory_bundle(
+                raw_bundle, scene_id=scene_id, scene_block_ids=scene_block_ids,
+            )
             knowledge_suggestions = validate_provider_knowledge_suggestions(
                 raw_bundle,
                 scene_id=scene_id,
@@ -12789,7 +12798,10 @@ class WritingService:
             if proposal["status"] != "pending":
                 raise DomainError("proposal_not_pending", "候选方案已经处理。", status=409)
             candidate = json.loads(self._verified_proposal_candidate(proposal))
-            if candidate.get("schema_version") != "adaptation-chapter/1.0" or candidate.get("formal") is not False:
+            if (not isinstance(candidate, dict)
+                    or candidate.get("schema_version") != "adaptation-chapter/1.0"
+                    or candidate.get("formal") is not False
+                    or "source_version_id" not in candidate or "source_chapter_id" not in candidate):
                 raise DomainError("proposal_candidate_invalid", "改编候选格式无效。", status=409)
             evidence = json.loads(proposal["evidence_json"] or "{}")
             source = connection.execute("SELECT current_version_id FROM work_sources WHERE work_id=?", (work_id,)).fetchone()
@@ -12800,10 +12812,16 @@ class WritingService:
             source_chapter = next((item for item in source_document.get("chapters", []) if item.get("id") == evidence.get("source_chapter_id")), None)
             if not source_chapter or source_chapter.get("content_digest") != evidence.get("source_digest"):
                 raise self._proposal_superseded("原文章节内容已经变化，请重新生成改编候选。")
+            validate_chapter_candidate(
+                candidate, source_id=source["current_version_id"], chapter=source_chapter,
+                code="proposal_candidate_invalid", status=409,
+            )
             adaptation_chapter = connection.execute("SELECT * FROM adaptation_chapters WHERE id=? AND adaptation_id IN (SELECT id FROM adaptations WHERE work_id=?)", (proposal["scope_id"], work_id)).fetchone()
             if not adaptation_chapter:
                 raise NotFound("adaptation_chapter", proposal["scope_id"])
             artifact = self._artifact(connection, work_id, "adaptation_manuscript", "adaptation_chapter", adaptation_chapter["id"])
+            if artifact.get("current_revision_id") != proposal["base_revision_id"]:
+                raise self._proposal_superseded("已采纳稿件已变化，旧候选不能覆盖新稿；请基于当前版本重新生成。")
             revision_id = self._add_revision(connection, artifact, {"schema_version": "adaptation-manuscript/1.0", "text": candidate["text"], "source_refs": candidate.get("source_refs", []), "deviations": candidate.get("deviations", []), "open_threads": candidate.get("open_threads", []), "source_version_id": candidate["source_version_id"], "source_chapter_id": candidate["source_chapter_id"]}, "user", {"workflow": "adaptation.chapter", "proposal_id": proposal_id, "source_version_id": candidate["source_version_id"], "source_refs": candidate.get("source_refs", [])}, schema_version="adaptation-manuscript/1.0")
             timestamp = now()
             connection.execute("UPDATE adaptation_chapters SET status='accepted',candidate_json=?,updated_at=? WHERE id=?", (canonical_json({**candidate, "formal": True, "revision_id": revision_id}), timestamp, adaptation_chapter["id"]))
@@ -12811,6 +12829,41 @@ class WritingService:
             connection.execute("INSERT INTO decisions VALUES (?,?,?,?,?,?,?)", (new_id("decision"), work_id, "proposal", proposal_id, "accepted", str(payload.get("note", "")), timestamp))
             self._bump_work(connection, work_id, version)
         return {"revision_id": revision_id, "proposal_id": proposal_id, "work": self.get_work(work_id)}
+
+    def _validate_memory_candidate_sources(self, connection, items, pinned):
+        sources = {}
+        for scene_id, revision_id in pinned:
+            row = connection.execute("SELECT * FROM revisions WHERE id=?", (revision_id,)).fetchone()
+            if not row:
+                raise DomainError("proposal_candidate_invalid", "长期记忆来源修订不存在。", status=409)
+            content = self._verified_revision_content(row, artifact_id=row["artifact_id"])
+            blocks = content.get("blocks")
+            if not isinstance(blocks, list):
+                blocks = self._scene_blocks_from_text(str(content.get("text") or ""), revision_id)
+            sources[scene_id] = {
+                "revision_id": revision_id, "content_hash": row["content_hash"],
+                "block_ids": {block["id"] for block in blocks if isinstance(block, dict) and isinstance(block.get("id"), str)},
+            }
+        for item in items:
+            refs = item.get("source_refs")
+            valid = isinstance(refs, list) and bool(refs)
+            for ref in refs if valid else []:
+                if not isinstance(ref, dict) or not isinstance(ref.get("scene_id"), str):
+                    valid = False
+                    break
+                source = sources.get(ref["scene_id"])
+                blocks = ref.get("block_ids")
+                if (not source or ref.get("kind") != "scene_revision"
+                        or ref.get("revision_id") != source["revision_id"]
+                        or ref.get("content_hash") != source["content_hash"]
+                        or not isinstance(blocks, list) or not blocks
+                        or any(not isinstance(block_id, str) for block_id in blocks)
+                        or not set(blocks).issubset(source["block_ids"])):
+                    valid = False
+                    break
+            if not valid:
+                raise DomainError("proposal_candidate_invalid", "长期记忆引用的场景、修订或正文块无效，不能采纳。",
+                                  status=409, details={"item_id": item.get("id"), "field": "source_refs"})
 
     def _accept_memory_bundle_proposal(self, work_id: str, proposal_id: str, payload: dict):
         expected = int(payload.get("expected_version", -1))
@@ -12862,8 +12915,10 @@ class WritingService:
                 ).fetchone()
                 if not source_scene or source_scene["current_revision_id"] != source_revision_id:
                     raise self._proposal_superseded("来源场景正文已经变化，请重新提取长期记忆。")
+                pinned = [(candidate.get("source_scene_id"), source_revision_id)]
 
             selected = [item for item in items if item["id"] in selected_ids]
+            self._validate_memory_candidate_sources(connection, selected, pinned)
             current_rows = {}
             for item in selected:
                 operation = str(item.get("operation") or "")

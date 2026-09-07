@@ -516,3 +516,143 @@ def test_chapter_memory_sweep_proposal_is_superseded_when_any_scene_changes(tmp_
         )
     assert error.value.code in {"proposal_not_pending", "proposal_superseded"}
     assert service.get_work(work["id"])["memories"] == []
+
+
+@pytest.mark.parametrize("bad_ids", [["block-does-not-exist"], [], [False], "block-action"])
+def test_single_scene_memory_rejects_nonexistent_or_missing_block_sources(tmp_path, bad_ids):
+    service = WritingService(tmp_path)
+    work, scene = saved_scene(service)
+
+    class InvalidReferences(FakeWritingProvider):
+        def extract_memory_bundle(self, context):
+            reply = super().extract_memory_bundle(context)
+            reply["items"][0]["source_block_ids"] = bad_ids
+            return reply
+
+    service.provider = InvalidReferences()
+    with pytest.raises(DomainError) as rejected:
+        service.generate_memory_proposal(work["id"], scene["id"], {"expected_version": work["version"]})
+    assert rejected.value.code == "provider_output_invalid"
+    current = service.get_work(work["id"])
+    assert current["memories"] == []
+    assert not [p for p in current["proposals"] if p["kind"] == "memory_bundle"]
+
+
+@pytest.mark.parametrize("broken", ["block", "scene", "hash", "empty"])
+def test_memory_acceptance_rechecks_legacy_checksummed_provenance(tmp_path, broken):
+    import json
+    from halocue_writing.repository import canonical_json
+
+    service = WritingService(tmp_path)
+    work, scene = saved_scene(service)
+    generated = service.generate_memory_proposal(work["id"], scene["id"], {"expected_version": work["version"]})
+    with service.repo.transaction() as connection:
+        row = connection.execute("SELECT * FROM proposals WHERE id=?", (generated["proposal_id"],)).fetchone()
+        candidate = json.loads(service.repo.read_text(row["candidate_uri"]))
+        item = candidate["items"][0]
+        if broken == "block":
+            item["source_refs"][0]["block_ids"] = ["invented-block"]
+        elif broken == "scene":
+            item["source_refs"][0]["scene_id"] = "other-scene"
+        elif broken == "hash":
+            item["source_refs"][0]["content_hash"] = "sha256:wrong"
+        else:
+            item["source_refs"] = []
+        _, digest = service.repo.atomic_write_text(row["candidate_uri"], canonical_json(candidate) + "\n")
+        connection.execute("UPDATE proposals SET candidate_hash=? WHERE id=?", (digest, row["id"]))
+    with pytest.raises(DomainError) as rejected:
+        service.accept_proposal(work["id"], generated["proposal_id"], {
+            "expected_version": generated["work"]["version"], "selected_item_ids": [item["id"]],
+        })
+    assert rejected.value.code == "proposal_candidate_invalid"
+    assert service.get_work(work["id"])["memories"] == []
+
+
+def test_memory_source_validation_happens_before_reference_truncation(tmp_path):
+    service = WritingService(tmp_path)
+    work, scene = saved_scene(service)
+
+    class LongReferenceList(FakeWritingProvider):
+        def extract_memory_bundle(self, context):
+            reply = super().extract_memory_bundle(context)
+            reply["items"][0]["source_block_ids"] = ["block-action"] * 80 + ["hidden-invalid-block"]
+            return reply
+
+    service.provider = LongReferenceList()
+    with pytest.raises(DomainError) as rejected:
+        service.generate_memory_proposal(work["id"], scene["id"], {"expected_version": work["version"]})
+    assert rejected.value.code == "provider_output_invalid"
+
+
+def test_partial_memory_acceptance_checks_selected_sources_only(tmp_path):
+    import json
+    from halocue_writing.repository import canonical_json
+
+    service = WritingService(tmp_path)
+    work, scene = saved_scene(service)
+    generated = service.generate_memory_proposal(work["id"], scene["id"], {"expected_version": work["version"]})
+    with service.repo.transaction() as connection:
+        row = connection.execute("SELECT * FROM proposals WHERE id=?", (generated["proposal_id"],)).fetchone()
+        candidate = json.loads(service.repo.read_text(row["candidate_uri"]))
+        candidate["items"][0]["source_refs"][0]["block_ids"] = ["legacy-invalid"]
+        selected_id = candidate["items"][1]["id"]
+        _, digest = service.repo.atomic_write_text(row["candidate_uri"], canonical_json(candidate) + "\n")
+        connection.execute("UPDATE proposals SET candidate_hash=? WHERE id=?", (digest, row["id"]))
+    accepted = service.accept_proposal(work["id"], generated["proposal_id"], {
+        "expected_version": generated["work"]["version"], "selected_item_ids": [selected_id],
+    })
+    assert [m["id"] for m in accepted["work"]["memories"]] == [selected_id]
+
+
+def test_memory_extraction_rejects_corrupt_source_before_provider_call(tmp_path):
+    service = WritingService(tmp_path)
+    work, scene = saved_scene(service)
+    with service.repo.connect() as connection:
+        row = connection.execute("SELECT content_uri FROM revisions WHERE id=?", (scene["current_revision_id"],)).fetchone()
+    path = service.repo.data_dir / row["content_uri"]
+    path.write_text(path.read_text(encoding="utf-8") + " ", encoding="utf-8")
+
+    class MustNotRun(FakeWritingProvider):
+        calls = 0
+
+        def extract_memory_bundle(self, context):
+            self.calls += 1
+            return super().extract_memory_bundle(context)
+
+    provider = MustNotRun()
+    service.provider = provider
+    with pytest.raises(DomainError) as rejected:
+        service.generate_memory_proposal(work["id"], scene["id"], {"expected_version": work["version"]})
+    assert rejected.value.code == "revision_integrity_failed"
+    assert provider.calls == 0
+
+
+def test_text_only_legacy_scene_memory_uses_stable_reconstructed_blocks(tmp_path):
+    import json
+    from halocue_writing.repository import canonical_json
+
+    service = WritingService(tmp_path)
+    work, scene = saved_scene(service)
+    revision_id = scene["current_revision_id"]
+    with service.repo.transaction() as connection:
+        row = connection.execute("SELECT * FROM revisions WHERE id=?", (revision_id,)).fetchone()
+        content = json.loads(service.repo.read_text(row["content_uri"]))
+        content.pop("blocks")
+        content["text"] = "旁白: 终端在口令后亮起。\n爱丽丝: 它真的回应了。"
+        _, digest = service.repo.atomic_write_text(row["content_uri"], canonical_json(content) + "\n")
+        connection.execute("UPDATE revisions SET content_hash=? WHERE id=?", (digest, revision_id))
+        expected_ids = {block["id"] for block in service._scene_revision_blocks(connection, revision_id)}
+    assert expected_ids
+    generated = service.generate_memory_proposal(
+        work["id"], scene["id"], {"expected_version": work["version"]}
+    )
+    accepted = service.accept_proposal(
+        work["id"], generated["proposal_id"], {"expected_version": generated["work"]["version"]}
+    )
+    assert accepted["work"]["memories"]
+    for memory in accepted["work"]["memories"]:
+        refs = memory["source_refs"]
+        assert refs[0]["revision_id"] == revision_id
+        assert refs[0]["block_ids"]
+        assert set(refs[0]["block_ids"]).issubset(expected_ids)
+    service.close()
