@@ -7281,6 +7281,39 @@ button:disabled {
   font-size: 13px;
 }
 
+/* Asset-copy proof is separate from the existing frozen-content integrity check. */
+.release-asset-proof {
+  margin: 14px 0;
+  padding-block: 12px;
+  border-block: 1px solid var(--line-soft);
+  overflow-wrap: anywhere;
+}
+
+.release-asset-proof > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 12px;
+  font-size: 13px;
+  color: var(--green);
+}
+
+.release-asset-proof > header span,
+.release-asset-proof > p {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.release-asset-proof > p {
+  margin: 10px 0 0;
+  line-height: 1.55;
+}
+
+.release-asset-proof.has-error > header {
+  color: #8d3d32;
+}
+
 .release-integrity-summary {
   margin: 14px 0;
   padding-block: 12px;

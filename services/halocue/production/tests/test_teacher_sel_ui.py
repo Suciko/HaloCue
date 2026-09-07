@@ -302,7 +302,7 @@ def test_reply_text_is_literal_not_html(sel_page):
 def test_real_service_sel_restarts_previews_and_switches_back_without_changing_identity(
     profile_browser, settings, tmp_path
 ):
-    from test_http_api import api as production_api
+    from production_http_helpers import api as production_api
 
     resource_index = tmp_path / "synthetic-resources.json"
     resource_index.write_text(
@@ -316,9 +316,9 @@ def test_real_service_sel_restarts_previews_and_switches_back_without_changing_i
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.on(
         "request",
-        lambda request: writes.append(request.url)
-        if request.method not in {"GET", "HEAD"}
-        else None,
+        lambda request: (
+            writes.append(request.url) if request.method not in {"GET", "HEAD"} else None
+        ),
     )
     try:
         with production_api(isolated) as base:
@@ -336,8 +336,9 @@ def test_real_service_sel_restarts_previews_and_switches_back_without_changing_i
             open_teacher(page)
             page.get_by_role("radio", name="Sel 回答", exact=True).check()
             with page.expect_response(
-                lambda response: response.url.endswith("/cast-bindings")
-                and response.request.method == "POST"
+                lambda response: (
+                    response.url.endswith("/cast-bindings") and response.request.method == "POST"
+                )
             ) as binding:
                 page.get_by_role("button", name="创建并绑定老师", exact=True).click()
             selected = binding.value.json()

@@ -296,7 +296,7 @@ def test_teacher_custom_fields_fit_desktop_and_mobile(teacher_page, tmp_path, wi
 
 
 def test_real_service_teacher_creation_reopen_and_preview(profile_browser, settings, tmp_path):
-    from test_http_api import api as production_api
+    from production_http_helpers import api as production_api
 
     resource_index = tmp_path / "synthetic-resources.json"
     resource_index.write_text(
@@ -323,8 +323,9 @@ def test_real_service_teacher_creation_reopen_and_preview(profile_browser, setti
             open_teacher(page)
             page.get_by_label("老师名称 / 组织").select_option("teacher_xialai")
             with page.expect_response(
-                lambda response: response.url.endswith("/cast-bindings")
-                and response.request.method == "POST"
+                lambda response: (
+                    response.url.endswith("/cast-bindings") and response.request.method == "POST"
+                )
             ) as binding_response:
                 page.get_by_role("button", name="创建并绑定老师", exact=True).click()
             selected = binding_response.value.json()

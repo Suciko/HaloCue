@@ -1409,7 +1409,8 @@ def test_release_ui_hides_identifiers_and_folds_integrity_details():
     ).read_text(encoding="utf-8")
 
     assert "<p class=\"code-meta\">${esc(r.id)}" not in script
-    assert "release.production_run_id?'已送往 AA 制作':'尚未送往 AA 制作'" in script
+    assert "已关联 AA 制作任务；素材副本确认情况见下方。" in script
+    assert "当前发布版本已完成交接。" not in script
     assert "<summary>技术详情</summary>" in script
     assert "<b>交付内容已确认</b><span>可追溯</span>" in script
     assert "读取不可变 Manifest" not in script

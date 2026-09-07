@@ -69,7 +69,7 @@ def test_old_client_rename_keeps_sel_after_restart_and_switch_back_requires_revi
 
 
 def test_sel_http_round_trip_unknown_version_and_stale_version(service):
-    from test_http_api import api, request
+    from production_http_helpers import api, request
 
     with api(service.settings) as base:
         _, _, created = request(

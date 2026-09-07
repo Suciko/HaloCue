@@ -146,7 +146,7 @@ def test_repeat_teacher_selection_retains_review_and_stale_selection_conflicts(s
 
 
 def test_teacher_http_contract_round_trip_and_unknown_version(service):
-    from test_http_api import api, request
+    from production_http_helpers import api, request
 
     with api(service.settings) as base:
         status, _, created = request(

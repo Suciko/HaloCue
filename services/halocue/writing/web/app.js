@@ -1642,11 +1642,11 @@ function renderRelease(el){
   const actions=!ready&&missingScene
     ? `<div class="actions"><button class="primary" data-release-missing-scene="${esc(missingScene.id)}">去完成「${esc(missingScene.title)}」</button></div>`
     : `<div class="actions"><button class="quiet" data-action="review-release">运行全篇审查</button><button class="primary" data-action="freeze-release" ${canFreeze?'':'disabled'}>${alreadyFrozen?'当前正文已冻结':'冻结新的发布版本'}</button></div>`;
-  const releaseCards=releases.map(release=>`<section class="artifact"><h3>制作定稿 ${esc(release.display_version)}</h3><p>${release.production_run_id?'已送往 AA 制作':'尚未送往 AA 制作'}</p><div class="actions"><button class="quiet" data-handoff="${release.id}" ${release.production_run_id?'disabled':''}>${release.production_run_id?'已提交制作':'交给 AA 制作'}</button></div></section>`).join('');
+  const releaseCards=releases.map(release=>`<section class="artifact" data-release-card="${esc(release.id)}"><h3>制作定稿 ${esc(release.display_version)}</h3><p data-release-link-status>${release.production_run_id?'已关联 AA 制作任务；素材副本确认情况见下方。':'尚未送往 AA 制作'}</p><div class="actions"><button class="quiet" data-handoff="${esc(release.id)}" ${release.production_run_id?'disabled':''}>${release.production_run_id?'已提交制作':'交给 AA 制作'}</button></div></section>`).join('');
   el.innerHTML=frame('检查与发布','检查并发布定稿','检查当前正文和素材，确认后再生成制作定稿。',`<div class="step-band"><strong>${alreadyFrozen?'当前正文已冻结':canFreeze?'全篇审查已通过':'等待全篇审查'}</strong><span>${alreadyFrozen?'正文或素材变化后可发布下一版':canFreeze?'现在由你决定是否冻结':ready?'先运行全篇审查，确认当前正文与依赖':'每个场景都必须有已采纳正文'}</span></div><div class="notice ${canFreeze||alreadyFrozen?'good':'bad'}">${status}</div>${ready&&drift.length?`<section class="release-gate-drift" role="status"><b>当前审查已失效</b><p>以下输入在上次审查后发生变化，不能直接冻结：</p><ul>${drift.map(item=>`<li>${esc(item)}</li>`).join('')}</ul><strong>下一步：先运行连续性审查，再运行发布审查。</strong></section>`:''}${preflight}${actions}${releaseCards}`);
 }
-function renderInspector(){const el=$('#inspectorContent'),scene=selectedScene(),proposal=pendingProposal(),latest=state.work?.releases?.[0];$$('[data-inspector]').forEach(b=>b.classList.toggle('active',b.dataset.inspector===state.inspector));if(state.inspector==='decision'){el.innerHTML=`<div class="inspector-body"><h3>现在需要你决定</h3><div class="notice ${proposal?'':'good'}">${proposal?'检查候选正文，并采纳、局部修改或退回。':state.stage==='release'&&latest&&!latest.production_run_id?'确认是否把冻结版本交给制作。':state.stage==='release'&&latest?'当前发布版本已完成交接。':'完成当前阶段的推荐动作。'}</div><h3>系统已经做了什么</h3><ul class="context-list"><li><span class="status-dot"></span>作品与版本已持久化</li><li><span class="status-dot ${proposal?'amber':''}"></span>${proposal?'候选等待审查':'没有待处理候选'}</li><li><span class="status-dot"></span>Agent 不可直接写回正文</li></ul></div>`}else if(state.inspector==='context'){const c=state.context;el.innerHTML=`<div class="inspector-body"><h3>当前作用域</h3><p>${scene?`${esc(scene.chapterTitle)} / ${esc(scene.title)}`:'未选择场景'}</p><ul class="context-list">${c?`<li>规则包<br><b>${esc(c.rules.pack_version)}</b></li><li>单一模式<br><b>${esc(c.rules.mode)}</b></li><li>固定输入修订<br><b>${c.source_revision_ids.length} 个</b></li><li>真实 BA 写作<br><b>${esc(c.readiness.real_ba_writing)}</b></li>`:'<li>点击“装配上下文”查看本场固定输入。</li>'}</ul></div>`}else{const existing=scene?.current_revision_id,latestRun=(state.work?.agent_runs||[]).find(run=>run.scope_id===scene?.id);el.innerHTML=`<div class="inspector-body"><h3>创作导演</h3><p>本次运行只读取固定场景合同、单一 BA 模式和运行时人物卡。它只提交一次 Proposal，不能改正文或长期事实。</p>${latestRun?`<section class="agent-run"><b>${esc(latestRun.status)}</b><p>工具记录 ${latestRun.tool_calls.length} 项${latestRun.proposal_id?` · Proposal ${esc(latestRun.proposal_id)}`:''}</p></section>`:''}<form id="agentRunForm"><label>本场指令<textarea name="instruction" placeholder="例如：以爱丽丝先观察、凯伊后补充的节奏起草本场" ${scene&&!existing?'':'disabled'}></textarea></label><button class="primary" type="submit" ${scene&&!existing&&!proposal?'':'disabled'}>运行 BA 场景 Agent</button></form><p class="form-note">${existing?'当前已有正文：首次 BA Agent 不读取旧稿，受控复写将在后续工作流开放。':providerDisclosure()}</p></div>`}}
-document.addEventListener('click',async event=>{const b=event.target.closest('button');if(!b)return;try{if(b.dataset.submit==='work'){event.preventDefault();await submitWorkDialog(document.getElementById('workForm'));return}if(b.dataset.action==='new-work'){openWorkDialog(b);return}if(b.dataset.mobile){state.mobileView=b.dataset.mobile;render();return}if(b.dataset.stage){navigateToStage(b.dataset.stage);return}if(b.dataset.stageJump){navigateToStage(b.dataset.stageJump);return}if((b.dataset.scene||b.dataset.sceneOpen)&&state.surface==='writing'&&state.stage==='draft'&&b.closest('#sceneTree'))return;if(b.dataset.scene){state.sceneId=b.dataset.scene;navigateToStage('draft');state.context=null;state.sceneContextEditorOpen=false;render();return}if(b.dataset.sceneOpen){state.sceneId=b.dataset.sceneOpen;navigateToStage('draft');state.sceneContextEditorOpen=false;render();return}if(b.dataset.inspector){state.inspector=b.dataset.inspector;renderInspector();return}if(b.dataset.action==='generate-blueprint'){setBusy('正在建立故事方向');const x=await api(`/works/${state.work.id}/blueprint:generate`,{method:'POST',body:JSON.stringify({expected_version:state.work.version})});state.work=x.work;toast('故事方向已保存');render();return}if(b.dataset.action==='add-chapter'){const title=prompt('章节名称','第一章');if(!title)return;const x=await api(`/works/${state.work.id}/chapters`,{method:'POST',body:JSON.stringify({expected_version:state.work.version,title})});state.work=x.work;toast('章节已建立');render();return}if(b.dataset.addScene){const title=prompt('场景名称','场景 01');if(!title)return;const goal=prompt('本场需要发生什么变化？','确认异常提示灯的来源')||'';const x=await api(`/works/${state.work.id}/chapters/${b.dataset.addScene}/scenes`,{method:'POST',body:JSON.stringify({expected_version:state.work.version,title,goal,location})});state.work=x.work;state.sceneId=x.scene_id;toast('场景已建立');render();return}if(b.dataset.action==='assemble-context'){state.context=await api(`/works/${state.work.id}/scenes/${selectedScene().id}/context:assemble`,{method:'POST',body:'{}'});state.inspector='context';toast('本场上下文已装配');render();return}if(b.dataset.action==='generate-candidate'){return}if(b.dataset.accept){const x=await api(`/works/${state.work.id}/proposals/${b.dataset.accept}/accept`,{method:'POST',body:JSON.stringify({expected_version:state.work.version,text:$('#candidateText').value})});state.work=x.work;toast('候选已采纳为新正文修订');render();return}if(b.dataset.reject){const x=await api(`/works/${state.work.id}/proposals/${b.dataset.reject}/reject`,{method:'POST',body:JSON.stringify({expected_version:state.work.version,note:'用户在工作台退回'})});state.work=x.work;toast('候选已退回');render();return}if(b.dataset.action==='freeze-release'){const x=await api(`/works/${state.work.id}/releases:freeze`,{method:'POST',body:JSON.stringify({expected_version:state.work.version})});state.work=x.work;toast(`已冻结 ${x.manifest.display_version}`);render();return}if(b.dataset.handoff){setBusy('正在联系 AA 制作后端');const x=await api(`/releases/${b.dataset.handoff}/handoff`,{method:'POST',body:'{}'});toast(`已建立制作任务 ${x.production_run_id}`);await loadWork(state.work.id);return}if(b.dataset.section==='works'){state.stage='overview';state.mobileView='writing';render();return}if(b.dataset.section==='writing'){navigateToStage(blueprintIsConfirmed()?'structure':'brief');return}if(b.dataset.section==='production'){const gate=stageGate('release');if(!gate.allowed){toast(`检查并发布尚未开放：${gate.reason}`,true);return}state.stage='release';state.mobileView='writing';render();return}if(b.dataset.section==='references'){state.stage='references';state.mobileView='writing';state.libraryView='overview';render();return}if(b.dataset.section==='tasks'){state.mobileView='tasks';render();return}}catch(error){setBusy('操作失败，作品数据未丢失');toast(error.message,true)}});
+function renderInspector(){const el=$('#inspectorContent'),scene=selectedScene(),proposal=pendingProposal(),latest=state.work?.releases?.[0];$$('[data-inspector]').forEach(b=>b.classList.toggle('active',b.dataset.inspector===state.inspector));if(state.inspector==='decision'){el.innerHTML=`<div class="inspector-body"><h3>现在需要你决定</h3><div class="notice ${proposal?'':'good'}">${proposal?'检查候选正文，并采纳、局部修改或退回。':state.stage==='release'&&latest&&!latest.production_run_id?'确认是否把冻结版本交给制作。':state.stage==='release'&&latest?'当前发布版本已关联制作任务；素材副本是否确认请查看发布卡片。':'完成当前阶段的推荐动作。'}</div><h3>系统已经做了什么</h3><ul class="context-list"><li><span class="status-dot"></span>作品与版本已持久化</li><li><span class="status-dot ${proposal?'amber':''}"></span>${proposal?'候选等待审查':'没有待处理候选'}</li><li><span class="status-dot"></span>Agent 不可直接写回正文</li></ul></div>`}else if(state.inspector==='context'){const c=state.context;el.innerHTML=`<div class="inspector-body"><h3>当前作用域</h3><p>${scene?`${esc(scene.chapterTitle)} / ${esc(scene.title)}`:'未选择场景'}</p><ul class="context-list">${c?`<li>规则包<br><b>${esc(c.rules.pack_version)}</b></li><li>单一模式<br><b>${esc(c.rules.mode)}</b></li><li>固定输入修订<br><b>${c.source_revision_ids.length} 个</b></li><li>真实 BA 写作<br><b>${esc(c.readiness.real_ba_writing)}</b></li>`:'<li>点击“装配上下文”查看本场固定输入。</li>'}</ul></div>`}else{const existing=scene?.current_revision_id,latestRun=(state.work?.agent_runs||[]).find(run=>run.scope_id===scene?.id);el.innerHTML=`<div class="inspector-body"><h3>创作导演</h3><p>本次运行只读取固定场景合同、单一 BA 模式和运行时人物卡。它只提交一次 Proposal，不能改正文或长期事实。</p>${latestRun?`<section class="agent-run"><b>${esc(latestRun.status)}</b><p>工具记录 ${latestRun.tool_calls.length} 项${latestRun.proposal_id?` · Proposal ${esc(latestRun.proposal_id)}`:''}</p></section>`:''}<form id="agentRunForm"><label>本场指令<textarea name="instruction" placeholder="例如：以爱丽丝先观察、凯伊后补充的节奏起草本场" ${scene&&!existing?'':'disabled'}></textarea></label><button class="primary" type="submit" ${scene&&!existing&&!proposal?'':'disabled'}>运行 BA 场景 Agent</button></form><p class="form-note">${existing?'当前已有正文：首次 BA Agent 不读取旧稿，受控复写将在后续工作流开放。':providerDisclosure()}</p></div>`}}
+document.addEventListener('click',async event=>{const b=event.target.closest('button');if(!b)return;try{if(b.dataset.submit==='work'){event.preventDefault();await submitWorkDialog(document.getElementById('workForm'));return}if(b.dataset.action==='new-work'){openWorkDialog(b);return}if(b.dataset.mobile){state.mobileView=b.dataset.mobile;render();return}if(b.dataset.stage){navigateToStage(b.dataset.stage);return}if(b.dataset.stageJump){navigateToStage(b.dataset.stageJump);return}if((b.dataset.scene||b.dataset.sceneOpen)&&state.surface==='writing'&&state.stage==='draft'&&b.closest('#sceneTree'))return;if(b.dataset.scene){state.sceneId=b.dataset.scene;navigateToStage('draft');state.context=null;state.sceneContextEditorOpen=false;render();return}if(b.dataset.sceneOpen){state.sceneId=b.dataset.sceneOpen;navigateToStage('draft');state.sceneContextEditorOpen=false;render();return}if(b.dataset.inspector){state.inspector=b.dataset.inspector;renderInspector();return}if(b.dataset.action==='generate-blueprint'){setBusy('正在建立故事方向');const x=await api(`/works/${state.work.id}/blueprint:generate`,{method:'POST',body:JSON.stringify({expected_version:state.work.version})});state.work=x.work;toast('故事方向已保存');render();return}if(b.dataset.action==='add-chapter'){const title=prompt('章节名称','第一章');if(!title)return;const x=await api(`/works/${state.work.id}/chapters`,{method:'POST',body:JSON.stringify({expected_version:state.work.version,title})});state.work=x.work;toast('章节已建立');render();return}if(b.dataset.addScene){const title=prompt('场景名称','场景 01');if(!title)return;const goal=prompt('本场需要发生什么变化？','确认异常提示灯的来源')||'';const x=await api(`/works/${state.work.id}/chapters/${b.dataset.addScene}/scenes`,{method:'POST',body:JSON.stringify({expected_version:state.work.version,title,goal,location})});state.work=x.work;state.sceneId=x.scene_id;toast('场景已建立');render();return}if(b.dataset.action==='assemble-context'){state.context=await api(`/works/${state.work.id}/scenes/${selectedScene().id}/context:assemble`,{method:'POST',body:'{}'});state.inspector='context';toast('本场上下文已装配');render();return}if(b.dataset.action==='generate-candidate'){return}if(b.dataset.accept){const x=await api(`/works/${state.work.id}/proposals/${b.dataset.accept}/accept`,{method:'POST',body:JSON.stringify({expected_version:state.work.version,text:$('#candidateText').value})});state.work=x.work;toast('候选已采纳为新正文修订');render();return}if(b.dataset.reject){const x=await api(`/works/${state.work.id}/proposals/${b.dataset.reject}/reject`,{method:'POST',body:JSON.stringify({expected_version:state.work.version,note:'用户在工作台退回'})});state.work=x.work;toast('候选已退回');render();return}if(b.dataset.action==='freeze-release'){const x=await api(`/works/${state.work.id}/releases:freeze`,{method:'POST',body:JSON.stringify({expected_version:state.work.version})});state.work=x.work;toast(`已冻结 ${x.manifest.display_version}`);render();return}if(b.dataset.handoff||b.dataset.retryHandoff){await ReleaseHandoffUI.submit(b);return}if(b.dataset.section==='works'){state.stage='overview';state.mobileView='writing';render();return}if(b.dataset.section==='writing'){navigateToStage(blueprintIsConfirmed()?'structure':'brief');return}if(b.dataset.section==='production'){const gate=stageGate('release');if(!gate.allowed){toast(`检查并发布尚未开放：${gate.reason}`,true);return}state.stage='release';state.mobileView='writing';render();return}if(b.dataset.section==='references'){state.stage='references';state.mobileView='writing';state.libraryView='overview';render();return}if(b.dataset.section==='tasks'){state.mobileView='tasks';render();return}}catch(error){setBusy('操作失败，作品数据未丢失');toast(error.message,true)}});
 $('#workForm').addEventListener('submit',event=>{event.preventDefault();const submitter=event.submitter;if(submitter&&submitter.dataset.submit!=='work')return;submitWorkDialog(event.target)});
 document.addEventListener('submit',async event=>{if(event.target.id!=='briefForm')return;event.preventDefault();try{const f=new FormData(event.target);const payload={idea:String(f.get('idea')||'').trim(),intent_only:true,expected_version:state.work.version};setBusy('正在保存想法');const intent=await api(`/works/${state.work.id}/brief`,{method:'POST',body:JSON.stringify(payload)});state.work=intent.work;setBusy('正在分析故事方向');const analysis=await api(`/works/${state.work.id}/blueprint:generate`,{method:'POST',body:JSON.stringify({expected_version:state.work.version})});state.work=analysis.work;state.stage='blueprint';toast(analysis.simulation?'已生成模拟方向候选，等待你的确认':'已生成故事方向候选，等待你的确认');render()}catch(error){setBusy('分析未完成，想法已安全保存');toast(error.message,true)}});
 const officialCatalogObserver=new MutationObserver(()=>{
@@ -2446,7 +2446,7 @@ document.addEventListener('input',event=>{const row=event.target.closest?.('[dat
 document.addEventListener('focusin',event=>{const row=event.target.closest?.('[data-manuscript-block]');if(row)row.classList.add('is-editing')},true);
 document.addEventListener('focusout',event=>{const row=event.target.closest?.('[data-manuscript-block]');if(row)setTimeout(()=>{if(!row.contains(document.activeElement))row.classList.remove('is-editing')},0)},true);
 document.addEventListener('submit',async event=>{const form=event.target;if(form.id!=='sceneManuscriptForm')return;event.preventDefault();event.stopImmediatePropagation();try{const sceneId=form.dataset.sceneId||state.sceneId,scene=scenes().find(item=>item.id===sceneId),blocks=readManuscriptBlocks();if(!scene)throw new Error('当前正文所在场景已变化，请重新打开后再保存。');if(!blocks.length)throw new Error('请先新增至少一个动作或对白块。');setBusy('正在保存新的正文修订');const result=await api(`/works/${state.work.id}/scenes/${scene.id}/manuscript`,{method:'POST',body:JSON.stringify({expected_version:state.work.version,expected_base_revision_id:form.dataset.baseRevision||null,blocks})});state.work=result.work;state.sceneId=scene.id;state.writingChapterId=scene.chapter_id;state._pendingChapterSceneScroll=scene.id;discardManuscriptDraft();state.sceneTextSelection=null;toast(result.superseded_proposal_ids?.length?'正文已保存为新修订；旧候选已替代。':'正文已保存为新修订');render()}catch(error){setBusy('正文未保存');toast(error.message,true)}},true);
-function renderInspector(){const el=$('#inspectorContent'),scene=selectedScene(),proposal=pendingProposal(),latest=state.work?.releases?.[0],findings=(state.work?.review_findings||[]).filter(item=>item.scene_id===scene?.id&&item.status==='open'),blocker=findings.find(item=>item.severity==='blocking'),warning=findings.find(item=>item.severity==='warning');$$('[data-inspector]').forEach(button=>button.classList.toggle('active',button.dataset.inspector===state.inspector));if(state.inspector==='decision'){const message=proposal?'候选已经生成，正文尚未改变。请检查 Diff 后决定。':blocker?blocker.message:warning?warning.message:state.stage==='release'&&latest?'当前发布版本已完成交接。':'当前场景没有待处理阻塞项。';const action=proposal?'候选等待决定':blocker?'处理阻塞项':warning?'补齐人物卡后重新审查':'可以生成候选或检查本场';el.innerHTML=`<div class="inspector-body"><p class="eyebrow">SCENE DECISION</p><h3>${esc(action)}</h3><div class="notice ${blocker?'bad':warning?'':'good'}">${esc(message)}</div><ul class="context-list"><li><b>当前场景</b><br>${esc(scene?.title||'未选择')}</li><li><b>审查状态</b><br>${blocker?'存在阻塞项':warning?'存在提示项':'没有开放发现'}</li><li><b>写入规则</b><br>Agent 只能提交 Proposal，用户采纳后才建立修订。</li></ul></div>`}else if(state.inspector==='context'){const c=state.context;el.innerHTML=`<div class="inspector-body"><p class="eyebrow">PINNED CONTEXT</p><h3>本场固定输入</h3><p>${scene?`${esc(scene.chapterTitle)} / ${esc(scene.title)}`:'未选择场景'}</p><ul class="context-list">${c?`<li>规则包<br><b>${esc(c.rules.pack_version)}</b></li><li>单一模式<br><b>${esc(c.rules.mode)}</b></li><li>固定输入修订<br><b>${c.source_revision_ids.length} 个</b></li><li>运行时人物卡<br><b>${c.runtime_character_cards.length} 张</b></li>`:'<li>执行“装配上下文”后查看本场固定输入。</li>'}</ul></div>`}else{const existing=scene?.current_revision_id,latestRun=(state.work?.agent_runs||[]).find(run=>run.scope_id===scene?.id),mode=existing?'rewrite':'draft',missingCharacters=(warning?.kind==='character_card_missing'?warning.evidence?.speakers||[]:[]),agentReady=!proposal&&!missingCharacters.length;const chips=existing?`<div class="agent-chips"><button type="button" class="quiet" data-agent-instruction="调整本场节奏：压缩解释，让动作和停顿先出现。">调整节奏</button><button type="button" class="quiet" data-agent-instruction="检查人物是否 OOC，并把需要调整的对白改写为更符合人物卡的表达。">检查 OOC</button><button type="button" class="quiet" data-agent-instruction="重写选中对白：保留本场事实、角色关系和停止边界。">重写选中对白</button></div>`:'';const blocked=missingCharacters.length?`<div class="notice bad">还不能运行：${esc(missingCharacters.join('、'))} 尚无已确认人物卡。补齐后才能把正文与人物约束一起交给 Agent。</div><button type="button" class="primary" data-agent-complete-cards>补齐人物卡</button>`:'';el.innerHTML=`<div class="inspector-body"><p class="eyebrow">BA WRITING AGENT</p><h3>${existing?'改写当前场景':'起草当前场景'}</h3><p>${existing?'当前正文会作为固定输入，Agent 只返回完整场景候选和 Diff，不会直接改动任何一句。':'只读取本场合同、单一 BA 模式和运行时人物卡；每次只提交一份 Proposal。'}</p>${latestRun?`<section class="agent-run"><b>${esc(latestRun.status)}</b><p>工具记录 ${latestRun.tool_calls.length} 项${latestRun.proposal_id?` · Proposal ${esc(latestRun.proposal_id)}`:''}</p></section>`:''}${blocked}<form id="agentRunForm" data-agent-mode="${mode}"><label>本场指令<textarea name="instruction" placeholder="${existing?'例如：压缩解释，保留爱丽丝先观察、凯伊后补充的节奏':'例如：以爱丽丝先观察、凯伊后补充的节奏起草本场'}" ${agentReady?'':'disabled'}></textarea></label>${agentReady?chips:''}<button class="primary" type="submit" ${agentReady?'':'disabled'}>${existing?'生成完整改写候选':'运行 BA 场景 Agent'}</button></form><p class="form-note">${existing?'完整候选不会写回正文，采纳后才建立新的正文修订。':providerDisclosure()}</p></div>`}}
+function renderInspector(){const el=$('#inspectorContent'),scene=selectedScene(),proposal=pendingProposal(),latest=state.work?.releases?.[0],findings=(state.work?.review_findings||[]).filter(item=>item.scene_id===scene?.id&&item.status==='open'),blocker=findings.find(item=>item.severity==='blocking'),warning=findings.find(item=>item.severity==='warning');$$('[data-inspector]').forEach(button=>button.classList.toggle('active',button.dataset.inspector===state.inspector));if(state.inspector==='decision'){const message=proposal?'候选已经生成，正文尚未改变。请检查 Diff 后决定。':blocker?blocker.message:warning?warning.message:state.stage==='release'&&latest?'当前发布版本已关联制作任务；素材副本是否确认请查看发布卡片。':'当前场景没有待处理阻塞项。';const action=proposal?'候选等待决定':blocker?'处理阻塞项':warning?'补齐人物卡后重新审查':'可以生成候选或检查本场';el.innerHTML=`<div class="inspector-body"><p class="eyebrow">SCENE DECISION</p><h3>${esc(action)}</h3><div class="notice ${blocker?'bad':warning?'':'good'}">${esc(message)}</div><ul class="context-list"><li><b>当前场景</b><br>${esc(scene?.title||'未选择')}</li><li><b>审查状态</b><br>${blocker?'存在阻塞项':warning?'存在提示项':'没有开放发现'}</li><li><b>写入规则</b><br>Agent 只能提交 Proposal，用户采纳后才建立修订。</li></ul></div>`}else if(state.inspector==='context'){const c=state.context;el.innerHTML=`<div class="inspector-body"><p class="eyebrow">PINNED CONTEXT</p><h3>本场固定输入</h3><p>${scene?`${esc(scene.chapterTitle)} / ${esc(scene.title)}`:'未选择场景'}</p><ul class="context-list">${c?`<li>规则包<br><b>${esc(c.rules.pack_version)}</b></li><li>单一模式<br><b>${esc(c.rules.mode)}</b></li><li>固定输入修订<br><b>${c.source_revision_ids.length} 个</b></li><li>运行时人物卡<br><b>${c.runtime_character_cards.length} 张</b></li>`:'<li>执行“装配上下文”后查看本场固定输入。</li>'}</ul></div>`}else{const existing=scene?.current_revision_id,latestRun=(state.work?.agent_runs||[]).find(run=>run.scope_id===scene?.id),mode=existing?'rewrite':'draft',missingCharacters=(warning?.kind==='character_card_missing'?warning.evidence?.speakers||[]:[]),agentReady=!proposal&&!missingCharacters.length;const chips=existing?`<div class="agent-chips"><button type="button" class="quiet" data-agent-instruction="调整本场节奏：压缩解释，让动作和停顿先出现。">调整节奏</button><button type="button" class="quiet" data-agent-instruction="检查人物是否 OOC，并把需要调整的对白改写为更符合人物卡的表达。">检查 OOC</button><button type="button" class="quiet" data-agent-instruction="重写选中对白：保留本场事实、角色关系和停止边界。">重写选中对白</button></div>`:'';const blocked=missingCharacters.length?`<div class="notice bad">还不能运行：${esc(missingCharacters.join('、'))} 尚无已确认人物卡。补齐后才能把正文与人物约束一起交给 Agent。</div><button type="button" class="primary" data-agent-complete-cards>补齐人物卡</button>`:'';el.innerHTML=`<div class="inspector-body"><p class="eyebrow">BA WRITING AGENT</p><h3>${existing?'改写当前场景':'起草当前场景'}</h3><p>${existing?'当前正文会作为固定输入，Agent 只返回完整场景候选和 Diff，不会直接改动任何一句。':'只读取本场合同、单一 BA 模式和运行时人物卡；每次只提交一份 Proposal。'}</p>${latestRun?`<section class="agent-run"><b>${esc(latestRun.status)}</b><p>工具记录 ${latestRun.tool_calls.length} 项${latestRun.proposal_id?` · Proposal ${esc(latestRun.proposal_id)}`:''}</p></section>`:''}${blocked}<form id="agentRunForm" data-agent-mode="${mode}"><label>本场指令<textarea name="instruction" placeholder="${existing?'例如：压缩解释，保留爱丽丝先观察、凯伊后补充的节奏':'例如：以爱丽丝先观察、凯伊后补充的节奏起草本场'}" ${agentReady?'':'disabled'}></textarea></label>${agentReady?chips:''}<button class="primary" type="submit" ${agentReady?'':'disabled'}>${existing?'生成完整改写候选':'运行 BA 场景 Agent'}</button></form><p class="form-note">${existing?'完整候选不会写回正文，采纳后才建立新的正文修订。':providerDisclosure()}</p></div>`}}
 
 // The library is a source-of-truth work surface, not a loose notes page.  It
 // intentionally keeps original references distinct from work-local invention.
@@ -3572,6 +3572,177 @@ function compactCreativeLibrary(){
 const renderBeforeCompactCreativeLibrary=render;
 render=function(){renderBeforeCompactCreativeLibrary();compactCreativeLibrary();};
 
+// Release/run linkage is navigation, never evidence that asset copies exist.
+// Keep optional proof IO out of loadWork and the global error/toast state.
+const ReleaseHandoffUI = {
+  view:null,
+  submissions:new Map(),
+  key(workId,releaseId){return JSON.stringify([workId,releaseId])},
+  current(entry){
+    return this.view===entry.view&&state.work===entry.view.work&&state.stage==='release'
+      &&entry.card.isConnected&&entry.view.root.contains(entry.card);
+  },
+  active(workId,releaseId){
+    const entry=this.view?.entries.get(releaseId);
+    return entry&&entry.view.work.id===workId&&this.current(entry)?entry:null;
+  },
+  async request(path,options={}){
+    // api() records even stale errors globally. This optional, card-local IO
+    // deliberately owns its errors instead, with the same envelope contract.
+    const response=await fetch('/api/v1'+path,{...options,headers:{'Content-Type':'application/json'}});
+    let result;
+    try{result=await response.json()}catch(_){throw new Error('服务器响应无法解析，请重试。')}
+    if(!response.ok||result?.ok===false)throw new Error(result?.error?.message||'请求失败，请检查服务后重试。');
+    return result?.data??result;
+  },
+  mount(root){
+    for(const entry of this.view?.entries.values()||[])entry.cancel?.();
+    const view={root,work:state.work,entries:new Map()};
+    this.view=view;
+    for(const release of view.work?.releases||[]){
+      const card=[...root.querySelectorAll('[data-release-card]')].find(node=>node.dataset.releaseCard===release.id);
+      if(!card)continue;
+      const surface=document.createElement('section');
+      surface.dataset.releaseAssetStatus=release.id;
+      surface.setAttribute('role','status');
+      surface.setAttribute('aria-live','polite');
+      surface.setAttribute('aria-atomic','true');
+      card.querySelector('.actions').insertAdjacentElement('beforebegin',surface);
+      const entry={view,release,card,surface,status:null,error:'',loading:true,requestId:0};
+      view.entries.set(release.id,entry);
+      this.paint(entry);
+      // Independent requests: neither a hung service nor another release can
+      // hold up rendering, work loading, navigation, or this card's controls.
+      if(!this.submissions.has(this.key(view.work.id,release.id)))void this.read(entry);
+    }
+  },
+  validate(value,entry){
+    const expected=value?.expected_count,copied=value?.copied_count;
+    if(value?.schema_version!=='production-asset-status/1.0'||value.release_id!==entry.release.id
+      ||(value.production_run_id||null)!==(entry.release.production_run_id||null)
+      ||!['not_required','not_handed_off','pending','complete'].includes(value.status)
+      ||!Number.isSafeInteger(expected)||expected<0||!Number.isSafeInteger(copied)||copied<0||copied>expected
+      ||(value.status==='complete'&&(!value.production_run_id||expected===0||copied!==expected))
+      ||(value.status==='not_required'&&(expected!==0||copied!==0))
+      ||(value.status==='not_handed_off'&&value.production_run_id)){
+      throw new Error('素材回执状态与本次发布不一致，暂不能确认副本，请重试交接。');
+    }
+    return value;
+  },
+  async read(entry){
+    entry.cancel?.();
+    const requestId=++entry.requestId,controller=new AbortController();
+    let timer;
+    const deadline=new Promise((_,reject)=>{
+      entry.cancel=()=>{controller.abort();reject(new Error('已离开本次状态读取。'))};
+      timer=setTimeout(()=>{controller.abort();reject(new Error('素材回执读取超时（5 秒），可重试交接；其他操作不受影响。'))},5000);
+    });
+    entry.loading=true;entry.error='';this.paint(entry);
+    try{
+      const value=await Promise.race([this.request(`/releases/${encodeURIComponent(entry.release.id)}/production-assets`,{signal:controller.signal}),deadline]);
+      if(this.current(entry)&&entry.requestId===requestId)entry.status=this.validate(value,entry);
+    }catch(error){
+      if(this.current(entry)&&entry.requestId===requestId)entry.error=String(error.message||'素材回执读取失败，请重试。');
+    }finally{
+      clearTimeout(timer);
+      if(entry.requestId===requestId){entry.cancel=null;entry.loading=false;if(this.current(entry))this.paint(entry)}
+    }
+  },
+  paint(entry){
+    if(!this.current(entry))return;
+    const busy=this.submissions.has(this.key(entry.view.work.id,entry.release.id));
+    const value=entry.status,done=!entry.error&&['complete','not_required'].includes(value?.status);
+    let title='正在读取素材副本回执',message='只读取本次发布的状态，不会自动交接或重试。';
+    if(busy){title='正在交接素材副本';message='正在使用本次冻结内容核对回执，请勿重复提交。打开制作任务不受影响。'}
+    else if(entry.error){title='素材副本尚未确认';message=entry.error}
+    else if(!entry.loading&&value){
+      const count=`${value.copied_count} / ${value.expected_count}`;
+      if(value.status==='not_required'){title='无需素材副本交接';message='本次冻结版本没有需要交接的场景素材。'}
+      else if(value.status==='complete'){title=`素材副本已确认 · ${count}`;message='本次发布的素材副本回执已齐全；这不代表 AA 制作或导出已经完成。'}
+      else if(value.status==='not_handed_off'){title=`素材尚未交接 · ${count}`;message='请使用「交给 AA 制作」提交本次冻结版本。'}
+      else{title=`素材副本待确认 · ${count}`;message='已关联制作任务不等于副本已确认。可重试交接，补齐本次冻结版本的回执。'}
+      if(!done&&value.capability?.status==='offline')message+=' AA 制作服务当前离线，请恢复服务后重试。';
+      if(!done&&value.capability?.status==='unsupported')message+=' AA 制作服务暂不支持素材交接，请检查服务版本后重试。';
+    }
+    entry.surface.className=`release-asset-proof ${done&&!busy&&!entry.loading?'is-verified':entry.error?'has-error':'is-loading'}`;
+    entry.surface.innerHTML=`<header><b>${esc(title)}</b><span>本发布版本</span></header><p>${esc(message)}</p>`;
+    entry.surface.setAttribute('aria-busy',String(busy||entry.loading));
+    const first=entry.card.querySelector('[data-handoff]');
+    if(first){first.disabled=busy||Boolean(state.releaseDetailErrors?.[entry.release.id]);first.textContent=busy?'正在交给 AA 制作…':'交给 AA 制作'}
+    let retry=entry.card.querySelector('[data-retry-handoff]');
+    const canRetry=entry.release.production_run_id&&(busy||entry.error||(!entry.loading&&!done));
+    if(canRetry){
+      if(!retry){
+        retry=document.createElement('button');retry.type='button';retry.className='quiet';
+        retry.dataset.retryHandoff=entry.release.id;retry.dataset.workId=entry.view.work.id;
+        entry.card.querySelector('.actions').appendChild(retry);
+      }
+      retry.disabled=busy;retry.textContent=busy?'正在重试交接…':'重试素材交接';
+    }else retry?.remove();
+  },
+  link(entry,runId){
+    entry.release.production_run_id=runId;
+    const button=entry.card.querySelector('[data-handoff], [data-open-production]');
+    if(button){
+      delete button.dataset.handoff;button.dataset.openProduction=runId;
+      button.dataset.workId=entry.view.work.id;button.dataset.releaseId=entry.release.id;
+      button.disabled=false;button.textContent='打开 AA 制作任务';
+    }
+    entry.card.querySelector('[data-release-link-status]').textContent='已关联 AA 制作任务；素材副本确认情况见下方。';
+  },
+  async submit(button){
+    const releaseId=button.dataset.retryHandoff||button.dataset.handoff;
+    const entry=this.active(button.dataset.workId,releaseId);
+    if(!entry||button.disabled)return;
+    const work=entry.view.work,key=this.key(work.id,releaseId);
+    if(this.submissions.has(key))return;
+    this.submissions.set(key,true);
+    // Fence any earlier status result before starting a user-initiated replay.
+    ++entry.requestId;entry.cancel?.();entry.cancel=null;
+    entry.error='';this.paint(entry);
+    let succeeded=false;
+    try{
+      const result=await this.request(`/releases/${encodeURIComponent(releaseId)}/handoff`,{method:'POST',body:'{}'});
+      if(result?.release_id!==releaseId||typeof result.production_run_id!=='string'||!result.production_run_id
+        ||(entry.release.production_run_id&&result.production_run_id!==entry.release.production_run_id)){
+        throw new Error('交接返回的制作任务与本次发布不一致，请重试核对。');
+      }
+      const current=this.active(work.id,releaseId);
+      if(!current||current.view.work!==work)return;
+      this.link(current,result.production_run_id);
+      const proof=result.asset_handoff;
+      const complete=proof?.status==='complete'&&Number.isSafeInteger(proof.expected_count)
+        &&proof.expected_count>0&&proof.confirmed_count===proof.expected_count;
+      toast(complete?`已关联制作任务；素材副本已确认（${proof.confirmed_count} / ${proof.expected_count}）。`
+        :proof?.status==='not_required'&&proof.expected_count===0?'已关联制作任务；本次无需素材副本交接。'
+        :'已关联制作任务；素材副本仍待确认，可重试素材交接。');
+      succeeded=true;
+    }catch(error){
+      const current=this.active(work.id,releaseId);
+      if(current&&current.view.work===work){current.error=`交接未完成：${error.message||'请检查服务后重试。'}`;current.loading=false}
+    }finally{
+      this.submissions.delete(key);
+      const current=this.active(work.id,releaseId);
+      if(current){
+        // A rerender of this card may share the in-flight guard, but only its
+        // own status read can update a newly selected work object.
+        current.loading=false;this.paint(current);
+        if(succeeded||current.view.work!==work)void this.read(current);
+      }
+    }
+  },
+};
+
+// The integrated shell also captures first-time handoff at document level.
+// Own only managed release-card submissions before that legacy handler; leave
+// [data-open-production] untouched so the established navigation still runs.
+window.addEventListener('click',event=>{
+  const button=event.target.closest('[data-handoff], [data-retry-handoff]');
+  if(!button||!ReleaseHandoffUI.active(button.dataset.workId,button.dataset.retryHandoff||button.dataset.handoff))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  void ReleaseHandoffUI.submit(button);
+},true);
+
 // In the integrated shell, a handed-off release remains a useful navigation
 // target instead of becoming a permanently disabled button.
 const renderReleaseBeforeProductionNavigation=renderRelease;
@@ -3590,6 +3761,7 @@ renderRelease=function(el){
     button.dataset.releaseId=release.id;
     button.textContent='打开 AA 制作任务';
   }
+  ReleaseHandoffUI.mount(el);
 };
 
 document.addEventListener('click',event=>{
