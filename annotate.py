@@ -705,7 +705,7 @@ def render(item):
     return f"{item['who']}{anno}: {item['text']}"
 
 
-def render_annotated_items(items):
+def render_annotated_items(items, *, reaction_records=None):
     """Render annotated items while avoiding redundant background switches."""
     out_lines = []
     last_bg = None
@@ -737,34 +737,69 @@ def render_annotated_items(items):
         if item.get("wait_ms"):
             out_lines.append(f"@wait {item['wait_ms']}")
         out_lines.extend(annotation_directives(item))
+        if item.get("_annotation_beat"):
+            # Only this accepted reaction gets a camera override; never change
+            # the held camera inherited by subsequent authored dialogue.
+            out_lines.append(f"@camera {item['who']}")
+            if reaction_records is not None:
+                reaction_records.append({
+                    **item["_reaction_record"],
+                    "output_line": sum(line.count("\n") + 1 for line in out_lines) + 1,
+                })
         out_lines.append(render(item))
 
     return "\n".join(out_lines) + "\n"
 
 
 def insert_annotation_beats(items, beats):
-    """Insert validated dialogue-free reaction nodes around source anchors."""
+    """Insert reactions without consuming one-line prefixes owned by the anchor."""
+    from diagnostics import PENDING_PREFIX_COMMANDS, THEMATIC_BREAK_RE
+
+    # Transition lives outside Pending in the compiler, but is reset after
+    # one dialogue too. Keep it on the authored anchor during beat insertion.
+    anchor_prefixes = PENDING_PREFIX_COMMANDS | {"trans"}
     before, after = {}, {}
     for beat in beats or []:
         target = before if beat.get("position") == "before" else after
         target.setdefault(str(beat.get("anchor_id") or ""), []).append(beat)
     result = []
+    pending_start = None
     for item in items:
+        if item.get("kind") != "line":
+            raw = str(item.get("raw") or "").strip()
+            if raw.startswith("##") or THEMATIC_BREAK_RE.fullmatch(raw):
+                pending_start = None
+            match = re.match(r"^@([A-Za-z_]+)\b", raw)
+            if match and match.group(1).lower() in anchor_prefixes and pending_start is None:
+                pending_start = len(result)
+            result.append(item)
+            continue
         anchor_id = str(item.get("annotation_id") or "")
-        for beat in before.get(anchor_id, []):
-            result.append(_beat_item(beat))
+        reactions = [_beat_item(beat, item) for beat in before.get(anchor_id, [])]
+        if reactions:
+            # Keep authored camera/wait/fx and later directives together, in
+            # original order, for their intended next line instead of the beat.
+            insertion = pending_start if pending_start is not None else len(result)
+            result[insertion:insertion] = reactions
         result.append(item)
-        for beat in after.get(anchor_id, []):
-            result.append(_beat_item(beat))
+        result.extend(_beat_item(beat, item) for beat in after.get(anchor_id, []))
+        pending_start = None
     return result
 
 
-def _beat_item(beat):
+def _beat_item(beat, anchor):
+    identity = [beat.get("anchor_id"), beat.get("position"), beat.get("who")]
+    beat_id = "reaction-" + hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:16]
     return {
         "kind": "line", "raw": "", "who": beat["who"], "text": "",
         "face": beat.get("face", ""), "emo": beat.get("emo", ""),
         "act": beat.get("act", ""), "fx": "", "wait_ms": beat.get("wait_ms", 0),
         "_annotation_beat": True,
+        "_reaction_record": {
+            **dict(beat), "beat_id": beat_id, "source_line": anchor.get("line_no", 0),
+        },
     }
 
 
@@ -1247,7 +1282,13 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     proposals.extend(build_postprocessor_proposals(items, rule="continuity_density"))
     normalize_bgfx_lifetime(items)
 
-    final_text = render_annotated_items(insert_annotation_beats(items, annotation_beats))
+    reaction_records = []
+    final_text = render_annotated_items(
+        insert_annotation_beats(items, annotation_beats), reaction_records=reaction_records,
+    )
+    if reaction_records:
+        from reaction_integrity import validate_reaction_output
+        reaction_records = validate_reaction_output(final_text, reaction_records, cast, idx, cfg)
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(final_text)
@@ -1280,6 +1321,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
 
     return {
         "text": final_text,
+        "reaction_records": reaction_records,
         "proposals": proposals,
         "diagnostics": diagnostics,
         "out": out_path,

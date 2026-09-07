@@ -1732,6 +1732,10 @@ class Legacy093Adapter:
             normalized = {"kind": "unset"}
         elif not str(mapping.get("id") or "").strip():
             raise ProductionError("cast_id_required", "有立绘角色必须提供 AA 角色 ID")
+        else:
+            # The explicit UI kind is authoritative over absent/stale legacy
+            # flags; the compiler and model evidence guards consume these flags.
+            normalized.update(portrait=True, narrator=False)
         try:
             with self._teacher_error_boundary():
                 self.store.update_cast(
@@ -2374,6 +2378,7 @@ class Legacy093Adapter:
                 "agent": agent,
                 "metrics": agent.get("metrics") if isinstance(agent.get("metrics"), dict) else {},
                 "diagnostics": list(value.get("diagnostics") or []),
+                "reaction_records": list(value.get("reaction_records") or []),
                 "proposal_count": len(value.get("proposals") or []),
                 "direction_change_count": int(value.get("direction_change_count") or 0),
                 "cancelled": bool(value.get("cancelled")),
@@ -2469,6 +2474,11 @@ class Legacy093Adapter:
                 "background_not_in_manifest": "所选背景不在冻结素材清单中，草稿未被修改",
             }
             code = str(getattr(exc, "code", ""))
+            if code == "reaction_intent_lost":
+                raise ProductionError(
+                    code, "反应镜头未保留目标或已确认演出，草稿未被修改。", status=409,
+                    details=exception_details if isinstance(exception_details, dict) else {},
+                ) from exc
             if code in contract_errors:
                 raise ProductionError(code, contract_errors[code], status=409) from exc
             raise ProductionError(
@@ -2500,6 +2510,16 @@ class Legacy093Adapter:
             _write_json_atomic(attempt_dir / "result.json", summary)
             return summary
 
+        source_by_line = {
+            card.get("line_no"): card for card in source_cards
+            if isinstance(card, dict) and card.get("kind") == "line"
+        }
+        result["reaction_records"] = [
+            {**record,
+             "source_card_id": source_by_line.get(record.get("source_line"), {}).get("card_id"),
+             "source_id": source_by_line.get(record.get("source_line"), {}).get("source_id")}
+            for record in result.get("reaction_records", [])
+        ]
         effective_proposals = [
             proposal
             for proposal in (result.get("proposals") or [])

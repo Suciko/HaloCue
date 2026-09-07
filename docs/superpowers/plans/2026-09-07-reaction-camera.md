@@ -34,3 +34,24 @@ source one-line camera conflict,5slots full,scene boundary,duplicate anchor,unkn
 anchor/rejected resource,ordinary offscreen/narrator/teacher lines,late/cancelled job
 publication remaining fenced. Preserve exact authored dialogue and unrelated source
 prefixes, wait count1. Standard prompt/rules untouched; real playback still unverified.
+
+
+## Implementation decision
+
+Use one-line camera for generated beats. For a before beat, insert before the first
+unconsumed authored prefix since the last dialogue/scene boundary; leave all source
+nodes in original order. This prevents the beat from consuming camera/wait/fx intended
+for its anchor. When no safe source anchor exists reject instead of guessing.
+
+Rendering optionally collects reaction-only sidecar records containing beat_id,
+anchor_id, source_line, position, who, face/emo/act/wait_ms and output_line. A pure
+reaction_integrity validator locally compiles generated text with the same frozen
+cast/resources/config and verifies each record's target slot and requested values.
+Return compiled_index for traceability, never insert metadata in ScriptData. Only
+runs when reaction records exist, not every normal annotation. Failed validation
+raises reaction_intent_lost with source-located diagnostics before writing annotation
+output or publishing production draft. Production maps it to a clear409 and persists
+audit diagnostics. Existing generation/cancel fences still own final publication.
+
+Helper write scope can be delegated: reaction_integrity.py plus tests; main owns
+annotate insertion/render and production adoption. No alternative standalone timeline.
