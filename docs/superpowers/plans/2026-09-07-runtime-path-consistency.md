@@ -25,3 +25,19 @@ Tests actual capability/settings/resolver/render call argument samefile; invalid
 persistedfailclosed;clear fallback;env and legacy conflict;restart same policy; no
 realSpine/AA processes or model. UI preserves existing controls,shows effective path
 and override explanation. Separate shared source resolution to avoid duplicated guesses.
+
+
+## Verified compatibility boundary
+
+The legacy resolver merges configuration dictionaries first: the first `spine_cli`
+key in legacy AA config masks the data-directory key even if that selected file is
+missing. Preserve this established policy, rather than claiming each missing file
+falls through to the next configuration. Environment candidates and portable
+resolution remain the legacy resolver's responsibility. Characterization tests cover
+both competing valid configs and a missing first-config path. New explicit saved
+selection remains authoritative and fail-closed; clearing it restores this legacy
+policy. Trim provenance comparisons exactly as legacy config/environment parsing does.
+
+AA restart target uses the constructor's validation of a saved workspace, not merely
+its persisted string. A missing required directory keeps the saved value visible but
+makes the predicted restart target null when no startup override exists.
