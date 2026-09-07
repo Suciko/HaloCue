@@ -176,6 +176,13 @@ class Repository:
           kind TEXT NOT NULL, automation_level TEXT NOT NULL, status TEXT NOT NULL,
           pinned_input_refs_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS release_asset_receipts (
+          release_id TEXT NOT NULL REFERENCES script_releases(id),
+          production_run_id TEXT NOT NULL, scene_id TEXT NOT NULL,
+          reference_id TEXT NOT NULL, receipt_json TEXT NOT NULL,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+          PRIMARY KEY (release_id, production_run_id, scene_id, reference_id)
+        );
         CREATE TABLE IF NOT EXISTS work_items (
           id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES production_runs(id),
           type TEXT NOT NULL, scope_type TEXT NOT NULL, scope_id TEXT NOT NULL,

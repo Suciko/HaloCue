@@ -579,7 +579,8 @@ def test_supported_asset_handoff_stays_pending_until_matching_receipt(tmp_path):
         receipt = {"schema_version": "production-asset-usage/1.0", "production_run_id": "run-assets", "references": [{"scene_id": scene_id, "reference_id": reference["id"], "source_asset_id": reference["source_asset_id"], "source_version": reference["source_version"], "content_hash": reference["content_hash"], "production_copy": {"copy_id": "copy-1", "content_hash": "sha256:" + "1" * 64}}]}
         assert service.reconcile_production_asset_copies(release["release_id"], receipt)["status"] == "complete"
         updated = service.get_work(release["work"]["id"])["chapters"][-1]["scenes"][0]["asset_references"][0]
-        assert updated["production_copy"]["copy_id"] == "copy-1"
+        assert updated["production_copy"] is None
+        assert service.production_asset_status(release["release_id"])["references"][0]["production_copy"]["copy_id"] == "copy-1"
         assert service.production_asset_status(release["release_id"])["status"] == "complete"
     finally:
         server.shutdown(); server.server_close(); thread.join(timeout=2)
@@ -616,7 +617,8 @@ def test_retrying_an_existing_production_run_reconciles_a_late_asset_receipt(tmp
         retry = service.handoff_release(release["release_id"])
         assert retry["idempotent"] is True
         assert retry["asset_handoff"]["status"] == "complete"
-        assert service.get_work(release["work"]["id"])["chapters"][-1]["scenes"][0]["asset_references"][0]["production_copy"]["copy_id"] == "copy-late"
+        assert service.production_asset_status(release["release_id"])["references"][0]["production_copy"]["copy_id"] == "copy-late"
+        assert service.get_work(release["work"]["id"])["chapters"][-1]["scenes"][0]["asset_references"][0]["production_copy"] is None
     finally:
         server.shutdown(); server.server_close(); thread.join(timeout=2)
 

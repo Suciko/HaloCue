@@ -72,6 +72,7 @@ from .aap_import import parse_aap_bytes, parse_aap_payload
 from .story_import import extract_document_paragraphs, parse_story_bytes, parse_story_payload
 from .source_catalog import SourceCatalog
 from .adaptation import AdaptationService, validate_chapter_candidate
+from .asset_references import source_reference_snapshot
 from .workspace_access import workspace_access, workspace_operation
 
 
@@ -4030,32 +4031,15 @@ class WritingService:
         )
         for row in rows:
             row["source_snapshot"] = json.loads(row.pop("source_snapshot_json") or "{}")
-            row["production_copy"] = (
-                json.loads(row.pop("production_copy_json"))
-                if row.get("production_copy_json")
-                else None
-            )
+            # Legacy values have no release/run identity and are not author inputs.
+            row.pop("production_copy_json", None)
+            row["production_copy"] = None
         return rows
 
     @staticmethod
     def _scene_asset_reference_snapshot(references: list[dict]) -> list[dict]:
-        """Freeze the public, traceable part of Scene asset references."""
-
-        return [
-            {
-                "reference_id": reference["id"],
-                "asset_kind": reference["asset_kind"],
-                "source_type": reference["source_type"],
-                "source_asset_id": reference["source_asset_id"],
-                "display_name": reference["display_name"],
-                "source_version": reference["source_version"],
-                "content_hash": reference["content_hash"],
-                "content_hash_kind": reference["content_hash_kind"],
-                "source_snapshot": reference["source_snapshot"],
-                "production_copy": reference["production_copy"],
-            }
-            for reference in references
-        ]
+        """Freeze author-owned sources, never production consumption results."""
+        return source_reference_snapshot(references)
 
     @staticmethod
     def _revision_comparison_subject(value, fallback: str) -> str:
@@ -14003,6 +13987,15 @@ class WritingService:
             "upstream_schema_version": data.get("schema_version") if isinstance(data, dict) else None,
         }
 
+    def _release_asset_receipts(self, connection, release, expected):
+        rows = connection.execute(
+            "SELECT scene_id,reference_id,receipt_json FROM release_asset_receipts "
+            "WHERE release_id=? AND production_run_id=?",
+            (release["id"], release.get("production_run_id")),
+        ).fetchall()
+        by_identity = {(row["scene_id"], row["reference_id"]): json.loads(row["receipt_json"]) for row in rows}
+        return [by_identity[key] for key in expected if key in by_identity]
+
     @workspace_operation
     def production_asset_status(self, release_id: str) -> dict:
         with self.repo.connect() as connection:
@@ -14016,12 +14009,10 @@ class WritingService:
             for group in manifest.get("asset_references", [])
             for reference in group.get("references", [])
         ]
-        expected_ids = [reference.get("reference_id") for _, reference in expected]
+        expected_ids = [(scene_id, reference.get("reference_id")) for scene_id, reference in expected]
         with self.repo.connect() as connection:
-            copied = connection.execute(
-                "SELECT COUNT(*) FROM scene_asset_references WHERE work_id=? AND id IN ({}) AND production_copy_json IS NOT NULL".format(",".join("?" for _ in expected_ids)),
-                [release["work_id"], *expected_ids],
-            ).fetchone()[0]
+            receipts = self._release_asset_receipts(connection, release, expected_ids)
+        copied = len(receipts)
         capability = self.production_asset_capabilities() if expected else {
             "schema_version": "production-asset-capabilities/1.0",
             "status": "not_required",
@@ -14044,6 +14035,7 @@ class WritingService:
             "status": status,
             "expected_count": len(expected),
             "copied_count": min(copied, len(expected)),
+            "references": receipts,
             "capability": capability,
         }
 
@@ -14118,25 +14110,21 @@ class WritingService:
             if not isinstance(copy, dict) or not copy.get("copy_id") or not copy.get("content_hash"):
                 raise DomainError("production_asset_usage_invalid", "素材回执缺少任务副本 ID 或 Hash。", status=409)
             seen.add(key)
-            updates.append((key, copy))
+            updates.append((key, receipt))
         with self.repo.transaction() as connection:
-            for (scene_id, reference_id), copy in updates:
-                row = connection.execute(
-                    "SELECT id, source_asset_id, source_version, content_hash FROM scene_asset_references WHERE work_id=? AND scene_id=? AND id=?",
-                    (release["work_id"], scene_id, reference_id),
-                ).fetchone()
-                if not row or any(row[field] != expected[(scene_id, reference_id)].get(field) for field in ("source_asset_id", "source_version", "content_hash")):
-                    raise DomainError("production_asset_usage_mismatch", "数据库中的场景素材已与发布快照不一致。", status=409, details={"scene_id": scene_id, "reference_id": reference_id})
+            current = connection.execute("SELECT production_run_id FROM script_releases WHERE id=?", (release_id,)).fetchone()
+            if not current or current["production_run_id"] != run_id:
+                raise DomainError("production_asset_usage_mismatch", "发布版本的制作任务已变化，本次回执未写入。", status=409)
+            for (scene_id, reference_id), receipt in updates:
+                timestamp = now()
                 connection.execute(
-                    "UPDATE scene_asset_references SET production_copy_json=?, updated_at=? WHERE id=?",
-                    (canonical_json(copy), now(), reference_id),
+                    "INSERT INTO release_asset_receipts VALUES (?,?,?,?,?,?,?) "
+                    "ON CONFLICT(release_id,production_run_id,scene_id,reference_id) "
+                    "DO UPDATE SET receipt_json=excluded.receipt_json,updated_at=excluded.updated_at",
+                    (release_id, run_id, scene_id, reference_id, canonical_json(receipt), timestamp, timestamp),
                 )
-        expected_ids = list(expected)
-        with self.repo.connect() as connection:
-            confirmed_count = connection.execute(
-                "SELECT COUNT(*) FROM scene_asset_references WHERE work_id=? AND id IN ({}) AND production_copy_json IS NOT NULL".format(",".join("?" for _ in expected_ids)),
-                [release["work_id"], *[reference_id for _, reference_id in expected_ids]],
-            ).fetchone()[0]
+            confirmed = self._release_asset_receipts(connection, release, expected)
+        confirmed_count = len(confirmed)
         status = "complete" if confirmed_count == len(expected) else "pending"
         return {
             "schema_version": "production-asset-reconciliation/1.0",

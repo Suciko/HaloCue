@@ -522,11 +522,8 @@
       : reference.source_snapshot?.source === 'writing_catalog'
         ? '1.0 写作资源 · 只读'
         : '全局原件 · AA 资源索引';
-    const productionCopy = reference.production_copy;
-    const copyLabel = productionCopy
-      ? `已收到任务副本 · ${productionCopy.copy_id || '未记录副本 ID'}`
-      : '尚未收到制作任务的素材副本';
-    return `<li><span>${esc(config.label)}</span><b>${esc(sceneAssetDisplayName(reference))}</b><small>${esc(source)}</small><details class="scene-asset-reference-details"><summary>技术详情</summary><dl><div><dt>资源标识</dt><dd><code>${esc(reference.source_asset_id || '未记录')}</code></dd></div><div><dt>引用 ID</dt><dd><code>${esc(reference.id || '未记录')}</code></dd></div><div><dt>原件版本</dt><dd>${esc(reference.source_version || '未记录')}</dd></div><div><dt>原件 Hash</dt><dd><code>${esc(reference.content_hash || '未记录')}</code> · ${esc(reference.content_hash_kind || '未标注类型')}</dd></div><div><dt>任务副本状态</dt><dd>${esc(copyLabel)}${productionCopy?.content_hash ? ` · <code>${esc(productionCopy.content_hash)}</code>` : ''}</dd></div></dl></details></li>`;
+    const copyLabel = '副本回执按发布版本记录，不改变本场的原件引用';
+    return `<li><span>${esc(config.label)}</span><b>${esc(sceneAssetDisplayName(reference))}</b><small>${esc(source)}</small><details class="scene-asset-reference-details"><summary>技术详情</summary><dl><div><dt>资源标识</dt><dd><code>${esc(reference.source_asset_id || '未记录')}</code></dd></div><div><dt>引用 ID</dt><dd><code>${esc(reference.id || '未记录')}</code></dd></div><div><dt>原件版本</dt><dd>${esc(reference.source_version || '未记录')}</dd></div><div><dt>原件 Hash</dt><dd><code>${esc(reference.content_hash || '未记录')}</code> · ${esc(reference.content_hash_kind || '未标注类型')}</dd></div><div><dt>任务副本状态</dt><dd>${esc(copyLabel)}</dd></div></dl></details></li>`;
   }
 
   function sceneAssetSuggestionsMarkup(sceneId) {
