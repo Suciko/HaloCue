@@ -128,8 +128,8 @@
       "id": "02-007",
       "summary": "普通导入入口走附件/聊天分支，专用改编 API 未接到现有按钮；采纳的 adaptation_manuscript 也没有进入冻结发布所消费的场景正文链。",
       "review_severity": "P1",
-      "status": "partial_or_mitigated",
-      "note": "45d000d：候选采纳写入唯一scene_script/scene-blocks正文，固定目标与当前场景修订，旧稿显式promotion保留原字节/回执幂等；普通审核→冻结→实际Production HTTP交接合成验证通过。1846项固定源码回归通过。普通TXT/DOCX入口仍旧附件/聊天，sliceC UI与浏览器纵向验收未完成，不能宣称整个导入体验已闭合。"
+      "status": "fixed_in_scope",
+      "note": "45d000d+d4e7cfa：普通TXT/DOCX入口使用原文/计划/持久章节任务，审核目标后采纳唯一scene_script，旧稿显式promotion；真实shipping浏览器TXT/DOCX保存→计划→生成→刷新恢复→采纳/场景导航，再普通API审核冻结及Production HTTP交接通过。AAP边界保留；1865项固定源码回归通过。真实模型质量/AA播放、完整输入/费用限制另列，不代表全目标完成。"
     },
     {
       "id": "02-008",
@@ -436,8 +436,8 @@
       "id": "07-011",
       "summary": "小说用户实际入口是解析→附件/预填要求→手动发送；原文版本/计划/逐章API未找到前端调用，不能凭接口补写按钮教程。",
       "review_severity": "P2",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "d4e7cfa：原文改编工作台实际连接原文版本/计划/章节任务/目标采纳/旧稿迁移，手册新增逐步操作与适用入口范围。连载、调用上限非费用账、真实模型发送、关闭不等于取消、重开恢复均明示；TXT/DOCX及新作品/AAP浏览器验证通过，1865项广回归。help端点/旧安装包入口问题仍单列待修。"
     },
     {
       "id": "07-012",

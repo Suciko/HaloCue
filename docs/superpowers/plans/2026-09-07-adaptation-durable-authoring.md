@@ -110,3 +110,13 @@ no complete accounting claim. SliceB/C remain unimplemented. Detailed next plan:
 Production handoff. Legacy records remain immutable until explicit promotion.1846
 unchanged-source regression tests pass. SliceC ordinary import UI remains pending;
 see2026-09-07-adaptation-import-ui.md. This is not full02-007 closure.
+
+
+## Slice C implementation record
+
+d4e7cfa connects ordinary TXT/DOCX import to the actual source/plan/job/candidate/
+canonical scene path, retains AAP, exposes legacy promotion and server-state recovery,
+and adds truthful user guidance.1865 immutable-source tests pass. UI screenshots and
+TXT/DOCX full-page browser traces supplement unit/API tests. This completes the bounded
+02-007 flow; full monetary/token accounting, input limits and real literary/AA quality
+remain separate outstanding requirements. Overall autonomous repair goal stays active.

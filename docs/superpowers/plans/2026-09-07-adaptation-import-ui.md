@@ -61,27 +61,40 @@ IDs/hashes go in optional details. No decorative progress that implies model wor
 
 ## Implementation / acceptance sequence
 
-- [ ] RED: ordinary TXT/DOCX import currently calls attachment/manual-chat flow; test
+- [x] RED: ordinary TXT/DOCX import currently calls attachment/manual-chat flow; test
       new choice/default source workflow and unchanged AAP behavior.
-- [ ] Inspect/display preview, explicit source apply with correct base/digest, stable
+- [x] Inspect/display preview, explicit source apply with correct base/digest, stable
       saved chapter selection, unfinished/provided-scope labels and bounded call budget.
-- [ ] Create/confirm real plan; display current provider/simulation boundary; model
+- [x] Create/confirm real plan; display current provider/simulation boundary; model
       call happens only after explicit per-chapter generation action.
-- [ ] Poll real run status; disable duplicate submission; cancellation/retry/error
+- [x] Poll real run status; disable duplicate submission; cancellation/retry/error
       branches; close/reopen/page reload restore from server state.
-- [ ] Show candidate text, quote refs, deviations/open threads and target placement;
+- [x] Show candidate text, quote refs, deviations/open threads and target placement;
       explicit acceptance navigates to normal scene editor. Legacy promotion reachable.
-- [ ] Do not overwrite unsaved scene edits or switch work based on late responses.
+- [x] Do not overwrite unsaved scene edits or switch work based on late responses.
       Fence in-flight UI responses by work/selection revision; escape filenames/content.
-- [ ] Ordinary brief/direction/readiness controls remain discoverable. Show next-step
+- [x] Ordinary brief/direction/readiness controls remain discoverable. Show next-step
       review/release navigation only when its actual prerequisites are available.
-- [ ] Visual QA at desktop and narrow viewport plus keyboard/focus/close behavior;
+- [x] Visual QA at desktop and narrow viewport plus keyboard/focus/close behavior;
       one rendered screenshot per meaningful size, not only source-string assertions.
-- [ ] Browser+synthetic APIs prove import→save source→confirm plan→queued fake model→
+- [x] Browser+synthetic APIs prove import→save source→confirm plan→queued fake model→
       review→adopt→ordinary scene→normal review/freeze→Production handoff. No real paid
       provider, user assets or actual AA execution. Preserve all source/proposal IDs.
-- [ ] Focused existing import/settings/Agent/teacher/Sel/UI suites, scoped review, then
+- [x] Focused existing import/settings/Agent/teacher/Sel/UI suites, scoped review, then
       immutable-source broad regression and truthful user docs/help updates.
 
 No main merge/push/release or1.1 edits. Global physical usage/cost accounting, input
 bounds and background knowledge authorization remain separate unresolved findings.
+
+
+## Accepted bounded slice
+
+d4e7cfa implements the shipping prose workbench and source-plan-job-proposal-scene
+bridge.1865 fixed-source tests pass921.62s. Main viewed desktop/mobile screenshots;
+320px nooverflow andEscape checked. Realbrowser trace drives import through scene
+adoption; subsequent ordinary gate/freeze/Production verification uses APIs, not a
+claim of fully click-driven release acceptance. AAP route and fresh-work zero-model
+source save verified. Actual current prerequisite UI is creative conversation, so the
+button routes/prefills there without sending, not to a superseded briefForm. User
+Markdown guide is shipped; general help endpoint/packaging consistency stays separate.
+See adaptation-workbench-ui handoff for scoped review fixes and exact evidence.
