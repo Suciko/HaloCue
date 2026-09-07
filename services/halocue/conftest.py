@@ -24,10 +24,11 @@ def isolated_legacy_root(tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def isolated_production_defaults(request, monkeypatch, tmp_path, isolated_legacy_root):
+def isolated_production_defaults(request, monkeypatch, tmp_path):
     relative = Path(str(request.node.path)).relative_to(Path(__file__).parent)
     if relative.parts[0] not in {"production", "integrated"}:
         return
+    isolated_legacy_root = request.getfixturevalue("isolated_legacy_root")
     monkeypatch.setenv("HALOCUE_LEGACY_ROOT", str(isolated_legacy_root))
     monkeypatch.setenv("HALOCUE_RESOURCE_INDEX", str(isolated_legacy_root / "aa_resources.json"))
     monkeypatch.setenv("HALOCUE_NAME_BASELINE", str(tmp_path / "absent-baseline.json"))
