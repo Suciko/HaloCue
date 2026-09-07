@@ -67,3 +67,10 @@ Files: integrated/tests/test_gateway.py; writing backup/release-integrity tests.
 3. Run narrow source/gate/release/handoff tests, then a scoped reviewer. Verify the
    combined writing/production/integrated suite against an unchanged commit. Record
    exact counts and limitations in handoff/ledger; keep 01-005/006 and goal active.
+
+## Execution
+
+Implemented in `6f28ebb` and test assertion migration `12389a2`. All three slices
+are verified by the 1146-test unchanged-commit broad run. Exact evidence, failed
+fixture history, migration and boundaries: `docs/handoffs/2026-09-07-release-asset-receipts.md`.
+01-005/006 remain separate required work.

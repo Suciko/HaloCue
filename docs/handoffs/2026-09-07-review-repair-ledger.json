@@ -28,8 +28,8 @@
       "id": "01-004",
       "summary": "生产回执被写入作者场景引用并进入下一份定稿，同素材再次发布会被生产端拒绝。",
       "review_severity": "P1",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "6f28ebb/12389a2：作者引用与按release/run隔离的回执投影分离；同素材R1/R2交接、历史引用删除、迁移与备份往返验证；旧冻结字节不改，带旧copy的定稿仍需重新审核发布。01-005/006仍待修。"
     },
     {
       "id": "01-003",
@@ -459,9 +459,9 @@
       "note": ""
     }
   ],
-  "latest_verified_code": "45b58bcb56cc5ab529c5429354ae02d5f18e7550",
+  "latest_verified_code": "12389a254c2effa6b1a383263ef89652c40c67bd",
   "latest_regression": {
-    "passed": 1131,
+    "passed": 1146,
     "real_provider": false,
     "real_AA_playback": false,
     "source_unchanged": true
