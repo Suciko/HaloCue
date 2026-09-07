@@ -128,8 +128,8 @@
       "id": "02-007",
       "summary": "普通导入入口走附件/聊天分支，专用改编 API 未接到现有按钮；采纳的 adaptation_manuscript 也没有进入冻结发布所消费的场景正文链。",
       "review_severity": "P1",
-      "status": "pending",
-      "note": "普通导入UI及adaptation→正式scene_script→发布仍待实现；6076ac0仅完成持久章节执行。下一步详见2026-09-07-adaptation-scene-adoption计划，不能凭202或单独artifact采纳接口宣称链路已闭合。"
+      "status": "partial_or_mitigated",
+      "note": "45d000d：候选采纳写入唯一scene_script/scene-blocks正文，固定目标与当前场景修订，旧稿显式promotion保留原字节/回执幂等；普通审核→冻结→实际Production HTTP交接合成验证通过。1846项固定源码回归通过。普通TXT/DOCX入口仍旧附件/聊天，sliceC UI与浏览器纵向验收未完成，不能宣称整个导入体验已闭合。"
     },
     {
       "id": "02-008",

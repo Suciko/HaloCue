@@ -61,7 +61,7 @@ release/export adapters; focused proposal/source/release/integrated tests.
 - [ ] Adoption atomically creates/updates the normal scene manuscript revision with
       source refs and decision provenance, then schedules existing commit projections.
       Reuse authoritative scene/block parsing; no parallel canonical manuscript type.
-- [ ] Prove accepted text survives work reload, selected-scene freeze, release export
+- [ ] Prove accepted text survives work reload, normal scene-set freeze, release export
       and synthetic Production handoff with identical intended dialogue/source refs.
 - [ ] Cover a second candidate after user edits, duplicate acceptance/concurrency,
       deleted target/source supersession, and old accepted adaptation artifacts.
@@ -102,3 +102,11 @@ summary) are corrected.22 new cases plus existing broad suite:1832passed717.12s 
 unchanged source. Physical usage/input limits remain separate incomplete findings;
 no complete accounting claim. SliceB/C remain unimplemented. Detailed next plan:
 `2026-09-07-adaptation-scene-adoption.md`. Handoff: durable-dispatch document.
+
+
+## Slice B implementation record
+
+45d000d connects accepted adaptations to ordinary scene revisions and normal release/
+Production handoff. Legacy records remain immutable until explicit promotion.1846
+unchanged-source regression tests pass. SliceC ordinary import UI remains pending;
+see2026-09-07-adaptation-import-ui.md. This is not full02-007 closure.

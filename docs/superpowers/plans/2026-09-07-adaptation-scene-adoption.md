@@ -4,7 +4,7 @@
 > user-visible outcome; do not stop at another disconnected artifact endpoint.
 
 **Goal:** Explicitly accepting a source-grounded adaptation candidate creates a normal
-scene manuscript revision that work reload, review, selected-scene release freeze and
+scene manuscript revision that work reload, review, normal scene-set release freeze and
 Production handoff already consume. Old accepted adaptation artifacts remain immutable
 and require an explicit promotion action.
 
@@ -68,3 +68,14 @@ TDD each behavior, scoped review, focused regression then immutable-source broad
 Do not change standard director prompts, teacher/Sel, 1.1, main or real user data.
 After this backend slice, the existing manual-chat prose import UI still needs sliceC;
 02-007 closes only after a real-DOM/browser vertical trace through the shipping UI.
+
+
+## Accepted implementation
+
+45d000d implements canonical scene-only new adoption, shared target/base resolver,
+explicit idempotent legacy promotion retaining original bytes, normalized blocks/text,
+source/scope validation, and a full synthetic normal-gate→freeze→Production HTTP trace.
+Scoped review accepted after normalization and old-queued-target compatibility fixes.
+1846 tests passed833.72s on unchanged source; see companion handoff. The selected-scene
+wording was corrected to the actual ordinary scene-set freeze contract. SliceC UI and
+real playback remain unimplemented/unverified, respectively.
