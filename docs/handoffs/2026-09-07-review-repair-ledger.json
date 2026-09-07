@@ -65,8 +65,8 @@
       "id": "01-008",
       "summary": "显式选择 legacy_root 不能隔离 Python 全局模块缓存，第二个适配器可能报 B 版本却执行 A 模块。",
       "review_severity": "P2",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "9cbcfa8/7f05887：单进程兼容代码根固定，共用core/teacher/compile/provider/Spine来源校验；拒绝多根/同名污染/缺失模块跨根回退，区分代码根与数据根并从实际源码目录读取版本。安装布局/无内置代码/传递模块manifest/链接来源/可选Spine回归；1810项固定源码测试通过。非import沙箱或同进程多版本隔离，frozen仅模拟未打包运行。详见legacy-module-provenance交接。"
     },
     {
       "id": "01-009",

@@ -26,20 +26,33 @@ other dynamic loaders (`spine_rendering.py`, resource previews and model setting
 only if needed to prevent a contradictory code-root promise. Do not merely patch
 version strings while continuing mismatched requested code execution.
 
-- [ ] Reproduce A then B in a clean child Python process with synthetic compatibility
+- [x] Reproduce A then B in a clean child Python process with synthetic compatibility
       modules and markers; assert mismatch is denied or isolated, never mislabeled.
-- [ ] Determine exact existing explicit-code vs data-only-root semantics from callers
+- [x] Determine exact existing explicit-code vs data-only-root semantics from callers
       and runtime packaging. Pin one actual module family; account for frozen origins.
-- [ ] Derive reported version from actual code origin, retain selected data-root
+- [x] Derive reported version from actual code origin, retain selected data-root
       provenance separately, and provide an actionable restart/config error for a
       conflicting explicit code selection. Do not reveal secrets in diagnostics.
-- [ ] Test A→A reuse; A→B conflict; B first; data-only roots use shared actual code;
+- [x] Test A→A reuse; A→B conflict; B first; data-only roots use shared actual code;
       partial/mixed module sets; preserve original adapter after rejected second root.
-- [ ] Confirm transitive module imports and optional teacher/Spine loaders cannot bypass
+- [x] Confirm transitive module imports and optional teacher/Spine loaders cannot bypass
       the origin check. Do not invalidate modules while workers are running.
-- [ ] Run production/integrated/compiler/prompt/teacher/Sel checks with synthetic data.
-- [ ] Scoped review, immutable-source broad regression, bounded ledger/handoff update.
+- [x] Run production/integrated/compiler/prompt/teacher/Sel checks with synthetic data.
+- [x] Scoped review, immutable-source broad regression, bounded ledger/handoff update.
 
 No standard-prompt changes, real asset reads/writes, paid calls, main merge/push or
 1.1 worktree edits. A local provenance guard is not full multi-checkout isolation;
 state that limitation explicitly rather than claiming the larger architecture solved.
+
+
+## Implementation progress
+
+Source9cbcfa8 implements the review's single-process single-implementation boundary,
+shared guards for core and lazy production imports, code/data provenance, and actual
+code-directory marker parsing. Sixteen new isolated origin cases plus two additional
+version cases cover the planned source behavior; runtime/origin/version37 focused
+checks pass. Scoped review accepted after optional-Spine and linked-file fixes.
+Frozen tests are simulations only; packaged artifact validation remains outside this
+synthetic evidence. Full immutable-source regression is in flight; see the handoff.
+
+Accepted7f05887: 1810 unchanged-source regression tests passed621.53s; installation layout correction and shipped family manifest reviewed. This completes the bounded review recommendation only; see explicit frozen/non-sandbox boundaries in handoff.
