@@ -69,3 +69,17 @@ conversation slice and agent presentation tests. The previous immutable broad ru
 was `72f24aa` (1181 passed); because this commit changes backend planning behavior,
 a fresh broad regression is still required before treating the branch snapshot as
 broadly verified. Ledger keeps those scopes separate.
+
+
+## Accepted immutable broad verification
+
+`1fbc259b33af07d0c632c018757a749ca5db5e19` was unchanged throughout:
+
+`python -X utf8 -m pytest services/halocue/writing/tests services/halocue/production/tests services/halocue/integrated/tests tests/test_direction_profiles.py tests/test_conservative_annotation.py tests/test_annotation_memory.py tests/test_annotation_agent.py tests/test_balanced_direction_prompt.py -q`
+
+**1203 passed, exit code0,606.06 seconds.** Tracked source hashes match before/after.
+This supersedes the pending-verification note above. Focused counts overlap and
+must not be added to this total. Production/integrated use the corrected isolated
+test data roots. No real provider/AA playback or whole-goal completion claim.
+Evidence: workspace-level output/autonomous-20260907/verified-regression-1fbc259.log
+and.json. New planning test formatting/lint and baseline-relative service lint pass.
