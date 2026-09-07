@@ -1060,6 +1060,8 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         model_config = {
             "provider": getattr(prov, "name", provider_name or llmcfg.get("provider") or ""),
             "model": getattr(prov, "model", ""),
+            "base_url": str(getattr(prov, "cfg", {}).get("base_url") or ""),
+            "source_context_strategy": source_context_strategy,
             "max_tokens": int(getattr(prov, "cfg", {}).get("max_tokens", 16000)),
             "annotation_max_tokens": int(getattr(prov, "cfg", {}).get("annotation_max_tokens") or getattr(prov, "cfg", {}).get("max_tokens", 16000)),
             "reasoning_mode": str(getattr(prov, "cfg", {}).get("reasoning_mode") or "balanced"),
@@ -1073,6 +1075,16 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             model_config,
             story_type=story_type, director_version="stateful-v1",
         )
+        # Checkpoint identity is not a prompt policy. Both profiles must pin
+        # every input that can change the actual request/plan on resume.
+        fingerprint["effective_static_sha256"] = hashlib.sha256(agent_static.encode("utf-8")).hexdigest()
+        fingerprint["planning_sha256"] = hashlib.sha256(json.dumps(
+            {"default_bg": cfg.get("default_bg"), "scene_bg": cfg.get("scene_bg"),
+             "usage_chain": usage_chain, "layout_mode": options.get("layout_mode"),
+             "context_before": int(llmcfg.get("agent_context_before", 15)),
+             "context_after": int(llmcfg.get("agent_context_after", 10))},
+            sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
         if direction_profile == "conservative":
             fingerprint["direction_profile"] = profile_snapshot
             fingerprint["static_prompt_sha256"] = hashlib.sha256(static.encode("utf-8")).hexdigest()

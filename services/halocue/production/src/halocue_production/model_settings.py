@@ -441,6 +441,21 @@ class DirectionModelSettings:
             ) from exc
 
 
+    def execution_identity(self) -> dict[str, str]:
+        """Non-secret saved configuration identity; never persist a credential value."""
+        public = self._load_public()
+        # Explicit allowlist: a wrongly named/extra config field cannot put a key
+        # in a persisted retry context. Credential revision is an opaque random ID.
+        fields = (
+            "provider", "base_url", "model", "max_tokens", "annotation_max_tokens",
+            "timeout", "wall_timeout", "reasoning_mode", "reasoning_wire_protocol",
+            "source_context_strategy", "transport_retries", "credential_revision", "api_key_env",
+        )
+        canonical = json.dumps({key: public.get(key) for key in fields},
+                               sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        return {"schema_version": "direction-model-identity/1.0",
+                "config_sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest()}
+
     def provider_settings(self) -> tuple[str, dict[str, Any]]:
         public = self._load_public()
         state = self.public()["model"]

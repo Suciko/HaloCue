@@ -334,12 +334,17 @@ def build_run_fingerprint(
     safe_model = {
         "provider": str(model_config.get("provider") or ""),
         "model": str(model_config.get("model") or ""),
+        "endpoint_sha256": _sha(str(model_config.get("base_url") or "")),
+        "context_window_tokens": int(model_config.get("context_window_tokens") or 0),
+        "source_context_strategy": str(model_config.get("source_context_strategy") or "preserve"),
+        "compact_annotation": bool(model_config.get("compact_annotation", False)),
         "max_tokens": int(model_config.get("max_tokens") or 0),
         "annotation_max_tokens": int(model_config.get("annotation_max_tokens") or 0),
         "reasoning_mode": str(model_config.get("reasoning_mode") or ""),
         "reasoning_wire_protocol": str(model_config.get("reasoning_wire_protocol") or ""),
     }
     return {
+        "fingerprint_version": 2,
         "script_sha256": _sha(script_text), "cast_sha256": _sha(cast),
         "resources_sha256": _sha(resources), "prompt_version": str(prompt_version),
         "schema_version": int(schema_version), "chunk_version": str(chunk_version),

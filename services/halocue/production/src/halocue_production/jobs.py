@@ -88,6 +88,7 @@ class JobControl:
         self._registry = registry
         self.job_id = job_id
         self._cancel = threading.Event()
+        self._side_effect_committed = False
         self._pause = threading.Event()
         self._supersede = threading.Event()
         self._stop = threading.Event()
@@ -153,6 +154,15 @@ class JobControl:
             self._supersede.set()
             self._stop.set()
             self._notify_stop_callbacks()
+
+    def commit_side_effect(self, commit: Callable[[], Any]) -> Any:
+        """Linearize a short local publish with cancellation (never model IO)."""
+        with self._registry._lock:
+            if self.stop_requested():
+                raise JobCancelled("任务已结束，晚到结果不再写入")
+            result = commit()
+            self._side_effect_committed = True
+            return result
 
     def report_progress(
         self,
@@ -424,6 +434,8 @@ class JobRegistry:
             if record is None or control is None or record.state not in {
                 "queued", "running", "pausing", "cancelling",
             }:
+                return False
+            if control._side_effect_committed:
                 return False
             now = self._now()
             control.request_cancel()

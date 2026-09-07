@@ -2674,7 +2674,11 @@ def test_empty_direction_failure_is_retryable_but_not_presented_as_checkpoint_re
             created_at="2026-09-04T00:00:00+00:00",
             updated_at="2026-09-04T00:00:01+00:00",
             run_id="run-000000000001",
-            retry_context={"expected_draft_version": 2, "generation_id": "direction-empty"},
+            # Modern retries carry model identity even when output was empty;
+            # legacy jobs without it require a fresh generation (separate test).
+            retry_context={"expected_draft_version": 2, "generation_id": "direction-empty",
+                           "model_identity": {"schema_version": "direction-model-identity/1.0",
+                                              "config_sha256": "0" * 64}},
             error={"code": "direction_generation_empty", "message": "没有有效演出修改"},
         ).to_dict()
     )

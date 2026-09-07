@@ -217,3 +217,42 @@ def test_changed_background_plan_invalidates_previous_checkpoint(tmp_path):
     assert len(provider.prompts) == 1
     assert "@bg BG_Classroom" in result["text"]
     assert result["agent"]["resumed_chunks"] == 0
+
+
+@pytest.mark.parametrize("field, changed", [
+    ("base_url", "https://second.invalid/v1"),
+    ("context_window_tokens", 32000),
+    ("source_context_strategy", "window"),
+    ("compact_annotation", True),
+])
+def test_semantic_model_config_changes_checkpoint_identity(field, changed):
+    from annotation_memory import build_run_fingerprint
+
+    config = {"model": "same-model", "base_url": "https://first.invalid/v1"}
+    first = build_run_fingerprint("script", {}, {}, "p", 3, "scene-v3", config)
+    second = build_run_fingerprint("script", {}, {}, "p", 3, "scene-v3", {**config, field: changed})
+    assert first != second
+
+
+def test_standard_annotation_fingerprint_tracks_context_and_background_inputs(tmp_path, monkeypatch):
+    original = annotate.run_annotation_agent
+    captured = []
+
+    def capture(*args, **kwargs):
+        captured.append(kwargs["run_fingerprint"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(annotate, "run_annotation_agent", capture)
+    opts = options(tmp_path, profile="standard")
+    provider = llm.MockProvider({"base_url": "https://first.invalid/v1"})
+    annotate.annotate_script(opts, provider_instance=provider)
+    conf = Path(opts["llm"])
+    conf.write_text(json.dumps({"agent_context_before": 2}), encoding="utf-8")
+    annotate.annotate_script(opts, provider_instance=provider)
+    assert captured[0] != captured[1]
+    cast_path = Path(opts["cast"])
+    cast = json.loads(cast_path.read_text(encoding="utf-8"))
+    cast["default_bg"] = "BG_Classroom"
+    cast_path.write_text(json.dumps(cast), encoding="utf-8")
+    annotate.annotate_script(opts, provider_instance=provider)
+    assert captured[1] != captured[2]

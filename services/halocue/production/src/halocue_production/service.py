@@ -5,6 +5,7 @@ import os
 import re
 import threading
 from dataclasses import replace
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -327,6 +328,18 @@ class ProductionService:
             saved = self.direction_model_settings._save_candidate(candidate, connection_test=tested)
         return {**saved, "test": tested}
 
+    @contextmanager
+    def _direction_model_access(self):
+        # Activation holds this lock across a connection test. Never wait for
+        # it while holding the state lock used by pause/cancel on other jobs.
+        lock = self.direction_model_settings.activation_lock
+        if not lock.acquire(blocking=False):
+            raise ProductionError("direction_model_busy", "模型配置正在测试或保存，请稍后重试生成。", status=409)
+        try:
+            yield
+        finally:
+            lock.release()
+
     def generate_direction(
         self,
         run_id: str,
@@ -335,8 +348,9 @@ class ProductionService:
         generation_id: str | None = None,
         resumed_from_job_id: str | None = None,
         frozen_direction_profile: dict[str, str] | None = None,
+        frozen_model_identity: dict[str, str] | None = None,
     ) -> tuple[int, dict[str, Any]]:
-        with self._state_lock:
+        with self._direction_model_access(), self._state_lock:
             run = self._run(run_id)
             if run.source_summary.get("generation_mode") != "ai_direction":
                 raise ProductionError(
@@ -366,6 +380,12 @@ class ProductionService:
                     status=409,
                 )
             direction_profile = direction_profile_snapshot["id"]
+            model_identity = self.direction_model_settings.execution_identity()
+            if frozen_model_identity is not None and frozen_model_identity != model_identity:
+                raise ProductionError(
+                    "direction_model_changed",
+                    "演出模型配置已变化，不能续用旧检查点；请发起新的生成任务。", status=409,
+                )
             active = self._assert_no_other_mutation_job(
                 run,
                 requested_kind="direction_generation",
@@ -373,6 +393,12 @@ class ProductionService:
             )
             if active:
                 context = active.retry_context if isinstance(active.retry_context, dict) else {}
+                if context.get("model_identity") != model_identity or (
+                    generation_id and generation_id != context.get("generation_id")
+                ):
+                    raise ProductionError(
+                        "direction_generation_conflict", "另一个模型配置或生成代次的任务正在运行。", status=409,
+                    )
                 active_profile = context.get("direction_profile_snapshot")
                 if active_profile is None:
                     active_profile = self.adapter.direction_profile_snapshot(
@@ -414,6 +440,8 @@ class ProductionService:
             generation_id = generation_id or new_id("direction")
             job_id = new_id("job")
             provider = self.direction_models.provider()
+            if self.direction_model_settings.execution_identity() != model_identity:
+                raise ProductionError("direction_model_changed", "模型配置正在变化，请重试。", status=409)
             run.state = "generating_direction"
             run.current_stage = "generation"
             run.active_job_id = job_id
@@ -566,6 +594,7 @@ class ProductionService:
             cooperative=True,
             resumed_from_job_id=resumed_from_job_id,
             retry_context={
+                "model_identity": model_identity,
                 "expected_draft_version": expected,
                 "story_type": story_type,
                 "layout_mode": layout_mode,
@@ -1178,7 +1207,8 @@ class ProductionService:
             )
             try:
                 result = self.adapter.execute_ai_preflight(
-                    token=str(run.draft_token), preflight_id=preflight_id, provider=provider
+                    token=str(run.draft_token), preflight_id=preflight_id, provider=provider,
+                    publish=control.commit_side_effect,
                 )
             finally:
                 remove_stop_callback()
@@ -1990,7 +2020,7 @@ class ProductionService:
             job = self.jobs.get(job_id)
             if not job:
                 raise ProductionError("job_not_found", "后台任务不存在", status=404)
-            if job.run_id:
+            if job.run_id and job.kind != "ai_preflight":
                 run = self._run(job.run_id)
                 if run.active_job_id != job_id:
                     raise ProductionError(
@@ -2119,6 +2149,11 @@ class ProductionService:
                 )
                 _, response = self.request_cg_advice(run_id, payload)
             elif kind == "direction_generation":
+                model_identity = context.get("model_identity")
+                if not isinstance(model_identity, dict) or model_identity.get("schema_version") != "direction-model-identity/1.0":
+                    raise ProductionError(
+                        "job_retry_unavailable", "旧任务缺少模型身份，不能安全续跑；请新建生成任务。", status=409
+                    )
                 payload["story_type"] = str(context.get("story_type") or "auto")
                 payload["layout_mode"] = str(context.get("layout_mode") or "ai")
                 payload["direction_profile"] = context.get("direction_profile", "standard")
@@ -2132,6 +2167,7 @@ class ProductionService:
                     generation_id=generation_id if reuse_checkpoint else None,
                     resumed_from_job_id=job_id if reuse_checkpoint else None,
                     frozen_direction_profile=context.get("direction_profile_snapshot"),
+                    frozen_model_identity=model_identity,
                 )
             else:
                 _, response = self.compile(run_id, payload)
@@ -2155,8 +2191,11 @@ class ProductionService:
         retry_context = job.get("retry_context") if isinstance(job.get("retry_context"), dict) else {}
         error = job.get("error") if isinstance(job.get("error"), dict) else {}
         error_code = str(error.get("code") or "")
+        model_identity = retry_context.get("model_identity")
+        identity_known = isinstance(model_identity, dict) and model_identity.get("schema_version") == "direction-model-identity/1.0"
         resumable = (
-            kind == "direction_generation"
+            identity_known
+            and kind == "direction_generation"
             and state in {"paused", "cancelled", "failed", "interrupted"}
             and bool(job.get("run_id"))
             and "expected_draft_version" in retry_context
@@ -2167,6 +2206,7 @@ class ProductionService:
             or (kind == "ai_preflight" and bool(job.get("run_id")))
             or (
                 kind in {"cg_advice", "direction_generation", "compile"}
+                and (kind != "direction_generation" or identity_known)
                 and bool(job.get("run_id"))
                 and "expected_draft_version" in retry_context
                 and (
@@ -2209,6 +2249,8 @@ class ProductionService:
             }
         else:
             next_action = {"label": "正在执行", "detail": "完成后任务状态会自动更新。", "stage": None}
+        if kind == "direction_generation" and not identity_known and state in {"paused", "cancelled", "failed", "interrupted"}:
+            next_action = {"label": "发起新的生成任务", "detail": "旧任务没有模型身份，不能安全续用检查点。", "stage": "generation"}
         public = {key: value for key, value in job.items() if key != "retry_context"}
         if kind == "direction_generation":
             public["direction_profile"] = (

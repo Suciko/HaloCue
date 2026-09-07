@@ -432,3 +432,167 @@ def test_conservative_fallback_reaches_reviewed_build_without_installing(
     assert service.run_detail(run_id)["run"]["last_build_id"] == compiled["build_id"]
     assert list((workspace / "projects").iterdir()) == []
     assert list((workspace / "saves").iterdir()) == []
+
+
+@pytest.mark.parametrize("change", [
+    {"base_url": "https://different.invalid/v1"},
+    {"max_tokens": 2048},
+    {"reasoning_mode": "quality"},
+])
+def test_direction_retry_rejects_changed_model_configuration(direction_service, monkeypatch, change):
+    service = direction_service
+    provider = FixtureProvider(blocked=True)
+    monkeypatch.setattr(service.direction_models, "provider", lambda: provider)
+    run_id, version = mapped_run(service)
+    _, original = service.generate_direction(run_id, {"expected_draft_version": version})
+    try:
+        assert provider.entered.wait(3)
+        service.pause_job(original["job"]["job_id"])
+    finally:
+        provider.released.set()
+    assert finished_job(service, original["job"]["job_id"])["state"] == "paused"
+    service.configure_direction_model({"api_key_env": "HALOCUE_PROFILE_TEST_KEY", **change})
+    with pytest.raises(ProductionError) as rejected:
+        service.retry_job(original["job"]["job_id"])
+    assert rejected.value.code == "direction_model_changed"
+    assert len(service.list_jobs()["items"]) == 1
+    assert provider.stats["calls"] == 1
+
+
+def test_cancelled_preflight_does_not_publish_late_analysis(direction_service, monkeypatch):
+    service = direction_service
+    entered, released = threading.Event(), threading.Event()
+
+    class LatePreflight:
+        name = "synthetic"
+        model = "preflight"
+
+        def complete_json(self, *args):
+            entered.set()
+            assert released.wait(8)
+            return {"potential_speakers": [], "scenes": [], "ambiguities": []}
+
+    monkeypatch.setattr(service.direction_models, "provider", LatePreflight)
+    run_id, _ = mapped_run(service)
+    _, accepted = service.start_ai_preflight(run_id)
+    try:
+        assert entered.wait(3)
+        service.cancel_job(accepted["job"]["job_id"])
+    finally:
+        released.set()
+    assert finished_job(service, accepted["job"]["job_id"])["state"] == "cancelled"
+    assert service.ai_preflights(run_id)["items"] == []
+
+
+def test_completed_preflight_publish_is_not_later_reported_cancelled(direction_service, monkeypatch):
+    service = direction_service
+    committed, finish = threading.Event(), threading.Event()
+    original = service.adapter.execute_ai_preflight
+
+    class Preflight:
+        name = "synthetic"
+        model = "preflight"
+
+        def complete_json(self, *args):
+            return {"potential_speakers": [], "scenes": [], "ambiguities": []}
+
+    def hold_after_publish(**kwargs):
+        result = original(**kwargs)
+        committed.set()
+        assert finish.wait(8)
+        return result
+
+    monkeypatch.setattr(service.direction_models, "provider", Preflight)
+    monkeypatch.setattr(service.adapter, "execute_ai_preflight", hold_after_publish)
+    run_id, _ = mapped_run(service)
+    _, job = service.start_ai_preflight(run_id)
+    try:
+        assert committed.wait(3)
+        with pytest.raises(ProductionError) as rejected:
+            service.cancel_job(job["job"]["job_id"])
+        assert rejected.value.code == "job_not_cancellable"
+    finally:
+        finish.set()
+    assert finished_job(service, job["job"]["job_id"])["state"] == "succeeded"
+    assert len(service.ai_preflights(run_id)["items"]) == 1
+
+
+def test_old_direction_job_without_model_identity_requires_new_generation(direction_service, monkeypatch):
+    service = direction_service
+    provider = FixtureProvider(blocked=True)
+    monkeypatch.setattr(service.direction_models, "provider", lambda: provider)
+    run_id, version = mapped_run(service)
+    _, accepted = service.generate_direction(run_id, {"expected_draft_version": version})
+    try:
+        assert provider.entered.wait(3)
+        service.pause_job(accepted["job"]["job_id"])
+    finally:
+        provider.released.set()
+    assert finished_job(service, accepted["job"]["job_id"])["state"] == "paused"
+    record = service.jobs.get(accepted["job"]["job_id"])
+    record.retry_context.pop("model_identity")
+    with pytest.raises(ProductionError) as rejected:
+        service.retry_job(record.job_id)
+    assert rejected.value.code == "job_retry_unavailable"
+    assert service.job_detail(record.job_id)["job"]["retryable"] is False
+    assert service.job_detail(record.job_id)["job"]["resumable"] is False
+
+
+def test_generation_fails_fast_while_model_activation_owns_config_lock(direction_service, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+
+    service = direction_service
+    monkeypatch.setattr(service.direction_models, "provider", FixtureProvider)
+    run_id, version = mapped_run(service)
+    entered, release = threading.Event(), threading.Event()
+
+    def activation_in_progress():
+        with service.direction_model_settings.activation_lock:
+            entered.set()
+            assert release.wait(6)
+
+    thread = threading.Thread(target=activation_in_progress)
+    thread.start()
+    try:
+        assert entered.wait(2)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(service.generate_direction, run_id, {"expected_draft_version": version})
+            try:
+                with pytest.raises(ProductionError) as blocked:
+                    future.result(timeout=1)
+                assert blocked.value.code == "direction_model_busy"
+            except TimeoutError:
+                pytest.fail("generation held state lock while waiting for activation")
+            finally:
+                release.set()
+    finally:
+        release.set()
+        thread.join(3)
+
+
+def test_retry_cannot_deduplicate_to_fresh_job_after_model_change(direction_service, monkeypatch):
+    service = direction_service
+    original_provider = FixtureProvider(blocked=True)
+    monkeypatch.setattr(service.direction_models, "provider", lambda: original_provider)
+    run_id, version = mapped_run(service)
+    _, first = service.generate_direction(run_id, {"expected_draft_version": version})
+    try:
+        assert original_provider.entered.wait(3)
+        service.pause_job(first["job"]["job_id"])
+    finally:
+        original_provider.released.set()
+    assert finished_job(service, first["job"]["job_id"])["state"] == "paused"
+    service.configure_direction_model({"model": "different", "api_key_env": "HALOCUE_PROFILE_TEST_KEY"})
+    fresh_provider = FixtureProvider(blocked=True)
+    monkeypatch.setattr(service.direction_models, "provider", lambda: fresh_provider)
+    _, second = service.generate_direction(run_id, {"expected_draft_version": version})
+    try:
+        assert fresh_provider.entered.wait(3)
+        with pytest.raises(ProductionError) as rejected:
+            service.retry_job(first["job"]["job_id"])
+        assert rejected.value.code == "direction_model_changed"
+        assert len(service.list_jobs()["items"]) == 2
+    finally:
+        service.cancel_job(second["job"]["job_id"])
+        fresh_provider.released.set()
+    finished_job(service, second["job"]["job_id"])

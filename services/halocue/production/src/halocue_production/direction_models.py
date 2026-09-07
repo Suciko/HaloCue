@@ -5,6 +5,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from .errors import ProductionError
 from .model_settings import DirectionModelSettings
@@ -22,6 +23,13 @@ class DirectionModelGateway:
             (candidate["provider"], candidate) if candidate is not None
             else self.settings.provider_settings()
         )
+        provider_settings = dict(provider_settings)
+        # The legacy OpenAI transport requires a nonempty Authorization value.
+        # Only a verified loopback OpenAI-compatible endpoint may be keyless;
+        # use an inert transport placeholder, never persist it as a real secret.
+        local = urlparse(str(provider_settings.get("base_url") or "")).hostname in {"localhost", "127.0.0.1", "::1"}
+        if provider_name == "openai" and local and not provider_settings.get("api_key") and not provider_settings.get("api_key_env"):
+            provider_settings["api_key"] = "halocue-local-keyless"
         legacy = str(self.legacy_root)
         if legacy not in sys.path:
             sys.path.insert(0, legacy)

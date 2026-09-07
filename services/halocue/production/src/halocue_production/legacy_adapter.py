@@ -1191,7 +1191,7 @@ class Legacy093Adapter:
             "ambiguities": normalized_ambiguities,
         }
 
-    def execute_ai_preflight(self, *, token: str, preflight_id: str, provider: Any) -> dict[str, Any]:
+    def execute_ai_preflight(self, *, token: str, preflight_id: str, provider: Any, publish=None) -> dict[str, Any]:
         """Run a source-only AI preflight without modifying the draft or cast."""
         draft_dir = self.store.get_draft_path(token)
         draft = self.store.load_draft(token)
@@ -1231,13 +1231,19 @@ class Legacy093Adapter:
             "model": {"provider": str(getattr(provider, "name", "")), "name": str(getattr(provider, "model", ""))},
             "analysis": analysis,
         }
-        output_dir = draft_dir / "ai-preflights"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output = output_dir / f"{preflight_id}.json"
-        temporary = output.with_suffix(".json.tmp")
-        temporary.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temporary, output)
-        return record
+        def persist():
+            output_dir = draft_dir / "ai-preflights"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output = output_dir / f"{preflight_id}.json"
+            temporary = output.with_suffix(".json.tmp")
+            try:
+                temporary.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.replace(temporary, output)
+            finally:
+                temporary.unlink(missing_ok=True)
+            return record
+
+        return publish(persist) if publish is not None else persist()
 
     def ai_preflights(self, token: str) -> dict[str, Any]:
         root = self.store.get_draft_path(token) / "ai-preflights"
