@@ -71,8 +71,8 @@
       "id": "01-009",
       "summary": "写作 HTTP 接收非对象 JSON 后返回 internal_error，客户端输入错误被错误归类为 500。",
       "review_severity": "P3",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "85125a1：写作HTTP拒绝非对象JSON和非法/重复长度/传输编码，保留成功协议与路由体积限制；超大十进制比较、非ASCII空白、截断输入测试。非完整HTTP安全审计/读取超时实现。"
     },
     {
       "id": "01-010",
@@ -337,8 +337,8 @@
       "id": "06-F09",
       "summary": "偏好存储缺少类型/范围校验，损坏文件被静默恢复默认",
       "review_severity": "P2",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "85125a1：严格枚举/实际整数范围，损坏保存文件明确报错且原字节不改；原子替换、实例锁、UI读取告警与旧值清空；保留未接入偏好只读，不承诺跨进程/断电持久性。"
     },
     {
       "id": "06-F10",
@@ -460,12 +460,12 @@
       "note": ""
     }
   ],
-  "latest_verified_code": "1fbc259b33af07d0c632c018757a749ca5db5e19",
+  "latest_verified_code": "87464e5d70fe56d82e1bb53aaa5dfc5a3a87d3a6",
   "latest_regression": {
-    "passed": 1203,
+    "passed": 1397,
+    "source_unchanged": true,
     "real_provider": false,
     "real_AA_playback": false,
-    "source_unchanged": true,
     "production_data_roots": "isolated test fixtures"
   },
   "latest_focused_after_planning": {

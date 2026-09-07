@@ -34,3 +34,9 @@ settings UI must surface a load warning without blocking unrelated model control
 TDD for both slices. Scoped review and focused HTTP/settings regressions. Freeze a
 commit before broad writing/production/integrated plus preserved-prompt regression.
 Keep ledger scopes explicit; neither is a group04 security audit or real-AA proof.
+
+## Executed
+
+85125a1 implements both repairs;87464e5 limits test fixture setup to its owning
+contexts. Scoped reviews and1397-test unchanged-commit regression accepted. Details
+and limits: `docs/handoffs/2026-09-07-input-settings-validation.md`.
