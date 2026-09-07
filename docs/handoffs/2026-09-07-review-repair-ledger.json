@@ -246,8 +246,8 @@
       "id": "05-007",
       "summary": "同频角色集合排序没有稳定次键，同一输入跨进程形成不同提示词与检查点哈希",
       "review_severity": "P2",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "95a11fd：频率主排序、原文首次出现稳定次序、原角色ID去重；跨hashseed/别名/Unicode/演员表插入顺序验证静态提示与checkpoint身份稳定；规则原文不改、装配指纹显式版本。未测远端缓存收益。"
     },
     {
       "id": "05-008",
@@ -460,14 +460,14 @@
       "note": ""
     }
   ],
-  "latest_verified_code": "4d0119558c3a15b65520660a146954bf02475a03",
+  "latest_verified_code": "95a11fd06e632536236f1e3335d8b4f709e3f83c",
   "latest_regression": {
-    "passed": 1709,
+    "passed": 1713,
     "source_unchanged": true,
     "real_provider": false,
     "real_AA_playback": false,
     "production_data_roots": "isolated test fixtures",
-    "scope": "services plus preserved prompts, compiler/resource/terminal and reaction integrity"
+    "scope": "services plus preserved prompts, compiler/reaction and stable speaker assembly"
   },
   "latest_focused_after_planning": {
     "commit": "0811a4a7e1e27d55393f88f79224fe61da3fa8a",

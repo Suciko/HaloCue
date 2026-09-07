@@ -18,3 +18,8 @@ hash seeds, unequal frequency order, tied aliases,Unicode,changed cast insertion
 Use temporary source/cast/index/llm paths and fake provider only; no actual config DB.
 Retain gold standard prompt/rule tests. Scope annotate.py used-speaker assembly and
 focused new test; no broad performance refactor/remote cache hit or literary claim.
+
+## Executed
+
+95a11fd;scoped review and1713-test immutable regression accepted.
+See docs/handoffs/2026-09-07-stable-speaker-order.md for evidence and boundaries.
