@@ -6681,7 +6681,16 @@ class WritingService:
                 "task_contract": self._conversation_task_contract(connection, work_id, {"surface": "work"}),
                 "conversation_summary": conversation_summary,
             }
+        with self._provider_lock:
             blueprint = self._validate_story_blueprint(provider.generate_blueprint(brief, analysis_context))
+        with self.repo.transaction() as connection:
+            version = self._check_work_version(connection, work_id, expected_work)
+            thread = self._check_thread_version(connection, work_id, thread_id, expected_thread)
+            self._conversation_policy(connection, thread, retry=True)
+            if connection.execute(
+                "SELECT 1 FROM proposals WHERE work_id=? AND kind='brief_blueprint' AND status='pending'", (work_id,)
+            ).fetchone():
+                raise DomainError("proposal_waiting_user", "已有故事方案等待决定，请先采纳或退回。", status=409)
             blueprint["status"] = "proposed"
             current_brief = connection.execute(
                 "SELECT current_revision_id FROM artifacts WHERE work_id=? AND kind='brief'", (work_id,)
@@ -7256,8 +7265,18 @@ class WritingService:
                 ),
                 "conversation_summary": self._conversation_summary(connection, thread_id),
             }
+        with self._provider_lock:
             candidate_plan = provider.generate_chapter_plan(messages, chapter_context)
             candidate_plan = self._validate_chapter_plan(candidate_plan)
+        with self.repo.transaction() as connection:
+            version = self._check_work_version(connection, work_id, expected_work)
+            thread = self._check_thread_version(connection, work_id, thread_id, expected_thread)
+            self._conversation_policy(connection, thread, retry=True)
+            if connection.execute(
+                "SELECT 1 FROM proposals WHERE work_id=? AND kind='chapter_plan' AND scope_id=? AND status='pending'",
+                (work_id, chapter_id),
+            ).fetchone():
+                raise DomainError("proposal_waiting_user", "本章已有细纲候选等待决定，请先采纳或退回。", status=409)
             candidate_plan["status"] = "proposed"
             candidate = {
                 "schema_version": "chapter-plan-proposal/1.0",
@@ -7871,7 +7890,10 @@ class WritingService:
                 "world": self._analysis_world_summary(connection, work_id),
                 "task_contract": self._conversation_task_contract(connection, work_id, {"surface": "work"}),
             }
+        with self._provider_lock:
             blueprint = self._validate_story_blueprint(provider.generate_blueprint(brief, analysis_context))
+        with self.repo.transaction() as connection:
+            version = self._check_work_version(connection, work_id, expected)
             feedback = str(payload.get("feedback", "")).strip()
             if feedback:
                 blueprint["feedback"] = feedback
