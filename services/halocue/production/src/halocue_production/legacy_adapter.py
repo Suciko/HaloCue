@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import importlib
 import hashlib
 import json
 import os
 import re
 import shutil
-import sys
 import threading
 import mimetypes
 import copy
@@ -15,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings
+from .legacy_modules import CORE_MODULES, load_module, load_modules
 from . import cg_advice, cg_segments
 from .errors import ProductionError
 from .models import StagedDirectionResult, new_id, utc_now
@@ -22,7 +21,6 @@ from .name_baseline import CharacterNameBaseline
 from .resource_previews import ResourcePreviewCatalog
 
 
-_IMPORT_LOCK = threading.RLock()
 _COMPILE_LOCK = threading.RLock()
 AA_WORKSPACE_DIRS = ("projects", "saves", "overrides", "settings")
 RESOURCE_SNAPSHOT_PREWARM_BYTES = 8 * 1024 * 1024
@@ -50,7 +48,6 @@ class Legacy093Adapter:
         self.settings = settings
         self.compat_root = settings.data_dir / "legacy-runtime"
         self.compat_root.mkdir(parents=True, exist_ok=True)
-        self.legacy_version = self._detect_legacy_version(settings.legacy_root)
         self._modules: dict[str, Any] = {}
         self._resource_snapshot_lock = threading.RLock()
         self._resource_snapshot_signature: tuple[tuple[str, int, int], ...] | None = None
@@ -59,11 +56,12 @@ class Legacy093Adapter:
         self.name_baseline = CharacterNameBaseline(settings.name_baseline)
         self.previews = ResourcePreviewCatalog(settings.legacy_root, settings.aa_data)
         self._load_modules()
+        self.legacy_version = self._detect_legacy_version(self.code_root)
         self.store = self._modules["draft_store"].DraftStore(
             base_dir=str(settings.data_dir / "drafts")
         )
         self._teacher_module = (
-            importlib.import_module("teacher_identity")
+            self._legacy_module("teacher_identity")
             if callable(getattr(self.store, "update_teacher_identity", None)) else None
         )
         # Building the labelled resource base can be expensive for a full AA
@@ -74,31 +72,11 @@ class Legacy093Adapter:
             self._refresh_resource_snapshot()
 
     def _load_modules(self) -> None:
-        if not self.settings.legacy_root.is_dir():
-            raise ProductionError(
-                "legacy_adapter_unavailable",
-                "找不到兼容转换模块",
-                status=503,
-                details={"legacy_root": str(self.settings.legacy_root)},
-            )
-        with _IMPORT_LOCK:
-            os.environ.setdefault("HALOCUE_USER_DATA_DIR", str(self.compat_root))
-            legacy = str(self.settings.legacy_root)
-            if legacy not in sys.path:
-                sys.path.insert(0, legacy)
-            for name in (
-                "document",
-                "draft_store",
-                "build_bundle",
-                "install_manager",
-                "annotate",
-                "assetdb",
-                "asset_catalog",
-                "portrait_layout",
-                "asset_import",
-                "aa_install_discovery",
-            ):
-                self._modules[name] = importlib.import_module(name)
+        os.environ.setdefault("HALOCUE_USER_DATA_DIR", str(self.compat_root))
+        self.code_root, self._modules = load_modules(self.settings.legacy_root, CORE_MODULES)
+
+    def _legacy_module(self, name: str):
+        return load_module(name, self.settings.legacy_root)
 
     @staticmethod
     def _detect_legacy_version(root: Path) -> str:
@@ -109,7 +87,7 @@ class Legacy093Adapter:
                 text = path.read_text(encoding="utf-8")
             except (OSError, UnicodeError):
                 continue
-            match = re.search(r"(?im)(?:^version\s*=\s*|HALOCUE_VERSION\s*=\s*[\"'])([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[-+][^\s\"']+)?)", text)
+            match = re.search(r"(?im)^(?:version|HALOCUE_VERSION)\s*=\s*[\"']?([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[-+][^\s\"']+)?)", text)
             if match:
                 return match.group(1)
             match = re.search(r"\b(0\.9(?:\.\d+)?|0\.95(?:\.\d+)?)\b", text)
@@ -220,6 +198,8 @@ class Legacy093Adapter:
             "legacy_adapter": {
                 "state": "available",
                 "version": self.legacy_version,
+                "code_root": str(self.code_root),
+                "data_root": str(self.settings.legacy_root.resolve()),
                 "mode": "domain_modules",
             },
             "script_import": {"state": "available"},
@@ -303,12 +283,12 @@ class Legacy093Adapter:
                 raise ProductionError("teacher_presentation_unavailable", "当前兼容模块不支持此老师呈现设置", status=409)
             return {"schema_version": "teacher-presentation/1.0", "mode": "slot_zero"}
         with self._teacher_error_boundary():
-            return importlib.import_module("teacher_presentation").effective_teacher_presentation(cast_data)
+            return self._legacy_module("teacher_presentation").effective_teacher_presentation(cast_data)
 
     def teacher_reply(self, card_id: str, text: str) -> dict[str, str]:
         with self._teacher_error_boundary():
-            importlib.import_module("teacher_reply_plan").validate_reply_text(text)
-            return {**importlib.import_module("teacher_presentation").teacher_reply_ids(card_id),
+            self._legacy_module("teacher_reply_plan").validate_reply_text(text)
+            return {**self._legacy_module("teacher_presentation").teacher_reply_ids(card_id),
                     "source_card_id": card_id, "text": text}
 
     @contextmanager
@@ -2051,7 +2031,7 @@ class Legacy093Adapter:
             cast_data.setdefault("cast", {}).update(aliases)
             reply_plan_path = input_dir / "teacher-reply-plan.json"
             if reply_plan_path.is_file():
-                reply_plan = importlib.import_module("teacher_reply_plan").retarget_reply_plan(
+                reply_plan = self._legacy_module("teacher_reply_plan").retarget_reply_plan(
                     json.loads(reply_plan_path.read_text(encoding="utf-8")), transformed, cast_data,
                 )
                 _write_json_atomic(reply_plan_path, reply_plan)
@@ -2064,7 +2044,7 @@ class Legacy093Adapter:
 
     def execute_compile(self, token: str, build_id: str) -> dict[str, Any]:
         with _COMPILE_LOCK, self._teacher_error_boundary():
-            script2aap = importlib.import_module("script2aap")
+            script2aap = self._legacy_module("script2aap")
             original_here = script2aap.HERE
             build_bundle = self._modules["build_bundle"]
             original_compile = build_bundle.compile_script
@@ -2093,7 +2073,7 @@ class Legacy093Adapter:
         if not custom_assets:
             return
         project = bundle_dir / "project"
-        aa_registry = importlib.import_module("aa_registry")
+        aa_registry = self._legacy_module("aa_registry")
         manifest = aa_registry.load_manifest(project)
         for item in custom_assets:
             kind = str(item.get("kind") or "")

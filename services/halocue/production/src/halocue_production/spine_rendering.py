@@ -1,21 +1,17 @@
 from __future__ import annotations
 
-import importlib
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
 from .errors import ProductionError
+from .legacy_modules import load_module
 from .settings_store import SettingsStore
 
 
 def _legacy_module(name: str, legacy_root: Path):
-    root = str(legacy_root.resolve())
-    if root not in sys.path:
-        sys.path.insert(0, root)
-    return importlib.import_module(name)
+    return load_module(name, legacy_root)
 
 
 def _config_paths(legacy_root: Path, data_dir: Path) -> tuple[Path, ...]:
@@ -62,6 +58,15 @@ def cli_selection(*, legacy_root: Path, data_dir: Path) -> dict[str, Any]:
             config_path=legacy_root / "aa_config.json",
             fallback_config_paths=_config_paths(legacy_root, data_dir),
         )
+    except ProductionError as error:
+        if (
+            error.code != "legacy_module_missing"
+            or error.details.get("module") != "spine_face_analysis"
+        ):
+            raise
+        # Older selected checkouts can omit this optional preview integration.
+        # Origin conflicts are different: keep those actionable failures visible.
+        path = None
     except (ImportError, OSError, ValueError, TypeError):
         path = None
     source = "discovered" if path else "none"
