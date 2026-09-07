@@ -84,36 +84,36 @@
       "id": "02-001",
       "summary": "改编候选接受不存在的段落引用；非 JSON 回复也被包装为带来源的合法候选，人工采纳后进入正式修订。",
       "review_severity": "P1",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "45b58bc：拒绝非JSON/无效引用/非有限值；校验固定段落ID与原文精确摘录，采纳重验旧候选；不等于文学忠实性证明。"
     },
     {
       "id": "02-002",
       "summary": "单场 memory.extract 不校验 source_block_ids 是否存在，错误来源经人工采纳后升级为 confirmed 并进入后续记忆检索。",
       "review_severity": "P1",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "45b58bc：生成前验证修订文件，逐条验证真实正文块；采纳所选记忆时重验场景/修订/Hash/块ID；兼容纯文本旧修订。"
     },
     {
       "id": "02-003",
       "summary": "改编 run 将同章多个窗口反复覆盖到同一个 candidate_json，只留最后窗口；重复 run 还会覆盖已采纳章节的状态投影。",
       "review_severity": "P1",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "45b58bc：按章汇总全部窗口，分析另存dependency_json.analysis；重跑不覆盖待采纳/已采纳投影。"
     },
     {
       "id": "02-004",
       "summary": "改编 Proposal 没有目标正式稿 base_revision 约束；先采纳新候选，再采纳仍 pending 的旧候选，可以将当前稿改回旧内容。",
       "review_severity": "P2",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "45b58bc：生成前固定正式稿base_revision，发布与采纳双重版本核对，拒绝晚到结果和旧候选覆盖。"
     },
     {
       "id": "02-005",
       "summary": "改编候选绕过持久 AgentDispatcher，同步 HTTP 调用结束才返回 202；没有逐次执行身份/取消恢复，异常统一退回调用计数。",
       "review_severity": "P2",
-      "status": "pending",
-      "note": ""
+      "status": "partial_or_mitigated",
+      "note": "45b58bc：失败不退还已派发逻辑候选次数；持久Agent身份、异步HTTP、取消/恢复尚未实现。"
     },
     {
       "id": "02-006",
@@ -203,8 +203,8 @@
       "id": "05-001",
       "summary": "改编 max_calls 会退回已收到失败响应的额度，章节调用也不进入常规用量汇总",
       "review_severity": "P1",
-      "status": "pending",
-      "note": ""
+      "status": "partial_or_mitigated",
+      "note": "45b58bc：修复失败逻辑调用额度退回；仍未纳入完整物理请求/重试/用量账。"
     },
     {
       "id": "05-002",
@@ -343,8 +343,8 @@
       "id": "06-F10",
       "summary": "改编 max_calls 退还所有失败请求，实际尝试次数可以超过声明预算",
       "review_severity": "P2",
-      "status": "pending",
-      "note": ""
+      "status": "partial_or_mitigated",
+      "note": "45b58bc：max_calls正整数校验且失败不退还；目前限制逻辑候选派发次数，不宣称限制物理HTTP重试或费用。"
     },
     {
       "id": "06-F11",
@@ -427,8 +427,8 @@
       "id": "07-010",
       "summary": "AdaptationService.run逐窗口更新同一章节candidate_json，长章最终只留下最后窗口，却标记analyzed。",
       "review_severity": "P2",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "45b58bc：同02-003，全部窗口coverage按顺序保留。"
     },
     {
       "id": "07-011",
@@ -459,10 +459,11 @@
       "note": ""
     }
   ],
-  "latest_verified_code": "072176137b1535ad2b1577276b268205b2278743",
+  "latest_verified_code": "45b58bcb56cc5ab529c5429354ae02d5f18e7550",
   "latest_regression": {
-    "passed": 1084,
+    "passed": 1131,
     "real_provider": false,
-    "real_AA_playback": false
+    "real_AA_playback": false,
+    "source_unchanged": true
   }
 }
