@@ -1071,6 +1071,15 @@ class ProductionService:
         return {"ok": True, "run_id": run_id, "usage": usage}
 
     def create_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        upstream = payload.get("script_release")
+        identity = str(upstream.get("id") or "").strip() if isinstance(upstream, dict) else ""
+        release_id = identity if UPSTREAM_RELEASE_ID.fullmatch(identity) else None
+        # Subclasses extend the protected template so receipt publication stays
+        # in this same identity-scoped admission, without recursive file locking.
+        with self.repository.handoff_guard(release_id):
+            return self._create_run(payload)
+
+    def _create_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         direction_profile = self.adapter.direction_profile_snapshot(
             payload.get("direction_profile")
         )["id"]

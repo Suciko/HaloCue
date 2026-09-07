@@ -667,11 +667,11 @@ def test_scene_asset_handoff_creates_a_verified_production_run_receipt(tmp_path)
     ],
 )
 def test_custom_asset_handoff_rejects_a_stale_or_tampered_frozen_reference(
-    tmp_path, field, value
+    tmp_path, field, value, isolated_legacy_root
 ):
     service = IntegratedProductionService(
         Settings(project_root=WORKSPACE_ROOT / "production", data_dir=tmp_path / "production",
-                 legacy_root=PROJECT_ROOT.parents[2], resource_index=synthetic_resource_index(tmp_path),
+                 legacy_root=isolated_legacy_root, resource_index=synthetic_resource_index(tmp_path),
                  aa_data=None, host="127.0.0.1", port=0)
     )
     asset_id = "library-asset-000000000001"

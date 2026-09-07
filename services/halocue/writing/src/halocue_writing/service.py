@@ -14141,27 +14141,34 @@ class WritingService:
             if not release:
                 raise NotFound("script_release", release_id)
             verified_release = verify_script_release(self.repo, release)
-            has_asset_references = any(
-                group.get("references")
-                for group in verified_release["manifest"].get("asset_references", [])
-                if isinstance(group, dict)
-            )
-            if release["production_run_id"]:
-                response = {"release_id": release_id, "production_run_id": release["production_run_id"], "idempotent": True}
-                if has_asset_references:
-                    response["asset_handoff"] = self.reconcile_production_asset_copies(release_id)
-                return response
             work = connection.execute("SELECT title FROM works WHERE id=?", (release["work_id"],)).fetchone()
+        has_asset_references = any(
+            group.get("references")
+            for group in verified_release["manifest"].get("asset_references", [])
+            if isinstance(group, dict)
+        )
         project_name = f"{work['title']} · {release['display_version']}"
         contract_hash = release["content_hash"].removeprefix("sha256:")
-        existing_run_id = self._find_production_run(release_id, contract_hash)
+        existing_run_id = release["production_run_id"]
+        recovered = False
+        if not existing_run_id:
+            existing_run_id = self._find_production_run(release_id, contract_hash)
+            if existing_run_id:
+                with self.repo.transaction() as connection:
+                    connection.execute("UPDATE script_releases SET production_run_id=? WHERE id=?", (existing_run_id, release_id))
+                recovered = True
         if existing_run_id:
-            with self.repo.transaction() as connection:
-                connection.execute("UPDATE script_releases SET production_run_id=? WHERE id=?", (existing_run_id, release_id))
-            response = {"release_id": release_id, "production_run_id": existing_run_id, "idempotent": True, "recovered": True}
-            if has_asset_references:
-                response["asset_handoff"] = self.reconcile_production_asset_copies(release_id)
-            return response
+            response = {"release_id": release_id, "production_run_id": existing_run_id, "idempotent": True}
+            if recovered:
+                response["recovered"] = True
+            if not has_asset_references:
+                return response
+            response["asset_handoff"] = self.reconcile_production_asset_copies(release_id)
+            if response["asset_handoff"]["status"] == "complete":
+                return response
+            # The run may have survived a failed receipt write. Replay the same
+            # frozen command so production completes its guarded copy/receipt
+            # stage; repeatedly reading missing proof cannot repair it.
         if has_asset_references:
             capability = self.production_asset_capabilities()
             if capability["status"] != "supported":
@@ -14196,9 +14203,15 @@ class WritingService:
         )
         if not run_id:
             raise DomainError("production_contract_error", "制作后端未返回 ProductionRun ID。", status=502, details={"response": result})
+        if existing_run_id and run_id != existing_run_id:
+            raise DomainError("production_run_identity_mismatch", "制作后端返回了不同任务，旧发布关联保持不变。", status=409)
         with self.repo.transaction() as connection:
             connection.execute("UPDATE script_releases SET production_run_id=? WHERE id=?", (run_id, release_id))
         response = {"release_id": release_id, "production_run_id": run_id, "response": result}
+        if existing_run_id:
+            response["idempotent"] = True
+        if recovered:
+            response["recovered"] = True
         if has_asset_references:
             response["asset_handoff"] = self.reconcile_production_asset_copies(release_id)
         return response

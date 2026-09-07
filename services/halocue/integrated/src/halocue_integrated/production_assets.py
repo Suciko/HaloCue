@@ -48,9 +48,9 @@ class IntegratedProductionService(ProductionService):
         }
         return capabilities
 
-    def create_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _create_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         references = self._validate_asset_handoff(payload)
-        result = super().create_run(payload)
+        result = super()._create_run(payload)
         if not references:
             return result
 
@@ -241,7 +241,7 @@ class IntegratedProductionService(ProductionService):
         if existing is not None:
             return existing
         detail = self.run_detail(run_id)
-        draft_version = int(detail.get("draft", {}).get("session", {}).get("draft_version", -1))
+        draft_version = int(detail.get("draft", {}).get("draft_version", -1))
         if draft_version < 0:
             raise ProductionError("production_asset_snapshot_missing", "ProductionRun draft version is unavailable.", status=409)
         self.attach_custom_asset(

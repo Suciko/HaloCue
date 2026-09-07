@@ -298,3 +298,33 @@ def test_partial_receipts_accumulate_only_inside_their_release_and_run(service):
     assert service.production_asset_status(release["release_id"])["copied_count"] == 0
     linked_receipt(service, release, "run-one", "copy-one")
     assert service.production_asset_status(release["release_id"])["copied_count"] == 2
+
+
+def test_replay_cannot_replace_a_known_production_run(service):
+    from test_scene_asset_references import _AssetProductionHandler, _asset_server
+    from halocue_writing.errors import DomainError
+
+    _, _, release = _freeze_asset_release(service)
+    linked_receipt(service, release, "run-original", "copy-original")
+
+    class WrongRunHandler(_AssetProductionHandler):
+        capabilities = ["scene_asset_handoff"]
+        usage = None
+        posts = []
+
+    server, thread = _asset_server(WrongRunHandler)
+    service.production_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with pytest.raises(DomainError) as rejected:
+            service.handoff_release(release["release_id"])
+        assert rejected.value.code == "production_run_identity_mismatch"
+        assert service.get_release(release["release_id"])["production_run_id"] == "run-original"
+        assert len(WrongRunHandler.posts) == 1
+        assert (
+            WrongRunHandler.posts[0]["asset_handoff"]["references"]
+            == release["manifest"]["asset_references"]
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)

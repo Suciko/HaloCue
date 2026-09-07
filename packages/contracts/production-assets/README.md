@@ -66,6 +66,31 @@ remain. Source snapshots and author UI do not claim a global task-copy status.
 ## Validation boundary
 
 Receipts confirm identity-matched local production copies, not playback quality,
-rights to redistribute assets, or full successful delivery. Missing-receipt repair
-and concurrent create-run idempotency are separate required repairs (01-005/006).
+rights to redistribute assets, or full successful delivery. The replay and admission behavior is specified below; other production mutations
+are outside this admission contract.
 No real AA asset bytes are part of these fixtures or this contract.
+
+## Replay and creation admission
+
+The existing `POST /api/v1/production-runs` is replayable for a validated upstream
+release identity. Its guard covers the lookup, creation, run save, integrated custom
+copy check/attach, and receipt publication. A retry with the same release ID/hash
+reuses the same run; a conflicting content hash remains a 409. Unrelated release
+IDs and requests without an upstream release are not globally serialized.
+
+The local OS lock coordinates cooperating threads/instances/processes sharing the
+production directory. Lock files under `.handoff-locks/` must not be removed while
+callers may exist. Owner process exit releases admission, but acquisition has no
+timeout. Windows exclusion/exit behavior is tested; POSIX uses flock and is not
+claimed runtime-tested on Windows. This does not make arbitrary production-state
+mutation safe across multiple active processes.
+
+Writing's ordinary handoff request retains its existing linked-run/no-assets and
+complete-proof fast paths. If a run exists but proof is pending, it replays the same
+verified frozen release command. It never reads mutable Scene references to repair
+that release. A different returned run ID cannot silently replace the known link.
+Repeated GET usage reads remain read-only. Missing, malformed-schema or wrong-run
+receipt files must not be counted as success; a valid replay may rebuild the proof.
+
+No new external provider/model request is introduced by local run/receipt replay.
+Successful proof is still not a claim that AA playback, export or delivery succeeded.
