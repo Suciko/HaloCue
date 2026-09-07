@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from .errors import DomainError, NotFound
+from .adaptation_targets import resolve_target
 from .repository import canonical_json, new_id, now, sha256_text
 from .workspace_access import workspace_operation
 
@@ -27,7 +28,7 @@ class AdaptationJobs:
             raise DomainError("adaptation_plan_required", "请先确认改编计划。", status=409)
         selected = json.loads(row["selected_chapter_ids_json"])
         chapter = connection.execute(
-            "SELECT id FROM adaptation_chapters WHERE adaptation_id=? AND source_chapter_id=?",
+            "SELECT * FROM adaptation_chapters WHERE adaptation_id=? AND source_chapter_id=?",
             (adaptation_id, chapter_id),
         ).fetchone()
         if chapter_id not in selected or not chapter:
@@ -49,10 +50,7 @@ class AdaptationJobs:
         source_chapter = next((c for c in source_doc["chapters"] if c["id"] == chapter_id), None)
         if not source_chapter:
             raise NotFound("source_chapter", chapter_id)
-        target = connection.execute(
-            "SELECT current_revision_id FROM artifacts WHERE work_id=? AND kind='adaptation_manuscript' AND scope_type='adaptation_chapter' AND scope_id=?",
-            (work_id, chapter["id"]),
-        ).fetchone()
+        target = resolve_target(connection, work_id, chapter)
         return {
             "work_id": work_id,
             "adaptation_id": adaptation_id,
@@ -61,10 +59,18 @@ class AdaptationJobs:
             "source_version_id": row["source_version_id"],
             "source_digest": source_chapter["content_digest"],
             "plan_digest": sha256_text(canonical_json(json.loads(row["plan_json"]))),
-            "base_revision_id": target["current_revision_id"] if target else None,
+            "base_revision_id": target["base_revision_id"],
+            "target": target,
         }
 
     def _assert_pins(self, connection, snapshot):
+        if not isinstance(snapshot.get("target"), dict):
+            raise DomainError(
+                "adaptation_target_confirmation_required",
+                "旧任务没有固定场景目标，不能直接重试；请重新生成并确认目标。",
+                status=409,
+                details={"retryable": False},
+            )
         current = self._pins(
             connection, snapshot["work_id"], snapshot["adaptation_id"], snapshot["chapter_id"]
         )
@@ -108,7 +114,7 @@ class AdaptationJobs:
                         "deduplicated": True,
                     }
             snapshot = {
-                "schema_version": "adaptation-agent-input/1.0",
+                "schema_version": "adaptation-agent-input/1.1",
                 **pins,
                 "provider_runtime": provider_runtime,
             }
@@ -309,7 +315,9 @@ class AdaptationJobs:
             failure = {
                 "code": getattr(error, "code", "adaptation_provider_failed"),
                 "message": getattr(error, "message", "改编生成失败，请查看任务并明确重试。"),
-                "retryable": True,
+                "retryable": error.code != "adaptation_target_confirmation_required"
+                if isinstance(error, DomainError)
+                else True,
             }
             with self.repo.transaction() as c:
                 completed = c.execute(

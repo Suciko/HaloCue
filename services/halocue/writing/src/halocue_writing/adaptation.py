@@ -7,6 +7,7 @@ from .errors import DomainError, NotFound
 from .repository import canonical_json, new_id, now, sha256_text
 from .source_catalog import source_windows
 from .adaptation_prompts import build_chapter_prompt
+from .adaptation_targets import resolve_target
 
 
 def validate_chapter_candidate(
@@ -288,17 +289,14 @@ class AdaptationService:
                 if callable(guard):
                     guard(c)
                 chapter_row = c.execute(
-                    "SELECT id FROM adaptation_chapters WHERE adaptation_id=? AND source_chapter_id=?",
+                    "SELECT * FROM adaptation_chapters WHERE adaptation_id=? AND source_chapter_id=?",
                     (adaptation_id, chapter_id),
                 ).fetchone()
                 if not chapter_row:
                     raise NotFound("adaptation_chapter", chapter_id)
                 scope_id = chapter_row["id"]
-                base_row = c.execute(
-                    "SELECT current_revision_id FROM artifacts WHERE work_id=? AND kind='adaptation_manuscript' AND scope_type='adaptation_chapter' AND scope_id=?",
-                    (item["work_id"], scope_id),
-                ).fetchone()
-                base_revision_id = base_row["current_revision_id"] if base_row else None
+                target = resolve_target(c, item["work_id"], chapter_row)
+                base_revision_id = target["base_revision_id"]
                 current_source = c.execute(
                     "SELECT current_version_id FROM work_sources WHERE work_id=?",
                     (item["work_id"],),
@@ -342,6 +340,7 @@ class AdaptationService:
             "source_chapter_id": chapter_id,
             "formal": False,
             "prompt_contract": "adaptation/1.0",
+            "target": target,
             "source_refs": refs,
             "deviations": structured["deviations"],
             "open_threads": structured["open_threads"],
@@ -357,15 +356,14 @@ class AdaptationService:
             current_source = c.execute(
                 "SELECT current_version_id FROM work_sources WHERE work_id=?", (item["work_id"],)
             ).fetchone()
-            current_target = c.execute(
-                "SELECT current_revision_id FROM artifacts WHERE work_id=? AND kind='adaptation_manuscript' AND scope_type='adaptation_chapter' AND scope_id=?",
-                (item["work_id"], scope_id),
+            current_chapter = c.execute(
+                "SELECT * FROM adaptation_chapters WHERE id=?", (scope_id,)
             ).fetchone()
-            current_revision_id = current_target["current_revision_id"] if current_target else None
+            current_target = resolve_target(c, item["work_id"], current_chapter)
             if (
                 not current_source
                 or current_source["current_version_id"] != source["id"]
-                or current_revision_id != base_revision_id
+                or current_target != target
             ):
                 raise DomainError(
                     "adaptation_inputs_changed",

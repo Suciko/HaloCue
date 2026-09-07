@@ -12,6 +12,18 @@ from halocue_writing.service import WritingService
 from test_adaptation_integrity import prepared, valid_reply, ReplyProvider
 
 
+def request(url, method="GET", body=None):
+    # Do not import ambiguous test_http_api: production and writing both define it.
+    import urllib.request
+
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        url, data=data, method=method, headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, timeout=5) as response:
+        return response.status, json.loads(response.read())
+
+
 class BlockingReply(ReplyProvider):
     def __init__(self, reply):
         super().__init__(reply)
@@ -143,7 +155,6 @@ def test_http_generation_returns_202_before_model_finishes(tmp_path):
     from http.server import ThreadingHTTPServer
     from pathlib import Path
     from halocue_writing.app import make_handler
-    from test_http_api import request
 
     service, work, source, plan = prepared(tmp_path)
     provider = BlockingReply(json.dumps(valid_reply(source["chapters"][0])))
@@ -319,7 +330,6 @@ def test_local_coverage_http_reports_completed_not_queued(tmp_path):
     from http.server import ThreadingHTTPServer
     from pathlib import Path
     from halocue_writing.app import make_handler
-    from test_http_api import request
 
     service, work, source, plan = prepared(tmp_path)
     provider = ReplyProvider("must not call a provider for local source coverage")
