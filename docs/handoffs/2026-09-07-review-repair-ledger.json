@@ -134,8 +134,8 @@
       "id": "02-008",
       "summary": "整理作品方案及章节计划时在 BEGIN IMMEDIATE 内等待 Provider，导致与该模型无关的写操作被锁住。",
       "review_severity": "P2",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "0811a4a：作品方案、章内细纲和兼容generate_blueprint均将Provider调用移出SQLite写事务；发布二次核对工作/线程版本、授权策略和候选唯一性。22项事件门控测试+审查通过；不扩展为全Agent生命周期/预算修复。"
     },
     {
       "id": "02-009",
@@ -467,5 +467,12 @@
     "real_AA_playback": false,
     "source_unchanged": true,
     "production_data_roots": "isolated test fixtures"
+  },
+  "latest_focused_after_planning": {
+    "commit": "0811a4a7e1e27d55393f88f79224fe61da3fa8a",
+    "passed": 100,
+    "scope": "planning/provider/conversation/presentation",
+    "real_provider": false,
+    "real_AA_playback": false
   }
 }
