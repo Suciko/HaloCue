@@ -176,8 +176,8 @@
       "id": "03-C01",
       "summary": "当前行明确的听者单人镜头与“必须保留说话者”后处理冲突；有效意图被无诊断改写为auto。",
       "review_severity": "P2",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "db0e8fa：保留原标准提示词的普通立绘说话者可见约束，不放开AI画外对白；新请求听者独镜被回退时给源ID/行号warning与before/after审稿记录，区别继承hold；手写camera不变。48组合渲染与基线相同。"
     },
     {
       "id": "03-R01",
@@ -460,14 +460,14 @@
       "note": ""
     }
   ],
-  "latest_verified_code": "95a11fd06e632536236f1e3335d8b4f709e3f83c",
+  "latest_verified_code": "db0e8faf91e988a13be27c64becdd99621ea7776",
   "latest_regression": {
-    "passed": 1713,
+    "passed": 1737,
     "source_unchanged": true,
     "real_provider": false,
     "real_AA_playback": false,
     "production_data_roots": "isolated test fixtures",
-    "scope": "services plus preserved prompts, compiler/reaction and stable speaker assembly"
+    "scope": "services plus preserved prompts, compiler/reaction/stable assembly/listener policy"
   },
   "latest_focused_after_planning": {
     "commit": "0811a4a7e1e27d55393f88f79224fe61da3fa8a",

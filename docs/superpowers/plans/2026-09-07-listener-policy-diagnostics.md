@@ -24,3 +24,8 @@ No change to raw standard prompt/rule golden hashes. Existing policy-drop propos
 must include rejected camera intent so reviewer can see before/after rather than false
 success. No group04/literary/AAplayback claim. Rootpolicy and test-only bounded changes;
 source exact dialogue and manual controls preserved.
+
+## Executed
+
+db0e8fa;scoped review and1737-test immutable regression accepted. Exact evidence
+and non-expansion decision: docs/handoffs/2026-09-07-listener-policy-diagnostics.md.
