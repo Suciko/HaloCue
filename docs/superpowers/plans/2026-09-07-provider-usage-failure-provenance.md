@@ -19,26 +19,37 @@ _open_with_retry and are not comprehensively counted by the current snapshot mod
 
 ## Implementation boundaries / TDD
 
-- [ ] Synthetic valid-response then truncated/refused response with usage proves
+- [x] Synthetic valid-response then truncated/refused response with usage proves
       last_usage refers to the current failed response, while content is still rejected.
-- [ ] Reset call-local usage before request construction/transport; malformed JSON,
+- [x] Reset call-local usage before request construction/transport; malformed JSON,
       missing usage, connection exceptions and exhausted retries cannot reuse prior
       values. Unknown usage is not asserted to mean zero billable use.
-- [ ] Safely normalize untrusted usage numbers (wrong types/negative/nonfinite) without
+- [x] Safely normalize untrusted usage numbers (wrong types/negative/nonfinite) without
       hiding the primary completion failure or manufacturing a monetary estimate.
-- [ ] Capture response usage before semantic output validation and preserve its status
+- [x] Capture response usage before semantic output validation and preserve its status
       through DomainError details/current-run audit. Do not retain hidden reasoning or
       raw secret response data in logs/audits merely to expose usage.
-- [ ] Update service normalization/merge contract to keep status/cache/input semantics;
+- [x] Update service normalization/merge contract to keep status/cache/input semantics;
       partial reported costs remain partial or unknown, not a complete accounting sum.
       Define migration/compatibility behavior for older aggregate rows with no status.
-- [ ] Verify actual failure consumers for conversation, review, scene and adaptation
+- [x] Verify actual failure consumers for conversation, review, scene and adaptation
       persist/retrieve these fields; identify which still require separate durable
       usage-ledger work. Avoid a getter-only fix declared as complete workflow repair.
-- [ ] Focused provider/tool/HTTP retry/activation/pinning/adaptation tests, scoped review,
+- [x] Focused provider/tool/HTTP retry/activation/pinning/adaptation tests, scoped review,
       unchanged-commit broad regression and exact ledger/handoff evidence.
 
 No live transport, paid provider, model-spec lookup, secrets, AA execution or new
 pricing tables needed. Use synthetic API response shapes already used by tests.
 Actual physical attempt accounting and unified hard authorization budget require
 separate coordinated changes; preserve those as unresolved rather than guessing costs.
+
+
+## Accepted implementation / boundaries
+
+e65ae26/f5ba3ea completes the bounded logical-response provenance, major durable failure
+consumers, message metadata/legacy semantics and actual UI runtime-detail labels.
+1897 unchanged-source tests pass947.13s; exact command and first failed broad run's
+test-only corrections are in the companion handoff. Verification includes conversation,
+scene/review/adaptation failure and cancellation, not full billing reconstruction.
+Physical requests/retries/direct compatibility calls/crash windows remain explicitly
+outside this fix and in the next physical-request-usage-ledger plan. Overall goal active.

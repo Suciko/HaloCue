@@ -206,7 +206,7 @@
       "summary": "改编 max_calls 会退回已收到失败响应的额度，章节调用也不进入常规用量汇总",
       "review_severity": "P1",
       "status": "partial_or_mitigated",
-      "note": "45b58bc：修复失败逻辑调用额度退回；仍未纳入完整物理请求/重试/用量账。"
+      "note": "此前已不退还已尝试逻辑候选额度；6076ac0持久任务化，e65ae26使正常durable章节调用成功/失败usage进入Agent汇总，并明确未知/部分状态。逻辑调用不是物理请求，直接兼容内部调用/重试/崩溃账未完整；05-003仍待实现。"
     },
     {
       "id": "05-002",
@@ -220,14 +220,14 @@
       "summary": "物理请求、失败尝试和缺失 usage 的统计口径不闭合，不能把当前总量当完整成本账",
       "review_severity": "P1",
       "status": "pending",
-      "note": ""
+      "note": "e65ae26改善逻辑响应及失败用量保留/部分总计，但未实现完整物理请求账。外部合成探针确认一次逻辑调用timeout→success实际2次urlopen而snapshot仅最终响应；见physical-request-usage-ledger计划，不能拿1897工程测试当作完整账单证明。"
     },
     {
       "id": "05-004",
       "summary": "写作响应先校验后采 usage，失败成本丢失；上层还丢弃了未知状态与统计语义",
       "review_severity": "P1",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "e65ae26/f5ba3ea：每次完成请求重置usage，响应先采usage再验证内容；非法/缺失/部分桶不伪称已知零或完整价格。逻辑调用观察写入Agent policy及对话元数据，失败/取消保留用量且不复活正文；服务汇总/实际运行详情保留未知与部分语义。修复scope退出重复计数和调用前取消虚记。1897项固定源码回归通过；物理重试/崩溃窗口完整账另属05-003未完成。"
     },
     {
       "id": "05-005",
