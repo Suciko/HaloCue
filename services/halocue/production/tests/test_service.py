@@ -1734,6 +1734,12 @@ def test_aa_workspace_configuration_persists_and_enables_capabilities(
         "configured": True,
         "path": str(aa_data.resolve()),
         "valid": True,
+        "source": "settings",
+        "persisted_path": str(aa_data.resolve()),
+        "startup_path": None,
+        "restart_path": str(aa_data.resolve()),
+        "session_override": False,
+        "startup_overrides_saved": False,
     }
     assert configured["capabilities"]["install"]["state"] == "available"
     first.jobs.close()
