@@ -651,40 +651,93 @@ class WritingModelSettings:
 
 
 class UserPreferencesStore:
+    _DEFAULTS: dict[str, Any] = {
+        "writing_tone": "bond_short",
+        "char_warning_threshold": 35,
+        "aa_pacing_wait_ms": 2500,
+        "max_stage_characters": 4,
+        "camera_switch_mode": "speaker_first",
+        "editor_font_size": "medium",
+    }
+    _ENUMS = {
+        "writing_tone": {"bond_short", "main_battle", "long_comedy", "text_reading"},
+        # No other camera mode has a documented consumer yet.
+        "camera_switch_mode": {"speaker_first"},
+        "editor_font_size": {"small", "medium", "large"},
+    }
+    _INT_RANGES = {
+        "char_warning_threshold": (15, 100),
+        "aa_pacing_wait_ms": (1000, 5000),
+        "max_stage_characters": (1, 5),
+    }
+
     def __init__(self, data_dir: Path) -> None:
         self.path = data_dir / "user-preferences.json"
+        self._lock = threading.RLock()
 
-    def load(self) -> dict[str, Any]:
-        defaults: dict[str, Any] = {
-            "writing_tone": "bond_short",  # bond_short, main_battle, long_comedy, text_reading
-            "char_warning_threshold": 35,
-            "aa_pacing_wait_ms": 2500,
-            "max_stage_characters": 4,
-            "camera_switch_mode": "speaker_first",
-            "editor_font_size": "medium",  # small, medium, large
-        }
-        if not self.path.is_file():
-            return defaults
+    @classmethod
+    def _validate(cls, data: Any) -> dict[str, Any]:
+        if not isinstance(data, dict):
+            raise DomainError("invalid_user_preferences", "偏好设置必须是 JSON 对象。")
+        result = {}
+        for key, value in data.items():
+            if key not in cls._DEFAULTS:
+                continue
+            if key in cls._ENUMS:
+                valid = isinstance(value, str) and value in cls._ENUMS[key]
+            else:
+                low, high = cls._INT_RANGES[key]
+                valid = type(value) is int and low <= value <= high
+            if not valid:
+                raise DomainError(
+                    "invalid_user_preferences",
+                    f"偏好设置字段无效：{key}。",
+                    details={"field": key},
+                )
+            result[key] = value
+        return result
+
+    def _read_locked(self) -> dict[str, Any]:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                defaults.update(data)
-        except Exception:
-            pass
-        return defaults
+        except FileNotFoundError:
+            return dict(self._DEFAULTS)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise DomainError(
+                "invalid_user_preferences",
+                "偏好设置文件不是有效的 UTF-8 JSON，原文件未修改。",
+            ) from exc
+        except OSError as exc:
+            raise DomainError(
+                "user_preferences_read_failed", "偏好设置文件读取失败。", status=500
+            ) from exc
+        return {**self._DEFAULTS, **self._validate(data)}
+
+    def load(self) -> dict[str, Any]:
+        with self._lock:
+            return self._read_locked()
 
     def save(self, payload: dict[str, Any]) -> dict[str, Any]:
-        current = self.load()
-        for key in (
-            "writing_tone",
-            "char_warning_threshold",
-            "aa_pacing_wait_ms",
-            "max_stage_characters",
-            "camera_switch_mode",
-            "editor_font_size",
-        ):
-            if key in payload:
-                current[key] = payload[key]
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
-        return current
+        with self._lock:
+            # Validate updates first; never reset a damaged original on save.
+            updates = self._validate(payload)
+            current = {**self._read_locked(), **updates}
+            temp_path = self.path.parent / f".{self.path.name}.{uuid.uuid4().hex}.tmp"
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                temp_path.write_text(
+                    json.dumps(current, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                os.replace(temp_path, self.path)
+            except OSError as exc:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass  # Preserve the original write error if cleanup is also denied.
+                raise DomainError(
+                    "user_preferences_save_failed",
+                    "偏好设置保存失败，原文件未修改。",
+                    status=500,
+                ) from exc
+            return current

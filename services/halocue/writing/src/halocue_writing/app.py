@@ -79,14 +79,27 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _body(self, max_bytes: int = 8_000_000):
-        length = int(self.headers.get("Content-Length", "0"))
-        if length > max_bytes:
+        lengths = self.headers.get_all("Content-Length", [])
+        if len(lengths) > 1 or self.headers.get_all("Transfer-Encoding", []):
+            raise DomainError("invalid_content_length", "请求长度不明确或传输编码不受支持。")
+        declared = lengths[0].strip(" \t") if lengths else "0"
+        if not declared or not declared.isascii() or not declared.isdecimal():
+            raise DomainError("invalid_content_length", "请求长度必须是非负整数。")
+        digits = declared.lstrip("0") or "0"
+        bound = str(max_bytes)
+        if len(digits) > len(bound) or (len(digits) == len(bound) and digits > bound):
             raise DomainError("payload_too_large", "请求内容过大。", status=413)
+        length = int(digits)
         raw = self.rfile.read(length) if length else b"{}"
+        if length and len(raw) != length:
+            raise DomainError("invalid_json", "请求内容不完整。")
         try:
-            return json.loads(raw.decode("utf-8"))
+            value = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise DomainError("invalid_json", "请求不是有效 JSON。") from exc
+        if not isinstance(value, dict):
+            raise DomainError("invalid_json", "请求 JSON 必须是对象。")
+        return value
 
     def _parts(self):
         return [item for item in urlparse(self.path).path.split("/") if item]

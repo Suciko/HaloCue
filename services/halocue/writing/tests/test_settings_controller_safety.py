@@ -57,3 +57,32 @@ def test_settings_controller_safety(case):
     assert result.returncode == 0, result.stdout + result.stderr
     observation = json.loads(result.stdout)
     assert observation == {"case": case, "passed": True, "external_requests": 0}
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "preference_load_failure_is_visible_and_nonblocking",
+        "preference_success_clears_warning_but_keeps_readonly",
+        "preference_missing_payload_is_not_silent_success",
+        "preference_stale_load_does_not_replace_latest_warning",
+    ],
+)
+def test_user_preferences_controller_safety(case):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is required for the preferences-controller behavior harness")
+    result = subprocess.run(
+        [
+            node,
+            str(HERE / "user_preferences_controller_cases.cjs"),
+            case,
+            str(HERE.parent / "web" / "app.js"),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {"case": case, "passed": True, "external_requests": 0}

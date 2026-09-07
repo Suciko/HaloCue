@@ -4634,9 +4634,11 @@ const SettingsController = {
       if (modelRes.status === 'fulfilled' && modelRes.value) {
         this.renderModelSettings(modelRes.value);
       }
-      if (prefRes.status === 'fulfilled' && prefRes.value?.preferences) {
-        this.renderPreferences(prefRes.value.preferences);
-      }
+      const preferences = prefRes.status === 'fulfilled' ? prefRes.value?.preferences : null;
+      this.renderPreferences(
+        preferences && typeof preferences === 'object' && !Array.isArray(preferences)
+          ? preferences : null
+      );
       if (diagRes.status === 'fulfilled' && diagRes.value) {
         this.renderDiagnostics(diagRes.value);
       }
@@ -5321,10 +5323,17 @@ const SettingsController = {
     const pacing = document.getElementById('prefAaPacing');
     const maxChars = document.getElementById('prefMaxStageCharacters');
 
-    if (tone && prefs.writing_tone) tone.value = prefs.writing_tone;
-    if (charWarn && prefs.char_warning_threshold) charWarn.value = prefs.char_warning_threshold;
-    if (pacing && prefs.aa_pacing_wait_ms) pacing.value = prefs.aa_pacing_wait_ms;
-    if (maxChars && prefs.max_stage_characters) maxChars.value = prefs.max_stage_characters;
+    // Failed loads must not present stale/default controls as saved preferences.
+    if (tone) tone.value = prefs?.writing_tone ?? '';
+    if (charWarn) charWarn.value = prefs?.char_warning_threshold ?? '';
+    if (pacing) pacing.value = prefs?.aa_pacing_wait_ms ?? '';
+    if (maxChars) maxChars.value = prefs?.max_stage_characters ?? '';
+    const hint = document.getElementById('prefSaveHint');
+    if (hint) {
+      const readonlyHint = '这些字段不会改变生成结果；为避免误导，暂不可编辑。';
+      hint.textContent = prefs ? readonlyHint
+        : `偏好设置读取失败，无法确认已保存的值。请检查偏好设置文件后重试。${readonlyHint}`;
+    }
   },
 
   async savePreferences(form) {
