@@ -28,3 +28,8 @@ to exact cards. Root and service fixtures synthetic, isolated legacy root, no AA
 
 No claim of03-N02 standalone events or full performance semantic correctness. Review
 and verify both this and face slice before immutable combined regression.
+
+## Executed
+
+Scoped reviews and1629-test unchanged-commit combined regression accepted. Exact
+commands and boundaries: `docs/handoffs/2026-09-07-compiler-resource-consumption.md`.

@@ -162,15 +162,15 @@
       "id": "03-D02",
       "summary": "表情资源白名单与编译器的 ID/语义名解析契约不一致：已知 S2_01 可被忽略并保留默认表情。",
       "review_severity": "P2",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "a8635f5：当前角色canonical face ID精确命中优先于数字兼容/标签；S2_01经证据过滤→渲染→解析→编译保留。保持证据/服装作用域与未知ID警告；不声称新增全面结构化非法ID诊断。"
     },
     {
       "id": "03-D03",
       "summary": "场尾/文件尾的合法一次性前缀指令无承载行时被丢弃，且没有“未消费指令”诊断。",
       "review_severity": "P2",
-      "status": "pending",
-      "note": ""
+      "status": "fixed_in_scope",
+      "note": "dba22d7：21类一次性前缀于场景/分隔符/EOF无承接行时逐源行报dir.unconsumed；静态预检和现有制作审核/编译gate阻断，旧ready重验。未引入独立事件或强制所有裸legacy build调用阻断。"
     },
     {
       "id": "03-C01",
@@ -460,13 +460,14 @@
       "note": ""
     }
   ],
-  "latest_verified_code": "87464e5d70fe56d82e1bb53aaa5dfc5a3a87d3a6",
+  "latest_verified_code": "dba22d77f748372712b8d8e1845966444b466ec6",
   "latest_regression": {
-    "passed": 1397,
+    "passed": 1629,
     "source_unchanged": true,
     "real_provider": false,
     "real_AA_playback": false,
-    "production_data_roots": "isolated test fixtures"
+    "production_data_roots": "isolated test fixtures",
+    "scope": "writing/production/integrated plus preserved prompts and root compiler/resource diagnostics"
   },
   "latest_focused_after_planning": {
     "commit": "0811a4a7e1e27d55393f88f79224fe61da3fa8a",
