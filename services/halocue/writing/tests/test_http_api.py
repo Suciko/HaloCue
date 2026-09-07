@@ -1438,7 +1438,8 @@ def test_main_user_surfaces_use_plain_language_and_fold_run_metrics():
     assert "当前场景" in script
     assert "所有正式修改先成为候选并显示差异" in script
     assert "ProductionRun 副本保持分离" not in workbench
-    assert "尚未收到制作任务的素材副本" in workbench
+    assert "副本回执按发布版本记录" in workbench
+    assert "尚未收到制作任务的素材副本" not in workbench
 
 
 def test_production_embed_recovers_focus_after_embedded_rerender_when_body_is_active():
