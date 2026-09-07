@@ -4432,6 +4432,22 @@ const SettingsController = {
   },
 
   async loadAll() {
+    const version = (this.settingsLoadVersion || 0) + 1;
+    this.settingsLoadVersion = version;
+    this.writingModelStatus = undefined;
+    this.directionModelStatus = undefined;
+    this.renderModelRoles(undefined, undefined);
+    // Independent service: a stalled production endpoint cannot block writing
+    // settings or completion of a writing-only activation.
+    this.readDirectionModelStatus().then(data => {
+      if (version !== this.settingsLoadVersion) return;
+      this.directionModelStatus = data;
+      this.renderModelRoles(this.writingModelStatus, data);
+    }, () => {
+      if (version !== this.settingsLoadVersion) return;
+      this.directionModelStatus = null;
+      this.renderModelRoles(this.writingModelStatus, null);
+    });
     try {
       const [modelRes, prefRes, diagRes, conversationRes] = await Promise.allSettled([
         api('/settings/writing-model'),
@@ -4440,6 +4456,9 @@ const SettingsController = {
         api('/settings/conversations'),
       ]);
 
+      if (version !== this.settingsLoadVersion) return;
+      this.writingModelStatus = modelRes.status === 'fulfilled' ? modelRes.value : null;
+      this.renderModelRoles(this.writingModelStatus, this.directionModelStatus);
       if (modelRes.status === 'fulfilled' && modelRes.value) {
         this.renderModelSettings(modelRes.value);
       }
@@ -4459,6 +4478,45 @@ const SettingsController = {
     } catch (e) {
       console.warn('Settings load error:', e);
     }
+  },
+
+  async readDirectionModelStatus() {
+    const controller = new AbortController();
+    let timer;
+    try {
+      return await Promise.race([
+        (async () => {
+          const response = await fetch('/production/api/v1/settings/direction-model', {signal: controller.signal});
+          const data = await response.json();
+          if (!response.ok || data.ok === false) throw new Error('AA 制作服务不可用');
+          return data.data || data;
+        })(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => { controller.abort(); reject(new Error('AA 状态读取超时')); }, 5000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+
+  renderModelRoles(writing, direction) {
+    for (const [role, result] of [['writing', writing], ['direction', direction]]) {
+      const model = result?.model;
+      const configured = model?.configured === true;
+      const verified = configured && model.activation_status === 'active';
+      const label = result === undefined ? '读取中' : !model ? '服务不可用' : !configured ? '尚未配置' : verified ? '已测试并启用' : '已保存 · 未测试';
+      const name = document.getElementById(`${role}ModelRoleName`);
+      const stateEl = document.getElementById(`${role}ModelRoleState`);
+      const endpoint = document.getElementById(`${role}ModelRoleEndpoint`);
+      const card = document.getElementById(`${role}ModelRoleCard`);
+      if (name) name.textContent = result === undefined ? '正在读取配置' : configured ? model.model : (model ? '等待配置' : '状态暂不可读');
+      if (stateEl) stateEl.textContent = label;
+      if (endpoint) endpoint.textContent = model?.base_url || '—';
+      if (card) card.dataset.status = verified ? 'ready' : configured ? 'pending' : 'unavailable';
+    }
+    const notice = document.getElementById('modelScopeNotice');
+    if (notice) notice.textContent = '写作与 AA 制作分别保存配置。下方表单以写作配置为起点；保存前选择生效范围。';
   },
 
   renderArchivedConversations(errorMessage = '') {
@@ -4542,14 +4600,14 @@ const SettingsController = {
     if (board) {
       if (model.configured && model.model) {
         board.className = 'active-model-card configured';
-        if (nameEl) nameEl.textContent = `当前生效主力：${model.model}`;
+        if (nameEl) nameEl.textContent = `写作配置：${model.model}`;
         if (roleBadge) {
-          roleBadge.textContent = '已连接';
+          roleBadge.textContent = '写作';
           roleBadge.className = 'model-role-badge';
         }
         if (latencyPill) {
           latencyPill.textContent = model.activation_status === 'active'
-            ? `${Number(model.last_test_latency_ms || 0)}ms · 已验证`
+            ? (Number(model.last_test_latency_ms) > 0 ? `${Number(model.last_test_latency_ms)}ms · 上次测试` : '上次测试通过')
             : '已配置 · 待测试';
         }
         if (idText) idText.textContent = model.model;
@@ -4566,7 +4624,7 @@ const SettingsController = {
         }
         if (scopeText) {
           scopeText.textContent = model.activation_status === 'active'
-            ? '已通过连通测试，可以用于写作与 AA 制作。'
+            ? '写作模型已测试并启用；AA 制作状态以上方独立卡片为准。'
             : '已保存，但还没有最近一次连通测试记录。';
         }
       } else {

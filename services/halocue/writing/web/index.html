@@ -286,10 +286,27 @@
           <!-- Tab 1: AI 模型服务 -->
           <section id="pane-models" class="settings-pane active">
             <div class="pane-lead">
-              <h3>大语言模型接入与双域协同</h3>
-              <p>支持配置常用模型服务商或本地模型。密钥只保存在当前电脑的加密存储中，支持一键分配给写作和 AA 制作。</p>
+              <p class="settings-kicker">CONNECTIONS / 连接</p>
+              <h3>连接你的创作助手</h3>
+              <p>写作负责故事，演出负责舞台。可以共用一个模型，也可以分别配置。</p>
             </div>
 
+            <div class="model-role-grid" aria-label="当前模型连接" aria-live="polite">
+              <article class="model-role-card" id="writingModelRoleCard" data-status="unavailable">
+                <header><span class="role-index">01</span><b>写作助手</b><span id="writingModelRoleState">读取中</span></header>
+                <strong id="writingModelRoleName">等待配置</strong><code id="writingModelRoleEndpoint">—</code>
+                <p>构思 · 改编 · 场景写作</p>
+              </article>
+              <article class="model-role-card" id="directionModelRoleCard" data-status="unavailable">
+                <header><span class="role-index">02</span><b>演出助手</b><span id="directionModelRoleState">读取中</span></header>
+                <strong id="directionModelRoleName">等待配置</strong><code id="directionModelRoleEndpoint">—</code>
+                <p>AA 制作 · 演出安排 · 制作意见</p>
+              </article>
+            </div>
+            <p class="model-scope-notice" id="modelScopeNotice">两种用途分别保存，保存前请确认生效范围。</p>
+
+            <details class="model-connection-details">
+              <summary>查看写作连接详情</summary>
             <!-- 当前生效大模型运行状态看板 -->
             <div id="activeModelStatusBoard" class="active-model-card unconfigured">
               <div class="active-model-header">
@@ -322,6 +339,8 @@
                 </div>
               </details>
             </div>
+
+            </details>
 
             <details id="modelConfigDetails" class="model-config-details">
               <summary class="model-config-summary" data-model-config-toggle>
@@ -524,15 +543,15 @@
           <!-- Tab 3: 创作与演出偏好 -->
           <section id="pane-preferences" class="settings-pane">
             <div class="pane-lead">
-              <h3>创作与演出默认习惯</h3>
-              <p>定制您的二创剧本写作风格基调、台词警戒阈值以及 AzureArchive 镜头与节奏参数。</p>
+              <h3>历史偏好记录</h3>
+              <p>这些旧偏好尚未接入生成流程，仅展示已保存的记录。实际写作模式请在场景中选择，演出方式请在制作任务中选择。</p>
             </div>
 
             <form id="preferencesForm" class="settings-form">
               <div class="field-grid">
                 <label>
                   默认剧本风格基调
-                  <select id="prefWritingTone" name="writing_tone">
+                  <select id="prefWritingTone" disabled aria-describedby="prefSaveHint" name="writing_tone">
                     <option value="bond_short">羁绊与日常互动 (轻松、细腻对话)</option>
                     <option value="main_battle">主线冲突与行动 (紧凑战斗与悬疑)</option>
                     <option value="long_comedy">轻松喜剧推进 (幽默、欢脱闹剧)</option>
@@ -542,7 +561,7 @@
 
                 <label>
                   单句台词字数警示阈值
-                  <input id="prefCharWarning" type="number" name="char_warning_threshold" value="35" min="15" max="100">
+                  <input id="prefCharWarning" disabled aria-describedby="prefSaveHint" type="number" name="char_warning_threshold" value="35" min="15" max="100">
                   <small class="field-hint">GalGame 单屏台词建议保持在 30-40 字以内。</small>
                 </label>
               </div>
@@ -550,24 +569,24 @@
               <div class="field-grid">
                 <label>
                   AA 气泡自动等待时间 (毫秒)
-                  <input id="prefAaPacing" type="number" name="aa_pacing_wait_ms" value="2500" min="1000" max="5000" step="100">
-                  <small class="field-hint">AzureArchive 播放对话气泡的停留时间（默认 2500ms）。</small>
+                  <input id="prefAaPacing" disabled aria-describedby="prefSaveHint" type="number" name="aa_pacing_wait_ms" value="2500" min="1000" max="5000" step="100">
+                  <small class="field-hint">历史记录，不覆盖剧本中已确认的等待指令。</small>
                 </label>
 
                 <label>
                   同屏最多立绘角色数
-                  <input id="prefMaxStageCharacters" type="number" name="max_stage_characters" value="4" min="1" max="5">
-                  <small class="field-hint">超过此数量时自动切镜或清理较早发言的角色。</small>
+                  <input id="prefMaxStageCharacters" disabled aria-describedby="prefSaveHint" type="number" name="max_stage_characters" value="4" min="1" max="5">
+                  <small class="field-hint">历史记录，不限制当前演出中的同屏人数。</small>
                 </label>
               </div>
 
               <div class="settings-actions-footer">
                 <div class="action-status-left">
-                  <span id="prefSaveHint" class="field-hint">修改后点击保存立即应用于所有新章节。</span>
+                  <span id="prefSaveHint" class="field-hint">这些字段不会改变生成结果；为避免误导，暂不可编辑。</span>
                 </div>
                 <div class="action-buttons-right">
                   <button type="button" class="quiet" data-onboarding-start>重新查看界面引导</button>
-                  <button type="submit" class="primary" id="savePreferencesBtn">保存偏好设置</button>
+                  <button type="submit" class="primary" id="savePreferencesBtn" disabled>暂未接入执行</button>
                 </div>
               </div>
             </form>

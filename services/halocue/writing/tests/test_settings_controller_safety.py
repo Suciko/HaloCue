@@ -10,6 +10,10 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 CASES = [
+    "direction_status_timeout_changes_pending_to_unavailable",
+    "hanging_production_does_not_block_writing_settings",
+    "distinct_model_roles_are_shown_independently",
+    "unavailable_direction_model_is_not_claimed_connected",
     "preset_switch_clears_key",
     "manual_endpoint_edit_clears_key",
     "protocol_edit_clears_key",

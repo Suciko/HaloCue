@@ -9,13 +9,13 @@ function harness(sourcePath) {
   const start = source.indexOf('const SettingsController =');
   const end = source.indexOf('\n};', start) + 3;
   assert(start >= 0 && end > start, 'SettingsController boundary not found');
-  const nodes = new Map(), calls = [], toasts = [];
+  const nodes = new Map(), calls = [], toasts = [], timers = [];
   function element(id) {
     if (!nodes.has(id)) {
       const listeners = new Map();
       const classes = new Set();
       nodes.set(id, {
-        id, value: '', type: 'password', textContent: '', innerHTML: '', disabled: false,
+        id, dataset: {}, value: '', type: 'password', textContent: '', innerHTML: '', disabled: false,
         className: '', open: false,
         classList: {add(...xs) {xs.forEach(x => classes.add(x));},
           remove(...xs) {xs.forEach(x => classes.delete(x));}, contains(x) {return classes.has(x);},
@@ -33,10 +33,10 @@ function harness(sourcePath) {
     timeout: 'settingsTimeout', reasoning_mode: 'settingsReasoningMode',
     input_cost_per_million: 'settingsInputCost', output_cost_per_million: 'settingsOutputCost',
     apply_scope: 'settingsApplyScope'};
-  const h = {element, calls, toasts, apiResult: async (route, body) => ({model: body?.model || 'model-a', models: ['model-a'], latency_ms: 1}),
+  const h = {element, calls, toasts, timers, apiResult: async (route, body) => ({model: body?.model || 'model-a', models: ['model-a'], latency_ms: 1}),
     fetchResult: async () => ({ok: true, environment: {workspace: {valid: false, path: null}, issues: []}})};
   const context = {
-    console, URL, URLSearchParams, window: {location: {search: ''}},
+    console, URL, URLSearchParams, AbortController, clearTimeout() {}, window: {location: {search: ''}},
     document: {getElementById: element, addEventListener() {}},
     FormData: class {get(name) {return fields[name] ? element(fields[name]).value : null;}},
     api: async (route, options) => {
@@ -52,7 +52,7 @@ function harness(sourcePath) {
     },
     toast: (message, error) => toasts.push({message, error: Boolean(error)}),
     esc: value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char])),
-    setTimeout() {}, state: {},
+    setTimeout(fn, ms) {timers.push({fn, ms}); return timers.length;}, state: {},
   };
   vm.createContext(context);
   vm.runInContext(source.slice(start, end) + '\nglobalThis.controller = SettingsController;', context);
@@ -68,6 +68,7 @@ function harness(sourcePath) {
   element('settingsApplyScope').value = 'both';
   c.activePresetId = 'a';
   c.init();
+  h.loadAll = c.loadAll.bind(c);
   c.loadAll = async () => {};
   calls.length = 0;
   h.enterKey = async value => {element('settingsApiKey').value = value; await element('settingsApiKey').fire('input');};
@@ -309,6 +310,54 @@ const cases = {
     h.controller.renderModelSettings({model: {provider: 'openai', base_url: 'https://b.invalid/v1', model: 'model-b'}, presets});
     assert.equal(h.element('settingsApiKey').value, '');
     assert.equal(h.element('settingsApiKey').type, 'password');
+  },
+
+  async distinct_model_roles_are_shown_independently(source) {
+    const h = harness(source);
+    h.apiResult = async route => route === '/settings/writing-model'
+      ? {ok: true, model: {configured: true, model: 'writer-A', provider: 'openai', base_url: 'https://writer.invalid/v1', activation_status: 'active', last_tested_at: 'synthetic'}, presets: []} : {};
+    h.fetchResult = async () => ({ok: true, model: {configured: true, model: 'director-B', provider: 'openai', base_url: 'http://localhost:11434/v1', activation_status: 'saved_unverified'}});
+    await h.loadAll();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(h.element('writingModelRoleName').textContent, 'writer-A');
+    assert.equal(h.element('directionModelRoleName').textContent, 'director-B');
+    assert(h.element('writingModelRoleState').textContent.includes('已测试'));
+    assert(h.element('directionModelRoleState').textContent.includes('未测试'));
+    assert(h.element('modelScopeNotice').textContent.includes('分别'));
+  },
+  async unavailable_direction_model_is_not_claimed_connected(source) {
+    const h = harness(source);
+    h.apiResult = async () => ({model: {configured: true, model: 'writer-only', provider: 'openai'}, presets: []});
+    h.fetchResult = async () => {throw new Error('offline');};
+    await h.loadAll();
+    await new Promise(resolve => setImmediate(resolve));
+    assert(h.element('directionModelRoleState').textContent.includes('不可用'));
+    assert(!h.element('directionModelRoleState').textContent.includes('已连接'));
+  },
+
+  async hanging_production_does_not_block_writing_settings(source) {
+    const h = harness(source);
+    h.apiResult = async route => route === '/settings/writing-model'
+      ? {model: {configured:true, model:'writer', provider:'openai', base_url:'https://writer.invalid/v1'}, presets: []} : {};
+    h.fetchResult = () => new Promise(() => {});
+    await Promise.race([h.loadAll(), new Promise((_, reject) => setTimeout(() => reject(new Error('writing settings waited for production')), 150))]);
+    assert.equal(h.element('writingModelRoleName').textContent, 'writer');
+    h.controller.loadAll = h.loadAll;
+    h.element('settingsApplyScope').value = 'writing';
+    await Promise.race([h.controller.saveModel(h.element('settingsModelForm')), new Promise((_, reject) => setTimeout(() => reject(new Error('writing save waited for production')), 150))]);
+    assert.equal(h.element('saveAndApplyModelBtn').disabled, false);
+  },
+
+  async direction_status_timeout_changes_pending_to_unavailable(source) {
+    const h = harness(source);
+    h.fetchResult = () => new Promise(() => {});
+    await h.loadAll();
+    assert(h.element('directionModelRoleState').textContent.includes('读取中'));
+    const timeout = h.timers.find(timer => timer.ms === 5000);
+    assert(timeout, 'direction status must have a bounded timeout');
+    timeout.fn();
+    await new Promise(resolve => setImmediate(resolve));
+    assert(h.element('directionModelRoleState').textContent.includes('不可用'));
   },
 
 };
