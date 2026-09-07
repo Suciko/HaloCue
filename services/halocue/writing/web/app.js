@@ -5231,6 +5231,18 @@ const SettingsController = {
       && selection === (document.getElementById('aaWorkspaceInput')?.value || '').trim();
   },
 
+  aaRuntimePathMarkup(workspace) {
+    if (!workspace) return '';
+    const sourceLabels = {startup: '启动配置', settings: '应用设置', settings_session_override: '本次会话设置', none: '未配置'};
+    const source = workspace.source || 'none';
+    return `<p>当前生效路径：${esc(workspace.valid === true ? workspace.path : '无（当前配置不可用）')}</p>
+      <p>来源：${esc(sourceLabels[source] || source)} (${esc(source)})</p>
+      <p>已保存路径：${esc(workspace.persisted_path || '无')}</p>
+      <p>重启后路径：${esc(workspace.restart_path || '无')}</p>
+      ${workspace.session_override ? '<small>当前采用仅本次会话生效；重启时启动配置优先。</small>'
+        : workspace.startup_overrides_saved ? '<small>启动配置优先，重启后将使用启动配置中的工作区。</small>' : ''}`;
+  },
+
   async inspectAa() {
     if (this.aaAdoptionPending) return;
     const raw = (document.getElementById('aaWorkspaceInput')?.value || '').trim();
@@ -5238,6 +5250,7 @@ const SettingsController = {
     const button = document.getElementById('inspectAaBtn');
     this.resetAaInspection('正在检查 AzureArchive 路径与工作区有效性...');
     const revision = this.aaInspectionRevision;
+    let runtimeMarkup = '';
     if (button) button.disabled = true;
     try {
       const resp = await fetch('/production/api/v1/settings/aa-environment', {
@@ -5249,6 +5262,7 @@ const SettingsController = {
       if (!resp.ok || data.ok === false) throw new Error(data.error?.message || 'AA 环境探测失败');
       const result = data.data || data;
       const environment = result.environment || {};
+      runtimeMarkup = this.aaRuntimePathMarkup(result.aa_workspace);
       const workspace = environment.workspace || {};
       if (workspace.valid !== true || typeof workspace.path !== 'string' || !workspace.path.trim()) {
         throw new Error(environment.issues?.[0]?.message || '未检测到有效 AA 工作区，请检查目录结构。');
@@ -5258,7 +5272,7 @@ const SettingsController = {
         card.className = 'environment-status-card valid';
         card.innerHTML = `<strong class="environment-valid-title">检测到有效的 AzureArchive 工作区</strong>
           <p>工作区路径: <code>${esc(workspace.path)}</code></p>
-          <small>检测通过不等于资源完整；采用时会再次校验目录结构。</small>`;
+          <small>检测通过不等于资源完整；采用时会再次校验目录结构。</small>${runtimeMarkup}`;
       }
       const adopt = document.getElementById('adoptAaBtn');
       if (adopt) adopt.disabled = false;
@@ -5267,7 +5281,7 @@ const SettingsController = {
       if (!this.aaInspectionIsCurrent(revision, raw)) return;
       if (card) {
         card.className = 'environment-status-card';
-        card.innerHTML = `<strong class="environment-error-title">未检测到有效 AA 工作区</strong><p>${esc(e.message || 'AA 环境探测失败')}</p>`;
+        card.innerHTML = `<strong class="environment-error-title">未检测到有效 AA 工作区</strong><p>${esc(e.message || 'AA 环境探测失败')}</p>${runtimeMarkup}`;
       }
       toast(e.message || 'AA 检测失败', true);
     } finally {
@@ -5305,7 +5319,14 @@ const SettingsController = {
       if (!this.aaInspectionIsCurrent(inspected.revision, inspected.selection)) return;
       this.aaInspection = null;
       if (button) button.textContent = '已采用';
-      toast('已成功采用并绑定该 AzureArchive 制作工作区');
+      const card = document.getElementById('aaEnvironmentCard');
+      if (card) {
+        card.className = 'environment-status-card valid';
+        card.innerHTML = `<strong class="environment-valid-title">已采用 AzureArchive 制作工作区</strong>${this.aaRuntimePathMarkup(workspace)}`;
+      }
+      toast(workspace.session_override || workspace.startup_overrides_saved
+        ? `已采用 AzureArchive 工作区；当前路径：${workspace.path}。重启时启动配置优先，将使用：${workspace.restart_path || '无'}。`
+        : '已成功采用并绑定该 AzureArchive 制作工作区');
     } catch (e) {
       if (!this.aaInspectionIsCurrent(inspected.revision, inspected.selection)) return;
       this.resetAaInspection('采用未完成，请重新检测后重试。');

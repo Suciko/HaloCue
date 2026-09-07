@@ -2711,21 +2711,29 @@
     const status = $("#spineCliStatus");
     const capabilityText = $("#spineCliCapability");
     if (!status) return;
-    const configured = info.configured === true && info.valid !== false;
-    const invalid = info.configured === true && info.valid === false;
+    const configured = info.configured === true && info.valid === true && Boolean(info.effective_path);
+    const invalidSaved = info.reason === "saved_spine_cli_unavailable"
+      || (info.source === "settings" && info.valid === false);
+    const invalid = invalidSaved || (Boolean(info.path) && info.valid === false);
     status.className = `environment-status ${configured ? "ready" : "needs-work"}`;
     status.innerHTML = configured
       ? "<strong>Spine 预览已启用</strong><p>导入角色时可以选择先渲染编号表情。渲染结果只作为待确认的视觉证据。</p>"
       : invalid
         ? "<strong>配置路径不可用</strong><p>找不到该程序；请重新选择 Spine.com、Spine.exe 或对应启动脚本。</p>"
         : "<strong>未启用 Spine 预览</strong><p>仍可使用静态头像、贴图和已验证表情 ID；需要动画证据时再配置。</p>";
+    const sourceLabels = { settings: "应用设置", environment: "环境变量", legacy_config: "旧版配置", data_config: "数据目录配置", discovered: "自动发现", none: "未选择" };
+    const source = info.source || "none";
+    status.innerHTML += `<p>当前生效路径：${esc(configured ? info.effective_path : "无")}</p><p>来源：${esc(sourceLabels[source] || source)} (${esc(source)})</p>`;
+    if (info.path && !configured) status.innerHTML += `<p>所选路径：${esc(info.path)}</p>`;
+    if (info.persisted_path) status.innerHTML += `<p>已保存路径：${esc(info.persisted_path)}</p>`;
+    if (invalidSaved) status.innerHTML += "<small>已保存路径不可用，未回退到环境变量或其他配置。请重新选择，或清除已保存路径以使用回退配置。</small>";
     if (capabilityText) {
-      capabilityText.textContent = capability.state === "available"
+      capabilityText.textContent = configured && capability.state === "available"
         ? "当前机器可以调用 Spine CLI。渲染仅写入临时 Production 数据目录，识别结果仍需人工确认。"
         : "当前机器没有可用的 Spine CLI。配置后可在角色导入步骤启用临时表情预览。";
     }
     const input = $("#spineCliPath");
-    if (input && info.path && document.activeElement !== input) input.value = info.path;
+    if (input && document.activeElement !== input) input.value = info.path || "";
   }
 
   async function loadSpineCliSettings() {
@@ -2756,7 +2764,9 @@
       const result = await api("/settings/spine-cli", { method: "POST", body: JSON.stringify({ path }) });
       renderSpineCliSettings(result);
       await refreshCapabilities();
-      toast("Spine 表情预览设置已保存。", "normal");
+      const info = result.spine_cli || {};
+      if (info.valid === true && info.configured === true && info.effective_path) toast("Spine 表情预览设置已保存。", "normal");
+      else toast("Spine 配置路径不可用，未启用预览；请重新选择或清除已保存路径。", "error");
     } catch (error) {
       if (status) status.innerHTML = `<strong>保存失败</strong><p>${esc(error.message || "请检查路径后重试")}</p>`;
       handleError(error);
@@ -2776,7 +2786,10 @@
       if (input) input.value = "";
       renderSpineCliSettings(result);
       await refreshCapabilities();
-      toast("已关闭 Spine 表情预览。", "normal");
+      const info = result.spine_cli || {};
+      toast(info.valid === true && info.configured === true && info.effective_path
+        ? `已清除保存的 Spine 路径；当前仍可按需预览，来源 ${info.source}：${info.effective_path}`
+        : "已清除保存的 Spine 路径；当前没有可用的 Spine CLI，未启用预览。", "normal");
     } catch (error) {
       if (status) status.innerHTML = `<strong>清除失败</strong><p>${esc(error.message || "请稍后重试")}</p>`;
       handleError(error);
@@ -2809,11 +2822,25 @@
     const status = $("#aaEnvironmentStatus");
     const path = workspace.path || "未找到工作区";
     const issue = environment.issues?.[0];
-    status.className = `environment-status ${workspace.valid ? "ready" : "needs-work"}`;
-    status.innerHTML = `<strong>${workspace.valid ? "AA 制作环境可用" : "还不能用于制作"}</strong><p>${esc(path)}</p><div><span>工程目录 ${workspace.directories?.projects ? "可用" : "缺失"}</span><span>存档目录 ${workspace.directories?.saves ? "可用" : "缺失"}</span><span>官方资源 ${cache.available ? "已发现" : "未发现"}</span></div>${issue ? `<small>${esc(issue.code)} · ${esc(issue.message)}</small>` : ""}`;
+    const active = result.aa_workspace;
+    const ready = active?.valid === true;
+    const headline = active
+      ? (ready ? "当前 AA 制作环境可用" : "当前 AA 制作环境不可用")
+      : (workspace.valid ? "检测到可用的 AA 工作区（尚未确认当前生效环境）" : "未检测到可用的 AA 工作区");
+    status.className = `environment-status ${ready ? "ready" : "needs-work"}`;
+    status.innerHTML = `<strong>${headline}</strong><p>检测路径（${workspace.valid ? "可用" : "不可用"}）：${esc(path)}</p><div><span>工程目录 ${workspace.directories?.projects ? "可用" : "缺失"}</span><span>存档目录 ${workspace.directories?.saves ? "可用" : "缺失"}</span><span>官方资源 ${cache.available ? "已发现" : "未发现"}</span></div>${issue ? `<small>${esc(issue.code)} · ${esc(issue.message)}</small>` : ""}`;
+    const adopted = result.adopted === true && active?.valid === true;
+    if (active) {
+      const sourceLabels = { startup: "启动配置", settings: "应用设置", settings_session_override: "本次会话设置", none: "未配置" };
+      const source = active.source || "none";
+      status.innerHTML += `<p>当前生效路径：${esc(active.valid ? active.path : "无（当前配置不可用）")}</p><p>来源：${esc(sourceLabels[source] || source)} (${esc(source)})</p><p>已保存路径：${esc(active.persisted_path || "无")}</p><p>重启后路径：${esc(active.restart_path || "无")}</p>`;
+      if (!active.valid && active.path) status.innerHTML += `<p>当前配置路径不可用：${esc(active.path)}</p>`;
+      if (active.session_override) status.innerHTML += "<small>当前采用仅本次会话生效；重启时启动配置优先。</small>";
+      else if (active.startup_overrides_saved) status.innerHTML += "<small>启动配置优先，已保存路径未覆盖当前或重启后的工作区。</small>";
+    }
     if (!$("#aaSelection").value.trim() && workspace.path) $("#aaSelection").value = workspace.path;
-    $("#adoptAaEnvironment").disabled = !workspace.valid || result.adopted === true;
-    if (result.adopted) $("#adoptAaEnvironment").textContent = "已采用";
+    $("#adoptAaEnvironment").disabled = !workspace.valid || adopted;
+    if (adopted) $("#adoptAaEnvironment").textContent = "已采用";
     else $("#adoptAaEnvironment").textContent = "采用此工作区";
   }
 
@@ -2825,7 +2852,14 @@
         ? await api("/settings/aa-environment")
         : await api("/settings/aa-environment", { method: "POST", body: JSON.stringify({ selection, adopt }) });
       renderAaEnvironment(result);
-      if (adopt) { await refreshCapabilities(); toast("AA 制作环境已采用。"); }
+      if (adopt) {
+        await refreshCapabilities();
+        const active = result.aa_workspace;
+        if (!result.adopted || active?.valid !== true) toast("AA 工作区采用未确认或当前配置不可用，请重新检测。", "error");
+        else toast(active.session_override || active.startup_overrides_saved
+          ? `AA 制作环境已采用；当前路径：${active.path}。重启时启动配置优先，将使用：${active.restart_path || "无"}。`
+          : "AA 制作环境已采用。");
+      }
     } catch (error) { handleError(error); }
   }
 

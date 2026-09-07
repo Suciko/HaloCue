@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import mimetypes
-import os
 import re
 import threading
 from dataclasses import replace
@@ -55,6 +54,8 @@ class ProductionService:
     def __init__(self, settings: Settings) -> None:
         settings.prepare()
         self.settings = settings
+        self._startup_aa_data = settings.aa_data
+        self._aa_session_selection = False
         self.repository = ProductionRepository(settings.data_dir)
         self.settings_store = SettingsStore(settings.data_dir)
         persisted = self.settings_store.load()
@@ -615,6 +616,19 @@ class ProductionService:
 
     def aa_workspace_settings(self) -> dict[str, Any]:
         path = self.settings.aa_data
+        persisted = self.settings_store.load().get("aa_data")
+        startup = self._startup_aa_data
+        session_override = bool(self._aa_session_selection and startup and path != startup)
+        restart_path = startup
+        if restart_path is None and persisted:
+            # Match constructor validation: a stale saved workspace is not adopted.
+            try:
+                restart_path = self.settings_store.validate_aa_workspace(persisted)
+            except ProductionError:
+                restart_path = None
+        source = "settings_session_override" if session_override else (
+            "startup" if startup and not self._aa_session_selection else "settings" if path else "none"
+        )
         valid = bool(
             path
             and path.is_dir()
@@ -629,6 +643,12 @@ class ProductionService:
                 "configured": bool(path),
                 "path": str(path) if path else None,
                 "valid": valid,
+                "source": source,
+                "persisted_path": str(persisted) if persisted else None,
+                "startup_path": str(startup) if startup else None,
+                "restart_path": str(restart_path) if restart_path else None,
+                "session_override": session_override,
+                "startup_overrides_saved": bool(startup and persisted and Path(str(persisted)) != startup),
             },
             "capabilities": self.capabilities(),
         }
@@ -664,6 +684,7 @@ class ProductionService:
         current["aa_data"] = str(path)
         self.settings_store.save(current)
         self.settings = replace(self.settings, aa_data=path)
+        self._aa_session_selection = True
         self.adapter.settings = self.settings
         self.resources = ResourceCatalog(
             self.settings.resource_index,
@@ -674,32 +695,11 @@ class ProductionService:
         return self.aa_workspace_settings()
 
     def spine_cli_settings(self) -> dict[str, Any]:
-        persisted = self.settings_store.load().get("spine_cli")
-        path = None
-        if persisted:
-            try:
-                path = Path(str(persisted)).expanduser().resolve()
-            except (OSError, ValueError):
-                path = None
-        capability = spine_rendering.capability(
-            legacy_root=self.settings.legacy_root,
-            data_dir=self.settings.data_dir,
+        selection = spine_rendering.cli_selection(
+            legacy_root=self.settings.legacy_root, data_dir=self.settings.data_dir,
         )
-        persisted_valid = bool(path and path.is_file()) if persisted else False
-        source = "settings" if persisted_valid else (
-            "environment" if os.environ.get("HALOCUE_SPINE_CLI") or os.environ.get("SPINE_CLI") else "none"
-        )
-        configured = persisted_valid or (not persisted and capability["state"] == "available")
-        return {
-            "ok": True,
-            "spine_cli": {
-                "configured": configured,
-                "path": str(path) if path else None,
-                "source": source,
-                "valid": persisted_valid if persisted else capability["state"] == "available",
-            },
-            "capability": capability,
-        }
+        return {"ok": True, "spine_cli": selection,
+                "capability": spine_rendering.capability_from_selection(selection)}
 
     def configure_spine_cli(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.settings_store.load()
