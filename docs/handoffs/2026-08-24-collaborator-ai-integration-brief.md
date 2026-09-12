@@ -7,7 +7,7 @@ directory into HaloCue.
 ```text
 你负责 HaloCue 的 BA 剧情编辑器集成。目标仓库是：
 
-  D:\桌面\蔚蓝档案二创\HaloCue项目\01-repo\HaloCue
+  <REPOSITORY_ROOT>
 
 远程仓库：
 
