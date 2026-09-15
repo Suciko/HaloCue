@@ -157,3 +157,16 @@ def test_workflows_install_and_probe_pinned_ffmpeg_before_verification(
     assert "Get-Command ffprobe" in job
     assert probe in job
     assert job.index(install) < job.index(probe) < job.index(verification)
+
+
+def test_release_tag_must_point_to_checked_out_source(tmp_path):
+    from tools.check_release_version import check_release_version, ReleaseVersionError
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    def git(*args):
+        subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=Test", "-c", "user.email=test@example.invalid", *args], check=True, capture_output=True)
+    git("commit", "--allow-empty", "-qm", "first")
+    git("tag", f"v{VERSION}")
+    git("commit", "--allow-empty", "-qm", "second")
+    with pytest.raises(ReleaseVersionError, match="checked-out HEAD"):
+        check_release_version(f"v{VERSION}", tmp_path)
+    assert "ref: refs/tags/${{ inputs.release_tag }}" in _workflow("release.yml")

@@ -13,11 +13,13 @@ from .gateway import create_gateway
 from .manifest import build_integration_manifest
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from services.halocue.runtime_layout import service_root, integrated_data_root, repository_root
+
+PROJECT_ROOT = service_root("integrated")
 WORKSPACE_ROOT = PROJECT_ROOT.parent
 WRITING_ROOT = WORKSPACE_ROOT / "writing"
 PRODUCTION_ROOT = WORKSPACE_ROOT / "production"
-REPOSITORY_ROOT = PROJECT_ROOT.parents[2]
+REPOSITORY_ROOT = repository_root()
 for source_root in (WRITING_ROOT / "src", PRODUCTION_ROOT / "src"):
     if str(source_root) not in sys.path:
         sys.path.insert(0, str(source_root))
@@ -39,8 +41,14 @@ class IntegratedRuntime:
         writing_data_dir: Path,
         production_data_dir: Path,
         resource_index: Path | None = None,
+        aa_data: Path | None = None,
+        legacy_root: Path | None = None,
     ) -> None:
         settings = Settings.from_env(host="127.0.0.1", port=0, data_dir=production_data_dir)
+        if aa_data is not None:
+            settings = replace(settings, aa_data=aa_data)
+        if legacy_root is not None:
+            settings = replace(settings, legacy_root=legacy_root)
         if resource_index is not None:
             settings = replace(settings, resource_index=resource_index.resolve())
         self.production_service = IntegratedProductionService(settings)
@@ -96,7 +104,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--writing-data-dir")
     parser.add_argument("--production-data-dir")
     args = parser.parse_args(argv)
-    default_data_root = REPOSITORY_ROOT / ".halocue" / "integrated"
+    default_data_root = integrated_data_root()
     writing_data = Path(
         args.writing_data_dir
         or os.getenv("HALOCUE_WRITING_DATA_DIR")

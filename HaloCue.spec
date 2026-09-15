@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = Path(SPECPATH).resolve()
 
@@ -9,7 +10,13 @@ datas = [
     (str(ROOT / "css"), "css"),
     (str(ROOT / "branding"), "branding"),
     (str(ROOT / "data" / "halocue_labels.db"), "data"),
+    (str(ROOT / "pyproject.toml"), "."),
+    (str(ROOT / "services" / "halocue" / "writing" / "skill" / "ba-writing"),
+     "services/halocue/writing/skill/ba-writing"),
 ]
+for service, folder in (("writing", "web"), ("production", "ui"), ("integrated", "static")):
+    datas.append((str(ROOT / "services" / "halocue" / service / folder),
+                  f"services/halocue/{service}/{folder}"))
 
 hiddenimports = [
     "desktop_app",
@@ -18,6 +25,12 @@ hiddenimports = [
     "anthropic",
     "UnityPy",
 ]
+import sys
+for service in ("writing", "production", "integrated"):
+    sys.path.insert(0, str(ROOT / "services" / "halocue" / service / "src"))
+    hiddenimports.extend(collect_submodules(f"halocue_{service}"))
+# The production adapter imports the compatibility family dynamically.
+hiddenimports.extend(path.stem for path in ROOT.glob("*.py") if path.stem not in {"setup"})
 
 excludes = [
     "archspec", "av", "bcrypt", "cv2", "hypothesis",
@@ -29,7 +42,8 @@ excludes = [
 
 a = Analysis(
     [str(ROOT / "launcher.py")],
-    pathex=[str(ROOT)],
+    pathex=[str(ROOT), *(str(ROOT / "services" / "halocue" / name / "src")
+                         for name in ("writing", "production", "integrated"))],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,

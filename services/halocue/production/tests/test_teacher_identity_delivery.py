@@ -8,7 +8,7 @@ import pytest
 
 from halocue_production.errors import ProductionError
 from halocue_production.service import ProductionService
-from test_direction_profiles import finished_job
+from services.halocue.production.tests.test_direction_profiles import finished_job
 from test_teacher_identity_service import select_teacher
 
 

@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from services.halocue.runtime_layout import repository_root as application_root
 
 from .workflow_pack import (
     COMMON_RULES,
@@ -34,7 +35,7 @@ class BaWritingSkillRegistry:
             # A repository-local Skill may be supplied later under this stable
             # boundary. User-specific writing material must be injected through
             # HALOCUE_BA_WRITING_SKILL_DIR and never becomes a repo prerequisite.
-            repository_root = Path(__file__).resolve().parents[5]
+            repository_root = application_root()
             root = repository_root / "services" / "halocue" / "writing" / "skill" / "ba-writing"
         self.root = root
         self._repo = None

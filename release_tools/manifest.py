@@ -22,6 +22,7 @@ _PUBLIC_DIRECTORIES = {
     "release_tools",
     "tests",
     "tools",
+    "services",
 }
 _PUBLIC_ROOT_FILES = {
     ".gitignore",
@@ -131,6 +132,15 @@ def is_public_source_path(relative_path: str) -> bool:
         return path.suffix.casefold() == ".py" or path.name in _PUBLIC_ROOT_FILES
     if path.parts[0] not in _PUBLIC_DIRECTORIES:
         return False
+    if path.parts[0] == "services":
+        if normalized == "services/halocue/runtime_layout.py":
+            return True
+        if normalized.startswith("services/halocue/writing/skill/ba-writing/"):
+            return path.suffix.casefold() == ".md"
+        return (len(path.parts) >= 5 and path.parts[1] == "halocue"
+                and path.parts[2] in {"writing", "production", "integrated"}
+                and path.parts[3] in {"src", "web", "ui", "static"}
+                and path.suffix.casefold() in {".py", ".html", ".css", ".js", ".json", ".svg"})
     if path.parts[0] == "data":
         return normalized == "data/halocue_labels.db"
     return True

@@ -83,6 +83,7 @@ def check_release_version(
     root: Path = ROOT,
     *,
     verify_database: bool = True,
+    verify_tag_head: bool = True,
 ) -> None:
     """Validate the exact release tag, archive metadata, and public seed."""
 
@@ -97,6 +98,16 @@ def check_release_version(
     expected_archive = f"{PRODUCT_NAME}-{VERSION}-windows-x64.zip"
     if PUBLIC_ARCHIVE_NAME != expected_archive:
         raise ReleaseVersionError("public archive name does not match HaloCue metadata")
+    if verify_database and verify_tag_head:
+        tag_commit = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"],
+            capture_output=True, check=False,
+        )
+        head = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, check=False,
+        )
+        if tag_commit.returncode or head.returncode or tag_commit.stdout.strip() != head.stdout.strip():
+            raise ReleaseVersionError("release tag must resolve to the checked-out HEAD")
     if verify_database:
         seed = require_clean_public_database(root)
         _verify_deterministic_public_database(seed)
@@ -105,9 +116,10 @@ def check_release_version(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", required=True)
+    parser.add_argument("--candidate", action="store_true", help="validate an untagged CI candidate, without publishing")
     args = parser.parse_args(argv)
     try:
-        check_release_version(args.tag)
+        check_release_version(args.tag, verify_tag_head=not args.candidate)
     except (OSError, ReleaseVersionError, subprocess.SubprocessError) as exc:
         print(f"release version check failed: {exc}", file=sys.stderr)
         return 1

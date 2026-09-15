@@ -7,6 +7,7 @@ packages cannot enumerate the source checkout. Names are provenance, not copied 
 
 FIRST_PARTY_MODULES = frozenset(
     (
+        "integrated_desktop",
         "aa_install_discovery",
         "aa_project_assets",
         "aa_registry",

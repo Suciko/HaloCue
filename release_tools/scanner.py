@@ -275,12 +275,12 @@ def _path_findings(relative: str, *, mode: ScanMode) -> list[ScanFinding]:
     if suffix in _EXECUTABLE_EXTENSIONS:
         allowed = False
         if mode == "public":
-            allowed = relative == "HaloCue.exe" or (
+            allowed = relative in {"HaloCue.exe", "HaloCueUpdater.exe"} or (
                 relative.startswith("_internal/") and suffix in {".dll", ".pyd"}
             )
         elif mode == "private":
             allowed = (
-                relative == "HaloCue.exe"
+                relative in {"HaloCue.exe", "HaloCueUpdater.exe"}
                 or (relative.startswith("_internal/") and suffix in {".dll", ".pyd"})
                 or private_spine
             )

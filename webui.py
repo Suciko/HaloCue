@@ -3274,7 +3274,7 @@ def _complete_preflight(
         return llm.validate_json_schema(result, _PREFLIGHT_SCHEMA)
 
 
-def _preflight_result(script: str, *, scope: str, model_profile_id: str | None = None) -> dict:
+def _preflight_result(script: str, *, scope: str, model_profile_id: str | None = None, use_ai: bool = True) -> dict:
     """执行规则基线与可选 AI 初审，返回浏览器可编辑的安全结果。"""
     text = Path(script).read_text(encoding="utf-8", errors="replace")
     analysis = analyze(script)
@@ -3344,7 +3344,7 @@ def _preflight_result(script: str, *, scope: str, model_profile_id: str | None =
     ai_diagnostics: dict | None = None
     ai_usage: dict | None = None
     ai_issues = []
-    provider = annotation_provider(model_profile_id)
+    provider = annotation_provider(model_profile_id) if use_ai else None
     if provider is not None:
         before_stats = dict(getattr(provider, "stats", {}) or {})
         static = (
@@ -3689,7 +3689,8 @@ def preflight_story_worker(payload: dict) -> dict:
     if not script or not os.path.isfile(script) or not scope:
         raise ValueError("缺少有效的剧本或剧情作用域")
     result = _preflight_result(
-        script, scope=scope, model_profile_id=payload.get("model_profile_id")
+        script, scope=scope, model_profile_id=payload.get("model_profile_id"),
+        use_ai=payload.get("use_ai") is True,
     )
     saved = False
     story_token = str(payload.get("story_token") or "")
@@ -5622,6 +5623,7 @@ class H(BaseHTTPRequestHandler):
                     "scope": str(context.project_dir),
                     "story_token": context.story_token,
                     "model_profile_id": data.get("model_profile_id"),
+                    "use_ai": data.get("use_ai") is True,
                 }
                 job_id = global_job_manager.submit(
                     lambda job: preflight_story_worker(task_payload),

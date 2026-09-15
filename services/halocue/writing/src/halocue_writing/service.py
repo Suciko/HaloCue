@@ -117,7 +117,8 @@ class WritingService:
         if configured_corpus:
             corpus_dir = Path(configured_corpus)
         else:
-            corpus_dir = Path(__file__).resolve().parents[3] / "05-官方演出语料库" / "records"
+            from services.halocue.runtime_layout import service_root
+            corpus_dir = service_root("writing").parent / "05-官方演出语料库" / "records"
         self.official_references = OfficialReferenceCatalog(corpus_dir)
         self.resource_catalog = ResourceCatalog(data_dir)
         self._provider_lock = threading.Lock()

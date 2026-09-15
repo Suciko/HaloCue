@@ -6,6 +6,7 @@ import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from services.halocue.runtime_layout import service_root
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .errors import ProductionError
@@ -53,7 +54,7 @@ RESOURCE_PREVIEW_ROUTE = re.compile(r"^/api/v1/resources/(characters|backgrounds
 class ProductionHandler(BaseHTTPRequestHandler):
     service: ProductionService
     server_version = "HaloCueProduction/1.0"
-    ui_root = Path(__file__).resolve().parents[2] / "ui"
+    ui_root = service_root("production") / "ui"
 
     def log_message(self, format: str, *args: Any) -> None:
         return

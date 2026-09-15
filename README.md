@@ -3,7 +3,7 @@
 **HaloCue 1.0.0** 是一款面向
 [AzureArchive](https://github.com/foxxlight/AzureArchive) 的 AA 剧本自动演出工具。它读取用户已经写好的中文剧本，安排表情、动作、站位、镜头、背景与声音，经过人工审查后编译为 AA 工程，同时帮助管理演员和素材。
 
-现版本的 AI 用于提出演出标注，不负责创作或改写剧本正文；用户始终可以在编译前逐项审查和修改结果。
+集成写作界面的 AI 可以提出新正文和改编候选；只有用户采纳才会写入正式修订。AA 制作中的 AI 用于演出标注，用户可以在编译前审查和修改结果。
 
 这是第三方项目，与 AzureArchive 作者、Nexon、Yostar、NAT Games 和
 Esoteric Software 均无隶属关系。HaloCue 不提供游戏资源，也不授予任何第三方素材的使用权。
@@ -18,7 +18,8 @@ Esoteric Software 均无隶属关系。HaloCue 不提供游戏资源，也不授
 1. 完整解压 ZIP，不要直接在压缩包里运行。
 2. 双击 `HaloCue.exe`，程序会直接打开独立应用窗口，不会启动系统浏览器。
 3. 首次使用时，在应用内选择你自己的 `AzureArchive.exe`；HaloCue 会读取 AA 设置并自动识别项目和存档位置。
-4. 按“导入剧本 → 确认演员 → 审查 → 编译”完成一章。
+4. 在写作工作台创建作品，或进入“AA 制作”按“导入剧本 → 确认演员 → 审查 → 编译”完成一章。
+5. 旧制作界面可通过 `HaloCue.exe --legacy-ui` 打开。
 
 **Windows ZIP 不需要安装 Python。** 完整用户手册见
 [docs/用户手册-1.0.md](docs/用户手册-1.0.md)；旧版兼容说明见

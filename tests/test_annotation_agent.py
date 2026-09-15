@@ -21,6 +21,21 @@ from annotation_memory import AnnotationCheckpointStore, build_run_fingerprint
 FIELDS = ("face", "emo", "act", "fx", "se", "bg", "bg_request", "place", "bgfx", "trans", "shot")
 
 
+@pytest.mark.parametrize("error_type", [llm.RequestDeadlineError, llm.RequestCancelledError])
+def test_terminal_failure_metrics_include_the_current_request(tmp_path, error_type):
+    class DeadlineProvider(RecordingProvider):
+        request_records = []
+        def complete_json(self, *args):
+            self.request_records = [{"request_index": 1, "input_tokens": 123,
+                                     "output_tokens": 0, "status": "failed"}]
+            raise error_type("stopped")
+
+    result = fixture(tmp_path, DeadlineProvider(), count=1)
+    assert result["timed_out"] or result["cancelled"]
+    assert len(result["metrics"]["request_records"]) == 1
+    assert result["metrics"]["failed_request_count"] == 1
+
+
 def test_chunk_output_budget_scales_with_wire_shape_and_reasoning_mode():
     compact = estimate_chunk_output_budget(
         20, compact=True, reasoning_mode="balanced", maximum=384_000,

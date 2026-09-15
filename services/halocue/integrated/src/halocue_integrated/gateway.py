@@ -3,6 +3,8 @@ from __future__ import annotations
 import http.client
 import json
 import mimetypes
+import secrets
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -157,6 +159,15 @@ class GatewayHandler(BaseHTTPRequestHandler):
 
     def _proxy(self) -> None:
         parsed = urlsplit(self.path)
+        if parsed.path == "/integration/runtime/stop":
+            token = getattr(self.server, "shutdown_token", None)
+            supplied = self.headers.get("X-HaloCue-Shutdown", "")
+            if self.command != "POST" or not token or not secrets.compare_digest(token, supplied):
+                self._send_json(403, {"ok": False})
+                return
+            self._send_json(200, {"ok": True})
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
         if parsed.path == "/integration/manifest":
             if self.command != "GET":
                 self._send_json(405, {"ok": False, "error": {"code": "method_not_allowed"}})

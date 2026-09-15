@@ -391,7 +391,7 @@ def verify(
         }), encoding="utf-8")
         ready = user_root / "run" / "first ready.json"
         process = _start(exe, [
-            "--no-browser", "--port", "0", "--ready-file", str(ready),
+            "--legacy-ui", "--no-browser", "--port", "0", "--ready-file", str(ready),
             selection_flag, str(selection),
         ], env)
         ready_payload = _wait_ready(process, ready)
@@ -412,7 +412,7 @@ def verify(
             connection.execute("INSERT INTO release_smoke_marker(value) VALUES ('keep-on-restart')")
             connection.commit()
         ready2 = user_root / "run" / "second ready.json"
-        process = _start(exe, ["--no-browser", "--port", "0", "--ready-file", str(ready2)], env)
+        process = _start(exe, ["--legacy-ui", "--no-browser", "--port", "0", "--ready-file", str(ready2)], env)
         second_payload = _wait_ready(process, ready2)
         base2 = f"http://{second_payload['host']}:{second_payload['port']}"
         _assert_http_identity(base2, workspace.alternate_data)

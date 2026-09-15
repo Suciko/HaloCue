@@ -414,7 +414,12 @@ def _start_application(
     port: int = 8770,
     no_browser: bool = False,
     ready_file: Path | None = None,
+    legacy_ui: bool = False,
 ) -> int:
+    if not legacy_ui:
+        from integrated_desktop import run_integrated
+
+        return run_integrated(aa_data=aa_data, port=port, no_browser=no_browser, ready_file=ready_file)
     application_args = ["--aa-data", str(aa_data or ""), "--port", str(port)]
     if no_browser:
         application_args.append("--no-browser")
@@ -431,7 +436,7 @@ def _start_application(
         try:
             from desktop_app import run_desktop
 
-            return run_desktop(str(aa_data) if aa_data else None)
+            return run_desktop(str(aa_data) if aa_data else None, port=port)
         except Exception as exc:
             message = f"HaloCue 桌面窗口启动失败：{exc}"
             try:
@@ -468,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--aa-install")
     parser.add_argument("--port", type=int, default=8770)
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--legacy-ui", action="store_true", help="open the compatibility production interface")
     parser.add_argument("--ready-file", type=Path)
     parser.add_argument("--no-update", action="store_true", help="disable the background update check")
     parser.add_argument("--check-update", action="store_true", help="check the signed update manifest and exit")
@@ -518,10 +524,11 @@ def main(argv: list[str] | None = None) -> int:
 
     aa_path = str(report["aa"].get("path") or "").strip()
     aa_data = Path(aa_path) if aa_path else None
-    if args.port == 8770 and not args.no_browser and args.ready_file is None:
+    if args.port == 8770 and not args.no_browser and args.ready_file is None and not args.legacy_ui:
         return _start_application(aa_data)
     return _start_application(
-        aa_data, port=args.port, no_browser=args.no_browser, ready_file=args.ready_file
+        aa_data, port=args.port, no_browser=args.no_browser, ready_file=args.ready_file,
+        legacy_ui=args.legacy_ui,
     )
 
 
