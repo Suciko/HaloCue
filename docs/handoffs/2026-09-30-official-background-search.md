@@ -21,13 +21,13 @@
 ## 检查命令
 
 ```text
-E:\Miniconda3\python.exe -m pytest services/halocue/production/tests/test_background_search.py services/halocue/production/tests/test_official_background_scope.py services/halocue/production/tests/test_preview_resource_root.py services/halocue/production/tests/test_background_import.py services/halocue/production/tests/test_full_background_library.py services/halocue/production/tests/test_background_names.py -q
+python -m pytest services/halocue/production/tests/test_background_search.py services/halocue/production/tests/test_official_background_scope.py services/halocue/production/tests/test_preview_resource_root.py services/halocue/production/tests/test_background_import.py services/halocue/production/tests/test_full_background_library.py services/halocue/production/tests/test_background_names.py -q
 ```
 
 结果：34 passed。覆盖来源排除、额外资源包保留、路径校验、冻结预览、缓存失效、并发解析、搜索别名和负面说明误匹配。
 
 ```text
-E:\Miniconda3\python.exe -m pytest services/halocue/production/tests/test_scene_background_picker_ui.py -q
+python -m pytest services/halocue/production/tests/test_scene_background_picker_ui.py -q
 ```
 
 结果：8 passed。新增时间线采用测试确认专用 POST、目标卡片和版本参数；包含布局与滚动分页测试。首次新增用例缺少生成完成 fixture，审查阶段被禁用；修正为 completed=True 后通过。
@@ -58,7 +58,7 @@ E:\Miniconda3\python.exe -m pytest services/halocue/production/tests/test_scene_
 - 浏览器捕获的 error 日志为空。
 
 截图仅保存维护者本地，不纳入仓库、不作为其他协作者运行前提：
-`C:/Users/Sakura/.codex/visualizations/2026/09/30/halocue-background-scope/`
+`<local visualization output>`
 包括 `light-layout.jpg`、`dark-layout.jpg`、`official-resource-pack.jpg`、`chinese-background-search.jpg`、`background-pagination.jpg`、`real-background-timeline.jpg`。
 
 ## 限制与下一步

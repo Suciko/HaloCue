@@ -1,1 +1,91 @@
-const {test}=require('node:test');\nconst assert=require('node:assert/strict');\nconst fs=require('node:fs');\nconst path=require('node:path');\nconst vm=require('node:vm');\nconst source=fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8');\nconst escape=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');\nfunction load(name,ctx={}){\n const start=source.indexOf(`function ${name}(`),end=source.indexOf('\nfunction ',start+10);\n const sandbox={esc:escape,...ctx};vm.createContext(sandbox);vm.runInContext(source.slice(start,end),sandbox);return sandbox[name];\n}\nconst prose=load('agentProseMarkup',{conversationTextMarkup:t=>escape(t).replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>')});\ntest('reply paragraphs and lists are real blocks, not a single escaped paragraph',()=>{\n const html=prose('## 转折\n\n第一段。\n\n- **保留**录音\n- 交给同伴\n\n1. 开始\n2. 结束');\n assert.match(html,/<h3>转折<\/h3>/);assert.match(html,/<p>第一段。<\/p>/);\n assert.match(html,/<ul><li><strong>保留<\/strong>录音<\/li>/);assert.match(html,/<ol><li>开始<\/li><li>结束<\/li><\/ol>/);\n});\ntest('model HTML and fenced code cannot create active elements',()=>{\n const html=prose('<img src=x onerror=alert(1)>\n\n```html\n<script>alert(1)</script>\n```\n\n`**literal**`');\n assert.doesNotMatch(html,/<(?:img|script)\b/);assert.match(html,/&lt;img/);assert.match(html,/<pre><code>&lt;script/);assert.match(html,/<code>\*\*literal\*\*<\/code>/);\n});\ntest('unfinished fences and CRLF do not lose text',()=>{\n assert.match(prose('第一段\r\n\r\n```\r\nconst x=1'),/<pre><code>const x=1<\/code><\/pre>/);\n});\nconst tools=load('workAgentInlineToolsMarkup',{\n agentToolLabel:t=>t,agentRunElapsedLabel:()=> '2 秒',agentUsageMarkup:()=>'',agentObservedUsage:()=>({}),agentRequestUsageMarkup:()=>''\n});\ntest('each tool row has a stable disclosure id and explicit status',()=>{\n const html=tools([{tool:'read',label:'读取人物卡',status:'succeeded'},{tool:'draft',status:'failed',error:{message:'<bad>'}}],{id:'message-1'},{id:'run-1'},'已核对');\n assert.match(html,/data-agent-disclosure="tool:message-1:0"/);assert.match(html,/data-agent-disclosure="tool:message-1:1"/);\n assert.match(html,/已完成/);assert.match(html,/&lt;bad&gt;/);assert.match(html,/本轮用时 2 秒/);\n assert.doesNotMatch(html,/details[^>]+ open/);\n});\ntest('missing tool status is not presented as successful',()=>{\n const html=tools([{tool:'read'}],{id:'m'},null);\n assert.match(html,/已记录/);assert.doesNotMatch(html,/已完成/);\n});\nfunction surface(messages){\n const state={work:{}};\n return load('renderFinalWorkAgentSurface',{\n state,scenes:()=>[],workAgentActiveRun:()=>null,workConversationThread:()=>({id:'t',title:'创作主对话',messages}),workPlanProposal:()=>null,conversationTaskContract:()=>({}),hcArray:x=>x||[],activeWorkDecision:()=>null,workDecisionDockMarkup:()=>'',workDecisionReopenMarkup:()=>'',isDefaultScriptFormatQuestion:()=>false,conversationHistoryMarkup:()=>'<article>正文</article>',activeAgentRunMarkup:()=>'',workAgentProposalMarkup:()=>'',intentPlansMarkup:()=>'',workUserStatusMarkup:()=>'',agentRuntimeBarMarkup:()=>'<span class="composer-runtime-meta"></span>',renderWorkAgentComposer:()=>'<form id="workConversationForm"></form>'\n })();\n}\ntest('notice-only thread gets the compact empty composition with one composer',()=>{\n const html=surface([{role:'assistant',kind:'notice'}]);\n assert.match(html,/is-empty-thread/);assert.match(html,/新的构思对话/);assert.equal((html.match(/id="workConversationForm"/g)||[]).length,1);\n assert.doesNotMatch(html,/data-section="tasks"/);\n});\ntest('conversation keeps records reachable without duplicating the bottom timeline',()=>{\n const html=surface([{role:'user',kind:'message'}]);\n assert.match(html,/has-conversation/);assert.match(html,/data-section="tasks"/);assert.doesNotMatch(html,/agent-presentation-summary|hc-starters/);\n});\ntest('desktop sidebar has a persistent header toggle and starter prefills emit input',()=>{\n assert.match(surface([{role:'user',kind:'message'}]),/class="agent-sidebar-toggle" data-panel-toggle="tree" aria-controls="worksPanel"/);\n assert.ok(source.includes("input.dispatchEvent(new Event('input',{bubbles:true}))"));\n});\n\ntest('composer opens a real model picker rather than settings directly',()=>{\n const start=source.indexOf('function renderWorkAgentComposer('),end=source.indexOf('function agentPresentationMarkup',start);\n const composer=source.slice(start,end);\n assert.match(composer,/data-agent-model-picker aria-haspopup="dialog"/);\n assert.match(composer,/aria-label="选择写作模型，当前/);\n assert.doesNotMatch(composer,/agent-model-button" data-action="settings"/);\n});\ntest('quick picker only uses registered settings and a centered SVG caret',()=>{\n const picker=fs.readFileSync(path.join(__dirname,'../web/agent-model-picker.js'),'utf8');\n assert.match(picker,/result\.registered_models/);\n assert.match(picker,/registered_model_id:id/);\n assert.doesNotMatch(picker,/fetch-models/);\n assert.match(source,/<svg class="agent-model-chevron"/);\n});\ntest('conversation rail has an in-place collapse control without losing its icon',()=>{\n assert.match(source,/class="agent-rail-collapse" data-panel-toggle="tree" data-panel-icon aria-controls="worksPanel"/);\n const shell=fs.readFileSync(path.join(__dirname,'../web/shell.js'),'utf8');\n assert.match(shell,/!button\.hasAttribute\("data-panel-icon"\)/);\n assert.match(shell,/root\.querySelector\('\.agent-sidebar-toggle'\)\?\.focus/);\n});\ntest('current work agent surface includes actionable status and runtime context without overflow-prone duplicate rails',()=>{\n const idx=source.indexOf('function renderFinalWorkAgentSurface');\n const renderer=source.slice(idx,source.indexOf('function renderFinalWorkAgentRail',idx));\n assert.match(renderer,/workUserStatusMarkup\(\)/);\n assert.match(renderer,/agentRuntimeBarMarkup\(thread\)/);\n assert.match(renderer,/agent-runtime-bar/);\n assert.match(renderer,/work-agent-bottom/);\n});\n
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const vm=require('node:vm');
+const source=fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8');
+const escape=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
+function load(name,ctx={}){
+ const start=source.indexOf(`function ${name}(`),end=source.indexOf('\nfunction ',start+10);
+ const sandbox={esc:escape,...ctx};vm.createContext(sandbox);vm.runInContext(source.slice(start,end),sandbox);return sandbox[name];
+}
+const prose=load('agentProseMarkup',{conversationTextMarkup:t=>escape(t).replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>')});
+test('reply paragraphs and lists are real blocks, not a single escaped paragraph',()=>{
+ const html=prose('## 转折\n\n第一段。\n\n- **保留**录音\n- 交给同伴\n\n1. 开始\n2. 结束');
+ assert.match(html,/<h3>转折<\/h3>/);assert.match(html,/<p>第一段。<\/p>/);
+ assert.match(html,/<ul><li><strong>保留<\/strong>录音<\/li>/);assert.match(html,/<ol><li>开始<\/li><li>结束<\/li><\/ol>/);
+});
+test('model HTML and fenced code cannot create active elements',()=>{
+ const html=prose('<img src=x onerror=alert(1)>\n\n```html\n<script>alert(1)</script>\n```\n\n`**literal**`');
+ assert.doesNotMatch(html,/<(?:img|script)\b/);assert.match(html,/&lt;img/);assert.match(html,/<pre><code>&lt;script/);assert.match(html,/<code>\*\*literal\*\*<\/code>/);
+});
+test('unfinished fences and CRLF do not lose text',()=>{
+ assert.match(prose('第一段\r\n\r\n```\r\nconst x=1'),/<pre><code>const x=1<\/code><\/pre>/);
+});
+const tools=load('workAgentInlineToolsMarkup',{
+ agentToolLabel:t=>t,agentRunElapsedLabel:()=> '2 秒',agentUsageMarkup:()=>'',agentObservedUsage:()=>({}),agentRequestUsageMarkup:()=>''
+});
+test('each tool row has a stable disclosure id and explicit status',()=>{
+ const html=tools([{tool:'read',label:'读取人物卡',status:'succeeded'},{tool:'draft',status:'failed',error:{message:'<bad>'}}],{id:'message-1'},{id:'run-1'},'已核对');
+ assert.match(html,/data-agent-disclosure="tool:message-1:0"/);assert.match(html,/data-agent-disclosure="tool:message-1:1"/);
+ assert.match(html,/已完成/);assert.match(html,/&lt;bad&gt;/);assert.match(html,/本轮用时 2 秒/);
+ assert.doesNotMatch(html,/details[^>]+ open/);
+});
+test('missing tool status is not presented as successful',()=>{
+ const html=tools([{tool:'read'}],{id:'m'},null);
+ assert.match(html,/已记录/);assert.doesNotMatch(html,/已完成/);
+});
+function surface(messages){
+ const state={work:{}};
+ return load('renderFinalWorkAgentSurface',{
+ state,scenes:()=>[],workAgentActiveRun:()=>null,workConversationThread:()=>({id:'t',title:'创作主对话',messages}),workPlanProposal:()=>null,conversationTaskContract:()=>({}),hcArray:x=>x||[],activeWorkDecision:()=>null,workDecisionDockMarkup:()=>'',workDecisionReopenMarkup:()=>'',isDefaultScriptFormatQuestion:()=>false,conversationHistoryMarkup:()=>'<article>正文</article>',activeAgentRunMarkup:()=>'',workAgentProposalMarkup:()=>'',intentPlansMarkup:()=>'',workUserStatusMarkup:()=>'',agentRuntimeBarMarkup:()=>'<span class="composer-runtime-meta"></span>',renderWorkAgentComposer:()=>'<form id="workConversationForm"></form>'
+ })();
+}
+test('notice-only thread gets the compact empty composition with one composer',()=>{
+ const html=surface([{role:'assistant',kind:'notice'}]);
+ assert.match(html,/is-empty-thread/);assert.match(html,/新的构思对话/);assert.equal((html.match(/id="workConversationForm"/g)||[]).length,1);
+ assert.doesNotMatch(html,/data-section="tasks"/);
+});
+test('conversation keeps records reachable without duplicating the bottom timeline',()=>{
+ const html=surface([{role:'user',kind:'message'}]);
+ assert.match(html,/has-conversation/);assert.match(html,/data-section="tasks"/);assert.doesNotMatch(html,/agent-presentation-summary|hc-starters/);
+});
+test('desktop sidebar has a persistent header toggle and starter prefills emit input',()=>{
+ assert.match(surface([{role:'user',kind:'message'}]),/class="agent-sidebar-toggle" data-panel-toggle="tree" aria-controls="worksPanel"/);
+ assert.ok(source.includes("input.dispatchEvent(new Event('input',{bubbles:true}))"));
+});
+
+test('composer opens a real model picker rather than settings directly',()=>{
+ const start=source.indexOf('function renderWorkAgentComposer('),end=source.indexOf('function agentPresentationMarkup',start);
+ const composer=source.slice(start,end);
+ assert.match(composer,/data-agent-model-picker aria-haspopup="dialog"/);
+ assert.match(composer,/aria-label="选择写作模型，当前/);
+ assert.doesNotMatch(composer,/agent-model-button" data-action="settings"/);
+});
+test('quick picker only uses registered settings and a centered SVG caret',()=>{
+ const picker=fs.readFileSync(path.join(__dirname,'../web/agent-model-picker.js'),'utf8');
+ assert.match(picker,/result\.registered_models/);
+ assert.match(picker,/registered_model_id:id/);
+ assert.doesNotMatch(picker,/fetch-models/);
+ assert.match(source,/<svg class="agent-model-chevron"/);
+});
+test('conversation rail has an in-place collapse control without losing its icon',()=>{
+ assert.match(source,/class="agent-rail-collapse" data-panel-toggle="tree" data-panel-icon aria-controls="worksPanel"/);
+ const shell=fs.readFileSync(path.join(__dirname,'../web/shell.js'),'utf8');
+ assert.match(shell,/!button\.hasAttribute\("data-panel-icon"\)/);
+ assert.match(shell,/root\.querySelector\('\.agent-sidebar-toggle'\)\?\.focus/);
+});
+test('current work agent surface includes actionable status and runtime context without overflow-prone duplicate rails',()=>{
+ const idx=source.indexOf('function renderFinalWorkAgentSurface');
+ const renderer=source.slice(idx,source.indexOf('function renderFinalWorkAgentRail',idx));
+ assert.match(renderer,/workUserStatusMarkup\(\)/);
+ assert.match(renderer,/agentRuntimeBarMarkup\(thread\)/);
+ assert.match(renderer,/agent-runtime-bar/);
+ assert.match(renderer,/work-agent-bottom/);
+});
+
+test('new work entry invites intent in conversation instead of adding a second planning button',()=>{
+ const index=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8');
+ assert.match(index,/短篇、长篇、续写、改编/);
+ assert.match(index,/Agent 会按类型引导/);
+});

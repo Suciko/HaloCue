@@ -2,7 +2,7 @@
 
 - kind: handoff; scope: 1.0 writing; status: active
 - User authorized completion of the eight-screenshot feedback and explicitly requested an active goal on 2026-09-26.
-- Branch: `codex/1.0-release-readiness-20260914`; baseline HEAD `e617f9bf` with substantial existing changes. No new public Issue or push authorized; local work is preserved. Source checkpoint: `.tmp/rework-baselines/authoring-20260926-164147.zip` (232 relevant source/test files).
+- Branch: `codex/1.0-release-readiness-20260914`; baseline HEAD `e617f9bf` with substantial existing changes. No new public Issue or push authorized; local work is preserved. Source checkpoint: `<local temporary checkpoint>` (232 relevant source/test files).
 - Context: AGENTS.md, product-direction-1.x, client/backend contexts, ADR-0001/0006, long-term-memory and remote-collaboration docs. Session-governance skill applied; no unrelated changes committed.
 - Plan: [full scope and acceptance](../1.0-authoring-rework-plan-2026-09-26.md).
 
@@ -12,7 +12,7 @@
 - Primary owns authoring/chapter review/document import and shared model capability backend. New APIs retain existing revisions, stable scene/block IDs and durable agent jobs. Atomic chapter saves, internal scene reviews plus chapter continuity/one change decision, release memory evidence, scoped outline prompt context and append-only import are implemented.
 - Model settings/transport now share known context/output capacities, custom overrides, input budget checks and protocol output parameters. Known current model defaults no longer use 8192. Probes use smaller compatible output allowances. No external credentials were used or actual endpoint behavior claimed.
 - Verification so far: authoring/import and model capacity group 47 passed; provider/model pinning, tool transport, binding, AA settings and root SDK group 99 passed; activation/settings hub/direction profiles 53 passed. Old catalog verification-date and supported-format assertions updated for intentional contract changes. Final integrated regression still pending.
-- Isolated primary review service was restarted after backend edits. Current entry `http://127.0.0.1:7618/?section=projects`, exec session 17539 (fixed port), data `C:/Users/Sakura/AppData/Local/Temp/halocue-rework-qa-20260926`. Previous 5952 is closed. User instance 5644 untouched.
+- Isolated primary review service was restarted after backend edits. Current entry `http://127.0.0.1:7618/?section=projects` was checked in an isolated local service. The service data and session identifiers are intentionally omitted; the user instance was not touched.
 - Latest shared model regression: 150 passed across writing activation, provider capabilities/recovery/pinning/tools, AA settings and root model/SDK suites. Follow-up catalog tests 38 passed; structure/outline/chapter-plan regression 20 passed; authoring backend 11 passed including retry recovery and preservation of previous structure goals.
 - Primary IAB chapter acceptance in progress: seeded isolated long-form sample (two scenes/eight paragraphs); edited both scenes using UI, saved once and reloaded; both changes persisted. 1366 three-column screenshot confirms prose occupies the primary reading area and paragraph controls no longer consume five columns. One chapter review was then queued through UI.
 - Contract: [authoring-workspace](../../services/halocue/writing/docs/authoring-workspace.md).

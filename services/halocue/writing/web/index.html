@@ -6,7 +6,7 @@
   <script src="/theme.js?v=20260916-appearance-2"></script>
   <title>HaloCue 写作工作台</title>
   <link rel="icon" type="image/png" href="/halocue-favicon.png?v=20260927-mark2">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=20260930-reference-fallback1">
   <link rel="stylesheet" href="/tokens.css?v=20260817-1">
   <!-- shell.css?v=20260820-37 and shell.css?v=20260824-44 retained for contract compatibility; the resource version below is current. -->
   <link rel="stylesheet" href="/shell.css?v=20260927-release-quick1">
@@ -23,7 +23,7 @@
   <link rel="stylesheet" href="/authoring-ui.css?v=20260930-inline-rewrite4">
   <link rel="stylesheet" href="/authoring-workspace-ui.css?v=20260927-chapter-plan2">
   <link rel="stylesheet" href="/chapter-authoring-ui.css?v=20260930-inline-rewrite4">
-  <link rel="stylesheet" href="/knowledge-graph-ui.css?v=20260928-graph-tiered5">
+  <link rel="stylesheet" href="/knowledge-graph-ui.css?v=20260930-graph-fix1">
 </head>
 <body class="app-loading">
   <div class="boot-screen" id="bootScreen" role="status" aria-live="polite">
@@ -139,7 +139,7 @@
     <form id="workForm">
       <div class="dialog-head"><div><p>NEW WORK</p><h2 id="workDialogTitle">开始一个新故事</h2></div><button type="button" data-close-work-dialog class="icon-button" title="关闭">×</button></div>
       <label>作品名称（可选）<input name="title" maxlength="80" placeholder="留空使用“未命名作品”"></label>
-      <label class="new-work-idea">起步想法（可选）<textarea name="idea" maxlength="600" placeholder="可以记下一个场景、人物关系，也可以稍后再想。"></textarea><small>想法只进入讨论，不会自动变成正式设定。</small></label>
+      <label class="new-work-idea">起步想法（可选）<textarea name="idea" maxlength="600" placeholder="说说你想做什么：短篇、长篇、续写、改编，或先做大纲 / 场景。"></textarea><small>先说目标就好，Agent 会按类型引导；想法不会自动变成正式设定。</small></label>
       <fieldset class="world-seed-picker">
         <legend>世界观底稿</legend>
         <label class="world-seed-option"><input type="radio" name="world_seed" value="blank" checked><span><b>空白世界</b><small>之后自行添加人物、地点、组织与规则。</small></span></label>
@@ -887,8 +887,8 @@
   <script src="/authoring-workspace-ui.js?v=20260927-chapter-plan2" defer></script>
   <script src="/chapter-authoring-ui.js?v=20260930-inline-rewrite4" defer></script>
   <script src="/vendor/echarts/echarts-6.0.0.min.js" defer></script>
-  <script src="/knowledge-graph-ui.js?v=20260928-graph-tiered5" defer></script>
-  <script src="/app.js?v=20260930-inline-rewrite4" defer></script>
+  <script src="/knowledge-graph-ui.js?v=20260930-graph-fix1" defer></script>
+  <script src="/app.js?v=20260930-routing-fallback1" defer></script>
   <!-- writing-workbench.js?v=20260821-39, writing-workbench.js?v=20260822-65 retained for contract compatibility; the resource version below is current. -->
   <script src="/adaptation-workbench.js?v=20260927-adaptation4" defer></script>
   <script src="/writing-workbench.js?v=20260930-inline-rewrite4" defer></script>

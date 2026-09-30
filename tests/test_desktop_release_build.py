@@ -9,7 +9,7 @@ def test_release_scan_ignores_echarts_escaped_font_table_but_catches_real_paths(
     bundle = tmp_path / "_internal/services/halocue/writing/web/vendor/echarts/echarts-6.0.0.min.js"
     bundle.parent.mkdir(parents=True)
     bundle.write_text(r'fontTable="zWW\\WQb\\0FWL";', encoding="utf-8")
-    (tmp_path / "README.txt").write_text(r"C:\Users\Fixture\notes.txt", encoding="utf-8")
+    (tmp_path / "README.txt").write_text(r"C:\Users\example\notes.txt", encoding="utf-8")
 
     assert scan_release_tree(tmp_path) == ["README.txt:absolute_path"]
 
