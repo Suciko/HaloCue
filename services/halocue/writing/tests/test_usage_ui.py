@@ -181,3 +181,24 @@ def test_live_details_prefer_physical_retry_summary_to_last_response():
     assert "HTTP 请求 2" in result.stdout
     assert "1 次未报告用量" in result.stdout
     assert "已报告部分" in result.stdout
+
+
+def test_reported_usage_without_price_explicitly_shows_unknown_cost():
+    html = render({
+        "input_tokens": 26129, "output_tokens": 440,
+        "usage_status": "reported", "cache_status": "unknown",
+        "estimated_cost": None, "cost_status": "unknown",
+    })
+    assert "费用未知" in html
+    assert "$0" not in html
+
+
+def test_tiny_positive_cost_does_not_round_to_free():
+    html = render({
+        "input_tokens": 1, "output_tokens": 1,
+        "usage_status": "reported", "cache_status": "unknown",
+        "estimated_cost": 0.0000001, "cost_status": "complete_estimate",
+    })
+    assert "$0.0000<" not in html
+    assert "0.000001" in html
+    assert "非账单" in html

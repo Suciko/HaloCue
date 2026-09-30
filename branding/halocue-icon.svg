@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">HaloCue</title>
+  <desc id="desc">A clear H inside an open halo, with a small cue point at the opening.</desc>
+  <defs>
+    <linearGradient id="tile" x1="64" y1="56" x2="448" y2="456" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#20324E"/>
+      <stop offset="1" stop-color="#101B2E"/>
+    </linearGradient>
+    <linearGradient id="halo" x1="136" y1="126" x2="372" y2="393" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7EE7D4"/>
+      <stop offset=".5" stop-color="#7CC9F3"/>
+      <stop offset="1" stop-color="#8DA9F4"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="448" height="448" rx="112" fill="url(#tile)"/>
+  <rect x="33" y="33" width="446" height="446" rx="111" fill="none" stroke="#426181" stroke-opacity=".48" stroke-width="2"/>
+  <path d="M358 150C331 122 293 106 253 106C170 106 106 173 106 256C106 339 170 406 253 406C294 406 332 389 359 362" fill="none" stroke="url(#halo)" stroke-width="42" stroke-linecap="round"/>
+  <path d="M207 196V316M305 196V316M207 256H305" fill="none" stroke="#F5FAFF" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="382" cy="256" r="18" fill="#FF9D88"/>
+</svg>

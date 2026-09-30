@@ -20,9 +20,7 @@ from halocue_meta import VERSION
 
 RELEASE_BASENAME = f"HaloCue-{VERSION}-windows-x64"
 PRIVATE_RELEASE_BASENAME = f"HaloCue-{VERSION}-private-windows-x64"
-_ABSOLUTE_PATH = re.compile(
-    r"(?i)(?:(?<![a-z])[a-z]:[\\/]|\\\\[a-z0-9._-]+[\\/]|/(?:users|home)/)"
-)
+_ABSOLUTE_PATH = re.compile(r"(?i)(?:(?<![a-z])[a-z]:[\\/]|\\\\[a-z0-9._-]+[\\/]|/(?:users|home)/)")
 
 
 def _sanitize_json_value(value):
@@ -140,10 +138,7 @@ def _scan_seed_database(path: Path) -> list[str]:
                 continue
             selected = ", ".join(f'"{name}"' for name in text_columns)
             for row in con.execute(f'SELECT {selected} FROM "{table}"'):
-                if any(
-                    isinstance(value, str) and _ABSOLUTE_PATH.search(value)
-                    for value in row
-                ):
+                if any(isinstance(value, str) and _ABSOLUTE_PATH.search(value) for value in row):
                     findings.append(f"aa_assets.db:{table}:absolute_path")
                     break
     finally:
@@ -156,7 +151,13 @@ def scan_release_tree(root: str | Path) -> list[str]:
     findings = []
     forbidden_names = {"aa_config.json", "llm.json", "llm_profiles.json"}
     forbidden_suffixes = {
-        ".skel", ".atlas", ".aap", ".aas", ".wav", ".mp3", ".ogg",
+        ".skel",
+        ".atlas",
+        ".aap",
+        ".aas",
+        ".wav",
+        ".mp3",
+        ".ogg",
     }
     for path in root.rglob("*"):
         if not path.is_file():
@@ -176,13 +177,26 @@ def scan_release_tree(root: str | Path) -> list[str]:
                 decoded = text
             if _contains_absolute_path(decoded):
                 findings.append(f"{relative}:absolute_path")
-            if re.search(r"sk-(?:ant-)?[A-Za-z0-9_-]{20,}", text):
+            if re.search(
+                r"\bsk-(?:ant-)?(?=[A-Za-z0-9_-]{20,}\b)(?=[A-Za-z0-9_-]*[A-Z0-9])[A-Za-z0-9_-]+\b",
+                text,
+            ):
                 findings.append(f"{relative}:secret")
         elif path.suffix.lower() in {".txt", ".md", ".html", ".js", ".css", ".py"}:
             text = path.read_text(encoding="utf-8", errors="replace")
-            if _ABSOLUTE_PATH.search(text):
+            # ECharts' minified font-detection table contains escaped backslash
+            # sequences that resemble UNC paths to this simple scanner. The
+            # bundle is vendored and version-pinned; continue checking it for
+            # secrets, while scanning application text for local paths.
+            is_echarts_bundle = relative.endswith(
+                "_internal/services/halocue/writing/web/vendor/echarts/echarts-6.0.0.min.js"
+            )
+            if _ABSOLUTE_PATH.search(text) and not is_echarts_bundle:
                 findings.append(f"{relative}:absolute_path")
-            if re.search(r"sk-(?:ant-)?[A-Za-z0-9_-]{20,}", text):
+            if re.search(
+                r"\bsk-(?:ant-)?(?=[A-Za-z0-9_-]{20,}\b)(?=[A-Za-z0-9_-]*[A-Z0-9])[A-Za-z0-9_-]+\b",
+                text,
+            ):
                 findings.append(f"{relative}:secret")
     return findings
 
@@ -192,11 +206,13 @@ def _write_manifest(release_dir: Path) -> Path:
     records = []
     for path in sorted(release_dir.rglob("*")):
         if path.is_file() and path != manifest_path:
-            records.append({
-                "path": path.relative_to(release_dir).as_posix(),
-                "size": path.stat().st_size,
-                "sha256": _sha256(path),
-            })
+            records.append(
+                {
+                    "path": path.relative_to(release_dir).as_posix(),
+                    "size": path.stat().st_size,
+                    "sha256": _sha256(path),
+                }
+            )
     manifest_path.write_text(
         json.dumps(
             {
@@ -225,7 +241,9 @@ def finalize_release(release_dir: str | Path) -> Path:
     zip_path = output_root / f"{release_dir.name}.zip"
     if zip_path.exists():
         zip_path.unlink()
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+    with zipfile.ZipFile(
+        zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+    ) as archive:
         for path in sorted(release_dir.rglob("*")):
             if path.is_file():
                 archive.write(path, Path(release_dir.name) / path.relative_to(release_dir))
@@ -246,9 +264,7 @@ def copy_private_spine_runtime(
     required = ("Spine.com", "Spine.exe", "launcher", "Spine")
     missing = [name for name in required if not (source / name).exists()]
     if missing:
-        raise FileNotFoundError(
-            "Spine 运行目录不完整，缺少：" + "、".join(missing)
-        )
+        raise FileNotFoundError("Spine 运行目录不完整，缺少：" + "、".join(missing))
 
     target = release / "tools" / "spine"
     target.mkdir(parents=True, exist_ok=False)
@@ -310,12 +326,16 @@ def build_release(
     subprocess.run(
         [
             str(Path(python_executable).resolve()),
-            "-m", "PyInstaller",
-            "--noconfirm", "--clean",
-            "--workpath", str(work_dir),
-            "--distpath", str(dist_dir),
-        str(root / "HaloCue.spec"),
-    ],
+            "-m",
+            "PyInstaller",
+            "--noconfirm",
+            "--clean",
+            "--workpath",
+            str(work_dir),
+            "--distpath",
+            str(dist_dir),
+            str(root / "HaloCue.spec"),
+        ],
         cwd=root,
         env=env,
         check=True,
@@ -323,12 +343,19 @@ def build_release(
     subprocess.run(
         [
             str(Path(python_executable).resolve()),
-            "-m", "PyInstaller", "--noconfirm", "--clean",
-            "--workpath", str(work_dir / "updater"),
-            "--distpath", str(dist_dir),
+            "-m",
+            "PyInstaller",
+            "--noconfirm",
+            "--clean",
+            "--workpath",
+            str(work_dir / "updater"),
+            "--distpath",
+            str(dist_dir),
             str(root / "HaloCueUpdater.spec"),
         ],
-        cwd=root, env=env, check=True,
+        cwd=root,
+        env=env,
+        check=True,
     )
 
     output_root = (
@@ -337,20 +364,21 @@ def build_release(
         else (root.parent / "发布包").resolve()
     )
     output_root.mkdir(parents=True, exist_ok=True)
-    release_name = (
-        PRIVATE_RELEASE_BASENAME if private_spine_source else RELEASE_BASENAME
-    )
+    release_name = PRIVATE_RELEASE_BASENAME if private_spine_source else RELEASE_BASENAME
     release_dir = output_root / release_name
     if release_dir.exists():
         shutil.rmtree(release_dir)
     shutil.copytree(dist_dir / "HaloCue", release_dir)
-    shutil.copy2(dist_dir / "HaloCueUpdater" / "HaloCueUpdater.exe", release_dir / "HaloCueUpdater.exe")
+    shutil.copy2(
+        dist_dir / "HaloCueUpdater" / "HaloCueUpdater.exe", release_dir / "HaloCueUpdater.exe"
+    )
     for name in (
         "使用说明-从这里开始.md",
         "README.md",
         "help.html",
         "docs/用户手册-1.0.md",
         "docs/高级部署与更新.md",
+        "docs/1.0-complete-package.md",
     ):
         source = root / name
         if source.is_file():
@@ -364,6 +392,11 @@ def build_release(
         + ("Private build with bundled Spine runtime\n" if private_spine_source else ""),
         encoding="utf-8",
     )
+    # PyInstaller carries pip provenance files that may contain the maintainer's
+    # absolute checkout path. They are not needed to run HaloCue and must not
+    # enter a release archive.
+    for provenance in release_dir.rglob("direct_url.json"):
+        provenance.unlink()
 
     if private_spine_source:
         copy_private_spine_runtime(private_spine_source, release_dir)

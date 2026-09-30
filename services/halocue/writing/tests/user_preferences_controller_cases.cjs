@@ -23,10 +23,10 @@ function harness(sourcePath) {
   const calls = [], renderedModels = [], renderedDiagnostics = [], roles = [];
   const h = {nodes, calls, renderedModels, renderedDiagnostics, roles,
     preferenceResult: async () => ({preferences: prefs})};
-  const context = {console, document: {getElementById: id => nodes.get(id)},
-    api: async route => {
+  const context = {console, AbortController: class {abort() {}}, setTimeout: (fn) => 1, clearTimeout: () => {}, document: {getElementById: id => nodes.get(id)},
+    api: async (route, options) => {
       calls.push(route);
-      if (route === '/settings/preferences') return h.preferenceResult();
+      if (route === '/settings/preferences') return await h.preferenceResult();
       if (route === '/settings/writing-model') return {model: {configured: true}};
       if (route === '/settings/diagnostics') return {writing_service: {status: 'online'}};
       if (route === '/settings/conversations') return [];

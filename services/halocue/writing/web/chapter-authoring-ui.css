@@ -1,0 +1,528 @@
+.chapter-authoring{width:min(100%,1040px);margin:0 auto;color:var(--ink,#25324a)}
+.chapter-authoring .chapter-continuous-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;padding:20px 0;border-bottom:1px solid var(--line,#dce2eb)}
+.chapter-authoring .chapter-continuous-head h2{margin:4px 0 6px;font-size:clamp(24px,2.2vw,32px)}
+.chapter-authoring .chapter-continuous-head p:last-child{margin:0;color:var(--muted,#67758a)}
+.chapter-authoring-save{display:flex;align-items:center;gap:12px;flex-shrink:0}
+.chapter-authoring-save span{font-size:13px;color:var(--muted,#67758a);max-width:240px}
+.chapter-authoring .chapter-manuscript-flow{display:block;min-width:0}
+.chapter-authoring-scene{padding:28px 0 34px;border-bottom:1px solid var(--line,#dce2eb);min-width:0}
+.chapter-authoring-scene>header{display:block;margin-bottom:20px}
+.chapter-authoring-scene>header span{display:block;font-size:12px;color:var(--muted,#67758a)}
+.chapter-authoring-scene>header h3{margin:4px 0 0;font-size:21px}
+.chapter-authoring-block{display:grid;grid-template-columns:28px minmax(0,1fr) 30px;gap:8px;align-items:start;margin:0 0 18px;min-width:0}
+.chapter-authoring-number{padding-top:29px;color:var(--muted,#67758a);font-size:11px;font-variant-numeric:tabular-nums}
+.chapter-authoring-block-body{min-width:0}
+.chapter-authoring-block-meta{display:flex;gap:8px;align-items:center;min-height:25px;margin-bottom:3px}
+.chapter-authoring-block select,.chapter-authoring-block input{box-sizing:border-box;min-width:0;margin:0;border:0;border-bottom:1px solid transparent;border-radius:0;background:transparent;color:var(--muted,#67758a);font:inherit;font-size:12px}
+.chapter-authoring-block select{width:65px;padding:2px 0}.chapter-authoring-block input{width:min(160px,50%);padding:2px 4px}
+.chapter-authoring-block select:focus,.chapter-authoring-block input:focus{border-bottom-color:var(--line,#dce2eb)}
+.chapter-authoring-block input[hidden]{display:none}
+.chapter-authoring-block textarea{box-sizing:border-box;display:block;width:100%;min-width:0;min-height:48px;padding:4px 2px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--ink,#25324a);font:inherit;font-size:17px;line-height:1.9;resize:none;overflow:hidden}
+.chapter-authoring-block textarea:hover,.chapter-authoring-block textarea:focus{border-color:var(--line,#dce2eb);background:var(--panel,#fff)}
+.chapter-authoring-block-actions{display:flex;flex-direction:column;gap:1px;opacity:0;transition:opacity .12s}
+.chapter-authoring-block:hover .chapter-authoring-block-actions,.chapter-authoring-block:focus-within .chapter-authoring-block-actions{opacity:1}
+.chapter-authoring-block-actions button{padding:1px;min-height:22px}
+.chapter-authoring-related{margin:14px 0 0 40px;padding:12px 16px;border:1px solid var(--line,#dce2eb);border-radius:10px}
+.chapter-review{margin:32px 0 72px;padding:20px 24px;border:1px solid var(--line,#dce2eb);border-radius:12px;background:var(--panel,#fff)}
+.chapter-review .chapter-review-title{flex:1;min-width:0}
+.chapter-review .chapter-review-body:empty{display:none}
+.chapter-review .chapter-review-body{margin-top:12px;font-size:13px}
+.chapter-review .chapter-review-body details{padding:8px 0}
+.chapter-review .chapter-review-body summary{font-size:13px;color:var(--hc-muted,var(--muted));cursor:pointer}
+.chapter-review .chapter-review-memories>p{margin:0 0 10px;color:var(--hc-muted,var(--muted));font-size:12px}
+.chapter-review .chapter-review-item{display:grid;grid-template-columns:16px minmax(0,1fr);gap:10px;align-items:start;font-size:13px;font-weight:400;text-align:left}
+.chapter-review .chapter-review-item input[type=checkbox]{width:16px;min-width:16px;height:16px;min-height:16px;margin:3px 0 0;padding:0;justify-self:start}
+.chapter-review .chapter-review-item span{min-width:0}
+.chapter-review .chapter-review-item b,.chapter-review .chapter-review-memory b{font-size:13px;font-weight:600}
+.chapter-review .chapter-review-item small,.chapter-review .chapter-review-memory small{display:block;margin-top:4px;font-size:12px;line-height:1.6;font-weight:400;color:var(--hc-muted,var(--muted))}
+.chapter-review .chapter-review-memory{padding:10px 0;border-bottom:1px solid var(--hc-line,var(--line))}
+.chapter-review h3{margin:0 0 10px}.chapter-review-status{margin:0 0 16px}.chapter-review-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.chapter-review fieldset{border:0;padding:0;margin:12px 0}.chapter-review legend{font-weight:650;margin-bottom:8px}.chapter-review-item{display:flex;gap:10px;align-items:start;padding:10px 0;border-top:1px solid var(--line,#dce2eb)}.chapter-review-item small{display:block;color:var(--muted,#67758a)}
+.chapter-authoring-error{color:var(--danger,#af3f46)}.chapter-authoring-empty{padding:48px 0;text-align:center}
+.chapter-authoring-conflict{margin:0 0 18px 36px;padding:14px 16px;border:1px solid var(--danger,#af3f46);border-radius:8px}
+.chapter-authoring-conflict details{margin:10px 0}.chapter-authoring-conflict details>div{display:grid;grid-template-columns:1fr 1fr;gap:12px}.chapter-authoring-conflict pre{white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:760px){.chapter-authoring .chapter-continuous-head{display:block}.chapter-authoring-save{margin-top:16px;justify-content:space-between}.chapter-authoring-block{grid-template-columns:22px minmax(0,1fr) 30px}.chapter-authoring-related{margin-left:30px}.chapter-review{padding:16px}}
+@media(hover:none){.chapter-authoring-block-actions{opacity:1}}
+
+/* 1.0 manuscript: sentence types are legible while controls stay secondary. */
+.chapter-inline-review [hidden]{display:none!important}
+.chapter-inline-change{margin:18px 0 24px 32px;border:1px solid var(--hc-line,var(--line));border-radius:10px;overflow:hidden;scroll-margin-top:100px;background:var(--hc-panel,var(--panel));outline-offset:3px}
+.chapter-inline-change>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;font-size:12px}
+.chapter-inline-location{color:var(--hc-muted,var(--muted));font-weight:600}
+.chapter-inline-change .chapter-inline-choice{display:flex!important;flex-direction:row!important;align-items:center!important;gap:7px;margin:0;font-size:12px;font-weight:500}
+.chapter-inline-choice input[type=checkbox]{width:15px;min-width:15px;height:15px;min-height:15px;margin:0;padding:0}
+.chapter-inline-pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);border-top:1px solid var(--hc-line,var(--line))}
+.chapter-inline-pair>section{min-width:0;padding:14px 16px}
+.chapter-inline-pair>section>b{display:block;margin-bottom:12px;font-size:11px;font-weight:600;opacity:.8}
+.chapter-inline-before{background:color-mix(in srgb,#c64e59 12%,var(--hc-panel,var(--panel)));color:var(--hc-text,var(--ink))}
+.chapter-inline-after{background:color-mix(in srgb,#439276 14%,var(--hc-panel,var(--panel)));border-left:1px solid var(--hc-line,var(--line));color:var(--hc-text,var(--ink))}
+.chapter-inline-copy+ .chapter-inline-copy{margin-top:16px}
+.chapter-inline-copy small{font-size:12px;font-weight:600;opacity:.8}
+.chapter-inline-copy p{margin:6px 0 0;font-size:16px;line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere}
+.chapter-inline-before> b{color:#bd6970}.chapter-inline-after> b{color:#509b7d}
+.chapter-inline-change.writing-return-target{box-shadow:none!important;outline:2px solid var(--hc-accent,var(--accent));outline-offset:2px}
+.chapter-inline-change>footer,.chapter-inline-review-summary{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--hc-line,var(--line))}
+.chapter-inline-change>footer button{min-height:30px;padding:5px 10px;font-size:12px}
+.chapter-inline-review-summary{margin-left:32px;font-size:12px;color:var(--hc-muted,var(--muted))}
+.chapter-inline-empty{font-size:13px;opacity:.7}
+.chapter-inline-review-unavailable{padding:14px;border:1px solid var(--hc-line,var(--line));font-size:13px}
+@media(max-width:760px){.chapter-inline-change{margin-left:0}.chapter-inline-pair{grid-template-columns:minmax(0,1fr)}.chapter-inline-after{border-left:0;border-top:1px solid var(--hc-line,var(--line))}.chapter-inline-change>header{align-items:flex-start;flex-wrap:wrap}.chapter-inline-copy p{font-size:15px}.chapter-inline-review-summary{margin-left:0}}
+.chapter-authoring{width:min(100%,900px);color:var(--hc-text,var(--ink))}
+.chapter-authoring .chapter-continuous-head{padding:20px 0 22px;border-bottom-color:var(--hc-line,var(--line))}
+.chapter-authoring .chapter-continuous-head h2{font-size:clamp(22px,2vw,28px);line-height:1.35}
+.chapter-authoring .chapter-continuous-head p:last-child{font-size:12px}
+.chapter-authoring .chapter-authoring-save{flex-wrap:wrap;justify-content:flex-end}
+.chapter-view-switch{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--hc-line,var(--line));border-radius:8px;background:var(--hc-bg,var(--surface-soft))}
+.chapter-view-switch button{min-width:52px;min-height:30px;padding:4px 10px;border:0;border-radius:5px;background:transparent;color:var(--hc-muted,var(--muted));font:600 12px/1.4 var(--author-ui-font,inherit);cursor:pointer}
+.chapter-view-switch button.active{background:var(--hc-panel,var(--panel));color:var(--hc-text,var(--ink));box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.chapter-view-switch button:focus-visible{outline:2px solid var(--hc-action,var(--accent));outline-offset:2px}
+.chapter-authoring .chapter-authoring-scene{padding:30px 0 28px;border-top:0!important;border-bottom:1px solid var(--hc-line,var(--line))}
+.chapter-authoring .chapter-authoring-scene + .chapter-authoring-scene{margin-top:0;border-top:0!important}
+.chapter-authoring-scene>header{margin-bottom:20px}
+.chapter-authoring-scene>header span{font-size:11px;font-weight:600;letter-spacing:.035em}
+.chapter-authoring-scene>header h3{margin-top:5px;font-size:20px;line-height:1.45;letter-spacing:-.02em}
+.chapter-authoring-block{
+  --type-accent:#627284;--type-ink:var(--hc-text,var(--ink));--type-wash:#f2f5f8;
+  position:relative;grid-template-columns:24px minmax(0,1fr);gap:8px;
+  margin:0 0 8px;padding:9px 9px 10px 0;border:0;border-left:2px solid var(--type-accent);
+  border-radius:0 8px 8px 0;transition:background-color .14s ease
+}
+.chapter-authoring-block[data-block-type="action"]{--type-accent:#27745e;--type-ink:#245b4d;--type-wash:#eef7f2}
+.chapter-authoring-block[data-block-type="dialogue"]{--type-accent:#3769aa;--type-ink:#254f87;--type-wash:#eef4fc}
+.chapter-authoring-block:hover,.chapter-authoring-block:focus-within{background:var(--type-wash)}
+.chapter-authoring-block:focus-within{box-shadow:inset 0 0 0 1px var(--hc-line,var(--line))}
+.chapter-authoring-number{padding-top:5px;text-align:center}
+.chapter-authoring-block-body{padding-left:8px}
+.chapter-authoring-block-meta{min-height:26px;margin-bottom:5px;padding-right:82px}
+.chapter-authoring-type{position:relative;display:inline-flex;flex:none;align-items:center;min-height:24px;border-radius:5px;background:var(--type-wash);color:var(--type-accent)}
+.chapter-authoring-type::after{content:"";position:absolute;right:9px;top:8px;width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);pointer-events:none}
+.chapter-authoring-block select{appearance:none;width:64px;min-height:24px;padding:2px 17px 2px 8px;border:0;border-radius:5px;background:transparent;color:var(--type-accent);font:600 11px/1.5 var(--author-ui-font,inherit);cursor:pointer}
+.chapter-authoring-block select option{background:var(--hc-panel,var(--panel));color:var(--hc-text,var(--ink))}
+.chapter-authoring-type:focus-within{outline:2px solid var(--hc-accent,var(--accent));outline-offset:2px}
+.chapter-authoring-block input{width:min(160px,48%);min-height:24px;padding:2px 5px;border:0;border-bottom:1px solid var(--hc-line,var(--line));border-radius:0;background:transparent;color:var(--type-ink);font:600 12px/1.5 var(--author-ui-font,inherit)}
+.chapter-authoring-block input:focus{outline:0;border-bottom-color:var(--type-accent)}
+.chapter-authoring-block textarea{min-height:42px;padding:1px 0 0;border:0!important;border-radius:0;background:transparent!important;box-shadow:none!important;color:var(--type-ink);font:400 16px/1.78 var(--author-ui-font,inherit)}
+.chapter-authoring-block textarea:hover,.chapter-authoring-block textarea:focus{border:0!important;background:transparent!important;outline:0!important;box-shadow:none!important}
+#app.hc-redesign .chapter-authoring .chapter-authoring-block textarea{background:transparent!important;color:var(--type-ink)!important;border:0!important;box-shadow:none!important}
+#app.hc-redesign .chapter-authoring .chapter-authoring-block select{background:transparent!important;color:var(--type-accent)!important;border:0!important}
+#app.hc-redesign .chapter-authoring .chapter-authoring-block input{background:transparent!important;color:var(--type-ink)!important;border:0!important;border-bottom:1px solid var(--hc-line,var(--line))!important}
+#app.hc-redesign .chapter-authoring .chapter-authoring-block input:focus{border-bottom-color:var(--type-accent)!important}
+.chapter-authoring-block textarea::placeholder{color:var(--hc-muted,var(--muted));opacity:.8}
+.chapter-reading-block{--type-accent:#627284;--type-ink:var(--hc-text,var(--ink));display:grid;grid-template-columns:66px minmax(0,1fr);gap:12px;align-items:start;width:100%;margin:0 0 4px;padding:10px 14px;border:0;border-left:2px solid var(--type-accent);border-radius:0 7px 7px 0;background:transparent;color:var(--type-ink);text-align:left;cursor:text}
+.chapter-reading-block[data-block-type="action"]{--type-accent:#27745e;--type-ink:#245b4d}
+.chapter-reading-block[data-block-type="dialogue"]{--type-accent:#3769aa;--type-ink:#254f87}
+.chapter-reading-block:hover,.chapter-reading-block:focus-visible{background:var(--hc-hover,var(--surface-soft));outline:0}
+.chapter-reading-kind{padding-top:3px;color:var(--type-accent);font:600 11px/1.6 var(--author-ui-font,inherit)}
+.chapter-reading-text{white-space:pre-wrap;overflow-wrap:anywhere;font:400 16px/1.85 var(--author-ui-font,inherit)}
+html[data-theme="dark"] .chapter-reading-block{--type-accent:#a3b2c4;--type-ink:#e1e7ee}
+html[data-theme="dark"] .chapter-reading-block[data-block-type="action"]{--type-accent:#91cfb1;--type-ink:#c8e8d6}
+html[data-theme="dark"] .chapter-reading-block[data-block-type="dialogue"]{--type-accent:#9dbdf0;--type-ink:#dce9ff}
+.chapter-authoring-block-actions{position:absolute;top:8px;right:8px;flex-direction:row;gap:2px;opacity:.72}
+.chapter-authoring-block:hover .chapter-authoring-block-actions,.chapter-authoring-block:focus-within .chapter-authoring-block-actions{opacity:1}
+.chapter-authoring-block-actions button{display:grid;place-items:center;width:24px;min-width:24px;min-height:24px;margin:0;padding:0!important;border:0!important;border-radius:5px;background:transparent!important;color:var(--hc-muted,var(--muted))!important;font-size:15px;line-height:1}
+.chapter-authoring-block-actions button:hover,.chapter-authoring-block-actions button:focus-visible{background:var(--hc-hover,var(--surface-soft))!important;color:var(--hc-text,var(--ink))!important}
+.chapter-authoring-block-actions [data-chapter-remove]:hover{color:var(--hc-danger,var(--danger,#af3f46))!important}
+.chapter-authoring-related{margin:16px 0 0 34px;border-color:var(--hc-line,var(--line));border-radius:8px}
+.chapter-review{margin-top:30px;border-color:var(--hc-line,var(--line));border-radius:10px;background:var(--hc-panel,var(--panel))}
+html[data-theme="dark"] .chapter-authoring-block{--type-accent:#a3b2c4;--type-ink:#e1e7ee;--type-wash:#242c37}
+html[data-theme="dark"] .chapter-authoring-block[data-block-type="action"]{--type-accent:#91cfb1;--type-ink:#c8e8d6;--type-wash:#22342f}
+html[data-theme="dark"] .chapter-authoring-block[data-block-type="dialogue"]{--type-accent:#9dbdf0;--type-ink:#dce9ff;--type-wash:#26354b}
+@media(max-width:760px){.chapter-authoring .chapter-authoring-save{justify-content:flex-start}.chapter-authoring-block{grid-template-columns:19px minmax(0,1fr);gap:4px}.chapter-authoring-block-body{padding-left:5px}.chapter-reading-block{grid-template-columns:54px minmax(0,1fr);gap:7px}.chapter-authoring-related{margin-left:26px}.chapter-authoring-conflict details>div{grid-template-columns:1fr}}
+@media(hover:none){.chapter-authoring-block-actions{opacity:.8}}
+
+
+/* 2026-09 manuscript polish: give empty scenes a clear first action and keep
+   chapter review secondary to the writing surface. */
+#app.hc-redesign[data-surface="writing"] .chapter-authoring{
+  width:min(100%,960px);
+  padding:0 0 72px;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-continuous-head{
+  position:sticky;
+  top:0;
+  z-index:3;
+  margin:0 0 8px;
+  padding:18px 0 16px;
+  background:color-mix(in srgb,var(--hc-bg,#fff) 94%,transparent);
+  backdrop-filter:blur(14px);
+  border-bottom:1px solid color-mix(in srgb,var(--hc-line,#dce2eb) 76%,transparent);
+}
+#app.hc-redesign[data-surface="writing"] .chapter-continuous-head h2{font-size:clamp(26px,2.35vw,34px);letter-spacing:-.035em}
+#app.hc-redesign[data-surface="writing"] .chapter-continuous-head p:last-child{max-width:520px;font-size:13px;line-height:1.65}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-save{gap:10px}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-save > span{font-size:12px;white-space:nowrap}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-scene{
+  margin:0;
+  padding:30px 0 36px;
+  border-bottom:1px solid var(--hc-line,var(--line));
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-scene.is-current{
+  background:linear-gradient(90deg,color-mix(in srgb,var(--hc-accent,#5675aa) 5%,transparent),transparent 55%);
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-scene>header{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:22px;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-scene>header h3{font-size:22px;line-height:1.35}
+#app.hc-redesign[data-surface="writing"] .chapter-scene-focus{opacity:.72}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-empty-scene{
+  display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:14px;
+  margin:4px 0 0 34px;padding:18px 20px;border:1px dashed color-mix(in srgb,var(--hc-accent,#5675aa) 38%,var(--hc-line,#dce2eb));
+  border-radius:12px;background:color-mix(in srgb,var(--hc-accent,#5675aa) 4%,var(--hc-panel,#fff));
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-empty-scene b{font-size:14px}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-empty-scene p{margin:4px 0 0;color:var(--hc-muted,var(--muted));font-size:12px;line-height:1.55}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-empty-mark{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--hc-hover,var(--surface-soft));color:var(--hc-accent,var(--accent));font-size:17px}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-empty-scene .primary{min-height:36px;padding:7px 13px;white-space:nowrap}
+#app.hc-redesign[data-surface="writing"] .chapter-review{
+  margin:26px 0 0;padding:16px 18px;border:1px solid var(--hc-line,var(--line));border-radius:12px;
+  background:color-mix(in srgb,var(--hc-panel,var(--panel)) 86%,var(--hc-bg,#fff));
+}
+#app.hc-redesign[data-surface="writing"] .chapter-review>h3{display:none}
+#app.hc-redesign[data-surface="writing"] .chapter-review-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px}
+#app.hc-redesign[data-surface="writing"] .chapter-review-eyebrow{display:block;margin-bottom:3px;color:var(--hc-muted,var(--muted));font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+#app.hc-redesign[data-surface="writing"] .chapter-review-head h3{margin:0;font-size:16px}
+#app.hc-redesign[data-surface="writing"] .chapter-review-status{margin:5px 0 0;font-size:12px;color:var(--hc-muted,var(--muted))}
+#app.hc-redesign[data-surface="writing"] .chapter-review-state{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap;min-width:0}
+#app.hc-redesign[data-surface="writing"] .chapter-review-state>p,#app.hc-redesign[data-surface="writing"] .chapter-review-state>small{margin:0;color:var(--hc-muted,var(--muted));font-size:11px}
+#app.hc-redesign[data-surface="writing"] .chapter-review-actions{margin:0}
+#app.hc-redesign[data-surface="writing"] .chapter-review-actions button{min-height:32px;padding:6px 11px;font-size:12px}
+@media(max-width:760px){
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-continuous-head{position:relative;display:block}
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring-save{justify-content:flex-start;margin-top:14px}
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-scene{margin:0;padding-inline:0}
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring-empty-scene{grid-template-columns:auto 1fr;margin-left:26px}
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring-empty-scene .primary{grid-column:2;justify-self:start}
+  #app.hc-redesign[data-surface="writing"] .chapter-review-head{display:block}
+  #app.hc-redesign[data-surface="writing"] .chapter-review-state{justify-content:flex-start;margin-top:12px}
+}
+
+.scene-discussion-mode{margin:0 0 12px;padding:10px 12px;border-left:2px solid var(--hc-accent,#5675aa);background:var(--hc-panel,#fff);border-radius:0 6px 6px 0;color:var(--hc-text,#25324a)}
+.scene-discussion-mode b{font-size:12px;display:block}
+.scene-discussion-mode p,.scene-discussion-mode small{font-size:11px;line-height:1.65;color:var(--hc-muted,#67758a)}
+.scene-discussion-mode p{margin:4px 0}.scene-discussion-mode small{display:block}
+
+/* Continuous prose blocks reveal their edit boundary only during interaction. */
+#app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-scene{
+  margin:0;
+  padding:22px 24px 26px;
+  border:0;
+  border-top:0!important;
+  border-bottom:1px solid var(--hc-line,#dce2eb)!important;
+  border-radius:0;
+  background:transparent;
+  box-shadow:none;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-scene + .chapter-authoring-scene{
+  margin-top:0;
+  border-top:0!important;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-scene.is-current{
+  border-color:var(--hc-line,#dce2eb);
+  border-top:0!important;
+  background:transparent;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-scene>header{margin-bottom:20px}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block{
+  display:grid;
+  grid-template-columns:34px minmax(0,1fr);
+  gap:12px;
+  align-items:start;
+  min-height:0;
+  margin:0;
+  padding:10px 82px 4px 0;
+  border:0!important;
+  border-left:0!important;
+  border-radius:0;
+  background:transparent!important;
+  box-shadow:none!important;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block:is(:hover,:focus-within){
+  background:transparent!important;
+  box-shadow:none!important;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-number{
+  display:grid;
+  place-items:center;
+  width:30px;
+  height:30px;
+  padding:0;
+  border-radius:50%;
+  background:color-mix(in srgb,var(--hc-muted,#67758a) 10%,transparent);
+  color:var(--hc-muted,var(--muted));
+  font-size:10px;
+  font-weight:650;
+  letter-spacing:.02em;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block:focus-within .chapter-authoring-number{
+  background:color-mix(in srgb,var(--hc-accent,#5675aa) 18%,transparent);
+  color:var(--hc-accent,#5675aa);
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block-body{
+  position:relative;
+  display:block;
+  padding-left:0;
+  min-width:0;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block-meta{
+  position:absolute;
+  top:-20px;
+  left:0;
+  z-index:3;
+  margin:0;
+  padding-right:0;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .15s ease;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-type{
+  background:transparent;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block:hover .chapter-authoring-block-meta,
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block:focus-within .chapter-authoring-block-meta{opacity:1;pointer-events:auto}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block textarea{
+  width:100%;
+  min-width:0;
+  min-height:36px;
+  color:var(--hc-text,var(--ink))!important;
+  line-height:1.75;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block[data-block-type="dialogue"] .chapter-authoring-block-body{display:block}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block[data-block-type="dialogue"] .chapter-authoring-block-meta{
+  position:static;
+  margin:0 0 4px;
+  opacity:1;
+  pointer-events:auto;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block[data-block-type="dialogue"] textarea{width:100%}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block input{color:var(--hc-text,var(--ink))!important}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block-actions{
+  top:12px;
+  right:8px;
+  opacity:0;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block-actions button{
+  background:transparent!important;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block:hover .chapter-authoring-block-actions,
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block:focus-within .chapter-authoring-block-actions{opacity:.9}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-insert-row{
+  position:relative;
+  height:18px;
+  margin:0 0 2px 46px;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-insert-row::before{
+  content:"";
+  position:absolute;
+  top:calc(50% - 3px);
+  right:-8px;
+  left:0;
+  height:1px;
+  background:var(--hc-accent,#5675aa);
+  opacity:0;
+  transform:scaleX(.97);
+  transform-origin:right;
+  transition:opacity .16s ease,transform .16s ease;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-insert{
+  position:absolute;
+  top:calc(50% - 3px);
+  right:-16px;
+  display:grid;
+  place-items:center;
+  width:32px;
+  min-width:32px;
+  height:32px;
+  min-height:32px;
+  margin:0;
+  padding:0;
+  transform:translateY(-50%);
+  border:1px solid var(--hc-accent,#5675aa)!important;
+  border-radius:50%!important;
+  background:var(--hc-panel,#fff)!important;
+  box-shadow:none!important;
+  color:var(--hc-accent,#5675aa)!important;
+  opacity:0;
+  font-size:18px;
+  font-weight:500;
+  line-height:1;
+  cursor:pointer;
+  transition:opacity .16s ease,background-color .16s ease;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block:hover + .chapter-authoring-insert-row::before,
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block:focus-within + .chapter-authoring-insert-row::before,
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-insert-row:hover::before,
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-insert-row:focus-within::before{
+  opacity:.34;
+  transform:scaleX(1);
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block:hover + .chapter-authoring-insert-row .chapter-authoring-insert,
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-block:focus-within + .chapter-authoring-insert-row .chapter-authoring-insert{opacity:.56}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-insert-row:hover .chapter-authoring-insert,
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-insert-row:focus-within .chapter-authoring-insert{opacity:1}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-insert:focus-visible{
+  outline:2px solid var(--hc-accent,#5675aa);
+  outline-offset:2px;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-reading-block{
+  margin:0 0 5px;
+  padding:10px 12px;
+  border:0;
+  border-left:0;
+  border-radius:8px;
+  background:transparent;
+  box-shadow:none;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-reading-block:hover,
+#app.hc-redesign[data-surface="writing"] .chapter-reading-block:focus-visible{
+  background:color-mix(in srgb,var(--hc-panel,#fff) 45%,transparent);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--hc-line,#dce2eb) 60%,transparent);
+}
+#app.hc-redesign[data-surface="writing"] .chapter-reading-text{color:var(--hc-text,var(--ink))}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-related{
+  margin:8px 0 0;
+  padding:0;
+  border:0;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring-related>summary{
+  padding:12px 0 2px;
+  border-top:1px solid var(--hc-line,var(--line));
+  color:var(--hc-muted,var(--muted));
+  font-size:12px;
+}
+#app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode{
+  padding:12px 13px;
+  border:1px solid var(--hc-line,#dce2eb)!important;
+  border-left:3px solid var(--hc-accent,#5675aa)!important;
+  border-radius:9px;
+  background:var(--hc-panel,#fff)!important;
+  color:var(--hc-text,#25324a)!important;
+}
+#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode .scene-discussion-copy b{display:block;font-size:12px;line-height:1.45}
+#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode .scene-discussion-copy p{margin:5px 0 0;font-size:11px;line-height:1.55}
+#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode .scene-discussion-copy p strong{font-weight:700}
+#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode .scene-discussion-actions{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0 7px}
+#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode .scene-discussion-actions button{min-height:30px;padding:5px 9px;font-size:11px}
+#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode>small{display:block;font-size:10px;line-height:1.45}
+#app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode :is(p,small){
+  color:var(--hc-muted,#67758a)!important;
+}
+html[data-theme="dark"] #app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode{
+  background:var(--surface-soft,#252d39)!important;
+  border-color:var(--line,#343e4c)!important;
+  border-left-color:var(--hc-accent,#85afea)!important;
+  color:var(--ink,#e1e7ee)!important;
+}
+html[data-theme="dark"] #app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode :is(p,small){color:var(--muted,#a1adbc)!important}
+html[data-theme="dark"] #app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode .scene-discussion-actions .quiet{background:transparent!important;color:var(--ink-2,#c9d4df)!important;border-color:var(--line,#343e4c)!important}
+html[data-theme="dark"] #app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode .scene-discussion-actions .quiet:hover{background:var(--hc-selected,#2b3b52)!important;color:var(--ink,#e1e7ee)!important}
+@media(max-width:760px){
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-scene{padding:18px 12px 22px}
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring-block{
+    grid-template-columns:28px minmax(0,1fr);
+    gap:8px;
+    padding:12px 86px 6px 0;
+  }
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring-insert-row{height:22px;margin-left:36px}
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring-insert{right:-9px;width:40px;min-width:40px;height:40px;min-height:40px}
+}
+@media(hover:none){
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring-insert-row::before{opacity:.18}
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring-insert{opacity:.48}
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring-block-actions{opacity:.72}
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring-block-meta{opacity:.65;pointer-events:auto}
+}
+@media(prefers-reduced-motion:reduce){
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring-block,
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring-insert-row::before,
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring-insert{transition:none}
+}
+
+/* Keep the chapter title and its controls inside the prose column. */
+#app.hc-redesign[data-surface="writing"] .chapter-authoring{
+  container:chapter-authoring / inline-size;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-continuous-head{
+  display:block;
+  position:relative;
+  top:auto;
+  z-index:auto;
+  width:100%;
+  box-sizing:border-box;
+  margin:0;
+  padding:16px 24px 9px;
+  border-bottom:0;
+  background:transparent;
+  backdrop-filter:none;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-continuous-head>div:first-child{min-width:0}
+#app#app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-continuous-head .eyebrow{
+  display:inline-flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:8px;
+  margin:0;
+  color:var(--hc-muted,var(--muted));
+}
+#app.hc-redesign[data-surface="writing"] .chapter-continuous-head .chapter-save-state{
+  padding-left:8px;
+  border-left:1px solid var(--hc-line,#dce2eb);
+  color:var(--hc-muted,var(--muted));
+  font-size:11px;
+  font-weight:500;
+  letter-spacing:0;
+  line-height:1.35;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-continuous-head h2{
+  font-size:clamp(24px,2vw,30px);
+  line-height:1.28;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-save{
+  display:flex;
+  position:sticky;
+  top:0;
+  z-index:4;
+  align-items:center;
+  justify-content:space-between;
+  flex-wrap:nowrap;
+  gap:12px;
+  width:100%;
+  box-sizing:border-box;
+  margin:0 0 16px;
+  padding:8px 24px 10px;
+  background:var(--hc-bg,#f7f8fa);
+  min-width:0;
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-save::after{
+  content:"";
+  position:absolute;
+  right:24px;
+  bottom:0;
+  left:24px;
+  height:1px;
+  background:var(--hc-line,#dce2eb);
+}
+#app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-scene{
+  scroll-margin-top:70px;
+}
+@container chapter-authoring (max-width:420px){
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-save{padding-inline:16px}
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-save::after{right:16px;left:16px}
+}
+@media(max-width:760px){
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-continuous-head{
+    padding:14px 16px 10px;
+  }
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-save{
+    position:relative;
+    top:auto;
+    margin:0 0 10px;
+    padding:8px 16px 10px;
+  }
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-save::after{
+    right:16px;
+    left:16px;
+  }
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-scene{scroll-margin-top:54px}
+}
+
+#workspace:has(.chapter-authoring){overflow-anchor:none}

@@ -397,6 +397,13 @@ class Repository:
         CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_run ON agent_tool_calls(agent_run_id, ordinal);
         CREATE INDEX IF NOT EXISTS idx_agent_dispatch_claim ON agent_dispatch_jobs(status, available_at, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_dispatch_lease ON agent_dispatch_jobs(status, lease_expires_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_dispatch_knowledge_revision
+          ON agent_dispatch_jobs (
+            json_extract(payload_json, '$.work_id'),
+            json_extract(payload_json, '$.scope_id'),
+            json_extract(payload_json, '$.request._source_revision_id'),
+            created_at DESC
+          ) WHERE operation='knowledge.discover' AND json_valid(payload_json);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_dispatch_active_run
           ON agent_dispatch_jobs(agent_run_id)
           WHERE agent_run_id IS NOT NULL AND status IN ('ready','running');
@@ -434,6 +441,10 @@ class Repository:
             connection.executescript(schema)
             from .request_ledger import SCHEMA as REQUEST_SCHEMA
             connection.executescript(REQUEST_SCHEMA)
+            from .authoring_workspace import WORLD_DRAFT_SCHEMA
+            connection.executescript(WORLD_DRAFT_SCHEMA)
+            from .chapter_review import SCHEMA as CHAPTER_REVIEW_SCHEMA
+            connection.executescript(CHAPTER_REVIEW_SCHEMA)
             self._migrate_domain_schema(connection)
             connection.commit()
         finally:
@@ -941,22 +952,49 @@ class Repository:
         available_at: str | None = None,
         retry_of: str | None = None,
         dedupe_by_payload: bool = False,
+        dedupe_knowledge_revision: tuple[str, str, str] | None = None,
     ) -> dict:
         """Persist one ready job and return ``{created, job}``.
 
         An active ``agent_run_id`` is an idempotency key. Concurrent enqueues for
         the same run return the existing ready/running job instead of dispatching
-        the provider twice.
+        the provider twice. Knowledge discovery uses its pinned scene revision as
+        a durable key across all job states, checked inside this write transaction.
         """
         operation = str(operation or "").strip()
         if not operation:
             raise ValueError("operation is required")
         if payload is not None and not isinstance(payload, dict):
             raise ValueError("payload must be a dict")
+        if dedupe_knowledge_revision is not None and operation != "knowledge.discover":
+            raise ValueError("revision dedupe is only available for knowledge discovery")
+        if dedupe_knowledge_revision is not None:
+            request = (payload or {}).get("request")
+            request = request if isinstance(request, dict) else {}
+            payload_revision = (
+                (payload or {}).get("work_id"),
+                (payload or {}).get("scope_id"),
+                request.get("_source_revision_id"),
+            )
+            if payload_revision != dedupe_knowledge_revision:
+                raise ValueError("revision dedupe key must match the job payload")
         timestamp = now()
         job_id = new_id("agent-job")
         payload_json = canonical_json(payload or {})
         with self.transaction() as connection:
+            if dedupe_knowledge_revision is not None:
+                existing = connection.execute(
+                    """SELECT * FROM agent_dispatch_jobs
+                       WHERE operation='knowledge.discover'
+                         AND json_valid(payload_json)
+                         AND json_extract(payload_json, '$.work_id')=?
+                         AND json_extract(payload_json, '$.scope_id')=?
+                         AND json_extract(payload_json, '$.request._source_revision_id')=?
+                       ORDER BY created_at DESC LIMIT 1""",
+                    dedupe_knowledge_revision,
+                ).fetchone()
+                if existing:
+                    return {"created": False, "job": self._agent_work_row(existing)}
             if agent_run_id:
                 existing = connection.execute(
                     """SELECT * FROM agent_dispatch_jobs

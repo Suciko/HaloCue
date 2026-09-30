@@ -227,6 +227,7 @@ def _result_for_data(
     saved_cache: str | os.PathLike | None = None,
     issues: list[DiscoveryIssue] | None = None,
     data_candidates: tuple[PathCandidate, ...] | None = None,
+    include_resource_cache: bool = True,
 ) -> AADiscoveryResult:
     issues = issues if issues is not None else []
     settings_json = configuration or {}
@@ -247,8 +248,8 @@ def _result_for_data(
         saves=optional_paths["saves"],
         overrides=optional_paths["overrides"],
         settings=optional_paths["settings"],
-        resource_cache=_resource_cache(data, settings_json, issues, saved_cache),
-        catalog=_catalog_path(executable),
+        resource_cache=_resource_cache(data, settings_json, issues, saved_cache) if include_resource_cache else None,
+        catalog=_catalog_path(executable) if include_resource_cache else None,
         recent_project_files=_read_recent_project_files(settings_json),
         data_candidates=data_candidates or (candidate,),
         requires_selection=False,
@@ -266,6 +267,7 @@ def _empty_result(
     requires_selection: bool,
     issues: list[DiscoveryIssue],
     configuration: Mapping | None = None,
+    include_resource_cache: bool = True,
 ) -> AADiscoveryResult:
     return AADiscoveryResult(
         executable=executable,
@@ -278,7 +280,7 @@ def _empty_result(
         overrides=None,
         settings=None,
         resource_cache=None,
-        catalog=_catalog_path(executable),
+        catalog=_catalog_path(executable) if include_resource_cache else None,
         recent_project_files=_read_recent_project_files(configuration or {}),
         data_candidates=candidates,
         requires_selection=requires_selection,
@@ -307,12 +309,13 @@ def discover_aa(
     fallback_config_paths: Sequence[str | os.PathLike] = (),
     home: str | os.PathLike | None = None,
     environ: Mapping[str, str] | None = None,
+    include_resource_cache: bool = True,
 ) -> AADiscoveryResult:
     """Discover AA paths without creating or modifying any filesystem entries."""
     issues: list[DiscoveryIssue] = []
     explicit_data = normalize_aa_data_path(selection)
     if explicit_data is not None:
-        return _result_for_data(explicit_data, source="explicit data")
+        return _result_for_data(explicit_data, source="explicit data", include_resource_cache=include_resource_cache)
 
     config_file = _resolved(config_path) if config_path is not None else Path(__file__).with_name("aa_config.json")
     config = _read_json_object(config_file, issues, "config_invalid")
@@ -338,6 +341,7 @@ def discover_aa(
     if authoritative is not None and authoritative.valid:
         return _result_for_data(
             authoritative.path,
+            include_resource_cache=include_resource_cache,
             source=authoritative.source,
             executable=executable,
             identity=identity,
@@ -353,6 +357,7 @@ def discover_aa(
     if local is not None and local.valid:
         return _result_for_data(
             local.path,
+            include_resource_cache=include_resource_cache,
             source=local.source,
             executable=executable,
             identity=identity,
@@ -368,6 +373,7 @@ def discover_aa(
         selected = valid_legacy[0]
         return _result_for_data(
             selected.path,
+            include_resource_cache=include_resource_cache,
             source=selected.source,
             executable=executable,
             identity=identity,
@@ -380,6 +386,7 @@ def discover_aa(
     if len(valid_legacy) > 1:
         issues.append(DiscoveryIssue("workspace_selection_required", "Multiple valid AA workspaces require selection."))
         return _empty_result(
+            include_resource_cache=include_resource_cache,
             executable=executable,
             identity=identity,
             local_low=local_low,
@@ -393,6 +400,7 @@ def discover_aa(
         issues.append(DiscoveryIssue("executable_not_found", "AzureArchive executable was not recognized."))
     issues.append(DiscoveryIssue("workspace_not_found", "No valid AA workspace was found."))
     return _empty_result(
+        include_resource_cache=include_resource_cache,
         executable=executable,
         identity=identity,
         local_low=local_low,

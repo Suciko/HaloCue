@@ -208,6 +208,9 @@
       const leavingSection = event.target.closest('[data-section]:not([data-section="production"])')?.dataset.section;
       const leavingMobile = event.target.closest("[data-mobile]")?.dataset.mobile;
       if (leavingSection || leavingMobile) initialProductionNavigationCancelled = true;
+      // The writing router owns navigation, unsaved guards, and handoff UI.
+      // Keep the legacy fallback only for hosts without that router.
+      if (window.HaloCueRouter) return;
       const productionModeVisible = document.querySelector("#app")?.classList.contains("production-mode");
       if ((productionModeVisible || window.HaloCueProductionEmbed?.isOpen?.()) && (leavingSection || leavingMobile)) {
         const destination = leavingSection || (leavingMobile === "works" || leavingMobile === "references" || leavingMobile === "tasks" ? leavingMobile : "writing");
@@ -287,6 +290,7 @@
     window.addEventListener("DOMContentLoaded", async () => {
       await waitFor(() => !document.body.classList.contains("app-loading"), 120);
       scheduleProductionWarmup();
+      if (window.HaloCueRouter) return;
       const workId = params.get("work_id");
       if (workId) {
         const workButton = await waitFor(() => [...document.querySelectorAll("[data-select-work]")].find(button => button.dataset.selectWork === workId));

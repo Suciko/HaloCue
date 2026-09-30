@@ -20,7 +20,7 @@ from email.utils import parsedate_to_datetime
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from model_capabilities import normalize_remote_model_record
+from model_capabilities import normalize_remote_model_record, completion_parameters, compact_request_context
 
 
 class LLMError(RuntimeError):
@@ -577,6 +577,20 @@ class AnthropicProvider(Provider):
             "xhigh": "xhigh", "max": "max",
         }.get(str(self.cfg.get("reasoning_mode") or "").strip().lower())
 
+    def _apply_configured_options(self, payload):
+        config = {**self.cfg, "provider": "anthropic", "model": self.model, "max_tokens": self._output_budget()}
+        # Integrated settings' explicit automatic mode means provider default;
+        # do not inherit the legacy transport's unconditional adaptive thinking.
+        if "reasoning_effort" in self.cfg:
+            payload.pop("thinking", None)
+            payload.get("output_config", {}).pop("effort", None)
+        compacted, self.context_compaction = compact_request_context(config, payload)
+        payload.update(compacted)
+        options = completion_parameters(config, payload)
+        if "output_config" in options:
+            payload.setdefault("output_config", {}).update(options.pop("output_config"))
+        payload.update(options)
+
     def complete_json(self, static_system, volatile_system, user, schema):
         # 静态部分打缓存断点；易变部分放它后面，避免整段前缀失效
         system = [{"type": "text", "text": static_system,
@@ -594,6 +608,7 @@ class AnthropicProvider(Provider):
                   output_config=output_config)
         if self.cfg.get("thinking", True):
             kw["thinking"] = {"type": "adaptive"}
+        self._apply_configured_options(kw)
 
         try:
             with self.client.messages.stream(**kw) as stream:
@@ -649,6 +664,7 @@ class AnthropicProvider(Provider):
                            "cache_control": {"type": "ephemeral", "ttl": "1h"}}],
                   messages=[{"role": "user", "content": content}],
                   output_config={"format": {"type": "json_schema", "schema": schema}})
+        self._apply_configured_options(kw)
         try:
             with self.client.messages.stream(**kw) as stream:
                 with self._track_active_request(
@@ -708,6 +724,7 @@ class AnthropicProvider(Provider):
             kw["output_config"]["effort"] = effort
         if self.cfg.get("thinking", True):
             kw["thinking"] = {"type": "adaptive"}
+        self._apply_configured_options(kw)
 
         chunks = []
         received_chars = 0
@@ -806,6 +823,15 @@ class OpenAIProvider(Provider):
         self.model = cfg.get("model") or "gpt-5"
 
     def _apply_reasoning_payload(self, payload):
+        config = {**self.cfg, "model": self.model, "provider": "openai", "max_tokens": self._output_budget()}
+        compacted, self.context_compaction = compact_request_context(config, payload)
+        payload.update(compacted)
+        options = completion_parameters(config, payload, tools=bool(payload.get("tools")))
+        payload.pop("max_tokens", None)
+        payload.pop("max_completion_tokens", None)
+        payload.update(options)
+        if self.cfg.get("reasoning_effort") not in {None, "", "auto"}:
+            return
         mode = str(self.cfg.get("reasoning_mode") or "").strip().lower()
         protocol = str(self.cfg.get("reasoning_wire_protocol") or "").strip().lower()
         if mode in {"", "provider_default"}:

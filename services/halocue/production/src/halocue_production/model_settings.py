@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .errors import ProductionError
+from .model_capabilities import normalize_advanced, ADVANCED_FIELDS
 
 
 PROVIDERS = {"openai", "anthropic"}
@@ -234,6 +235,10 @@ class DirectionModelSettings:
         requested = dict(payload or {})
         stored = self._load_public()
         candidate = {**stored, **requested}
+        if (candidate.get("model"), candidate.get("provider")) != (stored.get("model"), stored.get("provider")):
+            for field in (*ADVANCED_FIELDS, "max_tokens"):
+                if field not in requested:
+                    candidate.pop(field, None)
         provider = str(candidate.get("provider") or "openai").strip().lower()
         default_url = "https://api.anthropic.com/v1" if provider == "anthropic" else "https://api.openai.com/v1"
         candidate["provider"] = provider
@@ -323,13 +328,16 @@ class DirectionModelSettings:
         api_key_env = str(payload.get("api_key_env") or "").strip()
         if api_key_env and not api_key_env.replace("_", "A").isalnum():
             raise ProductionError("invalid_api_key_env", "密钥环境变量名称无效")
+        advanced = normalize_advanced(payload)
         try:
-            max_tokens = int(payload.get("max_tokens") or 16000)
+            max_tokens = int(payload.get("max_tokens") or advanced.get("max_output_tokens") or 16000)
             timeout = int(payload.get("timeout") or 180)
         except (TypeError, ValueError) as exc:
             raise ProductionError("invalid_model_limits", "模型预算和超时必须是整数") from exc
-        if not 512 <= max_tokens <= 128000:
-            raise ProductionError("invalid_model_limits", "max_tokens 必须在 512 到 128000 之间")
+        if not 256 <= max_tokens <= 10_000_000:
+            raise ProductionError("invalid_model_limits", "max_tokens 必须在 256 到 10000000 之间")
+        if advanced.get("max_output_tokens") and max_tokens > advanced["max_output_tokens"]:
+            raise ProductionError("invalid_model_limits", "请求输出额度不能超过配置的模型最大输出。")
         if not 5 <= timeout <= 600:
             raise ProductionError("invalid_model_limits", "timeout 必须在 5 到 600 秒之间")
         return {
@@ -340,6 +348,7 @@ class DirectionModelSettings:
             "api_key_env": api_key_env,
             "max_tokens": max_tokens,
             "annotation_max_tokens": max_tokens,
+            **advanced,
             "timeout": timeout,
             "wall_timeout": min(1800, max(timeout, int(payload.get("wall_timeout") or 300))),
             "reasoning_mode": str(payload.get("reasoning_mode") or "balanced").strip(),
@@ -450,7 +459,7 @@ class DirectionModelSettings:
             "provider", "base_url", "model", "max_tokens", "annotation_max_tokens",
             "timeout", "wall_timeout", "reasoning_mode", "reasoning_wire_protocol",
             "source_context_strategy", "transport_retries", "credential_revision", "api_key_env",
-        )
+        ) + ADVANCED_FIELDS
         canonical = json.dumps({key: public.get(key) for key in fields},
                                sort_keys=True, ensure_ascii=False, separators=(",", ":"))
         return {"schema_version": "direction-model-identity/1.0",

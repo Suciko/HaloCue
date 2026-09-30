@@ -331,7 +331,10 @@ def test_real_service_sel_restarts_previews_and_switches_back_without_changing_i
             page.locator("#scriptText").fill(
                 "Sensei: 第一句，先出发。\nSensei: 第二句，走这边。\n店员: 欢迎光临。\nSensei: 最后一句，谢谢。\n"
             )
-            page.get_by_role("button", name="建立制作任务", exact=True).click()
+            page.get_by_role("button", name="识别并预览分场", exact=True).click()
+            expect(page.locator("#confirmSceneJudgement")).to_be_visible()
+            page.get_by_role("button", name="确认分场，选择草稿方式", exact=True).click()
+            page.get_by_role("button", name="创建 AA 制作任务", exact=True).click()
             expect(page.locator("#page-mapping")).to_be_visible()
             open_teacher(page)
             page.get_by_role("radio", name="Sel 回答", exact=True).check()

@@ -127,14 +127,12 @@ _TEXT_EXTENSIONS = {
     ".yml",
 }
 
-_WINDOWS_USER_PATH = re.compile(
-    r"(?i)(?:[a-z]:[\\/]+(?:users|用户)[\\/]+)([^\\/\s\"']+)[\\/]"
-)
+_WINDOWS_USER_PATH = re.compile(r"(?i)(?:[a-z]:[\\/]+(?:users|用户)[\\/]+)([^\\/\s\"']+)[\\/]")
 _WINDOWS_DESKTOP_PATH = re.compile(r"(?i)[a-z]:[\\/]+(?:桌面|desktop)[\\/]+")
 _UNIX_USER_PATH = re.compile(r"(?i)/(?:users|home)/([^/\s\"']+)/")
 _PLACEHOLDER_USERS = {"alice", "example", "private", "test", "user", "username"}
 _SECRET_PATTERNS = (
-    re.compile(r"\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b"),
+    re.compile(r"\bsk-(?:ant-)?(?=[A-Za-z0-9_-]{20,}\b)(?=[A-Za-z0-9_-]*[A-Z0-9])[A-Za-z0-9_-]+\b"),
     re.compile(r"\bAIza[0-9A-Za-z_-]{30,}\b"),
     re.compile(r"\bgh[oprsu]_[A-Za-z0-9]{30,}\b"),
     re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b"),
@@ -250,9 +248,11 @@ def _path_findings(relative: str, *, mode: ScanMode) -> list[ScanFinding]:
     private_spine = mode == "private" and relative.casefold().startswith("tools/spine/")
     if any(part in _FORBIDDEN_DIRECTORY_NAMES for part in lowered_parts[:-1]):
         findings.append(_finding("forbidden-name", relative, "forbidden directory name"))
-    if name in _FORBIDDEN_FILE_NAMES or (
-        name.startswith("cast-") and name.endswith(".json") and name != "cast.example.json"
-    ) or name == "cast.json":
+    if (
+        name in _FORBIDDEN_FILE_NAMES
+        or (name.startswith("cast-") and name.endswith(".json") and name != "cast.example.json")
+        or name == "cast.json"
+    ):
         findings.append(_finding("forbidden-name", relative, "forbidden local filename"))
     if name.endswith(_SQLITE_SIDECAR_SUFFIXES) or name.startswith("aa_assets.db-"):
         findings.append(_finding("forbidden-name", relative, "SQLite sidecar is forbidden"))
@@ -286,7 +286,9 @@ def _path_findings(relative: str, *, mode: ScanMode) -> list[ScanFinding]:
             )
         if not allowed:
             findings.append(
-                _finding("unexpected-executable", relative, "executable is outside the mode allowlist")
+                _finding(
+                    "unexpected-executable", relative, "executable is outside the mode allowlist"
+                )
             )
     return findings
 
@@ -376,9 +378,7 @@ def _archive_findings(
                 member.file_size > _MAX_ARCHIVE_MEMBER_BYTES
                 or ratio > _MAX_ARCHIVE_COMPRESSION_RATIO
             ):
-                findings.append(
-                    _finding("archive-limit", virtual, "archive member limit exceeded")
-                )
+                findings.append(_finding("archive-limit", virtual, "archive member limit exceeded"))
                 continue
             try:
                 chunks: list[bytes] = []
@@ -403,7 +403,9 @@ def _archive_findings(
                 )
                 continue
             except (OSError, RuntimeError, zipfile.BadZipFile, NotImplementedError):
-                findings.append(_finding("archive-invalid", virtual, "archive member could not be read"))
+                findings.append(
+                    _finding("archive-invalid", virtual, "archive member could not be read")
+                )
                 continue
             nested_findings = _path_findings(member_name, mode="source")
             nested_findings.extend(_payload_findings(virtual, payload))
@@ -455,8 +457,7 @@ def _sqlite_findings(path: Path, relative: str) -> list[ScanFinding]:
                     continue
                 quoted_table = _quote_identifier(table)
                 actual_columns = tuple(
-                    row[1]
-                    for row in connection.execute(f"PRAGMA table_info({quoted_table})")
+                    row[1] for row in connection.execute(f"PRAGMA table_info({quoted_table})")
                 )
                 if actual_columns != tuple(expected_columns):
                     findings.append(
@@ -493,10 +494,7 @@ def _sqlite_findings(path: Path, relative: str) -> list[ScanFinding]:
                 findings.append(
                     _finding("sqlite-forbidden-table", relative, "forbidden table is non-empty")
                 )
-            columns = [
-                row[1]
-                for row in connection.execute(f"PRAGMA table_info({quoted_table})")
-            ]
+            columns = [row[1] for row in connection.execute(f"PRAGMA table_info({quoted_table})")]
             path_indexes = {
                 index
                 for index, column in enumerate(columns)
@@ -528,7 +526,9 @@ def _sqlite_findings(path: Path, relative: str) -> list[ScanFinding]:
                                 )
         connection.close()
     except (OSError, sqlite3.DatabaseError):
-        findings.append(_finding("sqlite-invalid", relative, "SQLite database could not be audited"))
+        findings.append(
+            _finding("sqlite-invalid", relative, "SQLite database could not be audited")
+        )
     return findings
 
 
@@ -564,7 +564,9 @@ def scan_tree(root: Path, *, mode: ScanMode) -> tuple[ScanFinding, ...]:
             try:
                 is_link = entry.is_symlink() or _is_reparse_point(path)
             except OSError:
-                findings.append(_finding("unreadable", relative, "entry metadata could not be read"))
+                findings.append(
+                    _finding("unreadable", relative, "entry metadata could not be read")
+                )
                 continue
             if is_link:
                 try:
@@ -573,7 +575,9 @@ def scan_tree(root: Path, *, mode: ScanMode) -> tuple[ScanFinding, ...]:
                 except (OSError, ValueError):
                     findings.append(_finding("unsafe-link", relative, "link escapes scan root"))
                 else:
-                    findings.append(_finding("unsafe-link", relative, "links are not release inputs"))
+                    findings.append(
+                        _finding("unsafe-link", relative, "links are not release inputs")
+                    )
                 continue
             if entry.is_dir(follow_symlinks=False):
                 if entry.name.casefold() in _FORBIDDEN_DIRECTORY_NAMES:
@@ -596,7 +600,9 @@ def scan_tree(root: Path, *, mode: ScanMode) -> tuple[ScanFinding, ...]:
             if data.startswith(_SQLITE_MAGIC):
                 if relative not in _PUBLIC_SEED_PATHS:
                     findings.append(
-                        _finding("sqlite-unapproved", relative, "SQLite file is not the public seed")
+                        _finding(
+                            "sqlite-unapproved", relative, "SQLite file is not the public seed"
+                        )
                     )
                 findings.extend(_sqlite_findings(path, relative))
             elif suffix == ".db":

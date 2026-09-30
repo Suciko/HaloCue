@@ -711,3 +711,24 @@ def test_http_detect_then_adopt_uses_resolved_path_and_rechecks_structure(settin
             base, "/api/v1/settings/aa-workspace", {"path": path}, "POST"
         )
         assert status == 400 and changed["error"]["code"] == "invalid_aa_workspace"
+
+def test_http_resource_index_rebuild_route(settings, monkeypatch):
+    expected = {"ok": True, "resource_index": {"path": "C:/index.json"}}
+    monkeypatch.setattr(ProductionService, "rebuild_resource_index", lambda self: expected)
+    with api(settings) as base:
+        status, _, result = request(base, "/api/v1/settings/resource-index:rebuild", {}, "POST")
+    assert status == 200
+    assert result == expected
+
+
+def test_http_aa_workspace_picker_returns_selected_local_path(settings, monkeypatch):
+    selected = r"C:\\Synthetic\\AzureArchive.exe"
+    monkeypatch.setattr(
+        ProductionService,
+        "pick_aa_executable",
+        lambda self: {"ok": True, "selected": True, "path": selected},
+    )
+    with api(settings) as base:
+        status, _, result = request(base, "/api/v1/settings/aa-workspace:pick", {}, "POST")
+    assert status == 200
+    assert result == {"ok": True, "selected": True, "path": selected}

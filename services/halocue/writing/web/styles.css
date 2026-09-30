@@ -51,6 +51,11 @@
 @media(max-width:440px){.library-control-copy .actions{display:grid;grid-template-columns:1fr}.library-control-copy .actions button{width:100%}.library-decision-queue li{grid-template-columns:32px minmax(0,1fr)}.library-decision-queue .quiet{grid-column:2;justify-self:start}.scene-arrangement-actions{display:grid;grid-template-columns:34px 34px minmax(0,1fr) 1fr;width:100%}.scene-arrangement-actions .quiet{min-width:0}.scene-chapter-select{grid-column:1/-1;width:100%}.structure-command-actions{display:grid;grid-template-columns:1fr 1fr}.structure-save-state{grid-column:1/-1}.structure-command-actions button{width:100%}}
 .proposal-runtime-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px 9px;margin-top:9px;color:var(--muted);font-size:11px;line-height:1.4}.proposal-runtime-meta>span:first-child{padding:3px 6px;border:1px solid #c7cec9;background:#f1f5f1;color:#315c4e;font-weight:700}.proposal-runtime-meta>span:first-child.is-simulation{border-color:#d3a34a;background:var(--amber-soft);color:#76500f}.proposal-runtime-meta>span:first-child.is-live{border-color:#8fc1b0;background:var(--green-soft);color:#1d6c58}.proposal-runtime-meta .proposal-runtime-identity{display:inline-flex;align-items:baseline;gap:5px;min-width:0;color:var(--ink)}.proposal-runtime-meta .proposal-runtime-identity small{display:inline;color:var(--muted);font:10px/1.4 "Microsoft YaHei UI",sans-serif;white-space:nowrap}.proposal-runtime-meta>small{flex-basis:100%;color:var(--muted);font:11px/1.45 Consolas,"Microsoft YaHei UI",sans-serif;word-break:break-word}.proposal-runtime-meta .proposal-runtime-config{color:#65766d}.proposal-runtime-meta .proposal-runtime-config.is-drifted{color:#98633e;font-weight:600}.proposal-runtime-meta .proposal-runtime-evidence{color:#65766d}
 .first-use-form{max-width:620px;margin:24px 0;padding:24px;border:1px solid #b8d5c7;border-left:4px solid var(--green);background:#fffdfa;box-shadow:var(--shadow)}.first-use-form-head h3{margin:4px 0 8px;font:600 24px/1.3 Georgia,"STSong",serif}.first-use-form-head p:not(.eyebrow){margin:0;color:var(--muted);font-size:13px;line-height:1.65}.first-use-form form{display:grid;gap:16px;margin-top:20px}.first-use-form label{min-width:0}.first-use-form label>small{font-size:11px;color:var(--muted);font-weight:400;line-height:1.45}.first-use-form-actions{justify-content:flex-start;margin-top:2px}.first-use-form-actions button{min-width:116px}.first-use-form .world-seed-picker{margin:0}
+.first-use-form{border-color:var(--hc-line);border-left-color:var(--hc-action);background:var(--hc-panel)}
+.work-start-picker{display:flex;flex-wrap:wrap;gap:8px 18px;margin:0;padding:11px 13px;border:1px solid var(--hc-line);border-radius:8px;background:var(--hc-panel)}
+.work-start-picker legend{padding:0 5px;color:var(--hc-muted);font-size:12px;font-weight:600}
+.work-start-picker label{display:inline-flex!important;align-items:center;gap:6px;white-space:nowrap;font-size:12px}
+.work-start-picker input{accent-color:var(--hc-action)}
 @media(max-width:640px){.first-use-form{margin:18px 0;padding:17px}.first-use-form-head h3{font-size:22px}.first-use-form-actions{display:grid;grid-template-columns:1fr 1fr}.first-use-form-actions button{width:100%;min-width:0}}
 
 /* A recovery path is contextual, not a second workflow: it returns to the
@@ -116,3 +121,42 @@
   background: #f8f8f4;
   opacity: .78;
 }
+
+
+/* Runtime evidence is supporting detail, not a centered feature card. */
+.proposal-runtime-details {
+  display: block;
+  margin: 14px 0 0;
+  padding: 0;
+  border-top: 1px solid #e2e8e5;
+  color: var(--muted);
+  text-align: left;
+}
+.proposal-runtime-details > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 2px;
+  color: #4f6c63;
+  font-size: 12px;
+  font-weight: 600;
+  list-style-position: inside;
+}
+.proposal-runtime-details[open] > summary { color: #2f8066; }
+.proposal-runtime-details .proposal-runtime-meta {
+  max-width: none;
+  padding: 0 2px 8px;
+}
+
+.intent-start { position: relative; }
+.intent-dismiss { position: absolute; top: 18px; right: 18px; border: 0; background: transparent; color: #70828a; font-size: 11px; cursor: pointer; }
+.intent-dismiss:hover { color: #2f8066; text-decoration: underline; }
+.intent-start.is-compact { position: fixed; right: 28px; bottom: 22px; left: 28px; z-index: 20; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 18px; margin: 0 auto; max-width: 920px; padding: 12px 16px; border: 1px solid #d8e2df; border-radius: 12px; background: rgba(255,255,255,.97); box-shadow: 0 12px 30px rgba(45,68,75,.12); }
+.intent-start.is-compact .intent-start-copy { margin: 0; }
+.intent-start.is-compact .compact-copy { display: block; }
+.intent-start.is-compact form { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+.intent-start.is-compact form textarea { min-height: 44px; max-height: 120px; }
+.intent-start.is-compact .intent-composer-meta, .intent-start.is-compact .intent-import-entry, .intent-start.is-compact .intent-start-note { display: none; }
+@media (max-width: 760px) { .intent-start.is-compact { right: 10px; bottom: 66px; left: 10px; grid-template-columns: 1fr; } .intent-start.is-compact form { grid-template-columns: 1fr; } }
+
+.bundled-reference-results{margin-top:18px;padding:16px;border:1px solid var(--line);background:#f7faf7}.bundled-reference-results>header{display:flex;justify-content:space-between;gap:14px;align-items:start}.bundled-reference-results h4{margin:3px 0 6px;font:600 17px Georgia,"STSong",serif}.bundled-reference-results header p:not(.eyebrow){margin:0;color:var(--muted);font-size:12px;line-height:1.6}.bundled-reference-list{display:grid;gap:8px;margin-top:13px}.bundled-reference-record{display:flex;justify-content:space-between;gap:12px;align-items:start;padding:11px 12px;border:1px solid #dfe7df;background:#fff}.bundled-reference-record strong{display:block;color:#294239}.bundled-reference-record span{display:block;margin-top:2px;color:#547064;font-size:11px}.bundled-reference-record small{color:var(--muted);font-size:11px;line-height:1.45}.bundled-reference-record>small{white-space:nowrap}

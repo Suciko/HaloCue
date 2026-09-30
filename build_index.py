@@ -15,11 +15,6 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aapaths                                              # noqa: E402
-from official_catalog import (                              # noqa: E402
-    locate_character_table_bundle,
-    read_character_table_bundle,
-    select_native_characters,
-)
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -148,6 +143,10 @@ def harvest_official_characters(*, cache_root, catalog_path, observed_identifier
     live in Addressables, so their Traditional-Chinese labels must come from
     AA's own FlatData table instead.
     """
+    # Legacy explicit extraction only; AA workspace import does not load this module.
+    from official_catalog import (
+        locate_character_table_bundle, read_character_table_bundle, select_native_characters,
+    )
     bundle = locate_character_table_bundle(catalog_path, cache_root)
     rows = read_character_table_bundle(bundle)
     return select_native_characters(rows, observed_identifiers)

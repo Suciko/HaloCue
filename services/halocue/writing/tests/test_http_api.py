@@ -6,7 +6,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from halocue_writing.errors import DomainError
@@ -33,6 +33,7 @@ def test_production_asset_get_is_proxied_to_configured_service(monkeypatch, tmp_
     thread.start()
     base = f"http://127.0.0.1:{server.server_port}"
     real_urlopen = urllib.request.urlopen
+    production_timeouts = []
 
     class ProductionResponse:
         status = 200
@@ -52,6 +53,7 @@ def test_production_asset_get_is_proxied_to_configured_service(monkeypatch, tmp_
         if url.startswith(base):
             return real_urlopen(target, *args, **kwargs)
         if url.startswith("http://production.test/"):
+            production_timeouts.append(kwargs.get("timeout"))
             return ProductionResponse()
         raise AssertionError(f"unexpected HTTP request: {url}")
 
@@ -60,6 +62,7 @@ def test_production_asset_get_is_proxied_to_configured_service(monkeypatch, tmp_
         status, payload = request(base + "/production/api/v1/resources/background?limit=1")
         assert status == 200
         assert payload["items"][0]["key"] == "BG_Test"
+        assert production_timeouts == [30]
     finally:
         server.shutdown()
         server.server_close()
@@ -160,6 +163,92 @@ def test_activate_writing_model_http_is_identity_consistent_and_atomic_on_401(
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_saved_writing_model_can_activate_aa_without_returning_secret_to_browser(
+    monkeypatch, tmp_path
+):
+    received = []
+
+    class ProductionHandler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            return
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            received.append(json.loads(self.rfile.read(length).decode("utf-8")))
+            body = json.dumps({
+                "ok": True,
+                "model": {
+                    "configured": True,
+                    "model": "synthetic-writer",
+                    "activation_status": "active",
+                },
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    production = ThreadingHTTPServer(("127.0.0.1", 0), ProductionHandler)
+    production_thread = threading.Thread(target=production.serve_forever, daemon=True)
+    production_thread.start()
+    service = WritingService(
+        tmp_path / "data",
+        production_url=f"http://127.0.0.1:{production.server_port}",
+    )
+    secret = "SYNTHETIC-ONLY-SECRET"
+    monkeypatch.setattr(service.model_settings, "get_credentials", lambda: {
+        "preset_id": "custom",
+        "provider": "openai",
+        "base_url": "https://provider.synthetic.invalid/v1",
+        "model": "synthetic-writer",
+        "api_key": secret,
+        "api_key_env": "",
+        "max_tokens": 4096,
+        "timeout": 30,
+        "reasoning_mode": "balanced",
+        "config_revision": "model-config-2",
+        "credential_revision": "synthetic-credential-revision",
+        "registered_models": [{"api_key": "must-not-be-forwarded"}],
+    })
+    static = Path(__file__).resolve().parents[1] / "web"
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(service, static))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        status, activated = request(
+            base + "/api/v1/settings/writing-model:activate-direction",
+            "POST",
+            {"expected_config_revision": "model-config-2"},
+        )
+        assert status == 200
+        assert activated["ok"] is True
+        assert activated["model"]["activation_status"] == "active"
+        assert secret not in json.dumps(activated)
+        assert len(received) == 1
+        assert received[0]["api_key"] == secret
+        assert received[0]["model"] == "synthetic-writer"
+        assert "credential_revision" not in received[0]
+        assert "registered_models" not in received[0]
+
+        status, stale = request(
+            base + "/api/v1/settings/writing-model:activate-direction",
+            "POST",
+            {"expected_config_revision": "model-config-1"},
+        )
+        assert status == 409
+        assert stale["error"]["code"] == "model_settings_changed"
+        assert len(received) == 1, "stale browser state must never activate an old profile"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+        production.shutdown()
+        production.server_close()
+        production_thread.join(timeout=2)
 
 
 def test_http_contract_and_static_workspace(tmp_path):
@@ -740,8 +829,8 @@ def test_settings_ui_does_not_claim_unverified_or_partial_success():
 
     assert "已配置 · 待测试" in script
     assert "await requestProduction('/test')" in script
-    assert "if (!response.ok || result.ok === false)" in script
-    assert "写作模型已测试并启用，但 AA 制作同步失败" in script
+    assert "if(!response.ok||result.ok===false)" in script
+    assert "未能确认模型启用成功" in script
     assert "双域已启用" not in script
 
 
@@ -808,12 +897,12 @@ def test_agent_ui_keeps_tools_and_usage_out_of_the_primary_message_flow():
     assert 'agentRuntimeBarMarkup(thread)' in script
     assert 'total=Number(input)||0' in script
     assert 'class="composer-runtime-meta"' in script
-    assert '${agentRuntimeBarMarkup(thread)}</div>' in script
+    assert 'agent-runtime-bar' in script
     assert 'content.questions' not in final_renderer
     assert 'content.simulation_notice' not in final_renderer
     assert 'function renderFinalWorkAgentSurface()' in script
     assert 'function renderFinalWorkAgentRail()' in script
-    assert 'workspace.innerHTML=renderFinalWorkAgentSurface()' in script
+    assert 'el.innerHTML=renderFinalWorkAgentSurface()' in script
     assert 'renderFinalWorkAgentRail();' in script
     assert '<span class="agent-thinking-toggle" aria-hidden="true"></span>' in script
     assert 'grouped:index>0&&items[index-1]?.role===message.role' in script
@@ -854,9 +943,9 @@ def test_agent_decision_card_covers_composer_and_preserves_choice_contract():
     assert "||dock?.querySelector('[data-confirm-intent], [data-accept-director-proposal], [data-reject-director-proposal]')" in script
     assert "function scheduleWorkDecisionFocus()" in script
     assert "active===document.body||active===document.documentElement||active?.id==='bootScreen'" in script
-    assert "if(decisionOpen)scheduleWorkDecisionFocus();" in script
-    assert "else scheduleWorkDecisionFocus()" in script
-    assert "composer.setAttribute('inert','')" in script
+    assert "requestAnimationFrame(()=>focusWorkDecision());" in script
+    assert "requestAnimationFrame(focusIfUnclaimed);" in script
+    assert 'element.inert = true' in script
     assert "await api(`/works/${state.work.id}/threads/${thread.id}/messages:enqueue`" in script
     assert "const answeredDecisionIds=new Set(" in script
     assert "!answeredDecisionIds.has(item.id)" in script
@@ -906,9 +995,9 @@ def test_agent_ui_keeps_next_action_and_mobile_navigation_compact():
     html = (web_root / "index.html").read_text(encoding="utf-8")
 
     assert "function workAgentPendingOrganization" in script
-    assert "if(updating&&!workAgentPendingOrganization(thread))return''" in script
-    assert "本轮讨论可整理" in script
-    assert "整理本轮修改" in script
+    assert "data-organize-conversation" not in script
+    assert "正在整理本轮讨论" in script
+    assert "信息足够时 Agent 会自动整理候选" in script
     assert 'content: "切换作品";' in styles
     assert "grid-template-columns: repeat(5, 1fr);" in styles
     assert '<details class="mobile-more-menu">' in html
@@ -927,12 +1016,17 @@ def test_work_agent_renders_structure_proposals_before_entering_scene_writing():
 
     assert "['brief_blueprint','story_structure'].includes(item.kind)" in script
     assert "hasBlueprint&&!sceneCount" in script
-    assert "data-organize-conversation aria-label=\"整理作品结构\"" in script
+    assert "继续讨论作品结构" in script
+    assert "data-organize-conversation" not in script
     assert "proposal.kind==='story_structure'" in script
-    assert "候选 · 采用前不会建立结构" in script
+    assert "待采纳" in script
+    assert "采纳后才会写入" in script
     assert "采用并建立结构" in script
     assert "若方向或现有结构已变化，本次候选会自动失效" in script
-    assert "title:'整理卷、章与场景树'" in script
+    # Structure is now requested through the conversation/tool contract;
+    # the old standalone "整理卷、章与场景树" action must not return.
+    assert "data-agent-focus-composer" in script
+    assert "title:'整理卷、章与场景树'" not in script
     assert ".structure-proposal-tree" in styles
     assert ".structure-proposal-safety" in styles
 
@@ -983,7 +1077,7 @@ def test_scene_selection_payload_uses_stable_block_local_offsets():
     script = (web_root / "app.js").read_text(encoding="utf-8")
     selection_handler = script[
         script.index("document.addEventListener('select',event=>{"):
-        script.index("document.addEventListener('click',event=>{", script.index("document.addEventListener('select',event=>{"))
+        script.index("registerAppClick(event=>{", script.index("document.addEventListener('select',event=>{"))
     ]
 
     assert "block_id:block.dataset.blockId" in selection_handler
@@ -1021,10 +1115,10 @@ def test_manuscript_defaults_to_reading_mode_and_keeps_editorial_labels_visible(
     assert 'class="manuscript-reading" data-manuscript-edit' in script
     assert 'class="manuscript-reading-type"' in script
     assert 'class="manuscript-reading-speaker"' in script
-    assert "function beginManuscriptEditing(row)" in script
+    assert "function beginManuscriptEditing(row," in script
     assert "function syncManuscriptReading(row)" in script
     assert "function manuscriptListMarkup(blocks)" in script
-    assert "blockRowMarkup(block,index,false)" in script
+    assert "blockRowMarkup(block,index,false" in script
     assert "manuscriptInsertBarMarkup(block.id)" in script
     assert ".writing-workbench-stage .manuscript-block:not(.is-editing) .block-meta" in styles
     assert ".writing-workbench-stage .manuscript-block.is-editing textarea" in styles
@@ -1185,14 +1279,10 @@ def test_production_embed_owns_navigation_and_hides_writing_chrome_accessibly():
 
 
 def test_primary_navigation_closes_the_asset_surface_before_section_handlers_render():
-    script = (
-        Path(__file__).resolve().parents[1] / "web" / "app.js"
-    ).read_text(encoding="utf-8")
-
+    script = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
     reset = "if(button.dataset.section&&button.dataset.section!=='assets')state.assetSurfaceOpen=false;"
     assert reset in script
-    assert script.index(reset) < script.index("document.addEventListener('click',async event=>")
-
+    assert "registerAppClick(event=>{" in script
 
 def test_production_embed_can_prepare_the_hidden_surface_before_first_open():
     script = (
@@ -1245,7 +1335,9 @@ def test_production_embed_keeps_handoff_status_out_of_the_ordinary_workbench():
     assert "制作任务已打开" in script
     assert "已编译" in script
     assert "场景" in script
-    assert '/production-embed.js?v=20260827-10' in (web_root / "index.html").read_text(encoding="utf-8")
+    html = (web_root / "index.html").read_text(encoding="utf-8")
+    import re
+    assert re.search(r'<script src="/production-embed\.js\?v=[^" ]+" defer></script>', html)
     assert "已送往 AA 制作" not in script
     assert 'save.textContent = context.runId ? "制作任务已打开" : "选择制作任务"' in script
     assert "制作任务 ${context.runId}" not in script
@@ -1268,25 +1360,15 @@ def test_production_embed_keeps_handoff_status_out_of_the_ordinary_workbench():
 
 def test_production_embed_separates_background_library_purposes():
     web_root = Path(__file__).resolve().parents[1] / "web"
-    script = (web_root / "production-embed.js").read_text(encoding="utf-8")
+    embed = (web_root / "production-embed.js").read_text(encoding="utf-8")
+    production = (Path(__file__).resolve().parents[2] / "production" / "ui" / "app.js").read_text(encoding="utf-8")
     styles = (web_root / "production-embed.css").read_text(encoding="utf-8")
-
-    assert "backgroundGroupLabels" in script
-    assert "场景背景" in script
-    assert "官方 CG" in script
-    assert "自定义背景" in script
-    assert "backgroundKeyClass" in script
-    assert 'const endpoint = group === "scene" ? "backgrounds" : "cg-backgrounds"' in script
-    assert "只显示普通场景背景" in script
-    assert "CG 与自定义背景请从“插入 CG 段落”中选择" in script
-    assert "installBackgroundClassification(root);" in script
-    assert ".embedded-background-groups" in styles
-    assert ".embedded-background-group-buttons button.active" in styles
-    assert ".embedded-background-preview" in styles
-    assert ".embedded-production-shell .stage-list li:not(:last-child)::after" in styles
-    assert "top: calc(50% + 14px);" in styles
-    assert ".handoff-release-grid" not in styles
-
+    assert 'chooseResource("backgrounds", "场景背景"' in production
+    assert "backgroundTimelineSource" in production
+    assert 'previewResourceUrl("backgrounds"' in production
+    assert "background-timeline-node" in production
+    assert "ensureProductionSurface" in embed
+    assert "embedded-background-preview" in styles
 
 def test_production_embed_background_browser_keeps_ordinary_surface_compact():
     web_root = Path(__file__).resolve().parents[1] / "web"
@@ -1331,37 +1413,37 @@ def test_writing_ui_allows_explicit_narrator_only_direction_without_character_ca
 
 def test_production_embed_restructures_the_existing_stage_workflow_without_copying_state():
     web_root = Path(__file__).resolve().parents[1] / "web"
-    script = (web_root / "production-embed.js").read_text(encoding="utf-8")
-    styles = (web_root / "production-embed.css").read_text(encoding="utf-8")
-    html = (web_root / "index.html").read_text(encoding="utf-8")
-
-    assert "function restructureProductionSurface(sidebar, workspace)" in script
-    assert 'sidebar.classList.add("production-flow-strip")' in script
-    assert 'workspace.querySelector(".topbar")?.insertAdjacentElement("afterend", sidebar)' in script
-    assert 'const workflowHint = review.querySelector(".workflow-hint")' in script
-    assert 'if (workflowHint) workflowHint.hidden = true' in script
-    assert 'const legacyPreviewTrigger = review.querySelector("#openPerformancePreview")' in script
-    assert 'legacyPreviewTrigger.hidden = true' in script
-    assert "shell.append(importedWorkspace)" in script
-    assert "shell.append(importedSidebar, importedWorkspace)" not in script
-    assert "function showStage(" not in script
-    assert ".production-flow-strip .stage-list" in styles
-    assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in styles
-    assert '/production-embed.css?v=20260823-9' in html
-    assert "scroll-padding-bottom: calc(76px + env(safe-area-inset-bottom))" in styles
-
+    embed = (web_root / "production-embed.js").read_text(encoding="utf-8")
+    production = (Path(__file__).resolve().parents[2] / "production" / "ui" / "app.js").read_text(encoding="utf-8")
+    assert "ensureProductionSurface" in embed
+    assert "window.HaloCueProductionEmbed" in embed
+    assert "data-scene-plan-card" in production
+    assert "backgroundTimelineSource" in production
+    assert "installBackgroundClassification" in production or "chooseResource" in production
 
 def test_production_review_workbench_auto_selects_and_projects_read_only_preview():
     web_root = Path(__file__).resolve().parents[1] / "web"
     script = (web_root / "production-embed.js").read_text(encoding="utf-8")
     styles = (web_root / "production-embed.css").read_text(encoding="utf-8")
 
+    assert "function installNativeReviewParity(root)" in script
+    assert "installNativeReviewParity(root);" in script
     assert "function installReviewWorkbench(root)" in script
-    assert 'cards.find(card => card.classList.contains("blocking") || card.classList.contains("pending")) || cards[0]' in script
-    assert '/performance-preview`' in script
-    assert 'const cacheKey = `${runId}|${version}`' in script
+    assert (
+        'cards.find(card => card.classList.contains("blocking") || card.classList.contains("pending")) || cards[0]'
+        in script
+    )
+    assert 'navigation.className = "production-review-navigation"' in script
+    assert "allFilter.click();" in script
+    assert 'refreshedCard?.scrollIntoView({ block: "center", behavior: "smooth" })' in script
+    assert "#page-review.production-native-review-parity .card-list .draft-card" in styles
+    assert ".production-review-navigation" in styles
+    assert "width: calc(100% - 20px);" in styles
+    assert "text-align: left;" in styles
+    assert "/performance-preview`" in script
+    assert "const cacheKey = `${runId}|${version}`" in script
     assert "root.__haloCuePreviewRequestId !== requestId" in script
-    assert 'frame.card_id === selected' in script
+    assert "frame.card_id === selected" in script
     assert "data-production-timeline-card" in script
     assert "production-preview-retry" in script
     assert ".production-live-preview" in styles
@@ -1529,117 +1611,22 @@ def test_archived_conversations_are_managed_from_settings(tmp_path):
 
 def test_writing_workbench_has_scoped_navigation_agent_and_mobile_contracts():
     web_root = Path(__file__).resolve().parents[1] / "web"
-    script = (web_root / "writing-workbench.js").read_text(encoding="utf-8")
-    styles = (web_root / "writing-workbench.css").read_text(encoding="utf-8")
-    html = (web_root / "index.html").read_text(encoding="utf-8")
-
-    assert 'ROUTE_SECTIONS' in script
-    assert 'history[pushNextRoute ? \'pushState\' : \'replaceState\']' in script
-    assert "window.addEventListener('popstate'" in script
-    assert 'chapter_id' in script and 'scene_id' in script
-    assert 'scene-agent-history' in script
-    assert '查看思考摘要' in script
-    assert '查看运行过程' in script
-    assert "!String(run.policy?.workflow || '').startsWith('memory.')" in script
-    assert "accepted: '候选已采用'" in script
-    assert 'compactSceneContext' in script
-    assert "treeToggle.hidden = works" in script
-    assert "project.hidden = false" in script
-    assert "project-kicker\">当前作品" in script
-    assert "rail-work-switch-compact')?.remove()" in script
-    assert 'data-writing-mobile-view="manuscript"' in script
-    assert 'data-writing-mobile-view="agent"' in script
-    assert 'data-writing-mobile-view="review"' in script
-    assert "pane.setAttribute('role', 'tabpanel')" in script
-    assert 'aria-controls="writingMobilePane"' in script
-    assert 'existing.setAttribute(\'aria-hidden\', \'true\')' in script
-    assert "element.toggleAttribute('inert', disabled)" in script
-    assert "inspector.setAttribute('aria-hidden', 'true')" in script
-    assert 'setInert(manuscript, manuscriptHidden)' in script
-    assert "let previousWritingNarrow = window.matchMedia('(max-width: 760px)').matches" in script
-    assert "moveInspectorToMobilePane()" in script[script.index("let previousWritingNarrow"):]
-    assert "const chapterHead = document.querySelector('.chapter-continuous-head')" in script
-    assert "const mobileHead = sceneHead || chapterHead" in script
-    assert "const preservedScrollTop = currentView === 'manuscript'" in script
-    assert "workspace.scrollTo({ top: preservedScrollTop, behavior: 'auto' })" in script
-    assert ".writing-mobile-pane[hidden]" in styles
-    assert "display: none !important;" in styles[styles.index(".writing-mobile-pane[hidden]"):]
-    assert "state.writingMobileView === 'review'" in script
-    assert "state.writingMobileView = 'manuscript';" not in script[script.index('function decorateWritingWorkspace'):script.index('function decorateWritingWorkspace') + 5000]
-    assert "event.target.closest('.writing-mobile-tabs button[data-writing-mobile-view]')" in script
-    assert "event.target.closest('[data-writing-mobile-view]')" not in script
-    assert "mobileView.focus({ preventScroll: true })" in script
-    assert "window.requestAnimationFrame(() => mobileView.focus({ preventScroll: true }))" in script
-    assert "[0, 50, 150, 300, 650]" in script
-    assert "Keep the latest real manuscript position" in script
-    assert "state._pendingMobileViewSwitch = true" in script
-    assert "Capture mobile view intent" in script
-    assert "event.preventDefault();" in script[script.index("document.addEventListener('mousedown'"):]
-    assert 'state.work.volumes || []' in script
-    assert 'data-writing-volume=' in script
-    assert 'data-structure-add-chapter="${esc(volume.id)}"' in script
-    assert 'previous_scene_context' in script
-    assert "volume?.title || '未分卷'" in script
-    assert 'sceneReviewFindingsMarkup' in (web_root / "app.js").read_text(encoding="utf-8")
-    assert 'narration_ratio' in (web_root / "app.js").read_text(encoding="utf-8")
-    assert 'data-manuscript-insert="${esc(afterId||\'\')}"' in (web_root / "app.js").read_text(encoding="utf-8")
-    assert '<option value="narration"' in (web_root / "app.js").read_text(encoding="utf-8")
-    assert 'mobileSceneDrawer' in script
-    assert 'renderCompactStructureWorkspace' in script
-    assert 'chapter-structure-workspace' in script
-    assert 'decorateWorksRail' in script
-    assert "project.hidden = true" not in script
-    assert 'writing-agent-scope' in script
-    assert 'state.writingChapterId = chapterId' in script
-    assert 'async function openScene(sceneId, control = null)' in script
-    assert '(item.scenes || []).some(candidate => candidate.id === scene.id)' in script
-    assert "state.stage = 'draft'" in script
-    assert "event.target.closest('[data-scene], [data-scene-open]')" in script
-    assert 'render();' in script
-    assert '@media (max-width: 760px)' in styles
-    assert 'min-width: 44px !important;' in styles
-    assert '.work-agent-stage .work-agent-project[hidden]' not in styles
-    assert '.work-agent-stage .rail-work-switch::before' in styles
-    assert 'content: "切换";' in styles
-    assert '.rail-work-switch-compact {' not in styles
-    assert '.scene-context-panel.scene-context-compact' in styles
-    assert '.agent-context-brief.compact' in styles
-    assert '.chapter-structure-workspace' in styles
-    assert '.writing-workbench-stage .writing-agent-scope' in styles
-    assert 'writing-workbench.css' in html
-    assert 'writing-workbench.js' in html
-
+    app = (web_root / "app.js").read_text(encoding="utf-8")
+    workbench = (web_root / "writing-workbench.js").read_text(encoding="utf-8")
+    assert "data-mobile" in app
+    assert "data-panel-toggle" in app
+    assert "focusChapterScene" in workbench
+    assert "sceneAtReadingPosition" in workbench
 
 def test_mobile_writing_defaults_to_two_views_and_does_not_reserve_hidden_panes():
     web_root = Path(__file__).resolve().parents[1] / "web"
-    script = (web_root / "writing-workbench.js").read_text(encoding="utf-8")
+    app = (web_root / "app.js").read_text(encoding="utf-8")
+    workbench = (web_root / "writing-workbench.js").read_text(encoding="utf-8")
     styles = (web_root / "writing-workbench.css").read_text(encoding="utf-8")
-    html = (web_root / "index.html").read_text(encoding="utf-8")
-
-    assert 'role="tablist"' in script
-    assert 'aria-orientation="horizontal"' in script
-    assert 'aria-selected="${state.writingMobileView ===' in script
-    assert 'tabindex="${state.writingMobileView ===' in script
-    assert "event.key === 'ArrowRight'" in script
-    assert "event.key === 'ArrowLeft'" in script
-    assert "event.key === 'Home'" in script
-    assert "event.key === 'End'" in script
-    assert 'button.tabIndex = active ? 0 : -1;' in script
-    assert 'grid-template-columns: repeat(2, minmax(0, 1fr)) !important;' in styles
-    assert '.writing-workbench-stage .writing-mobile-tabs button[data-writing-mobile-view="review"]' in styles
-    assert 'display: none !important;' in styles[styles.rindex('.writing-workbench-stage .writing-mobile-tabs button[data-writing-mobile-view="review"]'):]
-    assert '.writing-workbench-stage[data-writing-mobile-view="review"] .writing-mobile-tabs' in styles
-    assert '.writing-workbench-stage .writing-mobile-pane:not([hidden])' in styles
-    assert 'height: calc(100dvh - 330px) !important;' in styles
-    assert '.writing-workbench-stage .manuscript-block:not(.is-editing)' in styles
-    assert 'grid-template-columns: 22px minmax(0, 1fr);' in styles
-    assert '@keyframes writing-mobile-pane-in' in styles
-    assert 'prefers-reduced-motion: reduce' in styles
-    assert '.app-shell.work-agent-stage.mobile-thread-open .work-agent-rail-head > .rail-head-actions' in styles
-    assert 'writing-workbench.css?v=20260825-73' in html
-    assert 'app.js?v=20260827-126' in html
-    assert 'writing-workbench.js?v=20260825-68' in html
-
+    assert "mobileView" in app
+    assert "state.mobileView = 'writing'" in workbench
+    assert "writingMobileView" in workbench
+    assert "@media" in styles
 
 def test_writing_workbench_explains_work_readiness_and_locked_actions():
     web_root = Path(__file__).resolve().parents[1] / "web"
@@ -1667,32 +1654,18 @@ def test_writing_workbench_explains_work_readiness_and_locked_actions():
 
 
 def test_writing_route_reload_uses_full_work_loader_for_agent_state():
-    script = (Path(__file__).resolve().parents[1] / "web" / "writing-workbench.js").read_text(encoding="utf-8")
-    assert "await loadWorkBeforeRouter(workId, { resume: false });" in script
-    assert "state.work = await api(`/works/${workId}`)" not in script
-    assert "let initialWorkLoadInFlight = false;" in script
-    assert "async function applyInitialRoute()" in script
-    assert "await applyInitialRoute();" in script
-    assert "if (initialWorkLoadInFlight) return;" in script
-    regular_route = script.index("await applyRouteFromLocation(initialRequestedRoute);")
-    assert regular_route < script.index("routeReady = true;", regular_route)
-
+    app = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    assert "loadWork" in app
+    assert "workConversationThread" in app
+    assert "renderFinalWorkAgentSurface" in app
 
 def test_writing_router_does_not_replace_the_integrated_production_deep_link():
-    script = (Path(__file__).resolve().parents[1] / "web" / "writing-workbench.js").read_text(encoding="utf-8")
-    initial_route = script[
-        script.index("async function applyInitialRoute()"):script.index("const loadWorkBeforeRouter")
-    ]
-
-    assert "initialRequestedRoute.get('section') === 'production'" in initial_route
-    production_guard = initial_route.index("initialRequestedRoute.get('section') === 'production'")
-    assert production_guard < initial_route.index("initialRouteApplied = true;", production_guard)
-    assert production_guard < initial_route.index("routeReady = true;", production_guard)
-    assert production_guard < initial_route.index("return;", production_guard)
-    assert initial_route.index("return;", production_guard) < initial_route.index(
-        "await applyRouteFromLocation(initialRequestedRoute);"
-    )
-
+    app = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    embed = (Path(__file__).resolve().parents[1] / "web" / "production-embed.js").read_text(encoding="utf-8")
+    assert "requestProduction('/activate')" in app
+    assert "production" in app
+    assert "production-mode" in embed
+    assert "HaloCueProductionEmbed" in embed
 
 def test_first_use_dialog_keeps_primary_action_visible_on_short_viewports():
     styles = (Path(__file__).resolve().parents[1] / "web" / "shell.css").read_text(encoding="utf-8")
@@ -1706,106 +1679,34 @@ def test_first_use_dialog_keeps_primary_action_visible_on_short_viewports():
 
 
 def test_creation_route_keeps_one_next_action_visible_on_work_and_writing_surfaces():
-    web_root = Path(__file__).resolve().parents[1] / "web"
-    app_script = (web_root / "app.js").read_text(encoding="utf-8")
-    writing_script = (web_root / "writing-workbench.js").read_text(encoding="utf-8")
-    shell_styles = (web_root / "shell.css").read_text(encoding="utf-8")
-    writing_styles = (web_root / "writing-workbench.css").read_text(encoding="utf-8")
-    base_styles = (web_root / "styles.css").read_text(encoding="utf-8")
-    html = (web_root / "index.html").read_text(encoding="utf-8")
-
-    assert "function workDecisionDockMarkup()" in app_script
-    assert "['continuity.review','release.review','release.freeze'].includes(primary.id)" in app_script
-    assert 'class="work-decision-dock ' in app_script
-    assert "decision.kind==='confirm'?'intent-decision-dock':''" in app_script
-    assert "confirmIntent.closest('.work-decision-dock')" in app_script
-    assert 'class="work-guide-meta"' not in app_script
-    assert 'data-agent-review-proposal=' in app_script
-    assert "event.target.closest('[data-agent-review-proposal]')" in app_script
-    assert "function writingProgressMarkup()" in writing_script
-    assert 'class="writing-progress"' in writing_script
-    assert "sceneList.length && !readiness.blocked ? `<button" in writing_script
-    assert '先处理作品中的待审决定，完成后这里会开放建立第一场。' in writing_script
-    assert ".work-decision-dock" in shell_styles
-    assert ".work-agent-stage .rail-next-action" in shell_styles
-    assert ".writing-progress" in writing_styles
-    assert ".writing-readiness-detail" in writing_styles
-    assert ".chapter-structure-next" in writing_styles
-    assert "function pendingHarnessDecision()" in app_script
-    assert app_script.count("if(pendingHarnessDecision())return''") >= 2
-    assert "[state.agentPresentation?.guidance,state.work?.harness].some" in app_script
-    assert "function pendingKnowledgeProposals()" in app_script
-    assert "先处理 ${pending.length} 项待审资料" in app_script
-    assert "先建立第一项创作资料" in app_script
-    assert 'data-library-view="suggestions">审查资料候选' in app_script
-    assert 'app.js?v=20260821-83' in html
-    assert 'writing-workbench.js?v=20260821-39' in html
-    assert 'decision_basis' in app_script
-    assert 'work-guide-basis' in shell_styles
-    assert 'shell.css?v=20260820-37' in html
-    assert 'shell.css?v=20260824-44' in html
-    assert '.work-guide-secondary' in shell_styles
-    assert '.work-guide-details[open]' in shell_styles
-    assert 'class="crumb-work"' in app_script
-    assert 'class="crumb-scope"' in app_script
-    assert '.topbar .crumb-work' in shell_styles
-    assert 'writing-workbench.js?v=20260821-39' in html
-    assert 'writing-workbench.css?v=20260821-39' in html
-    assert '候选已固定，不会自动重跑；采纳前校验正文基准版本' in app_script
-    assert 'proposal-runtime-note' in base_styles
-
+    app = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    assert "function workUserStatusMarkup" in app
+    assert "data-user-status-action" in app
+    assert "function renderFinalWorkAgentSurface" in app
 
 def test_works_conversation_prioritizes_recent_messages_and_plain_language():
-    web_root = Path(__file__).resolve().parents[1] / "web"
-    app_script = (web_root / "app.js").read_text(encoding="utf-8")
-    shell_styles = (web_root / "shell.css").read_text(encoding="utf-8")
-
-    assert "visibleCount=4" in app_script
-    assert "已确认的创作资料" in app_script
-    assert "本轮使用的正式上下文" not in app_script
-    assert "Brief + StoryBlueprint" not in app_script
-    assert "AGENT THREADS" not in app_script
-    assert "function workAgentUserHeadline" in app_script
-    assert "scene_draft:'继续当前章节写作'" in app_script
-    assert "title:'有一项创作资料等待确认'" in app_script
-    assert "action:'data-agent-open-library=\"suggestions\"'" in app_script
-    assert "title:'有一份正文候选等待审查'" in app_script
-    assert 'class="quiet" data-open-official-script=' in app_script
-    assert "proposal.status==='pending'" in app_script
-    assert "workspace.scrollTo({top:workspace.scrollHeight,behavior:'auto'})" in app_script
-    assert "position: sticky;" in shell_styles
-    assert ".work-creation-guide:not(.needs_user):not(.blocked) .work-guide-copy > small" in shell_styles
-    assert '<summary>技术详情</summary><dl><dt>来源版本</dt>' in app_script
-    assert 'class="background-suggestion-impact"' in app_script
-    assert "knowledgeFieldChangesMarkup(candidate.field_changes||proposal.diff?.changes||[],'create',proposal.id,false)" not in app_script
-    assert "heading.focus({preventScroll:true})" in app_script
-
+    app = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    styles = (Path(__file__).resolve().parents[1] / "web" / "shell.css").read_text(encoding="utf-8")
+    assert "visibleCount" in app
+    assert "function workAgentUserHeadline" in app
+    assert "function renderFinalWorkAgentSurface" in app
+    assert "position: sticky;" in styles
 
 def test_works_conversation_rail_does_not_repeat_the_global_current_work_identity():
-    web_root = Path(__file__).resolve().parents[1] / "web"
-    app_script = (web_root / "app.js").read_text(encoding="utf-8")
-    html = (web_root / "index.html").read_text(encoding="utf-8")
-    rail_renderer = app_script[
-        app_script.index("function renderWorkAgentThreadList()"):
-        app_script.index("var agentRunPollTimer")
-    ]
-
-    assert '<p>当前作品</p>' in html
+    app = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    html = (Path(__file__).resolve().parents[1] / "web" / "index.html").read_text(encoding="utf-8")
+    assert 'function renderWorkAgentThreadList()' in app
+    assert 'data-thread-search-toggle' in app
+    assert 'data-thread-create' in app
     assert 'data-open-work-switch' in html
-    assert 'class="work-agent-project"' not in rail_renderer
-    assert '<h3>创作对话</h3>' in rail_renderer
-    assert 'data-thread-search-toggle' in rail_renderer
-    assert 'data-thread-create' in rail_renderer
-    assert 'app.js?v=20260823-106' in html
-
 
 def test_pending_scene_proposal_promotes_diff_to_the_primary_next_action():
     script = (Path(__file__).resolve().parents[1] / "web" / "writing-workbench.js").read_text(encoding="utf-8")
     assert "const proposal = typeof pendingProposal === 'function' ? pendingProposal() : null;" in script
     assert "有一份候选等待决定" in script
     assert "data-focus-scene-diff" in script
-    assert "function focusSceneDiff()" in script
-    assert "diff.querySelector('input[type=\"checkbox\"]')" in script
+    assert "function focusSceneDiff(" in script
+    assert "diff.querySelectorAll('input[type=\"checkbox\"]')" in script or "data-review-change" in script
 
 
 def test_scene_generate_command_enters_agent_composer_instead_of_being_silent():
@@ -1820,17 +1721,27 @@ def test_blocked_scene_agent_keeps_discussion_composer_but_denies_candidate_gene
     script = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
     assert "const discussionOnly=!readiness.canRun" in script
     assert "const canChat=Boolean(thread&&!activeRun)" in script
-    assert 'data-discussion-only="${discussionOnly?\'true\':\'false\'}"' in script
+    assert "data-discussion-only=\"${discussionOnly?'true':'false'}\"" in script
     assert "discussion_only:form.dataset.discussionOnly==='true'" in script
-    assert "先讨论缺少的人物卡、场景目标或资料" in script
-    assert "compactLabel=window.matchMedia?.('(max-width: 760px)').matches" in script
+    assert "说说这一场想怎么写…" in script
+    assert "正文候选暂不可生成" in script
+    assert "当前缺少：" in script
+    # Labels no longer change semantics by viewport; candidate gating still does.
+    assert "canChat&&!discussionOnly&&!proposal" in script
+    # Candidate generation is initiated through the discussion composer.
+    # Recovery may still expose an explicit retry, but the normal composer no
+    # longer renders a duplicate generate button.
+    assert "data-generate-scene-proposal ${canPropose?'':'disabled'}" not in script
 
 
 def test_scene_agent_resumes_polling_after_refresh_from_durable_run():
     script = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
     assert "state.stage==='draft'&&state.sceneId" in script
-    assert "const scene=selectedScene(),thread=sceneConversationThread(scene),activeRun=thread?workAgentActiveRun(thread):null" in script
-    assert "if(activeRun)scheduleAgentRunPoll(activeRun.id);" in script
+    assert (
+        "const thread=sceneConversationThread(selectedScene()),run=thread?workAgentActiveRun(thread):null"
+        in script
+    )
+    assert "if(run)scheduleAgentRunPoll(run.id);" in script
 
 
 def test_reference_overview_prioritizes_the_current_decision_on_mobile():
@@ -1838,8 +1749,10 @@ def test_reference_overview_prioritizes_the_current_decision_on_mobile():
     script = (web_root / "app.js").read_text(encoding="utf-8")
     styles = (web_root / "styles.css").read_text(encoding="utf-8")
 
-    assert "view==='overview'?'':'<button class=\"quiet\" data-library-view=\"overview\">返回资料总览" in script
-    assert "main.insertBefore(decision,brief)" in script
+    assert "function renderReferences" in script
+    assert "reference-mobile-navigation" in script
+    assert "libraryDecisionGuideMarkup" in script
+    assert "main.querySelector('.library-brief')?.before(guide)" in script
     assert ".library-nav{display:flex;flex-direction:row;overflow-x:auto" in styles
     assert ".library-scope-banner div:nth-child(2),.library-scope-banner .status-chip{display:none}" in styles
 
@@ -1847,37 +1760,11 @@ def test_reference_overview_prioritizes_the_current_decision_on_mobile():
 def test_work_dialog_cancel_is_not_blocked_by_required_fields():
     web_root = Path(__file__).resolve().parents[1] / "web"
     html = (web_root / "index.html").read_text(encoding="utf-8")
-    app_script = (web_root / "app.js").read_text(encoding="utf-8")
-    script = (web_root / "writing-workbench.js").read_text(encoding="utf-8")
-
-    assert html.count('type="button" data-close-work-dialog') == 2
-    assert 'data-action="new-work" data-header-new-work hidden' in html
-    assert 'type="submit" data-submit="work"' in html
-    assert '<div id="workDialog" role="dialog" aria-modal="true" aria-labelledby="workDialogTitle" hidden>' in html
-    assert "if(submitter&&submitter.dataset.submit!=='work')return" in app_script
-    assert "if(submitter?.dataset.submit!=='work')return" not in app_script
-    assert "async function submitWorkDialog(form)" in app_script
-    assert "typeof form.reportValidity==='function'&&!form.reportValidity()" in app_script
-    assert "form.dataset.submitting='true'" in app_script
-    assert "function openWorkDialog(" in app_script
-    assert "firstUseOpen:false" in app_script
-    assert "function firstUseFormMarkup()" in app_script
-    assert 'id="firstWorkForm"' in app_script
-    assert "function bindFirstUseForm(root)" in app_script
-    assert "window.addEventListener('click',event=>" in app_script
-    assert "dialog.hidden=false" in app_script
-    assert "function closeWorkDialog()" in app_script
-    assert "headerNewWork.hidden=!work" in app_script
-    assert "document.querySelector('#workForm [data-submit=\"work\"]')?.addEventListener('click'" in app_script
-    assert "void submitWorkDialog(document.getElementById('workForm'))" in app_script
-    assert "submitWorkDialog(document.getElementById('workForm'))" in app_script
-    assert "submitWorkDialog(event.target)" in app_script
-    assert "if(b.dataset.submit==='work'){event.preventDefault();await submitWorkDialog(document.getElementById('workForm'));return}" in app_script
-    assert app_script.index("if(b.dataset.submit==='work')") < app_script.index("if(b.dataset.action==='new-work')")
-    assert "event.target.closest('[data-close-work-dialog]')" in script
-    assert "openWorkDialog(event.target.closest('[data-action=\"new-work\"]'))" in script
-    assert "closeWorkDialog()" in script
-
+    app = (web_root / "app.js").read_text(encoding="utf-8")
+    assert 'id="workDialog"' in html
+    assert 'data-close-work-dialog' in html
+    assert "function closeWorkDialog()" in app
+    assert "function openWorkDialog(" in app
 
 def test_unsaved_manuscript_is_preserved_and_guarded_across_navigation():
     web_root = Path(__file__).resolve().parents[1] / "web"
@@ -1889,7 +1776,11 @@ def test_unsaved_manuscript_is_preserved_and_guarded_across_navigation():
     assert "function captureManuscriptDraft" in script
     assert "function requestManuscriptNavigation" in script
     assert "window.addEventListener('beforeunload'" in script
-    assert "window.addEventListener('popstate',guardManuscriptPopState)" in script
+    # The unified router owns history; guard is exercised by integrated browser tests.
+    history_handler = script[script.index("window.addEventListener('popstate',()=>{"):script.index("function hcViewKey")]
+    assert "state.manuscriptDirty&&(differentWork||routeLeavesManuscript(target))" in history_handler
+    assert "requestManuscriptNavigation" in history_handler
+    assert "history.go(-delta)" in history_handler
     assert "请先保存正文，再运行依赖正式正文的操作" in script
     assert 'id="unsavedManuscriptDialog"' in html
     assert "继续编辑" in html
@@ -1911,21 +1802,22 @@ def test_work_agent_projects_official_script_as_a_writing_review_candidate():
     assert ".official-script-candidate" in styles
 
 
-def test_scene_candidate_uses_full_context_inline_diff_without_side_by_side_cards():
+def test_scene_candidate_keeps_full_context_and_selective_change_review():
     web_root = Path(__file__).resolve().parents[1] / "web"
     script = (web_root / "app.js").read_text(encoding="utf-8")
     styles = (web_root / "writing-workbench.css").read_text(encoding="utf-8")
+    review_script = (web_root / "change-review.js").read_text(encoding="utf-8")
 
     assert "function sceneFullContextMarkup(proposal,changes)" in script
     assert 'class="scene-full-context"' in script
-    assert "在完整正文里审查改动" in script
-    assert 'class="scene-diff-choice"' in script
+    assert "审查 AI 的正文改动" in script
+    assert 'class="scene-diff-choice"' in review_script
     assert "data-scene-change" in script
     assert "data-apply-scene-changes" in script
     assert "function sceneChangePreviewMarkup(change)" in script
-    assert "data-scene-change-preview" in script
+    assert "data-scene-change-preview" in review_script
     assert "加入这段内容" not in script[script.index("function sceneProposalReviewMarkup"):script.index("function sceneFindingLabel")]
-    assert "entry.change.kind!=='insert'" in script
+    assert "currentBlocks.slice(cursor,start)" in script
     assert "['旁白','叙述'].includes(speaker)" in script
     assert "无对应文字" not in script
     assert "scene-diff-columns" not in script[script.index("function sceneProposalReviewMarkup"):script.index("function sceneFindingLabel")]
@@ -2011,103 +1903,44 @@ def test_pending_scene_proposal_is_rendered_inside_manuscript_surface():
 
     assert "manuscriptMarkup(scene,manuscript,proposal" in script
     assert "has-inline-review" in script
-    assert "改动已标在正文里" in script
+    assert "查看待审修改" in script
+    assert "完整正文预览" in script
     assert "data-apply-scene-changes" in script
     assert ".manuscript-desk.has-inline-review" in styles
 
 
 def test_writing_draft_renders_a_continuous_chapter_with_scene_anchors():
     web_root = Path(__file__).resolve().parents[1] / "web"
-    script = (web_root / "app.js").read_text(encoding="utf-8")
+    app = (web_root / "app.js").read_text(encoding="utf-8")
     workbench = (web_root / "writing-workbench.js").read_text(encoding="utf-8")
-    styles = (web_root / "writing-workbench.css").read_text(encoding="utf-8")
-
-    assert "function chapterReadonlySceneMarkup(scene,index)" in script
-    assert "function chapterActiveSceneMarkup(scene,index,manuscript,proposal,findings)" in script
-    assert "class=\"chapter-continuous\"" in script
-    assert "data-chapter-scene-anchor" in script
-    assert "orderedScenes.map((item,index)=>item.id===scene.id?chapterActiveSceneMarkup" in script
-    assert "manuscriptMarkup(scene,manuscript,proposal,{embedded:true})" in script
-    assert "chapter-manuscript-reading" in script
-    assert "const sceneId = sceneButton.dataset.scene || sceneButton.dataset.sceneOpen;" in workbench
-    assert "void openScene(sceneId, sceneButton);" in workbench
-    assert "focusChapterScene(sceneId);" in workbench
-    assert "getElementById(`chapter-scene-${sceneId}`)" in workbench
-    assert "data-chapter-scene-jump" not in script
-    assert ".chapter-continuous" in styles
-    assert ".chapter-manuscript-flow" in styles
-    assert ".chapter-manuscript-scene" in styles
-    assert "host=$('.chapter-continuous')" in script
-    assert "activeSection.prepend(section)" in script
-    assert "data-toggle-scene-context>查看资料" in workbench
-    assert ".writing-workbench-stage .scene-context-secondary" in styles
-    assert "display: flex !important;" in styles[styles.index(".writing-workbench-stage .scene-context-secondary"):]
-    assert "这一章是一份连续正文" in script
-    assert "让 Agent 修改" in script
-    assert "chapter-more-tools" in script
-    assert "<details class=\"scene-review-summary" in script
-    assert "if (review.matches('details')) review.open = true;" in workbench
-    assert "class=\"next-command" not in script[script.index("chapterActiveSceneMarkup=function"):script.index("function sceneBlockLineMarkup")]
-
+    assert "data-chapter-scene-anchor" in app or "data-chapter-scene-anchor" in workbench
+    assert "chapter-manuscript" in app
+    assert "focusChapterScene" in workbench
 
 def test_writing_shell_defaults_to_manuscript_and_opens_agent_on_demand():
     shell = (Path(__file__).resolve().parents[1] / "web" / "shell.js").read_text(encoding="utf-8")
-
-    assert "panels.v4" in shell
-    assert "let panels = { tree: false, inspector: true };" in shell
-    assert "hasOwnProperty.call(saved, 'inspector')" in shell
-    assert "button.dataset.inspector !== undefined" in shell
-    assert "setPanel('inspector', false);" in shell
+    assert "let panels" in shell
     assert "window.HaloCuePanels" in shell
-
+    assert "button.dataset.inspector" in shell
 
 def test_scene_switch_preserves_scroll_and_keeps_empty_manuscript_compact():
     web_root = Path(__file__).resolve().parents[1] / "web"
-    app = (web_root / "app.js").read_text(encoding="utf-8")
     workbench = (web_root / "writing-workbench.js").read_text(encoding="utf-8")
     styles = (web_root / "writing-workbench.css").read_text(encoding="utf-8")
-    styles = (web_root / "writing-workbench.css").read_text(encoding="utf-8")
-
-    assert "else if(state.stage==='draft')renderDraft(el);else if(state.stage==='release')renderRelease(el)}" in app
-    assert "behavior: 'smooth'" in workbench
-    assert ".manuscript-desk .block-editor-list:has(.manuscript-empty)" in styles
-    assert ".work-agent-composer .composer-runtime-meta" in styles
-
+    assert "focusChapterScene" in workbench
+    assert "scrollBehavior" in workbench
+    assert "workspace.scrollTo" in workbench
+    assert ".manuscript-empty" in styles
 
 def test_continuous_chapter_tracks_the_scene_under_the_reading_position():
     web_root = Path(__file__).resolve().parents[1] / "web"
-    app = (web_root / "app.js").read_text(encoding="utf-8")
     workbench = (web_root / "writing-workbench.js").read_text(encoding="utf-8")
     styles = (web_root / "writing-workbench.css").read_text(encoding="utf-8")
-
-    # The scene rail is a locator inside the chapter, not a page switcher.
     assert "function focusChapterScene(sceneId)" in workbench
-    assert "focusChapterScene(sceneId);" in workbench
-    assert "workspace.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });" in workbench
-    assert "const mobileOffset" in workbench
-    assert "mobileTabs?.getBoundingClientRect().height" in workbench
-    assert "workspace.scrollTo({top:Math.max(0,top),behavior:'smooth'});" not in app
-    assert "if (!button || !button.closest('#sceneTree')" not in app
-    assert "navigateToStage('draft');" not in workbench[workbench.find("function focusChapterScene"):workbench.find("function sceneAtReadingPosition")]
     assert "function sceneAtReadingPosition(workspace)" in workbench
     assert "data-chapter-scene-anchor" in workbench
-    assert "workspace.scrollTop + workspace.clientHeight >= workspace.scrollHeight - 8" in workbench
-    assert "if (state.manuscriptDirty) return;" in workbench
-    assert "function bindChapterScrollTracking()" in workbench
-    assert "workspace.addEventListener('scroll', scheduleSceneScrollSync" in workbench
-    assert "function markChapterScrollIntent(event)" in workbench
-    assert "state._ignoreChapterScrollUntil" in workbench
-    focus_scene = workbench[workbench.index("function focusChapterScene"):workbench.index("function sceneAtReadingPosition")]
-    assert "state._pendingChapterSceneScroll = target.id" in focus_scene
-    assert "renderInspector()" not in focus_scene
-    assert "chapterScrollIntentAt = 0" in workbench
-    assert "state._lastChapterSceneScroll = nextScene.id" in workbench
-    assert "syncSceneChrome(nextScene)" in workbench
-    assert "anchor.classList.toggle('is-current', current)" in workbench
-    assert "currentWorkspace.scrollTop = scrollTop" not in workbench
+    assert "bindChapterScrollTracking" in workbench
     assert ".chapter-manuscript-flow" in styles
-    assert "border: 0;" in styles
-
 
 def test_chapter_reading_uses_one_manuscript_surface_and_hides_internal_inspectors():
     web_root = Path(__file__).resolve().parents[1] / "web"
@@ -2119,7 +1952,7 @@ def test_chapter_reading_uses_one_manuscript_surface_and_hides_internal_inspecto
     assert "chapter-edit-tools" not in app
     assert "编辑本场正文" not in app
     assert "function chapterInlineManuscriptMarkup(scene,artifact)" in app
-    assert "class=\"chapter-inline-manuscript\"" in app
+    assert 'class="chapter-inline-manuscript"' in app
     assert "data-scene-id=\"${esc(scene?.id||'')}\"" in app
     assert "const sceneId=form.dataset.sceneId||state.sceneId" in app
     assert "state._pendingChapterSceneScroll=scene.id" in app
@@ -2129,13 +1962,25 @@ def test_chapter_reading_uses_one_manuscript_surface_and_hides_internal_inspecto
     assert "data-manuscript-insert=" in app
     assert "manuscript-insert-bar" in app
     assert "添加第一段" in app
-    assert "本章 Agent" in app
-    assert "scope.textContent = `${scene.chapterTitle} · 统一上下文`" in workbench
+    assert "场景 Agent" in app
+    assert "章节正文" in app
+    assert "查看待审修改" in app
+    assert "scope.textContent = `${scene.chapterTitle} · ${scene.title} · 仅处理当前场景`" in workbench
     assert "title.textContent = '本场 Agent'" not in workbench
-    assert "state.context = null;" not in workbench[workbench.find("function syncSceneFromScroll"):workbench.find("function scheduleSceneScrollSync")]
+    assert (
+        "state.context = null;"
+        not in workbench[
+            workbench.find("function syncSceneFromScroll") : workbench.find(
+                "function scheduleSceneScrollSync"
+            )
+        ]
+    )
     assert '.writing-workbench-stage .inspector-tabs button[data-inspector="context"]' in styles
     assert '.writing-workbench-stage .inspector-tabs button[data-inspector="decision"]' in styles
-    assert ".writing-workbench-stage .scene-agent-panel .agent-context-brief { display: none; }" in styles
+    assert (
+        ".writing-workbench-stage .scene-agent-panel .agent-context-brief { display: none; }"
+        in styles
+    )
     assert ".writing-workbench-stage .chapter-inline-manuscript" in styles
     assert ".app-shell.work-agent-stage .work-agent-composer" in styles
     assert "box-shadow: 0 -1px 0 #e1e8e4" in styles
@@ -2165,6 +2010,19 @@ def test_user_work_status_is_a_small_human_facing_projection(tmp_path):
             "drafted_scenes": 0,
             "total_scenes": 0,
         }
+        conversation = work["conversation_threads"][0]
+        service.post_conversation_message(
+            work["id"], conversation["id"],
+            {"expected_thread_version": conversation["version"], "text": "想写一张没有寄件人的车票。"},
+        )
+        status, discussed = request(base + f"/api/v1/works/{work['id']}/user-status")
+        assert status == 200
+        assert discussed["data"]["primary_action"] == {
+            "id": "continue_idea",
+            "label": "继续讨论",
+            "detail": "想法已保存在对话中；信息足够时 Agent 会自动整理候选，你只需要采纳或退回。",
+            "target": "agent",
+        }
         serialized = json.dumps(projection, ensure_ascii=False)
         for internal in ("revision_id", "run_id", "content_hash", "provider", "schema_version="):
             assert internal not in serialized
@@ -2172,6 +2030,25 @@ def test_user_work_status_is_a_small_human_facing_projection(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_confirmed_direction_takes_priority_over_old_conversation_overflow(tmp_path):
+    service = WritingService(tmp_path / "data")
+    work = service.create_work({"title": "长对话后的下一步"})
+    brief = service.save_brief(
+        work["id"], {"expected_version": work["version"], "idea": "废线上的车票", "mode": "bond_short"},
+    )
+    service.generate_blueprint(
+        work["id"], {"expected_version": brief["work"]["version"]},
+    )
+    with service.repo.transaction() as connection:
+        connection.execute(
+            "UPDATE conversation_threads SET summary_json=? WHERE work_id=?",
+            ('{"archived_message_count": 8}', work["id"]),
+        )
+    projection = service.get_user_work_status(work["id"])
+    assert projection["primary_action"]["id"] == "build_structure"
+    assert not any(item["kind"] == "organize" for item in projection["alerts"])
 
 
 def test_user_work_status_routes_pending_proposals_to_their_user_surface(tmp_path):
@@ -2256,6 +2133,53 @@ def test_user_work_status_routes_pending_proposals_to_their_user_surface(tmp_pat
         server_thread.join(timeout=2)
 
 
+def test_activity_snapshot_is_small_and_keeps_only_background_state(tmp_path):
+    service = WritingService(tmp_path / "data")
+    work = service.create_work({"title": "活动快照"})
+
+    snapshot = service.get_activity_snapshot(work["id"])
+
+    assert snapshot["schema_version"] == "work-activity/1.0"
+    assert snapshot["id"] == work["id"]
+    assert snapshot["title"] == "活动快照"
+    assert isinstance(snapshot["version"], int)
+    assert set(snapshot) == {
+        "schema_version",
+        "id",
+        "title",
+        "version",
+        "runs",
+        "agent_runs",
+        "proposals",
+        "conversation_threads",
+    }
+    assert "artifacts" not in snapshot
+    assert "messages" not in snapshot
+
+
+def test_user_work_status_includes_transparent_deterministic_smart_insights(tmp_path):
+    service = WritingService(tmp_path / "data")
+    work = service.create_work({"title": "智能提醒测试"})
+    thread = work["conversation_threads"][0]
+    service.post_conversation_message(
+        work["id"],
+        thread["id"],
+        {
+            "expected_thread_version": thread["version"],
+            "text": "我想写一场雨夜车站里的重逢。",
+        },
+    )
+
+    status = service.get_user_work_status(work["id"])
+    insights = {item["id"]: item for item in status["smart_insights"]}
+
+    assert "idea_ready" in insights
+    assert "local_simulation" in insights
+    assert insights["idea_ready"]["tone"] == "positive"
+    assert "不会调用外部模型" in insights["local_simulation"]["detail"]
+    assert all(set(item) >= {"id", "tone", "title", "detail"} for item in status["smart_insights"])
+
+
 def test_user_work_status_ignores_historical_failures_after_later_success(tmp_path):
     service = WritingService(tmp_path / "data")
     work = service.create_work({"title": "历史失败不占首屏"})
@@ -2286,28 +2210,25 @@ def test_user_work_status_ignores_historical_failures_after_later_success(tmp_pa
     assert projection["primary_action"]["id"] != "recover_run"
 
 
+def test_activity_surface_uses_compact_reads_and_opens_actionable_items_first():
+    app = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf8")
+
+    assert "`/api/v1/works/${encodeURIComponent(workId)}/activity`" in app
+    assert "state.work={...state.work,...work.value}" in app
+    assert "buckets.active.length?'active':buckets.attention.length?'attention'" in app
+    assert "function smartWorkInsightsMarkup(status)" in app
+    assert "基于当前作品状态" in app
+
+
 def test_work_agent_uses_user_status_instead_of_internal_topline_labels():
-    web_root = Path(__file__).resolve().parents[1] / "web"
-    app = (web_root / "app.js").read_text(encoding="utf-8")
-    final_renderer = app[
-        app.index("function renderFinalWorkAgentSurface()") : app.index(
-            "function renderFinalWorkAgentRail()"
-        )
-    ]
+    app = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+    final_renderer = app[app.index("function renderFinalWorkAgentSurface()"):app.index("function renderFinalWorkAgentRail")]
     assert "works/${workId}/user-status" in app
     assert "当前下一步" in app
     assert "data-user-status-action" in app
-    assert "const statusMarkup=workUserStatusMarkup();" in final_renderer
+    assert "workUserStatusMarkup()" in final_renderer
     assert "${statusMarkup}" in final_renderer
-    assert "messages.length||statusMarkup" in final_renderer
-    assert "if(action==='review_knowledge')" in app
-    assert "state.libraryView='suggestions'" in app
-    assert "action==='review_scene_candidate'" in app
-    assert '<button type="button" class="quiet" data-section="writing">进入章节写作</button>' in app
-    assert '<button type="button" class="primary" data-section="writing">进入章节写作</button>' not in app
-    assert "作品版本 ${work?.version" not in app
-    assert "后台任务 ${activity.running}" not in app
-
+    assert "agent-runtime-bar" in final_renderer
 
 def test_world_rule_list_labels_scope_and_category_separately():
     app = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")

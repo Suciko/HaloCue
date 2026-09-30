@@ -144,9 +144,11 @@ def test_shipping_prose_import_review_adoption_freeze_handoff(tmp_path, monkeypa
             panel.get_by_role("button", name="采纳到此场景", exact=True).click()
             panel.get_by_role("button", name="查看正式场景", exact=True).wait_for(timeout=10000)
             assert provider.calls == 1
+            scene_id = panel.get_by_role("button", name="查看正式场景", exact=True).get_attribute("data-adaptation-scene")
             panel.get_by_role("button", name="查看正式场景", exact=True).click()
-            page.locator("#sceneManuscriptForm").wait_for(state="visible")
-            assert page.evaluate("state.surface==='writing'&&state.stage==='draft'")
+            pw.expect(page.locator("#app")).to_have_attribute("data-surface", "writing")
+            pw.expect(page.locator(".chapter-authoring-scene")).to_be_visible()
+            assert page.evaluate("id=>state.sceneId===id&&state.stage==='draft'", scene_id)
             assert not errors, errors
             browser.close()
         writing.agent_dispatcher.close()
@@ -199,6 +201,8 @@ def test_first_work_prose_save_links_to_existing_direction_conversation(tmp_path
             page.add_init_script("localStorage.setItem('halocue:onboarding:interface-v2','done')")
             page.goto(f"http://127.0.0.1:{server.server_port}/")
             page.wait_for_load_state("networkidle")
+            # Project-first landing retains the empty creation/import path.
+            page.locator('.primary-nav [data-creation-entry]').click()
             page.get_by_role("button", name="导入已有内容", exact=True).click()
             aap = {
                 "ProjectName": "Synthetic AA",

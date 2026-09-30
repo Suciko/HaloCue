@@ -1,9 +1,16 @@
 .production-module-host {
+  /* This container receives programmatic focus when entering production. */
+  outline: none;
   display: none;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: #f5f6f8;
+  background: var(--surface, #fff);
+}
+
+.production-module-host:focus,
+.production-module-host:focus-visible {
+  outline: none;
 }
 
 .production-module-host[aria-busy="true"]::before {
@@ -49,25 +56,24 @@ body:has(.app-shell.production-mode) #saveStatus {
 
 .app-shell.production-mode .primary-nav [data-section] {
   background: transparent !important;
-  color: #9cb5ab !important;
+  color: var(--nav-muted, #9aa8b8) !important;
   font-weight: 500 !important;
   box-shadow: none !important;
 }
 
 .app-shell.production-mode .primary-nav [data-section="production"] {
-  background: rgba(255, 255, 255, 0.13) !important;
+  background: var(--nav-active, #355f94) !important;
   color: #ffffff !important;
   font-weight: 600 !important;
-  box-shadow: inset 2px 0 0 #64c8a8 !important;
+  box-shadow: inset 3px 0 0 #8fb9e8 !important;
 }
 
-/* Production has its own stage flow and contextual asset/task actions. Keep
-   the rail focused on moving between writing and production instead of
-   repeating the low-frequency destinations already available in “更多”. */
+/* Shared destinations stay available while production is embedded. The
+   writing router owns these transitions and their unsaved-change guard. */
 .app-shell.production-mode .primary-nav .nav-item[data-section="assets"],
 .app-shell.production-mode .primary-nav .nav-item[data-section="references"],
 .app-shell.production-mode .primary-nav .nav-item[data-section="tasks"] {
-  display: none;
+  display: flex !important;
 }
 
 .app-shell.production-mode .crumb {
@@ -79,6 +85,8 @@ body:has(.app-shell.production-mode) #saveStatus {
   align-items: center;
   gap: 7px;
 }
+
+.production-top-actions [hidden] { display:none !important; }
 
 .production-top-actions .quiet {
   min-height: 32px;
@@ -913,7 +921,7 @@ body:has(.app-shell.production-mode) #saveStatus {
 
 .embedded-production-shell .page {
   width: min(100%, 1180px);
-  max-width: 1180px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 34px 34px 46px;
 }
@@ -1213,6 +1221,27 @@ body:has(.app-shell.production-mode) #saveStatus {
 
 .embedded-production-shell .draft-card {
   border-radius: 5px;
+}
+
+/* Native Production review parity is recomposed inside the writing workbench:
+   controls and timeline stay in the left column, while preview stays visible. */
+.embedded-production-shell #page-review.production-native-review-parity .review-column {
+  min-width: 0;
+}
+
+.embedded-production-shell #page-review.production-native-review-parity .selected-card-toolbar {
+  position: static;
+  top: auto;
+  margin-bottom: 12px;
+}
+
+.embedded-production-shell #page-review.production-native-review-parity .background-timeline {
+  margin-bottom: 12px;
+}
+
+.embedded-production-shell #page-review.production-native-review-parity .card-list .draft-card {
+  width: calc(100% - 20px);
+  text-align: left;
 }
 
 .embedded-production-shell .draft-card:hover,
@@ -1834,7 +1863,7 @@ body:has(.app-shell.production-mode) #saveStatus {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0;
-  max-width: 1240px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 0 30px;
 }
@@ -1940,12 +1969,12 @@ body:has(.app-shell.production-mode) #saveStatus {
 
 .embedded-production-shell > .workspace > .page {
   display: none;
-  width: min(1240px, 100%);
+  width: min(1400px, 100%);
   min-height: 0;
   flex: 1 1 auto;
   overflow: auto;
   margin: 0 auto;
-  padding: 25px 30px 34px;
+  padding: 28px 36px 36px;
 }
 .embedded-production-shell > .workspace > .page.active { display: block; }
 
@@ -2196,6 +2225,67 @@ body:has(.app-shell.production-mode) #saveStatus {
   flex: 0 0 auto;
 }
 
+/* Native review follows the 0.95 continuous document. A fixed-height
+   overflow:hidden left column made every card below the timeline unreachable
+   at shorter window heights or browser zoom. Only the page owns left scrolling. */
+:host .embedded-production-shell > .workspace > #page-review.production-native-review-parity.active {
+  display: block !important;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-padding: 20px;
+}
+:host .embedded-production-shell #page-review.production-native-review-parity .review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px) !important;
+  align-items: start;
+  overflow: visible;
+  height: auto;
+}
+:host .embedded-production-shell #page-review.production-native-review-parity .review-column,
+:host .embedded-production-shell #page-review.production-native-review-parity #cardList {
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+}
+:host .embedded-production-shell #page-review.production-native-review-parity .review-side-rail {
+  position: sticky;
+  top: 16px;
+  align-self: start;
+  grid-template-rows: max-content max-content;
+  align-content: start;
+  max-height: calc(100dvh - 180px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+:host .embedded-production-shell #page-review.production-native-review-parity .review-side-rail > .inspector {
+  height: auto;
+  min-height: min-content;
+  max-height: none;
+  overflow: visible;
+}
+:host .embedded-production-shell #page-review.production-native-review-parity .filterbar {
+  flex-wrap: wrap;
+  border-radius: 10px 10px 0 0;
+}
+:host .embedded-production-shell #page-review.production-native-review-parity .buildbar {
+  margin: 18px 0 0;
+}
+@media (max-width: 800px) {
+  :host .embedded-production-shell > .workspace > #page-review.production-native-review-parity.active {
+    overflow: visible;
+  }
+  :host .embedded-production-shell #page-review.production-native-review-parity .review-layout {
+    display: block;
+  }
+  :host .embedded-production-shell #page-review.production-native-review-parity .review-side-rail {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    margin-top: 18px;
+  }
+}
+
 @media (max-width: 800px) {
   .embedded-production-shell { overflow: auto !important; }
   .embedded-production-shell > .workspace { height: auto; min-height: 100%; overflow: visible !important; }
@@ -2405,5 +2495,903 @@ body:has(.app-shell.production-mode) #saveStatus {
     display: block;
     min-height: calc(100dvh - 24px);
     overflow: auto;
+  }
+}
+
+.app-shell.production-mode > .production-module-host {
+  border-left: 1px solid var(--line, #dfe4ea);
+  background: var(--surface, #fff);
+}
+
+/* ========================================================================
+   Phase 2 — canonical light components (2026-09-15).
+   This file is loaded in BOTH the document and the production ShadowRoot.
+   :host targets the ShadowRoot, including dialogs that are siblings of the
+   embedded shell. Preview imagery/dialogue overlays deliberately keep their
+   stage styling; no universal background reset, filter, or brightness hack.
+   ======================================================================== */
+:host {
+  color-scheme: light;
+  --font-ui: var(--hc-font-ui, "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei UI", "PingFang SC", sans-serif);
+  --font-reading: var(--font-ui);
+  --ink: var(--hc-ink, #253247);
+  --ink-2: #394b63;
+  --muted: var(--hc-muted, #64748b);
+  --paper: #fff;
+  --paper-sidebar: #f8fafc;
+  --canvas: var(--hc-canvas, #f5f7fa);
+  --surface: var(--hc-surface, #fff);
+  --surface-soft: var(--hc-surface-soft, #f8fafc);
+  --line: var(--hc-line, #dfe5ed);
+  --line-strong: #c8d3e2;
+  --accent: var(--hc-action, #2f65a5);
+  --accent-hover: var(--hc-action-hover, #25568e);
+  --accent-soft: var(--hc-action-soft, #edf2fa);
+  --green: var(--accent); /* Legacy primary buttons use --green. */
+  --green-hover: var(--accent-hover);
+  --green-soft: var(--accent-soft);
+  --success: var(--hc-success, #267252);
+  --success-soft: var(--hc-success-soft, #edf7f1);
+  --warn: var(--hc-warning, #8a5b14);
+  --warn-soft: var(--hc-warning-soft, #fff7e7);
+  --danger: var(--hc-danger, #ad4545);
+  --danger-soft: var(--hc-danger-soft, #fff1f1);
+  --production-ink: var(--ink);
+  --production-muted: var(--muted);
+  --production-line: var(--line);
+  --production-blue: var(--accent);
+  --production-blue-soft: var(--accent-soft);
+  --shadow: 0 3px 12px rgb(35 50 71 / 5%);
+  --component-radius: 12px;
+  --control-radius: 8px;
+  background: var(--canvas);
+  color: var(--ink);
+  font: 14px/1.6 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+:host *, :host *::before, :host *::after { box-sizing: border-box; }
+:host [hidden] { display: none !important; }
+:host :is(h1,h2,h3,h4,h5,p,small,label,button,input,select,textarea) { font-family: var(--font-ui); letter-spacing: 0; }
+:host :is(button, input, select, textarea, summary, [role="button"]):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+:host .embedded-production-shell { background: var(--canvas); }
+:host .embedded-production-shell > .workspace { background: var(--canvas); }
+:host .embedded-production-shell > .workspace > .topbar { background: #fff; border-bottom: 1px solid var(--line); box-shadow: none; }
+:host .embedded-production-shell .production-flow-strip { background: #fff; border-color: var(--line); box-shadow: 0 2px 8px #25324704; }
+:host .embedded-production-shell .production-flow-strip .stage-list li { margin: 6px 3px; min-height: 58px; border-radius: 9px; border-bottom-width: 2px; }
+:host .embedded-production-shell .production-flow-strip .stage-list li.active { background: var(--accent-soft); border-bottom-color: var(--accent); }
+:host .embedded-production-shell .production-flow-strip .stage-list li.done b { border-color: var(--success); background: var(--success); }
+:host .embedded-production-shell .page-lead h3, :host .embedded-production-shell .review-head h3 { font-weight: 650; letter-spacing: -.02em; }
+/* Buttons: action blue, destructive red, success remains a status, not an action. */
+:host button { min-height: 34px; padding: 7px 12px; border: 1px solid var(--line-strong); border-radius: var(--control-radius); background: #fff; color: var(--ink); font: 500 12px/1.5 var(--font-ui); box-shadow: none; cursor: pointer; }
+:host button:hover:not(:disabled) { border-color: #9fb9db; background: var(--accent-soft); color: var(--accent); }
+:host button.primary, :host .embedded-production-shell button.primary { background: var(--accent); border-color: var(--accent); border-radius: var(--control-radius); color: #fff; font-weight: 600; box-shadow: none; }
+:host button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+:host :is(button.danger, button.danger-button, button[data-destructive]) { border-color: #e7c1c1; background: var(--danger-soft); color: var(--danger); }
+:host :is(button.danger,button.danger-button):hover:not(:disabled) { border-color: var(--danger); background: #ffe4e4; color: var(--danger); }
+:host button.text-button { border-color: transparent; background: transparent; color: var(--accent); }
+:host button:disabled { opacity: .46; cursor: not-allowed; box-shadow: none; }
+:host button.icon-button { min-width: 34px; padding: 4px 8px; border-radius: 8px; }
+:host :is(.filterbar,.card-filter-tabs) button.active { background: var(--accent-soft); border-color: #b0c6e2; color: var(--accent); }
+/* Shared cards and binding surfaces. Keep layouts/data attributes untouched. */
+:host :is(.source-mode-selector,.source-form,.recent-runs,.mapping-focus,.mapping-support-panel,.preflight-panel,.task-preflight-panel,.ai-preflight-panel,.ai-preflight-decision-surface,.action-panel,.gate-card,.review-column,.inspector,.request-card-editor,.generation-controls,.generation-job,.production-live-preview,.production-background-timeline,.production-review-side,.writing-release-card) {
+  background: #fff; border: 1px solid var(--line); border-radius: var(--component-radius); box-shadow: 0 2px 8px #25324704; color: var(--ink);
+}
+:host :is(.preflight-panel,.task-preflight-panel,.ai-preflight-panel,.mapping-focus,.action-panel,.recent-runs) { padding: 20px; }
+:host :is(.preflight-head,.task-preflight-head,.ai-preflight-head,.ai-preflight-decision-footer,.preflight-next,.task-preflight-next) { border-color: var(--line); }
+:host :is(.preflight-grid,.task-preflight-grid,.ai-preflight-grid,.ai-preflight-decision-grid) { gap: 12px; }
+:host :is(.preflight-grid,.task-preflight-grid,.ai-preflight-grid,.ai-preflight-decision-grid) > article { min-width: 0; padding: 15px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); box-shadow: none; }
+:host :is(.preflight-grid,.task-preflight-grid,.ai-preflight-grid) > article { border-top: 3px solid #bfd0e7; }
+:host :is(.preflight-grid,.task-preflight-grid,.ai-preflight-grid) > article.has-issues,
+:host .ai-preflight-decision-grid > article.has-errors { border-color: #e5bebe; border-top-color: var(--danger); background: var(--danger-soft); }
+:host :is(.preflight-grid,.task-preflight-grid,.ai-preflight-grid) strong { font-family: var(--font-ui); font-size: 21px; font-weight: 650; }
+:host :is(.preflight-status,.mapping-state,.mode-badge,.status-dot,.mapping-focus-hint,.ai-preflight-cast-state,.production-background-tag) { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--surface-soft); color: var(--muted); font: 550 11px/1.5 var(--font-ui); white-space: normal; }
+:host :is(.preflight-status:not(.notice):not(.warning),.mapping-state.ready,.ai-preflight-cast-state.ready,.status-dot.online) { border-color: #b8d8c8; background: var(--success-soft); color: var(--success); }
+:host :is(.preflight-status.notice,.preflight-status.warning,.mapping-state.needs-work,.ai-preflight-cast-state:not(.ready),.mapping-focus-hint) { border-color: #e6d2a6; background: var(--warn-soft); color: var(--warn); }
+:host :is(.mapping-state.missing,.mapping-state.failed,.mapping-state.state-failed,.ai-preflight-scene-state.failed) { border-color: #e5bbbb; background: var(--danger-soft); color: var(--danger); }
+:host .gate-card.pass { border-top: 3px solid var(--success); background: #fff; }
+:host .gate-card.block { border-top: 3px solid var(--danger); background: var(--danger-soft); }
+:host :is(.ai-preflight-alert,.cg-advice-control,.cg-advice) { border: 1px solid #e6d5b3; border-radius: 10px; background: var(--warn-soft); color: var(--warn); }
+:host .ai-preflight-alert.danger { border-color: #e5bebe; background: var(--danger-soft); color: var(--danger); }
+:host :is(.mapping-row,.character-row,.run-row,.task-row,.cg-material-row,.request-row) { min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 13px 15px; background: #fff; color: var(--ink); box-shadow: none; }
+:host .mapping-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr) auto; gap: 16px; }
+:host :is(.mapping-row,.character-row,.run-row,.cg-material-row):hover { border-color: #c2d2e6; background: #fbfcfe; }
+:host :is(.character-row.selected,.cg-material-row.selected) { border-color: #aac3e2; background: var(--accent-soft); }
+:host :is(.mapping-value,.mapping-speaker-cell,.ai-preflight-cast-identity) { min-width: 0; overflow-wrap: anywhere; }
+:host :is(.mapping-value small,.mapping-value,.mapping-row small,.request-row small) { color: var(--muted); }
+:host .mapping-avatar { border-color: var(--line); border-radius: 8px; background: var(--surface-soft); color: var(--muted); }
+:host :is(.ai-preflight-cast-row,.ai-preflight-scene-row) { padding: 12px 0; border-color: var(--line); gap: 10px; }
+:host .ai-preflight-source-summary { border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); }
+:host .draft-card { border-color: var(--line); border-radius: 10px; margin: 10px; background: #fff; color: var(--ink); box-shadow: none; }
+:host .draft-card.selected { border-color: #a6c0e2; background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+:host .draft-card.blocking { border-left: 3px solid var(--danger); }
+:host table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); font: 12px/1.6 var(--font-ui); }
+:host th { padding: 11px 13px; border: 0; border-bottom: 1px solid var(--line); background: var(--surface-soft); color: var(--muted); text-align: left; font-weight: 600; }
+:host td { padding: 12px 13px; border: 0; border-bottom: 1px solid #edf0f5; overflow-wrap: anywhere; }
+:host tr:last-child td { border-bottom: 0; }
+:host tbody tr:hover td { background: #f8fafd; }
+:host th:first-child { border-top-left-radius: 10px; }
+:host th:last-child { border-top-right-radius: 10px; }
+/* Controls include root-level resource/confirmation dialogs, not just shell descendants. */
+:host input:not([type="radio"]):not([type="checkbox"]):not([type="range"]):not([type="file"]), :host select, :host textarea { min-width: 0; max-width: 100%; border: 1px solid #cbd6e5; border-radius: var(--control-radius); background: #fff; color: var(--ink); padding: 9px 11px; font: 13px/1.6 var(--font-ui); box-shadow: none; }
+:host :is(input,select) { accent-color: var(--accent); }
+:host input::placeholder, :host textarea::placeholder { color: #8794a6; }
+:host :is(input,select,textarea):disabled { background: #edf1f6; color: var(--muted); }
+:host :is(.source-form fieldset,.mode-choice,.teacher-presentation-options label) { border-radius: 9px; border-color: var(--line); background: var(--surface-soft); }
+:host .mode-choice:has(input:checked) { background: var(--accent-soft); border-color: #a9c0df; }
+:host .source-tabs { padding: 6px; gap: 4px; border-bottom: 1px solid var(--line); border-radius: 12px 12px 0 0; background: var(--surface-soft); }
+:host .source-tab { border-color: transparent; border-radius: 8px; color: var(--muted); background: transparent; }
+:host .source-tab.active { border-color: var(--line); border-radius: 8px; background: #fff; color: var(--accent); box-shadow: 0 2px 5px #25324706; }
+:host .modern-dropzone { border: 1px dashed #afc4e0; border-radius: 10px; background: #f7faff; color: var(--ink); box-shadow: none; }
+:host :is(.buildbar,.sticky-actions,.dialog-footer) { background: #fff; border-color: var(--line); box-shadow: 0 -3px 10px #25324704; }
+:host dialog { max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line); border-radius: 15px; background: #fff; color: var(--ink); box-shadow: 0 22px 70px #20344d33; font-family: var(--font-ui); overflow: auto; }
+:host dialog:not([open]) { display: none !important; }
+:host dialog::backdrop { background: rgb(26 39 58 / 38%); backdrop-filter: blur(3px); }
+:host :is(.dialog-shell,.task-dialog-shell,.cg-dialog-shell) { background: #fff; color: var(--ink); border-radius: 15px; }
+:host dialog > :is(header,form) { min-width: 0; }
+:host :is(.performance-preview-dialog,.direction-proposals-dialog) { padding: 20px; }
+:host .confirm-dialog { padding: 22px; }
+/* Keep actual staging visuals intact: .preview-stage/.preview-dialogue,
+   .production-preview-frame and image/audio/video elements are not repainted. */
+@media (max-width: 800px) {
+  :host :is(.preflight-panel,.task-preflight-panel,.ai-preflight-panel,.mapping-focus,.action-panel,.recent-runs) { padding: 15px; }
+  :host .embedded-production-shell .production-flow-strip .stage-list li { padding: 8px; margin: 4px 1px; min-height: 52px; }
+  :host .mapping-row { grid-template-columns: minmax(0,1fr) auto; gap: 10px; }
+  :host .mapping-row > .mapping-value { grid-column: 1; }
+  :host .mapping-row > button { grid-column: 2; grid-row: 1 / span 2; }
+  :host :is(.preflight-grid,.task-preflight-grid,.ai-preflight-grid,.ai-preflight-decision-grid) { grid-template-columns: minmax(0,1fr); }
+  :host dialog { max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); border-radius: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :host button, :host .source-tab, :host .draft-card, :host .stage-list li { transition: none !important; animation: none !important; }
+}
+
+
+/* 0.95 embedded parity: make 1A script input and 1B scene judgement
+   visibly independent without sending the user to separate pages. */
+:host .embedded-production-shell #page-source.production-source-workbench .source-form.production-source-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.14fr) minmax(340px, .86fr);
+  grid-auto-rows: min-content;
+  align-items: start;
+  gap: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+:host .embedded-production-shell #page-source.production-source-workbench .source-document-block {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  border-top: 3px solid var(--accent);
+}
+:host .embedded-production-shell #page-source.production-source-workbench .source-read-gate {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+:host .embedded-production-shell #page-source.production-source-workbench #sourcePreflight,
+:host .embedded-production-shell #page-source.production-source-workbench #draftGenerationDecision {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+:host .embedded-production-shell #page-source.production-source-workbench #sourcePreflight { grid-row: 2; }
+:host .embedded-production-shell #page-source.production-source-workbench #draftGenerationDecision { grid-row: 3; }
+:host .embedded-production-shell #page-source.production-source-workbench .source-read-gate {
+  border-top: 3px solid var(--success);
+}
+:host .embedded-production-shell #page-source.production-source-workbench #draftGenerationDecision {
+  border-top: 3px solid var(--accent);
+  border-left-width: 1px;
+}
+:host .embedded-production-shell #page-source.production-source-workbench .source-workflow-block,
+:host .embedded-production-shell #page-source.production-source-workbench #sourcePreflight {
+  padding: 20px;
+  border-color: var(--line);
+  border-radius: var(--component-radius);
+  background: #fff;
+  box-shadow: 0 2px 8px #25324704;
+}
+:host .embedded-production-shell #page-source.production-source-workbench .source-mode-selector {
+  margin: 0 0 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+:host .embedded-production-shell #page-source.production-source-workbench .source-tabs {
+  margin-bottom: 10px;
+}
+:host .embedded-production-shell #page-source.production-source-workbench .writing-works-list-container {
+  padding: 14px 15px;
+  border-radius: 9px;
+  box-shadow: none;
+}
+:host .embedded-production-shell #page-source.production-source-workbench .writing-releases-grid .empty {
+  min-height: 76px;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 14px;
+  text-align: center;
+}
+:host .embedded-production-shell #page-source.production-source-workbench .source-document-block textarea {
+  min-height: 250px;
+}
+:host .embedded-production-shell #page-source.production-source-workbench .source-read-action {
+  align-items: stretch;
+  flex-direction: column;
+}
+:host .embedded-production-shell #page-source.production-source-workbench .source-read-action button {
+  width: 100%;
+}
+
+/* Embedded scene workbench. Keep native controls, with a quiet material list
+   and a compact decision rail instead of nested dashboard cards. */
+:host .embedded-production-shell #page-generation.production-generation-workbench .page-lead {
+  margin-bottom: 22px;
+}
+:host .embedded-production-shell .production-generation-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  align-items: start;
+  gap: 24px;
+}
+:host .embedded-production-shell .production-generation-step {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--component-radius);
+  background: var(--surface);
+  box-shadow: 0 3px 12px rgb(35 50 71 / 3%);
+}
+:host .embedded-production-shell .production-generation-section-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 96px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+:host .embedded-production-shell .production-generation-step-index {
+  display: grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+:host .embedded-production-shell .production-generation-section-head > div { min-width: 0; }
+:host .embedded-production-shell .production-generation-section-head small { display: none; }
+:host .embedded-production-shell .production-generation-section-head h4 {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 650;
+}
+:host .embedded-production-shell .production-generation-section-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+:host .embedded-production-shell .production-generation-section-head .mode-badge {
+  margin: 2px 0 0;
+  padding: 1px 7px;
+  font-size: 11px;
+}
+:host .embedded-production-shell .production-generation-plan > .scene-plan {
+  margin: 0;
+  padding: 18px 20px 20px;
+  border: 0;
+  border-radius: 0 0 var(--component-radius) var(--component-radius);
+  background: transparent;
+  box-shadow: none;
+}
+:host .embedded-production-shell .production-generation-plan > .scene-plan > header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding: 0;
+  border: 0;
+}
+:host .embedded-production-shell .production-generation-plan > .scene-plan > header > div { display: none; }
+:host .embedded-production-shell #scenePlanStatus { font-size: 12px; color: var(--muted); }
+:host .embedded-production-shell .scene-plan-list { display: grid; gap: 18px; }
+:host .embedded-production-shell .scene-plan-card {
+  min-width: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  overflow: hidden;
+}
+:host .embedded-production-shell .scene-plan-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px 10px;
+  border: 0;
+  background: transparent;
+}
+:host .embedded-production-shell .scene-plan-number {
+  min-width: 28px;
+  color: var(--muted);
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+:host .embedded-production-shell .scene-plan-card-heading > div { min-width: 0; flex: 1; }
+:host .embedded-production-shell .scene-plan-card-heading strong { font-size: 14px; color: var(--ink); }
+:host .embedded-production-shell .scene-plan-card-heading small { font-size: 11px; color: var(--muted); }
+:host .embedded-production-shell .scene-plan-card-heading > b {
+  flex: 0 0 auto;
+  border-radius: 5px;
+  padding: 3px 7px;
+  font-size: 10px;
+  font-weight: 500;
+}
+:host .embedded-production-shell .scene-plan-evidence {
+  padding: 0 16px 10px 56px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+:host .embedded-production-shell .scene-plan-evidence summary { cursor: pointer; }
+:host .embedded-production-shell .scene-plan-background-block {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+:host .embedded-production-shell .scene-plan-thumb,
+:host .embedded-production-shell .scene-plan-thumb .resource-thumb {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--canvas);
+}
+:host .embedded-production-shell .scene-plan-thumb img { width: 100%; height: 100%; object-fit: contain; }
+:host .embedded-production-shell .scene-plan-background-block > div:last-child { min-width: 0; }
+:host .embedded-production-shell .scene-plan-background-block strong {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+:host .embedded-production-shell .scene-plan-background-block :is(p, em, small) {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+  font-style: normal;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+:host .embedded-production-shell :is(.scene-plan-card, .mapping-scene-card) > footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  background: transparent;
+}
+:host .embedded-production-shell :is(.scene-plan-card, .mapping-scene-card) > footer > button {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--ink);
+  font-weight: 500;
+}
+:host .embedded-production-shell :is(.scene-plan-card, .mapping-scene-card) > footer > button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+:host .embedded-production-shell :is(.scene-plan-card, .mapping-scene-card) > footer > :is([data-scene-plan-card], [data-mapping-scene-review]) {
+  border-color: transparent;
+  color: var(--accent);
+}
+:host .embedded-production-shell .production-scene-tools { flex: 0 0 auto; margin-left: auto; }
+:host .embedded-production-shell .production-scene-tools[open] { flex-basis: 100%; margin-left: 0; }
+:host .embedded-production-shell .production-scene-tools > summary {
+  width: fit-content;
+  min-height: 32px;
+  padding: 6px 0;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+:host .embedded-production-shell .production-scene-tools-content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 0 2px;
+}
+:host .embedded-production-shell .production-generation-decision > #layoutModeFieldset {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin: 18px 0 0;
+  padding: 0 18px 18px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+:host .embedded-production-shell .production-generation-decision > #layoutModeFieldset.hidden { display: none; }
+:host .embedded-production-shell .production-generation-decision > #layoutModeFieldset legend {
+  margin-bottom: 12px;
+  padding: 0;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+:host .embedded-production-shell .production-generation-decision > #layoutModeFieldset .mode-choice {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+:host .embedded-production-shell .production-generation-decision > #layoutModeFieldset .mode-choice:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+:host .embedded-production-shell .production-generation-decision > #directionProfileControl {
+  margin: 0;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+:host .embedded-production-shell .production-setting-help,
+:host .embedded-production-shell .production-format-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+:host .embedded-production-shell .production-format-note { margin: 0; padding: 18px; border-bottom: 1px solid var(--line); }
+:host .embedded-production-shell #directionProfileControl:not(.hidden) ~ .production-format-note { display: none; }
+:host .embedded-production-shell .production-generation-gates { padding: 18px; background: transparent; }
+:host .embedded-production-shell .production-generation-gates-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+:host .embedded-production-shell .production-generation-gates-head small { color: var(--muted); font-size: 11px; }
+:host .embedded-production-shell .production-generation-gates-head strong { color: var(--ink); font-size: 12px; }
+:host .embedded-production-shell .production-generation-decision #generationGates { grid-template-columns: minmax(0, 1fr); gap: 0; }
+:host .embedded-production-shell .production-generation-decision #generationGates .gate-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px 12px;
+  min-width: 0;
+  padding: 12px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+:host .embedded-production-shell .production-generation-decision #generationGates .gate-card:last-child { border: 0; }
+:host .embedded-production-shell .production-generation-decision #generationGates .gate-card small { margin: 0; font-size: 12px; }
+:host .embedded-production-shell .production-generation-decision #generationGates .gate-card small:last-child { grid-column: 1 / -1; font-size: 11px; }
+:host .embedded-production-shell .production-generation-decision #generationGates .gate-card.pass small:last-child { display: none; }
+:host .embedded-production-shell .production-generation-decision #generationGates .gate-card b { margin: 0; font-size: 12px; font-weight: 600; }
+:host .embedded-production-shell .production-generation-decision #generationGates .gate-card.pass b { color: var(--success); }
+:host .embedded-production-shell .production-generation-decision #generationGates .gate-card.block b { color: var(--danger); }
+:host .embedded-production-shell .production-generation-decision > .action-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  margin: 0;
+  padding: 18px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--component-radius) var(--component-radius);
+  background: var(--surface-soft);
+  box-shadow: none;
+}
+:host .embedded-production-shell .production-generation-decision > .action-panel small { display: none; }
+:host .embedded-production-shell .production-generation-decision > .action-panel h3 { font-size: 14px; }
+:host .embedded-production-shell .production-generation-decision > .action-panel p { font-size: 12px; line-height: 1.7; }
+:host .embedded-production-shell .production-generation-decision > .action-panel .direction-generation-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+:host .embedded-production-shell .production-generation-decision > .action-panel .direction-generation-actions button { flex: 1; min-height: 40px; margin: 0; }
+:host .embedded-production-shell #page-generation.production-generation-workbench > #generationJob { margin-top: 20px; }
+
+/* Keep the high-frequency 0.95 review commands visible. Secondary actions
+   remain in “更多工具”, while the original Production buttons keep ownership
+   of all mutations and disabled states. */
+:host .embedded-production-shell .production-review-commandbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+:host .embedded-production-shell .production-review-task {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 8px 11px;
+  text-align: left;
+}
+:host .embedded-production-shell .production-review-task > span {
+  min-width: 0;
+}
+:host .embedded-production-shell .production-review-task small,
+:host .embedded-production-shell .production-review-task strong {
+  display: block;
+}
+:host .embedded-production-shell .production-review-task small {
+  color: var(--muted);
+  font-size: 10px;
+}
+:host .embedded-production-shell .production-review-task strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:host .embedded-production-shell .production-review-task em {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 11px;
+  font-style: normal;
+}
+:host .embedded-production-shell .production-review-command-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+:host .embedded-production-shell .production-review-command-actions button {
+  white-space: nowrap;
+}
+:host .embedded-production-shell .production-review-command-actions #openInstallDialog {
+  border-color: #afc5e2;
+  color: var(--accent);
+  font-weight: 600;
+}
+:host .embedded-production-shell .production-review-navigation {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+}
+:host .embedded-production-shell .production-review-card-total {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+:host .embedded-production-shell .production-review-navigation label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+:host .embedded-production-shell .production-review-navigation input {
+  width: 76px;
+  min-height: 34px;
+  padding: 6px 8px;
+}
+
+@media (max-width: 1120px) {
+  :host .embedded-production-shell .production-generation-flow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :host .embedded-production-shell .production-generation-section-head {
+    min-height: 0;
+  }
+  :host .embedded-production-shell .production-review-commandbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :host .embedded-production-shell .production-review-command-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 960px) {
+  :host .embedded-production-shell #page-source.production-source-workbench .source-form.production-source-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :host .embedded-production-shell #page-source.production-source-workbench .source-document-block,
+  :host .embedded-production-shell #page-source.production-source-workbench .source-read-gate,
+  :host .embedded-production-shell #page-source.production-source-workbench #sourcePreflight,
+  :host .embedded-production-shell #page-source.production-source-workbench #draftGenerationDecision {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
+@media (max-width: 800px) {
+  :host .embedded-production-shell .production-generation-section-head {
+    flex-wrap: wrap;
+    padding: 14px;
+  }
+  :host .embedded-production-shell .production-generation-section-head .mode-badge {
+    margin-left: 0;
+  }
+  :host .embedded-production-shell .production-generation-plan > .scene-plan,
+  :host .embedded-production-shell .production-generation-gates,
+  :host .embedded-production-shell .production-generation-decision > #layoutModeFieldset,
+  :host .embedded-production-shell .production-generation-decision > #directionProfileControl,
+  :host .embedded-production-shell .production-generation-decision > .action-panel {
+    padding: 14px;
+  }
+  :host .embedded-production-shell .production-review-commandbar {
+    padding: 8px;
+  }
+  :host .embedded-production-shell .production-review-task {
+    align-items: flex-start;
+  }
+  :host .embedded-production-shell .production-review-command-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  :host .embedded-production-shell .production-review-command-actions button {
+    width: 100%;
+  }
+  :host .embedded-production-shell .production-review-navigation {
+    width: 100%;
+    margin: 8px 0 0;
+  }
+  :host .embedded-production-shell .production-review-navigation label {
+    margin-left: auto;
+  }
+}
+
+/* Finish the same material language on mapping and review; native actions stay
+   visible, while secondary material tools expand inline (never a clipped menu). */
+:host .embedded-production-shell :is(.scene-plan-card, .mapping-scene-card) > footer button { font-size: 12px; }
+:host .embedded-production-shell .mapping-scene-workbench {
+  border: 1px solid var(--line);
+  border-radius: var(--component-radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+:host .embedded-production-shell .mapping-scene-workbench > header {
+  padding: 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+:host .embedded-production-shell .mapping-scene-list { padding: 18px 20px; gap: 18px; }
+:host .embedded-production-shell .mapping-scene-card { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); }
+:host .embedded-production-shell .mapping-scene-card > header { padding: 14px 16px; background: var(--surface); }
+:host .embedded-production-shell .mapping-scene-card h5 { font-size: 14px; color: var(--ink); }
+:host .embedded-production-shell .mapping-scene-background { padding: 14px 16px; background: var(--surface-soft); }
+:host .embedded-production-shell .mapping-scene-thumb { border-radius: 6px; overflow: hidden; }
+:host .embedded-production-shell .production-review-commandbar { padding: 10px 12px; border-radius: 10px; box-shadow: none; }
+:host .embedded-production-shell .production-review-task { border-color: transparent; }
+:host .embedded-production-shell .selected-card-toolbar { border-color: var(--line); background: var(--surface); padding: 12px 14px; }
+:host .embedded-production-shell .background-timeline { padding: 16px; background: var(--surface-soft); border-color: var(--line); }
+:host .embedded-production-shell .background-timeline h4 { font-size: 15px; }
+:host .embedded-production-shell .background-timeline-node { flex-basis: 176px; border-radius: 8px; overflow: hidden; background: var(--surface); }
+:host .embedded-production-shell .background-timeline-jump { min-height: 0; padding: 0; border-radius: 0; }
+:host .embedded-production-shell .background-timeline-jump img,
+:host .embedded-production-shell .background-timeline-placeholder { height: 82px; }
+:host .embedded-production-shell .background-timeline-copy strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:host .embedded-production-shell .background-timeline-actions { padding: 0 8px 8px; }
+:host .embedded-production-shell .production-flow-strip .stage-list li[data-stage-state]::before { display: none; }
+@media (max-width: 600px) {
+  :host .embedded-production-shell .scene-plan-background-block { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  :host .embedded-production-shell .scene-plan-thumb { max-width: 320px; }
+  :host .embedded-production-shell .scene-plan-card-heading { flex-wrap: wrap; }
+  :host .embedded-production-shell .scene-plan-card-heading > b { margin-left: 40px; }
+  :host .embedded-production-shell .production-scene-tools { flex-basis: 100%; margin-left: 0; }
+  :host .embedded-production-shell .mapping-scene-list { padding: 12px; }
+}
+
+:host .embedded-production-shell .scene-background-availability[data-background-availability="unavailable"] { color: var(--warn); }
+:host .embedded-production-shell .scene-background-availability[data-background-availability="available"] { color: var(--success); }
+:host .embedded-production-shell .asset-preview-unavailable { border-color: var(--warn); }
+/* Three independent right-rail panels must retain their intrinsic height. */
+:host .embedded-production-shell #page-review.production-native-review-parity .review-side-rail { grid-template-rows: none; grid-auto-rows: max-content; }
+:host .embedded-production-shell .review-command-guide { background: var(--surface-soft); color: var(--muted); border-color: var(--line); }
+:host .embedded-production-shell .review-task-assets { background: var(--surface); border-color: var(--line); color: var(--ink); box-shadow: none; }
+
+/* Strategy cards retain native radio semantics in the embedded workbench. */
+:host .embedded-production-shell .profile-picker .profile-choice { display: block; padding: 0; margin: 0; }
+:host .embedded-production-shell .profile-picker .profile-choice input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; }
+:host .embedded-production-shell .profile-picker-heading { padding: 0; border: 0; background: transparent; }
+:host .embedded-production-shell .profile-picker-heading h4 { font-family: inherit; font-size: 14px; font-weight: 600; line-height: 1.4; }
+:host .embedded-production-shell .profile-picker .profile-choice-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+
+/* A production run is not necessarily owned by the last writing work. */
+#app.production-mode .hc-work-switch,
+#app.production-mode #versionStatus,
+#app.production-mode #taskStatus { display: none !important; }
+.production-context-name { font-size: 13px; font-weight: 650; max-width: min(36vw, 380px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 640px) { .production-context-name { max-width: 42vw; font-size: 12px; } }
+
+/* Judgement lives in a narrow column even on desktop. Do not squeeze its title
+   between the sequence number and a desktop-width evidence row. */
+:host .scene-judgement-list > li { grid-template-columns: 30px minmax(0, 1fr); }
+:host .scene-evidence { grid-column: 2; justify-content: flex-start; }
+:host .scene-judgement > header { display: block; }
+:host .scene-judgement > header p { text-align: left; margin-top: 6px; }
+:host .preflight-confirm { flex-wrap: wrap; gap: 12px; }
+
+.production-current-task-boundary { display: grid; gap: 14px; margin: 0 0 18px; padding: 18px; border: 1px solid var(--line, #d9dde4); border-radius: 14px; background: var(--surface, #fff); box-shadow: 0 8px 24px rgba(22, 34, 48, .06); }
+.production-current-task-head, .production-frozen-scenes > header, .production-current-task-actions { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.production-current-task-head h3, .production-frozen-source h4, .production-frozen-scenes h4 { margin: 4px 0 0; color: var(--ink, #1c2735); }
+.production-current-task-head p { max-width: 680px; margin: 6px 0 0; color: var(--muted, #697386); font-size: 13px; line-height: 1.55; }
+.production-current-task-state, .production-frozen-scenes > header > span { padding: 5px 8px; border: 1px solid var(--accent, #7ea5d4); border-radius: 999px; color: var(--accent, #416997); font-size: 12px; white-space: nowrap; }
+.production-current-task-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line, #d9dde4); border-radius: 10px; overflow: hidden; }
+.production-current-task-metrics span { display: grid; gap: 4px; padding: 10px 12px; border-right: 1px solid var(--line, #d9dde4); }
+.production-current-task-metrics span:last-child { border-right: 0; }
+.production-current-task-metrics small, .production-frozen-source small, .production-frozen-scenes small { color: var(--muted, #697386); font-size: 11px; }
+.production-frozen-source, .production-frozen-scenes { padding: 13px; border: 1px solid var(--line, #d9dde4); border-radius: 10px; background: var(--surface-soft, #f6f8fb); }
+.production-frozen-source > header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.production-frozen-source details { min-width: 160px; }
+.production-frozen-source summary { cursor: pointer; color: var(--accent, #416997); font-size: 12px; }
+.production-frozen-source pre { max-height: 220px; overflow: auto; margin: 12px 0 0; padding: 12px; border: 1px solid var(--line, #d9dde4); border-radius: 8px; background: var(--canvas, #fff); color: var(--ink, #1c2735); white-space: pre-wrap; font: 12px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.production-frozen-scenes ol { display: grid; gap: 7px; margin: 10px 0 0; padding: 0; list-style: none; }
+.production-frozen-scenes li { display: flex; justify-content: space-between; gap: 10px; padding: 9px 10px; border: 1px solid var(--line, #d9dde4); border-radius: 8px; background: var(--surface, #fff); }
+.production-frozen-scenes li span { color: var(--muted, #697386); font-size: 12px; }
+.production-current-task-actions { align-items: center; padding-top: 2px; color: var(--muted, #697386); font-size: 12px; }
+.production-current-task-actions > div { display: flex; gap: 8px; }
+.production-current-task-boundary[hidden] { display: none; }
+.production-task-provenance { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.production-task-provenance > div { display: grid; gap: 3px; min-width: 0; padding: 9px 11px; border: 1px solid var(--line, #d9dde4); border-radius: 8px; background: var(--surface, #fff); }
+.production-task-provenance small { color: var(--muted, #697386); font-size: 11px; }
+.production-task-provenance strong { overflow-wrap: anywhere; font-size: 12px; font-weight: 600; }
+.production-task-provenance .is-stale { border-color: var(--warn, #9a6a20); background: var(--warn-soft, #fff7e7); color: var(--warn, #9a6a20); }
+:host-context(html[data-theme="dark"]) .production-current-task-boundary { background: var(--surface) !important; border-color: var(--line-strong) !important; box-shadow: none; }
+:host-context(html[data-theme="dark"]) :is(.production-frozen-source, .production-frozen-scenes, .production-current-task-metrics) { background: var(--surface-soft) !important; border-color: var(--line-strong) !important; }
+:host-context(html[data-theme="dark"]) .production-frozen-source pre { background: var(--canvas) !important; color: var(--ink) !important; border-color: var(--line-strong) !important; }
+:host-context(html[data-theme="dark"]) .production-frozen-scenes li { background: var(--surface) !important; border-color: var(--line-strong) !important; }
+:host-context(html[data-theme="dark"]) .overview-origin { background: var(--surface-soft) !important; border-left-color: var(--line-strong) !important; color: var(--ink) !important; }
+:host-context(html[data-theme="dark"]) .overview-origin.from-writing { background: var(--success-soft) !important; border-left-color: var(--success) !important; }
+:host .production-source-workbench #sourceForm[hidden] { display: none !important; }
+@media (max-width: 760px) { .production-current-task-head, .production-frozen-source > header, .production-current-task-actions { display: grid; } .production-current-task-actions > div { display: grid; grid-template-columns: 1fr 1fr; } .production-current-task-actions button { width: 100%; } .production-current-task-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .production-current-task-metrics span:nth-child(2) { border-right: 0; } .production-current-task-metrics span:nth-child(n+3) { border-top: 1px solid var(--line, #d9dde4); } .production-task-provenance { grid-template-columns: minmax(0, 1fr); } }
+
+/* Keep mapping support secondary inside the writing workbench. */
+:host .mapping-support-panel .task-preflight-panel,
+:host .mapping-support-panel .ai-preflight-panel { padding: 10px; }
+:host .task-preflight-compact,
+:host .ai-preflight-compact { padding: 12px 13px; border-radius: 7px; background: var(--surface-soft); }
+:host .task-preflight-compact h3,
+:host .ai-preflight-compact h3 { font-family: var(--font-ui); font-size: 15px; font-weight: 650; }
+:host .task-preflight-detail-list,
+:host .ai-preflight-detail-list { border-radius: 7px; background: var(--surface); overflow: clip; }
+:host .task-preflight-detail-list .task-preflight-grid > article { padding: 11px; border-radius: 6px; background: var(--surface-soft); }
+:host .task-preflight-detail-list .task-preflight-grid > article.is-muted { opacity: .68; }
+:host .support-optional-badge { border-radius: 4px; background: var(--surface-soft); font-family: var(--font-ui); }
+@media (max-width: 760px) {
+  :host .mapping-support-panel > summary { align-items: center; }
+  :host .mapping-support-panel > summary small { max-width: 52%; }
+  :host .mapping-support-panel .task-preflight-panel,
+  :host .mapping-support-panel .ai-preflight-panel { padding: 8px; }
+  :host .task-preflight-actions button,
+  :host .ai-preflight-actions button { width: auto; margin-top: 0; }
+}
+
+.embedded-production-shell :is(.task-preflight-grid, .ai-preflight-grid) li > .mapping-state {
+  display: inline-flex;
+  align-self: center;
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font: 600 12px/1.3 var(--font-ui, sans-serif);
+  white-space: nowrap;
+}
+
+/* Keep the collapsed review guide quiet and compact below the card toolbar. */
+:host .embedded-production-shell #page-review.production-native-review-parity .review-command-guide:not([open]) {
+  margin: 0 0 6px;
+  padding: 2px 12px;
+  border: 0;
+  background: transparent;
+}
+:host .embedded-production-shell #page-review.production-native-review-parity .review-command-guide:not([open]) > summary {
+  width: fit-content;
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: 6px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+:host .embedded-production-shell #page-review.production-native-review-parity .review-command-guide:not([open]) > summary:hover {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+:host .embedded-production-shell #page-review.production-native-review-parity .review-command-guide[open] {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+/* Keep the AA-only header actions slightly quieter than the main work area. */
+#app.hc-redesign .production-top-actions :is(.quiet, .production-more-actions > summary, .production-more-actions > div button) {
+  font-size: 11px;
+}
+
+/* Mapping panes stay narrow inside a 2K desktop layout. Reflow by the actual
+   pane width instead of the viewport so speaker names and role labels remain
+   readable at the user's preferred 2560×1440 / 75% scale. */
+:host .embedded-production-shell .mapping-list {
+  container: speaker-mappings / inline-size;
+}
+
+@container speaker-mappings (max-width: 680px) {
+  :host .embedded-production-shell .mapping-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    column-gap: 12px;
+    row-gap: 8px;
+  }
+
+  :host .embedded-production-shell .mapping-speaker-cell {
+    grid-column: 1;
+    grid-row: 1;
+    align-items: flex-start;
+  }
+
+  :host .embedded-production-shell .mapping-speaker-cell strong {
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  :host .embedded-production-shell .mapping-speaker-cell small {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 11px;
+    line-height: 1.5;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+
+  :host .embedded-production-shell .mapping-edit {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+  }
+
+  :host .embedded-production-shell .mapping-value {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-items: start;
+    padding-left: 54px;
+  }
+
+  :host .embedded-production-shell .mapping-role-chip {
+    justify-self: start;
+    width: fit-content;
+    max-width: 100%;
   }
 }

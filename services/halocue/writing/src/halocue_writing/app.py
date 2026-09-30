@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .errors import DomainError
 from .service import WritingService
+from .model_capabilities import capabilities
 
 
 class WritingRequestHandler(BaseHTTPRequestHandler):
@@ -48,17 +49,58 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    @staticmethod
+    def _embedded_production_script(body: bytes) -> bytes:
+        """Adapt the standalone production UI to the writing page shadow root."""
+        text = body.decode("utf-8").replace("\r\n", "\n")
+        api_marker = (
+            'const API_ROOT = location.port === "8891"\n'
+            '    ? "http://127.0.0.1:8892/api/v1"\n'
+            '    : "/api/v1";'
+        )
+        selector_marker = (
+            'const $ = (selector) => document.querySelector(selector);\n'
+            '  const $$ = (selector) => [...document.querySelectorAll(selector)];'
+        )
+        selector_replacement = (
+            'const productionHost = globalThis["document"].querySelector("#productionModule");\n'
+            '  const productionRoot = productionHost?.shadowRoot;\n'
+            '  if (!productionRoot) throw new Error("AA 制作工作面尚未挂载");\n'
+            '  const $ = (selector) => productionRoot.querySelector(selector);\n'
+            '  const $$ = (selector) => [...productionRoot.querySelectorAll(selector)];'
+        )
+        text = text.replace(api_marker, 'const API_ROOT = "/production/api/v1";', 1)
+        text = text.replace(selector_marker, selector_replacement, 1)
+        text = text.replace("document.querySelectorAll(", "productionRoot.querySelectorAll(")
+        text = text.replace("document.querySelector(", "productionRoot.querySelector(")
+        text = text.replace("document.addEventListener(", "productionRoot.addEventListener(")
+        text = text.replace("document.body.classList.toggle(", "productionHost.classList.toggle(")
+        text = text.replace(
+            'state.currentRun.source_summary?.dialogue_count || 0',
+            '(state.currentRun.source_summary?.speaker_details || []).find((item) => item.speaker === speaker)?.count || 0',
+            1,
+        )
+        return text.encode("utf-8")
+
     def _proxy_production_get(self):
         parsed = urlparse(self.path)
-        upstream_path = parsed.path.removeprefix("/production")
+        embedded_script = parsed.path == "/production/app-embedded.js"
+        upstream_path = "/app.js" if embedded_script else parsed.path.removeprefix("/production")
         upstream_url = f"{self.service.production_url}{upstream_path}"
         if parsed.query:
             upstream_url += f"?{parsed.query}"
         request = urllib.request.Request(upstream_url, method="GET")
+        # Production API reads may assemble previews and resource metadata on
+        # demand. Keep the short timeout for static UI assets, but give API
+        # reads the same budget as production mutations so the embedded
+        # workbench does not turn a valid slow preview into a 503.
+        timeout = 30 if upstream_path.startswith("/api/") else 3
         try:
-            with urllib.request.urlopen(request, timeout=3) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 body = response.read()
                 content_type = response.headers.get("Content-Type", "application/json; charset=utf-8")
+                if embedded_script and response.status == 200:
+                    body = self._embedded_production_script(body)
                 return self._response_bytes(response.status, content_type, body)
         except urllib.error.HTTPError as exc:
             body = exc.read()
@@ -70,6 +112,52 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
                 "error": {
                     "code": "production_unavailable",
                     "message": "AA 制作服务当前不可用，素材条目暂时无法读取。",
+                    "details": {"reason": str(exc)},
+                },
+            }, status=503)
+
+    def _proxy_production_mutation(self, method: str):
+        """Forward an embedded AA mutation without interpreting its payload."""
+        lengths = self.headers.get_all("Content-Length", [])
+        if len(lengths) > 1 or self.headers.get_all("Transfer-Encoding", []):
+            raise DomainError("invalid_content_length", "请求长度不明确或传输编码不受支持。")
+        declared = lengths[0].strip(" \t") if lengths else "0"
+        if not declared or not declared.isascii() or not declared.isdecimal():
+            raise DomainError("invalid_content_length", "请求长度必须是非负整数。")
+        length = int(declared.lstrip("0") or "0")
+        if length > 65 * 1024 * 1024:
+            raise DomainError("payload_too_large", "制作请求内容过大。", status=413)
+        body = self.rfile.read(length) if length else b""
+        if len(body) != length:
+            raise DomainError("invalid_json", "请求内容不完整。")
+        parsed = urlparse(self.path)
+        upstream_path = parsed.path.removeprefix("/production")
+        upstream_url = f"{self.service.production_url}{upstream_path}"
+        if parsed.query:
+            upstream_url += f"?{parsed.query}"
+        headers = {}
+        if content_type := self.headers.get("Content-Type"):
+            headers["Content-Type"] = content_type
+        request = urllib.request.Request(upstream_url, data=body, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return self._response_bytes(
+                    response.status,
+                    response.headers.get("Content-Type", "application/json; charset=utf-8"),
+                    response.read(),
+                )
+        except urllib.error.HTTPError as exc:
+            return self._response_bytes(
+                exc.code,
+                exc.headers.get("Content-Type", "application/json; charset=utf-8") if exc.headers else "application/json; charset=utf-8",
+                exc.read(),
+            )
+        except (urllib.error.URLError, TimeoutError) as exc:
+            return self._json({
+                "ok": False,
+                "error": {
+                    "code": "production_unavailable",
+                    "message": "AA 制作服务当前不可用，无法提交制作操作。",
                     "details": {"reason": str(exc)},
                 },
             }, status=503)
@@ -114,6 +202,12 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
     def _dispatch_GET(self):
         try:
             parts = self._parts()
+            if parts == ["api", "v1", "settings", "model-capabilities"]:
+                query = parse_qs(urlparse(self.path).query)
+                return self._json({"ok": True, "data": capabilities(query.get("model", [""])[0], query.get("provider", ["openai"])[0], query.get("base_url", [""])[0], include_registry=True)})
+            handled, authoring_result = self.service.authoring.route("GET", parts)
+            if handled:
+                return self._json({"ok": True, "data": authoring_result})
             if parts == ["api", "v1", "health"]:
                 return self._json(self.service.health())
             if parts == ["api", "v1", "capabilities"]:
@@ -167,13 +261,17 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
             if len(parts) == 7 and parts[:3] == ["api", "v1", "works"] and parts[4] == "attachments" and parts[6] == "content":
                 content_type, body = self.service.get_conversation_attachment(parts[3], parts[5])
                 return self._bytes(body, content_type)
+            if len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] == "knowledge-impact":
+                return self._json({"ok": True, "data": self.service.get_knowledge_change_impact(parts[3])})
             if len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] == "user-status":
                 return self._json({"ok": True, "data": self.service.get_user_work_status(parts[3])})
+            if len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] == "activity":
+                return self._json({"ok": True, "data": self.service.get_activity_snapshot(parts[3])})
             if len(parts) == 4 and parts[:3] == ["api", "v1", "works"]:
                 return self._json({"ok": True, "data": self.service.get_work(parts[3])})
             if len(parts) == 5 and parts[:3] == ["api", "v1", "releases"] and parts[4] == "production-assets":
                 return self._json({"ok": True, "data": self.service.production_asset_status(parts[3])})
-            if parts[:2] == ["production", "api"]:
+            if parts and parts[0] == "production":
                 return self._proxy_production_get()
             if len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] == "harness":
                 query = parse_qs(urlparse(self.path).query)
@@ -250,9 +348,14 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
             self._error(DomainError("internal_error", "写作服务发生内部错误。", status=500, details={"type": type(exc).__name__}))
 
     def do_POST(self):
+        if (parts := self._parts()) and parts[0] == "production":
+            try:
+                return self._proxy_production_mutation("POST")
+            except DomainError as error:
+                return self._error(error)
         # Restore acquires exclusive admission itself; never upgrade a shared
         # request after it may have read the old workspace.
-        if self._parts() == ["api", "v1", "settings", "backups", "restore"]:
+        if parts == ["api", "v1", "settings", "backups", "restore"]:
             return self._dispatch_POST()
         try:
             with self.service.data_access.operation():
@@ -278,15 +381,23 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
                 or (len(parts) == 7 and parts[:3] == ["api", "v1", "works"] and parts[4] == "threads" and parts[6] == "attachments")
             ) else 8_000_000
             payload = self._body(body_limit)
+            handled, authoring_result = self.service.authoring.route("POST", parts, payload)
+            if handled:
+                return self._json({"ok": True, "data": authoring_result})
             result = None
             if parts == ["api", "v1", "settings", "writing-model:activate"]:
                 result = self.service.activate_writing_model(payload)
+                return self._json(result)
+            if parts == ["api", "v1", "settings", "writing-model:activate-direction"]:
+                result = self.service.activate_direction_model_from_writing(payload)
                 return self._json(result)
             if parts == ["api", "v1", "settings", "writing-model"]:
                 result = self.service.configure_writing_model(payload)
                 return self._json(result)
             if parts == ["api", "v1", "settings", "writing-model", "fetch-models"]:
                 result = self.service.fetch_writing_models(payload)
+                if isinstance(result, dict):
+                    return self._json({"ok": True, **result})
                 return self._json({"ok": True, "models": result})
             if parts == ["api", "v1", "settings", "writing-model", "test"]:
                 result = self.service.test_writing_model(payload)
@@ -398,6 +509,8 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
                 result = self.service.save_character_card(parts[3], payload)
             elif len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] == "character-cards:validate":
                 result = self.service.validate_character_card_import(parts[3], payload)
+            elif len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] == "character-cards:reuse":
+                result = self.service.reuse_character_card(parts[3], payload)
             elif len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] == "character-cards:import":
                 result = self.service.import_character_card(parts[3], payload)
             elif len(parts) == 7 and parts[:3] == ["api", "v1", "works"] and parts[4] == "character-cards" and parts[6] == "archive":

@@ -58,6 +58,7 @@ def test_open_and_reopen_only_read_durable_state(page):
 def test_plan_uses_saved_chapter_ids_and_no_generation_until_requested(page):
     page.evaluate("ui.open()")
     page.get_by_role("button", name="建立改编计划", exact=True).click()
+    page.wait_for_function("calls.some(c=>c.route.endsWith('/adaptations')&&c.body)")
     body = page.evaluate("calls.find(c=>c.route.endsWith('/adaptations')&&c.body).body")
     assert body["chapter_ids"] == ["saved-ch"]
     assert not page.evaluate("calls.some(c=>c.route.endsWith('candidate:generate'))")
@@ -82,9 +83,81 @@ def test_source_apply_uses_confirmed_digest_not_transient_preview_ids(page):
     assert body["base_version_id"] == "source-saved"
     assert body["preview_digest"] == "digest"
     page.get_by_role("button", name="建立改编计划", exact=True).click()
+    page.wait_for_function("calls.some(c=>c.route.endsWith('/adaptations')&&c.body)")
     assert page.evaluate(
         "calls.find(c=>c.route.endsWith('/adaptations')&&c.body).body.chapter_ids"
     ) == ["saved-ch"]
+
+
+def test_new_story_is_previewed_before_creating_a_work(page):
+    page.evaluate(r"""
+      activeWork=null;source=null;
+      const original=bridge.api;
+      bridge.api=async(route,options)=>{
+        const body=options?.body?JSON.parse(options.body):null;
+        if(route==='/imports/story:preview'){
+          calls.push({route,body,method:'POST'});
+          return {chapters:[{id:'parsed-ch',title:'第一章'}],counts:{paragraphs:1},lines:[{chapter_id:'parsed-ch',raw_text:'门口的灯亮了。'}]};
+        }
+        if(route==='/works'&&body){
+          calls.push({route,body,method:'POST'});
+          return {id:'work-1',version:1,title:body.title,chapters:[{id:'chapter-1',title:'第一章',scenes:[]}],agent_runs:[],proposals:[]};
+        }
+        if(route.endsWith('/source:preview')){
+          calls.push({route,body,method:'POST'});
+          return {preview_digest:'new-source-digest',document:{chapters:[{id:'parsed-ch',title:'第一章',paragraphs:[{text:'门口的灯亮了。'}]}]},changes:[{title:'第一章',kind:'added',diff:['+门口的灯亮了。']}],duplicate:false};
+        }
+        if(route.endsWith('/source:update')){
+          calls.push({route,body,method:'POST'});
+          source={id:'new-source',filename:'我的小说.md',chapters:[{id:'saved-ch',title:'第一章',paragraphs:[{id:'paragraph',text:'门口的灯亮了。'}]}]};
+          return {source,duplicate:false};
+        }
+        return original(route,options);
+      };
+      ui.open();
+    """)
+    page.locator("[data-adaptation-file]").set_input_files(
+        {"name": "我的小说.md", "mimeType": "text/markdown", "buffer": "# 第一章\n门口的灯亮了。".encode()}
+    )
+    page.get_by_role("button", name="预览原文变化", exact=True).click()
+    page.get_by_role("button", name="确认保存原文", exact=True).wait_for()
+    assert page.evaluate("activeWork===null")
+    assert page.evaluate("calls.some(c=>c.route==='/imports/story:preview')")
+    assert not page.evaluate("calls.some(c=>c.route==='/works'&&c.method==='POST')")
+    page.get_by_role("button", name="确认保存原文", exact=True).click()
+    page.get_by_role("button", name="建立改编计划", exact=True).wait_for()
+    assert page.evaluate("activeWork.id") == "work-1"
+    assert page.evaluate("calls.some(c=>c.route.endsWith('/source:update')&&c.body.preview_digest==='new-source-digest')")
+
+
+def test_project_home_new_story_does_not_attach_to_selected_work(page):
+    page.evaluate("ui.open(null,true)")
+    page.get_by_role("button", name="原文文件").wait_for()
+    assert page.evaluate("activeWork.id") == "work-1"
+    assert not page.evaluate("calls.some(c=>c.route==='/works/work-1')")
+    assert not page.evaluate("calls.some(c=>c.route==='/works/work-1/source')")
+
+
+def test_multichapter_plan_creates_and_pins_missing_destination(page):
+    page.evaluate(r"""
+      source.chapters.push({id:'second-ch',title:'第二章',paragraphs:[{id:'second-p',text:'门打开了。'}]});
+      const original=bridge.api;
+      bridge.api=async(route,options)=>{
+        if(route.endsWith('/chapters')&&options?.method==='POST'){
+          const body=JSON.parse(options.body);calls.push({route,body,method:'POST'});
+          activeWork={...activeWork,version:8,chapters:[...activeWork.chapters,{id:'chapter-2',title:body.title,scenes:[]}]};
+          return {chapter_id:'chapter-2',work:activeWork};
+        }
+        return original(route,options);
+      };
+      ui.open();
+    """)
+    page.get_by_role("button", name="建立改编计划", exact=True).click()
+    page.wait_for_function("calls.some(c=>c.route.endsWith('/adaptations')&&c.body)")
+    assert page.get_by_role("button", name="确认计划", exact=True).count(), page.locator(".adaptation-workbench").inner_text()
+    body = page.evaluate("calls.find(c=>c.route.endsWith('/adaptations')&&c.body).body")
+    assert body["target_chapter_ids"] == {"saved-ch": "chapter-1", "second-ch": "chapter-2"}
+    assert page.evaluate("calls.filter(c=>c.route.endsWith('/chapters')&&c.method==='POST').length") == 1
 
 
 def test_candidate_text_is_escaped_and_target_visible_before_acceptance(page):
@@ -248,10 +321,44 @@ def test_inflight_poll_snapshot_cannot_restore_already_accepted_candidate(page):
       ui.open()
     """)
     page.evaluate("holdReads=true;void pollTimer()")
-    page.wait_for_function("oldReads.length===4")
+    page.wait_for_function("oldReads.length===1")
+    page.evaluate("oldReads.shift()()")
+    page.wait_for_function("oldReads.length===3")
     page.evaluate("holdReads=false")
     page.get_by_role("button", name="采纳到此场景", exact=True).click()
     page.get_by_role("button", name="查看正式场景", exact=True).wait_for()
     page.evaluate("oldReads.forEach(resolve=>resolve())")
     assert page.get_by_role("button", name="查看正式场景", exact=True).count() == 1
     assert page.get_by_role("button", name="采纳到此场景", exact=True).count() == 0
+
+
+def test_fast_generation_cannot_pair_completed_run_with_precommit_plan(page):
+    page.evaluate(r"""
+      plans=[{id:'plan-1',source_version_id:source.id,status:'ready',plan:{},budget:{max_calls:5,reserved_calls:0},chapters:[{id:'adapt-ch',source_chapter_id:'saved-ch',status:'planned',candidate:{},dependency:{}}]}];
+      window.justGenerated=false;window.finishWorkRead=null;
+      const original=bridge.api;
+      bridge.api=async(route,options)=>{
+        if(route.endsWith('candidate:generate')){
+          calls.push({route,method:'POST'});justGenerated=true;
+          return {agent_run_id:'fast-run',job:{id:'job-fast'}};
+        }
+        if(route==='/works/work-1'&&justGenerated){
+          justGenerated=false;
+          return new Promise(resolve=>finishWorkRead=()=>{
+            // Durable candidate commit becomes visible while the work read completes.
+            plans[0].budget.reserved_calls=1;
+            plans[0].chapters[0]={...plans[0].chapters[0],status:'candidate',candidate:{formal:false,proposal_id:'p-fast',text:'旁白: 新候选。',target:{chapter_id:'chapter-1'}}};
+            activeWork={...activeWork,agent_runs:[{id:'fast-run',status:'completed',scope_id:'adapt-ch',policy:{workflow:'adaptation.chapter.generate'}}]};
+            resolve(activeWork);
+          });
+        }
+        return structuredClone(await original(route,options));
+      };
+      ui.open();
+    """)
+    page.get_by_role("button", name="生成模拟候选", exact=True).click()
+    page.wait_for_function("finishWorkRead!==null")
+    page.evaluate("finishWorkRead()")
+    page.get_by_role("button", name="采纳到此场景", exact=True).wait_for(timeout=3000)
+    assert page.evaluate("calls.filter(c=>c.route.endsWith('candidate:generate')).length") == 1
+    assert "新候选" in page.locator(".adaptation-workbench").inner_text()

@@ -10,6 +10,8 @@ from .source_catalog import source_windows
 from .adaptation_prompts import build_chapter_prompt
 from .adaptation_targets import resolve_target
 
+MAX_CANDIDATE_SOURCE_CHARACTERS = 30000
+
 
 def validate_chapter_candidate(
     value, *, source_id, chapter, code="provider_output_invalid", status=502
@@ -142,11 +144,23 @@ class AdaptationService:
                 "adaptation_chapter_invalid", "改编章节不在当前原文版本中。", status=422
             )
         chapters = [c for c in source["chapters"] if c["id"] in selected]
+        targets = payload.get("target_chapter_ids") or {}
+        if not isinstance(targets, dict) or any(key not in known for key in targets):
+            raise DomainError("adaptation_target_invalid", "原文章节与目标章节的对应关系无效。", status=422)
+        with self.repo.connect() as connection:
+            valid_targets = {
+                row["id"] for row in connection.execute(
+                    "SELECT id FROM chapters WHERE work_id=?", (work_id,)
+                ).fetchall()
+            }
+        if any(not isinstance(value, str) or value not in valid_targets for value in targets.values()):
+            raise DomainError("adaptation_target_invalid", "目标章节不属于当前作品。", status=422)
         plan = {
             "schema_version": "adaptation-plan/1.0",
             "fidelity": "faithful_source",
             "unfinished_policy": "provided_scope_only",
             "character_mapping": payload.get("character_mapping", {}),
+            "target_chapter_ids": {c["id"]: targets[c["id"]] for c in chapters if c["id"] in targets},
             "scene_plan": [
                 {"chapter_id": c["id"], "scenes": [], "sample_required": True} for c in chapters
             ],
@@ -192,7 +206,7 @@ class AdaptationService:
                         ordinal,
                         "planned",
                         "{}",
-                        "{}",
+                        canonical_json({"target_chapter_id": targets[ch["id"]]}) if ch["id"] in targets else "{}",
                         timestamp,
                         timestamp,
                     ),
@@ -273,6 +287,12 @@ class AdaptationService:
         chapter = next((c for c in source["chapters"] if c["id"] == chapter_id), None)
         if not chapter or chapter_id not in item["selected_chapter_ids"]:
             raise NotFound("adaptation_chapter", chapter_id)
+        if chapter.get("characters", 0) > MAX_CANDIDATE_SOURCE_CHARACTERS:
+            raise DomainError(
+                "adaptation_chapter_too_large",
+                "这一原文章节超过 3 万字。请在原文中加入章节标题并重新导入，再逐章改编，避免一次调用发送过长原文。",
+                status=422,
+            )
         system, user = build_chapter_prompt(
             source=source,
             chapter=chapter,

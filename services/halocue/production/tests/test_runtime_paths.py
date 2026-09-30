@@ -298,3 +298,40 @@ def test_fallback_preserves_legacy_first_config_key_policy(
     assert spine_rendering.resolve_cli(
         legacy_root=service.settings.legacy_root, data_dir=service.settings.data_dir
     ) == (legacy if legacy_available else None)
+
+
+def test_windows_aa_picker_returns_an_existing_executable(settings, tmp_path, monkeypatch):
+    """The native picker returns only a local existing EXE; it does not bind it."""
+    import halocue_production.service as service_module
+
+    executable = tmp_path / "AzureArchive.exe"
+    executable.write_bytes(b"synthetic")
+    service = ProductionService(settings)
+    try:
+        monkeypatch.setattr(service_module.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(
+            service_module.subprocess,
+            "run",
+            lambda *args, **kwargs: type("Completed", (), {"returncode": 0, "stdout": str(executable)})(),
+        )
+        result = service.pick_aa_executable()
+        assert result == {"ok": True, "selected": True, "path": str(executable.resolve())}
+        assert service.aa_workspace_settings()["aa_workspace"]["configured"] is False
+    finally:
+        service.jobs.close()
+
+
+def test_windows_aa_picker_allows_cancel_without_changing_configuration(settings, monkeypatch):
+    import halocue_production.service as service_module
+
+    service = ProductionService(settings)
+    try:
+        monkeypatch.setattr(service_module.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(
+            service_module.subprocess,
+            "run",
+            lambda *args, **kwargs: type("Completed", (), {"returncode": 0, "stdout": ""})(),
+        )
+        assert service.pick_aa_executable() == {"ok": True, "selected": False, "path": None}
+    finally:
+        service.jobs.close()

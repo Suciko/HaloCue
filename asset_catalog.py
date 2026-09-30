@@ -161,6 +161,7 @@ def _face_capabilities(con) -> dict[str, list[dict]]:
                 fields = (
                     "emotion_family", "intensity", "expression_class", "beat_fit",
                     "hold_policy", "special_tags", "avoid_when_cn",
+                    "usage_hint_cn", "primary_emotion", "search_terms_cn",
                 )
                 for field in fields:
                     if field in rich:
@@ -192,6 +193,9 @@ def _union_faces(existing: list[dict], capabilities: list[dict]) -> list[dict]:
     faces = {face["id"]: face for face in existing}
     for variant in capabilities:
         for face in variant["faces"]:
+            # Vision describes a face but cannot register a new executable ID.
+            if not ({"atlas_candidate", "aa_verified", "aap_observed", "spine_semantic"} & set(face.get("sources", []))):
+                continue
             faces.setdefault(face["id"], {
                 "id": face["id"], "raw": face["raw"], "label": face["label"],
                 "cn": face.get("cn", ""),
@@ -1043,6 +1047,34 @@ def export_model_constraints(con, *, scope: str | None = None) -> dict:
     return out
 
 
+
+def _merge_face_variants(*catalogues):
+    """Merge evidence by exact skeleton/outfit and face; never replace a catalogue wholesale."""
+    variants = {}
+    for catalogue in catalogues:
+        for variant in catalogue or []:
+            key = (str(variant.get("spine_signature") or ""), str(variant.get("outfit_key") or ""))
+            target = variants.setdefault(key, {**copy.deepcopy(variant), "faces": {}})
+            for face in variant.get("faces") or []:
+                face_id = str(face.get("id") or "")
+                previous = target["faces"].get(face_id)
+                if previous is None:
+                    target["faces"][face_id] = copy.deepcopy(face)
+                    continue
+                # Prefer visually grounded semantics; weaker database rows may
+                # contribute evidence, but must not erase rich imported labels.
+                old_strength = _FACE_VISUAL_EVIDENCE[face_visual_evidence(previous)]
+                new_strength = _FACE_VISUAL_EVIDENCE[face_visual_evidence(face)]
+                preferred, fallback = (face, previous) if new_strength >= old_strength else (previous, face)
+                combined = copy.deepcopy(fallback)
+                combined.update({k: copy.deepcopy(v) for k, v in preferred.items() if v is not None and v != ""})
+                combined["sources"] = sorted(set(previous.get("sources", [])) | set(face.get("sources", [])), key=_source_priority)
+                combined["visual_evidence"] = face_visual_evidence(combined)
+                combined["verified"] = bool(previous.get("verified") or face.get("verified"))
+                target["faces"][face_id] = combined
+    return [{**value, "faces": [value["faces"][face_id] for face_id in sorted(value["faces"])]} for _, value in sorted(variants.items())]
+
+
 def merge_model_constraints(index: dict, con, *, scope: str) -> dict:
     """Return a copy of an official index extended by one project's assets."""
     merged = copy.deepcopy(index)
@@ -1096,10 +1128,11 @@ def merge_model_constraints(index: dict, con, *, scope: str) -> dict:
     evidence_capabilities = _face_capabilities(con)
     merged_capabilities = {}
     for character in merged["characters"]:
-        capabilities = (
-            evidence_capabilities.get(character.get("identifier"), [])
-            or character.get("face_capabilities", [])
-            or custom_capabilities.get(character.get("identifier"), [])
+        capabilities = _merge_face_variants(
+            (index.get("face_capabilities") or {}).get(character.get("identifier"), []),
+            character.get("face_capabilities", []),
+            custom_capabilities.get(character.get("identifier"), []),
+            evidence_capabilities.get(character.get("identifier"), []),
         )
         if not capabilities:
             continue

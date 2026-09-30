@@ -1,0 +1,58 @@
+/* Keep the active decision visible; explanations belong beside the control or in details. */
+.stage-list small { display:none !important; }
+.stage-list li { min-height:50px; }
+.page-lead { margin-bottom:17px; }
+.page-lead h3 { margin:3px 0; }
+.page-lead p { line-height:1.6; }
+
+#page-source .source-step-index { display:none; }
+#page-source .source-document-block > .source-workflow-head { display:none; }
+#page-source .source-edit-field[hidden] { display:none !important; }
+#page-source .source-workflow-head { margin-bottom:12px; }
+#page-source .source-workflow-head h4 { margin:0; font:650 16px/1.4 var(--font-ui,"Microsoft YaHei UI",sans-serif); }
+#page-source .source-workflow-head p { margin:5px 0 0; font-size:12px; }
+#page-source .source-workflow-block { padding:17px; box-shadow:none; }
+#page-source .source-tabs { margin-bottom:10px; }
+#page-source .source-tab { min-height:37px; }
+#page-source .writing-release-entry { padding:16px; }
+#page-source .writing-release-entry h4 { margin:0 0 4px; font-size:14px; }
+#page-source .writing-release-entry p { margin:0 0 10px; line-height:1.6; }
+#page-source .writing-works-list-container { padding:0; border:0; background:transparent; }
+#page-source .release-entry-actions { gap:5px; }
+#page-source .source-read-action { gap:10px; }
+#page-source .source-read-action > span { font-size:12px; }
+#page-source .recent-runs:has(.run-list > .empty) { display:none; }
+#page-source .source-pane-manual:not(.hidden) { position:absolute; width:1px; height:1px; padding:0 !important; border:0 !important; overflow:hidden; clip-path:inset(50%); }
+#page-source :is(.source-read-action,.preflight-confirm,.draft-create-footer) .primary:not(:disabled) { background:#345b90 !important; color:#fff !important; border-color:#6d98d1 !important; }
+#page-source :is(.source-read-action,.preflight-confirm,.draft-create-footer) .primary:hover:not(:disabled) { background:#436fa7 !important; }
+#page-source .preflight-head h3 { margin:0; }
+#page-source .preflight-confirm { justify-content:flex-end; }
+#page-source .preflight-confirm > button { margin-left:auto; }
+#page-source .draft-generation-decision .generation-mode-fieldset legend { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+#page-source .draft-generation-decision .profile-boundary-note { display:none; }
+
+#page-mapping .mapping-focus > header,
+#page-mapping .mapping-scene-workbench > header,
+#page-generation .scene-plan > header { margin-bottom:14px; }
+#page-mapping .mapping-focus > header h4,
+#page-mapping .mapping-scene-workbench > header h4,
+#page-generation .scene-plan > header h4 { margin:0; }
+
+#page-review .workflow-hint { margin:0 0 13px; padding:9px 12px; }
+#page-review .workflow-hint > summary { cursor:pointer; color:var(--muted); font-size:12px; }
+#page-review .workflow-hint > summary small { margin-left:8px; font-weight:400; }
+#page-review .workflow-hint .workflow-track { margin-top:12px; }
+#selectedCardToolbar[hidden] { display:none !important; }
+
+:host .embedded-production-shell .production-flow-strip .stage-list li { min-height:49px; }
+:host .embedded-production-shell .production-flow-strip .stage-list small { display:none !important; }
+:host .embedded-production-shell #page-source.production-source-workbench .source-document-block,
+:host .embedded-production-shell #page-source.production-source-workbench .source-read-gate { border-top:1px solid var(--line); }
+:host .embedded-production-shell #page-source.production-source-workbench .source-workflow-block { padding:17px; box-shadow:none; }
+:host .embedded-production-shell #page-source.production-source-workbench .writing-works-list-container { padding:0; border:0; background:transparent; }
+
+@media (max-width:800px) {
+  #page-source .source-workflow-block { padding:14px; }
+  #page-source .source-tabs { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  #page-review .workflow-hint > summary small { display:block; margin:3px 0 0; }
+}

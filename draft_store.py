@@ -815,7 +815,15 @@ class DraftStore:
                 raise KeyError(f"Card ID not found: {card_id}")
 
             target_node = nodes[target_index]
-            target_node.fields.update(patch)
+            # Unknown source text has no editable schema.  A caller that
+            # supplies dialogue fields intentionally promotes it to a normal
+            # line, allowing the serializer and compiler to handle it exactly
+            # like authored dialogue from this point forward.
+            if target_node.kind == "unknown":
+                target_node.kind = "line"
+                target_node.fields = dict(patch)
+            else:
+                target_node.fields.update(patch)
             target_node.dirty = True
 
             is_directive = target_node.kind in ("dir", "background_request")

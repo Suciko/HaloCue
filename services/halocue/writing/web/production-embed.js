@@ -15,21 +15,37 @@
   let loadStartedAt = 0;
   let loadFinishedAt = 0;
   let previousChrome = null;
+  let activeContext = null;
+  let openEpoch = 0;
 
   const sleep = (delay) => new Promise(resolve => setTimeout(resolve, delay));
   const app = () => document.querySelector("#app");
   const host = () => document.querySelector(`#${hostId}`);
 
   function linkedContext(trigger = null) {
-    const linked = trigger?.matches?.("[data-open-production]")
-      ? trigger
-      : document.querySelector("[data-open-production]");
     const params = new URLSearchParams(location.search);
-    return {
-      runId: linked?.dataset.openProduction || params.get("run_id") || "",
-      workId: linked?.dataset.workId || params.get("work_id") || "",
-      releaseId: linked?.dataset.releaseId || params.get("release_id") || "",
-    };
+    const linked = trigger?.matches?.("[data-open-production]") ? trigger
+      : params.get("section") === "production" ? null : document.querySelector("[data-open-production]");
+    if (linked) return { runId: linked.dataset.openProduction || "", workId: linked.dataset.workId || "", releaseId: linked.dataset.releaseId || "" };
+    return { runId: params.get("run_id") || "", workId: params.get("work_id") || "", releaseId: params.get("release_id") || "" };
+  }
+
+  function syncChrome() {
+    if (!activeContext || !app()?.classList.contains("production-mode")) return;
+    let title = document.querySelector(".production-context-name");
+    if (!title) {
+      title = document.createElement("span");
+      title.className = "production-context-name";
+      document.querySelector(".hc-work-switch")?.before(title);
+    }
+    title.textContent = activeContext.title || "正在打开制作任务…";
+    title.title = title.textContent;
+    const crumb = document.querySelector("#crumb");
+    if (crumb) {
+      crumb.textContent = "AA 制作";
+      crumb.title = `${title.textContent} / AA 制作`;
+      crumb.setAttribute("aria-label", crumb.title);
+    }
   }
 
   function updateUrl(context, replace = false) {
@@ -40,7 +56,7 @@
     if (context.runId) url.searchParams.set("run_id", context.runId);
     if (context.workId) url.searchParams.set("work_id", context.workId);
     if (context.releaseId) url.searchParams.set("release_id", context.releaseId);
-    history[replace ? "replaceState" : "pushState"]({ section: "production", ...context }, "", url);
+    history[replace ? "replaceState" : "pushState"]({ ...history.state, section: "production", ...context }, "", url);
   }
 
   function captureNavigationState() {
@@ -108,7 +124,7 @@
         writingChrome: captureWritingChromeState(),
       };
     }
-    if (crumb) crumb.textContent = "AA 制作";
+    syncChrome();
     if (save) {
       save.textContent = context.runId ? "制作任务已打开" : "选择制作任务";
       save.dataset.state = "saved";
@@ -124,27 +140,33 @@
     const controls = document.createElement("span");
     controls.className = "production-top-actions";
     controls.innerHTML = `
+      <button type="button" class="quiet production-new" data-production-proxy="startNewProduction">新建制作</button>
       <button type="button" class="quiet production-assets" data-production-proxy="openAssetLibrary">制作素材</button>
       <button type="button" class="quiet production-overview" data-production-proxy="openRunOverview">任务总览</button>
       <details class="production-more-actions">
         <summary>更多</summary>
         <div role="menu">
           <button type="button" data-production-proxy="openTasks" role="menuitem">后台任务</button>
-          <button type="button" data-production-proxy="openSettings" role="menuitem">设置</button>
           <button type="button" data-production-proxy="refreshRun" role="menuitem" aria-label="刷新制作任务">刷新制作任务</button>
         </div>
       </details>`;
     controls.addEventListener("click", event => {
       const button = event.target.closest("[data-production-proxy]");
       if (!button) return;
-      root.querySelector(`#${button.dataset.productionProxy}`)?.click();
+      if (button.dataset.productionProxy === "startNewProduction") root.querySelector(".embedded-production-shell")?.haloCueShowNewProduction?.();
+      else root.querySelector(`#${button.dataset.productionProxy}`)?.click();
       button.closest("details")?.removeAttribute("open");
     });
     topActions.prepend(controls);
     const syncAvailability = () => {
       const assetButton = controls.querySelector(".production-assets");
+      const newButton = controls.querySelector(".production-new");
+      const overviewButton = controls.querySelector(".production-overview");
       const hasRun = !root.querySelector("#openRunOverview")?.disabled;
       if (!assetButton) return;
+      if (newButton) newButton.hidden = !hasRun;
+      if (overviewButton) overviewButton.hidden = !hasRun;
+      assetButton.hidden = !hasRun;
       assetButton.disabled = !hasRun;
       assetButton.title = hasRun ? "打开当前任务素材" : "先打开一个制作任务";
       assetButton.setAttribute("aria-disabled", String(!hasRun));
@@ -169,6 +191,8 @@
     restoreWritingChromeAccessibility(previousChrome.writingChrome);
     document.querySelector(".production-top-actions")?.remove();
     previousChrome = null;
+    activeContext = null;
+    document.querySelector(".production-context-name")?.remove();
   }
 
   function ensureHost() {
@@ -183,6 +207,72 @@
     element.hidden = true;
     app()?.append(element);
     return element;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+  }
+
+  function installCurrentTaskSourceBoundary(root) {
+    if (root.__haloCueCurrentTaskBoundary) return;
+    const shell = root.querySelector(".embedded-production-shell");
+    const source = root.querySelector("#page-source");
+    const form = root.querySelector("#sourceForm");
+    const recent = root.querySelector(".recent-runs");
+    if (!shell || !source || !form) return;
+    const lead = source.querySelector(".page-lead");
+    const panel = document.createElement("section");
+    panel.className = "production-current-task-boundary";
+    panel.setAttribute("aria-labelledby", "currentTaskBoundaryTitle");
+    panel.hidden = true;
+    if (lead) lead.insertAdjacentElement("afterend", panel);
+    const render = () => {
+      const snapshot = shell.haloCueGetState?.() || {};
+      const run = snapshot.run;
+      const draft = snapshot.draft;
+      const active = Boolean(run);
+      panel.hidden = !active;
+      form.hidden = active;
+      if (recent) recent.hidden = active;
+      if (!active) return;
+      const summary = run.source_summary || {};
+      const scenes = Array.isArray(summary.scenes) ? summary.scenes : [];
+      const sourceText = draft?.frozen_source_text || "";
+      const upstream = summary.upstream_release && summary.upstream_release.kind === "halocue_writing"
+        ? summary.upstream_release : null;
+      const sourceLabel = upstream
+        ? `写作定稿 ${upstream.display_version || "已确认"}`
+        : summary.source_kind === "file_upload"
+          ? `本机文件${summary.source_filename ? ` · ${summary.source_filename}` : ""}`
+          : "直接导入剧本";
+      const buildVersion = Number.isInteger(run.last_build_draft_version)
+        ? `构建基于草稿 v${run.last_build_draft_version}`
+        : "尚未生成构建";
+      const buildState = Number.isInteger(run.last_build_draft_version)
+        && Number.isInteger(draft?.draft_version)
+        && run.last_build_draft_version !== draft.draft_version
+        ? "构建已落后于当前草稿"
+        : buildVersion;
+      const sceneList = scenes.length
+        ? scenes.map(scene => `<li><strong>${escapeHtml(scene.title || "未命名场景")}</strong><span>第 ${escapeHtml(scene.line_no || "-")} 行</span></li>`).join("")
+        : "<li><strong>未读取到场景摘要</strong><span>请刷新任务</span></li>";
+      panel.innerHTML = `
+        <header class="production-current-task-head">
+          <div><small>当前制作任务 · 来源已冻结</small><h3 id="currentTaskBoundaryTitle">${escapeHtml(run.project || "未命名工程")}</h3><p>这不是新建表单。当前任务的剧本、场景边界和下游草稿保持独立，不会被下面的“新建制作”覆盖。</p></div>
+          <span class="production-current-task-state">${escapeHtml({waiting_for_review:"等待审查",compiled:"已编译",installed:"已安装",generating_direction:"演出生成中",direction_failed:"演出生成失败"}[run.state] || run.state || "处理中")}</span>
+        </header>
+        <div class="production-current-task-metrics"><span><small>剧本</small><b>${escapeHtml(summary.line_count || 0)} 行</b></span><span><small>场景</small><b>${escapeHtml(summary.scene_count || scenes.length || 0)} 个</b></span><span><small>草稿</small><b>v${escapeHtml(draft?.draft_version || "-")}</b></span><span><small>待审</small><b>${escapeHtml(draft?.counts?.pending || 0)} 张</b></span></div>
+        <section class="production-task-provenance" aria-label="当前任务来源与版本"><div><small>来源</small><strong>${escapeHtml(sourceLabel)}</strong></div><div><small>下游版本</small><strong>审查草稿 v${escapeHtml(draft?.draft_version || "-")}</strong></div><div class="${buildState === "构建已落后于当前草稿" ? "is-stale" : ""}"><small>构建状态</small><strong>${escapeHtml(buildState)}</strong></div></section>
+        <section class="production-frozen-source"><header><div><small>1A · 当前使用的冻结剧本</small><h4>不会改写写作正文</h4></div><details><summary>展开剧本</summary><pre>${escapeHtml(sourceText || "当前任务未提供可展开的剧本文本")}</pre></details></header></section>
+        <section class="production-frozen-scenes"><header><div><small>1B · 已确认的场景判断</small><h4>下游制作沿用这些边界</h4></div><span>只读</span></header><ol>${sceneList}</ol></section>
+        <footer class="production-current-task-actions"><span>下一步：${escapeHtml(snapshot.stage === "review" ? "进入逐卡审查" : snapshot.stage === "generation" ? "完成场景制作计划" : "处理角色与素材")}</span><div><button type="button" class="quiet" data-current-task-continue>继续当前任务</button><button type="button" class="primary" data-current-task-new>新建另一项制作</button></div></footer>`;
+      panel.querySelector("[data-current-task-continue]")?.addEventListener("click", () => shell.haloCueShowStage?.(snapshot.stage));
+      panel.querySelector("[data-current-task-new]")?.addEventListener("click", () => shell.haloCueShowNewProduction?.());
+    };
+    shell.addEventListener("halocue:production-run-changed", render);
+    shell.addEventListener("halocue:production-new-mode", render);
+    root.__haloCueCurrentTaskBoundary = { render };
+    render();
   }
 
   function installFocusRecovery(root, element) {
@@ -205,7 +295,7 @@
     if (sideHeader) {
       const eyebrow = sideHeader.querySelector("small");
       const title = sideHeader.querySelector("h1");
-      const description = sideHeader.querySelector("p");
+      const description = sideHeader.querySelector("p:not(#runTitle)");
       if (eyebrow && eyebrow.textContent !== "AA 制作") eyebrow.textContent = "AA 制作";
       if (title && title.textContent !== "AA 制作") title.textContent = "AA 制作";
       if (description && description.textContent !== "把已发布剧本整理成可预览、可安装的 AA 工程") {
@@ -302,7 +392,7 @@
   }
 
   function currentProductionRunId(root) {
-    return linkedContext().runId
+    return activeContext?.runId || linkedContext().runId
       || root.querySelector("[data-run-id].active")?.dataset.runId
       || root.querySelector("[data-run-id]")?.dataset.runId
       || "";
@@ -317,10 +407,10 @@
     if (!runId) return { items: [], total: 0, has_more: false };
     const cache = root.__haloCueResourceCache || (root.__haloCueResourceCache = new Map());
     const pending = root.__haloCueResourcePending || (root.__haloCueResourcePending = new Map());
-    const cacheKey = `${runId}|${kind}|${query}|${offset}|${limit}`;
+    const cacheKey = `${runId}|${kind}|${query}|${offset}|${limit}|${options.group || ""}`;
     if (cache.has(cacheKey)) return cache.get(cacheKey);
     if (pending.has(cacheKey)) return pending.get(cacheKey);
-    const request = fetch(`/production/api/v1/production-runs/${encodeURIComponent(runId)}/resources/${kind}?q=${encodeURIComponent(query)}&offset=${offset}&limit=${limit}`, { signal: options.signal })
+    const request = fetch(`/production/api/v1/production-runs/${encodeURIComponent(runId)}/resources/${kind}?q=${encodeURIComponent(query)}&offset=${offset}&limit=${limit}${kind === "backgrounds" ? `&scope=library&group=${encodeURIComponent(options.group || "")}` : ""}`, { signal: options.signal })
       .then(response => {
         if (!response.ok) throw new Error(`素材读取失败（${response.status}）`);
         return response.json();
@@ -461,10 +551,10 @@
 
   function backgroundUserLabel(item, metadata, group) {
     const configured = backgroundGroupLabels[group] || backgroundGroupLabels.scene;
-    const values = [metadata?.display_name, metadata?.place, metadata?.category_path, metadata?.main_category, metadata?.label];
+    const values = [metadata?.display_name_zh_cn, metadata?.place_cn, metadata?.label_cn, metadata?.display_name, metadata?.place, metadata?.category_path, metadata?.main_category, metadata?.label, item?.name];
     const readable = values.find(value => /[\u3400-\u9fff]/.test(String(value || "")));
     if (readable) return String(readable);
-    return configured.source;
+    return item?.name || item?.key || configured.source;
   }
 
   function backgroundCategoryInfo(metadata, group) {
@@ -488,7 +578,7 @@
     const configured = backgroundGroupLabels[group] || backgroundGroupLabels.scene;
     const name = backgroundUserLabel(item, metadata, group);
     const categoryInfo = backgroundCategoryInfo(metadata, group);
-    const preview = runId && key && item.preview_available === true
+    const preview = runId && key && item.preview_available !== false
       ? `<span class="resource-thumb background-thumb"><span class="background-preview-placeholder" aria-hidden="true">预览</span><img ${index < 6 ? `src="${productionResourceUrl(runId, "backgrounds", key, "/preview")}"` : `data-preview-src="${productionResourceUrl(runId, "backgrounds", key, "/preview")}"`} loading="lazy" decoding="async" alt=""></span>`
       : `<span class="resource-thumb background-thumb preview-unavailable" aria-hidden="true">无预览</span>`;
     return `<article class="asset-library-item embedded-background-item" data-embedded-background-key="${escapeHtml(key)}" data-background-category="${escapeHtml(categoryInfo.filterValues.join("|"))}"><div class="embedded-background-preview">${preview}</div><div><strong>${escapeHtml(name)}</strong><small>${escapeHtml(categoryInfo.visible)}</small></div></article>`;
@@ -500,7 +590,7 @@
     root.__haloCueBackgroundPreviewObserver?.disconnect();
     const load = image => {
       const source = image.dataset.previewSrc;
-      if (!source || image.src) return;
+      if (!source || image.hasAttribute("src")) return;
       image.src = source;
       image.removeAttribute("data-preview-src");
     };
@@ -545,15 +635,11 @@
     root.__haloCueBackgroundRequest = request;
     root.__haloCueBackgroundRequestId = requestId;
     try {
-      const endpoint = group === "scene" ? "backgrounds" : "cg-backgrounds";
-      const payload = await fetchProductionResources(root, endpoint, search, offset, 24, { signal: request.signal });
+      const endpoint = "backgrounds";
+      const payload = await fetchProductionResources(root, endpoint, search, offset, 24, { signal: request.signal, group });
       if (root.__haloCueBackgroundRequestId !== requestId) return;
       let items = Array.isArray(payload.items) ? payload.items : [];
-      items = items.filter(item => group === "scene"
-        ? backgroundKeyClass(item.key) === "scene"
-        : group === "cg"
-          ? item.cg_source === "official_cg"
-          : item.cg_source === "custom_background");
+      // The server applies the group before pagination, so totals stay accurate.
       const metadata = group === "scene"
         ? backgroundMetadataMap(await fetchWritingBackgroundMetadata(root, items.map(item => item.key), search).catch(() => []))
         : new Map();
@@ -618,15 +704,7 @@
     };
     const observer = new MutationObserver(() => {
       syncLibrary();
-      const resourceDialog = root.querySelector("#resourceDialog");
-      if (resourceDialog?.open && /背景请求/.test(resourceDialog.querySelector("#resourceDialogEyebrow")?.textContent || "")) {
-        root.querySelectorAll("#resourceResults [data-resource-key]").forEach(button => {
-          button.hidden = backgroundKeyClass(button.dataset.resourceKey) !== "scene";
-        });
-        const status = resourceDialog.querySelector("#resourceDialogStatus");
-        const message = "只显示普通场景背景；CG 与自定义背景请从“插入 CG 段落”中选择。";
-        if (status && status.textContent !== message) status.textContent = message;
-      }
+
     });
     observer.observe(root, { childList: true, subtree: true, characterData: true });
     root.addEventListener("click", event => {
@@ -671,7 +749,181 @@
     syncLibrary();
   }
 
+  function restructureSourceSurface(workspace) {
+    const source = workspace.querySelector("#page-source");
+    const form = source?.querySelector("#sourceForm");
+    const sourceSelector = source?.querySelector(".source-mode-selector");
+    const documentBlock = form?.querySelector(".source-document-block");
+    const documentHead = documentBlock?.querySelector(".source-workflow-head");
+    if (!source || !form || !sourceSelector || !documentBlock || !documentHead) return;
+    if (form.dataset.productionSourceSplit === "true") return;
+
+    // In 0.95 the script itself and the scene judgement are separate
+    // decisions. Keep the source picker with 1A, then place 1B/1C in the
+    // parallel decision column so the user can see the boundary immediately.
+    documentHead.insertAdjacentElement("afterend", sourceSelector);
+    source.classList.add("production-source-workbench");
+    form.classList.add("production-source-split");
+    form.dataset.productionSourceSplit = "true";
+  }
+
+  function restructureGenerationSurface(workspace) {
+    const generation = workspace.querySelector("#page-generation");
+    const lead = generation?.querySelector(":scope > .page-lead");
+    const scenePlan = generation?.querySelector(":scope > .scene-plan");
+    const directionProfile = generation?.querySelector(":scope > #directionProfileControl");
+    const actionPanel = generation?.querySelector(":scope > .action-panel");
+    const generationJob = generation?.querySelector(":scope > #generationJob");
+    const gates = generation?.querySelector(":scope > #generationGates");
+    const layoutMode = generation?.querySelector(":scope > #layoutModeFieldset");
+    if (!generation || !lead || !scenePlan || !directionProfile || !actionPanel || !generationJob || !gates || !layoutMode) return;
+    if (generation.dataset.productionGenerationSplit === "true") return;
+
+    const leadKicker = lead.querySelector("small");
+    const leadTitle = lead.querySelector("h3");
+    if (leadKicker) leadKicker.textContent = "第三步 · 场景与演出";
+    if (leadTitle) leadTitle.textContent = "场景与演出";
+
+    const flow = document.createElement("div");
+    flow.className = "production-generation-flow";
+
+    const plan = document.createElement("section");
+    plan.className = "production-generation-step production-generation-plan";
+    plan.setAttribute("aria-labelledby", "productionGenerationPlanTitle");
+    plan.innerHTML = `
+      <header class="production-generation-section-head">
+        <span class="production-generation-step-index" aria-hidden="true">3A</span>
+        <div>
+          <small>场景制作计划</small>
+          <h4 id="productionGenerationPlanTitle">场景与素材</h4>
+          <p>逐场确认背景与人物，不改写原剧本。</p>
+        </div>
+      </header>`;
+    plan.append(scenePlan);
+
+    const decision = document.createElement("section");
+    decision.className = "production-generation-step production-generation-decision";
+    decision.setAttribute("aria-labelledby", "productionGenerationDecisionTitle");
+    decision.innerHTML = `
+      <header class="production-generation-section-head">
+        <span class="production-generation-step-index" aria-hidden="true">3B</span>
+        <div>
+          <small>草稿编排</small>
+          <h4 id="productionGenerationDecisionTitle">演出设置</h4>
+        </div>
+      </header>`;
+    const decisionHead = decision.querySelector(".production-generation-section-head");
+    const modeBadge = lead.querySelector("#generationModeBadge");
+    if (modeBadge) decisionHead?.querySelector("div")?.append(modeBadge);
+    // Keep native inputs and their event handlers; this layer only explains
+    // the two independent settings rather than inventing a combined mode.
+    layoutMode.querySelector("legend").textContent = "执行方式 · 谁负责安排演出";
+    decision.append(layoutMode, directionProfile);
+    const formatNote = document.createElement("p");
+    formatNote.className = "production-format-note";
+    formatNote.textContent = "当前仅转换格式，保留原文与已有 AA 指令，不调用 AI 安排演出。";
+    decision.append(formatNote);
+
+    const gateSurface = document.createElement("div");
+    gateSurface.className = "production-generation-gates";
+    gateSurface.innerHTML = '<div class="production-generation-gates-head"><strong>准备状态</strong><small>进入审查前检查</small></div>';
+    gateSurface.append(gates);
+    decision.append(gateSurface, actionPanel);
+
+    flow.append(plan, decision);
+    generation.append(flow, generationJob);
+    generation.classList.add("production-generation-workbench");
+    generation.dataset.productionGenerationSplit = "true";
+    installScenePlanTools(scenePlan);
+  }
+
+  function installScenePlanTools(scenePlan) {
+    if (!scenePlan) return;
+    const organize = () => {
+      scenePlan.querySelectorAll(".scene-plan-card > footer:not([data-tools-organized]), .mapping-scene-card > footer:not([data-tools-organized])").forEach(footer => {
+        footer.dataset.toolsOrganized = "true";
+        const review = footer.querySelector("[data-scene-plan-card], [data-mapping-scene-review]");
+        const more = document.createElement("details");
+        more.className = "production-scene-tools";
+        more.innerHTML = '<summary>更多素材操作</summary><div class="production-scene-tools-content"></div>';
+        const content = more.querySelector("div");
+        footer.querySelectorAll("button").forEach(button => {
+          if (!button.matches("[data-scene-plan-official], [data-mapping-scene-official]") && button !== review) content.append(button);
+        });
+        // Move, never clone: production's listeners and scene IDs stay intact.
+        if (review) footer.append(review);
+        footer.append(more);
+      });
+    };
+    organize();
+    new MutationObserver(organize).observe(scenePlan, { childList: true, subtree: true });
+  }
+
+  function installReviewCommandParity(sidebar, workspace, review, tools, toolList) {
+    if (review.querySelector(".production-review-commandbar")) return;
+    const reviewHead = review.querySelector(".review-head");
+    if (!reviewHead) return;
+
+    const commandbar = document.createElement("section");
+    commandbar.className = "production-review-commandbar";
+    commandbar.setAttribute("aria-label", "审查与安装常用操作");
+    commandbar.innerHTML = `
+      <button type="button" class="production-review-task" data-production-review-proxy="openRunOverview">
+        <span><small>当前制作任务</small><strong data-production-review-title>正在读取任务</strong></span>
+        <em>任务总览</em>
+      </button>
+      <div class="production-review-command-actions">
+        <button type="button" data-production-review-proxy="refreshRun">刷新</button>
+      </div>`;
+    const actions = commandbar.querySelector(".production-review-command-actions");
+    ["approveAll", "validateDraft", "openInstallDialog"].forEach(id => {
+      const button = review.querySelector(`#${id}`);
+      if (button) actions.append(button);
+    });
+    const compileProxy = document.createElement("button");
+    compileProxy.type = "button";
+    compileProxy.className = "primary production-review-compile";
+    compileProxy.dataset.productionReviewProxy = "compileButton";
+    compileProxy.textContent = "编译 AA 工程";
+    const installButton = actions.querySelector("#openInstallDialog");
+    if (installButton) actions.insertBefore(compileProxy, installButton);
+    else actions.append(compileProxy);
+    reviewHead.insertAdjacentElement("afterend", commandbar);
+
+    // Only secondary review actions stay inside the overflow menu.
+    if (!toolList.children.length) tools.hidden = true;
+
+    const runTitle = sidebar.querySelector("#runTitle");
+    const runList = workspace.querySelector("#runList");
+    const overviewButton = workspace.querySelector("#openRunOverview");
+    const compileButton = review.querySelector("#compileButton");
+    const commandTitle = commandbar.querySelector("[data-production-review-title]");
+    const taskButton = commandbar.querySelector(".production-review-task");
+    const syncCommandbar = () => {
+      // The loaded run, not the initial URL or a recent-list label, owns this title.
+      commandTitle.textContent = runTitle?.textContent?.trim() || "尚未建立制作任务";
+      taskButton.disabled = Boolean(overviewButton?.disabled);
+      compileProxy.disabled = Boolean(compileButton?.disabled);
+      compileProxy.textContent = compileButton?.textContent?.trim() || "编译 AA 工程";
+    };
+    const observer = new MutationObserver(syncCommandbar);
+    if (runTitle) observer.observe(runTitle, { childList: true, subtree: true, characterData: true });
+    if (runList) observer.observe(runList, { childList: true, subtree: true, characterData: true });
+    if (overviewButton) observer.observe(overviewButton, { attributes: true, attributeFilter: ["disabled"] });
+    if (compileButton) observer.observe(compileButton, { attributes: true, attributeFilter: ["disabled"], childList: true, subtree: true });
+    commandbar.addEventListener("click", event => {
+      const proxy = event.target.closest("[data-production-review-proxy]");
+      if (!proxy || proxy.disabled) return;
+      workspace.querySelector(`#${proxy.dataset.productionReviewProxy}`)?.click();
+    });
+    commandbar.__haloCueObserver = observer;
+    syncCommandbar();
+  }
+
   function restructureProductionSurface(sidebar, workspace) {
+    restructureSourceSurface(workspace);
+    restructureGenerationSurface(workspace);
+    installScenePlanTools(workspace.querySelector("#mappingScenePlan"));
     sidebar.classList.add("production-flow-strip");
     sidebar.querySelector(".side-header")?.setAttribute("hidden", "");
     sidebar.querySelector(".side-status")?.setAttribute("hidden", "");
@@ -705,49 +957,83 @@
         // but never place it inside the user-facing tools menu.
         review.append(legacyPreviewTrigger);
       }
-      [...review.querySelectorAll(".review-actions > button:not(#openPerformancePreview)")].forEach(button => toolList.append(button));
+      [...review.querySelectorAll(".review-actions > button:not(#openPerformancePreview)")].forEach(button => {
+        if (!["approveAll", "validateDraft", "openInstallDialog"].includes(button.id)) toolList.append(button);
+      });
+      installReviewCommandParity(sidebar, workspace, review, tools, toolList);
       review.querySelector(".review-actions")?.replaceChildren(tools);
 
-      const timeline = document.createElement("nav");
-      timeline.className = "production-background-timeline";
-      timeline.setAttribute("aria-label", "背景时间线");
-      timeline.innerHTML = '<span>背景时间线</span><div data-production-background-nodes><small>正在读取草稿画面</small></div>';
-      const timelineWrap = document.createElement("details");
-      timelineWrap.className = "production-background-timeline-wrap";
-      timelineWrap.innerHTML = '<summary><span>背景变化</span><small>按切换点查看</small></summary>';
-      timelineWrap.open = window.matchMedia("(min-width: 801px)").matches;
-      timelineWrap.append(timeline);
-      reviewLayout.insertAdjacentElement("beforebegin", timelineWrap);
+      const hasNativeReviewParity = Boolean(
+        review.querySelector("#backgroundTimeline")
+        && review.querySelector(".persistent-preview-panel")
+        && review.querySelector(".review-side-rail"),
+      );
+      review.classList.toggle("production-native-review-parity", hasNativeReviewParity);
 
-      const side = document.createElement("aside");
-      side.className = "production-review-side";
-      const preview = document.createElement("section");
-      preview.className = "production-live-preview";
-      preview.setAttribute("aria-label", "剧情预览");
-      preview.innerHTML = `
-        <header><div><small>随卡片同步</small><h3>剧情预览</h3></div><button type="button" class="production-preview-close" aria-label="关闭剧情预览">×</button></header>
-        <div class="production-preview-stage" data-production-preview-stage><div class="production-preview-empty"><strong>选择一张卡片</strong><p>这里会显示当前画面和台词。</p></div></div>`;
-      side.append(preview, inspector);
-      reviewLayout.append(side);
+      if (hasNativeReviewParity) {
+        // 0.95 keeps the background timeline in the left review column while
+        // the live preview remains visible on the right. Production owns the
+        // native widgets; the writing shell only composes them for the embedded
+        // workbench instead of projecting a second copy.
+        const reviewColumn = reviewLayout.querySelector(".review-column");
+        const filterbar = reviewColumn?.querySelector(".filterbar");
+        const selectedToolbar = review.querySelector("#selectedCardToolbar");
+        const backgroundTimeline = review.querySelector("#backgroundTimeline");
+        if (reviewColumn && filterbar) {
+          // Match 0.95: filters/jump, selected-card actions, timeline, then
+          // the complete card sequence. Never put the list behind a scroll clip.
+          if (selectedToolbar) filterbar.insertAdjacentElement("afterend", selectedToolbar);
+          const commandGuide = review.querySelector("#reviewCommandGuide");
+          if (commandGuide) (selectedToolbar || filterbar).insertAdjacentElement("afterend", commandGuide);
+          if (backgroundTimeline) (commandGuide || selectedToolbar || filterbar).insertAdjacentElement("afterend", backgroundTimeline);
+        }
+      }
 
-      const previewToggle = document.createElement("button");
-      previewToggle.type = "button";
-      previewToggle.className = "production-preview-toggle";
-      previewToggle.setAttribute("aria-expanded", "false");
-      previewToggle.textContent = "查看剧情预览";
-      review.querySelector(".review-head")?.append(previewToggle);
-      const editToggle = document.createElement("button");
-      editToggle.type = "button";
-      editToggle.className = "production-edit-toggle";
-      editToggle.dataset.productionEditCurrent = "true";
-      editToggle.setAttribute("aria-expanded", "false");
-      editToggle.textContent = "编辑当前卡";
-      review.querySelector(".review-head")?.append(editToggle);
-      const backdrop = document.createElement("button");
-      backdrop.type = "button";
-      backdrop.className = "production-preview-backdrop";
-      backdrop.setAttribute("aria-label", "关闭剧情预览");
-      review.append(backdrop);
+      // Current Production already owns the 0.95-style background timeline,
+      // persistent preview and inspector rail. Older Production builds did not,
+      // so retain the adapter fallback without duplicating the native UI.
+      if (!hasNativeReviewParity) {
+        const timeline = document.createElement("nav");
+        timeline.className = "production-background-timeline";
+        timeline.setAttribute("aria-label", "背景时间线");
+        timeline.innerHTML = '<span>背景时间线</span><div data-production-background-nodes><small>正在读取草稿画面</small></div>';
+        const timelineWrap = document.createElement("details");
+        timelineWrap.className = "production-background-timeline-wrap";
+        timelineWrap.innerHTML = '<summary><span>背景变化</span><small>按切换点查看</small></summary>';
+        timelineWrap.open = window.matchMedia("(min-width: 801px)").matches;
+        timelineWrap.append(timeline);
+        reviewLayout.insertAdjacentElement("beforebegin", timelineWrap);
+
+        const side = document.createElement("aside");
+        side.className = "production-review-side";
+        const preview = document.createElement("section");
+        preview.className = "production-live-preview";
+        preview.setAttribute("aria-label", "剧情预览");
+        preview.innerHTML = `
+          <header><div><small>随卡片同步</small><h3>剧情预览</h3></div><button type="button" class="production-preview-close" aria-label="关闭剧情预览">×</button></header>
+          <div class="production-preview-stage" data-production-preview-stage><div class="production-preview-empty"><strong>选择一张卡片</strong><p>这里会显示当前画面和台词。</p></div></div>`;
+        side.append(preview, inspector);
+        reviewLayout.append(side);
+
+        const previewToggle = document.createElement("button");
+        previewToggle.type = "button";
+        previewToggle.className = "production-preview-toggle";
+        previewToggle.setAttribute("aria-expanded", "false");
+        previewToggle.textContent = "查看剧情预览";
+        review.querySelector(".review-head")?.append(previewToggle);
+        const editToggle = document.createElement("button");
+        editToggle.type = "button";
+        editToggle.className = "production-edit-toggle";
+        editToggle.dataset.productionEditCurrent = "true";
+        editToggle.setAttribute("aria-expanded", "false");
+        editToggle.textContent = "编辑当前卡";
+        review.querySelector(".review-head")?.append(editToggle);
+        const backdrop = document.createElement("button");
+        backdrop.type = "button";
+        backdrop.className = "production-preview-backdrop";
+        backdrop.setAttribute("aria-label", "关闭剧情预览");
+        review.append(backdrop);
+      }
     }
   }
 
@@ -834,6 +1120,84 @@
       : "";
     const label = frame.presentation === "cg" ? "CG 画面" : frame.presentation === "direction" ? "演出指令" : frame.presentation === "scene" ? "场景" : "当前台词";
     return `<div class="production-preview-frame">${background}<span class="production-preview-count">${index + 1} / ${total}</span><div class="production-preview-dialogue"><small>${escapeHtml(label)}</small><strong>${escapeHtml(frame.title || frame.speaker?.name || "未命名")}</strong><p>${escapeHtml(frame.text || "这张卡片没有正文。")}</p></div></div>`;
+  }
+
+  function installNativeReviewParity(root) {
+    if (root.__haloCueNativeReviewParity) return;
+    const review = root.querySelector("#page-review.production-native-review-parity");
+    const cardList = review?.querySelector("#cardList");
+    const filterbar = review?.querySelector(".filterbar");
+    if (!review || !cardList || !filterbar) return;
+
+    const navigation = document.createElement("span");
+    navigation.className = "production-review-navigation";
+    navigation.innerHTML = `
+      <span class="production-review-card-total" data-production-card-total>0 张</span>
+      <label>跳到 #<input type="number" min="1" step="1" inputmode="numeric" aria-label="卡片号" placeholder="卡片号"></label>
+      <button type="button" data-production-card-jump>跳转</button>`;
+    filterbar.append(navigation);
+    const totalLabel = navigation.querySelector("[data-production-card-total]");
+    const jumpInput = navigation.querySelector("input");
+    const jumpButton = navigation.querySelector("[data-production-card-jump]");
+    const reviewSummary = review.querySelector("#reviewSummary");
+    const syncNavigation = () => {
+      const summaryCount = reviewSummary?.textContent?.match(/(\d+)\s*张卡片/)?.[1];
+      const count = Number(summaryCount || cardList.querySelectorAll("[data-card-id]").length || 0);
+      totalLabel.textContent = `${count} 张`;
+      jumpInput.max = String(Math.max(count, 1));
+    };
+    const jumpToCard = () => {
+      const requested = Number.parseInt(jumpInput.value, 10);
+      if (!Number.isFinite(requested) || requested < 1) {
+        jumpInput.focus();
+        return;
+      }
+      const select = () => {
+        const cards = [...cardList.querySelectorAll("[data-card-id]")];
+        const card = cards[Math.min(requested, cards.length) - 1];
+        if (!card) return;
+        card.click();
+        window.setTimeout(() => {
+          const refreshedCards = [...cardList.querySelectorAll("[data-card-id]")];
+          const refreshedCard = refreshedCards[Math.min(requested, refreshedCards.length) - 1];
+          refreshedCard?.scrollIntoView({ block: "center", behavior: "smooth" });
+        }, 0);
+      };
+      const allFilter = filterbar.querySelector('[data-filter="all"]');
+      if (allFilter && !allFilter.classList.contains("active")) {
+        allFilter.click();
+        window.setTimeout(select, 0);
+      } else {
+        select();
+      }
+    };
+    jumpButton.addEventListener("click", jumpToCard);
+    jumpInput.addEventListener("keydown", event => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      jumpToCard();
+    });
+
+    let syncing = false;
+    const syncSelection = () => {
+      if (syncing || !review.classList.contains("active")) return;
+      syncing = true;
+      queueMicrotask(() => {
+        const cards = [...cardList.querySelectorAll("[data-card-id]")];
+        if (cards.length && !cards.some(card => card.classList.contains("selected"))) {
+          (cards.find(card => card.classList.contains("blocking") || card.classList.contains("pending")) || cards[0]).click();
+        }
+        syncNavigation();
+        syncing = false;
+      });
+    };
+
+    const observer = new MutationObserver(syncSelection);
+    observer.observe(cardList, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+    observer.observe(review, { attributes: true, attributeFilter: ["class"] });
+    if (reviewSummary) observer.observe(reviewSummary, { childList: true, subtree: true, characterData: true });
+    root.__haloCueNativeReviewParity = observer;
+    syncSelection();
   }
 
   function installReviewWorkbench(root) {
@@ -976,6 +1340,7 @@
   function installProductionWorkbench(root) {
     if (root.__haloCueProductionWorkbench) return;
     installSettingsWorkbench(root);
+    installNativeReviewParity(root);
     installReviewWorkbench(root);
     root.addEventListener("click", event => {
       if (event.target.closest?.("#openAssetLibrary, #assetLibraryDialog [data-asset-kind], #assetLibraryMore")) {
@@ -986,7 +1351,27 @@
     simplifyAssetWorkbench(root);
   }
 
+  function ensureProductionRecoveryStyle(root) {
+    if(root.querySelector('[data-production-recovery-style]'))return;
+    // This surface must be usable even when the production HTML/styles never arrive.
+    const style=document.createElement('style');style.dataset.productionRecoveryStyle='true';
+    style.textContent=`
+      .production-surface-state{box-sizing:border-box;padding:40px 24px;color:var(--hc-text,#263241);font-family:var(--author-ui-font,sans-serif);}
+      .production-surface-state[hidden]{display:none!important}
+      .production-surface-state-card{max-width:640px;margin:24px auto;padding:24px;border:1px solid var(--hc-line,#dce1e7);border-radius:14px;background:var(--hc-panel,#fff);display:flex;gap:16px;align-items:flex-start;}
+      .production-surface-state-mark{flex:none;display:grid;place-items:center;width:32px;height:32px;border-radius:9px;background:var(--hc-hover,#f3f5f8);color:var(--hc-muted,#637080);}
+      .production-surface-state-card>div{min-width:0;flex:1}.production-surface-state-card strong{font-size:17px;line-height:1.6}
+      .production-surface-state-card p{font-size:13px;line-height:1.8;color:var(--hc-muted,#637080);overflow-wrap:anywhere}
+      .production-recovery-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}.production-recovery-actions button{min-height:38px;padding:8px 12px;border:1px solid var(--hc-line,#dce1e7);border-radius:7px;background:transparent;color:inherit;font:inherit;font-size:12px;cursor:pointer}
+      .production-recovery-actions button:focus-visible{outline:2px solid var(--hc-accent,#537fbc);outline-offset:2px}
+      .production-surface-state-card details{margin-top:12px;font-size:12px;color:var(--hc-muted,#637080)}
+      @media(max-width:760px){.production-surface-state{padding:20px 14px}.production-surface-state-card{margin:0;padding:18px;gap:10px}.production-recovery-actions button{min-height:44px}}
+    `;
+    root.append(style);
+  }
+
   function setProductionSurfaceState(root, stateName, options = {}) {
+    ensureProductionRecoveryStyle(root);
     const panelState = String(stateName || "loading");
     let panel = root.querySelector(".production-surface-state");
     if (!panel) {
@@ -1013,10 +1398,17 @@
     const title = options.title || (panelState === "loading" ? "正在打开 AA 制作" : "AA 制作工作面没有打开");
     const detail = options.detail || (panelState === "loading" ? "正在连接制作服务，请稍候。" : "请重新读取制作工作面。");
     const retry = typeof options.onRetry === "function"
-      ? `<button type="button" class="production-embed-retry">${esc(options.actionLabel || "重试")}</button>`
+      ? `<button type="button" class="production-embed-retry">${escapeHtml(options.actionLabel || "重试")}</button>`
       : "";
     panel.setAttribute("role", panelState === "loading" ? "status" : "alert");
-    panel.innerHTML = `<div class="production-surface-state-card"><span class="production-surface-state-mark" aria-hidden="true">${panelState === "loading" ? "…" : "!"}</span><div><strong>${esc(title)}</strong><p>${esc(detail)}</p>${retry}</div></div>`;
+    const failed=panelState==='error';
+    const recovery=failed?'<button type="button" data-production-return-writing>返回写作</button><button type="button" data-production-open-settings>检查制作环境</button>':'';
+    panel.innerHTML = `<div class="production-surface-state-card"><span class="production-surface-state-mark" aria-hidden="true">${panelState === "loading" ? "…" : "!"}</span><div><strong>${escapeHtml(title)}</strong><p>${failed?'暂时无法连接制作工作面。作品和正文仍保留，你可以继续写作，或检查本机制作服务后重试。':escapeHtml(detail)}</p>${failed?`<details><summary>查看连接详情</summary><p>${escapeHtml(detail)}</p></details>`:''}<div class="production-recovery-actions">${retry}${recovery}</div></div></div>`;
+    panel.querySelector('[data-production-return-writing]')?.addEventListener('click',()=>window.HaloCueRouter?.navigate({section:'writing',stage:'draft',pane:'writing'}));
+    panel.querySelector('[data-production-open-settings]')?.addEventListener('click',()=>{
+      document.querySelector('#openSettingsButton')?.click();
+      document.querySelector('#settingsTab-aa')?.click();
+    });
     const retryButton = panel.querySelector(".production-embed-retry");
     retryButton?.addEventListener("click", () => options.onRetry(), { once: true });
     host()?.setAttribute("aria-busy", panelState === "loading" ? "true" : "false");
@@ -1042,17 +1434,29 @@
 
     const styleUrls = [
       "/production/app.css",
+      "/production/layout-mode.css",
       "/production/previews.css",
+      "/production/review-parity.css",
       "/production/preflight.css",
       "/production/cg-responsive.css",
       "/production/workspace-migration.css",
       "/production/direction-profile.css",
-      "/production-embed.css",
+      "/production/confirm-dialog.css",
+      "/production-embed.css?v=20260929-overview-origin-dark2",
+      "/production-theme.css?v=20260929-resource-empty-dark1",
+      "/production/clarity.css?v=20260927-compact4",
     ];
     const styleLoads = styleUrls.map(stylesheet);
     const links = styleLoads.map(load => load.link);
     const shell = document.createElement("div");
     shell.className = "app-shell embedded-production-shell";
+    shell.addEventListener("halocue:production-context", event => {
+      if (!app()?.classList.contains("production-mode")) return;
+      activeContext = event.detail;
+      updateUrl(activeContext, true);
+      window.HaloCueRouter?.setProductionContext(activeContext);
+      syncChrome();
+    });
     const importedSidebar = document.importNode(stripInlineStyles(sidebar), true);
     const importedWorkspace = document.importNode(stripInlineStyles(workspace), true);
     const topActions = importedWorkspace.querySelector(".top-actions");
@@ -1067,6 +1471,9 @@
       const action = document.importNode(source, true);
       action.className = "embed-tool-button";
       action.textContent = label;
+      // app.js binds this legacy control during startup. Keep its inert DOM
+      // hook for compatibility, while settings are owned by the main shell.
+      action.hidden = selector === "#openSettings";
       topActions.prepend(action);
     });
 
@@ -1082,7 +1489,7 @@
 
     await new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = "/production/app-embedded.js";
+      script.src = "/production/app-embedded.js?v=20260927-compact4";
       script.onload = resolve;
       script.onerror = () => reject(new Error("无法启动 AA 制作工作面"));
       document.head.append(script);
@@ -1135,23 +1542,21 @@
   }
 
   async function selectRun(root, runId) {
+    const shell = root.querySelector(".embedded-production-shell");
+    await shell.haloCueReady;
     if (!runId) return true;
-    for (let attempt = 0; attempt < 80; attempt += 1) {
-      const button = [...root.querySelectorAll("[data-run-id]")].find(item => item.dataset.runId === runId);
-      if (button) {
-        button.click();
-        return true;
-      }
-      await sleep(100);
-    }
-    return false;
+    // Open by stable ID, including runs older than the eight recent rows.
+    try { return await shell.haloCueOpenRun(runId); }
+    catch (error) { if (error.status === 404 || error.code === "run_not_found") return false; throw error; }
   }
 
   async function open(options = {}) {
+    const ticket = ++openEpoch;
     const context = linkedContext(options.trigger);
     for (const key of ["runId", "workId", "releaseId"]) {
-      if (options[key]) context[key] = options[key];
+      if (Object.prototype.hasOwnProperty.call(options, key)) context[key] = options[key] || "";
     }
+    activeContext = { ...context, title: context.runId ? "正在打开制作任务…" : "选择制作任务" };
     const element = ensureHost();
     element.hidden = false;
     element.focus({ preventScroll: true });
@@ -1160,12 +1565,17 @@
     updateUrl(context, Boolean(options.replaceHistory));
     try {
       const root = await ensureProductionSurface();
+      if (ticket !== openEpoch || !app()?.classList.contains("production-mode")) return;
+      await root.querySelector(".embedded-production-shell").haloCueReady;
+      if (ticket !== openEpoch || !app()?.classList.contains("production-mode")) return;
+      installCurrentTaskSourceBoundary(root);
       installFocusRecovery(root, element);
       installProductionLabelSanitizer(root);
       installBackgroundClassification(root);
       installOuterActions(root);
-      setProductionSurfaceState(root, "ready");
+      setProductionSurfaceState(root, "loading", { title: "正在读取制作任务", detail: "正在同步草稿、素材和审查状态。" });
       const selected = await selectRun(root, context.runId);
+      if (ticket !== openEpoch || !app()?.classList.contains("production-mode")) return;
       if (context.runId && !selected) {
         setProductionSurfaceState(root, "missing-run", {
           title: "没有找到这项制作任务",
@@ -1175,11 +1585,13 @@
         });
       } else {
         setProductionSurfaceState(root, "ready");
+        root.__haloCueCurrentTaskBoundary?.render();
       }
       // Loading the embedded production surface and selecting a run can move focus
       // back to document.body; restore the outer work-surface focus after async work.
       element.focus({ preventScroll: true });
     } catch (error) {
+      if (ticket !== openEpoch || !app()?.classList.contains("production-mode")) return;
       loadPromise = null;
       element.setAttribute("aria-busy", "false");
       const root = element.shadowRoot || element.attachShadow({ mode: "open" });
@@ -1193,6 +1605,7 @@
   }
 
   function close(options = {}) {
+    openEpoch++;
     app()?.classList.remove("production-mode");
     const element = host();
     if (element) element.hidden = true;
@@ -1220,6 +1633,7 @@
   }, true);
 
   window.addEventListener("popstate", () => {
+    if (window.HaloCueRouter) return;
     const params = new URLSearchParams(location.search);
     if (params.get("section") === "production") {
       open({ ...linkedContext(), replaceHistory: true });
@@ -1228,5 +1642,5 @@
     }
   });
 
-  window.HaloCueProductionEmbed = { open, close, preload, status, isOpen: () => app()?.classList.contains("production-mode") };
+  window.HaloCueProductionEmbed = { open, close, preload, status, syncChrome, isOpen: () => app()?.classList.contains("production-mode") };
 })();

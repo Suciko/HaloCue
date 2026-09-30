@@ -576,3 +576,20 @@ def test_conversation_finalization_preserves_unacknowledged_receipt(tmp_path, mo
     assert calls == [1]
     service.close()
     restored.close()
+
+
+def test_activity_snapshot_keeps_request_usage_after_refresh(tmp_path, monkeypatch):
+    service, work, source, plan, queued, provider, body = setup_job(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "halocue_writing.providers.urllib.request.urlopen", lambda *args, **kw: Response(body)
+    )
+    service.agent_dispatcher.run_once()
+    activity = service.get_activity_snapshot(work["id"])
+    run = next(row for row in activity["agent_runs"] if row["id"] == queued["agent_run_id"])
+    summary = service.request_ledger.for_run(work["id"], run["id"])["summary"]
+    assert run["request_usage"] == summary
+    assert run["request_usage"]["totals"]["input_tokens"] == 10
+    assert run["request_usage"]["totals"]["output_tokens"] == 2
+    assert run["request_usage"]["physical_request_count"] == 1
+    assert "SECRET-KEY" not in json.dumps(activity)
+    assert source["chapters"][0]["paragraphs"][0]["text"] not in json.dumps(activity)

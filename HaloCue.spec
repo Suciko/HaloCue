@@ -10,6 +10,7 @@ datas = [
     (str(ROOT / "css"), "css"),
     (str(ROOT / "branding"), "branding"),
     (str(ROOT / "data" / "halocue_labels.db"), "data"),
+    (str(ROOT / "model_capabilities.py"), "."),
     (str(ROOT / "pyproject.toml"), "."),
     (str(ROOT / "services" / "halocue" / "writing" / "skill" / "ba-writing"),
      "services/halocue/writing/skill/ba-writing"),

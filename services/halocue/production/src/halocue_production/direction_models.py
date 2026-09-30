@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -23,6 +24,12 @@ class DirectionModelGateway:
             else self.settings.provider_settings()
         )
         provider_settings = dict(provider_settings)
+        if provider_name == "anthropic":
+            effort = provider_settings.get("reasoning_effort", "auto")
+            if effort == "none":
+                provider_settings["thinking"] = False
+            elif effort != "auto":
+                provider_settings["effort"] = effort
         # The legacy OpenAI transport requires a nonempty Authorization value.
         # Only a verified loopback OpenAI-compatible endpoint may be keyless;
         # use an inert transport placeholder, never persist it as a real secret.
@@ -52,12 +59,16 @@ class DirectionModelGateway:
         }
         started = time.monotonic()
         try:
-            result = provider.complete_json(
-                "You are a connection test. Return JSON only.",
-                "",
-                'Return exactly {"ok":true}.',
-                schema,
-            )
+            budget = min(int((candidate or {}).get("max_tokens") or 4096),
+                         max(4096, int((candidate or {}).get("thinking_budget") or 0) + 512))
+            scoped = provider.temporary_output_budget(budget) if hasattr(provider, "temporary_output_budget") else nullcontext()
+            with scoped:
+                result = provider.complete_json(
+                    "You are a connection test. Return JSON only.",
+                    "",
+                    'Return exactly {"ok":true}.',
+                    schema,
+                )
         except Exception as exc:
             raise ProductionError(
                 str(getattr(exc, "code", "model_connection_failed")),

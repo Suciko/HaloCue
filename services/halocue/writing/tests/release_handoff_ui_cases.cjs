@@ -9,7 +9,7 @@ const source = fs.readFileSync(sourcePath, 'utf8');
 const renderStart = source.indexOf('function renderRelease(el){');
 const renderSource = source.slice(renderStart, source.indexOf('\nfunction renderInspector', renderStart));
 const navigationStart = source.indexOf('const renderReleaseBeforeProductionNavigation=');
-const navigationSource = source.slice(navigationStart, source.indexOf("\ndocument.addEventListener", navigationStart));
+const navigationSource = source.slice(navigationStart, source.indexOf("\nregisterAppClick", navigationStart));
 const controllerStart = source.indexOf('const ReleaseHandoffUI =');
 const controllerSource = controllerStart < 0 ? '' : source.slice(controllerStart, source.indexOf('// In the integrated shell', controllerStart));
 const integrityStart = source.indexOf('function decorateReleaseIntegrity(el){');
@@ -17,8 +17,19 @@ const integritySource = source.slice(integrityStart, source.indexOf('\nrenderRel
 const integration = fs.readFileSync(path.resolve(path.dirname(sourcePath), '../../integrated/static/integration-shell.js'), 'utf8');
 const integrationStart = integration.indexOf('    document.addEventListener("click", async event => {');
 const integrationSource = integration.slice(integrationStart, integration.indexOf('    }, true);', integrationStart) + '    }, true);'.length);
-const clickSource = source.split('\n').find(line => line.startsWith("document.addEventListener('click',async event=>{const b="));
+const clickSource = source.split('\n').find(line => line.startsWith("registerAppClick(async event=>{const b="));
 assert(renderSource && navigationSource && clickSource, 'Production release boundaries must exist');
+const dispatcherStart = source.indexOf('function handleAppRouteClick(event){');
+const dispatcherSource = source.slice(dispatcherStart, source.indexOf("window.addEventListener('popstate'", dispatcherStart));
+const dispatcherSetup = `
+let hcCommandDepth=0; const hcClickHandlers=[],hcClaimedEvents=new WeakSet();
+function registerAppClick(handler,priority=20){hcClickHandlers.push({handler,priority,order:hcClickHandlers.length});}
+function claimAppEvent(event){hcClaimedEvents.add(event);}
+function routeUrl(){return '/fixture';} function syncAppRoute(){}
+function captureClientError(error){throw error;}
+function navigateRoute(target){if(target.section==='production')HaloCueProductionEmbed.open({...target,workId:state.work.id});}
+window.HaloCueRouter={navigate:navigateRoute};
+`;
 const retry = '[data-retry-handoff]';
 const proof = '[data-release-asset-status]';
 const open = '[data-open-production]';
@@ -313,7 +324,7 @@ const cases = {
       window.clearTimeout = id => {if (id<0) io.timers.delete(id);else nativeClear(id);};
       document.querySelector('#unrelated').addEventListener('click', () => io.unrelated++);
     });
-    await page.addScriptTag({content:integrationSource+'\n'+renderSource+'\n'+controllerSource+'\n'+navigationSource+'\n'+integritySource+'\n'+clickSource+"\nconst renderBeforeTestIntegrity=renderRelease;renderRelease=function(el){renderBeforeTestIntegrity(el);decorateReleaseIntegrity(el)};"});
+    await page.addScriptTag({content:dispatcherSetup+'\n'+dispatcherSource+'\n'+integrationSource+'\n'+renderSource+'\n'+controllerSource+'\n'+navigationSource+'\n'+integritySource+'\n'+clickSource+"\nconst renderBeforeTestIntegrity=renderRelease;renderRelease=function(el){renderBeforeTestIntegrity(el);decorateReleaseIntegrity(el)};"});
     const h = {
       page,
       async render(workId='a', ids=['r1'], linked=true) {

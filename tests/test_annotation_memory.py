@@ -161,6 +161,9 @@ def test_target_context_uses_short_indices_without_full_fingerprints():
     assert "authored=face,emo" in user
     assert items[0]["text_fingerprint"] not in user
     assert "不复述规则、哈希、原文或候选比较" in user
+    assert "顶层必须有 lines、state_delta、memory_events" in user
+    assert '{"lines":[],"state_delta":{},"memory_events":[]}' in user
+    assert "source_ids 使用 TARGET 的整数序号" in user
 
 
 def test_checkpoint_round_trip_and_no_temporary_file(tmp_path):

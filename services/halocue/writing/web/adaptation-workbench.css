@@ -241,6 +241,25 @@ dialog.adaptation-workbench .adaptation-chapters label {
   cursor: pointer;
 }
 
+dialog.adaptation-workbench .adaptation-chapters .adaptation-target-row {
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+dialog.adaptation-workbench .adaptation-target-row span { font-weight: 600; }
+dialog.adaptation-workbench .adaptation-target-row select {
+  width: min(100%, 320px);
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  color-scheme: inherit;
+}
+
 dialog.adaptation-workbench input[type="checkbox"] {
   flex: 0 0 auto;
   width: 18px;

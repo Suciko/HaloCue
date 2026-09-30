@@ -1,0 +1,294 @@
+/* HaloCue phase 2. Loaded last; scoped to Settings/Help, never the writing router. */
+:root {
+  --hc-font-ui: "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  --hc-canvas: #f5f7fa;
+  --hc-surface: #ffffff;
+  --hc-surface-soft: #f8fafc;
+  --hc-ink: #253247;
+  --hc-muted: #64748b;
+  --hc-line: #dfe5ed;
+  --hc-action: var(--action, #2f65a5);
+  --hc-action-hover: var(--action-hover, #25568e);
+  --hc-action-soft: var(--action-soft, #edf2fa);
+  --hc-success: #267252;
+  --hc-success-soft: #edf7f1;
+  --hc-warning: #8a5b14;
+  --hc-warning-soft: #fff7e7;
+  --hc-danger: #ad4545;
+  --hc-danger-soft: #fff1f1;
+  --hc-radius: 12px;
+}
+.topbar .help-entry { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 10px; border: 1px solid var(--hc-line); border-radius: 8px; background: var(--hc-surface); color: var(--hc-muted); font: 12px/1.4 var(--hc-font-ui); white-space: nowrap; }
+.topbar .help-entry span { display: grid; place-items: center; width: 17px; height: 17px; border: 1px solid currentColor; border-radius: 50%; font-size: 11px; font-weight: 650; }
+.topbar .help-entry:hover { color: var(--hc-action); border-color: var(--hc-action); background: var(--hc-action-soft); }
+#settingsDialog, #helpDialog { box-sizing: border-box; padding: 0; margin: auto; border: 1px solid var(--hc-line); border-radius: 18px; background: var(--hc-surface); color: var(--hc-ink); box-shadow: 0 26px 90px #1b2c4940; font: 14px/1.6 var(--hc-font-ui); overflow: hidden; overscroll-behavior: contain; }
+#settingsDialog *, #helpDialog * { box-sizing: border-box; }
+#settingsDialog :is(h1,h2,h3,h4,h5), #helpDialog :is(h1,h2,h3,h4,h5) { font-family: var(--hc-font-ui); }
+#settingsDialog:not([open]), #helpDialog:not([open]), #settingsDialog [hidden], #settingsDialog .hidden, #helpDialog [hidden] { display: none !important; }
+#settingsDialog::backdrop, #helpDialog::backdrop { background: rgb(26 39 58 / 38%); backdrop-filter: blur(3px); }
+#settingsDialog { width: min(1160px, calc(100vw - 48px)); height: min(900px, calc(100dvh - 48px)); max-width: none; max-height: none; }
+#settingsDialog .settings-shell { display: flex; flex-direction: column; height: 100%; min-height: 0; max-height: none; overflow: hidden; background: var(--hc-surface); }
+#settingsDialog .settings-header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 20px; padding: 22px 30px 18px; border-bottom: 0; background: var(--hc-surface); }
+#settingsDialog .settings-header h2, #helpDialog h2 { margin: 3px 0 0; font: 650 23px/1.3 var(--hc-font-ui); letter-spacing: -.02em; color: var(--hc-ink); }
+#settingsDialog .eyebrow, #helpDialog .eyebrow { margin: 0; font: 600 10px/1.5 var(--hc-font-ui); letter-spacing: .12em; color: var(--hc-muted); }
+#settingsDialog .icon-button, #helpDialog .icon-button { flex: 0 0 34px; width: 34px; height: 34px; padding: 0; border: 1px solid var(--hc-line); border-radius: 10px; background: #fff; color: var(--hc-muted); font: 22px/1 var(--hc-font-ui); display: grid; place-items: center; }
+#settingsDialog .settings-body { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
+#settingsDialog .settings-nav { display: flex; flex: 0 0 auto; flex-direction: row; justify-content: flex-start; align-items: stretch; gap: 6px; width: auto; padding: 0 30px; background: #fff; border: 0; border-bottom: 1px solid var(--hc-line); overflow-x: auto; }
+#settingsDialog .settings-nav-btn { display: inline-flex; width: auto; flex: 0 0 auto; align-items: center; justify-content: center; min-width: 100px; min-height: 47px; margin: 0; padding: 12px 18px; border: 0; border-bottom: 3px solid transparent; border-radius: 9px 9px 0 0; background: transparent; color: var(--hc-muted); font: 550 14px/1.4 var(--hc-font-ui); box-shadow: none; white-space: nowrap; }
+#settingsDialog .settings-nav-btn:hover { background: var(--hc-surface-soft); color: var(--hc-ink); }
+#settingsDialog .settings-nav-btn.active { border-bottom-color: var(--hc-action); background: var(--hc-action-soft); color: var(--hc-action); font-weight: 650; box-shadow: none; }
+
+#settingsDialog .settings-nav-btn-aa { gap: 7px; color: var(--hc-action); }
+#settingsDialog .settings-nav-status { display: inline-flex; align-items: center; min-height: 19px; padding: 1px 6px; border: 1px solid #e9cf99; border-radius: 999px; background: var(--hc-warning-soft); color: var(--hc-warning); font-size: 10px; font-weight: 650; line-height: 1.4; }
+#settingsDialog .settings-nav-status.is-ready { border-color: #b9d8c8; background: var(--hc-success-soft); color: var(--hc-success); }
+#settingsDialog .settings-nav-status.is-unavailable { border-color: #e4c2c2; background: var(--hc-danger-soft); color: var(--hc-danger); }
+#settingsDialog .aa-setup-callout { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin: 0 0 18px; padding: 20px 22px; border: 1px solid #bed1ea; border-left: 4px solid var(--hc-action); border-radius: var(--hc-radius); background: linear-gradient(100deg, var(--hc-action-soft), #fff); }
+#settingsDialog .aa-setup-callout h4 { margin: 3px 0 6px; color: var(--hc-ink); font-size: 17px; }
+#settingsDialog .aa-setup-callout p { margin: 0; color: var(--hc-muted); font-size: 12px; line-height: 1.75; }
+#settingsDialog .aa-setup-state { flex: 0 0 auto; padding: 5px 9px; border-radius: 999px; background: var(--hc-action); color: #fff; font-size: 11px; font-weight: 650; }
+#settingsDialog .aa-setup-callout.is-bound { border-color: #b9d8c8; border-left-color: var(--hc-success); background: var(--hc-success-soft); }
+#settingsDialog .aa-setup-callout.is-bound .aa-setup-state { background: var(--hc-success); }
+#settingsDialog .aa-environment-actions { align-items: center; }
+#settingsDialog #pickAaExeBtn { min-width: 238px; }
+#settingsDialog .settings-content { display: block; flex: 1; min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 26px 30px 30px; background: var(--hc-canvas); }
+#settingsDialog .settings-pane { min-width: 0; max-width: none; padding: 0; outline: none; }
+#settingsDialog .settings-pane.active { display: block; animation: none; }
+#settingsDialog .pane-lead { margin: 0 0 16px; padding: 0; }
+#settingsDialog .pane-lead h3 { margin: 3px 0 7px; color: var(--hc-ink); font: 650 23px/1.35 var(--hc-font-ui); letter-spacing: -.02em; }
+#settingsDialog .pane-lead p { margin: 0; color: var(--hc-muted); font-size: 13px; line-height: 1.75; }
+#settingsDialog .settings-kicker { margin: 0 0 7px; color: var(--hc-action); font: 650 10px/1.5 var(--hc-font-ui); letter-spacing: .12em; }
+#settingsDialog .settings-load-status { padding: 10px 14px; margin: 0 0 16px; background: var(--hc-warning-soft); border: 1px solid #ecd9b3; border-radius: 9px; color: var(--hc-warning); font-size: 12px; }
+#settingsDialog .model-role-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+#settingsDialog .model-role-card { padding: 12px 16px; min-width: 0; background: #fff; border: 1px solid var(--hc-line); border-top: 3px solid #c5cfdd; border-radius: var(--hc-radius); box-shadow: 0 2px 6px #25324704; }
+#settingsDialog .model-role-card[data-status="ready"] { border-top-color: var(--hc-success); }
+#settingsDialog .model-role-card[data-status="pending"] { border-top-color: #b68b41; }
+#settingsDialog .model-role-card header { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; color: var(--hc-ink); font-size: 12px; }
+#settingsDialog .model-role-card header > span:last-child { margin-left: auto; color: var(--hc-muted); font-size: 11px; }
+#settingsDialog .model-role-card .role-index { color: #8998ac; font: 600 12px/1.5 var(--hc-font-ui); }
+#settingsDialog .model-role-card > strong { margin: 7px 0 3px; color: var(--hc-ink); font: 600 17px/1.4 var(--hc-font-ui); overflow-wrap: anywhere; }
+#settingsDialog .model-role-card code { font-size: 11px; color: var(--hc-muted); overflow-wrap: anywhere; }
+#settingsDialog .model-role-card > p { margin: 5px 0 0; padding-top: 0; border-top: 0; color: var(--hc-muted); font-size: 11px; }
+#settingsDialog .model-scope-notice { margin: 10px 0 8px; color: var(--hc-muted); font-size: 12px; line-height: 1.6; }
+#settingsDialog .model-connection-details { margin: 0 0 12px; color: var(--hc-muted); }
+#settingsDialog .model-connection-details > summary { padding: 7px 0; font-size: 12px; }
+#settingsDialog .active-model-card { border: 1px solid var(--hc-line); border-radius: 10px; background: #fff; box-shadow: none; }
+#settingsDialog .model-config-details { border: 1px solid var(--hc-line); border-radius: var(--hc-radius); background: #fff; overflow: visible; box-shadow: 0 2px 6px #25324704; }
+#settingsDialog .model-config-summary { padding: 12px 18px; background: #fff; border-radius: var(--hc-radius); color: var(--hc-ink); }
+#settingsDialog .model-config-summary small { color: var(--hc-muted); font-size: 12px; }
+#settingsDialog .model-config-summary > strong { color: var(--hc-action); font-size: 12px; }
+#settingsDialog .model-config-summary > strong::before { content: none; }
+#settingsDialog .model-config-fields { display: block; min-width: 0; margin: 0; padding: 0; border: 0; }
+#settingsDialog .model-config-workspace { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 0; border: 0; border-top: 1px solid var(--hc-line); }
+#settingsDialog .vendor-preset-section { min-width: 0; padding: 18px 12px; border: 0; border-right: 1px solid var(--hc-line); border-radius: 0 0 0 var(--hc-radius); background: var(--hc-surface-soft); }
+#settingsDialog .provider-picker-head { display: grid; gap: 12px; margin: 0 0 12px; }
+#settingsDialog .provider-picker-head small { font-size: 11px; color: var(--hc-muted); }
+#settingsDialog .provider-search-field input { width: 100%; min-height: 36px; font-size: 12px; }
+#settingsDialog .vendor-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; max-height: 470px; padding: 2px; overflow: auto; }
+#settingsDialog .vendor-card { display: block; width: 100%; min-width: 0; min-height: 52px; margin: 0; padding: 10px 11px; text-align: left; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--hc-ink); box-shadow: none; }
+#settingsDialog .vendor-card:hover { background: var(--hc-surface); border-color: var(--hc-line); }
+#settingsDialog .vendor-card.active { background: var(--hc-action-soft); border-color: #aec4e0; color: var(--hc-action); box-shadow: none; }
+#settingsDialog .vendor-card strong { font-size: 12px; font-weight: 650; }
+#settingsDialog .vendor-card small { display: block; margin-top: 4px; color: var(--hc-muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+#settingsDialog .vendor-card-title { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+#settingsDialog .vendor-card-check { color: var(--hc-action); opacity: 0; }
+#settingsDialog .vendor-card.active .vendor-card-check { opacity: 1; }
+#settingsDialog .vendor-empty { font-size: 12px; color: var(--hc-muted); padding: 10px 5px; }
+#settingsDialog .vendor-empty > * { display: block; margin: 0 0 8px; }
+#settingsDialog .model-provider-detail { display: block; padding: 20px 22px; margin: 0; background: #fff; border: 0; border-radius: 0 0 var(--hc-radius) 0; }
+#settingsDialog #pane-models .pane-lead > .settings-kicker { display: none; }
+#settingsDialog .provider-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--hc-line); }
+#settingsDialog .provider-detail-head h4 { margin: 3px 0 5px; font-size: 18px; color: var(--hc-ink); }
+#settingsDialog .provider-detail-head p { margin: 0; overflow-wrap: anywhere; color: var(--hc-muted); font-size: 12px; line-height: 1.65; }
+#settingsDialog .section-label { color: var(--hc-muted); font-size: 12px; font-weight: 600; }
+#settingsDialog .provider-protocol-badge, #settingsDialog .dpapi-badge { border: 1px solid var(--hc-line); border-radius: 6px; background: var(--hc-surface-soft); color: var(--hc-muted); padding: 3px 6px; font-size: 10px; white-space: nowrap; }
+#settingsDialog .settings-form { min-width: 0; }
+#settingsDialog .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; }
+#settingsDialog .field-grid:has(.key-field-wrap) { grid-template-columns: minmax(0, 1fr); }
+#settingsDialog .settings-form label { display: grid; gap: 7px; min-width: 0; margin: 0; color: var(--hc-ink); font: 500 12px/1.6 var(--hc-font-ui); }
+#settingsDialog :is(input, select, textarea) { min-width: 0; max-width: 100%; background: #fff; color: var(--hc-ink); border: 1px solid #cfd8e5; border-radius: 8px; font-family: var(--hc-font-ui); box-shadow: none; }
+#settingsDialog :is(input, select):not([type="radio"]):not([type="checkbox"]):not([type="file"]) { width: 100%; min-height: 42px; padding: 9px 11px; font-size: 13px; }
+#settingsDialog input::placeholder { color: #8794a6; }
+#settingsDialog input[type="radio"], #settingsDialog input[type="checkbox"] { accent-color: var(--hc-action); }
+#settingsDialog input:disabled, #settingsDialog select:disabled { background: #f0f3f7; opacity: .75; }
+#settingsDialog .field-hint { color: var(--hc-muted); font-size: 11px; font-weight: 400; line-height: 1.6; }
+#settingsDialog .password-input-group, #settingsDialog .model-input-group { display: flex; align-items: stretch; min-width: 0; width: 100%; gap: 0; border: 1px solid #cfd8e5; border-radius: 9px; background: #fff; overflow: hidden; }
+#settingsDialog .password-input-group:focus-within, #settingsDialog .model-input-group:focus-within { border-color: var(--hc-action); box-shadow: 0 0 0 3px var(--hc-action-soft); }
+#settingsDialog .password-input-group input, #settingsDialog .model-input-group input { flex: 1 1 0; width: 0; min-width: 0; border: 0; border-radius: 0; outline: 0; box-shadow: none; }
+#settingsDialog .toggle-password-btn, #settingsDialog .fetch-models-btn { flex: 0 0 auto; position: static; width: auto; min-width: 45px; min-height: 40px; padding: 8px 10px; border: 0; border-left: 1px solid var(--hc-line); border-radius: 0; background: var(--hc-surface-soft); color: var(--hc-action); font: 500 12px/1.4 var(--hc-font-ui); transform: none; white-space: nowrap; }
+#settingsDialog .model-technical-details, #settingsDialog .advanced-settings-toggle { margin: 0 0 18px; border: 1px solid var(--hc-line); border-radius: 9px; padding: 0 13px; background: var(--hc-surface-soft); color: var(--hc-muted); }
+#settingsDialog .model-technical-details > summary, #settingsDialog .advanced-settings-toggle > summary { cursor: pointer; padding: 12px 0; color: var(--hc-muted); font: 550 12px/1.5 var(--hc-font-ui); }
+#settingsDialog .model-technical-details .field-grid, #settingsDialog .advanced-settings-toggle .field-grid { padding: 0 0 12px; margin: 0; }
+#settingsDialog .role-allocation-box { margin: 20px 0; padding: 0; border: 0; background: transparent; }
+#settingsDialog .role-radios { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 9px; }
+#settingsDialog .role-option { display: flex; align-items: flex-start; gap: 8px; border: 1px solid var(--hc-line); border-radius: 9px; padding: 11px 10px; background: #fff; cursor: pointer; }
+#settingsDialog .role-option:has(input:checked) { border-color: #a4bedd; background: var(--hc-action-soft); box-shadow: none; }
+#settingsDialog .role-option input { flex: 0 0 auto; margin-top: 4px; }
+#settingsDialog .role-option span { display: grid; gap: 4px; min-width: 0; }
+#settingsDialog .role-option b { font-size: 12px; font-weight: 600; color: var(--hc-ink); }
+#settingsDialog .role-option small { color: var(--hc-muted); font-size: 10px; line-height: 1.6; }
+#settingsDialog .settings-actions-footer { display: flex; flex-wrap: wrap; position: sticky; bottom: -30px; z-index: 2; justify-content: space-between; align-items: center; gap: 12px; margin: 20px -22px -20px; padding: 16px 22px; border: 0; border-top: 1px solid var(--hc-line); border-radius: 0 0 var(--hc-radius) 0; background: #fff; box-shadow: 0 -4px 15px #25324705; }
+#settingsDialog .action-buttons-right { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+#settingsDialog button.primary, #helpDialog button.primary { border: 1px solid var(--hc-action); border-radius: 8px; background: var(--hc-action); color: #fff; min-height: 38px; padding: 9px 15px; box-shadow: none; font: 600 12px/1.4 var(--hc-font-ui); }
+#settingsDialog button.primary:hover, #helpDialog button.primary:hover { background: var(--hc-action-hover); border-color: var(--hc-action-hover); }
+#settingsDialog button.quiet, #settingsDialog .file-action, #helpDialog .quiet { display: inline-flex; align-items: center; justify-content: center; border: 1px solid #cfd8e5; border-radius: 8px; background: #fff; color: var(--hc-ink); min-height: 38px; padding: 8px 13px; font: 500 12px/1.5 var(--hc-font-ui); text-decoration: none; cursor: pointer; }
+#settingsDialog .danger { border: 1px solid #e5b9b9; border-radius: 8px; background: var(--hc-danger-soft); color: var(--hc-danger); min-height: 38px; padding: 8px 13px; font: 600 12px/1.5 var(--hc-font-ui); }
+#settingsDialog button:disabled, #helpDialog button:disabled { opacity: .5; cursor: not-allowed; }
+#settingsDialog :is(button,input,select,textarea,summary,a):focus-visible, #helpDialog :is(button,a):focus-visible, .topbar .help-entry:focus-visible { outline: 2px solid var(--hc-action); outline-offset: 3px; }
+#settingsDialog .status-chip { display: inline-block; max-width: 100%; padding: 4px 8px; border-radius: 6px; font-size: 11px; overflow-wrap: anywhere; background: var(--hc-surface-soft); color: var(--hc-muted); }
+#settingsDialog .status-chip.good { background: var(--hc-success-soft); color: var(--hc-success); }
+#settingsDialog .status-chip.amber { background: var(--hc-warning-soft); color: var(--hc-warning); }
+#settingsDialog .diagnostics-card { margin: 16px 0; padding: 14px; border: 1px solid #bddacb; border-radius: 10px; background: var(--hc-success-soft); color: var(--hc-success); font-size: 12px; overflow-wrap: anywhere; }
+#settingsDialog .diagnostics-card.error { background: var(--hc-danger-soft); border-color: #e8c5c5; color: var(--hc-danger); }
+#settingsDialog .diagnostics-card.stale, #settingsDialog .model-apply-status.stale { background: var(--hc-warning-soft); border-color: #ecd9b3; color: var(--hc-warning); }
+#settingsDialog .diagnostics-stale-note { font-weight: 650; }
+#settingsDialog .diagnostics-details { margin: 10px 0; }
+#settingsDialog .diagnostics-details summary { cursor: pointer; font-weight: 600; }
+#settingsDialog .diagnostics-details p { margin: 7px 0; overflow-wrap: anywhere; }
+#settingsDialog .diagnostics-card .quiet { margin-top: 8px; }
+#settingsDialog .model-field-error { display: block; color: var(--hc-danger); font-size: 12px; }
+#settingsDialog #settingsModelName[aria-invalid="true"] { border-color: var(--hc-danger); }
+#settingsDialog .model-apply-status { margin: 12px 0; }
+#settingsDialog .apply-result { display: flex; align-items: baseline; gap: 12px; margin: 6px 0; padding: 11px 14px; border: 1px solid var(--hc-line); border-radius: 9px; background: #fff; font-size: 12px; }
+#settingsDialog .apply-result b { flex: 0 0 82px; }
+#settingsDialog .apply-result span { overflow-wrap: anywhere; }
+#settingsDialog .apply-result.success { border-color: #bedccc; background: var(--hc-success-soft); color: var(--hc-success); }
+#settingsDialog .apply-result.error { border-color: #e7bebe; background: var(--hc-danger-soft); color: var(--hc-danger); }
+#settingsDialog .apply-result.pending { color: var(--hc-muted); }
+#settingsDialog .backup-scope-card, #settingsDialog .data-maintenance-section, #settingsDialog .about-help-card { padding: 22px; margin: 0 0 18px; border: 1px solid var(--hc-line); border-radius: var(--hc-radius); background: #fff; }
+#settingsDialog .backup-scope-card { border-left: 3px solid var(--hc-action); }
+#settingsDialog .backup-scope-card b { color: var(--hc-ink); font-size: 15px; }
+#settingsDialog .backup-scope-card p, #settingsDialog .maintenance-copy { margin: 8px 0; color: var(--hc-muted); font-size: 13px; line-height: 1.8; }
+#settingsDialog .backup-scope-card small { color: var(--hc-warning); font-size: 12px; }
+#settingsDialog .maintenance-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 18px 0 0; }
+#settingsDialog .backup-restore-preview { display: grid; gap: 18px; margin-top: 20px; padding: 18px; border: 1px solid #e9cccc; border-radius: 10px; background: #fff8f6; }
+#settingsDialog .backup-restore-preview span, #settingsDialog .backup-restore-preview small { display: block; color: var(--hc-muted); margin-top: 6px; line-height: 1.7; }
+#settingsDialog .backup-restore-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+#settingsDialog .about-identity { display: flex; align-items: center; gap: 20px; margin: 2px 0 26px; }
+#settingsDialog .about-logo { display:block; flex:0 0 70px; width:70px; height:70px; border:0; border-radius:18px; object-fit:contain; }
+#settingsDialog .about-identity h3 { margin: 4px 0; font-size: 26px; color: var(--hc-ink); }
+#settingsDialog .about-identity h3 small { font-size: 13px; color: var(--hc-muted); font-weight: 400; margin-left: 6px; }
+#settingsDialog .about-identity p { margin: 5px 0 0; color: var(--hc-muted); font-size: 12px; }
+#settingsDialog .about-help-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+#settingsDialog .about-help-card p { margin: 6px 0 0; color: var(--hc-muted); font-size: 12px; }
+#settingsDialog .about-help-card button { flex-shrink: 0; }
+#settingsDialog .settings-section-title { margin: 24px 0 12px; color: var(--hc-muted); font-size: 12px; font-weight: 600; }
+#settingsDialog .settings-shortcut-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+#settingsDialog .settings-shortcut-grid button { display: grid; gap: 6px; padding: 17px 18px; border: 1px solid var(--hc-line); border-radius: 10px; text-align: left; background: #fff; color: var(--hc-ink); font-family: var(--hc-font-ui); }
+#settingsDialog .settings-shortcut-grid button b { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 600; }
+#settingsDialog .settings-shortcut-grid button b span { color: #8796ab; }
+#settingsDialog .settings-shortcut-grid button small { color: var(--hc-muted); font-size: 11px; font-weight: 400; }
+#settingsDialog .settings-shortcut-grid button:hover { border-color: #aac1de; background: var(--hc-action-soft); }
+#settingsDialog .settings-back-link { margin: 0 0 17px; padding: 0; border: 0; background: transparent; color: var(--hc-action); font-size: 12px; min-height: 30px; }
+#settingsDialog .about-footnote { margin: 24px 0 0; padding-top: 18px; border-top: 1px solid var(--hc-line); color: var(--hc-muted); font-size: 11px; line-height: 1.9; }
+#settingsDialog .system-status-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+#settingsDialog .system-metric, #settingsDialog .corpus-card, #settingsDialog .environment-status-card { border: 1px solid var(--hc-line); border-radius: 10px; padding: 18px; background: #fff; color: var(--hc-ink); }
+#settingsDialog .environment-status-card.valid { background: var(--hc-success-soft); border-color: #b9d8c8; }
+#helpDialog { width: min(1250px, calc(100vw - 48px)); height: min(940px, calc(100dvh - 48px)); max-height: none; max-width: none; }
+#helpDialog .help-dialog-shell { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+#helpDialog .help-dialog-header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 24px; border-bottom: 1px solid var(--hc-line); background: var(--surface); color: var(--ink); }
+#helpDialog .help-dialog-actions { display: flex; align-items: center; gap: 10px; }
+#helpDialog iframe { display: block; flex: 1; width: 100%; height: 100%; min-height: 0; border: 0; background: var(--paper); }
+#helpDialog .help-load-status, #helpDialog .help-load-error { margin: auto; padding: 30px; max-width: 600px; text-align: center; color: var(--hc-muted); font-size: 13px; }
+#helpDialog .help-load-error b { font-size: 17px; color: var(--hc-ink); }
+#helpDialog .help-load-error p { line-height: 1.8; }
+@media (max-width: 900px) {
+  #settingsDialog .settings-content { padding: 22px; }
+  #settingsDialog .model-config-workspace { grid-template-columns: 175px minmax(0,1fr); }
+  #settingsDialog .model-provider-detail { padding: 18px; }
+  #settingsDialog .field-grid, #settingsDialog .role-radios { grid-template-columns: minmax(0,1fr); }
+  #settingsDialog .role-option small { font-size: 11px; }
+  #settingsDialog .settings-actions-footer { margin: 18px -18px -18px; padding: 14px 18px; bottom: -22px; }
+}
+@media (max-width: 680px) {
+  #settingsDialog, #helpDialog { width: calc(100vw - 16px); height: calc(100dvh - 16px); border-radius: 12px; }
+  #settingsDialog .settings-header, #helpDialog .help-dialog-header { padding: 15px 16px; }
+  #settingsDialog .settings-header h2, #helpDialog h2 { font-size: 20px; }
+  #settingsDialog .settings-nav { gap: 2px; padding: 0 12px; }
+  #settingsDialog .settings-nav-btn { flex: 1; min-width: 0; min-height: 44px; padding: 10px; font-size: 13px; }
+  #settingsDialog .settings-nav-btn-aa { gap: 4px; }
+  #settingsDialog .settings-nav-status { display: none; }
+  #settingsDialog .aa-setup-callout { display: block; padding: 17px; }
+  #settingsDialog .aa-setup-state { display: inline-block; margin-top: 12px; }
+  #settingsDialog #pickAaExeBtn { width: 100%; min-width: 0; }
+  #settingsDialog .settings-content { padding: 18px 14px 24px; }
+  #settingsDialog .pane-lead h3 { font-size: 21px; }
+  #settingsDialog .model-role-grid { gap: 9px; }
+  #settingsDialog .model-role-card { padding: 12px; }
+  #settingsDialog .model-role-card > strong { font-size: 15px; }
+  #settingsDialog .model-role-card header > span:last-child { flex-basis: 100%; margin-left: 0; }
+  #settingsDialog .model-config-workspace { display: flex; flex-direction: column; }
+  #settingsDialog .vendor-preset-section { padding: 14px; border: 0; border-bottom: 1px solid var(--hc-line); border-radius: 0; }
+  #settingsDialog .provider-picker-head { grid-template-columns: 1fr 1fr; align-items: center; }
+  #settingsDialog .vendor-grid { grid-template-columns: repeat(2,minmax(0,1fr)); max-height: 160px; gap: 5px; }
+  #settingsDialog .vendor-card { min-height: 54px; padding: 8px; }
+  #settingsDialog .model-provider-detail { padding: 15px; }
+  #settingsDialog .provider-detail-head { flex-wrap: wrap; gap: 8px; }
+  #settingsDialog .settings-actions-footer { margin: 18px -15px -15px; padding: 13px 15px; bottom: -24px; border-radius: 0 0 var(--hc-radius) var(--hc-radius); }
+  #settingsDialog .action-buttons-right { width: 100%; margin: 0; display: grid; grid-template-columns: 1fr 1fr; }
+  #settingsDialog .settings-shortcut-grid, #settingsDialog .system-status-grid { grid-template-columns: minmax(0,1fr); }
+  #settingsDialog .about-help-card { display: block; padding: 18px; }
+  #settingsDialog .about-help-card button { margin-top: 15px; }
+  #settingsDialog .about-identity { gap: 14px; }
+  #settingsDialog .about-logo { flex-basis:56px; width:56px; height:56px; border-radius:16px; }
+  #settingsDialog .backup-scope-card, #settingsDialog .data-maintenance-section { padding: 17px; }
+  #helpDialog .help-dialog-actions { gap: 7px; }
+  #helpDialog .help-dialog-actions .quiet { min-height: 32px; padding: 6px 8px; font-size: 11px; }
+  .topbar .help-entry { display: none; } /* Also available from mobile “更多”. */
+}
+@media (max-width: 390px) { #settingsDialog .model-role-grid { grid-template-columns: minmax(0,1fr); } }
+@media (prefers-reduced-motion: reduce) {
+  #settingsDialog *, #helpDialog * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+
+#helpDialog iframe[hidden], #helpDialog .help-load-status[hidden], #helpDialog .help-load-error[hidden] { display: none; }
+
+/* The protocol and endpoint are primary connection inputs, not an advanced disclosure. */
+#settingsDialog #modelEndpointDetails.model-endpoint-fields { padding:17px 18px; background:var(--hc-surface-soft); }
+#settingsDialog .model-endpoint-heading { padding:0 0 14px; }
+#settingsDialog .model-endpoint-heading b { display:block; color:var(--hc-ink); font:650 14px/1.45 var(--hc-font-ui); }
+#settingsDialog .model-endpoint-heading small { display:block; margin-top:4px; color:var(--hc-muted); font:400 11px/1.6 var(--hc-font-ui); }
+#settingsDialog #modelEndpointDetails.model-endpoint-fields > .field-grid { padding:0; margin:0; background:transparent; border:0; }
+#settingsDialog .model-endpoint-preview { margin:14px 0 0; padding:9px 11px; border-radius:7px; background:var(--hc-surface); color:var(--hc-muted); font:500 11px/1.6 var(--hc-font-ui); overflow-wrap:anywhere; }
+#settingsDialog .model-capability-panel { display:flex; align-items:center; justify-content:space-between; gap:14px; margin:0 0 13px; padding:12px 14px; border:1px solid var(--hc-line); border-radius:8px; background:var(--hc-surface); }
+#settingsDialog .model-capability-panel b { color:var(--hc-ink); font-size:12px; }
+#settingsDialog .model-capability-panel p { margin:3px 0 0; color:var(--hc-muted); font-size:11px; line-height:1.6; }
+#settingsDialog .model-capability-actions { display:flex; flex:none; flex-wrap:wrap; gap:6px; }
+#settingsDialog .model-capability-actions button { min-height:31px; padding:5px 9px; font-size:11px; }
+#settingsDialog .advanced-grid .field-hint { display:block; }
+@media (max-width:680px) {
+  #settingsDialog #modelEndpointDetails.model-endpoint-fields { padding:14px; }
+  #settingsDialog .model-capability-panel { align-items:stretch; flex-direction:column; }
+}
+
+/* Provider setup: one service, one key, one model. Advanced controls are opt-in. */
+#settingsDialog #modelEndpointDetails[hidden],
+#settingsDialog #modelTokenParameterField[hidden],
+#settingsDialog .provider-detail-links [hidden] { display: none !important; }
+#settingsDialog .provider-detail-links { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px 14px; }
+#settingsDialog .provider-detail-links a { color: var(--hc-action); text-decoration: none; font: 550 12px/1.6 var(--hc-font-ui); white-space: nowrap; }
+#settingsDialog .provider-detail-links a:hover { text-decoration: underline; text-underline-offset: 3px; }
+#settingsDialog .provider-detail-head > div:first-child { min-width: 0; }
+#settingsDialog .provider-detail-head p { max-width: 48em; }
+#settingsDialog .model-capability-panel { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 18px 0 8px; padding: 14px 16px; border: 1px solid var(--hc-line); border-radius: 9px; background: var(--hc-surface-soft); }
+#settingsDialog .model-capability-panel > div { min-width: 0; }
+#settingsDialog .model-capability-panel b { font-size: 12px; font-weight: 600; }
+#settingsDialog .model-capability-panel p { margin: 6px 0 0; color: var(--hc-muted); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+#settingsDialog .model-capability-panel > button { flex: 0 0 auto; }
+#settingsDialog .model-auto-badge { margin-left: 7px; padding: 2px 6px; border-radius: 4px; color: var(--hc-action); background: var(--hc-action-soft); font-size: 10px; font-weight: 500; }
+#settingsDialog .model-parameter-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0 18px; }
+#settingsDialog .model-parameter-toolbar p { margin: 0; color: var(--hc-muted); font-size: 12px; }
+#settingsDialog .model-manual-toggle { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+#settingsDialog .model-manual-toggle input { width: 14px; height: 14px; margin: 0; }
+#settingsDialog .advanced-grid input[readonly] { background: var(--hc-surface-soft); color: var(--hc-muted); box-shadow: none; }
+@media (max-width: 720px) {
+  #settingsDialog .provider-detail-head { flex-direction: column; align-items: flex-start; }
+  #settingsDialog .provider-detail-links { justify-content: flex-start; }
+  #settingsDialog .model-capability-panel { flex-wrap: wrap; }
+}
+
+/* Access labels stay readable in the narrow provider list, without shortening names. */
+#settingsDialog .vendor-access-badge { display: inline-flex; align-items: center; justify-self: start; width: fit-content; flex: 0 0 auto; padding: 2px 7px; border-radius: 5px; background: var(--hc-action-soft); color: var(--hc-action); font: 600 10px/1.5 var(--hc-font-ui); white-space: nowrap; }
+#settingsDialog .provider-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+#settingsDialog .provider-title-row h4 { margin: 0; }
+#settingsDialog .provider-detail-head .provider-access-note { margin-top: 8px; font-size: 11px; line-height: 1.7; }
+#settingsDialog .vendor-access-badge[hidden], #settingsDialog .provider-access-note[hidden] { display: none !important; }

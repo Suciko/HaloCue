@@ -1,6 +1,8 @@
 import base64
 from pathlib import Path
+import pytest
 
+from halocue_writing.errors import DomainError
 from halocue_writing.service import WritingService
 
 
@@ -62,3 +64,38 @@ def test_adaptation_list_is_scoped_to_work_and_newest_first(tmp_path: Path):
     listed = service.adaptations.list(first_work["id"])
     assert [item["id"] for item in listed] == [newer["id"], older["id"]]
     assert all(item["work_id"] == first_work["id"] for item in listed)
+
+
+def test_novel_chapters_keep_their_explicit_destination(tmp_path: Path):
+    service = WritingService(tmp_path)
+    work = service.create_work({"title": "小说改编"})
+    current = source(service, work["id"], "第一章\n灯亮了。\n第二章\n门打开了。")
+    first = service.create_chapter(work["id"], {"expected_version": work["version"], "title": "第一章"})
+    second = service.create_chapter(work["id"], {"expected_version": first["work"]["version"], "title": "第二章"})
+    ids = [ch["id"] for ch in current["chapters"]]
+    destinations = {ids[0]: first["chapter_id"], ids[1]: second["chapter_id"]}
+    plan = service.adaptations.create(work["id"], {
+        "source_version_id": current["id"], "chapter_ids": ids,
+        "target_chapter_ids": destinations,
+    })
+    assert plan["plan"]["target_chapter_ids"] == destinations
+    assert [row["resolved_target"]["chapter_id"] for row in plan["chapters"]] == list(destinations.values())
+    service.adaptations.approve_plan(plan["id"], {"plan_digest": plan["plan_digest"]})
+    generated = service.adaptations.generate_chapter_candidate(plan["id"], ids[1])
+    assert generated["candidate"]["target"]["chapter_id"] == second["chapter_id"]
+    adopted = service.accept_proposal(work["id"], generated["proposal_id"], {
+        "expected_version": second["work"]["version"]
+    })
+    assert any(scene["id"] == adopted["scene_id"] for scene in adopted["work"]["chapters"][1]["scenes"])
+
+
+def test_oversized_chapter_stops_before_model_call_or_budget_charge(tmp_path: Path):
+    service = WritingService(tmp_path)
+    work = service.create_work({"title": "长篇原文"})
+    current = source(service, work["id"], "第一章\n" + "灯" * 30001)
+    plan = service.adaptations.create(work["id"], {"source_version_id": current["id"], "max_calls": 1})
+    service.adaptations.approve_plan(plan["id"], {"plan_digest": plan["plan_digest"]})
+    with pytest.raises(DomainError) as blocked:
+        service.adaptations.generate_chapter_candidate(plan["id"], current["chapters"][0]["id"])
+    assert blocked.value.code == "adaptation_chapter_too_large"
+    assert service.adaptations.get(plan["id"])["budget"]["reserved_calls"] == 0

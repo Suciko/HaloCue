@@ -22,11 +22,12 @@ def test_model_settings_uses_searchable_provider_master_detail_ui():
     assert 'id="selectedProviderName"' in html
     assert 'id="selectedProviderNotes"' in html
     assert 'id="selectedProviderProtocol"' in html
-    assert 'role="listbox"' in html
+    assert 'role="tablist"' in html
+    assert 'id="settingsModelDatalist"' in html
     assert "renderProviderPresets()" in script
     assert "updateSelectedProviderSummary(preset)" in script
     assert "providerSearchQuery" in script
-    assert 'aria-selected="${selected ? \'true\' : \'false\'}"' in script
+    assert "aria-pressed=\"${selected ? 'true' : 'false'}\"" in script
     assert ".model-config-workspace {" in styles
     assert "grid-template-columns: 238px minmax(0, 1fr);" in styles
     assert ".model-provider-detail {" in styles
@@ -48,7 +49,7 @@ def test_model_secret_store_and_settings(tmp_path):
         "provider": "openai",
         "base_url": "https://api.deepseek.com/v1",
         "model": "deepseek-chat",
-        "api_key": "sk-test-secret-key-123456",
+        "api_key": "test-review-secret-012345",
         "max_tokens": 4096,
         "timeout": 60,
         "reasoning_mode": "balanced",
@@ -61,7 +62,7 @@ def test_model_secret_store_and_settings(tmp_path):
     # Verify secret is loaded without leaking into public JSON
     provider_type, conf = settings.provider_settings()
     assert provider_type == "openai"
-    assert conf["api_key"] == "sk-test-secret-key-123456"
+    assert conf["api_key"] == "test-review-secret-012345"
     assert conf["model"] == "deepseek-chat"
 
     # Public JSON file does NOT contain api_key

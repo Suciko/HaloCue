@@ -39,7 +39,11 @@ def validate_completion(data: object, protocol: str, *, allow_tools: bool = Fals
     if truncated:
         reject("provider_output_truncated", "模型输出达到上限，候选不完整；请缩小范围或提高输出上限。")
     if tool_call:
-        if not allow_tools or reason != tool_reason:
+        # Some OpenAI-compatible Gemini relays emit a normal ``stop`` finish
+        # reason together with a valid native tool call. The tool-call payload,
+        # not that relay-specific label, is the authoritative continuation signal.
+        valid_tool_reasons = {tool_reason, *normal}
+        if not allow_tools or reason not in valid_tool_reasons:
             reject("provider_output_invalid", "模型工具调用不符合当前任务的完成协议。")
     elif reason not in normal:
         reject("provider_output_invalid", "模型响应未确认正常结束。")

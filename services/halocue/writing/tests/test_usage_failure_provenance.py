@@ -537,3 +537,28 @@ def test_tool_followup_failure_keeps_both_call_usage_once(tmp_path, monkeypatch)
     assert run["policy"]["usage"]["input_tokens"] == 130
     assert service.agent_usage(work["id"])["input_tokens"] == 130
     service.close()
+
+
+@pytest.mark.parametrize("prices", [
+    {"input_cost_per_million": 10},
+    {"output_cost_per_million": 20},
+    {"input_cost_per_million": 10, "output_cost_per_million": 0},
+])
+def test_missing_price_for_consumed_bucket_is_unknown_not_free(prices):
+    provider = LLMWritingProvider({"provider": "openai", "model": "synthetic", **prices})
+    usage = provider._capture_usage({"usage": {"prompt_tokens": 100, "completion_tokens": 20}})
+    assert usage.usage_status == "reported"
+    assert usage.estimated_cost is None
+
+
+def test_complete_prices_keep_known_arithmetic_and_cache_included_once():
+    provider = LLMWritingProvider({
+        "provider": "openai", "model": "synthetic",
+        "input_cost_per_million": 10, "output_cost_per_million": 20,
+    })
+    usage = provider._capture_usage({"usage": {
+        "prompt_tokens": 100, "completion_tokens": 20,
+        "prompt_tokens_details": {"cached_tokens": 80},
+    }})
+    assert usage.input_tokens == 100
+    assert usage.estimated_cost == pytest.approx(0.00068)

@@ -1,0 +1,479 @@
+/* Quiet editorial workbench: conversation first, expandable operations second. */
+#app.hc-redesign[data-surface="works"] .hc-idea-canvas{max-width:960px;padding-inline:clamp(18px,4vw,48px)!important;background:var(--hc-panel)!important}
+#app.hc-redesign[data-surface="works"] .hc-canvas-header{align-items:center;border-bottom:1px solid var(--hc-line);padding:20px 0 16px;gap:16px}
+#app.hc-redesign[data-surface="works"] .hc-canvas-header h1{font-size:22px;font-weight:650;letter-spacing:-.5px;color:var(--hc-text)}
+#app.hc-redesign[data-surface="works"] .has-conversation .hc-canvas-header h1{font-size:18px}
+#app.hc-redesign[data-surface="works"] .hc-discussion-tools button{border:1px solid var(--hc-line);border-radius:9px;padding:7px 11px;background:var(--hc-panel);color:var(--hc-muted)}
+#app.hc-redesign[data-surface="works"] .hc-idea-empty{text-align:left;max-width:640px;padding-block:clamp(30px,8vh,88px)}
+#app.hc-redesign[data-surface="works"] .hc-idea-empty h2{font-size:clamp(24px,3vw,34px);line-height:1.4;color:var(--hc-text);letter-spacing:-1px}
+#app.hc-redesign[data-surface="works"] .hc-idea-empty p{font-size:14px;color:var(--hc-muted);line-height:1.9}
+#app.hc-redesign[data-surface="works"] .hc-starters{display:flex;flex-wrap:wrap;justify-content:flex-start;gap:10px;margin-top:26px}
+#app.hc-redesign[data-surface="works"] .hc-starters button{padding:12px 16px;border:1px solid var(--hc-line);border-radius:12px;background:var(--hc-panel);color:var(--hc-text)}
+#app.hc-redesign[data-surface="works"] .conversation-message{margin-bottom:28px}
+#app.hc-redesign[data-surface="works"] .conversation-message.assistant .message-bubble{color:var(--hc-text);font-size:14px;line-height:1.9}
+#app.hc-redesign[data-surface="works"] .conversation-message.user .message-bubble{background:var(--hc-selected)!important;border:0!important;border-radius:16px 16px 4px 16px!important;padding:13px 18px!important;color:var(--hc-text)!important}
+#app.hc-redesign[data-surface="works"] .work-agent-bottom{background:var(--hc-panel)!important;padding-top:12px!important}
+#app.hc-redesign[data-surface="works"] .work-agent-composer{padding:14px 16px 10px!important;border:1px solid var(--hc-line)!important;border-radius:18px!important;background:var(--hc-panel)!important;box-shadow:0 4px 22px rgb(0 0 0 / .035)!important;transition:border-color 150ms ease,box-shadow 150ms ease}
+#app.hc-redesign[data-surface="works"] .work-agent-composer:focus-within{border-color:var(--hc-accent)!important;box-shadow:0 0 0 2px color-mix(in srgb,var(--hc-accent) 12%,transparent)!important}
+#app.hc-redesign[data-surface="works"] .work-agent-composer textarea{min-height:60px!important;max-height:180px!important;height:auto;resize:none!important;padding:2px 0 10px!important;font-size:14px!important;line-height:1.7!important;background:transparent!important;color:var(--hc-text)!important;overflow-y:auto}
+#app.hc-redesign[data-surface="works"] .composer-actions{align-items:center;gap:10px}
+#app.hc-redesign[data-surface="works"] .composer-tools{min-width:0;flex-wrap:wrap;gap:8px}
+#app.hc-redesign[data-surface="works"] .send-button{min-height:36px;padding:8px 15px;border-radius:11px!important;white-space:nowrap;background:var(--hc-accent)!important;color:white!important}
+#app.hc-redesign[data-surface="works"] .agent-stop-button{width:36px;height:36px;border-radius:10px}
+#app.hc-redesign[data-surface="works"] .hc-composer-hint{display:flex;justify-content:space-between;gap:12px;text-align:left;color:var(--hc-muted);font-size:10px;margin:10px 3px 0}
+#app.hc-redesign[data-surface="works"] .attachment-menu>summary{width:32px;height:32px;border-radius:9px;background:var(--hc-panel)!important;color:var(--hc-text)}
+#app.hc-redesign[data-surface="works"] :is(.attachment-popover,.permission-popover){background:var(--hc-panel)!important;border:1px solid var(--hc-line);color:var(--hc-text);border-radius:12px;box-shadow:0 12px 40px rgb(0 0 0 / .14)}
+#app.hc-redesign[data-surface="works"] .decision-choice-dock{border-color:var(--hc-line)!important;background:var(--hc-panel)!important;box-shadow:none!important;border-radius:14px!important}
+#app.hc-redesign[data-surface="works"] .decision-card-head{background:var(--hc-panel)!important;border-bottom:1px solid var(--hc-line);padding:16px 18px!important}
+#app.hc-redesign[data-surface="works"] .decision-option{min-height:64px;border-radius:10px!important;background:var(--hc-panel)!important;transition:background-color 140ms ease,border-color 140ms ease}
+#app.hc-redesign[data-surface="works"] .decision-option[aria-checked="true"]{background:var(--hc-selected)!important;border-color:var(--hc-accent)!important}
+#app.hc-redesign[data-surface="works"] .decision-option-copy b{font-size:13px;color:var(--hc-text)}
+#app.hc-redesign[data-surface="works"] .decision-option-copy small{font-size:12px;color:var(--hc-muted)}
+#app.hc-redesign[data-surface="works"] .decision-option-arrow{font-size:0}
+#app.hc-redesign[data-surface="works"] .decision-option-arrow::after{content:'○';font-size:18px;color:var(--hc-muted)}
+#app.hc-redesign[data-surface="works"] .decision-option[aria-checked="true"] .decision-option-arrow::after{content:'✓';color:var(--hc-accent)}
+#app.hc-redesign[data-surface="works"] .agent-presentation-summary{margin:18px 0;border:1px solid var(--hc-line);border-radius:12px;background:var(--hc-panel);padding:0;overflow:hidden}
+#app.hc-redesign[data-surface="works"] .agent-presentation-summary>summary{display:flex;gap:12px;align-items:center;padding:12px 16px;color:var(--hc-muted);cursor:pointer;list-style:none}
+#app.hc-redesign[data-surface="works"] .agent-presentation-summary>summary b{font-size:12px;font-weight:500;color:var(--hc-text)}
+#app.hc-redesign[data-surface="works"] .agent-presentation-summary>summary small{display:block;font-size:11px;margin-top:3px}
+#app.hc-redesign[data-surface="works"] .agent-presentation-summary>summary em{margin-left:auto;font-style:normal;font-size:11px}
+#app.hc-redesign[data-surface="works"] .agent-presentation-body ol{list-style:none;padding:0 16px 12px;margin:0}
+#app.hc-redesign[data-surface="works"] .agent-presentation-body li{display:flex;gap:12px;padding:10px 0;border-top:1px solid var(--hc-line);font-size:12px;line-height:1.6}
+#app.hc-redesign[data-surface="works"] .agent-presentation-body li>span{color:var(--hc-accent)}
+#app.hc-redesign[data-surface="works"] .agent-presentation-body li b{font-weight:500;overflow-wrap:anywhere}
+#app.hc-redesign[data-surface="works"] .agent-presentation-body li small{display:block;color:var(--hc-muted)}
+#app.hc-redesign[data-surface="works"] .agent-jump-latest{position:absolute;right:30px;bottom:230px;z-index:10;border:1px solid var(--hc-line);background:var(--hc-panel);color:var(--hc-text);border-radius:20px;padding:8px 14px;box-shadow:0 3px 12px rgb(0 0 0 / .08)}
+#app.hc-redesign[data-surface="works"] .agent-running-line{background:var(--hc-bg);border:1px solid var(--hc-line);padding:13px 16px;border-radius:12px;flex-wrap:wrap}
+/* Animate deliberate disclosures, never replay all messages on every render. */
+@media(prefers-reduced-motion:no-preference){
+ #app[data-surface="works"] :is(.attachment-menu,.permission-menu)[open]>div,.hc-todo-dialog[open]{animation:hc-agent-reveal 160ms cubic-bezier(.23,1,.32,1)}
+ #app[data-surface="works"] .agent-presentation-summary[open] .agent-presentation-body{animation:hc-agent-reveal 160ms cubic-bezier(.23,1,.32,1)}
+}
+@keyframes hc-agent-reveal{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){#app[data-surface="works"] :is(.work-agent-composer,.decision-option){transition:none!important}#app[data-surface="works"] .agent-thinking-indicator{animation:none!important}}
+@media(max-width:760px){
+ #app.hc-redesign[data-surface="works"] .hc-composer-hint span{display:none}
+ #app.hc-redesign[data-surface="works"] .hc-canvas-header{padding:14px 0 12px}
+ #app.hc-redesign[data-surface="works"] .work-agent-composer{padding:12px!important}
+ #app.hc-redesign[data-surface="works"] .agent-jump-latest{right:24px;bottom:210px}
+}
+
+#app.hc-redesign[data-surface="works"] .agent-format-note{font-size:12px;line-height:1.8;color:var(--hc-muted);padding:12px 16px;border-left:2px solid var(--hc-line);margin:18px 0}
+#app.hc-redesign[data-surface="works"] .conversation-message.user .message-bubble p{white-space:pre-wrap!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere}
+#app.hc-redesign[data-surface="works"] .composer-thread-trigger{background:var(--hc-panel)!important;color:var(--hc-text)!important;border-color:var(--hc-line)!important}
+#app.hc-redesign[data-surface="works"] .hc-idea-empty{min-height:0!important}
+#app.hc-redesign[data-surface="works"] .hc-idea-empty h2{font-family:inherit!important;font-weight:600}
+
+/* Conversation composition: one reading column, tools belong to each reply. */
+#app#app.hc-redesign[data-surface="works"] .hc-idea-canvas { max-width:940px; padding-inline:clamp(20px,3.2vw,40px)!important; }
+#app#app.hc-redesign[data-surface="works"] .hc-canvas-header { flex:0 0 auto; min-height:60px; padding:12px 0!important; }
+#app#app.hc-redesign[data-surface="works"] .agent-session-heading { display:flex;align-items:baseline;gap:12px;min-width:0; }
+#app#app.hc-redesign[data-surface="works"] .agent-session-heading h1 { font-size:14px!important;line-height:1.5;margin:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:32ch; }
+#app#app.hc-redesign[data-surface="works"] .agent-session-heading>span { font-size:11px;white-space:nowrap;color:var(--hc-muted); }
+#app#app.hc-redesign[data-surface="works"] .hc-discussion-tools { gap:4px; }
+#app#app.hc-redesign[data-surface="works"] .hc-discussion-tools button { border:0;padding:6px 9px;font-size:11px; }
+#app#app.hc-redesign[data-surface="works"] .hc-discussion-tools .has-pending { color:var(--hc-accent)!important;background:var(--hc-selected)!important; }
+#app#app.hc-redesign[data-surface="works"] .work-agent-thread { padding:28px 10px 22px!important;scrollbar-width:thin;scrollbar-color:var(--hc-control-line) transparent; }
+#app#app.hc-redesign[data-surface="works"] .conversation-message.assistant { grid-template-columns:minmax(0,1fr)!important;gap:0!important;margin-bottom:32px!important; }
+#app#app.hc-redesign[data-surface="works"] .conversation-message.assistant .message-avatar { display:none!important; }
+#app#app.hc-redesign[data-surface="works"] .conversation-message.assistant .message-role { margin-bottom:10px;font-size:11px!important;font-weight:500; }
+#app#app.hc-redesign[data-surface="works"] .message-bubble { font-size:15px!important;line-height:1.85!important; }
+#app#app.hc-redesign[data-surface="works"] .conversation-message.user { max-width:88%!important;margin-bottom:28px!important; }
+#app#app.hc-redesign[data-surface="works"] .conversation-message.user .message-bubble { font-size:14px!important;padding:10px 16px!important; }
+#app#app.hc-redesign[data-surface="works"] .agent-prose p { margin:0 0 14px!important;white-space:pre-wrap; }
+#app#app.hc-redesign[data-surface="works"] .agent-prose h3 { font-size:16px;line-height:1.6;margin:22px 0 10px;font-weight:650; }
+#app#app.hc-redesign[data-surface="works"] .agent-prose :is(ul,ol) { margin:0 0 16px;padding-left:22px; }
+#app#app.hc-redesign[data-surface="works"] .agent-prose li { padding-left:3px;margin:7px 0;white-space:pre-wrap;font-size:inherit!important;line-height:inherit!important; }
+#app#app.hc-redesign[data-surface="works"] .agent-prose strong { color:inherit!important;font-weight:650; }
+#app#app.hc-redesign[data-surface="works"] .agent-prose code { font-size:.9em;background:var(--hc-hover);border-radius:4px;padding:2px 4px; }
+#app#app.hc-redesign[data-surface="works"] .agent-prose pre { background:var(--hc-hover);padding:14px 16px;border-radius:9px;overflow:auto;max-width:100%;line-height:1.65;font-size:12px; }
+#app#app.hc-redesign[data-surface="works"] .agent-prose pre code { padding:0;white-space:pre; }
+#app#app.hc-redesign[data-surface="works"] .agent-message-actions { display:flex;align-items:center;gap:8px;margin-top:12px;font-size:11px;color:var(--hc-muted); }
+#app#app.hc-redesign[data-surface="works"] .agent-message-actions button { padding:3px 6px!important;border:0;background:transparent!important;color:var(--hc-muted)!important;font-size:11px; }
+#app#app.hc-redesign[data-surface="works"] .agent-tool-steps { margin:0 0 6px; }
+#app#app.hc-redesign[data-surface="works"] :is(.agent-tool-step,.agent-turn-info) { margin:0;border:0;background:transparent; }
+#app#app.hc-redesign[data-surface="works"] .agent-tool-step>summary { display:flex;align-items:center;gap:9px;padding:7px 0;list-style:none;cursor:pointer;font-size:12px;line-height:1.5;color:var(--hc-muted)!important; }
+#app#app.hc-redesign[data-surface="works"] .agent-tool-step>summary::-webkit-details-marker,#app#app.hc-redesign[data-surface="works"] .agent-turn-info>summary::-webkit-details-marker { display:none; }
+#app#app.hc-redesign[data-surface="works"] .agent-tool-name { min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:65%; }
+#app#app.hc-redesign[data-surface="works"] .agent-tool-step small { font-size:10px;color:var(--hc-muted);white-space:nowrap;padding:0!important;margin:0!important;border:0!important;background:transparent!important;line-height:1.5; }
+#app#app.hc-redesign[data-surface="works"] .agent-tool-symbol { width:16px;text-align:center;font-size:14px;flex:none; }
+#app#app.hc-redesign[data-surface="works"] .agent-tool-chevron { display:inline-block;font-size:16px; }
+#app#app.hc-redesign[data-surface="works"] .agent-tool-step[open] .agent-tool-chevron { transform:rotate(90deg); }
+#app#app.hc-redesign[data-surface="works"] .agent-tool-step[data-status="failed"]>summary,#app#app.hc-redesign[data-surface="works"] .agent-tool-step[data-status="denied"]>summary { color:var(--red)!important; }
+#app#app.hc-redesign[data-surface="works"] .agent-tool-detail { padding:10px 14px;margin:4px 0 10px 24px;border-left:2px solid var(--hc-line);background:var(--hc-rail);border-radius:0 8px 8px 0;overflow-wrap:anywhere;font-size:12px;line-height:1.7;color:var(--hc-muted); }
+#app#app.hc-redesign[data-surface="works"] .agent-tool-detail p { margin:6px 0!important;font-size:12px!important; }
+#app#app.hc-redesign[data-surface="works"] .agent-turn-info { margin-bottom:14px; }
+#app#app.hc-redesign[data-surface="works"] .agent-turn-info>summary { display:flex;align-items:center;gap:8px;width:fit-content;list-style:none;font-size:11px;line-height:1.5;padding:5px 0;cursor:pointer;color:var(--hc-muted)!important; }
+#app#app.hc-redesign[data-surface="works"] .work-agent-bottom { padding:10px 0 16px!important; }
+#app#app.hc-redesign[data-surface="works"] .work-agent-composer { border-radius:18px!important;padding:14px 16px 10px!important; }
+#app#app.hc-redesign[data-surface="works"] .work-agent-composer textarea { min-height:48px!important;font-size:14px!important;line-height:1.75!important; }
+#app#app.hc-redesign[data-surface="works"] .composer-actions { margin-top:6px;flex-wrap:nowrap;gap:8px; }
+#app#app.hc-redesign[data-surface="works"] .composer-tools { max-width:none;flex:1 1 auto;flex-wrap:wrap;gap:6px; }
+#app#app.hc-redesign[data-surface="works"] .agent-composer-send { display:flex;align-items:center;gap:10px;flex:0 1 auto;min-width:0; }
+#app#app.hc-redesign[data-surface="works"] .agent-model-button { display:flex;align-items:center;gap:6px;max-width:170px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;padding:5px;border:0;background:transparent;color:var(--hc-muted); }
+#app#app.hc-redesign[data-surface="works"] .agent-send-icon { width:34px!important;min-width:34px!important;max-width:34px!important;height:34px;min-height:34px;padding:0!important;display:grid!important;place-items:center;border-radius:50%!important; }
+#app#app.hc-redesign[data-surface="works"] .agent-send-icon span { font-size:23px;line-height:1;font-weight:400; }
+#app#app.hc-redesign[data-surface="works"] .agent-composer-more { position:relative; }
+#app#app.hc-redesign[data-surface="works"] .agent-composer-more>summary { display:grid;place-items:center;width:30px;height:30px;cursor:pointer;list-style:none;color:var(--hc-muted);border-radius:8px;font-size:18px; }
+#app#app.hc-redesign[data-surface="works"] .agent-composer-popover { position:absolute;bottom:calc(100% + 10px);left:0;z-index:30;min-width:180px;max-width:280px;padding:8px;background:var(--hc-panel);border:1px solid var(--hc-line);border-radius:10px;box-shadow:0 6px 24px rgb(0 0 0 / .12); }
+#app#app.hc-redesign[data-surface="works"] .agent-composer-popover button { width:100%;white-space:normal;min-height:36px; }
+#app#app.hc-redesign[data-surface="works"] .hc-composer-hint { padding-inline:3px;font-size:10px!important; }
+#app#app.hc-redesign[data-surface="works"] .agent-format-note { border:0;padding:0;margin:6px 0 18px;font-size:11px; }
+#app#app.hc-redesign[data-surface="works"] .is-start .hc-canvas-header { border:0; }
+#app#app.hc-redesign[data-surface="works"] .is-start .work-agent-thread { flex:0 0 auto!important;overflow:visible!important;padding:0!important;margin-top:auto; }
+#app#app.hc-redesign[data-surface="works"] .is-start .work-agent-bottom { margin-bottom:auto!important;padding-top:0!important; }
+#app#app.hc-redesign[data-surface="works"] .is-start .hc-idea-empty { text-align:center;max-width:none;margin:0;padding:24px 0 28px!important; }
+#app#app.hc-redesign[data-surface="works"] .agent-start-mark { display:block;color:var(--hc-accent);font-size:28px;line-height:1;margin-bottom:16px; }
+#app#app.hc-redesign[data-surface="works"] .hc-idea-empty h2 { font-size:clamp(23px,2.4vw,30px);letter-spacing:-.5px;margin:0 0 12px; }
+#app#app.hc-redesign[data-surface="works"] .hc-idea-empty p { font-size:13px;margin:0;color:var(--hc-muted); }
+#app#app.hc-redesign[data-surface="works"] .hc-starters { display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin:22px 0 24px; }
+#app#app.hc-redesign[data-surface="works"] .hc-starters button { display:flex;align-items:center;gap:14px;padding:9px 12px;font-size:12px;border-radius:9px;background:transparent; }
+#app#app.hc-redesign[data-surface="works"] .hc-starters span { color:var(--hc-muted); }
+@media(max-width:760px){
+ #app#app.hc-redesign[data-surface="works"] .hc-idea-canvas { padding-inline:16px!important; }
+ #app#app.hc-redesign[data-surface="works"] .hc-canvas-header { min-height:48px;gap:6px; }
+ #app#app.hc-redesign[data-surface="works"] .agent-session-heading>span { display:none; }
+ #app#app.hc-redesign[data-surface="works"] .agent-session-heading h1 { max-width:15ch;font-size:13px!important; }
+ #app#app.hc-redesign[data-surface="works"] .work-agent-thread { padding:18px 2px!important; }
+ #app#app.hc-redesign[data-surface="works"] .agent-model-button { max-width:100px;font-size:10px; }
+ #app#app.hc-redesign[data-surface="works"] .agent-composer-send { gap:5px; }
+ #app#app.hc-redesign[data-surface="works"] .message-bubble { font-size:14px!important; }
+ #app#app.hc-redesign[data-surface="works"] .hc-starters { gap:6px; }
+ #app#app.hc-redesign[data-surface="works"] .hc-starters button { padding:8px 10px;font-size:11px; }
+ #app#app.hc-redesign[data-surface="works"] .is-start .hc-idea-empty { padding:20px 0!important; }
+}
+@media(max-height:640px){
+ #app#app.hc-redesign[data-surface="works"] .is-start { overflow-y:auto!important; }
+ #app#app.hc-redesign[data-surface="works"] .is-start .hc-canvas-header { min-height:40px; }
+ #app#app.hc-redesign[data-surface="works"] .is-start .hc-idea-empty { padding:16px 0!important; }
+}
+
+#app#app.hc-redesign[data-surface="works"] .agent-session-notice { margin:4px 0 24px;font-size:11px!important;line-height:1.7;color:var(--hc-muted)!important; }
+#app#app.hc-redesign[data-surface="works"] .agent-model-name { min-width:0;overflow:hidden;text-overflow:ellipsis; }
+#app#app.hc-redesign[data-surface="works"] .composer-thread-trigger { display:none!important; }
+@media(max-width:760px){
+ #app#app.hc-redesign[data-surface="works"] .agent-model-button { max-width:84px;padding-inline:0; }
+ #app#app.hc-redesign[data-surface="works"] .agent-send-icon { width:44px!important;min-width:44px!important;max-width:44px!important;height:44px!important;min-height:44px!important; }
+ #app#app.hc-redesign[data-surface="works"] .composer-tools { gap:4px; }
+ #app#app.hc-redesign[data-surface="works"] .agent-composer-more>summary { min-width:30px!important;width:30px!important;min-height:36px!important;height:36px!important;padding:0!important; }
+}
+
+/* The ideation workspace shares the app's surfaces and spacing rhythm while
+   retaining user-selected accent palettes. */
+#app#app.hc-redesign[data-surface="works"] {
+  --hc-bg: #f7f8fa;
+  --hc-panel: #ffffff;
+  --hc-rail: #f9fafb;
+  --hc-text: #242932;
+  --hc-muted: #66666f;
+  --hc-line: #e6e8ed;
+  --hc-hover: #f1f4f8;
+  --hc-neutral-selected: #edf2fb;
+  --hc-control-line: #8b8b94;
+  --hc-accent: var(--appearance-accent);
+  --hc-selected: var(--appearance-accent-soft);
+  --hc-nav-selected: var(--hc-selected); --hc-nav-ink: var(--hc-accent);
+  --hc-on-accent: #ffffff;
+  --ink: var(--hc-text); --ink-2: var(--hc-text); --muted: var(--hc-muted);
+  --line: var(--hc-line); --line-strong: var(--hc-control-line);
+  --surface: var(--hc-panel); --surface-soft: var(--hc-rail);
+  --paper: var(--hc-bg); --paper-2: var(--hc-rail);
+  --hc-ink: var(--hc-text); --hc-surface: var(--hc-panel);
+  --hc-surface-soft: var(--hc-rail); --hc-canvas: var(--hc-bg);
+  --accent: var(--hc-accent); --accent-soft: var(--hc-selected);
+  background: var(--hc-bg) !important; color: var(--hc-text);
+}
+html:not([data-theme="dark"]):is([data-appearance-palette="azure"],:not([data-appearance-palette])) #app#app.hc-redesign[data-surface="works"] {
+  --hc-accent: #4569b5; --hc-selected: #edf2fb; --hc-nav-selected: #edf2fb; --hc-nav-ink: #4569b5;
+}
+html[data-theme="dark"] #app#app.hc-redesign[data-surface="works"] {
+  --hc-bg: #191e27; --hc-panel: #1d232d; --hc-rail: #222a35;
+  --hc-text: #e1e7ee; --hc-muted: #a1adbc; --hc-line: #343e4c;
+  --hc-hover: #252d39; --hc-neutral-selected: #2b3b52;
+  --hc-control-line: #4b596b; --hc-on-accent: #171e28;
+}
+html[data-theme="dark"]:is([data-appearance-palette="azure"],:not([data-appearance-palette])) #app#app.hc-redesign[data-surface="works"] {
+  --hc-accent: #85afea; --hc-selected: #2b3b52; --hc-nav-selected: #2b3b52; --hc-nav-ink: #85afea;
+}
+html[data-appearance-contrast="high"] #app#app.hc-redesign[data-surface="works"] {
+  --hc-muted: #3d4b5e; --hc-line: #728197; --hc-control-line: #4a5a70;
+}
+html[data-theme="dark"][data-appearance-contrast="high"] #app#app.hc-redesign[data-surface="works"] {
+  --hc-muted: #d4deeb; --hc-line: #a5b1c3; --hc-control-line: #dbe4ef;
+}
+#app#app.hc-redesign[data-surface="works"] :is(.primary-nav,#worksPanel,#treePanel,#inspector,.hc-context-panel) {
+  background: var(--hc-rail) !important; border-color: var(--hc-line) !important;
+}
+#app#app.hc-redesign[data-surface="works"] :is(.topbar,.hc-idea-canvas,.work-agent-bottom,.mobile-nav,.panel-resizer) {
+  background: var(--hc-panel) !important; border-color: var(--hc-line) !important;
+}
+html[data-theme="dark"] #app#app.hc-redesign[data-surface="works"] :is(.topbar,.mobile-nav) {
+  background: var(--hc-rail) !important;
+}
+#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item,
+#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item::before {
+  color: var(--hc-muted) !important; text-shadow: none !important;
+}
+#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item { background: transparent !important; box-shadow: none !important; }
+#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item:hover { background: var(--hc-hover) !important; }
+#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item.active { background: var(--hc-nav-selected) !important; }
+#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item.active,
+#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item.active::before { color: var(--hc-nav-ink) !important; }
+#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item.active::after { background: var(--hc-accent) !important; }
+#app#app.hc-redesign[data-surface="works"] .work-agent-thread-row { background: transparent !important; border-color: transparent !important; }
+#app#app.hc-redesign[data-surface="works"] .work-agent-thread-row:hover { background: var(--hc-hover) !important; }
+#app#app.hc-redesign[data-surface="works"] .work-agent-thread-row.active { background: var(--hc-neutral-selected) !important; }
+#app#app.hc-redesign[data-surface="works"] :is(.work-agent-thread-select,.thread-title-line b,.brand,.hc-work-switch) { color: var(--hc-text) !important; }
+#app#app.hc-redesign[data-surface="works"] :is(.thread-title-line time,.thread-copy small,.hc-composer-hint,.hc-eyebrow,.agent-format-note,.message-role,.works-panel-footer,.work-agent-rail-footer,.save-indicator,.provider-badge) { color: var(--hc-muted) !important; }
+#app#app.hc-redesign[data-surface="works"] :is(.quiet,.icon-button,.rail-new-thread,.panel-divider-toggle,.save-indicator,.provider-badge,.attachment-menu>summary) {
+  background: var(--hc-panel) !important; color: var(--hc-muted) !important; border-color: var(--hc-line) !important;
+}
+#app#app.hc-redesign[data-surface="works"] :is(.quiet,.icon-button,.rail-new-thread,.attachment-menu>summary):hover { background: var(--hc-hover) !important; color: var(--hc-text) !important; }
+#app#app.hc-redesign[data-surface="works"] .conversation-message.user .message-bubble { background: var(--hc-hover) !important; color: var(--hc-text) !important; }
+#app#app.hc-redesign[data-surface="works"] .conversation-message .message-bubble p { color: var(--hc-text) !important; }
+#app#app.hc-redesign[data-surface="works"] :is(.decision-card-head,.decision-card-footer,.work-decision-dock,.agent-inline-artifact,.attachment-popover,.permission-popover,.thread-action-popover,.work-agent-composer) {
+  background: var(--hc-panel) !important; color: var(--hc-text) !important; border-color: var(--hc-line) !important;
+}
+#app#app.hc-redesign[data-surface="works"] .decision-option { border-color: var(--hc-control-line) !important; }
+#app#app.hc-redesign[data-surface="works"] .decision-option[aria-checked="true"] { border-color: var(--hc-accent) !important; background: var(--hc-selected) !important; }
+#app#app.hc-redesign[data-surface="works"] .decision-option-index { background: var(--hc-neutral-selected) !important; color: var(--hc-muted) !important; }
+#app#app.hc-redesign[data-surface="works"] :is(.decision-option-copy small,.permission-popover small,.attachment-popover span,.agent-presentation-summary small) { color: var(--hc-muted) !important; }
+#app#app.hc-redesign[data-surface="works"] :is(input,textarea)::placeholder { color: var(--hc-muted) !important; opacity: 1; }
+#app#app.hc-redesign[data-surface="works"] :is(.primary,.send-button) {
+  background: var(--hc-accent) !important; color: var(--hc-on-accent) !important; border-color: var(--hc-accent) !important;
+}
+#app#app.hc-redesign[data-surface="works"] :is(.primary,.send-button) :is(b,span) { color: inherit !important; }
+#app#app.hc-redesign[data-surface="works"] :focus-visible { outline-color: var(--hc-accent) !important; }
+
+/* Authoring navigation shares the theme material; selection alone carries color. */
+#app#app#app.hc-redesign[data-surface="works"] > .primary-nav {
+  --hc-nav-base: var(--hc-rail);
+  --hc-nav-label: var(--hc-muted);
+  --hc-nav-hover: var(--hc-hover);
+  --hc-nav-current: var(--hc-nav-selected);
+  --hc-nav-current-ink: var(--hc-nav-ink);
+  --hc-nav-marker: var(--hc-accent);
+  width: var(--hc-nav-width,64px) !important;
+  margin: 0 !important;
+  padding: 12px 6px 10px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: var(--hc-nav-base) !important;
+  color: var(--hc-nav-label) !important;
+  box-shadow: none !important;
+}
+#app#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item,
+#app#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item::before { color: var(--hc-nav-label) !important; }
+#app#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item:hover { background: var(--hc-nav-hover) !important; }
+#app#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item.active { background: var(--hc-nav-current) !important; }
+#app#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item.active,
+#app#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item.active::before { color: var(--hc-nav-current-ink) !important; }
+#app#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item.active::after { display: block !important; background: var(--hc-nav-marker) !important; }
+#app#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item:focus-visible { outline-color: var(--hc-nav-marker) !important; }
+
+/* Final control rhythm: compact composer and quieter conversation rail. */
+#app#app.hc-redesign[data-surface="works"] .work-agent-composer{padding:12px 14px 10px!important;border-radius:16px!important;box-shadow:0 3px 18px rgb(0 0 0 / .035)!important}
+#app#app.hc-redesign[data-surface="works"] .work-agent-composer textarea{min-height:42px!important;padding:0 2px 8px!important;font-weight:400!important;line-height:1.7!important}
+#app#app.hc-redesign[data-surface="works"] .composer-actions{margin-top:4px!important;min-height:34px}
+#app#app.hc-redesign[data-surface="works"] .work-agent-composer:not(.has-input) .agent-send-icon{background:var(--hc-neutral-selected)!important;border-color:transparent!important;color:var(--hc-muted)!important}
+#app#app.hc-redesign[data-surface="works"] .work-agent-composer .agent-send-icon{transition:background-color 140ms ease,color 140ms ease}
+#app#app.hc-redesign[data-surface="works"] .attachment-menu>summary,#app#app.hc-redesign[data-surface="works"] .agent-composer-more>summary{width:32px!important;height:32px!important;min-width:32px!important;padding:0!important;border:0!important;background:transparent!important;border-radius:8px!important}
+#app#app.hc-redesign[data-surface="works"] .permission-menu>summary{padding:6px 9px!important;border-radius:8px!important;font-weight:400!important;color:var(--hc-muted)!important}
+#app#app.hc-redesign[data-surface="works"] .composer-tools summary:hover{background:var(--hc-hover)!important}
+#app#app.hc-redesign[data-surface="works"] .agent-model-button{max-width:150px;border-radius:7px;min-height:32px}
+#app#app.hc-redesign[data-surface="works"] .agent-model-button:hover{background:var(--hc-hover)}
+#app#app.hc-redesign[data-surface="works"] .hc-composer-hint{margin-top:8px!important}
+#app#app.hc-redesign[data-surface="works"] .work-agent-rail-head{padding:16px 14px 12px!important}
+#app#app.hc-redesign[data-surface="works"] .work-agent-rail-head h3{font-size:15px!important;margin-bottom:12px!important}
+#app#app.hc-redesign[data-surface="works"] .rail-new-thread{height:36px!important;border-radius:9px!important;font-size:12px!important}
+#app#app.hc-redesign[data-surface="works"] .rail-thread-search-toggle{width:36px;height:36px;border-radius:9px!important;background:transparent!important;border-color:transparent!important;color:var(--hc-muted)}
+#app#app.hc-redesign[data-surface="works"] .work-agent-thread-list{gap:4px;padding:0 14px 20px!important}
+#app#app.hc-redesign[data-surface="works"] .work-agent-thread-row{border-radius:9px!important}
+#app#app.hc-redesign[data-surface="works"] .work-agent-thread-select{padding:9px 32px 9px 10px!important;min-height:52px}
+#app#app.hc-redesign[data-surface="works"] .thread-title-line b{font-size:12px!important;line-height:1.5}
+#app#app.hc-redesign[data-surface="works"] .thread-title-line time{margin-top:4px!important;font-size:10px!important}
+#app#app.hc-redesign[data-surface="works"] .thread-actions{top:11px!important;right:6px!important}
+#app#app.hc-redesign[data-surface="works"] .thread-actions>summary{display:grid;place-items:center;width:26px;height:26px;border-radius:6px}
+#app#app.hc-redesign[data-surface="works"] .thread-actions>summary:hover{background:var(--hc-panel)}
+#app#app.hc-redesign[data-surface="works"] .hc-rail-footer{padding:12px 14px!important;border-top:1px solid var(--hc-line)}
+#app#app.hc-redesign[data-surface="works"] .hc-rail-footer p{display:none}
+#app#app.hc-redesign[data-surface="works"] .hc-rail-footer button{width:100%;text-align:left;border:0;background:transparent!important;padding:8px 10px;font-size:12px}
+#app#app.hc-redesign[data-surface="works"] .agent-sidebar-toggle{display:inline-flex;align-items:center;justify-content:center;min-height:30px;padding:4px 8px;flex:none;border:1px solid var(--hc-line);border-radius:7px;background:transparent;color:var(--hc-muted);font-size:11px;cursor:pointer}
+#app#app.hc-redesign[data-surface="works"] .agent-sidebar-toggle:hover{background:var(--hc-hover);color:var(--hc-text)}
+@media(min-width:761px){
+ #app#app#app.hc-redesign.work-agent-stage[data-surface="works"]>.panel-divider-toggle-left{display:none!important}
+ #app#app.hc-redesign[data-surface="works"] .panel-resizer-left::before{background:transparent}
+ #app#app.hc-redesign[data-surface="works"] .panel-resizer-left:is(:hover,:focus-visible)::before{background:var(--hc-accent)}
+}
+@media(hover:hover) and (pointer:fine){
+ #app#app.hc-redesign[data-surface="works"] .thread-actions:not([open])>summary{opacity:0}
+ #app#app.hc-redesign[data-surface="works"] .work-agent-thread-row:is(:hover,:focus-within) .thread-actions>summary{opacity:1}
+}
+@media(max-width:760px){
+ #app#app.hc-redesign[data-surface="works"] .agent-sidebar-toggle{display:none}
+ #app#app.hc-redesign[data-surface="works"] .agent-model-button{max-width:90px}
+ #app#app.hc-redesign[data-surface="works"] .composer-actions{min-height:44px}
+ #app#app.hc-redesign[data-surface="works"] .attachment-menu>summary,#app#app.hc-redesign[data-surface="works"] .agent-composer-more>summary{height:44px!important;min-height:44px!important}
+}
+@media(prefers-reduced-motion:reduce){#app#app.hc-redesign[data-surface="works"] .agent-send-icon{transition:none!important}}
+#app[data-surface="works"] .agent-nav-icon{width:21px;height:21px;flex:none;margin-bottom:3px}
+#app#app#app.hc-redesign[data-surface="works"] .primary-nav .nav-item:has(.agent-nav-icon)::before{display:none!important}
+
+
+/* Composer finish: a writing surface above a quiet, aligned action strip. */
+#app#app[data-surface="works"] #workConversationForm {
+  --composer-surface:#ffffff; --composer-tools:#fafafb; --composer-border:#dcdde3;
+  padding:0!important;border:1px solid var(--composer-border)!important;border-radius:18px!important;
+  background:var(--composer-surface)!important;box-shadow:0 5px 22px rgb(25 30 50 / .045)!important;
+  transition:border-color 150ms ease,box-shadow 150ms ease;
+}
+html[data-theme="dark"] #app#app[data-surface="works"] #workConversationForm {
+  --composer-surface:#27272b; --composer-tools:#232327; --composer-border:#45454f;
+  box-shadow:0 5px 22px rgb(0 0 0 / .12)!important;
+}
+#app#app[data-surface="works"] #workConversationForm:focus-within {
+  border-color:var(--hc-accent)!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--hc-accent) 10%,transparent),0 5px 22px rgb(25 30 50 / .045)!important;
+}
+#app#app[data-surface="works"] #workConversationForm>label {padding:17px 18px 5px!important}
+#app#app[data-surface="works"] #workConversationForm textarea {
+  padding:0!important;min-height:44px!important;line-height:1.7!important;font-size:14px!important;
+  font-weight:400!important;background:transparent!important;letter-spacing:.01em;
+}
+#app#app[data-surface="works"] #workConversationForm .composer-actions {
+  margin:0!important;padding:9px 10px!important;min-height:54px;gap:10px;
+  border-top:1px solid color-mix(in srgb,var(--composer-border) 50%,transparent)!important;
+  border-radius:0 0 18px 18px;background:var(--composer-tools)!important;
+}
+#app#app[data-surface="works"] #workConversationForm .composer-tools {gap:6px!important}
+#app#app[data-surface="works"] #workConversationForm .composer-control-icon {width:18px;height:18px;flex:none;display:block}
+#app#app[data-surface="works"] #workConversationForm .attachment-menu>summary {
+  width:34px!important;height:34px!important;min-width:34px!important;min-height:34px!important;
+  border:1px solid var(--composer-border)!important;background:var(--composer-surface)!important;border-radius:10px!important;
+}
+#app#app[data-surface="works"] #workConversationForm .permission-menu>summary {
+  display:flex!important;align-items:center;gap:6px;min-height:34px!important;padding:5px 9px!important;
+  font-size:12px!important;font-weight:500!important;border-radius:9px!important;color:var(--hc-muted)!important;
+}
+#app#app[data-surface="works"] #workConversationForm .permission-menu>summary .composer-control-icon {width:15px;height:15px}
+#app#app[data-surface="works"] #workConversationForm .agent-composer-more>summary {height:34px!important;min-height:34px!important}
+#app#app[data-surface="works"] #workConversationForm .agent-model-button {
+  padding:6px 9px!important;min-height:32px;max-width:180px;font-size:12px!important;border:1px solid transparent;border-radius:9px;
+}
+#app#app[data-surface="works"] #workConversationForm .agent-model-button:hover {background:var(--composer-surface);border-color:var(--composer-border)}
+#app#app[data-surface="works"] #workConversationForm .agent-composer-send {gap:8px}
+#app#app[data-surface="works"] #workConversationForm .agent-send-icon {
+  width:36px!important;min-width:36px!important;max-width:36px!important;height:36px!important;min-height:36px!important;
+  border-radius:11px!important;box-shadow:none!important;
+}
+#app#app[data-surface="works"] #workConversationForm .agent-send-icon .composer-control-icon {width:20px;height:20px}
+#app#app[data-surface="works"] #workConversationForm:not(.has-input) .agent-send-icon {background:var(--hc-neutral-selected)!important;color:var(--hc-muted)!important}
+#app#app[data-surface="works"] #workConversationForm .composer-attachments:empty {display:none!important}
+#app#app[data-surface="works"] #workConversationForm .composer-attachments:not(:empty) {padding:12px 16px 0}
+#app#app[data-surface="works"] #workConversationForm .composer-import-state {margin:12px 16px 0}
+@media(max-width:760px){
+ #app#app[data-surface="works"] #workConversationForm>label {padding:15px 14px 5px!important}
+ #app#app[data-surface="works"] #workConversationForm .composer-actions {padding:7px 8px!important;gap:4px;min-height:58px}
+ #app#app[data-surface="works"] #workConversationForm .composer-tools {gap:2px!important}
+ #app#app[data-surface="works"] #workConversationForm .permission-menu>summary {padding:5px!important;font-size:11px!important;gap:4px;min-height:44px!important}
+ #app#app[data-surface="works"] #workConversationForm .agent-model-button {max-width:90px;padding:6px 2px!important;font-size:10px!important}
+ #app#app[data-surface="works"] #workConversationForm .agent-send-icon {width:44px!important;min-width:44px!important;max-width:44px!important;height:44px!important;min-height:44px!important;border-radius:13px!important}
+ #app#app[data-surface="works"] #workConversationForm .attachment-menu>summary,#app#app[data-surface="works"] #workConversationForm .agent-composer-more>summary {height:44px!important;min-height:44px!important}
+}
+@media(prefers-reduced-motion:reduce){#app#app[data-surface="works"] #workConversationForm{transition:none!important}}
+
+#app[data-surface="works"] #workConversationForm .agent-model-settings-label{flex:none;font-size:10px;border-left:1px solid var(--composer-border);padding-left:7px;color:var(--hc-muted)}
+
+/* Keep the collapse control where users look for it: beside the rail title. */
+#app#app.hc-redesign[data-surface="works"] .agent-rail-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
+#app#app.hc-redesign[data-surface="works"] .agent-rail-title h3{margin:0!important}
+#app#app.hc-redesign[data-surface="works"] .agent-rail-collapse{display:grid;place-items:center;flex:none;width:30px;height:30px;padding:0;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--hc-muted);cursor:pointer}
+#app#app.hc-redesign[data-surface="works"] .agent-rail-collapse svg{display:block;flex:none}
+#app#app.hc-redesign[data-surface="works"] .agent-rail-collapse:hover{background:var(--hc-hover);color:var(--hc-text);border-color:var(--hc-line)}
+#app#app.hc-redesign[data-surface="works"] .agent-rail-collapse:focus-visible{outline:2px solid var(--hc-accent);outline-offset:2px}
+@media(max-width:760px){#app#app.hc-redesign[data-surface="works"] .agent-rail-collapse{display:none}}
+
+/* The scrollport is the workspace, not the centered reading column.
+   Header/thread/composer share one width token without sharing a narrow box. */
+#app#app.hc-redesign[data-surface="works"] .hc-idea-canvas {
+  --agent-reading-width: 820px;
+  --agent-edge-space: 28px;
+  width: 100% !important;
+  max-width: none;
+  min-height: 0;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+#app#app.hc-redesign[data-surface="works"] .hc-canvas-header {
+  width: 100%; margin: 0; padding: 14px var(--agent-edge-space) !important;
+  min-height: 62px; border-bottom: 1px solid var(--hc-line);
+}
+#app#app.hc-redesign[data-surface="works"] .agent-session-heading h1 { font-size: 16px !important; font-weight: 650; }
+#app#app.hc-redesign[data-surface="works"] .hc-idea-canvas .work-agent-thread {
+  align-self: stretch; width: 100%; max-width: none; margin: 0 !important;
+  padding: 28px max(var(--agent-edge-space), calc((100% - var(--agent-reading-width)) / 2)) 32px !important;
+  overflow-x: hidden !important; overflow-y: auto !important;
+  scrollbar-gutter: stable; scroll-padding-block: 20px;
+}
+#app#app.hc-redesign[data-surface="works"] .hc-idea-canvas .work-agent-bottom {
+  width: 100% !important; margin: 0 !important;
+  padding: 12px max(var(--agent-edge-space), calc((100% - var(--agent-reading-width)) / 2)) 16px !important;
+}
+#app#app.hc-redesign[data-surface="works"] .work-agent-bottom .work-agent-composer {
+  width: 100% !important; max-width: none; margin: 0 !important;
+  border-radius: 14px !important;
+  box-shadow: 0 3px 16px rgb(0 0 0 / .035) !important;
+}
+#app#app.hc-redesign[data-surface="works"] .hc-idea-canvas.is-start .work-agent-thread {
+  margin-top: auto !important;
+  padding: 0 max(var(--agent-edge-space), calc((100% - var(--agent-reading-width)) / 2)) !important;
+  overflow: visible !important;
+}
+#app#app.hc-redesign[data-surface="works"] .hc-idea-canvas.is-start .work-agent-bottom { margin-bottom: auto !important; }
+#app#app.hc-redesign[data-surface="works"] .is-empty-thread .hc-idea-empty-compact { max-width:none; min-height:0; margin:0; padding:8px 0 18px; text-align:left; }
+#app#app.hc-redesign[data-surface="works"] .is-empty-thread .hc-idea-empty-compact h2 { margin:0 0 4px; font-size:16px; line-height:1.45; letter-spacing:0; }
+#app#app.hc-redesign[data-surface="works"] .is-empty-thread .hc-idea-empty-compact p { margin:0; font-size:12px; line-height:1.6; }
+#app#app.hc-redesign[data-surface="works"] .hc-composer-hint { color: var(--hc-muted); font-size: 11px !important; margin-top: 8px; }
+@media(max-width:760px) {
+  #app#app.hc-redesign[data-surface="works"] .hc-idea-canvas { --agent-edge-space: 16px; }
+  #app#app.hc-redesign[data-surface="works"] .hc-canvas-header { min-height: 52px; padding-block: 10px !important; }
+  #app#app.hc-redesign[data-surface="works"] .hc-idea-canvas .work-agent-thread { padding-block: 18px !important; }
+  #app#app.hc-redesign[data-surface="works"] .hc-idea-canvas .work-agent-bottom { padding-block: 8px 10px !important; }
+}
+/* The parent must not reserve another unused native scrollbar gutter. */
+#app#app.hc-redesign[data-surface="works"] #workspace:has(.hc-idea-canvas) {
+  overflow: hidden !important; scrollbar-gutter: auto;
+}
+
+/* A single next step reads as an action, rather than an unexplained menu. */
+#app#app[data-surface="works"] #workConversationForm .composer-next-action {
+  display: flex;
+  min-width: 0;
+}
+#app#app[data-surface="works"] #workConversationForm .composer-next-action > button {
+  min-height: 34px;
+  margin: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--composer-border);
+  border-radius: 9px;
+  background: var(--composer-surface);
+  color: var(--hc-text);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: none;
+}
+#app#app[data-surface="works"] #workConversationForm .composer-next-action > button:hover {
+  background: var(--hc-hover);
+  border-color: var(--hc-line);
+}
+#app#app[data-surface="works"] #workConversationForm .composer-next-action > button:focus-visible {
+  outline: 2px solid var(--hc-accent);
+  outline-offset: 2px;
+}
+@media (max-width: 760px) {
+  #app#app[data-surface="works"] #workConversationForm .composer-next-action > button {
+    min-height: 44px;
+    padding-inline: 8px;
+    font-size: 11px;
+  }
+}

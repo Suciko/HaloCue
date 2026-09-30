@@ -16,11 +16,13 @@ import zipfile
 from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 from .errors import DomainError, NotFound, RevisionConflict
 from .ba_world_starter import BA_WORLD_STARTER_SOURCE, BA_WORLD_STARTER_VERSION, starter_bible
 from .model_settings import UserPreferencesStore, WritingModelSettings
+from .model_capabilities import ADVANCED_FIELDS
 from .memory_store import (
     memory_projection_rows,
     relevant_memories,
@@ -35,6 +37,7 @@ from .request_ledger import RequestLedger
 from .agent_tools import AgentToolRegistry, ToolExecutionContext
 from .document_context import index_attachment, normalize_text, retrieve_context
 from .conversation_summary import (
+    BUDGET_POLICY,
     conversation_summary_evidence_ids,
     recent_conversation_history,
     refresh_conversation_summary,
@@ -56,6 +59,9 @@ from .ba_world_card_import import (
     parse_import_payload as parse_world_import_payload,
     validation_failure as world_import_validation_failure,
 )
+from .character_reuse import reuse_character_card
+from .card_assistance import resolve_card_assistance
+from .knowledge_change_impact import build_knowledge_change_impact
 from .backup import WritingBackupManager
 from .agent_dispatcher import AgentDispatcher
 from .proposal_impact import build_knowledge_impact_preview
@@ -78,6 +84,7 @@ from .adaptation_jobs import AdaptationJobs, OPERATION as ADAPTATION_OPERATION
 from .adaptation import AdaptationService
 from .asset_references import source_reference_snapshot
 from .workspace_access import workspace_access, workspace_operation
+from .authoring_workspace import AuthoringWorkspace
 
 
 class _ProposalAcceptanceStopped(Exception):
@@ -97,6 +104,7 @@ class WritingService:
 
     def _initialize(self, data_dir, production_url, official_corpus_dir):
         self.repo = Repository(data_dir)
+        self.authoring = AuthoringWorkspace(self)
         self.request_ledger = RequestLedger(self.repo)
         self.request_ledger.recover_interrupted()
         self.sources = SourceCatalog(self.repo)
@@ -149,11 +157,13 @@ class WritingService:
             "scene.candidate.generate",
             "scene.draft.generate",
             "scene.draft.rewrite",
+            "scene.proposal.generate",
             "scene.review",
             "continuity.review",
             "release.review",
             "memory.extract",
             "memory.sweep",
+            "chapter.review",
             "knowledge.discover",
         ):
             self.agent_dispatcher.register(operation, self._dispatch_workflow_operation)
@@ -254,6 +264,8 @@ class WritingService:
                 "production_asset_reconciliation",
                 "work_canon",
                 "character_cards",
+                "card_assistance/1.0",
+                "knowledge-change-impact/1.0",
                 "world_bible",
                 "ba_world_starter",
                 "reference_files",
@@ -448,6 +460,19 @@ class WritingService:
             ).fetchone()
         if not row or row["current_revision_id"] != revision_id:
             return None
+        with self.repo.connect() as connection:
+            previous = connection.execute(
+                """SELECT * FROM agent_dispatch_jobs
+                   WHERE operation='knowledge.discover'
+                     AND json_valid(payload_json)
+                     AND json_extract(payload_json, '$.work_id')=?
+                     AND json_extract(payload_json, '$.scope_id')=?
+                     AND json_extract(payload_json, '$.request._source_revision_id')=?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (work_id, scene_id, revision_id),
+            ).fetchone()
+        if previous:
+            return {"created": False, "job": dict(previous)}
         _, provider_runtime = self._capture_provider()
         payload = {
             "work_id": work_id,
@@ -459,29 +484,10 @@ class WritingService:
             },
             "provider_runtime": provider_runtime,
         }
-        with self.repo.connect() as connection:
-            previous_rows = connection.execute(
-                """SELECT * FROM agent_dispatch_jobs
-                   WHERE operation='knowledge.discover'
-                   ORDER BY created_at DESC"""
-            ).fetchall()
-        for previous in previous_rows:
-            try:
-                previous_payload = json.loads(previous["payload_json"] or "{}")
-            except json.JSONDecodeError:
-                continue
-            previous_request = previous_payload.get("request")
-            if (
-                previous_payload.get("work_id") == work_id
-                and previous_payload.get("scope_id") == scene_id
-                and isinstance(previous_request, dict)
-                and previous_request.get("_source_revision_id") == revision_id
-            ):
-                return {"created": False, "job": dict(previous)}
         queued = self.repo.enqueue_agent_work(
             operation="knowledge.discover",
             payload=payload,
-            dedupe_by_payload=True,
+            dedupe_knowledge_revision=(work_id, scene_id, revision_id),
         )
         if queued["created"]:
             self.agent_dispatcher.notify()
@@ -1278,6 +1284,10 @@ class WritingService:
             return self.run_scene_agent(work_id, scope_id, dispatched_request)
         if operation == "scene.draft.rewrite":
             return self.run_scene_rewrite_agent(work_id, scope_id, dispatched_request)
+        if operation == "scene.proposal.generate":
+            return self.generate_scene_proposal_from_conversation(
+                work_id, str(request.get("thread_id") or ""), dispatched_request
+            )
         if operation == "scene.review":
             return self.review_scene(work_id, scope_id, dispatched_request)
         if operation == "continuity.review":
@@ -1288,6 +1298,8 @@ class WritingService:
             return self.generate_memory_proposal(work_id, scope_id, dispatched_request)
         if operation == "memory.sweep":
             return self.sweep_chapter_memory(work_id, scope_id, dispatched_request)
+        if operation == "chapter.review":
+            return self.authoring.chapters.run(work_id, scope_id, dispatched_request)
         if operation == "knowledge.discover":
             return self.discover_scene_knowledge(work_id, scope_id, dispatched_request)
         raise DomainError("agent_operation_not_registered", "Agent 工作流未注册。", status=409)
@@ -1299,11 +1311,13 @@ class WritingService:
             "scene.candidate.generate": "scene",
             "scene.draft.generate": "scene",
             "scene.draft.rewrite": "scene",
+            "scene.proposal.generate": "scene",
             "scene.review": "scene",
             "continuity.review": "work",
             "release.review": "work",
             "memory.extract": "scene",
             "memory.sweep": "chapter",
+            "chapter.review": "chapter",
         }
         if operation not in allowed:
             raise DomainError(
@@ -1315,6 +1329,19 @@ class WritingService:
         if not scope_id:
             raise DomainError("validation_error", "Agent 工作流缺少作用域。", details={"field": "scope_id"})
         request = payload.get("request") if isinstance(payload.get("request"), dict) else {}
+        if operation == "scene.proposal.generate":
+            with self.repo.connect() as connection:
+                self._check_work_version(connection, work_id, request.get("expected_version", -1))
+                thread = self._check_thread_version(
+                    connection, work_id, str(request.get("thread_id") or ""),
+                    request.get("expected_thread_version", -1),
+                )
+                if thread["scope_type"] != "scene" or thread["scope_id"] != scope_id:
+                    raise DomainError("scene_conversation_required", "改写要求必须属于当前场景。", status=409)
+        if operation == "chapter.review":
+            with self.repo.connect() as connection:
+                self._check_work_version(connection, work_id, request.get("expected_version", -1))
+            request = {**request, "_chapter_snapshot": self.authoring.chapters.snapshot(work_id, scope_id)}
         _, provider_runtime = self._capture_provider()
         queued = self.repo.enqueue_agent_work(
             operation=operation,
@@ -1369,6 +1396,9 @@ class WritingService:
     def enqueue_conversation_message(self, work_id: str, thread_id: str, payload: dict):
         """Persist the request, then return once its fixed AgentRun exists."""
         with self.repo.connect() as connection:
+            # Fail stale editor requests before creating a durable job; the worker
+            # validates again to cover edits made while the request was queued.
+            resolve_card_assistance(self, connection, work_id, payload.get("card_assistance"))
             active = self._active_conversation_run(connection, work_id, thread_id)
         if active:
             raise DomainError(
@@ -1467,6 +1497,9 @@ class WritingService:
                 self._check_thread_version(connection, work_id, thread_id, expected_thread_version)
                 if run["status"] not in {"queued", "running"}:
                     raise DomainError("agent_run_not_active", "本轮 Agent 已经结束，不能再转向。", status=409)
+                card_assistance, _ = resolve_card_assistance(
+                    self, connection, work_id, payload.get("card_assistance"),
+                )
             self.cancel_agent_run(work_id, run_id)
             result = self.enqueue_conversation_message(
                 work_id,
@@ -1477,6 +1510,7 @@ class WritingService:
                     "attachment_ids": payload.get("attachment_ids") or [],
                     "task_scope": payload.get("task_scope"),
                     "redirect_of": run_id,
+                    **({"card_assistance": card_assistance} if card_assistance else {}),
                 },
             )
             result["redirected_from_agent_run_id"] = run_id
@@ -1774,7 +1808,8 @@ class WritingService:
         return result
 
     def _retry_review_agent_run(self, work_id: str, run, payload: dict):
-        workflow = json.loads(run["policy_json"]).get("workflow")
+        stored_policy = json.loads(run["policy_json"])
+        workflow = stored_policy.get("workflow")
         expected = int(payload.get("expected_version", -1))
         # Keep review retries on the same fixed-snapshot boundary as every
         # other workflow.  In particular, a deleted/unreadable snapshot must
@@ -1814,7 +1849,7 @@ class WritingService:
             )
         return self._run_work_review_agent(
             work_id,
-            {"expected_version": expected},
+            {"expected_version": expected, "review_profile": stored_policy.get("review_profile", "standard")},
             workflow,
             review_pack=review_pack,
             retry_of=run["id"],
@@ -2490,6 +2525,9 @@ class WritingService:
                 "不要写入正式正文",
                 "不改正式正文",
                 "不要改正式正文",
+                "不要改正文",
+                "不要修改正文",
+                "不修改正式正文",
                 "不生成正文候选",
                 "不要生成正文候选",
                 "不生成候选",
@@ -3109,6 +3147,16 @@ class WritingService:
             summary = {}
         if summary.get("schema_version") != "conversation-summary/1.1":
             summary = self._refresh_conversation_summary(connection, thread_id)
+        elif summary.get("budget_policy") != BUDGET_POLICY:
+            # Validate old stored sources before migrating the history boundary.
+            # A new token budget must not turn a legitimate older thread into
+            # an integrity error, or silently repair a tampered summary.
+            validate_conversation_summary(connection, thread_id, summary, pinned=True)
+            summary = refresh_conversation_summary(connection, thread_id, force_rebuild=True)
+            connection.execute(
+                "UPDATE conversation_threads SET summary_json=?,archived_message_count=? WHERE id=?",
+                (canonical_json(summary), summary["archived_message_count"], thread_id),
+            )
         return validate_conversation_summary(connection, thread_id, summary)
 
     @contextmanager
@@ -3158,9 +3206,138 @@ class WritingService:
         value = getter() if callable(getter) else getattr(provider, "_last_usage", {})
         return normalize_usage(value)
 
+    @contextmanager
+    def _planning_usage_scope(self, work_id, scope_type, scope_id, workflow, provider, inputs):
+        """Account synchronous planning calls through the physical request ledger."""
+        run_id = new_id("agent")
+        snapshot_uri, digest = self.repo.atomic_write_text(
+            f"agent-runs/{run_id}/input.json",
+            json.dumps({"schema_version": "planning-input/1.0", "workflow": workflow, "inputs": inputs}, ensure_ascii=False) + "\n",
+        )
+        with self.repo.transaction() as connection:
+            connection.execute(
+                "INSERT INTO agent_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (run_id, work_id, scope_type, scope_id, workflow, "running",
+                 canonical_json({"workflow": workflow, "write_boundary": "proposal_only"}),
+                 snapshot_uri, digest, None, None, now(), None),
+            )
+        try:
+            with self._provider_lock, self._provider_usage_scope(provider, run_id):
+                yield run_id
+            with self.repo.transaction() as connection:
+                self._require_agent_run_committable(connection, run_id)
+                connection.execute("UPDATE agent_runs SET status='completed',finished_at=? WHERE id=?", (now(), run_id))
+        except Exception as error:
+            failure = {"code": error.code if isinstance(error, DomainError) else "provider_failed", "message": "规划调用未完成。"}
+            try:
+                with self.repo.transaction() as connection:
+                    connection.execute(
+                        "UPDATE agent_runs SET status='failed',failure_json=?,finished_at=? WHERE id=? AND status='running'",
+                        (canonical_json(failure), now(), run_id),
+                    )
+            except Exception as persistence_error:
+                error.add_note(f"Planning failure status could not be persisted: {type(persistence_error).__name__}")
+            raise
+
     @staticmethod
     def _merge_usage(first: dict, second: dict) -> dict:
         return merge_usage(first, second)
+
+    @staticmethod
+    def _infer_creation_intent(
+        text: str,
+        *,
+        first_idea: str = "",
+        history: list[dict] | None = None,
+        attachments: list[dict] | None = None,
+        import_mode: str = "",
+    ) -> dict:
+        """Classify author intent without adding a separate wizard or choice card.
+
+        This is deliberately a small deterministic hint for the Agent.  The
+        conversation remains the source of truth: if signals conflict, the
+        provider asks one focused question instead of exposing an intent form.
+        """
+        latest = str(text or "").strip()
+        user_turns = [
+            str(item.get("text") or "").strip()
+            for item in (history or [])
+            if isinstance(item, dict) and item.get("role") == "user" and str(item.get("text") or "").strip()
+        ]
+        # ``text`` is the request being routed right now.  Prefer it over
+        # persisted history; a caller may classify before the current message
+        # has been appended to the history slice.
+        if not latest and user_turns:
+            latest = user_turns[-1]
+        filenames = [
+            str(item.get("filename") or "").strip()
+            for item in (attachments or [])
+            if isinstance(item, dict) and str(item.get("filename") or "").strip()
+        ]
+        # Include the direct request even when there is no persisted history.
+        # The classifier also runs before the first message is stored; omitting
+        # ``latest`` here silently downgraded new requests to guided ideation.
+        haystack = " ".join([latest, str(first_idea or ""), *user_turns[-6:], *filenames]).casefold()
+        latest_lower = latest.casefold()
+        signals = {
+            "novel_to_script_adaptation": (
+                import_mode in {"story_to_script", "aap_to_script"}
+                or any(token in haystack for token in ("小说改编", "改成剧本", "改编成剧本", "小说转剧本", "story to script", "adaptation"))
+            ),
+            "continue_existing_draft": any(token in haystack for token in ("续写", "继续写", "接着写", "已有文章", "继续上一篇", "接着上一章", "continue writing")),
+            "character_relationship_scene": any(token in latest_lower for token in ("人物关系", "角色关系", "两人互动", "关系场景", "character relationship")),
+            "worldbuilding_first": any(token in latest_lower for token in ("世界观", "世界规则", "设定先行", "地点设定", "worldbuilding", "world building")),
+            "outline_only": any(token in latest_lower for token in ("大纲", "梗概", "结构", "章节安排", "outline", "story structure")),
+            "script_or_scene_first": any(token in latest_lower for token in ("剧本", "对白", "场景", "镜头", "舞台动作", "script", "scene")),
+            "short_story_ideation": any(token in haystack for token in ("短篇", "短故事", "单篇", "短场景", "short story", "one-shot")),
+            "long_form_ideation": any(token in haystack for token in ("长篇", "连载", "多卷", "多章", "长线", "long-form", "long form", "serial")),
+            "imported_draft_review": bool(filenames) and not any(token in haystack for token in ("续写", "改编", "改成剧本")),
+        }
+        priority = [
+            "novel_to_script_adaptation", "continue_existing_draft",
+            "character_relationship_scene", "worldbuilding_first", "outline_only",
+            "script_or_scene_first", "short_story_ideation", "long_form_ideation",
+            "imported_draft_review",
+        ]
+        candidates = [item for item in priority if signals[item]]
+        primary = candidates[0] if candidates else "guided_ideation"
+        source = "import_mode" if import_mode in {"story_to_script", "aap_to_script"} else (
+            "user_message" if candidates else "implicit"
+        )
+        return {
+            "primary": primary,
+            "candidates": candidates or ["guided_ideation"],
+            "source": source,
+            "evidence": [
+                value[:160] for value in [latest, *filenames] if value
+            ][:4],
+        }
+
+    @classmethod
+    def _attach_creation_intent(
+        cls,
+        task_contract: dict,
+        text: str,
+        *,
+        first_idea: str = "",
+        history: list[dict] | None = None,
+        attachments: list[dict] | None = None,
+    ) -> dict:
+        scope = task_contract.get("task_scope") if isinstance(task_contract.get("task_scope"), dict) else {}
+        intent = cls._infer_creation_intent(
+            text,
+            first_idea=first_idea,
+            history=history,
+            attachments=attachments,
+            import_mode=str(scope.get("import_mode") or ""),
+        )
+        return {
+            **task_contract,
+            "creation_intent": intent["primary"],
+            "creation_intent_candidates": intent["candidates"],
+            "creation_intent_source": intent["source"],
+            "creation_intent_evidence": intent["evidence"],
+        }
 
     def _conversation_task_contract(self, connection, work_id: str, requested_scope: dict | None = None) -> dict:
         """Resolve the active director task from persisted work state.
@@ -3302,16 +3479,18 @@ class WritingService:
         selected_modes = [mode for mode in (brief or {}).get("story_modes", []) if mode in MODE_SOURCES]
         if not selected_modes and (brief or {}).get("mode") in MODE_SOURCES:
             selected_modes = [brief["mode"]]
+        conversation_output_mode = "edit_patch" if template_id == "scene.draft.rewrite" else "official_script"
         skill_runtime = self.ba_skill.compile(
             selected_modes[0] if len(selected_modes) == 1 else None,
             bool((brief or {}).get("has_sensei")),
             task_id=template_id,
+            output_mode=conversation_output_mode,
         )
         prompt_bundle = self.ba_prompt_assembler.describe_bundle(
             template_id,
             mode_key=selected_modes[0] if len(selected_modes) == 1 else None,
             has_sensei=bool((brief or {}).get("has_sensei")),
-            output_mode="official_script",
+            output_mode=conversation_output_mode,
         )
         skill_runtime["prompt_bundle"] = prompt_bundle
         import_contract = None
@@ -3370,6 +3549,7 @@ class WritingService:
                     "chapter_title": scene["chapter_title"] if scene else (memory_scene["chapter_title"] if memory_scene else (chapter["title"] if chapter else None)),
                     "scene_id": scene["id"] if scene else (memory_scene["id"] if memory_scene else None),
                     "scene_title": scene["title"] if scene else (memory_scene["title"] if memory_scene else None),
+                    **({"selection": requested_scope["selection"]} if scene and isinstance(requested_scope.get("selection"), dict) else {}),
                     "scene_revision_id": scene["current_revision_id"] if scene else (memory_scene["current_revision_id"] if memory_scene else None),
                     **({"import_mode": import_mode, "import_id": str(requested_scope.get("import_id") or "").strip(), "import_preview": import_preview} if import_mode else {}),
                 },
@@ -3401,6 +3581,12 @@ class WritingService:
         if not scene:
             raise DomainError("scene_conversation_target_stale", "本场对话所绑定的场景已经不存在。", status=409)
 
+        scene_contract = json.loads(scene["contract_json"] or "{}")
+        selection = scene_contract.get("context_selection") or {}
+        explicit_selection = selection.get("mode") == "explicit"
+        selected_cards = set(selection.get("character_card_ids", []))
+        selected_world = set(selection.get("world_item_ids", []))
+        selected_refs = set(selection.get("reference_file_ids", []))
         materials = []
         source_revisions = []
         rows = connection.execute(
@@ -3413,6 +3599,9 @@ class WritingService:
             (work_id,),
         ).fetchall()
         for row in rows:
+            # Scene conversations must respect the same explicit scope as drafting.
+            if explicit_selection and row["kind"] == "character_card" and row["scope_id"] not in selected_cards:
+                continue
             content = self._revision_content(connection, row["current_revision_id"])
             if row["kind"] == "brief" and content.get("status", "confirmed") != "confirmed":
                 continue
@@ -3440,6 +3629,7 @@ class WritingService:
                             item for item in content.get(collection, [])
                             if item.get("status", "active") != "archived"
                             and item.get("confidence_status") == "confirmed"
+                            and (not explicit_selection or item.get("id") in selected_world)
                         ]
                         for collection in ("entities", "rules", "timeline")
                     },
@@ -3459,6 +3649,21 @@ class WritingService:
                 "revision_id": row["current_revision_id"],
             })
 
+        # Scene discussion uses the same bounded character projection as
+        # drafting. Full imported profiles remain in their source revisions.
+        character_materials = [item for item in materials if item["kind"] == "character_card"]
+        active_names = [
+            name
+            for item in character_materials
+            for name in [item["content"].get("name"), item["content"].get("canonical_name"), *item["content"].get("aliases", [])]
+            if name
+        ]
+        for item in character_materials:
+            item["content"] = self._runtime_character_card(
+                item["content"], item["revision_id"], scene_contract,
+                active_names, self._scene_has_sensei(scene_contract, next((material["content"] for material in materials if material["kind"] == "brief"), {})),
+            )
+
         references = []
         for row in connection.execute(
             """SELECT id,title,kind,content_uri,content_hash,source_label,version
@@ -3467,6 +3672,8 @@ class WritingService:
                ORDER BY updated_at""",
             (work_id,),
         ).fetchall():
+            if explicit_selection and row["id"] not in selected_refs:
+                continue
             excerpt = self._traceable_text_excerpt(self.repo.read_text(row["content_uri"]))
             references.append({
                 "id": row["id"],
@@ -3493,6 +3700,12 @@ class WritingService:
             })
 
         scene_asset_references = self._scene_asset_references(connection, work_id, scene["id"])
+        pending_text_edit = None
+        pending_row = connection.execute("SELECT id,base_revision_id,candidate_uri,candidate_hash FROM proposals WHERE work_id=? AND scope_id=? AND kind='scene_script' AND status='pending' ORDER BY created_at DESC LIMIT 1", (work_id, scene["id"])).fetchone()
+        if pending_row:
+            pending_text = self.repo.read_text(pending_row["candidate_uri"])
+            pending_text_edit = {"id": pending_row["id"], "base_revision_id": pending_row["base_revision_id"],
+                                 "content": {"blocks": self._scene_blocks_from_text(pending_text, pending_row["id"])}}
 
         return {
             "schema_version": "scene-conversation-context/1.0",
@@ -3504,6 +3717,7 @@ class WritingService:
                 "contract": json.loads(scene["contract_json"] or "{}"),
             },
             "current_manuscript": manuscript,
+            "pending_text_edit": pending_text_edit,
             "scene_asset_references": scene_asset_references,
             "confirmed_materials": materials,
             "confirmed_references": references,
@@ -3594,9 +3808,12 @@ class WritingService:
     @workspace_operation
     def create_work(self, payload: dict):
         idea = str(payload.get("idea", "")).strip()
-        title = str(payload.get("title", "")).strip() or idea[:24]
-        if not title:
-            raise DomainError("validation_error", "请写下一句故事想法或作品名称。", details={"fields": ["idea", "title"]})
+        world_draft = None
+        if payload.get("world_draft_id"):
+            world_draft = self.authoring.get_world(str(payload["world_draft_id"]))
+            if payload.get("world_draft_revision_id") != world_draft["current_revision_id"]:
+                raise DomainError("world_draft_changed", "世界底稿已更新，请重新选择要采用的版本。", status=409)
+        title = str(payload.get("title", "")).strip() or "未命名作品"
         world_seed = str(payload.get("world_seed", "blank")).strip() or "blank"
         if world_seed not in {"blank", "ba_starter"}:
             raise DomainError("validation_error", "世界观底稿类型无效。", details={"field": "world_seed"})
@@ -3640,7 +3857,14 @@ class WritingService:
                 "INSERT INTO production_runs VALUES (?,?,?,?,?,?,?,?)",
                 (run_id, work_id, "creation", permission_mode, "planned", "[]", timestamp, timestamp),
             )
-            if world_seed == "ba_starter":
+            if world_draft:
+                artifact = self._artifact(connection, work_id, "world_bible", "work", work_id)
+                seed_revision_id = self._add_revision(
+                    connection, artifact, world_draft["content"], "user",
+                    {"workflow": "world.draft.copy", "world_draft_id": world_draft["id"],
+                     "world_draft_revision_id": world_draft["current_revision_id"], "pack": PACK_VERSION},
+                )
+            elif world_seed == "ba_starter":
                 artifact = self._artifact(connection, work_id, "world_bible", "work", work_id)
                 seed_revision_id = self._add_revision(
                     connection,
@@ -3664,6 +3888,10 @@ class WritingService:
             )
             return result["work"]
         return self.get_work(work_id)
+
+    @workspace_operation
+    def get_knowledge_change_impact(self, work_id: str):
+        return build_knowledge_change_impact(self, work_id)
 
     @workspace_operation
     def get_work(self, work_id: str):
@@ -3842,6 +4070,112 @@ class WritingService:
             return work
 
     @workspace_operation
+    def get_activity_snapshot(self, work_id: str) -> dict:
+        """Return only the data needed by the background activity surface.
+
+        ``get_work`` intentionally returns the complete authoring graph, including
+        every artifact revision and conversation message. Activity polling does
+        not need that graph; keeping this projection small prevents a quiet
+        status refresh from repeatedly shipping the entire work to the browser.
+        """
+        with self.repo.connect() as connection:
+            work = connection.execute(
+                "SELECT id,title,version FROM works WHERE id=?", (work_id,)
+            ).fetchone()
+            if not work:
+                raise NotFound("work", work_id)
+
+            def decode(raw, fallback):
+                try:
+                    value = json.loads(raw or "")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    return fallback
+                return value
+
+            runs = []
+            for run in self.repo.rows(
+                connection.execute(
+                    "SELECT id,work_id,created_at,updated_at FROM production_runs "
+                    "WHERE work_id=? ORDER BY created_at DESC",
+                    (work_id,),
+                )
+            ):
+                run["work_items"] = []
+                for item in self.repo.rows(
+                    connection.execute(
+                        """SELECT id,run_id,type,scope_type,scope_id,status,
+                                  input_refs_json,output_refs_json,acceptance_json,
+                                  attempt_count,error_json,created_at,updated_at
+                           FROM work_items WHERE run_id=? ORDER BY created_at""",
+                        (run["id"],),
+                    )
+                ):
+                    item["input_refs"] = decode(item.pop("input_refs_json"), {})
+                    item["output_refs"] = decode(item.pop("output_refs_json"), [])
+                    item["acceptance"] = decode(item.pop("acceptance_json"), {})
+                    item["error"] = decode(item.pop("error_json"), None)
+                    item["attempts"] = self.repo.rows(
+                        connection.execute(
+                            """SELECT id,work_item_id,ordinal,status,output_ref,
+                                      error_code,started_at,finished_at
+                               FROM job_attempts WHERE work_item_id=? ORDER BY ordinal""",
+                            (item["id"],),
+                        )
+                    )
+                    run["work_items"].append(item)
+                runs.append(run)
+
+            request_summaries = self.request_ledger.summaries(connection, work_id)
+            agent_runs = []
+            for agent_run in self.repo.rows(
+                connection.execute(
+                    """SELECT id,work_id,scope_type,scope_id,status,
+                              input_snapshot_uri,proposal_id,policy_json,
+                              failure_json,created_at,finished_at
+                       FROM agent_runs WHERE work_id=? ORDER BY created_at DESC""",
+                    (work_id,),
+                )
+            ):
+                raw_policy = decode(agent_run.pop("policy_json"), {})
+                if not isinstance(raw_policy, dict):
+                    raw_policy = {}
+                agent_run["policy"] = {
+                    key: raw_policy.get(key)
+                    for key in ("thread_id", "retry_of", "redirect_of", "task_id")
+                    if raw_policy.get(key) is not None
+                }
+                agent_run["failure"] = decode(agent_run.pop("failure_json"), None)
+                agent_run["request_usage"] = request_summaries.get(agent_run["id"])
+                agent_runs.append(agent_run)
+
+            proposals = self.repo.rows(
+                connection.execute(
+                    """SELECT id,status,kind,scope_type,scope_id,created_at
+                       FROM proposals WHERE work_id=? ORDER BY created_at DESC""",
+                    (work_id,),
+                )
+            )
+            conversation_threads = self.repo.rows(
+                connection.execute(
+                    """SELECT id,work_id,scope_type,scope_id,title,status,version,
+                              created_at,updated_at
+                       FROM conversation_threads WHERE work_id=?
+                       ORDER BY updated_at DESC""",
+                    (work_id,),
+                )
+            )
+            return {
+                "schema_version": "work-activity/1.0",
+                "id": work["id"],
+                "title": work["title"],
+                "version": int(work["version"]),
+                "runs": runs,
+                "agent_runs": agent_runs,
+                "proposals": proposals,
+                "conversation_threads": conversation_threads,
+            }
+
+    @workspace_operation
     def get_user_work_status(self, work_id: str) -> dict:
         """Return the small, human-facing status projection for a work.
 
@@ -3924,6 +4258,12 @@ class WritingService:
                 or int(summary.get("overflowed_user_context_count") or 0) > 0
                 for summary in summaries
             )
+            has_user_idea = bool(connection.execute(
+                """SELECT 1 FROM conversation_messages AS message
+                   JOIN conversation_threads AS thread ON thread.id=message.thread_id
+                   WHERE thread.work_id=? AND message.role='user' LIMIT 1""",
+                (work_id,),
+            ).fetchone())
 
             blueprint_confirmed = bool(
                 blueprint and blueprint.get("status") in {"accepted", "confirmed"}
@@ -3992,11 +4332,11 @@ class WritingService:
                     "detail": "上一轮没有完成，输入和已确认资料仍然保留。",
                     "target": "agent",
                 }
-            elif needs_organizing:
+            elif not brief and has_user_idea:
                 primary = {
-                    "id": "organize_conversation",
-                    "label": "整理对话后继续",
-                    "detail": "对话内容已经较多，先整理会让下一轮讨论更稳妥。",
+                    "id": "continue_idea",
+                    "label": "继续讨论",
+                    "detail": "想法已保存在对话中；信息足够时 Agent 会自动整理候选，你只需要采纳或退回。",
                     "target": "agent",
                 }
             elif not brief:
@@ -4034,6 +4374,13 @@ class WritingService:
                     "detail": "正文已经准备好，可以进行全篇检查。",
                     "target": "release",
                 }
+            elif needs_organizing:
+                primary = {
+                    "id": "organize_conversation",
+                    "label": "整理对话后继续",
+                    "detail": "对话内容已经较多，先整理会让下一轮讨论更稳妥。",
+                    "target": "agent",
+                }
             else:
                 primary = {
                     "id": "continue_discussion",
@@ -4047,16 +4394,91 @@ class WritingService:
                 alerts.append({"kind": "decision", "text": f"{pending_count} 项内容等待你的决定"})
             if blocking_count:
                 alerts.append({"kind": "blocked", "text": f"{blocking_count} 项审查问题需要处理"})
-            if needs_organizing:
+            if needs_organizing and primary["target"] == "agent":
                 alerts.append({"kind": "organize", "text": "对话内容较多，整理后继续会更稳妥"})
             if failed_count and not active_count:
                 alerts.append({"kind": "recovery", "text": "有一轮没有完成，可以从原位置继续"})
+
+            # These are deterministic, read-only workflow hints. They make the
+            # product feel more intelligent without pretending that a model was
+            # called or changing formal work state behind the user's back.
+            smart_insights = []
+
+            def add_smart_insight(insight_id, tone, title, detail, action=None):
+                item = {
+                    "id": insight_id,
+                    "tone": tone,
+                    "title": title,
+                    "detail": detail,
+                }
+                if action:
+                    item["action"] = action
+                smart_insights.append(item)
+
+            if pending_count:
+                add_smart_insight(
+                    "decision_queue",
+                    "attention",
+                    "先处理待决定内容",
+                    "候选不会自动写入正式作品；先审查再继续，能避免后续上下文建立在未确认内容上。",
+                )
+            if blocking_count:
+                add_smart_insight(
+                    "blocking_review",
+                    "blocked",
+                    "有审查阻塞项",
+                    "先处理阻塞问题，再冻结发布；当前正文和资料不会被自动改写。",
+                )
+            if needs_organizing:
+                add_smart_insight(
+                    "context_cleanup",
+                    "info",
+                    "对话上下文需要整理",
+                    "较早的讨论已被归档或超出本轮上下文；整理后再生成候选，结果会更稳定。",
+                    {"id": "organize_conversation", "label": "整理对话", "target": "agent"},
+                )
+            if not brief and has_user_idea:
+                add_smart_insight(
+                    "idea_ready",
+                    "positive",
+                    "想法已经安全保留",
+                    "可以先把当前讨论整理成方向候选，再决定是否采纳；不会直接改动正式正文。",
+                )
+            elif blueprint_confirmed and not scene_count:
+                add_smart_insight(
+                    "structure_gap",
+                    "next",
+                    "方向已确认，下一步是拆场景",
+                    "先建立稳定的章节与场景 ID，后续正文、审查和 AA 制作才能追踪同一段内容。",
+                )
+            elif scene_count and drafted_count < scene_count:
+                add_smart_insight(
+                    "draft_coverage",
+                    "next",
+                    "还有场景没有正文",
+                    f"当前已完成 {drafted_count}/{scene_count} 场；建议继续下一场，而不是重复整理已完成内容。",
+                )
+            elif scene_count and drafted_count == scene_count and not released:
+                add_smart_insight(
+                    "release_ready",
+                    "positive",
+                    "正文已经具备全篇审查条件",
+                    "现在可以检查连续性、人物约束和资料版本；检查通过后仍需你明确冻结发布。",
+                )
+            if self.provider.is_simulation:
+                add_smart_insight(
+                    "local_simulation",
+                    "info",
+                    "当前使用本地模拟",
+                    "不会调用外部模型；你仍可手写正文、整理资料和审查候选。",
+                )
 
             return {
                 "schema_version": "work-user-status/1.0",
                 "work_version": int(work["version"]),
                 "primary_action": primary,
                 "alerts": alerts[:3],
+                "smart_insights": smart_insights[:4],
                 "counts": {
                     "pending_decisions": pending_count,
                     "blocking_issues": blocking_count,
@@ -4695,6 +5117,10 @@ class WritingService:
                     details={"agent_run_id": active["id"]},
                 )
             policy = self._conversation_policy(connection, thread, retry=bool(retry_snapshot))
+            card_assistance, _ = resolve_card_assistance(
+                self, connection, work_id,
+                retry_snapshot.get("card_assistance") if retry_snapshot else payload.get("card_assistance"),
+            )
             if retry_snapshot:
                 history = retry_snapshot.get("history") if isinstance(retry_snapshot.get("history"), list) else []
                 task_contract = retry_snapshot.get("task_contract") if isinstance(retry_snapshot.get("task_contract"), dict) else None
@@ -4744,6 +5170,7 @@ class WritingService:
                         "retry_of": retry_of,
                         "redirect_of": redirect_of,
                         "request_source": request_source,
+                        **({"card_assistance": card_assistance} if card_assistance else {}),
                         **({"decision_response": decision_response} if decision_response else {}),
                     },
                     agent_run_id=run_id,
@@ -4765,7 +5192,12 @@ class WritingService:
                     if first_user else text
                 )
                 effective_scope = self._effective_conversation_scope(thread, payload.get("task_scope"))
+                if effective_scope.get("surface") == "scene" and self._intent_discussion_only(text):
+                    effective_scope = {**effective_scope, "discussion_only": True}
                 task_contract = self._conversation_task_contract(connection, work_id, effective_scope)
+                task_contract = self._attach_creation_intent(
+                    task_contract, text, first_idea=first_idea, history=history, attachments=attachments
+                )
                 scene_memory_context = self._scene_memory_context(connection, work_id, task_contract)
                 scene_conversation_context = self._scene_conversation_context(connection, work_id, task_contract)
                 document_context = retrieve_context(
@@ -4779,6 +5211,8 @@ class WritingService:
                 "attachments": attachments,
                 "document_context": document_context,
             }
+            if card_assistance:
+                provider_context["card_assistance"] = card_assistance
             if scene_memory_context:
                 provider_context["scene_memory_context"] = scene_memory_context
             if scene_conversation_context:
@@ -4787,6 +5221,7 @@ class WritingService:
                 provider_context["document_skill"] = DOCUMENT_SKILL
             snapshot = {
                 "schema_version": "conversation-agent-input/1.2",
+                **({"card_assistance": card_assistance} if card_assistance else {}),
                 "work_id": work_id,
                 "thread_id": thread_id,
                 "scope": {"type": thread["scope_type"], "id": thread["scope_id"]},
@@ -4859,8 +5294,13 @@ class WritingService:
                 "message": getattr(exc, "message", "模型未能完成本轮对话。"),
             }
             failure_details = getattr(exc, "details", {})
-            if isinstance(failure_details, dict) and failure_details.get("failure_kind"):
-                provider_failure["failure_kind"] = failure_details["failure_kind"]
+            if isinstance(failure_details, dict):
+                if failure_details.get("failure_kind"):
+                    provider_failure["failure_kind"] = failure_details["failure_kind"]
+                diagnostic_keys = ("request_status", "estimated_input_tokens", "input_limit_tokens", "overage_tokens", "serialized_json_characters", "non_ascii_characters", "ascii_characters", "estimation_method", "actual_input_tokens", "actual_output_tokens", "actual_usage_status", "usage", "components", "schema_version")
+                diagnostics = {key: failure_details[key] for key in diagnostic_keys if key in failure_details}
+                if diagnostics:
+                    provider_failure["token_diagnostics"] = diagnostics
             reply = {
                 "text": "本轮模型调用失败，没有生成候选，也没有修改任何正式资料。你可以检查模型设置后重试。",
                 "questions": [], "ready_for_proposal": False,
@@ -4993,6 +5433,10 @@ class WritingService:
                         for key in ("failure_kind", "http_status", "provider_message", "operation", "reason"):
                             if key in failure_details:
                                 provider_failure[key] = failure_details[key]
+                        diagnostic_keys = ("request_status", "estimated_input_tokens", "input_limit_tokens", "overage_tokens", "serialized_json_characters", "non_ascii_characters", "ascii_characters", "estimation_method", "actual_input_tokens", "actual_output_tokens", "actual_usage_status", "usage", "components", "schema_version")
+                        diagnostics = {key: failure_details[key] for key in diagnostic_keys if key in failure_details}
+                        if diagnostics:
+                            provider_failure["token_diagnostics"] = diagnostics
                     reply = {
                         **current_reply,
                         "text": "工具已经按权限执行，但模型未能根据结果完成回复；正式资料没有改变。",
@@ -5079,7 +5523,24 @@ class WritingService:
             else "waiting_user" if reply.get("ready_for_proposal") or reply.get("artifact_preview") or waiting_tools
             else "completed"
         )
+        scene_edit_requests = [item.output for item in tool_results if item.status == "succeeded" and item.tool == "propose_scene_text_edit" and isinstance(item.output, dict)]
+        if len(scene_edit_requests) > 1:
+            first_edit = scene_edit_requests[0]
+            edits = [edit for request in scene_edit_requests for edit in request["edits"]]
+            same_base = all(all(request.get(key) == first_edit.get(key) for key in
+                                ("scene_id", "base_revision_id", "replace_proposal_id", "replace_candidate_hash", "selection"))
+                            for request in scene_edit_requests)
+            if not same_base or len({edit["block_id"] for edit in edits}) != len(edits) or len(edits) > 480:
+                tool_failure = {"code": "conflicting_scene_edits", "message": "修改批次存在重叠或版本冲突，请重新读取后合并修改。"}
+                run_status = "failed"
+            else:
+                scene_edit_requests = [{**first_edit, "edits": edits, "batched": True}]
+        scene_edit_proposal_id = None
         auto_propose_kind = None
+        auto_organize_requested = any(
+            item.status == "succeeded" and item.tool == "organize_current_plan"
+            for item in tool_results
+        )
         if not provider_failure and not tool_failure and thread_snapshot["permission_mode"] == "managed" and isinstance(reply.get("artifact_preview"), dict):
             preview_kind = reply["artifact_preview"].get("kind")
             if preview_kind in {"character_card", "world_card", "world_rule", "canon_fact"}:
@@ -5093,6 +5554,20 @@ class WritingService:
                 raise DomainError("agent_run_missing", "Agent 运行记录不存在。", status=409)
             if current_run["status"] != "running":
                 raise DomainError("agent_run_interrupted", "Agent 运行已被中断，不能覆盖其状态。", status=409)
+            if scene_edit_requests and not provider_failure and not tool_failure:
+                try:
+                    scene_edit_proposal_id = self._commit_scene_text_edit(connection, work_id, scene_edit_requests[0], provider_runtime)
+                    reply["ready_for_proposal"] = True
+                    run_status = "waiting_user"
+                except (ValueError, DomainError) as exc:
+                    tool_failure = {"code": "scene_edit_commit_failed", "message": str(exc)}
+                    run_status = "failed"
+                    reply["text"] = "正文已经变化或已有待处理修改，本轮修改没有应用。请核对当前正文后重试。"
+                    reply["ready_for_proposal"] = False
+                    for item in tool_results:
+                        if item.tool == "propose_scene_text_edit":
+                            item.status = "failed"
+                            item.error = tool_failure
             timestamp = now()
             for ordinal, result in enumerate(tool_results, start=1):
                 activity = result.activity()
@@ -5110,6 +5585,7 @@ class WritingService:
             assistant_message_id = self._append_conversation_message(
                 connection, thread_id, "assistant", "discussion", reply,
                 provider=provider.descriptor(), agent_run_id=run_id, usage=usage,
+                proposal_id=scene_edit_proposal_id,
             )
             connection.execute(
                 "UPDATE agent_runs SET status=?,policy_json=?,failure_json=?,finished_at=? WHERE id=?",
@@ -5127,13 +5603,15 @@ class WritingService:
                     timestamp, run_id,
                 ),
             )
+            if scene_edit_proposal_id:
+                connection.execute("UPDATE agent_runs SET proposal_id=? WHERE id=?", (scene_edit_proposal_id, run_id))
 
         if provider_failure:
             raise DomainError(
                 "agent_failed", "写作 Agent 未能完成本轮对话，失败记录已保存。", status=502,
                 details={"agent_run_id": run_id, "failure": provider_failure},
             )
-        if failed_tools:
+        if failed_tools or (tool_failure and tool_failure.get("code") in {"duplicate_scene_edit", "conflicting_scene_edits", "scene_edit_commit_failed"}):
             raise DomainError(
                 "agent_tool_failed", "写作 Agent 的工具执行失败，失败记录已保存。", status=502,
                 details={"agent_run_id": run_id, "failure": tool_failure},
@@ -5156,9 +5634,40 @@ class WritingService:
                 "agent_run_id": run_id, "simulation": provider.is_simulation,
                 "auto_proposal_id": proposed["proposal_id"], "work": proposed["work"],
             }
+        if auto_organize_requested:
+            current = self.get_work(work_id)
+            current_thread = next(item for item in current["conversation_threads"] if item["id"] == thread_id)
+            try:
+                proposed = self.organize_conversation_proposal(
+                    work_id, thread_id,
+                    {
+                        "expected_version": current["version"],
+                        "expected_thread_version": current_thread["version"],
+                        "task_scope": task_contract.get("task_scope") or {},
+                        "preview_message_id": assistant_message_id,
+                        "agent_run_id": run_id,
+                    },
+                )
+            except DomainError as exc:
+                # The assistant reply is already durable.  A race with another
+                # pending decision must not turn a useful conversation turn into
+                # a failed request; the user can keep discussing or decide the
+                # existing candidate.
+                return {
+                    "thread_id": thread_id, "assistant_message_id": assistant_message_id,
+                    "agent_run_id": run_id, "simulation": provider.is_simulation,
+                    "organization_error": {"code": exc.code, "message": exc.message},
+                    "work": self.get_work(work_id),
+                }
+            return {
+                "thread_id": thread_id, "assistant_message_id": assistant_message_id,
+                "agent_run_id": run_id, "simulation": provider.is_simulation,
+                "auto_proposal_id": proposed["proposal_id"], "work": proposed["work"],
+            }
         return {
             "thread_id": thread_id, "assistant_message_id": assistant_message_id,
             "agent_run_id": run_id, "simulation": provider.is_simulation,
+            **({"auto_proposal_id": scene_edit_proposal_id} if scene_edit_proposal_id else {}),
             "work": self.get_work(work_id),
         }
 
@@ -5167,7 +5676,10 @@ class WritingService:
         """Turn one persisted scene discussion into a reviewable scene Proposal."""
         expected_version = int(payload.get("expected_version", -1))
         expected_thread_version = int(payload.get("expected_thread_version", -1))
-        with self.repo.connect() as connection:
+        direct_instruction = str(payload.get("instruction") or "").strip()
+        if len(direct_instruction) > 20000:
+            raise DomainError("validation_error", "写作要求过长，请缩短后再试。", details={"field": "instruction"})
+        with self.repo.transaction() as connection:
             self._check_work_version(connection, work_id, expected_version)
             thread = self._check_thread_version(
                 connection, work_id, thread_id, expected_thread_version
@@ -5187,13 +5699,23 @@ class WritingService:
             scene_context = self._scene_conversation_context(
                 connection, work_id, task_contract
             )
+            if direct_instruction:
+                self._append_conversation_message(
+                    connection, thread_id, "user", "text",
+                    {"text": direct_instruction},
+                )
+                connection.execute(
+                    "UPDATE conversation_threads SET version=version+1,updated_at=? WHERE id=?",
+                    (now(), thread_id),
+                )
+                expected_thread_version += 1
             history = recent_conversation_history(connection, thread_id)
             conversation_summary = self._conversation_summary(connection, thread_id)
 
         user_messages = [
             {
                 "message_id": item["id"],
-                "text": " ".join(str(item.get("text") or "").split())[:2000],
+                "text": str(item.get("text") or "").strip()[:20000],
             }
             for item in history
             if item.get("role") == "user" and str(item.get("text") or "").strip()
@@ -5224,6 +5746,9 @@ class WritingService:
             "discussion_constraints": discussion_constraints,
             "scene_conversation_context": scene_context,
         }
+        for runtime_key in ("_run_started_callback", "_provider_instance", "_expected_provider"):
+            if runtime_key in payload:
+                agent_payload[runtime_key] = payload[runtime_key]
         if task_contract["id"] == "scene.draft.rewrite":
             if "selection" in payload:
                 agent_payload["selection"] = payload.get("selection")
@@ -5265,7 +5790,7 @@ class WritingService:
                 "notice",
                 {
                     "schema_version": "scene-conversation-proposal-link/1.0",
-                    "text": "已根据本场最近讨论生成正文 Proposal，正式正文尚未改变，等待用户审查。",
+                    "text": "改写已准备好，查看修改对比后应用。" if task_contract["id"] == "scene.draft.rewrite" else "正文已写好，查看后加入本场。",
                     "task_contract": task_contract,
                     "discussion_constraints": discussion_constraints,
                     "proposal": {
@@ -5321,6 +5846,9 @@ class WritingService:
             history=history,
             allowed_actions=frozenset((policy or {}).get("allowed_actions") or {"read", "discuss"}),
             policy_status=str((policy or {}).get("status") or "active"),
+            task_contract_id=str(task_contract.get("id") or ""),
+            task_contract=task_contract,
+            text_selection=task_contract.get("task_scope", {}).get("selection"),
         )
         results = []
         activities = []
@@ -5350,6 +5878,11 @@ class WritingService:
                 # cannot claim that a persisted document was dropped.
                 arguments = {"count": int(attachment_count)}
             result = self.agent_tools.execute(context, name, arguments)
+            if result.status == "succeeded" and result.tool == "organize_current_plan":
+                # The tool only signals the write boundary.  The actual
+                # proposal is created after the assistant message is durable.
+                reply["ready_to_organize"] = True
+                reply["ready_for_proposal"] = True
             if result.status == "succeeded" and result.tool.startswith("draft_") and not reply.get("artifact_preview"):
                 reply["artifact_preview"] = result.output
             label = str(item.get("label") or "").strip()
@@ -5375,6 +5908,101 @@ class WritingService:
         reply["tool_activity"] = activities
         reply["tool_results"] = tool_results
         return results
+
+    def _read_scene_text_window(self, connection, work_id, scene_id, arguments):
+        from .edit_prompt import text_window
+        scene = connection.execute("SELECT current_revision_id FROM scenes WHERE id=? AND work_id=?", (scene_id, work_id)).fetchone()
+        if not scene or scene["current_revision_id"] != arguments["base_revision_id"]:
+            raise ValueError("正文版本已变化，请刷新后读取。")
+        pending = connection.execute("SELECT id,base_revision_id,candidate_uri,candidate_hash FROM proposals WHERE work_id=? AND scope_id=? AND kind='scene_script' AND status='pending' ORDER BY created_at DESC LIMIT 1", (work_id, scene_id)).fetchone()
+        if pending:
+            if pending["id"] != arguments.get("replace_proposal_id") or pending["base_revision_id"] != scene["current_revision_id"]:
+                raise ValueError("待审稿版本已变化，请刷新后读取。")
+            text = self.repo.read_text(pending["candidate_uri"])
+            if sha256_text(text) != pending["candidate_hash"]:
+                raise ValueError("待审稿内容校验失败。")
+            blocks = self._scene_blocks_from_text(text, pending["id"])
+        else:
+            if arguments.get("replace_proposal_id"):
+                raise ValueError("待审稿已经处理，请刷新后读取。")
+            content = self._revision_content(connection, scene["current_revision_id"])
+            blocks = content.get("blocks") or self._scene_blocks_from_text(content.get("text", ""))
+        return {"base_revision_id": scene["current_revision_id"],
+                "replace_proposal_id": pending["id"] if pending else None,
+                **text_window(blocks, start=arguments.get("start", 1), limit=arguments.get("limit", 40), query=arguments.get("query", ""))}
+
+    def _prepare_scene_text_edit(self, connection, work_id, scene_id, arguments, *, selection=None, allow_batch=False):
+        scene = connection.execute("SELECT current_revision_id FROM scenes WHERE id=? AND work_id=?", (scene_id, work_id)).fetchone()
+        if not scene or scene["current_revision_id"] != arguments["base_revision_id"]:
+            raise ValueError("正文版本已变化，请读取当前正文后重试。")
+        content = self._revision_content(connection, scene["current_revision_id"])
+        blocks = content.get("blocks") or self._scene_blocks_from_text(content.get("text", ""))
+        replaced_id = arguments.get("replace_proposal_id")
+        replaced_hash = None
+        if replaced_id:
+            pending = connection.execute("SELECT base_revision_id,candidate_uri,candidate_hash FROM proposals WHERE id=? AND work_id=? AND scope_id=? AND kind='scene_script' AND status='pending'", (replaced_id, work_id, scene_id)).fetchone()
+            if not pending or pending["base_revision_id"] != scene["current_revision_id"]:
+                raise ValueError("待采用修改已变化，请重新读取。")
+            candidate_text = self.repo.read_text(pending["candidate_uri"])
+            if sha256_text(candidate_text) != pending["candidate_hash"]:
+                raise ValueError("待采用修改内容校验失败。")
+            replaced_hash = pending["candidate_hash"]
+            if arguments.get("replace_candidate_hash") and arguments["replace_candidate_hash"] != replaced_hash:
+                raise ValueError("待采用修改已变化，请重新读取。")
+            if selection:
+                raise ValueError("调整待采用修改时请引用候选段落，不能使用正式正文的选段坐标。")
+            blocks = self._scene_blocks_from_text(candidate_text, replaced_id)
+        by_id = {block["id"]: block for block in blocks}
+        edits = arguments["edits"]
+        selected = self._normalize_text_selection(selection, content.get("text") or self._scene_text_from_blocks(blocks), blocks=blocks, current_revision_id=scene["current_revision_id"]) if selection else None
+        if not edits or len(edits) > (480 if allow_batch else 40) or len({edit["block_id"] for edit in edits}) != len(edits):
+            raise ValueError("修改段落过多或重复。")
+        for edit in edits:
+            block = by_id.get(edit["block_id"])
+            if not block or not (edit.get("old_text") or edit.get("old_text_sha256")):
+                raise ValueError("修改必须引用读取到的原文或其校验值。")
+            if (("old_text" in edit and block["text"] != edit["old_text"])
+                    or ("old_text_sha256" in edit and sha256_text(block["text"]) != edit["old_text_sha256"])):
+                raise ValueError("修改引用的段落与原文不一致，请重新读取。")
+            if not edit["new_text"].strip() or "\n" in edit["new_text"] or "\r" in edit["new_text"]:
+                raise ValueError("每项修改必须是一段有效正文，不能夹带其他段落。")
+            if selected:
+                if edit["block_id"] != selected.get("block_id"):
+                    raise ValueError("只能修改作者选中的段落。")
+                prefix, suffix = block["text"][:selected["local_start"]], block["text"][selected["local_end"]:]
+                if not edit["new_text"].startswith(prefix) or (suffix and not edit["new_text"].endswith(suffix)):
+                    raise ValueError("选段之外的文字必须保留原文。")
+        changes = {edit["block_id"]: edit["new_text"].strip() for edit in edits}
+        candidate_blocks = [{**block, "text": changes.get(block["id"], block["text"])} for block in blocks]
+        candidate = self._scene_text_from_blocks(candidate_blocks)
+        if candidate == self._scene_text_from_blocks(blocks):
+            raise ValueError("修改内容与原文相同。")
+        return {"kind": "scene_text_edit", "status": "prepared", "scene_id": scene_id,
+                "base_revision_id": scene["current_revision_id"], "candidate": candidate,
+                "base_text": content.get("text") or self._scene_text_from_blocks(blocks),
+                "reason": arguments["reason"], "edits": edits, "selection": selected,
+                "replace_proposal_id": replaced_id, "replace_candidate_hash": replaced_hash}
+
+    def _commit_scene_text_edit(self, connection, work_id, prepared, provider_runtime):
+        # Recheck the pinned manuscript at the final authorized result commit.
+        verified = self._prepare_scene_text_edit(connection, work_id, prepared["scene_id"], prepared, selection=prepared.get("selection"), allow_batch=bool(prepared.get("batched")))
+        pending = connection.execute("SELECT id FROM proposals WHERE work_id=? AND scope_id=? AND kind='scene_script' AND status='pending'", (work_id, prepared["scene_id"])).fetchall()
+        if any(row["id"] != prepared.get("replace_proposal_id") for row in pending):
+            raise DomainError("agent_waiting_user", "本场已有待决定的修改，请先处理。", status=409)
+        proposal_id = new_id("proposal")
+        candidate_uri, candidate_hash = self.repo.atomic_write_text(f"artifacts/proposals/{proposal_id}.txt", verified["candidate"])
+        diff = list(difflib.unified_diff(verified["base_text"].splitlines(), verified["candidate"].splitlines(), fromfile="当前正文", tofile="修改后的正文", lineterm=""))
+        connection.execute(
+            "INSERT INTO proposals (id,work_id,kind,scope_type,scope_id,base_revision_id,candidate_uri,candidate_hash,diff_json,evidence_json,risk,status,provider_json,created_at,decided_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (proposal_id, work_id, "scene_script", "scene", prepared["scene_id"], prepared["base_revision_id"], candidate_uri, candidate_hash, canonical_json(diff), canonical_json([prepared["base_revision_id"]]), "medium", "pending", canonical_json(provider_runtime), now(), None),
+        )
+        if prepared.get("replace_proposal_id"):
+            timestamp = now()
+            connection.execute("UPDATE proposals SET status='superseded',decided_at=? WHERE id=? AND status='pending'", (timestamp, prepared["replace_proposal_id"]))
+            connection.execute("INSERT INTO decisions (id,work_id,kind,target_id,decision,note,created_at) VALUES (?,?,?,?,?,?,?)", (new_id("decision"), work_id, "proposal", prepared["replace_proposal_id"], "superseded", "作者继续调整，已由新修改替代。", timestamp))
+        version = connection.execute("SELECT version FROM works WHERE id=?", (work_id,)).fetchone()[0]
+        self._bump_work(connection, work_id, version)
+        return proposal_id
 
     def _finalize_agent_reply(self, task_contract: dict, reply: dict, provider=None) -> dict:
         """Attach a durable, user-facing execution trace without storing hidden chain-of-thought."""
@@ -5496,6 +6124,13 @@ class WritingService:
                 "作品讨论回复的 ready_for_proposal 必须是布尔值。",
                 status=502,
                 details={"field": "ready_for_proposal"},
+            )
+        if "ready_to_organize" in result and not isinstance(result["ready_to_organize"], bool):
+            raise DomainError(
+                "provider_output_invalid",
+                "作品讨论回复的 ready_to_organize 必须是布尔值。",
+                status=502,
+                details={"field": "ready_to_organize"},
             )
         preview = result.get("artifact_preview")
         if preview is not None:
@@ -6103,8 +6738,6 @@ class WritingService:
             title = str(payload.get("title") or preview.get("title") or "").strip()
             if requested_kind == "canon_fact":
                 title = title or "作品事实"
-            if not title or title in {"待命名角色", "待命名世界观", "世界观设定草稿"}:
-                raise DomainError("knowledge_name_required", "请先在对话中明确资料名称。", status=409)
             user_notes = [
                 str(content.get("text", "")).strip()
                 for row, content in messages
@@ -6117,6 +6750,19 @@ class WritingService:
                 ),
                 None,
             )
+            source_user_content = next(
+                (content for row, content in messages if source_user_row and row["id"] == source_user_row["id"]),
+                {},
+            )
+            card_assistance, assistance_base = resolve_card_assistance(
+                self, connection, work_id, source_user_content.get("card_assistance"),
+            )
+            if card_assistance and card_assistance["kind"] != requested_kind:
+                raise DomainError("card_assistance_kind_mismatch", "本轮助手只能整理所选卡片类型的候选。", status=409)
+            if card_assistance:
+                title = assistance_base["name"]
+            elif not title or title in {"待命名角色", "待命名世界观", "世界观设定草稿"}:
+                raise DomainError("knowledge_name_required", "请先在对话中明确资料名称。", status=409)
             source_message_ids = [
                 item for item in (
                     source_user_row["id"] if source_user_row else None,
@@ -6178,7 +6824,30 @@ class WritingService:
             base_revision_id = None
             operation = "create"
             base_content = {}
-            if requested_kind == "character_card":
+            if card_assistance:
+                operation = "update"
+                scope_id = card_assistance["target_id"]
+                base_revision_id = card_assistance["base_revision_id"]
+                base_content = assistance_base
+                title = assistance_base["name"]
+                patch = {key: preview_content[key] for key in card_assistance["allowed_fields"] if key in preview_content}
+                content = {**assistance_base, **patch}
+                if requested_kind == "character_card":
+                    content = self._normalize_character_card_payload(content)
+                else:
+                    content = self._normalize_world_entity(content, index=0, source_type=assistance_base["source_type"])
+                    bible = self._revision_content(connection, base_revision_id)
+                    self._normalize_world_bible_payload({
+                        **bible,
+                        "entities": [content if item["id"] == scope_id else item for item in bible.get("entities", [])],
+                    })
+                if not any(content.get(key) != assistance_base.get(key) for key in card_assistance["allowed_fields"]):
+                    raise DomainError("card_assistance_no_changes", "助手没有提供允许范围内的具体修改，请补充要求后重新整理。", status=409)
+                # A model cannot grant itself authority to change sources or identity.
+                # New evidence remains in the discussion, not official source metadata.
+                document_citations = []
+                conflicts = []
+            elif requested_kind == "character_card":
                 proposed_content = {
                     "name": title,
                     **preview_content,
@@ -6389,6 +7058,7 @@ class WritingService:
             )
             candidate = {
                 "schema_version": "conversation-knowledge-proposal/1.2",
+                **({"card_assistance": card_assistance} if card_assistance else {}),
                 "kind": requested_kind,
                 "operation": operation,
                 "scope_id": scope_id,
@@ -6436,6 +7106,7 @@ class WritingService:
                 )
             proposal_preview = {
                 **preview,
+                **({"card_assistance": card_assistance, "content": content} if card_assistance else {}),
                 "title": title,
                 "status": "proposal",
                 "operation": operation,
@@ -6608,6 +7279,201 @@ class WritingService:
             pending_digests.add(suggestion_digest)
         return created_ids
 
+    def _create_background_relationship_suggestions(
+        self,
+        connection,
+        *,
+        work_id: str,
+        work_version: int,
+        scene_id: str,
+        scene_revision,
+        agent_run_id: str,
+        suggestions: list[dict],
+        provider_descriptor: dict,
+    ) -> list[str]:
+        """Group evidence-backed relationship changes into one review per source card."""
+
+        if not suggestions:
+            return []
+        cards = {}
+        for row in connection.execute(
+            """SELECT scope_id,current_revision_id FROM artifacts
+               WHERE work_id=? AND kind='character_card' AND current_revision_id IS NOT NULL""",
+            (work_id,),
+        ).fetchall():
+            content = self._revision_content(connection, row["current_revision_id"])
+            if content.get("status", "active") != "archived":
+                cards[row["scope_id"]] = (row["current_revision_id"], content)
+        pending_sources = set()
+        seen_digests = set()
+        for row in connection.execute(
+            "SELECT scope_id,status,evidence_json FROM proposals WHERE work_id=? AND kind='character_card'",
+            (work_id,),
+        ).fetchall():
+            try:
+                evidence = json.loads(row["evidence_json"] or "{}")
+            except json.JSONDecodeError:
+                continue
+            if evidence.get("background_suggestion") and evidence.get("suggestion_type") == "relationship":
+                if row["status"] == "pending":
+                    pending_sources.add(row["scope_id"])
+                if evidence.get("suggestion_digest"):
+                    seen_digests.add(evidence["suggestion_digest"])
+        grouped: dict[str, list[dict]] = {}
+        for suggestion in suggestions:
+            from_id = suggestion["from_character_id"]
+            if from_id in cards and suggestion["to_character_id"] in cards:
+                grouped.setdefault(from_id, []).append(suggestion)
+
+        created_ids = []
+        for from_id, items in grouped.items():
+            if from_id in pending_sources:
+                continue
+            base_revision_id, current = cards[from_id]
+            relationships = list(current.get("relationships") or [])
+            changed_ids = []
+            change_markers = []
+            source_block_ids = []
+            for item in items:
+                target_id = item["to_character_id"]
+                target_name = cards[target_id][1]["name"]
+                index = next(
+                    (
+                        position for position, relation in enumerate(relationships)
+                        if isinstance(relation, dict) and (
+                            relation.get("target_character_id") == target_id
+                            or (
+                                not relation.get("target_character_id")
+                                and relation.get("target") == target_name
+                            )
+                        )
+                    ),
+                    None,
+                )
+                previous = relationships[index] if index is not None else None
+                if (
+                    previous
+                    and previous.get("kind") == item["relation_kind"]
+                    and previous.get("summary") == item["summary"]
+                ):
+                    continue
+                relation_id = str(previous.get("id") or "") if previous else ""
+                relation_id = relation_id or new_id("relationship")
+                relation = {
+                    "id": relation_id,
+                    "target_character_id": target_id,
+                    "target": target_name,
+                    "kind": item["relation_kind"],
+                    "summary": item["summary"],
+                    "status": "open",
+                }
+                if index is None:
+                    relationships.append(relation)
+                else:
+                    relationships[index] = relation
+                changed_ids.append(relation_id)
+                change_markers.append({
+                    "to_character_id": target_id,
+                    "kind": item["relation_kind"],
+                    "summary": item["summary"],
+                })
+                source_block_ids.extend(item["source_block_ids"])
+            if not changed_ids:
+                continue
+            suggestion_digest = "sha256:" + sha256_text(canonical_json({
+                "scene_revision_id": scene_revision["id"],
+                "base_revision_id": base_revision_id,
+                "from_character_id": from_id,
+                "changes": sorted(change_markers, key=lambda item: (
+                    item["to_character_id"], item["kind"], item["summary"]
+                )),
+            }))
+            if suggestion_digest in seen_digests:
+                continue
+            source_block_ids = list(dict.fromkeys(source_block_ids))
+            content = {**current, "relationships": relationships}
+            field_changes = self._knowledge_field_changes(current, content)
+            conflicts = self._knowledge_conflicts(connection, work_id, "character_card", content)
+            affected_refs = self._knowledge_affected_refs(
+                connection, work_id, "character_card", from_id, content
+            )
+            impact_preview = build_knowledge_impact_preview(
+                work_id=work_id,
+                work_version=work_version,
+                kind="character_card",
+                operation="update",
+                scope_id=from_id,
+                title=f"{current['name']}的人物关系",
+                base_revision_id=base_revision_id,
+                field_changes=field_changes,
+                conflicts=conflicts,
+                affected_refs=affected_refs,
+            )
+            candidate = {
+                "schema_version": "conversation-knowledge-proposal/1.2",
+                "kind": "character_card",
+                "operation": "update",
+                "scope_id": from_id,
+                "base_revision_id": base_revision_id,
+                "content": content,
+                "source_thread_id": None,
+                "source_agent_run_id": agent_run_id,
+                "source_preview_message_id": None,
+                "source_message_ids": [],
+                "conversation_summary_digest": None,
+                "document_citations": [],
+                "field_changes": field_changes,
+                "conflicts": conflicts,
+                "impact_preview": impact_preview,
+                "maintenance_source": "scene_relationship_extract",
+            }
+            proposal_id = new_id("proposal")
+            candidate_uri, candidate_hash = self.repo.atomic_write_text(
+                f"artifacts/proposals/{proposal_id}.json",
+                json.dumps(candidate, ensure_ascii=False, indent=2) + "\n",
+            )
+            connection.execute(
+                """INSERT INTO proposals
+                   (id,work_id,kind,scope_type,scope_id,base_revision_id,candidate_uri,candidate_hash,
+                    diff_json,evidence_json,risk,status,provider_json,created_at,decided_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    proposal_id, work_id, "character_card", "character", from_id,
+                    base_revision_id, candidate_uri, candidate_hash,
+                    canonical_json({
+                        "format": "knowledge-fields/1.2",
+                        "operation": "update",
+                        "changes": field_changes,
+                    }),
+                    canonical_json({
+                        "background_suggestion": True,
+                        "suggestion_type": "relationship",
+                        "suggestion_digest": suggestion_digest,
+                        "scene_id": scene_id,
+                        "scene_revision_id": scene_revision["id"],
+                        "scene_revision_hash": scene_revision["content_hash"],
+                        "source_block_ids": source_block_ids,
+                        "relationship_ids": changed_ids,
+                    }),
+                    "medium", "pending", canonical_json(provider_descriptor), now(), None,
+                ),
+            )
+            created_ids.append(proposal_id)
+            pending_sources.add(from_id)
+            seen_digests.add(suggestion_digest)
+        return created_ids
+
+    def _create_background_knowledge_suggestions(self, connection, **kwargs) -> list[str]:
+        suggestions = kwargs.pop("suggestions")
+        facts = [item for item in suggestions if item["kind"] == "canon_fact"]
+        relationships = [item for item in suggestions if item["kind"] == "character_relationship"]
+        return [
+            *self._create_background_canon_suggestions(connection, suggestions=facts, **kwargs),
+            *self._create_background_relationship_suggestions(
+                connection, suggestions=relationships, **kwargs
+            ),
+        ]
+
     def _supersede_background_knowledge_suggestions(
         self,
         connection,
@@ -6622,7 +7488,7 @@ class WritingService:
         timestamp = now()
         superseded_ids = []
         rows = connection.execute(
-            "SELECT id,evidence_json FROM proposals WHERE work_id=? AND kind='canon_fact' AND status='pending'",
+            "SELECT id,evidence_json FROM proposals WHERE work_id=? AND kind IN ('canon_fact','character_card') AND status='pending'",
             (work_id,),
         ).fetchall()
         for row in rows:
@@ -6738,7 +7604,7 @@ class WritingService:
                 "task_contract": self._conversation_task_contract(connection, work_id, {"surface": "work"}),
                 "conversation_summary": conversation_summary,
             }
-        with self._provider_lock:
+        with self._planning_usage_scope(work_id, "work", work_id, "blueprint.generate", provider, {"brief": brief, "analysis_context": analysis_context}):
             blueprint = self._validate_story_blueprint(provider.generate_blueprint(brief, analysis_context))
         with self.repo.transaction() as connection:
             version = self._check_work_version(connection, work_id, expected_work)
@@ -6825,6 +7691,10 @@ class WritingService:
     def _record_current_story_structure(
         self, connection, work_id: str, *, workflow: str, created_by: str = "user"
     ) -> str:
+        artifact = self._artifact(connection, work_id, "story_structure", "work", work_id)
+        prior = self._revision_content(connection, artifact["current_revision_id"]) if artifact.get("current_revision_id") else {}
+        prior_volumes = {item["id"]: item for item in prior.get("volumes", [])}
+        prior_chapters = {chapter["id"]: chapter for volume in prior.get("volumes", []) for chapter in volume.get("chapters", [])}
         snapshot = self._structure_snapshot(connection, work_id)["projection"]
         chapters_by_volume: dict[str, list[dict]] = {}
         scenes_by_chapter: dict[str, list[dict]] = {}
@@ -6844,6 +7714,7 @@ class WritingService:
                 {
                     "id": chapter["id"],
                     "title": chapter["title"],
+                    "goal": prior_chapters.get(chapter["id"], {}).get("goal", ""),
                     "status": chapter["status"],
                     "stable_order_key": chapter["stable_order_key"],
                     "scenes": scenes_by_chapter.get(chapter["id"], []),
@@ -6853,19 +7724,19 @@ class WritingService:
             {
                 "id": volume["id"],
                 "title": volume["title"],
+                "goal": prior_volumes.get(volume["id"], {}).get("goal", ""),
                 "status": volume["status"],
                 "stable_order_key": volume["stable_order_key"],
                 "chapters": chapters_by_volume.get(volume["id"], []),
             }
             for volume in snapshot["volumes"]
         ]
-        artifact = self._artifact(connection, work_id, "story_structure", "work", work_id)
         return self._add_revision(
             connection,
             artifact,
             {
                 "schema_version": "story-structure/1.0",
-                "summary": "当前作品的卷、章与场景结构。",
+                "summary": prior.get("summary") or "当前作品的卷、章与场景结构。",
                 "volumes": volumes,
                 "status": "accepted",
             },
@@ -7322,7 +8193,7 @@ class WritingService:
                 ),
                 "conversation_summary": self._conversation_summary(connection, thread_id),
             }
-        with self._provider_lock:
+        with self._planning_usage_scope(work_id, "chapter", chapter_id, "chapter.plan", provider, {"messages": messages, "chapter_context": chapter_context}):
             candidate_plan = provider.generate_chapter_plan(messages, chapter_context)
             candidate_plan = self._validate_chapter_plan(candidate_plan)
         with self.repo.transaction() as connection:
@@ -7445,6 +8316,8 @@ class WritingService:
             )
         mode_aliases = {
             "主线与战斗": "main_battle",
+            "主线与任务调查": "main_battle",
+            "主线与任务调查模式": "main_battle",
             "长篇喜剧": "long_comedy",
             "羁绊短场景": "bond_short",
             "小说化阅读": "text_reading",
@@ -7865,6 +8738,46 @@ class WritingService:
             })
         return cards
 
+    def _scene_knowledge_characters(self, connection, work_id: str, manuscript: dict) -> list[dict]:
+        """Send only named scene participants to the shared extraction call."""
+        blocks = manuscript.get("blocks") if isinstance(manuscript.get("blocks"), list) else []
+        scene_text = str(manuscript.get("text") or "") + "\n" + "\n".join(
+            str(block.get("text") or "") for block in blocks if isinstance(block, dict)
+        )
+        scene_text_folded = scene_text.casefold()
+        speakers = {
+            self._knowledge_key(block.get("speaker"))
+            for block in blocks if isinstance(block, dict) and block.get("speaker")
+        }
+        cards = self._analysis_character_cards(connection, work_id)
+        names_by_card = {}
+        name_owners: dict[str, set[str]] = {}
+        for card in cards:
+            names = list(dict.fromkeys(
+                str(name).strip() for name in
+                [card["name"], card["canonical_name"], *(card.get("aliases") or [])]
+                if str(name).strip()
+            ))
+            names_by_card[card["id"]] = names
+            for name in names:
+                name_owners.setdefault(self._knowledge_key(name), set()).add(card["id"])
+        characters = []
+        for card in cards:
+            names = names_by_card[card["id"]]
+            if not any(
+                name_owners[self._knowledge_key(name)] == {card["id"]}
+                and (
+                    self._knowledge_key(name) in speakers
+                    or (len(name) > 1 and name.casefold() in scene_text_folded)
+                )
+                for name in names
+            ):
+                continue
+            characters.append({"id": card["id"], "name": card["name"], "aliases": names[1:4]})
+            if len(characters) == 24:
+                break
+        return characters
+
     def _analysis_world_summary(self, connection, work_id: str) -> dict:
         artifact = connection.execute(
             "SELECT * FROM artifacts WHERE work_id=? AND kind='world_bible'", (work_id,)
@@ -7947,7 +8860,7 @@ class WritingService:
                 "world": self._analysis_world_summary(connection, work_id),
                 "task_contract": self._conversation_task_contract(connection, work_id, {"surface": "work"}),
             }
-        with self._provider_lock:
+        with self._planning_usage_scope(work_id, "work", work_id, "blueprint.generate", provider, {"brief": brief, "analysis_context": analysis_context}):
             blueprint = self._validate_story_blueprint(provider.generate_blueprint(brief, analysis_context))
         with self.repo.transaction() as connection:
             version = self._check_work_version(connection, work_id, expected)
@@ -8181,7 +9094,7 @@ class WritingService:
         }
         for key in (
             "validation_report", "import_id", "import_filename", "import_source_label",
-            "raw_import_uri", "cleaned_import_uri", "raw_import_hash", "cleaned_import_hash",
+            "raw_import_uri", "cleaned_import_uri", "raw_import_hash", "cleaned_import_hash", "reuse_origin",
         ):
             if payload.get(key) is not None:
                 card[key] = payload[key]
@@ -8309,6 +9222,10 @@ class WritingService:
             "source_hash": parsed.source_hash,
             "work": self.get_work(work_id),
         }
+
+    @workspace_operation
+    def reuse_character_card(self, work_id: str, payload: dict) -> dict:
+        return reuse_character_card(self, work_id, payload)
 
     @workspace_operation
     def archive_character_card(self, work_id: str, card_id: str, payload: dict):
@@ -8536,6 +9453,7 @@ class WritingService:
         )
         bible = {
             "title": title,
+            "overview": AuthoringWorkspace._text(payload.get("overview", ""), "世界总说明"),
             "source_type": effective_source_type,
             "entities": entities,
             "rules": rules,
@@ -8549,6 +9467,8 @@ class WritingService:
     def save_world_bible(self, work_id: str, payload: dict):
         """Save world rules and timeline as a distinct versioned artifact, never as chat text."""
         expected = int(payload.get("expected_version", -1))
+        if "overview" not in payload:
+            payload = {**payload, "overview": self._current_world_bible(work_id).get("overview", "")}
         bible = self._normalize_world_bible_payload(payload)
         effective_source_type = bible["source_type"]
         import_metadata = payload.get("import_metadata")
@@ -8778,6 +9698,19 @@ class WritingService:
 
     @staticmethod
     def _memory_maintenance_snapshot(connection, work_id: str, scenes: list[dict]) -> list[dict]:
+        chapter_decisions = {}
+        current = {row["id"]: row["current_revision_id"] for row in connection.execute(
+            "SELECT id,current_revision_id FROM scenes WHERE work_id=?", (work_id,)
+        )}
+        for review in connection.execute(
+            "SELECT id,snapshot_json,result_json FROM chapter_reviews WHERE work_id=? AND status='complete' ORDER BY updated_at DESC",
+            (work_id,),
+        ):
+            snapshot, result = json.loads(review["snapshot_json"]), json.loads(review["result_json"])
+            refs = snapshot.get("scenes", [])
+            if result.get("decision") and refs and all(current.get(ref["scene_id"]) == ref["revision_id"] for ref in refs):
+                for ref in refs:
+                    chapter_decisions.setdefault(ref["revision_id"], {"chapter_review_id": review["id"], "decision": result["decision"]})
         rows = connection.execute(
             """SELECT item.* FROM work_items AS item
                JOIN production_runs AS run ON run.id=item.run_id
@@ -8812,6 +9745,8 @@ class WritingService:
                 "decision": task.get("decision"),
                 "complete": status in {"succeeded", "skipped"},
             })
+            if revision_id in chapter_decisions:
+                result[-1].update({**chapter_decisions[revision_id], "status": "chapter_confirmed", "complete": True})
         return result
 
     def _assemble_work_review_pack(self, work_id: str, workflow: str) -> dict:
@@ -8979,13 +9914,20 @@ class WritingService:
         provider=None,
     ):
         provider = provider if provider is not None else self.provider
+        review_profile = str(payload.get("review_profile") or "standard") if workflow == "release.review" else "standard"
+        if review_profile not in {"standard", "quick"}:
+            raise DomainError("invalid_review_profile", "请选择快速检查或完整检查。", status=422)
         expected = int(payload.get("expected_version", -1))
         with self.repo.connect() as connection:
             self._check_work_version(connection, work_id, expected)
         review_pack = review_pack or self._assemble_work_review_pack(work_id, workflow)
+        review_scope_id = review_pack.get("chapter_id") or work_id
+        review_scope_type = "chapter" if review_pack.get("chapter_id") else "work"
         run_id = new_id("agent")
         policy = {
             "workflow": workflow,
+            "review_profile": review_profile,
+            "chapter_id": review_pack.get("chapter_id"),
             "pack_version": PACK_VERSION,
             "write_policy": "findings_and_gate_only_formal_artifacts_read_only",
             "tool_allowlist": ["assemble_work_review_pack", "create_review_findings", "evaluate_review_gate"],
@@ -9007,7 +9949,7 @@ class WritingService:
             version = self._check_work_version(connection, work_id, expected)
             connection.execute(
                 "INSERT INTO agent_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (run_id, work_id, "work", work_id, "跨场景连续性审查" if workflow == "continuity.review" else "全篇发布审查",
+                (run_id, work_id, review_scope_type, review_scope_id, "跨场景连续性审查" if workflow == "continuity.review" else "全篇发布审查",
                  "running", canonical_json(policy), snapshot_uri, digest, None, None, timestamp, None),
             )
             connection.execute(
@@ -9022,7 +9964,7 @@ class WritingService:
             current_refs = [item["revision_id"] for item in review_pack["scenes"] if item["revision_id"]]
             connection.execute(
                 "INSERT INTO work_items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (work_item_id, production_run["id"], f"agent.{workflow}", "work", work_id, "running",
+                (work_item_id, production_run["id"], f"agent.{workflow}", review_scope_type, review_scope_id, "running",
                  canonical_json(current_refs), "[]", canonical_json({"formal_artifacts_read_only": True, "agent_run_id": run_id}),
                  1, None, timestamp, timestamp),
             )
@@ -9099,11 +10041,13 @@ class WritingService:
             self._require_agent_run_committable(connection, run_id)
             version_row = connection.execute("SELECT version FROM works WHERE id=?", (work_id,)).fetchone()
             current_rows = connection.execute(
-                """SELECT s.id,s.current_revision_id FROM scenes s JOIN chapters c ON c.id=s.chapter_id
+                """SELECT s.id,s.current_revision_id,s.chapter_id FROM scenes s JOIN chapters c ON c.id=s.chapter_id
                    LEFT JOIN volumes v ON v.id=c.volume_id WHERE s.work_id=?
                    ORDER BY COALESCE(v.stable_order_key,''),c.stable_order_key,s.stable_order_key""",
                 (work_id,),
             ).fetchall()
+            if review_scope_type == "chapter":
+                current_rows = [row for row in current_rows if row["chapter_id"] == review_scope_id]
             current_refs = []
             for row in current_rows:
                 asset_references = self._scene_asset_reference_snapshot(
@@ -9124,8 +10068,8 @@ class WritingService:
                 conflict_actual = version_row["version"] if version_row else -1
             else:
                 prior_rows = connection.execute(
-                    "SELECT id,agent_run_id FROM review_findings WHERE work_id=? AND scope_type='work' AND status='open'",
-                    (work_id,),
+                    "SELECT id,agent_run_id FROM review_findings WHERE work_id=? AND scope_type=? AND scope_id=? AND status='open'",
+                    (work_id, review_scope_type, review_scope_id),
                 ).fetchall()
                 for prior in prior_rows:
                     prior_run = connection.execute("SELECT policy_json FROM agent_runs WHERE id=?", (prior["agent_run_id"],)).fetchone()
@@ -9140,7 +10084,7 @@ class WritingService:
                            (id,work_id,scene_id,revision_id,scope_type,scope_id,revision_refs_json,agent_run_id,
                             kind,severity,status,message,evidence_json,created_at,resolved_at)
                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (finding_id, work_id, anchor["scene_id"], anchor["revision_id"], "work", work_id,
+                        (finding_id, work_id, anchor["scene_id"], anchor["revision_id"], review_scope_type, review_scope_id,
                          canonical_json(item["revision_refs"]), run_id, item["kind"], item["severity"], "open",
                          item["message"], canonical_json(evidence), now(), None),
                     )
@@ -9166,13 +10110,14 @@ class WritingService:
                     if not item.get("complete")
                 ]
                 deterministic_ready = bool(review_pack["scenes"]) and not missing
-                if workflow == "release.review":
+                if workflow == "release.review" and review_profile == "standard":
                     deterministic_ready = deterministic_ready and not unreviewed and not incomplete_memory
                 gate_status = "passed" if deterministic_ready and not open_blockers and not provider_blockers else "blocked"
                 gate_id = new_id("gate")
                 gate_snapshot = {
                     "schema_version": "work-review-gate/1.0",
                     "workflow": workflow,
+                    "review_profile": review_profile,
                     "checked_scene_count": len(review_pack["scenes"]),
                     "no_scenes": not bool(review_pack["scenes"]),
                     "scene_revision_ids": all_revision_ids,
@@ -9202,7 +10147,7 @@ class WritingService:
                 }
                 connection.execute(
                     "INSERT INTO gates VALUES (?,?,?,?,?,?,?,?)",
-                    (gate_id, work_id, workflow, "work", work_id, gate_status, canonical_json(gate_snapshot), now()),
+                    (gate_id, work_id, workflow, review_scope_type, review_scope_id, gate_status, canonical_json(gate_snapshot), now()),
                 )
                 connection.execute(
                     "INSERT INTO agent_tool_calls VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -9298,9 +10243,9 @@ class WritingService:
 
     @workspace_operation
     def review_scene(self, work_id: str, scene_id: str, payload: dict):
-        provider = self.provider
+        provider, _ = self._provider_for_request(payload)
         expected = int(payload.get("expected_version", -1))
-        context = self.assemble_context(work_id, scene_id)
+        context = self.assemble_context(work_id, scene_id, allow_unplanned=True)
         if not provider.is_simulation and context["readiness"]["real_ba_writing"] != "ready_for_provider":
             raise DomainError(
                 "review_blocked",
@@ -9582,17 +10527,6 @@ class WritingService:
         title = str(payload.get("title", "")).strip() or "第一章"
         with self.repo.transaction() as connection:
             version = self._check_work_version(connection, work_id, expected)
-            blueprint_artifact = connection.execute(
-                "SELECT * FROM artifacts WHERE work_id=? AND kind='story_blueprint'", (work_id,)
-            ).fetchone()
-            if not blueprint_artifact or not blueprint_artifact["current_revision_id"]:
-                raise DomainError("blueprint_required", "请先分析并确认故事方向。", status=409)
-            blueprint_revision = connection.execute(
-                "SELECT * FROM revisions WHERE id=?", (blueprint_artifact["current_revision_id"],)
-            ).fetchone()
-            blueprint = json.loads(self.repo.read_text(blueprint_revision["content_uri"]))
-            if blueprint.get("status", "accepted") != "accepted":
-                raise DomainError("blueprint_unconfirmed", "请先确认故事方向候选，再建立章节。", status=409)
             requested_volume_id = str(payload.get("volume_id", "")).strip()
             if requested_volume_id:
                 volume = connection.execute(
@@ -9676,19 +10610,6 @@ class WritingService:
         title = str(payload.get("title", "")).strip() or "未命名卷"
         with self.repo.transaction() as connection:
             version = self._check_work_version(connection, work_id, expected)
-            blueprint_artifact = connection.execute(
-                "SELECT current_revision_id FROM artifacts WHERE work_id=? AND kind='story_blueprint'",
-                (work_id,),
-            ).fetchone()
-            if not blueprint_artifact or not blueprint_artifact["current_revision_id"]:
-                raise DomainError("blueprint_required", "请先分析并确认故事方向。", status=409)
-            blueprint_revision = connection.execute(
-                "SELECT content_uri FROM revisions WHERE id=?",
-                (blueprint_artifact["current_revision_id"],),
-            ).fetchone()
-            blueprint = json.loads(self.repo.read_text(blueprint_revision["content_uri"]))
-            if blueprint.get("status", "accepted") != "accepted":
-                raise DomainError("blueprint_unconfirmed", "请先确认故事方向候选，再建立卷。", status=409)
             count = connection.execute(
                 "SELECT COUNT(*) FROM volumes WHERE work_id=?", (work_id,)
             ).fetchone()[0]
@@ -10617,7 +11538,8 @@ class WritingService:
             if len(normalized_turns) != len(turns) or any(not turn["speaker"] or not turn["line"] for turn in normalized_turns):
                 continue
             speakers = {turn["speaker"] for turn in normalized_turns}
-            if not speakers.intersection(active_names + (["老师", "Sensei"] if has_sensei else [])):
+            allowed_speakers = set(active_names + (["老师", "Sensei"] if has_sensei else []))
+            if not speakers or not speakers.issubset(allowed_speakers):
                 continue
             voice_sequences.append({
                 "source_id": str(item["source_id"]).strip(),
@@ -10629,6 +11551,14 @@ class WritingService:
         voice_sequences = voice_sequences[:3]
 
         relations = profile.get("relations") if isinstance(profile.get("relations"), dict) else {}
+        if relations:
+            relations = {
+                **({"sensei": relations["sensei"]} if has_sensei and "sensei" in relations else {}),
+                "peers": {
+                    name: value for name, value in (relations.get("peers") or {}).items()
+                    if name in active_names
+                } if isinstance(relations.get("peers"), dict) else {},
+            }
         if not relations:
             relations = {
                 "peers": {
@@ -10642,9 +11572,15 @@ class WritingService:
                 }
             }
         address_patterns = speech.get("address_patterns") if isinstance(speech.get("address_patterns"), dict) else {}
-        ooc_constraints = profile.get("ooc_constraints") or profile.get("ooc") or content.get("ooc_constraints", [])
+        address_patterns = {
+            name: value for name, value in address_patterns.items()
+            if name in active_names or (has_sensei and name.casefold() in {"老师", "sensei"})
+        }
+        ooc_constraints = content.get("ooc_constraints") or profile.get("ooc_constraints") or profile.get("ooc") or []
         if isinstance(ooc_constraints, str):
             ooc_constraints = [ooc_constraints]
+        if isinstance(ooc_constraints, dict):
+            ooc_constraints = [text for value in ooc_constraints.values() for text in (value if isinstance(value, list) else [value])]
 
         runtime = {
             "schema_version": "runtime-character-card/1.1",
@@ -10669,7 +11605,11 @@ class WritingService:
                 "voice_examples": voice_examples,
                 "voice_sequences": voice_sequences,
             },
-            "special_mechanisms": profile.get("special_mechanisms", {}),
+            "special_mechanisms": {
+                key: value for key, value in (profile.get("special_mechanisms") or {}).items()
+                if str(key).casefold() in scene_text
+                or key in scene_contract.get("special_mechanism_keys", [])
+            } if isinstance(profile.get("special_mechanisms"), dict) else {},
             "source_refs": content.get("source_refs", []),
             "trust_status": content.get("trust_status", "open"),
         }
@@ -10712,7 +11652,7 @@ class WritingService:
         }
 
     @workspace_operation
-    def assemble_context(self, work_id: str, scene_id: str):
+    def assemble_context(self, work_id: str, scene_id: str, *, allow_unplanned: bool = False):
         with self.repo.connect() as connection:
             scene = connection.execute("SELECT * FROM scenes WHERE id=? AND work_id=?", (scene_id, work_id)).fetchone()
             if not scene:
@@ -10720,6 +11660,10 @@ class WritingService:
             scene_contract = json.loads(scene["contract_json"])
             scene_asset_references = self._scene_asset_references(connection, work_id, scene_id)
             scene_asset_reference_digest = sha256_text(canonical_json(scene_asset_references))
+            author_outline = self.authoring.outline_context(work_id, scene["chapter_id"])
+            # A deliberately saved author outline is a valid starting direction.
+            # Keep synthetic context ephemeral; never fabricate accepted AI artifacts.
+            allow_unplanned = allow_unplanned or any(item["revision_id"] for item in author_outline)
             selection = scene_contract.get("context_selection") or {"mode": "legacy"}
             explicit_selection = selection.get("mode") == "explicit"
             artifacts = connection.execute("SELECT * FROM artifacts WHERE work_id=? AND kind IN ('brief','story_blueprint','story_structure','work_canon','world_bible')", (work_id,)).fetchall()
@@ -10730,9 +11674,20 @@ class WritingService:
                     revision = connection.execute("SELECT * FROM revisions WHERE id=?", (artifact["current_revision_id"],)).fetchone()
                     values[artifact["kind"]] = json.loads(self.repo.read_text(revision["content_uri"]))
                     revision_refs.append(revision["id"])
+            if allow_unplanned:
+                if values.get("brief", {}).get("status", "confirmed") != "confirmed":
+                    values.pop("brief", None)
+                if values.get("story_blueprint", {}).get("status", "accepted") != "accepted":
+                    values.pop("story_blueprint", None)
+            if allow_unplanned and ("brief" not in values or "story_blueprint" not in values):
+                manuscript = self._revision_content(connection, scene["current_revision_id"]) if scene["current_revision_id"] else {}
+                speakers = list(dict.fromkeys(block.get("speaker", "") for block in manuscript.get("blocks", [])
+                                              if block.get("type") == "dialogue" and block.get("speaker")))
+                values.setdefault("brief", {"status": "unplanned", "mode": scene_contract.get("writing_mode"), "characters": speakers})
+                values.setdefault("story_blueprint", {"status": "unplanned", "narrator_only": not speakers})
             if "brief" not in values or "story_blueprint" not in values:
                 raise DomainError("context_incomplete", "请先保存写作想法并建立故事方向。", status=409)
-            if values["brief"].get("status", "confirmed") != "confirmed" or values["story_blueprint"].get("status", "accepted") != "accepted":
+            if not allow_unplanned and (values["brief"].get("status", "confirmed") != "confirmed" or values["story_blueprint"].get("status", "accepted") != "accepted"):
                 raise DomainError("context_incomplete", "请先确认故事方向候选，再装配场景上下文。", status=409)
             scene_mode = scene_contract.get("writing_mode") or values["brief"].get("mode")
             if scene_mode not in MODE_SOURCES:
@@ -10917,8 +11872,10 @@ class WritingService:
                         "truncated": excerpt["truncated"],
                     }
                     revision_refs.append(previous_revision["id"])
+            revision_refs.extend(item["revision_id"] for item in author_outline if item["revision_id"])
             context = {
                 "scene_id": scene_id,
+                "author_outline": author_outline,
                 "scene_contract": scene_contract,
                 "scene_asset_references": scene_asset_references,
                 "scene_asset_reference_digest": scene_asset_reference_digest,
@@ -10952,6 +11909,7 @@ class WritingService:
                         runtime_character_cards=runtime_cards,
                         missing_runtime_character_cards=missing_cards,
                         explicit_character_selection=explicit_selection,
+                        narrator_only=bool(values["story_blueprint"].get("narrator_only")),
                     ),
                     "unverified_character_cards": {
                         key: unverified_cards[key]
@@ -10963,6 +11921,7 @@ class WritingService:
             }
             scene_writing_pack = {
                 "schema_version": "scene-writing-pack/1.0",
+                "author_outline": author_outline,
                 "workflow": "scene.draft.generate",
                 "scene_id": scene_id,
                 "mode_key": scene_mode,
@@ -11915,7 +12874,7 @@ class WritingService:
 
     @workspace_operation
     def sweep_chapter_memory(self, work_id: str, chapter_id: str, payload: dict):
-        provider = self.provider
+        provider, _ = self._provider_for_request(payload)
         return self._run_chapter_memory_sweep(
             work_id, chapter_id, payload, provider=provider
         )
@@ -12196,6 +13155,7 @@ class WritingService:
                     "contract": json.loads(scene["contract_json"]),
                 },
                 "manuscript": manuscript,
+                "known_characters": self._scene_knowledge_characters(connection, work_id, manuscript),
                 "write_boundary": "background_proposal_only",
             }
             snapshot_text = json.dumps(discovery_input, ensure_ascii=False, indent=2) + "\n"
@@ -12243,6 +13203,7 @@ class WritingService:
                 raw_bundle,
                 scene_id=scene_id,
                 scene_block_ids=scene_block_ids,
+                known_character_ids={item["id"] for item in discovery_input["known_characters"]},
             )
         except Exception as exc:
             code = exc.code if isinstance(exc, DomainError) else "writing_provider_failed"
@@ -12293,7 +13254,7 @@ class WritingService:
                 )
                 suggestion_ids = []
             else:
-                suggestion_ids = self._create_background_canon_suggestions(
+                suggestion_ids = self._create_background_knowledge_suggestions(
                     connection,
                     work_id=work_id,
                     work_version=version,
@@ -12394,6 +13355,7 @@ class WritingService:
                     "contract": json.loads(scene["contract_json"]),
                 },
                 "manuscript": manuscript,
+                "known_characters": self._scene_knowledge_characters(connection, work_id, manuscript),
                 "existing_memories": [
                     {
                         "memory_id": item["id"],
@@ -12492,6 +13454,7 @@ class WritingService:
                 raw_bundle,
                 scene_id=scene_id,
                 scene_block_ids=scene_block_ids,
+                known_character_ids={item["id"] for item in memory_context["known_characters"]},
             )
         except Exception as exc:
             code = exc.code if isinstance(exc, DomainError) else "writing_provider_failed"
@@ -12588,7 +13551,7 @@ class WritingService:
                     "INSERT INTO agent_tool_calls VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (new_id("tool"), agent_run_id, 3, "create_memory_bundle_proposal", "succeeded", snapshot_digest, proposal_id, None, now(), now()),
                 )
-                background_suggestion_ids = self._create_background_canon_suggestions(
+                background_suggestion_ids = self._create_background_knowledge_suggestions(
                     connection,
                     work_id=work_id,
                     work_version=expected,
@@ -13233,6 +14196,17 @@ class WritingService:
                 if partial_accept:
                     existing = self._revision_content(connection, artifact.get("current_revision_id"))
                     accepted_content = {**existing, **{key: candidate["content"].get(key) for key in applied_fields}}
+                if candidate.get("maintenance_source") == "scene_relationship_extract":
+                    evidence = json.loads(proposal["evidence_json"] or "{}")
+                    approved_ids = set(evidence.get("relationship_ids") or [])
+                    accepted_content = {
+                        **accepted_content,
+                        "relationships": [
+                            {**item, "status": "confirmed"}
+                            if item.get("id") in approved_ids else item
+                            for item in accepted_content.get("relationships", [])
+                        ],
+                    }
                 accepted_content = self._normalize_character_card_payload(accepted_content)
                 revision_id = self._add_revision(
                     connection, artifact, accepted_content, "user",
@@ -13264,7 +14238,8 @@ class WritingService:
                 else:
                     entities.append(candidate["content"])
                 bible = {**bible, "entities": entities}
-                bible["source_type"] = self._merge_world_source_type([bible.get("source_type", "custom"), "custom"])
+                if not candidate.get("card_assistance"):
+                    bible["source_type"] = self._merge_world_source_type([bible.get("source_type", "custom"), "custom"])
                 bible = self._normalize_world_bible_payload(bible)
                 revision_id = self._add_revision(
                     connection, artifact, bible, "user",
@@ -13606,77 +14581,81 @@ class WritingService:
         expected = int(payload.get("expected_version", -1))
         expected_base = payload.get("expected_base_revision_id") or None
         blocks = self._normalize_scene_blocks(payload.get("blocks"))
-        text = self._scene_text_from_blocks(blocks)
         with self.repo.transaction() as connection:
             version = self._check_work_version(connection, work_id, expected)
-            scene = connection.execute(
-                "SELECT * FROM scenes WHERE id=? AND work_id=?", (scene_id, work_id)
-            ).fetchone()
-            if not scene:
-                raise NotFound("scene", scene_id)
-            if scene["current_revision_id"] != expected_base:
-                raise DomainError(
-                    "manuscript_conflict",
-                    "正文已经产生新修订，请重新载入后再保存。",
-                    status=409,
-                    details={
-                        "expected_base_revision_id": expected_base,
-                        "actual_revision_id": scene["current_revision_id"],
-                    },
-                )
-            artifact = self._artifact(connection, work_id, "scene_script", "scene", scene_id)
-            if artifact.get("current_revision_id") != scene["current_revision_id"]:
-                artifact["current_revision_id"] = scene["current_revision_id"]
-            content = {"schema_version": "scene-blocks/1.0", "blocks": blocks, "text": text}
-            revision_id = self._add_revision(
-                connection,
-                artifact,
-                content,
-                "user",
-                {
-                    "workflow": "scene.manuscript.edit",
-                    "pack": PACK_VERSION,
-                    "base_revision_id": expected_base,
-                    "editor": "scene-blocks",
-                },
-                schema_version="scene-blocks/1.0",
-            )
-            timestamp = now()
-            pending = connection.execute(
-                "SELECT id FROM proposals WHERE work_id=? AND scope_type='scene' AND scope_id=? AND status='pending'",
-                (work_id, scene_id),
-            ).fetchall()
-            if pending:
-                connection.execute(
-                    "UPDATE proposals SET status='superseded', decided_at=? WHERE work_id=? AND scope_type='scene' AND scope_id=? AND status='pending'",
-                    (timestamp, work_id, scene_id),
-                )
-                for proposal in pending:
-                    connection.execute(
-                        "INSERT INTO decisions VALUES (?,?,?,?,?,?,?)",
-                        (new_id("decision"), work_id, "proposal", proposal["id"], "superseded", "用户保存了新的正文修订，旧候选不再适用。", timestamp),
-                    )
-            connection.execute(
-                "UPDATE scenes SET current_revision_id=?, status='draft', version=version+1, updated_at=? WHERE id=?",
-                (revision_id, timestamp, scene_id),
-            )
-            background_superseded = self._supersede_background_knowledge_suggestions(
-                connection,
-                work_id=work_id,
-                scene_id=scene_id,
-                current_revision_id=revision_id,
-                reason="用户保存了新的正文修订，旧的后台资料建议不再适用。",
-            )
-            self._ensure_memory_extract_work_item(
-                connection, work_id, scene_id, revision_id
+            revision_id, superseded = self._write_scene_manuscript(
+                connection, work_id, scene_id, expected_base, blocks
             )
             self._bump_work(connection, work_id, version)
         self._schedule_commit_projection(work_id, revision_id)
-        return {
-            "revision_id": revision_id,
-            "superseded_proposal_ids": [row["id"] for row in pending] + background_superseded,
-            "work": self.get_work(work_id),
-        }
+        return {"revision_id": revision_id, "superseded_proposal_ids": superseded,
+                "work": self.get_work(work_id)}
+
+    def _write_scene_manuscript(self, connection, work_id, scene_id, expected_base, blocks):
+        """Write one scene within a caller-owned transaction; schedule only after commit."""
+        text = self._scene_text_from_blocks(blocks)
+        scene = connection.execute(
+            "SELECT * FROM scenes WHERE id=? AND work_id=?", (scene_id, work_id)
+        ).fetchone()
+        if not scene:
+            raise NotFound("scene", scene_id)
+        if scene["current_revision_id"] != expected_base:
+            raise DomainError(
+                "manuscript_conflict",
+                "正文已经产生新修订，请重新载入后再保存。",
+                status=409,
+                details={
+                    "expected_base_revision_id": expected_base,
+                    "actual_revision_id": scene["current_revision_id"],
+                },
+            )
+        artifact = self._artifact(connection, work_id, "scene_script", "scene", scene_id)
+        if artifact.get("current_revision_id") != scene["current_revision_id"]:
+            artifact["current_revision_id"] = scene["current_revision_id"]
+        content = {"schema_version": "scene-blocks/1.0", "blocks": blocks, "text": text}
+        revision_id = self._add_revision(
+            connection,
+            artifact,
+            content,
+            "user",
+            {
+                "workflow": "scene.manuscript.edit",
+                "pack": PACK_VERSION,
+                "base_revision_id": expected_base,
+                "editor": "scene-blocks",
+            },
+            schema_version="scene-blocks/1.0",
+        )
+        timestamp = now()
+        pending = connection.execute(
+            "SELECT id FROM proposals WHERE work_id=? AND scope_type='scene' AND scope_id=? AND status='pending'",
+            (work_id, scene_id),
+        ).fetchall()
+        if pending:
+            connection.execute(
+                "UPDATE proposals SET status='superseded', decided_at=? WHERE work_id=? AND scope_type='scene' AND scope_id=? AND status='pending'",
+                (timestamp, work_id, scene_id),
+            )
+            for proposal in pending:
+                connection.execute(
+                    "INSERT INTO decisions VALUES (?,?,?,?,?,?,?)",
+                    (new_id("decision"), work_id, "proposal", proposal["id"], "superseded", "用户保存了新的正文修订，旧候选不再适用。", timestamp),
+                )
+        connection.execute(
+            "UPDATE scenes SET current_revision_id=?, status='draft', version=version+1, updated_at=? WHERE id=?",
+            (revision_id, timestamp, scene_id),
+        )
+        background_superseded = self._supersede_background_knowledge_suggestions(
+            connection,
+            work_id=work_id,
+            scene_id=scene_id,
+            current_revision_id=revision_id,
+            reason="用户保存了新的正文修订，旧的后台资料建议不再适用。",
+        )
+        self._ensure_memory_extract_work_item(
+            connection, work_id, scene_id, revision_id
+        )
+        return revision_id, [row["id"] for row in pending] + background_superseded
 
     def _set_memory_lifecycle(self, work_id: str, memory_id: str, payload: dict, lifecycle: str):
         expected = int(payload.get("expected_version", -1))
@@ -14306,6 +15285,62 @@ class WritingService:
             result = self.model_settings.activate(payload)
             self.provider = make_writing_provider(self.model_settings, self.ba_prompt_assembler)
         return {**result, "runtime": self.provider.descriptor()}
+
+    @workspace_operation
+    def activate_direction_model_from_writing(self, payload: dict) -> dict:
+        """Activate the saved writing profile for AA without returning its secret to the browser."""
+        expected_revision = str(payload.get("expected_config_revision") or "").strip()
+        if not expected_revision:
+            raise DomainError("model_settings_changed", "请重新保存写作模型后再启用 AA 演出助手。", status=409)
+        credentials = self.model_settings.get_credentials()
+        if not credentials.get("model"):
+            raise DomainError("model_not_configured", "请先保存并启用写作模型。", status=409)
+        actual_revision = str(credentials.get("config_revision") or "")
+        if expected_revision != actual_revision:
+            raise DomainError("model_settings_changed", "写作模型已发生变化，请重新保存并启用 AA 演出助手。", status=409)
+
+        fields = {
+            "preset_id", "provider", "base_url", "model", "api_key", "api_key_env",
+            "max_tokens", "timeout", "reasoning_mode", "reasoning_wire_protocol",
+            "wall_timeout", "annotation_max_tokens",
+        }
+        fields.update(ADVANCED_FIELDS)
+        candidate = {name: credentials[name] for name in fields if name in credentials}
+        if not candidate.get("api_key") and not candidate.get("api_key_env"):
+            if urlparse(str(candidate.get("base_url") or "")).hostname not in {"localhost", "127.0.0.1", "::1"}:
+                raise DomainError("model_secret_required", "当前写作模型没有可用于 AA 演出助手的密钥。", status=409)
+
+        upstream_url = f"{self.production_url}/api/v1/settings/direction-model:activate"
+        request = urllib.request.Request(
+            upstream_url,
+            data=json.dumps(candidate, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise DomainError(
+                "direction_model_activation_failed",
+                "AA 演出助手未能测试并启用当前写作模型，请检查制作服务状态后重试。",
+                status=502,
+                details={"production_status": exc.code},
+            ) from exc
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise DomainError(
+                "direction_model_activation_failed",
+                "AA 演出助手暂时无法连接制作服务，请稍后重试。",
+                status=503,
+            ) from exc
+        if not isinstance(result, dict) or result.get("ok") is False:
+            raise DomainError(
+                "direction_model_activation_failed",
+                "AA 演出助手未能测试并启用当前写作模型，请检查模型接口后重试。",
+                status=502,
+                details={"production_code": (result.get("error") or {}).get("code") if isinstance(result, dict) else "invalid_response"},
+            )
+        return result
 
     @workspace_operation
     def fetch_writing_models(self, payload: dict | None = None) -> list[str]:

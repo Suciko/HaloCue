@@ -98,6 +98,12 @@ def run_reply(profile="standard", *, job_state=None, completed=False):
         },
         "gates": {"compile": {"passed": False, "blockers": ["pending_review"]}},
         "active_job": None,
+        "draft_direction_profile": {
+            "id": profile or "standard",
+            "generation_id": "generation-completed",
+        }
+        if completed
+        else None,
     }
     if job_state:
         job = {
@@ -130,9 +136,40 @@ class ProductionApiFixture:
     def handle(self, route):
         request = route.request
         parsed = urlsplit(request.url)
-        path = parsed.path.removeprefix("/api/v1")
+        path = parsed.path.removeprefix("/production").removeprefix("/api/v1")
         if request.method == "POST":
             payload = request.post_data_json
+            if path == "/script-preflight":
+                route.fulfill(
+                    json={
+                        "ok": True,
+                        "kind": "static_preflight",
+                        "format": {
+                            "label": "角色台词格式",
+                            "confidence": "medium",
+                            "message": "已识别角色台词结构。",
+                        },
+                        "speakers": [
+                            {"name": "Narrator", "count": 1, "sample": "A synthetic scene."}
+                        ],
+                        "scenes": [
+                            {
+                                "title": "未分段开场",
+                                "line_no": 1,
+                                "end_line": 1,
+                                "implicit": True,
+                                "speakers": [{"name": "Narrator", "count": 1}],
+                                "dialogue_count": 1,
+                                "directive_count": 0,
+                                "has_background": False,
+                                "background": "",
+                            }
+                        ],
+                        "directives": {"total": 0, "recognized": 0, "issues": []},
+                        "actions": [{"id": "create_run", "available": True}],
+                    }
+                )
+                return
             self.posts.append((path, parsed.query, payload))
             if path == "/production-runs":
                 self.result = run_reply(payload.get("direction_profile", "standard"))
@@ -212,18 +249,52 @@ def profile_page(profile_browser, ui_url):
     assert errors == []
 
 
+def confirm_source_scene_judgement(page):
+    page.locator("#preflightSource").click()
+    expect(page.locator("#confirmSceneJudgement")).to_be_visible()
+    page.locator("#confirmSceneJudgement").click()
+    expect(page.locator("#draftGenerationDecision")).to_be_visible()
+
+
+def test_scene_judgement_must_be_confirmed_and_becomes_stale_after_edit(profile_page):
+    page, api = profile_page()
+    page.locator('[data-source-tab="manual"]').click()
+    page.locator("#projectName").fill("Scene judgement gate")
+    page.locator("#scriptText").fill("Narrator: Before the scene.\n## Platform\nNarrator: Ready.")
+    expect(page.locator("#draftGenerationDecision")).to_be_hidden()
+    expect(page.locator("#createRunAfterPreflight")).to_be_hidden()
+
+    page.locator("#preflightSource").click()
+    expect(page.locator("#confirmSceneJudgement")).to_be_visible()
+    expect(page.locator("#draftGenerationDecision")).to_be_hidden()
+    assert api.posts == []
+
+    page.locator("#confirmSceneJudgement").click()
+    expect(page.locator("#draftGenerationDecision")).to_be_visible()
+    page.locator("#scriptText").fill("Narrator: Changed after confirmation.")
+    expect(page.locator("#sourcePreflight")).to_be_hidden()
+    expect(page.locator("#draftGenerationDecision")).to_be_hidden()
+    expect(page.locator("#sourceStatus")).to_contain_text("重新识别分场")
+    assert api.posts == []
+
+
 def test_new_ai_import_defaults_to_conservative_and_submits_profile(profile_page):
     page, api = profile_page()
     page.locator('[data-source-tab="manual"]').click()
     page.locator("#projectName").fill("Synthetic production")
     page.locator("#scriptText").fill("Narrator: A synthetic scene.")
+    confirm_source_scene_judgement(page)
     page.locator('input[name="generationMode"][value="ai_direction"]').check()
-    expect(page.get_by_label("新任务演出策略")).to_have_value("conservative")
-    page.get_by_role("button", name="建立制作任务", exact=True).click()
+    expect(
+        page.locator('input[name="sourceDirectionProfileChoice"][value="conservative"]')
+    ).to_be_checked()
+    page.get_by_role("button", name="创建 AA 制作任务", exact=True).click()
     expect(page.locator("#page-mapping")).to_be_visible()
     assert api.posts[0][2]["direction_profile"] == "conservative"
     page.locator("#mappingContinue").click()
-    expect(page.get_by_role("combobox", name="演出策略", exact=True)).to_have_value("conservative")
+    expect(
+        page.locator('input[name="directionProfileChoice"][value="conservative"]')
+    ).to_be_checked()
 
 
 def test_older_adapter_disables_unsupported_strategy(profile_page):
@@ -233,11 +304,19 @@ def test_older_adapter_disables_unsupported_strategy(profile_page):
             "items": [{"id": "standard"}],
         }
     )
+    page.locator('[data-source-tab="manual"]').click()
+    page.locator("#projectName").fill("Synthetic production")
+    page.locator("#scriptText").fill("Narrator: A synthetic scene.")
+    confirm_source_scene_judgement(page)
     page.locator('input[name="generationMode"][value="ai_direction"]').check()
-    expect(page.get_by_label("新任务演出策略")).to_have_value("standard")
+    expect(
+        page.locator('input[name="sourceDirectionProfileChoice"][value="standard"]')
+    ).to_be_checked()
     expect(
         page.locator('#sourceDirectionProfile option[value="conservative"]')
     ).to_have_js_property("disabled", True)
+    expect(page.locator('input[name="sourceDirectionProfileChoice"][value="conservative"]')).to_be_disabled()
+    expect(page.locator('input[name="sourceDirectionProfileChoice"][value="standard"]')).to_be_enabled()
 
 
 def test_embedded_workbench_loads_the_same_profile_styles():
@@ -252,10 +331,10 @@ def test_restored_profile_can_start_selected_strategy_and_locks_while_running(
     profile_page, profile
 ):
     page, api = profile_page(run_reply(profile))
-    selector = page.get_by_role("combobox", name="演出策略", exact=True)
+    selector = page.locator("#directionProfile")
     expect(selector).to_have_value(profile or "standard")
     selected = "standard" if profile == "conservative" else "conservative"
-    selector.select_option(selected)
+    page.locator(f'input[name="directionProfileChoice"][value="{selected}"]').check()
     page.locator("#generateOrReview").click()
     expect(page.locator("#generationJobState")).to_have_text("正在执行")
     assert api.posts == [
@@ -277,7 +356,7 @@ def test_restored_profile_can_start_selected_strategy_and_locks_while_running(
 @pytest.mark.parametrize("job_state", ["paused", "cancelled", "interrupted"])
 def test_changed_profile_requires_confirmed_new_generation_not_resume(profile_page, job_state):
     page, api = profile_page(run_reply("standard", job_state=job_state))
-    page.get_by_role("combobox", name="演出策略", exact=True).select_option("conservative")
+    page.locator('input[name="directionProfileChoice"][value="conservative"]').check()
     expect(page.locator("#resumeGeneration")).to_be_hidden()
     page.locator("#generateOrReview").click()
     expect(page.locator("#actionConfirmDialog")).to_be_visible()
@@ -305,7 +384,7 @@ def test_unchanged_profile_continues_original_job(profile_page, job_state):
 def test_completed_generation_can_be_regenerated_only_after_confirmation(profile_page):
     page, api = profile_page(run_reply("standard", job_state="succeeded", completed=True))
     page.locator('.stage-list [data-stage="generation"]').click()
-    page.get_by_role("combobox", name="演出策略", exact=True).select_option("conservative")
+    page.locator('input[name="directionProfileChoice"][value="conservative"]').check()
     page.locator("#regenerateDirection").click()
     expect(page.locator("#actionConfirmDialog")).to_be_visible()
     assert api.posts == []
@@ -319,7 +398,7 @@ def test_completed_generation_can_be_regenerated_only_after_confirmation(profile
 
 def test_task_list_cannot_resume_old_strategy_after_user_selects_another(profile_page):
     page, api = profile_page(run_reply("standard", job_state="paused"))
-    page.get_by_role("combobox", name="演出策略", exact=True).select_option("conservative")
+    page.locator('input[name="directionProfileChoice"][value="conservative"]').check()
     page.locator("#openTasks").click()
     page.locator('#taskList [data-task-job-action="resume"]').click()
     expect(page.locator("#tasksDialog")).not_to_be_visible()
@@ -329,8 +408,8 @@ def test_task_list_cannot_resume_old_strategy_after_user_selects_another(profile
 
 def test_unsubmitted_strategy_survives_same_run_refresh_but_not_reopening(profile_page):
     page, api = profile_page(run_reply("standard", job_state="paused"))
-    selector = page.get_by_role("combobox", name="演出策略", exact=True)
-    selector.select_option("conservative")
+    selector = page.locator("#directionProfile")
+    page.locator('input[name="directionProfileChoice"][value="conservative"]').check()
     page.locator("#refreshRun").click()
     expect(selector).to_have_value("conservative")
     page.reload(wait_until="networkidle")
@@ -346,9 +425,8 @@ def test_profile_controls_and_confirmation_fit_desktop_and_mobile(
     page, api = profile_page(run_reply("standard", job_state="succeeded", completed=True))
     page.set_viewport_size({"width": width, "height": 900})
     page.locator('.stage-list [data-stage="generation"]').click()
-    selector = page.get_by_role("combobox", name="演出策略", exact=True)
-    selector.select_option(profile)
-    bounds = selector.bounding_box()
+    page.locator(f'input[name="directionProfileChoice"][value="{profile}"]').check()
+    bounds = page.locator("#directionProfileControl .profile-choice-grid").bounding_box()
     assert bounds and 0 <= bounds["x"] and bounds["x"] + bounds["width"] <= width
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     screenshots = Path(os.environ.get("HALOCUE_TEST_SCREENSHOT_DIR") or tmp_path)
@@ -363,3 +441,119 @@ def test_profile_controls_and_confirmation_fit_desktop_and_mobile(
     )
     assert api.posts == []
     page.locator("#actionConfirmDialog").get_by_role("button", name="取消", exact=True).click()
+
+
+def test_current_chunk_does_not_claim_generation_is_complete(profile_page):
+    result = run_reply("conservative", job_state="running")
+    result["active_job"]["progress"] = {
+        "phase": "annotating",
+        "current": 1,
+        "total": 1,
+        "percent": 100,
+        "detail": "正在标注",
+    }
+    page, api = profile_page(result)
+    page.locator('.stage-list [data-stage="generation"]').click()
+    progress = page.locator("#generationProgress")
+    expect(progress).not_to_have_attribute("aria-valuenow", "100")
+    expect(progress).to_have_attribute("aria-valuetext", "正在处理，完成比例尚未确定")
+    expect(page.locator("#generationJobDetail")).to_contain_text("非完成比例")
+    assert page.locator("#generationProgressBar").evaluate(
+        "e => e.getBoundingClientRect().width > 0"
+    )
+    page.locator("#openTasks").click()
+    expect(page.locator("#taskList progress")).not_to_have_attribute("value", "100")
+    assert api.posts == []
+
+
+def test_layout_mode_names_make_ai_backend_boundary_explicit():
+    html = (UI_ROOT / "index.html").read_text(encoding="utf-8")
+    styles = (UI_ROOT / "direction-profile.css").read_text(encoding="utf-8")
+    assert "执行方式" in html
+    assert "协同 AI" in html
+    assert "AI 判断演出意图，后端修正站位与连续性" in html
+    assert "决定谁负责安排镜头与连续性" in html
+    assert ".layout-mode-fieldset legend small" in styles
+
+
+def test_strategy_cards_distinguish_current_and_next_without_writes(profile_page):
+    page, api = profile_page(run_reply("standard", job_state="succeeded", completed=True))
+    page.locator('.stage-list [data-stage="generation"]').click()
+    status = page.locator("#directionProfileStatus")
+    expect(status).to_contain_text("当前草稿来源")
+    expect(status).to_contain_text("标准")
+    page.locator('input[name="directionProfileChoice"][value="conservative"]').check()
+    expect(status).to_contain_text("简洁 · 尚未应用")
+    expect(status.locator(".profile-status-row").first).to_contain_text("标准")
+    expect(page.locator("#directionProfileControl .profile-boundary-note")).to_contain_text(
+        "现有草稿不变"
+    )
+    assert api.posts == []
+
+
+def test_keyboard_radios_and_reduced_motion(profile_page):
+    page, api = profile_page(run_reply("standard"))
+    standard = page.locator('input[name="directionProfileChoice"][value="standard"]')
+    conservative = page.locator('input[name="directionProfileChoice"][value="conservative"]')
+    standard.focus()
+    standard.press("ArrowLeft")
+    expect(conservative).to_be_checked()
+    expect(conservative).to_be_focused()
+    assert page.locator("#directionProfileControl").get_attribute("data-input-method") == "keyboard"
+    page.emulate_media(reduced_motion="reduce")
+    duration = page.locator("#directionProfileControl .profile-choice-check").first.evaluate(
+        "e=>getComputedStyle(e).transitionDuration"
+    )
+    assert duration == "0s"
+    assert api.posts == []
+
+
+def test_failed_attempt_does_not_relabel_existing_draft(profile_page):
+    result = run_reply("standard", job_state="failed", completed=True)
+    result["draft_direction_profile"] = {"id": "conservative", "generation_id": "previous-success"}
+    page, api = profile_page(result)
+    expect(page.locator("#directionProfileStatus .profile-status-row").first).to_contain_text(
+        "简洁"
+    )
+    expect(page.locator("#directionProfileStatus")).to_contain_text("标准 · 尚未应用")
+    assert api.posts == []
+
+
+def test_running_strategy_is_locked_and_described(profile_page):
+    page, api = profile_page(run_reply("conservative", job_state="running"))
+    expect(page.locator("#directionProfileLock")).to_have_text("本次策略已锁定")
+    expect(page.locator("#directionProfileStatus")).to_contain_text("正在生成")
+    for value in ("conservative", "standard"):
+        expect(
+            page.locator(f'input[name="directionProfileChoice"][value="{value}"]')
+        ).to_be_disabled()
+    assert api.posts == []
+
+
+def test_pointer_transition_is_real_and_keeps_layout_stable(profile_page):
+    page, api = profile_page(run_reply("standard", completed=True))
+    page.locator('.stage-list [data-stage="generation"]').click()
+    root = page.locator("#directionProfileControl")
+    root.scroll_into_view_if_needed()
+    before = root.bounding_box()
+    page.locator('input[name="directionProfileChoice"][value="conservative"]').click()
+    after = root.bounding_box()
+    assert abs(before["height"] - after["height"]) < 1
+    assert root.get_attribute("data-input-method") == "pointer"
+    transition = root.locator(".profile-choice-check").first.evaluate(
+        "e=>getComputedStyle(e).transitionDuration"
+    )
+    assert "0.18s" in transition
+    expect(root.locator('input[value="conservative"]')).to_be_checked()
+    assert api.posts == []
+
+
+def test_quick_strategy_switch_keeps_last_selection_without_generation(profile_page):
+    page, api = profile_page(run_reply("standard", completed=True))
+    page.locator('.stage-list [data-stage="generation"]').click()
+    for value in ('conservative', 'standard', 'conservative'):
+        page.locator(f'input[name="directionProfileChoice"][value="{value}"]').click()
+    expect(page.locator('#directionProfile')).to_have_value('conservative')
+    expect(page.locator('#directionProfileStatus')).to_contain_text('简洁 · 尚未应用')
+    expect(page.locator('#directionProfileStatus .profile-status-row').first).to_contain_text('标准')
+    assert api.posts == []

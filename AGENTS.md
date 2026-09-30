@@ -34,6 +34,35 @@ and an AI GalGame workspace.
 
 ## Design rules
 
+- Budget context at every writing and AA model boundary. Start automatic
+  compaction at a soft ceiling of 256,000 estimated input tokens, earlier when
+  the model's real capacity requires it, and reserve output and tool overhead.
+  Preserve exact target prose, revision IDs, pending changes, latest user
+  instructions and evidence. Archive older conversation with traceable sources;
+  incomplete summaries must allow scoped retrieval of original messages.
+  Local editing uses exact paragraph windows and hash-checked patches. Keep
+  unrelated pending changes on the server, merge disjoint batches atomically,
+  and reject stale versions or overlapping batches. Avoid echoing full original
+  and candidate manuscripts through edit-tool followups. Stable rules and
+  selected character material precede dynamic editing state. Report cache hits
+  and costs only from actual provider usage or billing receipts.
+- Prefer conversational Agent tool execution for tasks the author can describe
+  in chat, including prose polishing, targeted sentence edits, and logic fixes.
+  The Agent should locate the requested passage and call a scoped tool directly;
+  do not require an extra generation button after the author sends the request.
+  Keep buttons for deliberate choices, applying reviewed edits, and undoing
+  changes. Clarify only when the requested target or direction is ambiguous.
+- Show prose changes at their original paragraph positions in the manuscript.
+  Replace the affected range with a complete before/after view, keep surrounding
+  text in order, and locate the first change when the Agent finishes. Do not put
+  the main review behind a separate list at the bottom of the scene.
+- Put the user's current goal and its visual result first. Prefer real character
+  portraits, scene art, and other relevant imagery when the task is visual; keep
+  technical identifiers, local paths, provenance, and diagnostics out of the
+  primary view and in collapsed details or a deliberate inspection action.
+  Remove supporting copy that does not help the user decide or complete the
+  current task, while keeping preview availability and other actionable states
+  truthful.
 - Keep one source of truth: AA and MMT are presentations of one project model.
 - Treat StoryForge `StudioProject v2` as a renderer/export adapter, not the
   canonical product model.

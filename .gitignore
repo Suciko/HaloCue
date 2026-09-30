@@ -136,3 +136,7 @@ external-inputs/
 docs/handoffs/_generated/
 artifacts/
 acceptance-output/
+
+# Local collaborator review state
+/.review-data/
+/.review-venv/

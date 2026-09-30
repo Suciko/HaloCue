@@ -10,6 +10,23 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 CASES = [
+    "provider_free_access_badges_are_visible_searchable_and_escaped",
+    "paid_or_custom_providers_do_not_keep_free_access_labels",
+    "known_model_auto_fills_limits_and_maximum_output",
+    "switching_unknown_model_drops_previous_limits",
+    "fetched_provider_limits_override_catalog_automatically",
+    "id_only_provider_does_not_mislabel_catalog_parameters",
+    "stale_capability_response_never_fills_new_model",
+    "manual_override_is_not_replaced_by_inflight_detection",
+    "automatic_limits_finish_before_activation_payload",
+    "preset_connections_are_automatic_custom_stays_editable",
+    "provider_links_reject_non_https_and_embedded_credentials",
+
+    "activation_replaces_old_test_with_current_result",
+    "expanding_saved_writing_model_to_aa_uses_server_side_credential_relay",
+    "activation_failure_focuses_visible_result_after_refresh",
+    "activation_result_scrolls_inside_settings_above_footer",
+    "advanced_limits_are_identical_in_test_and_activation",
     "direction_status_timeout_changes_pending_to_unavailable",
     "hanging_production_does_not_block_writing_settings",
     "distinct_model_roles_are_shown_independently",

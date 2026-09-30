@@ -318,14 +318,69 @@ def _looks_like_cg_key(value: Any) -> bool:
     return _text(value).casefold().startswith("bg_cs_")
 
 
+def _bundled_metadata_database() -> Path | None:
+    """Find the shipped metadata-only BA catalog without touching user data."""
+    candidates: list[Path] = []
+    try:
+        from services.halocue.runtime_layout import repository_root
+
+        candidates.append(repository_root() / "data" / "halocue_labels.db")
+    except (ImportError, OSError):
+        pass
+    # Source-tree fallback for direct module execution and test runners.
+    candidates.append(Path(__file__).resolve().parents[5] / "data" / "halocue_labels.db")
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return candidate.resolve()
+        except OSError:
+            continue
+    return None
+
+
 class ResourceCatalog:
     """Owns the 1.0 resource metadata database and its public projection."""
 
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path, *, seed_bundled: bool = True):
         self.root = Path(data_dir).resolve() / "resource-catalog"
         self.root.mkdir(parents=True, exist_ok=True)
         self.path = self.root / "halocue-1.0.db"
+        self._bundled_seed_status = "not_checked"
+        self._bundled_seed_error = ""
         self._init_schema()
+        if seed_bundled:
+            self._seed_bundled_metadata()
+        else:
+            self._bundled_seed_status = "disabled"
+
+    def _seed_bundled_metadata(self) -> None:
+        """Populate a new catalog from the shipped metadata-only seed once.
+
+        The seed contains searchable character/background/variant/face metadata,
+        not copyrighted image, audio, Spine, or story bytes. User imports and
+        overrides always win: a non-empty local catalog is never replaced.
+        """
+        with closing(self._connect()) as connection:
+            existing = sum(
+                int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+                for table in ("backgrounds", "characters", "character_variants", "faces", "expression_parts")
+            )
+        if existing:
+            self._bundled_seed_status = "already_initialized"
+            return
+        source = _bundled_metadata_database()
+        if source is None:
+            self._bundled_seed_status = "unavailable"
+            return
+        try:
+            self.import_legacy(source, "HaloCue 1.0 bundled metadata")
+        except (OSError, ValueError, sqlite3.DatabaseError) as exc:
+            # Resource browsing is optional evidence; do not make the writer
+            # unusable when a frozen distribution is missing its optional seed.
+            self._bundled_seed_status = "failed"
+            self._bundled_seed_error = str(exc)
+        else:
+            self._bundled_seed_status = "ready"
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path)
@@ -368,6 +423,12 @@ class ResourceCatalog:
             "storage": "local_read_only_base_with_user_overrides",
             "counts": counts,
             "source_manifest": _json_object(source[0] if source else ""),
+            "bundled_seed": {
+                "status": self._bundled_seed_status,
+                "error": self._bundled_seed_error or None,
+                "includes": ["characters", "backgrounds", "variants", "faces", "expression_parts"],
+                "binary_assets": False,
+            },
             "ready": any(counts.values()),
         }
 

@@ -103,6 +103,7 @@
           "work_item_id": {"type": ["string", "null"]},
           "status": {"type": "string", "minLength": 1},
           "decision": {"type": ["string", "null"]},
+          "chapter_review_id": {"type": "string", "minLength": 1},
           "complete": {"type": "boolean"}
         }
       }

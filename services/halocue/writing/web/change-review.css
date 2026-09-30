@@ -1,0 +1,167 @@
+/* Quiet, document-first review. Semantic labels remain legible without color. */
+.change-review, .scene-diff-desk {
+  --review-add: #23674d;
+  --review-add-bg: #edf7f1;
+  --review-remove: #a43e42;
+  --review-remove-bg: #fcf0ef;
+  --review-modify: #345e9a;
+  --review-ink: var(--hc-ink, #233449);
+  --review-muted: var(--hc-muted, #64748b);
+  --review-line: var(--hc-line, #dce2e9);
+  --review-surface: var(--hc-surface, #fff);
+  min-width: 0;
+  color: var(--review-ink);
+}
+[data-theme="dark"] .change-review, [data-theme="dark"] .scene-diff-desk {
+  --review-add: #9dd9b6;
+  --review-add-bg: #223a31;
+  --review-remove: #f3b2b5;
+  --review-remove-bg: #422e35;
+  --review-modify: #abc8f3;
+}
+.change-review { margin: 18px 0; border: 1px solid var(--review-line); border-radius: 10px; overflow: hidden; background: var(--review-surface); }
+.change-review .change-review-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--review-line); }
+.change-review-head > div:first-child { display: grid; gap: 4px; }
+.change-review-head b { font-size: 13px; }
+.change-review-head small { color: var(--review-muted); font-size: 11px; }
+.change-review-counts { display: flex; flex-wrap: wrap; gap: 7px 14px; padding: 0; font: 500 12px/1.6 var(--hc-font-ui, var(--font-ui)); }
+.change-count { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.change-count b { font-variant-numeric: tabular-nums; }
+.change-count.is-add { color: var(--review-add); }
+.change-count.is-remove { color: var(--review-remove); }
+.change-count.is-modify { color: var(--review-modify); }
+.change-review .change-review-item { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.change-review-item + .change-review-item { border-top: 1px solid var(--review-line); }
+.change-review .change-review-item > summary { display: flex; align-items: center; gap: 14px; min-height: 58px; margin: 0; padding: 10px 16px; list-style: none; cursor: pointer; background: transparent; }
+.change-review-item > summary::-webkit-details-marker, .scene-review-detail > summary::-webkit-details-marker { display: none; }
+.change-review-item > summary::before, .change-review-item > summary::after { display: none !important; }
+.change-review-name { display: grid; gap: 2px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.change-review-name small { font-size: 10px; font-weight: 400; color: var(--review-muted); }
+.change-review-name b { font-size: 12px; font-weight: 600; }
+.change-operation { display: inline-block; flex: 0 0 auto; font: 600 11px/1.5 var(--hc-font-ui, var(--font-ui)); }
+.is-add > summary > .change-operation, .is-add .scene-diff-choice .change-operation { color: var(--review-add); }
+.is-remove > summary > .change-operation, .is-remove .scene-diff-choice .change-operation { color: var(--review-remove); }
+.is-modify > summary > .change-operation, .is-modify .scene-diff-choice .change-operation { color: var(--review-modify); }
+.change-review-chevron { color: var(--review-muted); }
+.change-review-item[open] > summary .change-review-chevron { transform: rotate(180deg); }
+.change-review .change-review-pair, .scene-diff-desk .change-review-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 0; border-top: 1px solid var(--review-line); background: var(--review-line); }
+.change-review-side { min-width: 0; padding: 12px 16px 16px; }
+.change-review-side.is-before { color: var(--review-remove); background: var(--review-remove-bg); }
+.change-review-side.is-after { color: var(--review-add); background: var(--review-add-bg); }
+.change-review-side > small { display: block; margin-bottom: 8px; font: 500 10px/1.5 var(--hc-font-ui, var(--font-ui)); opacity: .9; }
+.change-review .change-review-side pre, .scene-diff-desk .change-review-side pre { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; font: 400 13px/1.9 var(--hc-font-ui, var(--font-ui)); white-space: pre-wrap; overflow-wrap: anywhere; overflow: visible; }
+.change-review .change-review-empty, .scene-diff-desk .change-review-empty { margin: 0; padding: 12px 16px; color: var(--review-muted); font-size: 12px; }
+.change-review-side .change-review-empty { padding: 0 !important; color: inherit !important; }
+.change-review .change-review-warning { margin: 0; padding: 16px; color: var(--review-remove); font-size: 12px; line-height: 1.8; }
+.change-review summary:focus-visible, .scene-review-detail summary:focus-visible { outline: 2px solid var(--review-modify); outline-offset: -3px; border-radius: 4px; }
+/* Match the writing surface without burying changes behind a second preview. */
+.scene-diff-desk > .change-review-counts { padding: 0 0 14px; }
+.scene-diff-desk .scene-review-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.scene-review-change { min-width: 0; overflow: hidden; border: 1px solid var(--review-line); border-radius: 9px; background: var(--review-surface); }
+.scene-diff-desk .scene-review-change .scene-diff-choice { margin: 0; border: 0; border-radius: 0; padding: 12px 14px; background: transparent; box-shadow: none; align-items: start; }
+.scene-review-change:has(input:checked) { border-color: var(--review-modify); }
+.scene-review-change .scene-diff-choice > input { margin-top: 3px; width: 17px; height: 17px; accent-color: var(--review-modify); }
+.scene-diff-desk .scene-review-location { color: var(--review-muted); font-size: 11px; font-weight: 400; }
+.scene-diff-desk .scene-review-change [data-scene-change-preview] { display: block; color: var(--review-ink); white-space: normal; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; margin-top: 4px; }
+.scene-diff-desk .scene-review-detail { margin: 0; padding: 0; border: 0; border-top: 1px solid var(--review-line); border-radius: 0; background: transparent; }
+.scene-diff-desk .scene-review-detail > summary { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 8px 14px; list-style: none; cursor: pointer; color: var(--review-muted); font-size: 11px; }
+.scene-review-detail > summary::before, .scene-review-detail > summary::after { display: none !important; }
+.director-pending:has(.change-review) { display: block; }
+@media (max-width: 640px) {
+  .change-review .change-review-pair, .scene-diff-desk .change-review-pair { grid-template-columns: minmax(0, 1fr); }
+  .change-review .change-review-head { padding: 12px; }
+  .change-review .change-review-item > summary { gap: 10px; padding: 12px; }
+  .change-review-side { padding: 10px 12px 14px; }
+  .scene-diff-desk .scene-diff-actions { flex-wrap: wrap; }
+}
+/* Legacy proposal cards style every small descendant as a footer. Scope that out
+   of the review, where small is a field label rather than a section separator. */
+#app.hc-redesign .change-review small,
+#app.hc-redesign .scene-review-change small {
+  border: 0; margin: 0; padding: 0; text-transform: none; letter-spacing: normal;
+}
+#app.hc-redesign .change-review-side > small { margin-bottom: 8px; }
+#app.hc-redesign .change-review-name b { white-space: normal; overflow: visible; }
+#app.hc-redesign .agent-inline-artifact-body:has(> .change-review) {
+  background: var(--hc-panel, #fff); color: var(--hc-text, #233449); border-color: var(--hc-line, #dce2e9);
+}
+#app.hc-redesign .agent-inline-artifact-body:has(> .change-review) > :is(p,ol,.artifact-field) { color: inherit; }
+#app.hc-redesign .agent-inline-artifact-body:has(> .change-review) .artifact-field b { color: inherit; }
+#app.hc-redesign .scene-review-change .scene-diff-choice { display: flex; flex-direction: row; gap: 12px; }
+#app.hc-redesign .scene-review-change .scene-diff-choice > span { min-width: 0; flex: 1; }
+#app.hc-redesign .scene-review-change .scene-diff-choice > input { flex: 0 0 17px; }
+#app.hc-redesign .scene-review-change [data-scene-change-preview] { margin-top: 5px; }
+#app.hc-redesign .scene-diff-desk .scene-full-context { margin-top: 16px; }
+#app.hc-redesign .scene-diff-desk .scene-full-context > header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 16px; border: 1px solid var(--review-line); border-radius: 8px; }
+#app.hc-redesign .scene-full-context > header > div { flex: 1; min-width: 180px; display: grid; gap: 6px; }
+#app.hc-redesign .scene-full-context > header small { font-size: 11px; color: var(--review-muted); line-height: 1.7; }
+#app.hc-redesign .scene-diff-desk .scene-diff-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; padding: 12px 16px; }
+#app.hc-redesign .scene-diff-count { margin-right: auto; font-size: 12px; white-space: nowrap; }
+/* A review card is no longer a tiny, independently scrolling checkbox list.
+   Keep the document as the scroll owner and the apply controls reachable. */
+#app.hc-redesign .scene-diff-desk .scene-review-list {
+  max-height: none; overflow: visible; scrollbar-gutter: auto; overscroll-behavior: auto;
+}
+#app.hc-redesign .scene-diff-desk > .change-review-counts { padding: 12px 22px 0; }
+#app.hc-redesign .scene-review-change .scene-diff-choice b { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+#app.hc-redesign .scene-diff-desk .scene-diff-actions {
+  position: sticky; bottom: 0; z-index: 2; background: var(--review-surface); border-top: 1px solid var(--review-line);
+}
+/* Linked review stays inside the existing document + Agent workspace. */
+#app.hc-redesign .scene-diff-desk { overflow: visible; }
+#app.hc-redesign .scene-review-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 14px; border-top: 1px solid var(--review-line); color: var(--review-muted); font-size: 11px; }
+#app.hc-redesign .scene-review-tools button { min-height: 30px; padding: 4px 8px; font-size: 11px; }
+#app.hc-redesign .scene-review-more { margin: 14px 22px; padding: 0; border: 0; background: transparent; }
+#app.hc-redesign .scene-review-more > summary { padding: 8px 0; cursor: pointer; font-size: 12px; color: var(--review-muted); }
+#app.hc-redesign .scene-review-more .scene-full-context { margin: 6px 0; }
+#app.hc-redesign .scene-review-more .proposal-runtime-details { margin: 8px 0; }
+#app.hc-redesign .scene-agent-review-link { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; }
+#app.hc-redesign .scene-agent-review-link > span { font-size: 11px; }
+#app.hc-redesign .scene-review-reference { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 8px; padding: 6px 8px; border: 1px solid var(--hc-line); border-radius: 6px; font-size: 11px; color: var(--hc-text); background: var(--hc-panel); }
+#app.hc-redesign .scene-review-reference > span { flex: 1; }
+#app.hc-redesign .scene-review-reference button { min-height: 30px; padding: 3px 6px; font-size: 11px; }
+#app.hc-redesign .proposal-overview { border: 0; padding: 0; margin: 0; background: transparent; }
+#app.hc-redesign .proposal-overview > summary { display: block; min-height: 36px; padding: 8px 0; font-size: 12px; color: var(--hc-muted); }
+#app.hc-redesign .proposal-overview > summary::before { content: '＋'; margin-right: 8px; }
+#app.hc-redesign .proposal-overview[open] > summary::before { content: '−'; }
+#app.hc-redesign .proposal-overview > :not(summary) { margin-top: 12px; }
+#app.hc-redesign .agent-inline-artifact-body > .change-review { margin: 0; }
+#app.hc-redesign .proposal-message .artifact-decision-actions { position: sticky; bottom: 0; z-index: 2; background: var(--hc-panel); }
+#app.hc-redesign .proposal-message .agent-inline-artifact { overflow: visible; }
+@media (max-width: 640px) {
+  #app.hc-redesign .scene-review-more { margin-inline: 16px; }
+}
+
+/* Review is an editorial document, not a stack of boxed dashboards. */
+#app#app.hc-redesign[data-surface="works"] .proposal-message .agent-inline-artifact {
+  border: 0; border-radius: 0; box-shadow: none; background: transparent;
+}
+#app#app.hc-redesign[data-surface="works"] .proposal-message .agent-inline-artifact > summary {
+  padding: 14px 0 !important; background: transparent !important; border-bottom: 1px solid var(--hc-line);
+}
+#app#app.hc-redesign[data-surface="works"] .proposal-message .agent-inline-artifact-body {
+  padding: 18px 0 0 !important; border: 0; background: transparent;
+}
+#app#app.hc-redesign[data-surface="works"] .proposal-message .change-review {
+  border: 0; border-radius: 0; background: transparent;
+}
+#app#app.hc-redesign[data-surface="works"] .proposal-message .change-review-head { padding: 4px 0 14px; }
+#app#app.hc-redesign[data-surface="works"] .proposal-message .change-review-item > summary {
+  padding: 12px 4px; min-height: 64px; gap: 16px;
+}
+#app#app.hc-redesign[data-surface="works"] .proposal-message .change-review-name b { font-size: 14px; }
+#app#app.hc-redesign[data-surface="works"] .proposal-message .change-review-name small { font-size: 11px; line-height: 1.65; }
+#app#app.hc-redesign[data-surface="works"] .proposal-message .change-review-side pre { font-size: 14px; }
+#app#app.hc-redesign[data-surface="works"] .proposal-message .artifact-decision-actions {
+  margin-top: 8px; padding: 14px 0; border-top: 1px solid var(--hc-line); box-shadow: none;
+}
+#app#app.hc-redesign[data-surface="works"] .proposal-message .change-review-item > summary:hover { background: var(--hc-hover); }
+@media(max-width:760px) {
+  #app#app.hc-redesign[data-surface="works"] .proposal-message .change-review-item > summary { gap: 10px; }
+  #app#app.hc-redesign[data-surface="works"] .proposal-message .change-review-name b { font-size: 13px; }
+}
+#app#app.hc-redesign[data-surface="works"] .proposal-message .agent-inline-artifact,
+#app#app.hc-redesign[data-surface="works"] .proposal-message .agent-inline-artifact-body,
+#app#app.hc-redesign[data-surface="works"] .proposal-message .change-review {
+  border-inline: 0 !important; box-shadow: none !important;
+}

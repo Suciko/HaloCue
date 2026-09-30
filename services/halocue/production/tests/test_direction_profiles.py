@@ -434,12 +434,17 @@ def test_conservative_fallback_reaches_reviewed_build_without_installing(
     assert list((workspace / "saves").iterdir()) == []
 
 
-@pytest.mark.parametrize("change", [
-    {"base_url": "https://different.invalid/v1"},
-    {"max_tokens": 2048},
-    {"reasoning_mode": "quality"},
-])
-def test_direction_retry_rejects_changed_model_configuration(direction_service, monkeypatch, change):
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"base_url": "https://different.invalid/v1"},
+        {"max_tokens": 2048},
+        {"reasoning_mode": "quality"},
+    ],
+)
+def test_direction_retry_rejects_changed_model_configuration(
+    direction_service, monkeypatch, change
+):
     service = direction_service
     provider = FixtureProvider(blocked=True)
     monkeypatch.setattr(service.direction_models, "provider", lambda: provider)
@@ -484,7 +489,9 @@ def test_cancelled_preflight_does_not_publish_late_analysis(direction_service, m
     assert service.ai_preflights(run_id)["items"] == []
 
 
-def test_completed_preflight_publish_is_not_later_reported_cancelled(direction_service, monkeypatch):
+def test_completed_preflight_publish_is_not_later_reported_cancelled(
+    direction_service, monkeypatch
+):
     service = direction_service
     committed, finish = threading.Event(), threading.Event()
     original = service.adapter.execute_ai_preflight
@@ -517,7 +524,9 @@ def test_completed_preflight_publish_is_not_later_reported_cancelled(direction_s
     assert len(service.ai_preflights(run_id)["items"]) == 1
 
 
-def test_old_direction_job_without_model_identity_requires_new_generation(direction_service, monkeypatch):
+def test_old_direction_job_without_model_identity_requires_new_generation(
+    direction_service, monkeypatch
+):
     service = direction_service
     provider = FixtureProvider(blocked=True)
     monkeypatch.setattr(service.direction_models, "provider", lambda: provider)
@@ -538,7 +547,9 @@ def test_old_direction_job_without_model_identity_requires_new_generation(direct
     assert service.job_detail(record.job_id)["job"]["resumable"] is False
 
 
-def test_generation_fails_fast_while_model_activation_owns_config_lock(direction_service, monkeypatch):
+def test_generation_fails_fast_while_model_activation_owns_config_lock(
+    direction_service, monkeypatch
+):
     from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
     service = direction_service
@@ -556,7 +567,9 @@ def test_generation_fails_fast_while_model_activation_owns_config_lock(direction
     try:
         assert entered.wait(2)
         with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(service.generate_direction, run_id, {"expected_draft_version": version})
+            future = pool.submit(
+                service.generate_direction, run_id, {"expected_draft_version": version}
+            )
             try:
                 with pytest.raises(ProductionError) as blocked:
                     future.result(timeout=1)
@@ -582,7 +595,9 @@ def test_retry_cannot_deduplicate_to_fresh_job_after_model_change(direction_serv
     finally:
         original_provider.released.set()
     assert finished_job(service, first["job"]["job_id"])["state"] == "paused"
-    service.configure_direction_model({"model": "different", "api_key_env": "HALOCUE_PROFILE_TEST_KEY"})
+    service.configure_direction_model(
+        {"model": "different", "api_key_env": "HALOCUE_PROFILE_TEST_KEY"}
+    )
     fresh_provider = FixtureProvider(blocked=True)
     monkeypatch.setattr(service.direction_models, "provider", lambda: fresh_provider)
     _, second = service.generate_direction(run_id, {"expected_draft_version": version})
@@ -596,3 +611,39 @@ def test_retry_cannot_deduplicate_to_fresh_job_after_model_change(direction_serv
         service.cancel_job(second["job"]["job_id"])
         fresh_provider.released.set()
     finished_job(service, second["job"]["job_id"])
+
+
+def test_committed_profile_survives_failed_attempt_and_read_is_nonmutating(
+    direction_service, monkeypatch
+):
+    service = direction_service
+    monkeypatch.setattr(service.direction_models, "provider", lambda: FixtureProvider())
+    run_id, version = mapped_run(service, "conservative")
+    assert service.run_detail(run_id)["draft_direction_profile"] is None
+    _, first = service.generate_direction(run_id, {"expected_draft_version": version})
+    assert finished_job(service, first["job"]["job_id"])["state"] == "succeeded"
+    detail = service.run_detail(run_id)
+    committed = detail["draft_direction_profile"]
+    assert committed["id"] == "conservative"
+    assert committed["generation_id"] == detail["run"]["last_direction_generation_id"]
+    frozen_draft = detail["draft"]
+    monkeypatch.setattr(service.direction_models, "provider", lambda: FixtureProvider(fail=True))
+    _, failed = service.generate_direction(
+        run_id,
+        {"expected_draft_version": frozen_draft["draft_version"], "direction_profile": "standard"},
+    )
+    assert finished_job(service, failed["job"]["job_id"])["state"] == "failed"
+    after = service.run_detail(run_id)
+    assert after["run"]["source_summary"]["direction_profile"] == "standard"
+    assert after["draft_direction_profile"] == committed
+    assert after["draft"] == frozen_draft
+
+
+def test_missing_profile_record_is_unknown_not_inferred_from_attempt(direction_service):
+    service = direction_service
+    run_id, _ = mapped_run(service, "standard")
+    run = service.repository.get_run(run_id)
+    run.last_direction_generation_id = "direction-123456abcdef"
+    service.repository.save_run(run)
+    assert service.run_detail(run_id)["draft_direction_profile"] is None
+    assert service.adapter.committed_direction_profile(run.draft_token, "../../outside") is None

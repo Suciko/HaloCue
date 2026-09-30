@@ -68,8 +68,16 @@ def test_docx_preview_reads_paragraphs_and_returns_repair_guidance():
     assert any("章节标题" in item for item in preview["repair_suggestions"])
 
 
+def test_markdown_headings_keep_chapter_structure_and_source_text():
+    text = "# 第一章 雨夜\n门开了。\n# 第二章 回声\n灯熄灭了。"
+    preview = parse_story_payload(_encoded("故事.md", text.encode()))
+    assert preview["normalized_text"] == text
+    assert preview["counts"]["chapters"] == 2
+    assert preview["chapters"][0]["title"] == "第一章 雨夜"
+
+
 def test_story_preview_rejects_unsupported_or_broken_documents():
-    with pytest.raises(ValueError, match="TXT 或 DOCX"):
+    with pytest.raises(ValueError, match="TXT、Markdown 或 DOCX"):
         parse_story_payload(_encoded("旧稿.pdf", b"not a story"))
     with pytest.raises(ValueError, match="无法读取"):
         parse_story_payload(_encoded("损坏.docx", b"not a zip"))

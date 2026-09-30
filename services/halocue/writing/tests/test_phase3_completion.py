@@ -12,6 +12,7 @@ import pytest
 
 from halocue_writing.app import make_handler
 from halocue_writing.errors import DomainError
+from halocue_writing.memory_store import validate_provider_knowledge_suggestions
 from halocue_writing.providers import FakeWritingProvider
 from halocue_writing.service import WritingService
 
@@ -51,6 +52,26 @@ class KnowledgeDiscoveryProvider(FakeWritingProvider):
             ],
         }
 
+
+class RelationshipDiscoveryProvider(KnowledgeDiscoveryProvider):
+    def extract_memory_bundle(self, memory_context: dict) -> dict:
+        characters = {
+            item["name"]: item["id"] for item in memory_context["known_characters"]
+        }
+        return {
+            "schema_version": "memory-bundle/1.0",
+            "summary": "发现正文明确建立的人物关系。",
+            "items": [],
+            "knowledge_suggestions": [{
+                "kind": "character_relationship",
+                "from_character_id": characters["白露"],
+                "to_character_id": characters["青禾"],
+                "relation_kind": "调查搭档",
+                "summary": "两人明确约定共同核对档案。",
+                "confidence_status": "open",
+                "source_block_ids": ["block-relation"],
+            }],
+        }
 
 def saved_scene(service: WritingService):
     work = service.create_work({"title": "Phase 3 资料维护"})
@@ -130,6 +151,126 @@ def test_background_discovery_is_durable_non_blocking_and_requires_acceptance(tm
     assert canon["current_revision"]["content"]["facts"][0]["text"] == "旧终端会在正确口令后亮起。"
 
 
+def test_background_relationship_requires_existing_ids_evidence_and_author_acceptance(tmp_path):
+    service = WritingService(tmp_path)
+    service.provider = RelationshipDiscoveryProvider()
+    work = service.create_work({"title": "关系随正文推进"})
+    saved_cards = []
+    for name in ("白露", "青禾"):
+        result = service.save_character_card(
+            work["id"], {
+                "expected_version": work["version"], "name": name,
+                "role": "共同调查档案", "source_type": "custom",
+                "source_refs": ["作者确认"], "trust_status": "confirmed",
+            },
+        )
+        saved_cards.append(result["card_id"])
+        work = result["work"]
+    scene = service.create_scene(
+        work["id"], work["chapters"][0]["id"],
+        {"expected_version": work["version"], "title": "调查约定"},
+    )
+    saved = service.save_scene_manuscript(
+        work["id"], scene["scene_id"], {
+            "expected_version": scene["work"]["version"],
+            "blocks": [{
+                "id": "block-relation", "type": "narration", "speaker": "",
+                "text": "白露与青禾明确约定共同核对档案，成为调查搭档。",
+            }],
+        },
+    )
+    service.run_commit_projection(work["id"], saved["revision_id"])
+    while True:
+        dispatched = service.agent_dispatcher.run_once()
+        assert dispatched["status"] == "succeeded"
+        if dispatched["job"]["operation"] == "knowledge.discover":
+            break
+    discovered = service.get_work(work["id"])
+    suggestion = next(
+        item for item in discovered["proposals"]
+        if item["kind"] == "character_card"
+        and item["evidence"].get("suggestion_type") == "relationship"
+    )
+    assert suggestion["status"] == "pending"
+    assert suggestion["evidence"]["source_block_ids"] == ["block-relation"]
+    with service.repo.transaction() as connection:
+        revision = connection.execute(
+            "SELECT * FROM revisions WHERE id=?", (saved["revision_id"],)
+        ).fetchone()
+        duplicated = service._create_background_relationship_suggestions(
+            connection,
+            work_id=work["id"], work_version=discovered["version"],
+            scene_id=scene["scene_id"], scene_revision=revision,
+            agent_run_id="duplicate-check",
+            suggestions=[{
+                "kind": "character_relationship",
+                "from_character_id": saved_cards[0],
+                "to_character_id": saved_cards[1],
+                "relation_kind": "调查搭档",
+                "summary": "两人明确约定共同核对档案。",
+                "source_block_ids": ["block-relation"],
+            }],
+            provider_descriptor=service.provider.descriptor(),
+        )
+    assert duplicated == []
+    source = next(
+        item for item in discovered["artifacts"]
+        if item["kind"] == "character_card" and item["scope_id"] == saved_cards[0]
+    )
+    assert source["current_revision"]["content"]["relationships"] == []
+
+    accepted = service.accept_proposal(
+        work["id"], suggestion["id"], {
+            "expected_version": discovered["version"],
+            "expected_impact_digest": suggestion["candidate"]["impact_preview"]["digest"],
+        },
+    )
+    source = next(
+        item for item in accepted["work"]["artifacts"]
+        if item["kind"] == "character_card" and item["scope_id"] == saved_cards[0]
+    )
+    relation = source["current_revision"]["content"]["relationships"][0]
+    assert relation["target_character_id"] == saved_cards[1]
+    assert relation["kind"] == "调查搭档"
+    assert relation["status"] == "confirmed"
+
+
+def test_background_relationship_rejects_unlisted_character_ids():
+    with pytest.raises(DomainError, match="已识别的两张不同人物卡"):
+        validate_provider_knowledge_suggestions(
+            {
+                "knowledge_suggestions": [{
+                    "kind": "character_relationship",
+                    "from_character_id": "known", "to_character_id": "invented",
+                    "relation_kind": "搭档", "summary": "共同调查",
+                    "source_block_ids": ["block-1"],
+                }]
+            },
+            scene_id="scene-1", scene_block_ids={"block-1"},
+            known_character_ids={"known", "other"},
+        )
+
+
+def test_scene_knowledge_does_not_offer_ambiguous_aliases_to_agent(tmp_path):
+    service = WritingService(tmp_path)
+    work = service.create_work({"title": "同名关系保护"})
+    for name in ("甲", "乙"):
+        saved = service.save_character_card(
+            work["id"], {
+                "expected_version": work["version"], "name": name,
+                "aliases": ["共同称呼"], "source_type": "custom",
+                "source_refs": ["作者确认"],
+            },
+        )
+        work = saved["work"]
+    with service.repo.connect() as connection:
+        known = service._scene_knowledge_characters(
+            connection, work["id"],
+            {"blocks": [{"id": "block-1", "text": "共同称呼出现了。"}]},
+        )
+    assert known == []
+
+
 def test_background_discovery_reconcile_dedupes_restart_and_new_revision_gets_new_job(tmp_path):
     service = WritingService(tmp_path)
     service.provider = KnowledgeDiscoveryProvider()
@@ -175,6 +316,55 @@ def test_background_discovery_reconcile_dedupes_restart_and_new_revision_gets_ne
             "SELECT payload_json FROM agent_dispatch_jobs WHERE operation='knowledge.discover'"
         ).fetchall()
     assert len(jobs) == 2
+
+
+def test_background_discovery_dedupe_uses_revision_index(tmp_path, monkeypatch):
+    service = WritingService(tmp_path)
+    work, scene_id, revision_id = saved_scene(service)
+    unrelated_job_id = None
+    for index in range(24):
+        queued = service.repo.enqueue_agent_work(
+            operation="knowledge.discover",
+            payload={"work_id": "other", "scope_id": f"scene-{index}",
+                     "request": {"_source_revision_id": f"revision-{index}"}},
+        )
+        unrelated_job_id = unrelated_job_id or queued["job"]["id"]
+    with service.repo.transaction() as connection:
+        connection.execute(
+            "UPDATE agent_dispatch_jobs SET payload_json='{' WHERE id=?",
+            (unrelated_job_id,),
+        )
+    first = service._queue_background_knowledge_discovery(work["id"], scene_id, revision_id)
+    assert first["created"]
+    atomic_duplicate = service.repo.enqueue_agent_work(
+        operation="knowledge.discover",
+        payload={"work_id": work["id"], "scope_id": scene_id,
+                 "request": {"_source_revision_id": revision_id,
+                             "expected_version": work["version"] + 1}},
+        dedupe_knowledge_revision=(work["id"], scene_id, revision_id),
+    )
+    assert atomic_duplicate["created"] is False
+    assert atomic_duplicate["job"]["id"] == first["job"]["id"]
+
+    def unexpected_capture():
+        raise AssertionError("duplicate should not capture provider or scan unrelated jobs")
+
+    monkeypatch.setattr(service, "_capture_provider", unexpected_capture)
+    again = service._queue_background_knowledge_discovery(work["id"], scene_id, revision_id)
+    assert again["created"] is False
+    assert again["job"]["id"] == first["job"]["id"]
+    with service.repo.connect() as connection:
+        plan = connection.execute(
+            """EXPLAIN QUERY PLAN SELECT * FROM agent_dispatch_jobs
+               WHERE operation='knowledge.discover'
+                 AND json_valid(payload_json)
+                 AND json_extract(payload_json, '$.work_id')=?
+                 AND json_extract(payload_json, '$.scope_id')=?
+                 AND json_extract(payload_json, '$.request._source_revision_id')=?
+               ORDER BY created_at DESC LIMIT 1""",
+            (work["id"], scene_id, revision_id),
+        ).fetchall()
+    assert any("idx_agent_dispatch_knowledge_revision" in row["detail"] for row in plan)
 
 
 def test_artifact_revision_comparison_is_scoped_read_only_and_integrity_checked(tmp_path):

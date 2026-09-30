@@ -30,9 +30,26 @@ def _label_text(labels: Mapping[str, Any], key: str) -> str:
     if isinstance(value, Mapping):
         return " ".join(
             str(value.get(field) or "")
-            for field in ("label", "place", "time", "mood", "tags")
+            for field in ("label", "place", "time", "time_of_day", "mood", "tags",
+                          "weather", "season", "indoor_outdoor", "search_terms_cn",
+                          "affiliation_names_cn", "category_path_cn", "usage_hint_cn")
         )
     return ""
+
+
+def background_label_metadata(index: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Merge frozen scene annotations without mutating the author's catalogue."""
+    labels = index.get("bg_label") or {}
+    scenes = (index.get("scene_labels") or {}).get("background") or {}
+    result = {}
+    for key in index.get("bg") or {}:
+        label = labels.get(key)
+        metadata = dict(label) if isinstance(label, Mapping) else {"label": label or ""}
+        scene = scenes.get(key)
+        if isinstance(scene, Mapping):
+            metadata.update({name: value for name, value in scene.items() if value is not None and value != ""})
+        result[key] = metadata
+    return result
 
 
 def _usage_pins(usage_chain: Sequence[Mapping[str, Any]]) -> tuple[set[str], set[str]]:
@@ -97,7 +114,7 @@ def _select(
 def rank_background_candidates(index: Mapping[str, Any], query: str) -> list[tuple[float, str]]:
     """Rank frozen keys using existing labels; scores are not probabilities."""
     return _ranked_candidates(
-        list(index.get("bg") or {}), index.get("bg_label") or {}, query, _terms(query),
+        list(index.get("bg") or {}), background_label_metadata(index), query, _terms(query),
     )
 
 
@@ -113,7 +130,7 @@ def build_resource_candidate_index(
     """Build a bounded prompt catalogue while leaving the source index untouched."""
     backgrounds = [str(key) for key in (index.get("bg") or {})]
     sounds = [str(key) for key in (index.get("sounds") or [])]
-    background_labels = index.get("bg_label") or {}
+    background_labels = background_label_metadata(index)
     sound_labels = index.get("sound_label") or {}
     usage_backgrounds, usage_sounds = _usage_pins(usage_chain or [])
 

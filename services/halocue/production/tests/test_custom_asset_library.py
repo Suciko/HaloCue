@@ -112,11 +112,14 @@ def test_image_recognition_is_a_proposal_until_explicit_registration(settings, m
 
     registered = service.register_custom_asset({
         **payload,
+        "labels": {"tags": [], "place": "手工地点", "time": "夜晚", "mood": ""},
         "accept_recognition": True,
         "recognition_digest": proposal["recognition"]["digest"],
     })
     assert registered["asset"]["name"] == "雨夜走廊"
     assert registered["asset"]["tags"] == ["室内", "雨夜", "走廊"]
+    assert registered["asset"]["labels"]["place"] == "手工地点"
+    assert registered["asset"]["labels"]["time"] == "夜晚"
     assert "private_source" not in registered["asset"]
     assert "source_relative" not in registered["asset"]
     assert service.custom_asset_preview(registered["asset"]["asset_id"]).path.is_file()
@@ -401,6 +404,47 @@ def test_library_is_durable_deduplicated_and_attaches_a_task_local_copy(settings
     assert restarted.list_custom_assets()["items"][0]["asset_id"] == registered["asset"]["asset_id"]
     assert restarted.custom_asset_preview(registered["asset"]["asset_id"]).path.is_file()
     restarted.jobs.close()
+
+
+def test_character_note_does_not_become_club_when_attached_to_a_task(settings):
+    service = ProductionService(settings)
+    upload = service.upload_asset(filename="student.zip", content=spine_zip_bytes())
+    asset = service.register_custom_asset({
+        "kind": "character", "upload_token": upload["upload_token"],
+        "identifier": "1516544", "display_name": "测试角色",
+        "nickname": "本机 Spine 包，含头像",
+        "labels": {"club": "游戏开发部"},
+    })["asset"]
+    run = service.create_run({
+        "project": "角色备注验证",
+        "source": {"kind": "inline", "text": "测试角色: 台词\n"},
+    })
+    attached = service.attach_custom_asset(
+        run["run"]["run_id"], asset["asset_id"],
+        {"expected_draft_version": run["draft"]["draft_version"]},
+    )
+    assert attached["asset"]["club"] == "游戏开发部"
+    assert attached["asset"]["nickname"] == "本机 Spine 包，含头像"
+    draft_token = str(service._run(run["run"]["run_id"]).draft_token)
+    assert service.adapter._draft_resources(draft_token)["characters"][0]["club"] == "游戏开发部"
+
+    cleared = service.update_custom_asset(asset["asset_id"], {
+        "expected_metadata_version": asset["metadata_version"],
+        "name": "测试角色", "nickname": "本机 Spine 包，含头像",
+        "tags": [], "labels": {"club": ""},
+    })["asset"]
+    next_run = service.create_run({
+        "project": "无社团角色备注验证",
+        "source": {"kind": "inline", "text": "测试角色: 台词\n"},
+    })
+    next_attached = service.attach_custom_asset(
+        next_run["run"]["run_id"], cleared["asset_id"],
+        {"expected_draft_version": next_run["draft"]["draft_version"]},
+    )
+    assert next_attached["asset"]["club"] == ""
+    next_token = str(service._run(next_run["run"]["run_id"]).draft_token)
+    assert service.adapter._draft_resources(next_token)["characters"][0]["club"] == ""
+    service.jobs.close()
 
 
 def test_registered_asset_metadata_can_be_corrected_without_changing_source(settings):

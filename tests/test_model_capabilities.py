@@ -32,6 +32,26 @@ def test_models_dev_request_identifies_client_and_loads_registry(monkeypatch):
     assert model_capabilities._load_models_dev() == {"google": {"models": {}}}
 
 
+def test_models_dev_failed_refresh_keeps_catalog_and_retries_soon(monkeypatch):
+    clock = [model_capabilities._REGISTRY_REFRESH_SECONDS + 1]
+    calls = []
+    monkeypatch.setattr(model_capabilities, "_REGISTRY_CACHE", {"old": {"models": {}}})
+    monkeypatch.setattr(model_capabilities, "_REGISTRY_FETCHED_AT", 0)
+    monkeypatch.setattr(model_capabilities, "_REGISTRY_LAST_FETCH_OK", True)
+    monkeypatch.setattr(model_capabilities.time, "monotonic", lambda: clock[0])
+    def unavailable(_request, timeout):
+        calls.append(timeout)
+        raise OSError("offline")
+    monkeypatch.setattr(model_capabilities, "urlopen", unavailable)
+    assert "old" in model_capabilities._load_models_dev()
+    clock[0] += 60
+    assert "old" in model_capabilities._load_models_dev()
+    assert len(calls) == 1
+    clock[0] += model_capabilities._REGISTRY_FAILURE_RETRY_SECONDS
+    model_capabilities._load_models_dev()
+    assert len(calls) == 2
+
+
 def test_remote_explicit_output_limit_beats_catalog():
     result = resolve_output_capability(
         "gpt-4o",
@@ -67,7 +87,7 @@ def test_verified_catalog_matches_exact_models_and_bounded_aliases(model_id, exp
     assert result["max_output_tokens"] == expected
     assert result["source"] == "catalog"
     assert result["source_url"].startswith("https://")
-    assert result["verified_at"] == "2026-08-07"
+    assert result["verified_at"] == ("2026-09-26" if model_id == "gpt-4o" else "2026-08-07")
 
 
 def test_similar_unknown_name_does_not_match_by_substring():

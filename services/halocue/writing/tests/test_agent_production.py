@@ -5,6 +5,7 @@ import threading
 
 import pytest
 
+from halocue_writing.agent_tools import ToolExecutionContext
 from halocue_writing.errors import DomainError
 from halocue_writing.providers import FakeWritingProvider
 from halocue_writing.service import WritingService
@@ -373,7 +374,11 @@ def test_tool_followup_failure_preserves_safe_provider_diagnosis(tmp_path):
         item for item in service.get_work(work["id"])["agent_runs"]
         if item["id"] == failed.value.details["agent_run_id"]
     )
-    assert run["failure"] == {
+    failure = run["failure"]
+    assert {key: failure[key] for key in (
+        "code", "type", "message", "failure_kind", "http_status",
+        "provider_message", "operation", "reason",
+    )} == {
         "code": "writing_provider_failed",
         "type": "DomainError",
         "message": "工具结果回传被模型服务拒绝。",
@@ -383,6 +388,11 @@ def test_tool_followup_failure_preserves_safe_provider_diagnosis(tmp_path):
         "operation": "作品讨论",
         "reason": "tool follow-up was rejected",
     }
+    diagnostics = failure["token_diagnostics"]
+    assert diagnostics["usage"]["input_tokens"] == 100
+    assert diagnostics["usage"]["output_tokens"] == 10
+    assert diagnostics["usage"]["cache_read_tokens"] == 20
+    assert diagnostics["usage"]["cache_write_tokens"] == 3
 
 
 def test_provider_tool_chain_runs_two_lookup_rounds_before_final_reply(tmp_path):
@@ -1256,3 +1266,113 @@ def test_second_service_does_not_reclassify_unleased_agent_run(tmp_path):
     run = next(item for item in restored["agent_runs"] if item["id"] == "agent-interrupted")
     assert run["status"] == "running"
     assert run["failure"] is None
+
+
+class AutoOrganizeProvider(FakeWritingProvider):
+    is_simulation = False
+    kind = "auto-organize-test"
+    display_name = "Auto organize test provider"
+
+    def __init__(self):
+        self.contexts = []
+
+    def discuss_work(self, messages, work_context):
+        self.contexts.append(work_context)
+        if work_context.get("tool_followup"):
+            return {
+                "text": "已把当前讨论交给候选整理。",
+                "questions": [],
+                "ready_for_proposal": False,
+                "ready_to_organize": False,
+                "reasoning_summary": "信息已足够，候选会等待作者决定。",
+            }
+        return {
+            "text": "信息已经足够，我先整理当前阶段候选。",
+            "questions": [],
+            "ready_for_proposal": False,
+            "ready_to_organize": False,
+            "tool_calls": [{
+                "id": "organize-1",
+                "tool": "organize_current_plan",
+                "arguments": {"reason": "短篇核心冲突、人物变化和停止边界已经明确。"},
+            }],
+        }
+
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ("我想构思一个短篇，围绕一场雨后的误会", "short_story_ideation"),
+    ("我要做多卷连载长篇，先规划长期冲突", "long_form_ideation"),
+    ("请接着我已有文章的最后一章继续写", "continue_existing_draft"),
+    ("先讨论白子和芹香的人物关系场景", "character_relationship_scene"),
+    ("先把阿拜多斯的世界规则和地点设定理清", "worldbuilding_first"),
+])
+def test_creation_intent_is_inferred_without_a_selection_form(text, expected):
+    intent = WritingService._infer_creation_intent(text)
+    assert intent["primary"] == expected
+
+
+def test_novel_adaptation_intent_is_separate_from_plan_organization():
+    intent = WritingService._infer_creation_intent(
+        "把这篇小说改成剧本", attachments=[{"filename": "source.docx"}]
+    )
+    assert intent["primary"] == "novel_to_script_adaptation"
+
+
+def test_organize_tool_creates_only_a_pending_proposal(tmp_path):
+    service = WritingService(tmp_path)
+    work = service.create_work({"title": "自动整理", "idea": "一个雨后车站的短篇。"})
+    provider = AutoOrganizeProvider()
+    service.provider = provider
+    thread = work["conversation_threads"][0]
+
+    result = service.post_conversation_message(
+        work["id"], thread["id"],
+        {"expected_thread_version": thread["version"], "text": "短篇只围绕一次误会，结尾停在两人重新并肩。"},
+    )
+
+    assert result["auto_proposal_id"]
+    state = service.get_work(work["id"])
+    proposal = next(item for item in state["proposals"] if item["id"] == result["auto_proposal_id"])
+    assert proposal["status"] == "pending"
+    assert proposal["kind"] == "brief_blueprint"
+    assert not any(item["kind"] == "story_blueprint" and item.get("status") == "accepted" for item in state["artifacts"])
+    run = next(item for item in state["agent_runs"] if item["id"] == result["agent_run_id"])
+    assert [(item["tool_name"], item["status"]) for item in run["tool_calls"]] == [("organize_current_plan", "succeeded")]
+
+
+def test_bundled_character_metadata_is_reference_only(tmp_path):
+    service = WritingService(tmp_path)
+    work = service.create_work({"title": "内置人物索引"})
+    with service.repo.connect() as connection:
+        context = ToolExecutionContext(
+            connection=connection, service=service, work_id=work["id"],
+            thread_id=work["conversation_threads"][0]["id"], scope_type="work",
+            scope_id=work["id"], permission_mode="managed",
+        )
+        result = service.agent_tools.execute(
+            context, "search_bundled_character_metadata", {"query": "白子", "limit": 4}
+        )
+    assert result.status == "succeeded"
+    assert result.output["source"] == "bundled_metadata_only"
+    assert result.output["write_boundary"] == "reference_only"
+    assert result.output["items"]
+    assert all(item["formal_card_available"] is False for item in result.output["items"])
+
+
+def test_organize_tool_rejects_adaptation_scope(tmp_path):
+    service = WritingService(tmp_path)
+    work = service.create_work({"title": "改编隔离"})
+    with service.repo.connect() as connection:
+        context = ToolExecutionContext(
+            connection=connection, service=service, work_id=work["id"],
+            thread_id=work["conversation_threads"][0]["id"], scope_type="work",
+            scope_id=work["id"], permission_mode="managed",
+            task_contract={
+                "id": "import.script",
+                "creation_intent": "novel_to_script_adaptation",
+                "task_scope": {"import_mode": "story_to_script"},
+            },
+        )
+        result = service.agent_tools.execute(context, "organize_current_plan", {})
+    assert result.status == "failed"
+    assert "独立改编工作流" in result.error["message"]

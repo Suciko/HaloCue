@@ -32,7 +32,7 @@ def test_release_ui_compares_dependency_values_not_json_object_key_order():
     )
 
 
-def _build_release(service: WritingService):
+def _build_release(service: WritingService, *, chapter_review: bool = False):
     work = service.create_work({"title": "发布完整性验收"})
     brief = service.save_brief(
         work["id"],
@@ -69,11 +69,24 @@ def _build_release(service: WritingService):
     reviewed = service.review_scene(
         work["id"], scene["scene_id"], {"expected_version": accepted["work"]["version"]}
     )
-    memory = service.skip_scene_memory_maintenance(
-        work["id"],
-        scene["scene_id"],
-        {"expected_version": reviewed["work"]["version"], "note": "测试明确跳过。"},
-    )
+    if chapter_review:
+        chapter_result = service.authoring.chapters.run(
+            work["id"], chapter["chapter_id"], {"expected_version": reviewed["work"]["version"]}
+        )
+        memory = service.authoring.chapters.decide(
+            work["id"], chapter["chapter_id"],
+            {
+                "review_id": chapter_result["review"]["id"],
+                "decision": "keep",
+                "expected_version": chapter_result["work"]["version"],
+            },
+        )
+    else:
+        memory = service.skip_scene_memory_maintenance(
+            work["id"],
+            scene["scene_id"],
+            {"expected_version": reviewed["work"]["version"], "note": "测试明确跳过。"},
+        )
     continuity = service.review_continuity(
         work["id"], {"expected_version": memory["work"]["version"]}
     )
@@ -130,6 +143,20 @@ def test_release_contracts_are_versioned_and_complete(tmp_path):
         "source_set_digest",
     } <= set(handoff_schema["properties"]["script_release"]["required"])
     assert loaded["work_id"] == work["id"]
+
+
+def test_chapter_review_release_passes_integrity_and_can_build_handoff(tmp_path):
+    service = WritingService(tmp_path)
+    work, release = _build_release(service, chapter_review=True)
+    loaded = service.get_release(release["release_id"])
+    maintenance = loaded["manifest"]["memory_maintenance"]
+    assert maintenance and maintenance[0]["status"] == "chapter_confirmed"
+    assert maintenance[0]["chapter_review_id"]
+    handoff = build_production_handoff(
+        {"release": loaded, "manifest": loaded["manifest"], "text": loaded["text"]},
+        f"{work['title']} · v1",
+    )
+    assert handoff["script_release"]["id"] == release["release_id"]
 
 
 @pytest.mark.parametrize(

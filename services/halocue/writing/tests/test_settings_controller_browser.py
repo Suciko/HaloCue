@@ -65,10 +65,17 @@ def test_settings_credentials_and_workspace_controls_in_real_browser():
               c.dialog.showModal();
               c.dialog.querySelectorAll('details').forEach(node => {node.open = true;});
             }""")
+            assert page.locator("#modelEndpointDetails").is_hidden()
+            assert page.locator('input[name="apply_scope"][value="writing"]').is_checked()
             page.locator("#settingsApiKey").fill("SYNTHETIC-KEY-A")
             page.locator('[data-preset-id="b"]').click()
             assert page.locator("#settingsApiKey").input_value() == ""
             page.locator("#settingsApiKey").fill("SYNTHETIC-KEY-B")
+            assert page.locator("#modelEndpointDetails").is_hidden()
+            page.locator('[data-preset-id="custom"]').click()
+            assert page.locator("#modelEndpointDetails").is_visible()
+            assert page.locator("#settingsApiKey").input_value() == ""
+            page.locator("#settingsApiKey").fill("SYNTHETIC-CUSTOM-KEY")
             page.locator("#settingsBaseUrl").fill("https://custom.invalid/v1")
             assert page.locator("#settingsApiKey").input_value() == ""
             page.locator("#fetchModelsBtn").click()

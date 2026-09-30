@@ -13,6 +13,50 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 from .manifest import build_integration_manifest
 
 
+# Explicit paths only: neither credentials nor arbitrary repository files are served.
+HELP_ROUTES = {
+    "/help": "help.html",
+    "/help/": "help.html",
+    "/help.html": "help.html",              # 0.x bookmarks
+    "/help/help.html": "help.html",
+    "/help/help.css": "help.css",
+    "/help/help_center.js": "help_center.js",
+    "/help/help_page.js": "help_page.js",
+    "/css/help.css": "help.css",            # 0.x asset references
+    "/js/help_center.js": "help_center.js",
+    "/js/help_page.js": "help_page.js",
+}
+HELP_FILES = frozenset(HELP_ROUTES.values())
+HELP_CSP = (
+    "default-src 'self'; style-src 'self'; script-src 'self'; "
+    "img-src 'self' data:; connect-src 'self'; object-src 'none'; "
+    "base-uri 'none'; frame-ancestors 'self'; form-action 'self'"
+)
+
+
+def _resolve_help_dir(static_dir: Path, explicit: Path | None = None) -> Path | None:
+    """Prefer packaged static/help; also accept the source bundle's legacy_help.
+
+    An explicit path is authoritative. Search only a few known directory names,
+    never expose a parent folder or use a URL-supplied filesystem path.
+    """
+    if explicit is not None:
+        candidates = [Path(explicit)]
+    else:
+        module_dir = Path(__file__).resolve().parent
+        candidates = [static_dir / "help", static_dir / "legacy_help", static_dir]
+        # Covers both server_gateway/ and services/integrated/src/<package>/.
+        for base in (static_dir.parent, *tuple(module_dir.parents)[:4]):
+            candidates.extend([base / "legacy_help", base / "static" / "help"])
+        candidates.append(module_dir / "legacy_help")
+    for candidate in candidates:
+        root = candidate.resolve()
+        if all((root / name).is_file() and (root / name).resolve().parent == root
+               for name in HELP_FILES):
+            return root
+    return None
+
+
 HOP_BY_HOP_HEADERS = {
     "connection",
     "keep-alive",
@@ -56,6 +100,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
     production_address: tuple[str, int]
     static_dir: Path
     integration_manifest: dict
+    help_dir: Path | None = None
     server_version = "HaloCueIntegrated/1.0"
 
     def log_message(self, format: str, *args: Any) -> None:
@@ -73,7 +118,41 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
-        self.wfile.write(body)
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _send_help_asset(self, filename: str) -> None:
+        if self.command not in {"GET", "HEAD"}:
+            self.send_response(405)
+            self.send_header("Allow", "GET, HEAD")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        root = self.help_dir
+        if root is None or filename not in HELP_FILES:
+            self.send_error(404, "Help assets not installed; copy legacy_help to static/help")
+            return
+        path = (root / filename).resolve()
+        if path.parent != root or not path.is_file():
+            self.send_error(404)
+            return
+        try:
+            body = path.read_bytes()
+        except OSError:
+            self.send_error(404)
+            return
+        content_type = {".html": "text/html", ".css": "text/css", ".js": "text/javascript"}[path.suffix]
+        self.send_response(200)
+        self.send_header("Content-Type", content_type + "; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", HELP_CSP)
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header("Referrer-Policy", "same-origin")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     def _send_json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -83,7 +162,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
-        self.wfile.write(body)
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     @staticmethod
     def _embed_production_script(body: bytes) -> bytes:
@@ -159,6 +239,13 @@ class GatewayHandler(BaseHTTPRequestHandler):
 
     def _proxy(self) -> None:
         parsed = urlsplit(self.path)
+        help_asset = HELP_ROUTES.get(parsed.path)
+        if help_asset is not None:
+            self._send_help_asset(help_asset)
+            return
+        if _path_is(parsed.path, "/help"):
+            self.send_error(404)
+            return
         if parsed.path == "/integration/runtime/stop":
             token = getattr(self.server, "shutdown_token", None)
             supplied = self.headers.get("X-HaloCue-Shutdown", "")
@@ -213,7 +300,11 @@ class GatewayHandler(BaseHTTPRequestHandler):
             for key, value in self.headers.items()
             if key.casefold() not in HOP_BY_HOP_HEADERS | {"host", "content-length"}
         }
-        connection = http.client.HTTPConnection(*address, timeout=30)
+        # Creating a work with an initial idea includes one synchronous model
+        # response. Its completion can exceed the usual local-service timeout;
+        # returning a premature 503 invites a second, billable submission.
+        initial_idea_request = target == "writing" and self.command == "POST" and urlsplit(downstream_path).path == "/api/v1/works"
+        connection = http.client.HTTPConnection(*address, timeout=180 if initial_idea_request else 30)
         try:
             connection.request(self.command, downstream_path, body=body, headers=headers)
             response = connection.getresponse()
@@ -228,22 +319,26 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 if key.casefold() in HOP_BY_HOP_HEADERS | {"content-length", "content-security-policy", "x-frame-options"}:
                     continue
                 self.send_header(key, value)
-            self.send_header("Content-Length", str(len(response_body)))
+            self.send_header("Content-Length", response.getheader("Content-Length", "0") if self.command == "HEAD" else str(len(response_body)))
             self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
             self.send_header("X-Frame-Options", "DENY")
             self.end_headers()
-            self.wfile.write(response_body)
+            if self.command != "HEAD":
+                self.wfile.write(response_body)
         except (ConnectionError, TimeoutError, OSError) as exc:
             payload = (f'{{"ok":false,"error":{{"code":"upstream_unavailable","message":"{target} service unavailable","details":{{"type":"{type(exc).__name__}"}}}}}}').encode("utf-8")
             self.send_response(503)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
-            self.wfile.write(payload)
+            if self.command != "HEAD":
+                self.wfile.write(payload)
         finally:
             connection.close()
 
     do_GET = _proxy
+    do_HEAD = _proxy
+    do_OPTIONS = _proxy
     do_POST = _proxy
     do_PATCH = _proxy
     do_PUT = _proxy
@@ -258,6 +353,7 @@ def create_gateway(
     production_address: tuple[str, int],
     static_dir: Path,
     integration_manifest: dict | None = None,
+    help_dir: Path | None = None,
 ) -> ThreadingHTTPServer:
     handler = type(
         "BoundGatewayHandler",
@@ -266,6 +362,7 @@ def create_gateway(
             "writing_address": writing_address,
             "production_address": production_address,
             "static_dir": static_dir.resolve(),
+            "help_dir": _resolve_help_dir(static_dir.resolve(), help_dir),
             "integration_manifest": integration_manifest or build_integration_manifest(),
         },
     )

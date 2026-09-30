@@ -4080,7 +4080,7 @@ button:disabled {
 
 .permission-popover button {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 16px;
+  grid-template-columns: minmax(0, 1fr) 16px;
   gap: 9px;
   align-items: start;
   width: 100%;
@@ -4106,7 +4106,10 @@ button:disabled {
   font-size: 11px;
 }
 
-.permission-popover button > span:nth-child(2) {
+.permission-popover button > span:first-child {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
   display: grid;
   gap: 3px;
 }
@@ -4125,8 +4128,9 @@ button:disabled {
 }
 
 .permission-popover button i {
-  display: none;
-  align-self: center;
+  display: block;
+  visibility: hidden;
+  align-self: start;
   color: var(--accent);
   font-size: 13px;
   font-style: normal;
@@ -4143,6 +4147,7 @@ button:disabled {
 }
 
 .permission-popover button.active i {
+  visibility: visible;
   display: block;
 }
 
@@ -4689,6 +4694,12 @@ button:disabled {
   height: 16px;
   margin: 1px 0 0;
   padding: 0;
+}
+.feedback-context-note {
+  margin: -9px 0 0 26px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
 }
 
 @media (max-width: 640px) {
@@ -6975,8 +6986,8 @@ button:disabled {
 .scene-memory-review > footer p {
   margin-top: 4px;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .scene-memory-review > header > span {
@@ -7055,7 +7066,7 @@ button:disabled {
 
 .memory-copy b {
   color: var(--ink-2);
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .memory-copy em {
@@ -7077,13 +7088,14 @@ button:disabled {
 
 .memory-copy p {
   color: var(--ink-2);
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.7;
 }
 
 .memory-copy small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -12627,8 +12639,8 @@ body:has(.custom-asset-dialog[open]) { overflow: hidden; }
 
 .work-user-status-copy .eyebrow {
   margin: 0;
-  color: #477666;
-  font-size: 9px;
+  color: #356d5a;
+  font-size: 11px;
   font-weight: 800;
 }
 
@@ -12640,12 +12652,22 @@ body:has(.custom-asset-dialog[open]) { overflow: hidden; }
 
 .work-user-status-copy > p:not(.eyebrow) {
   margin: 0;
-  color: #697a73;
-  font-size: 11px;
+  color: #405b4e;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.work-user-status-copy .work-user-status-error {
+  margin-top: 5px;
+  padding: 7px 9px;
+  border-left: 3px solid #a54740;
+  background: #fff2ef;
+  color: #87352f;
+  font-size: 12px;
   line-height: 1.5;
 }
 
-.work-user-status-copy ul {
+.work-user-status-copy > ul {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 10px;
@@ -12657,19 +12679,39 @@ body:has(.custom-asset-dialog[open]) { overflow: hidden; }
   list-style: none;
 }
 
-.work-user-status-copy li::before {
+.work-user-status-copy > ul > li::before {
   margin-right: 4px;
   color: #a06e42;
   content: '•';
 }
 
 .work-agent-stage .work-user-status > button {
+  align-self: start;
   min-width: 132px;
   min-height: 36px;
   border-radius: 5px;
   box-shadow: none;
   white-space: nowrap;
 }
+
+.work-agent-stage .work-user-status > .work-status-route {
+  justify-self: start;
+  width: auto;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--action);
+  font-size: 11px;
+  font-weight: 650;
+}
+.work-agent-stage .work-user-status > .work-status-route:hover {
+  border-color: var(--action-line);
+  background: var(--action-soft);
+}
+.work-agent-stage .work-user-status > .work-status-route span { margin-left: 3px; }
 
 .work-agent-stage .work-agent-composer {
   border-color: #d7e0dc;
@@ -12823,9 +12865,46 @@ body.work-dialog-open::before {
 
 #workDialog form {
   box-sizing: border-box;
+  display: grid;
+  gap: 14px;
   padding: 24px;
   max-height: calc(100dvh - 28px);
   overflow-y: auto;
+}
+
+#workDialog .dialog-head { margin-bottom: 2px; }
+#workDialog label { gap: 7px; font-size: 13px; line-height: 1.5; }
+#workDialog .new-work-idea textarea { font-size: 15px; line-height: 1.65; }
+#workDialog .new-work-idea small { color: #52655c; font-size: 12px; font-weight: 400; line-height: 1.5; }
+#workDialog .world-seed-picker { margin: 3px 0; }
+#workDialog :is(.world-seed-picker,.work-start-picker), .first-use-form :is(.world-seed-picker,.work-start-picker) { border-color:var(--hc-line); background:var(--hc-panel); }
+#workDialog .world-seed-option, .first-use-form .world-seed-option { background:var(--hc-panel); }
+#workDialog .world-seed-option:has(input:checked), .first-use-form .world-seed-option:has(input:checked) { border-color:var(--hc-action); background:var(--hc-action-soft); }
+#workDialog .world-seed-option input, .first-use-form .world-seed-option input { accent-color:var(--hc-action); }
+#workDialog .form-note { color: #52655c; font-size: 12px; line-height: 1.6; }
+
+/* The continuous manuscript shares the window with two rails. Keep the
+   scene contract legible at the actual editor width, even on desktop. */
+.writing-workbench-stage .chapter-manuscript-flow .scene-contract-editor {
+  display: block;
+  min-width: 0;
+}
+.writing-workbench-stage .chapter-manuscript-flow .scene-contract-editor > div:first-child {
+  margin-bottom: 18px;
+}
+.writing-workbench-stage .chapter-manuscript-flow .scene-contract-editor form {
+  grid-template-columns: minmax(0, 1fr);
+}
+.writing-workbench-stage .chapter-manuscript-flow .scene-contract-editor form > label,
+.writing-workbench-stage .chapter-manuscript-flow .scene-contract-editor form > details,
+.writing-workbench-stage .chapter-manuscript-flow .scene-contract-editor form > .contract-warning,
+.writing-workbench-stage .chapter-manuscript-flow .scene-contract-editor form > .actions {
+  grid-column: 1;
+}
+.writing-workbench-stage .chapter-manuscript-flow .scene-contract-check {
+  border: 1px solid #c7d8ce;
+  background: #f5faf7;
+  padding: 9px 12px;
 }
 
 #workDialog .dialog-actions {
@@ -13412,3 +13491,133 @@ body.work-dialog-open::before {
   .settings-modal .settings-nav-btn { display: inline-flex; flex: 0 0 auto; width: auto; min-width: max-content; max-width: none; align-items: center; gap: 7px; }
   .settings-modal .settings-nav-btn span { max-width: none; overflow: visible; }
 }
+
+
+/* Panel collapse controls live in the splitter grid cells, so they remain
+   fully visible and clickable even when a panel scrolls or is collapsed. */
+.panel-divider-toggle {
+  position: relative;
+  z-index: 15;
+  display: grid;
+  width: 24px;
+  height: 54px;
+  place-items: center;
+  align-self: center;
+  border: 1px solid #cbd5df;
+  background: #fff;
+  color: #54708d;
+  box-shadow: 0 3px 10px rgba(42,62,84,.10);
+  cursor: pointer;
+  font-size: 19px;
+  line-height: 1;
+}
+.panel-divider-toggle:hover { background: #edf5fb; color: #356da5; }
+.panel-divider-toggle:focus-visible { outline: 2px solid #438466; outline-offset: 2px; }
+.panel-divider-toggle-left {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+  transform: translateX(50%);
+  border-radius: 0 7px 7px 0;
+}
+.panel-divider-toggle-right {
+  grid-column: 4;
+  grid-row: 2;
+  justify-self: start;
+  transform: translateX(-50%);
+  border-radius: 7px 0 0 7px;
+}
+.app-shell.production-mode .panel-divider-toggle,
+.app-shell.overview-stage.work-agent-stage .panel-divider-toggle-right { display: none; }
+@media (max-width: 760px) { .panel-divider-toggle { display: none; } }
+.intent-composer-actions .intent-attachment { display: inline-flex; align-items: center; justify-content: center; text-align: center; }
+
+
+/* The starter surface has a work switcher, not an Agent inspector.  Removing
+   the unused fourth grid track prevents the misleading blank right gutter. */
+@media (min-width: 761px) {
+  .app-shell.empty-work-stage,
+  .app-shell.empty-work-stage.inspector-collapsed {
+    grid-template-columns: 58px 280px minmax(0, 1fr) 0 !important;
+  }
+
+  .app-shell.empty-work-stage.tree-collapsed,
+  .app-shell.empty-work-stage.tree-collapsed.inspector-collapsed {
+    grid-template-columns: 58px 34px minmax(0, 1fr) 0 !important;
+  }
+
+  .empty-work-stage > .inspector,
+  .empty-work-stage > .inspector-rail,
+  .empty-work-stage > .panel-divider-toggle-right {
+    display: none !important;
+  }
+
+.empty-work-stage > .workspace {
+    grid-column: 3 / 5;
+  }
+}
+
+/* Release review starts with one clear action; the detailed gates remain available. */
+#app.hc-redesign .release-status-banner {
+  display: grid;
+  justify-content: stretch;
+  gap: 4px;
+  margin: 0 0 12px;
+  padding: 15px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper-2);
+  color: var(--ink);
+}
+#app.hc-redesign .release-status-banner strong,
+#app.hc-redesign .release-status-banner span { display: block; min-width: 0; overflow-wrap: anywhere; }
+#app.hc-redesign .release-status-banner strong { font-size: 15px; line-height: 1.4; }
+#app.hc-redesign .release-status-banner span { color: var(--muted); font-size: 12px; line-height: 1.55; }
+#app.hc-redesign .release-status-banner[data-state="passed"],
+#app.hc-redesign .release-status-banner[data-state="frozen"] { border-color: var(--success); background: var(--success-soft); }
+#app.hc-redesign .release-status-banner[data-state="blocked"] { border-color: var(--red); background: var(--hc-danger-soft); }
+#app.hc-redesign .release-neutral-note {
+  margin: 0 0 15px;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  color: var(--muted);
+  line-height: 1.6;
+}
+#app.hc-redesign .release-quick-review {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  margin: 0 0 20px;
+  padding: 19px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+#app.hc-redesign .release-quick-review :is(h3,p) { margin: 0; }
+#app.hc-redesign .release-quick-review h3 { color: var(--ink); font-size: 17px; line-height: 1.4; }
+#app.hc-redesign .release-quick-review p:not(.eyebrow) { margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.65; }
+#app.hc-redesign .release-quick-review small { display: block; margin-top: 8px; color: var(--amber); line-height: 1.5; }
+#app.hc-redesign .release-quick-review > button { min-width: 128px; min-height: 42px; }
+#app.hc-redesign .release-detailed-checks { margin: 20px 0; border-top: 1px solid var(--line); color: var(--ink); }
+#app.hc-redesign .release-detailed-checks > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; cursor: pointer; font-size: 13px; font-weight: 650; }
+#app.hc-redesign .release-detailed-checks > summary span { color: var(--muted); font-size: 11px; font-weight: 400; }
+#app.hc-redesign .release-detailed-checks > p { margin: 0 0 14px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+#app.hc-redesign .release-detailed-checks > button { margin: 12px 0 4px; }
+@media (max-width: 700px) {
+  #app.hc-redesign .release-quick-review { grid-template-columns: 1fr; padding: 16px; }
+  #app.hc-redesign .release-quick-review > button { width: 100%; }
+}
+
+/* Token diagnostics: make cost and context failures actionable in Activity. */
+.task-token-diagnostics { margin: 12px 0 0; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--hc-line) 75%, #c48a3a); border-radius: 8px; background: color-mix(in srgb, var(--hc-panel) 88%, #f4ead8); }
+.task-token-diagnostics b { display: block; margin-bottom: 4px; color: var(--ink); }
+.task-token-diagnostics p { margin: 4px 0 8px; font-size: 12px; color: var(--muted); }
+.task-token-diagnostics dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; margin: 0; font-size: 12px; }
+.task-token-diagnostics dl > div { display: flex; justify-content: space-between; gap: 10px; border-top: 1px solid color-mix(in srgb, var(--hc-line) 70%, transparent); padding-top: 5px; }
+.task-token-diagnostics dt { color: var(--muted); }
+.task-token-diagnostics dd { margin: 0; color: var(--ink); font-variant-numeric: tabular-nums; text-align: right; }
+.task-token-method { overflow-wrap: anywhere; }
+@media (max-width: 680px) { .task-token-diagnostics dl { grid-template-columns: 1fr; } }

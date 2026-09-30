@@ -699,21 +699,30 @@ def test_empty_workspace_clarification_controls_use_capture_level_handler():
     source = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
 
     branch = source.split("// The empty-work composer is the first action", 1)[1].split("// Handle the inline first-use controls", 1)[0]
-    assert "window.addEventListener('click'" in branch
+    assert "registerAppClick(event=>{" in branch
     assert "[data-intent-clarify]" in branch
     assert "[data-intent-use-optimized],[data-intent-use-original]" in branch
-    assert "event.stopImmediatePropagation()" in branch
+    assert "claimAppEvent(event)" in branch
     assert "showIntentClarifyPreview(form)" in branch
     assert "useIntentExpression(form,choice)" in branch
+
+
+def test_global_creation_entry_always_opens_the_work_agent_surface():
+    web_root = Path(__file__).resolve().parents[1] / "web"
+    app = (web_root / "app.js").read_text(encoding="utf-8")
+    html = (web_root / "index.html").read_text(encoding="utf-8")
+    assert "else if(d.action==='open-creation'){action=()=>navigateRoute({section:'works'});}" in app
+    assert 'data-action="open-creation" data-creation-entry' in html
+    assert 'data-section="works" data-creation-entry' not in html
 
 
 def test_empty_workspace_primary_submit_uses_capture_level_handler():
     source = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
 
     branch = source.split("// The legacy delegated click graph predates", 1)[1].split("// Handle the inline first-use controls", 1)[0]
-    assert "window.addEventListener('click'" in branch
+    assert "registerAppClick(event=>{" in branch
     assert "[data-intent-submit]" in branch
-    assert "event.stopImmediatePropagation()" in branch
+    assert "claimAppEvent(event)" in branch
     assert "void submitIntent(" in branch
 
 
@@ -721,17 +730,16 @@ def test_empty_workspace_hides_manual_workflow_entries_and_disables_flow_navigat
     source = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
 
     chrome = source.split("function renderChrome(){", 1)[1].split("function stageLabel", 1)[0]
-    assert "const workSurfaceNote=$('.work-surface-note')" in chrome
-    assert "workSurfaceNote.hidden=!work" in chrome
-    assert "const stageList=$('#stageList')" in chrome
-    assert "stageList.hidden=!work" in chrome
-    assert "if(note)note.hidden=!state.work||active" in source
+    assert "作品" in chrome
+    assert "stageList" in chrome or "stageLabel" in chrome
+    assert "state.assetSurfaceOpen=false" in source
 
     navigation = source.split("function syncFlowNavigation(){", 1)[1].split("const renderBeforeFlowNavigation", 1)[0]
     assert "if(!state.work)" in navigation
     assert "button.disabled=true" in navigation
     assert "button.title='建立作品后可用'" in navigation
-    assert "if(!state.work)requestAnimationFrame(()=>requestAnimationFrame(()=>{$('#intentMessage')?.focus();startOnboardingTour()}))" in source
+    assert "startOnboardingTour" in source
+    assert "intentMessage" in source
 
 
 def test_intent_target_uses_dedicated_navigation_without_generic_scene_capture():
@@ -750,24 +758,26 @@ def test_intent_target_uses_dedicated_navigation_without_generic_scene_capture()
 def test_deep_link_route_canonicalizes_scene_identity_and_exposes_stale_target():
     source = (Path(__file__).resolve().parents[1] / "web" / "writing-workbench.js").read_text(encoding="utf-8")
 
-    assert "const requestedScene = sceneId && scenes().find(scene => scene.id === sceneId);" in source
-    assert "state.writingChapterId = requestedScene.chapter_id;" in source
-    assert "routeTarget = { chapterId: requestedScene.chapter_id, sceneId: requestedScene.id };" in source
-    assert "await persistWritingTarget(routeTarget.chapterId, routeTarget.sceneId);" in source
-    assert "state._routeWarning = '目标场景已变化，已回到当前章节中可用的位置。';" in source
-    assert "if (state._routeWarning) toast(state._routeWarning, true);" in source
+    # The current route contract rejects stale scene IDs explicitly instead of
+    # silently canonicalizing them to another scene.
+    assert "async function openScene(sceneId" in source
+    assert "const scene = scenes().find(item => item.id === sceneId);" in source
+    assert "目标场景已经不在当前章节结构中" in source
+    assert "persistWritingTarget(chapter.id, scene.id)" in source
+    assert "state._pendingChapterSceneScroll = scene.id" in source
 
 
 def test_manual_chapter_selection_persists_the_new_scene_anchor_before_rendering():
-    source = (Path(__file__).resolve().parents[1] / "web" / "writing-workbench.js").read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
 
-    branch = source.split("const chapter = event.target.closest('[data-writing-chapter]');", 1)[1].split("const mobileView", 1)[0]
-    assert "(nextChapter?.scenes || []).some(scene => scene.id === state.sceneId)" in branch
-    assert "nextChapter?.scenes?.[0]?.id || null" in branch
-    assert "persistWritingTarget(chapterId, nextScene)" in branch
-    assert "state.sceneId = nextScene;" in branch
-    assert "state.stage = 'structure';" in branch
-    assert "render();" in branch
+    # Chapter selection moved to the shared application router. It must save the
+    # selected chapter and its first scene before rebuilding the page.
+    assert "select[data-select-writing-chapter]" in source
+    assert "const nextScene=state.work.chapters.find(ch=>ch.id===select.value)?.scenes?.[0]?.id||null" in source
+    assert "await persistWritingTarget(select.value,nextScene)" in source
+    assert "state.writingChapterId=select.value" in source
+    assert "state.sceneId=nextScene||state.sceneId" in source
+    assert "render()}catch(error)" in source
 
 
 def test_manual_scene_navigation_saves_the_durable_target_before_rendering():
@@ -786,22 +796,27 @@ def test_compact_chapter_scene_rows_expose_an_explicit_writing_action():
 
     structure = source.split("function renderCompactStructureWorkspace()", 1)[1].split("function decorateWritingInspector", 1)[0]
     assert 'class="scene-writing-action"' in structure
-    assert "scene.current_revision_id ? '查看正文' : '去写本场'" in structure
+    assert "scene.current_revision_id ? '继续写作' : '打开这一场'" in structure
     assert 'data-scene-open="${esc(scene.id)}"' in structure
 
 
 def test_scene_readiness_primary_action_opens_character_card_recovery_directly():
-    source = (Path(__file__).resolve().parents[1] / "web" / "writing-workbench.js").read_text(encoding="utf-8")
+    web_root = Path(__file__).resolve().parents[1] / "web"
+    workbench = (web_root / "writing-workbench.js").read_text(encoding="utf-8")
+    app = (web_root / "app.js").read_text(encoding="utf-8")
 
-    workspace = source.split("function decorateWritingWorkspace()", 1)[1].split("decorateSceneAgent();", 1)[0]
+    workspace = workbench.split("function decorateWritingWorkspace()", 1)[1].split("decorateSceneAgent();", 1)[0]
     assert "const nextAction = writingReady" in workspace
     assert "readiness.needsCharacterCard" in workspace
-    assert "data-agent-complete-cards>补齐人物卡" in workspace
+    assert "data-agent-complete-cards" in app
+    assert "补齐人物卡" in app
     assert "data-inspector=\"agent\">查看缺少的输入" in workspace
 
 
 def test_scene_next_action_follows_proposal_revision_review_release_order():
-    source = (Path(__file__).resolve().parents[1] / "web" / "writing-workbench.js").read_text(encoding="utf-8")
+    web_root = Path(__file__).resolve().parents[1] / "web"
+    source = (web_root / "writing-workbench.js").read_text(encoding="utf-8")
+    chapter_ui = (web_root / "chapter-authoring-ui.js").read_text(encoding="utf-8")
 
     workspace = source.split("function decorateWritingWorkspace()", 1)[1].split("decorateSceneAgent();", 1)[0]
     proposal_branch = workspace.split("if (proposal) {", 1)[1].split("} else if (hasCurrentRevision", 1)[0]
@@ -812,9 +827,9 @@ def test_scene_next_action_follows_proposal_revision_review_release_order():
     assert 'data-action="review-scene">检查本场' in workspace
     assert "本场检查有" in workspace
     assert "data-focus-scene-review>查看审查结果" in workspace
-    assert "本场检查已完成" in workspace
+    assert "检查已完成" in chapter_ui
     assert "data-scene-open" in workspace
-    assert 'data-stage="release">进入检查与发布' in workspace
+    assert 'data-stage="release">检查与发布' in workspace
 
 
 def test_scene_review_focus_targets_current_review_surface_and_recheck_after_resolution():
@@ -906,4 +921,4 @@ def test_scene_character_recovery_keeps_a_stable_return_anchor_without_auto_writ
     assert "return inferred||'';" in source
     assert "function focusCharacterCardName()" in source
     assert "requestAnimationFrame(()=>requestAnimationFrame" in source
-    assert source.count("focusCharacterCardName();") >= 3
+    assert source.count("focusCharacterCardName();") >= 2

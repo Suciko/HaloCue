@@ -134,7 +134,7 @@ GET  /api/v1/settings/aa-workspace
 POST /api/v1/settings/aa-workspace
 ```
 
-The settings request is `{"path":"E:\\AzureArchive\\...\\data"}`. A valid
+The settings request is `{"path":"<AA data workspace>"}`. A valid
 workspace must contain `projects`, `saves`, `overrides`, and `settings`.
 The selected path is persisted only in `08-HaloCue-1.0/data/settings.json`.
 

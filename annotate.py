@@ -12,6 +12,7 @@ script2aap.py。任何超出资源表的标注都会被丢弃并告警——模�
 import argparse
 import hashlib
 import json
+import copy
 import os
 import re
 import sys
@@ -165,6 +166,34 @@ def _scoped_face_evidence(
     return evidence
 
 
+
+def _model_face_scope(index, character):
+    """Use the frozen character's selected variant when the cast omits selectors.
+
+    Visual annotations enrich existing asset face IDs; they never create new IDs.
+    Explicit selectors remain authoritative and ambiguous variants fail closed.
+    """
+    ident = character.get("id")
+    record = next((row for row in index.get("characters", []) if row.get("identifier") == ident), {})
+    explicit = bool(character.get("spine_signature") or character.get("outfit_key"))
+    selector = {
+        "spine_signature": character.get("spine_signature", "") if explicit else record.get("spine_signature", ""),
+        "outfit_key": character.get("outfit_key", "") if explicit else record.get("outfit_key", ""),
+    }
+    selected = _selected_variants(index.get("face_capabilities") or {}, ident, **selector)
+    if len(selected) > 1:
+        return {}, selector
+    capabilities = {ident: copy.deepcopy(selected)}
+    if not character.get("custom") and selected:
+        same_record = all(not selector[key] or selector[key] == record.get(key) for key in selector)
+        asset_ids = {str(face.get("id") or "") for face in record.get("faces", []) if isinstance(face, dict)} if same_record else set()
+        for variant in capabilities[ident]:
+            for face in variant.get("faces", []):
+                if str(face.get("id") or "") in asset_ids and face_visual_evidence(face) == "visual_confirmed":
+                    face["sources"] = list(dict.fromkeys([*face.get("sources", []), "atlas_candidate"]))
+    return capabilities, selector
+
+
 def annotation_constraints(idx, cast, *, usage_chain=None):
     """Build the complete allowlist used to filter one model response.
 
@@ -188,23 +217,20 @@ def annotation_constraints(idx, cast, *, usage_chain=None):
         for character in cast.values():
             ident = character.get("id")
             if ident:
-                selector = {
-                    "spine_signature": character.get("spine_signature", ""),
-                    "outfit_key": character.get("outfit_key", ""),
-                }
+                scoped_capabilities, selector = _model_face_scope(idx, character)
                 official = ident in {
                     record.get("identifier")
                     for record in idx.get("characters", [])
                 } and not character.get("custom")
                 faces_by_id[ident] = (
-                    semantic_face_allowlist(capabilities, ident, **selector)
+                    semantic_face_allowlist(scoped_capabilities, ident, **selector)
                     if ident in semantic_modular
-                    else official_basic_face_allowlist(capabilities, ident, **selector)
+                    else official_basic_face_allowlist(scoped_capabilities, ident, **selector)
                     if official
-                    else face_allowlist(capabilities, ident, **selector)
+                    else face_allowlist(scoped_capabilities, ident, **selector)
                 )
                 face_evidence_by_id[ident] = _scoped_face_evidence(
-                    capabilities, ident, faces_by_id[ident], **selector
+                    scoped_capabilities, ident, faces_by_id[ident], **selector
                 )
     else:
         faces_by_id = {
@@ -588,12 +614,12 @@ def build_static(idx, cast, cast_names, *, story_type="auto", direction_profile=
             expression_mode = character.get(
                 "_expression_mode", record.get("expression_mode", "opaque_custom")
             )
+            scoped_capabilities, selector = _model_face_scope(idx, character)
             faces_by_id[ident] = {
                 "faces": _allowed_face_records(
-                    capabilities,
+                    scoped_capabilities,
                     ident,
-                    spine_signature=character.get("spine_signature", ""),
-                    outfit_key=character.get("outfit_key", ""),
+                    **selector,
                     semantic=expression_mode == "semantic_modular",
                     official_basic=ident in character_records and not character.get("custom"),
                 ),
@@ -644,6 +670,7 @@ def parse_lines(path, cast):
         out.append(item)
     pending_directives = set()
     authored_camera_hold = False
+    authored_background = ""
     for item in out:
         if item.get("kind") != "line":
             raw = str(item.get("raw") or "")
@@ -655,17 +682,22 @@ def parse_lines(path, cast):
             if structural_boundary:
                 pending_directives.clear()
                 authored_camera_hold = False
+                authored_background = ""
             elif scene_directive:
                 authored_camera_hold = False
             match = re.match(r"^\s*@([A-Za-z_]+)\b\s*(.*)$", raw)
             if match and match.group(1).lower() in _DIRECTIVE_FIELDS:
                 command = match.group(1).lower()
+                if command == "bg":
+                    authored_background = match.group(2).strip()
                 pending_directives.add(_DIRECTIVE_FIELDS[command])
                 if command == "camera_hold":
                     authored_camera_hold = match.group(2).strip().lower() not in {"auto", "自动"}
                 elif command == "camera":
                     authored_camera_hold = False
             continue
+        if authored_background:
+            item["_authored_background"] = authored_background
         effective_directives = set(pending_directives)
         if authored_camera_hold:
             effective_directives.add("camera_hold")
@@ -713,6 +745,10 @@ def render_annotated_items(items, *, reaction_records=None):
     for item in items:
         if item["kind"] != "line":
             out_lines.append(item["raw"])
+            authored_bg = re.match(r"^\s*@bg\s+(.+?)\s*$", item["raw"], re.IGNORECASE)
+            if authored_bg:
+                last_bg = authored_bg.group(1)
+                has_background = True
             continue
 
         background = item.get("bg")

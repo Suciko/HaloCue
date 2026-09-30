@@ -1843,12 +1843,13 @@ def test_structure_reorder_rejects_missing_and_external_ids(tmp_path):
 def test_multi_volume_binder_order_and_membership_survive_restart(tmp_path):
     service = WritingService(tmp_path)
     work = service.create_work({"title": "多卷 Binder"})
-    with pytest.raises(DomainError) as blocked:
-        service.create_volume(
-            work["id"],
-            {"expected_version": work["version"], "title": "过早建立的卷"},
-        )
-    assert blocked.value.code == "blueprint_required"
+    # The outline is editable before a story-direction proposal is confirmed;
+    # this is the durable world-first/outline-first path.
+    second_volume = service.create_volume(
+        work["id"],
+        {"expected_version": work["version"], "title": "第二卷"},
+    )
+    work = second_volume["work"]
 
     brief = service.save_brief(
         work["id"],
@@ -1870,14 +1871,10 @@ def test_multi_volume_binder_order_and_membership_survive_restart(tmp_path):
             "title": "第一卷第一章",
         },
     )
-    second_volume = service.create_volume(
-        work["id"],
-        {"expected_version": first["work"]["version"], "title": "第二卷"},
-    )
     second = service.create_chapter(
         work["id"],
         {
-            "expected_version": second_volume["work"]["version"],
+            "expected_version": first["work"]["version"],
             "volume_id": second_volume["volume_id"],
             "title": "第二卷第一章",
         },
@@ -1921,20 +1918,21 @@ def test_intent_proposal_confirmation_and_scene_mode_are_durable(tmp_path):
     proposed = service.generate_blueprint(work["id"], {"expected_version": intent["work"]["version"]})
     proposal = next(item for item in proposed["work"]["artifacts"] if item["kind"] == "story_blueprint")["current_revision"]["content"]
     assert proposal["status"] == "proposed"
-    with pytest.raises(DomainError) as blocked:
-        service.create_chapter(work["id"], {"expected_version": proposed["work"]["version"], "title": "第一章"})
-    assert blocked.value.code == "blueprint_unconfirmed"
+    draft_chapter = service.create_chapter(
+        work["id"],
+        {"expected_version": proposed["work"]["version"], "title": "第一章"},
+    )
 
     confirmed = service.confirm_blueprint(
         work["id"],
         {
-            "expected_version": proposed["work"]["version"],
+            "expected_version": draft_chapter["work"]["version"],
             "mode": "bond_short",
             "character_card_ids": ["character-aris"],
             "sensei_presence": "auto",
         },
     )
-    chapter = service.create_chapter(work["id"], {"expected_version": confirmed["work"]["version"], "title": "第一章"})
+    chapter = {"chapter_id": draft_chapter["chapter_id"], "work": confirmed["work"]}
     scene = service.create_scene(
         work["id"],
         chapter["chapter_id"],

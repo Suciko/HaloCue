@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
 from .errors import ProductionError
+from .background_names import background_name_metadata
 from .name_baseline import CharacterNameBaseline
 from .resource_previews import ResourcePreview, ResourcePreviewCatalog
+from .background_library import BackgroundLibraryScope
+from .background_search import background_search_document, background_search_score
 
 
 RESOURCE_KINDS = {"characters", "backgrounds", "sounds", "cg"}
@@ -23,9 +27,13 @@ class ResourceCatalog:
         legacy_root: Path | None = None,
         name_baseline: CharacterNameBaseline | None = None,
     ) -> None:
+        self._index_lock = threading.RLock()
+        self._index_cache = None
+        self._index_stamp = None
         self.index_path = index_path
         self.aa_data = aa_data
-        self.previews = ResourcePreviewCatalog(legacy_root or Path(), aa_data)
+        self.previews = ResourcePreviewCatalog(legacy_root or Path(), aa_data, index_path)
+        self.background_scope = BackgroundLibraryScope(aa_data, index_path)
         self.name_baseline = name_baseline or CharacterNameBaseline()
 
     def cg_keys(self) -> list[str]:
@@ -43,6 +51,20 @@ class ResourceCatalog:
         )
 
     def _load(self) -> dict[str, Any]:
+        # Thumbnail grids issue concurrent requests; parse the large catalogue once.
+        with self._index_lock:
+            try:
+                stat = self.index_path.stat() if self.index_path else None
+                stamp = (str(self.index_path), stat.st_mtime_ns, stat.st_size) if stat else None
+            except OSError:
+                stamp = None
+            if stamp is not None and stamp == self._index_stamp and self._index_cache is not None:
+                return self._index_cache
+            value = self._read_index()
+            self._index_stamp, self._index_cache = stamp, value
+            return value
+
+    def _read_index(self) -> dict[str, Any]:
         if not self.index_path or not self.index_path.is_file():
             raise ProductionError(
                 "resource_index_not_configured",
@@ -113,17 +135,28 @@ class ResourceCatalog:
             ]
         elif kind == "backgrounds":
             raw = payload.get("bg") if isinstance(payload.get("bg"), dict) else {}
-            items = [
-                {
-                    "key": str(key),
-                    "name": str(key),
+            labels = payload.get("bg_label") if isinstance(payload.get("bg_label"), dict) else {}
+            scene_labels = payload.get("scene_labels") if isinstance(payload.get("scene_labels"), dict) else {}
+            scene_backgrounds = scene_labels.get("background") if isinstance(scene_labels.get("background"), dict) else {}
+            items = []
+            visible = self.background_scope.visible_keys(payload)
+            for key, value in raw.items():
+                if key not in visible:
+                    continue
+                token = str(key)
+                metadata = {
+                    **(labels.get(token) if isinstance(labels.get(token), dict) else {}),
+                    **(scene_backgrounds.get(token) if isinstance(scene_backgrounds.get(token), dict) else {}),
+                }
+                row = {
+                    "key": token,
+                    **background_name_metadata(token, metadata),
                     "aa_hash": value,
                     "source": "resource_index",
-                    "preview_available": self._preview_available("backgrounds", str(key)),
                 }
-                for key, value in raw.items()
-                if not needle or needle in str(key).casefold()
-            ]
+                if background_search_score(background_search_document({**metadata, **row}), needle) is not None:
+                    row["preview_available"] = self._preview_available("backgrounds", token)
+                    items.append(row)
         elif kind == "sounds":
             raw = payload.get("sounds") if isinstance(payload.get("sounds"), list) else []
             items = [
@@ -189,8 +222,7 @@ class ResourceCatalog:
         if kind == "cg":
             return key in set(self.cg_keys())
         if kind == "backgrounds":
-            raw = self._load().get("bg")
-            return isinstance(raw, dict) and key in raw
+            return key in self.background_scope.visible_keys(self._load())
         if kind == "sounds":
             raw = self._load().get("sounds")
             return isinstance(raw, list) and key in {str(item) for item in raw}

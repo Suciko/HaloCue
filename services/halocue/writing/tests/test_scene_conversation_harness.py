@@ -185,6 +185,9 @@ def test_scene_conversation_uses_fixed_read_only_context_and_multiturn_fake_repl
     assert provider_context["current_manuscript"] is None
     assert provider_context["ba_skill"]["status"] == "ready"
     assert provider_context["confirmed_materials"]
+    character_inputs = [item["content"] for item in provider_context["confirmed_materials"] if item["kind"] == "character_card"]
+    assert character_inputs
+    assert all(item["schema_version"] == "runtime-character-card/1.1" and "ba_profile" not in item for item in character_inputs)
     assert provider_context["source_revision_ids"]
     assert "不得写回" in provider_context["write_boundary"]
 
@@ -283,6 +286,46 @@ def test_multiturn_scene_discussion_generates_pending_proposal_and_links_message
     restored_notice = restored_thread["messages"][-1]
     assert restored_notice["proposal_id"] == generated["proposal_id"]
     assert restored_notice["agent_run_id"] == generated["agent_run_id"]
+
+
+def test_direct_scene_request_is_persisted_and_generates_without_discussion_call(tmp_path):
+    service = WritingService(tmp_path)
+    provider = CapturingProvider()
+    service.provider = provider
+    work_id, scene_id, work = create_ready_scene(service)
+    current, thread = create_scene_thread(service, work_id, scene_id, work)
+    request = "只写提示灯亮起后的观察。\n保持两句短对白。"
+    result = service.generate_scene_proposal_from_conversation(
+        work_id, thread["id"], {
+            "expected_version": current["version"],
+            "expected_thread_version": thread["version"], "instruction": request,
+        },
+    )
+    assert not provider.discussion_contexts
+    assert request in provider.scene_contexts[-1]["instruction"]
+    updated = next(t for t in result["work"]["conversation_threads"] if t["id"] == thread["id"])
+    assert updated["version"] == thread["version"] + 2
+    assert updated["messages"][-2]["content"]["text"] == request
+    assert updated["messages"][-1]["proposal_id"] == result["proposal_id"]
+    assert updated["messages"][-1]["content"]["text"] == "正文已写好，查看后加入本场。"
+    assert result["work"]["chapters"][0]["scenes"][0]["current_revision_id"] is None
+
+
+def test_scene_proposal_job_rejects_a_thread_from_another_scene_before_model_call(tmp_path):
+    service = WritingService(tmp_path)
+    provider = CapturingProvider()
+    service.provider = provider
+    work_id, scene_id, work = create_ready_scene(service)
+    current, thread = create_scene_thread(service, work_id, scene_id, work)
+    with pytest.raises(DomainError) as caught:
+        service.enqueue_agent_operation(work_id, {
+            "operation": "scene.proposal.generate", "scope_id": "other-scene",
+            "request": {"expected_version": current["version"],
+                        "expected_thread_version": thread["version"],
+                        "thread_id": thread["id"], "instruction": "改写"},
+        })
+    assert caught.value.code == "scene_conversation_required"
+    assert not provider.scene_contexts
 
 
 def test_scene_proposal_http_route_uses_rewrite_and_optional_selection(tmp_path):

@@ -14,6 +14,18 @@ PNG_1X1 = base64.b64encode(
 ).decode("ascii")
 
 
+def test_work_can_start_without_title_or_idea(tmp_path):
+    service = WritingService(tmp_path)
+    created = service.create_work({"title": "", "idea": "", "world_seed": "blank"})
+    reopened = service.get_work(created["id"])
+    assert reopened["title"] == "未命名作品"
+    assert len(reopened["chapters"]) == 1
+    assert reopened["chapters"][0]["scenes"] == []
+    assert reopened["conversation_threads"][0]["messages"] == []
+    assert not any(item["kind"] == "world_bible" for item in reopened["artifacts"])
+    service.close()
+
+
 class ReasoningProvider(FakeWritingProvider):
     is_simulation = False
     display_name = "Reasoning Test Provider"
@@ -692,7 +704,7 @@ def test_new_work_atomically_creates_volume_chapter_and_work_conversation(tmp_pa
         }
     )
 
-    assert work["title"].startswith("爱丽丝和凯伊")
+    assert work["title"] == "未命名作品"
     assert len(work["volumes"]) == 1
     assert work["volumes"][0]["title"] == "第一卷"
     assert len(work["volumes"][0]["chapters"]) == 1
@@ -1451,6 +1463,16 @@ def test_story_blueprint_accepts_writing_pack_display_mode_names():
     assert normalized["mode"] == "bond_short"
     assert normalized["recommendations"]["secondary_scene_modes"] == ["text_reading"]
 
+    investigation = WritingService._validate_story_blueprint({
+        "title": "废线调查",
+        "premise": "老师与学生一起追查失踪乘客。",
+        "central_conflict": "车票指向不存在的班次。",
+        "direction": ["核对车票与失踪报告。"],
+        "characters": ["原创学生", "老师"],
+        "mode": "主线与任务调查模式",
+    })
+    assert investigation["mode"] == "main_battle"
+
 
 def test_explicit_narrator_only_blueprint_can_be_confirmed_without_character_cards(tmp_path):
     service = WritingService(tmp_path)
@@ -1527,6 +1549,10 @@ def test_explicit_narrator_only_blueprint_can_be_confirmed_without_character_car
         "world_item_ids": [],
         "reference_file_ids": [],
     }
+    readiness = service.assemble_context(work["id"], scene["scene_id"])["readiness"]
+    assert readiness["narrator_only"] is True
+    assert readiness["runtime_cards_ready"] is True
+    assert readiness["real_ba_writing"] == "ready_for_provider"
 
 
 def test_chapter_plan_acceptance_rejects_stale_story_blueprint_dependency(tmp_path):

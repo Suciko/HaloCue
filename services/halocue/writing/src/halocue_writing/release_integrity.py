@@ -384,13 +384,15 @@ def _verify_manifest_shape(manifest: dict, release_id: str) -> None:
     for item in manifest["memory_maintenance"]:
         if (
             not isinstance(item, dict)
-            or set(item) != _MEMORY_KEYS
+            or not _MEMORY_KEYS <= set(item)
+            or not (set(item) - _MEMORY_KEYS) <= {"chapter_review_id"}
             or any(not isinstance(item.get(key), str) or not item[key] for key in ("scene_id", "revision_id"))
             or not isinstance(item.get("complete"), bool)
             or not isinstance(item.get("status"), str)
             or not item["status"]
             or (item.get("work_item_id") is not None and not isinstance(item["work_item_id"], str))
             or (item.get("decision") is not None and not isinstance(item["decision"], str))
+            or ("chapter_review_id" in item and (not isinstance(item["chapter_review_id"], str) or not item["chapter_review_id"]))
         ):
             raise _integrity_error(release_id, "manifest_shape_invalid")
 

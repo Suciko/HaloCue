@@ -14,6 +14,7 @@ def build_scene_readiness(
     runtime_character_cards: Sequence[Mapping[str, Any]],
     missing_runtime_character_cards: Sequence[str],
     explicit_character_selection: bool,
+    narrator_only: bool = False,
     context_ready: bool = True,
 ) -> dict[str, Any]:
     """Build the stable, author-facing readiness contract for one scene."""
@@ -24,7 +25,12 @@ def build_scene_readiness(
         provider.get("is_simulation")
     )
     skill_ready = skill_runtime.get("status") == "ready"
-    runtime_cards_ready = bool(runtime_character_cards) and not missing_cards
+    narrator_only = bool(narrator_only)
+    # A confirmed narrator-only blueprint is an explicit runtime contract: it
+    # requires zero character cards, but it must not mask named-card gaps.
+    runtime_cards_ready = not missing_cards and (
+        narrator_only or bool(runtime_character_cards)
+    )
 
     blocking_reasons: list[dict[str, Any]] = []
     if not context_ready:
@@ -81,7 +87,11 @@ def build_scene_readiness(
     reason = (
         blocking_reasons[0]["message"]
         if blocking_reasons
-        else "本场上下文、运行时人物卡、Skill 与真实模型 Provider 均已就绪。"
+        else (
+            "本场为纯旁白，Skill 与真实模型 Provider 均已就绪。"
+            if narrator_only
+            else "本场上下文、运行时人物卡、Skill 与真实模型 Provider 均已就绪。"
+        )
     )
     return {
         "schema_version": SCENE_READINESS_SCHEMA_VERSION,
@@ -90,6 +100,7 @@ def build_scene_readiness(
         "provider_ready": provider_ready,
         "skill_ready": skill_ready,
         "runtime_cards_ready": runtime_cards_ready,
+        "narrator_only": narrator_only,
         "blocking_reasons": blocking_reasons,
         # Compatibility fields for existing clients and backend gates.
         "fake_provider": "ready",
