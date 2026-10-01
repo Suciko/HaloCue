@@ -89,3 +89,25 @@ test('new work entry invites intent in conversation instead of adding a second p
  assert.match(index,/短篇、长篇、续写、改编/);
  assert.match(index,/Agent 会按类型引导/);
 });
+
+test('conversation task labels cover non-wizard creation intents',()=>{
+ const start=source.indexOf('function userFacingConversationTask(');
+ const end=source.indexOf('\n\n/* Final surface overrides',start);
+ const sandbox={};vm.createContext(sandbox);vm.runInContext(source.slice(start,end),sandbox);
+ const task=sandbox.userFacingConversationTask;
+ const expected={
+  short_story_ideation:'构思短篇',
+  long_form_ideation:'构思长篇',
+  continue_existing_draft:'继续已有文章',
+  character_relationship_scene:'构思人物关系场景',
+  worldbuilding_first:'先整理世界观',
+  outline_only:'先整理大纲',
+  script_or_scene_first:'先做场景或剧本',
+  imported_draft_review:'检查已有文稿',
+ };
+ for(const [intent,title] of Object.entries(expected)){
+  const view=task({id:'brief.build',creation_intent:intent,task_scope:{surface:'work'}});
+  assert.equal(view.title,title,intent);
+  assert.notEqual(view.subtitle,'从目标、人物、篇幅和限制开始，信息足够时自动整理候选。',intent);
+ }
+});

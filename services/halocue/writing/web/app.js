@@ -1468,13 +1468,34 @@ function userFacingConversationTask(contract){
   const importMode=contract?.task_scope?.import_mode||contract?.import_contract?.mode;
   const intent=contract?.creation_intent;
   if(importMode||intent==='novel_to_script_adaptation')return {scope,title:'把来源改成剧本',subtitle:'先检查来源结构、人物映射和缺失信息，再形成可审查的剧本候选。'};
+  const intentTitles={
+    short_story_ideation:'构思短篇',
+    long_form_ideation:'构思长篇',
+    continue_existing_draft:'继续已有文章',
+    character_relationship_scene:'构思人物关系场景',
+    worldbuilding_first:'先整理世界观',
+    outline_only:'先整理大纲',
+    script_or_scene_first:'先做场景或剧本',
+    imported_draft_review:'检查已有文稿',
+    guided_ideation:'先把想法聊清楚',
+  };
   const titles={
-    'brief.build':intent==='short_story_ideation'?'构思短篇':intent==='long_form_ideation'?'构思长篇':intent==='continue_existing_draft'?'继续已有文章':intent==='character_relationship_scene'?'构思人物关系场景':'先把想法聊清楚',
+    'brief.build':intentTitles[intent]||'先把想法聊清楚',
     'blueprint.generate':'整理故事方向候选','structure.plan':'整理作品结构候选','chapter.plan':'规划当前章节',
     'scene.draft.generate':'起草当前场景','scene.draft.rewrite':'修改当前正文','release.review':'检查并准备发布',
   };
+  const intentSubtitles={
+    short_story_ideation:'围绕单一核心冲突、人物变化和篇幅边界继续讨论。',
+    long_form_ideation:'围绕长线冲突、卷章推进和可持续的关系变化继续讨论。',
+    continue_existing_draft:'先确认续写起点、承接状态和不可改动的原文范围。',
+    character_relationship_scene:'先核对人物卡与关系证据，再收敛到一场可写的互动。',
+    worldbuilding_first:'先整理规则、地点和边界；人物与剧情稍后再接入。',
+    outline_only:'只整理故事结构和章节安排，不提前生成正文。',
+    script_or_scene_first:'先明确可演出动作、对白和场景停止边界。',
+    imported_draft_review:'先阅读已有文稿，标出结构、连续性和需要确认的地方。',
+  };
   const subtitles={
-    'brief.build':'从目标、人物、篇幅和限制开始，信息足够时自动整理候选。',
+    'brief.build':intentSubtitles[intent]||'从目标、人物、篇幅和限制开始，信息足够时自动整理候选。',
     'blueprint.generate':'围绕冲突、人物关系和世界观边界继续讨论。',
     'structure.plan':'讨论卷、章与场景各自要完成的变化。',
     'chapter.plan':'只处理本章目标、节拍和承接点。',
