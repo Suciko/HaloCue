@@ -415,6 +415,39 @@ html[data-theme="dark"] #app#app.hc-redesign[data-surface="writing"] #sceneConve
 html[data-theme="dark"] #app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode :is(p,small){color:var(--muted,#a1adbc)!important}
 html[data-theme="dark"] #app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode .scene-discussion-actions .quiet{background:transparent!important;color:var(--ink-2,#c9d4df)!important;border-color:var(--line,#343e4c)!important}
 html[data-theme="dark"] #app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode .scene-discussion-actions .quiet:hover{background:var(--hc-selected,#2b3b52)!important;color:var(--ink,#e1e7ee)!important}
+
+/* Preparing is a transient state, not a second instruction panel. Keep it
+   compact and let the composer remain the obvious place to continue. */
+#app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-preparing{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:9px 11px!important;
+}
+#app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-preparing-copy{
+  display:flex; align-items:center; gap:8px; min-width:0;
+}
+#app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-preparing-copy > div{min-width:0}
+#app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-preparing-copy b{
+  font-size:12px; line-height:1.45;
+}
+#app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-preparing-copy p{
+  margin:2px 0 0; font-size:11px; line-height:1.45;
+}
+#app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-preparing-spinner{
+  flex:0 0 auto; width:8px; height:8px; border-radius:50%;
+  background:var(--hc-accent,#5675aa); box-shadow:0 0 0 3px color-mix(in srgb,var(--hc-accent,#5675aa) 16%,transparent);
+}
+#app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-preparing > .quiet{
+  flex:0 0 auto; min-height:30px; padding:5px 9px; font-size:11px;
+}
+
+@media(max-width:760px){
+  #app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-preparing{
+    align-items:flex-start; flex-wrap:wrap;
+  }
+  #app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-preparing > .quiet{
+    margin-left:16px;
+  }
+}
 @media(max-width:760px){
   #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-scene{padding:18px 12px 22px}
   #app.hc-redesign[data-surface="writing"] .chapter-authoring-block{

@@ -37,6 +37,11 @@ def test_composer_surface_growth_keyboard_and_actions(width,height,theme):
             assert field.evaluate('e=>getComputedStyle(e).backgroundColor')=='rgba(0, 0, 0, 0)'
             assert field.evaluate('e=>getComputedStyle(e).resize')=='none'
             assert page.locator('.scene-agent-submit').evaluate('e=>getComputedStyle(e).borderTopWidth')=='0px'
+            assert page.locator('.scene-composer-footer').count()==1
+            footer=page.locator('.scene-composer-footer').bounding_box()
+            send_box=page.locator('.scene-agent-submit > .primary').bounding_box()
+            assert footer['x'] <= send_box['x']
+            assert send_box['x']+send_box['width'] <= footer['x']+footer['width']+1
             assert field.bounding_box()['height']==96
             field.fill('需要讨论的后续衔接。\n'*30)
             limit=max(96,min(224,int(height*.24)))
@@ -54,7 +59,6 @@ def test_composer_surface_growth_keyboard_and_actions(width,height,theme):
             expect(page.locator('[data-save-for-agent]')).to_be_hidden()
             # The send selector must not accidentally choose the cross-form save button.
             assert page.locator('button[type="submit"]:not([form])').inner_text()=='发送'
-            send_box=page.locator('.scene-agent-submit > .primary').bounding_box()
             assert send_box['width']<=120
             assert page.locator('[data-generate-scene-proposal]').count()==0
             assert page.locator('.permission-menu').count()==0

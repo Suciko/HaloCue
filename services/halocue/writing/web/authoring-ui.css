@@ -1373,3 +1373,28 @@ html[data-theme="dark"] #app.hc-redesign[data-surface="writing"] .scene-context-
 @media (max-width:640px) {
   #toast[popover] { inset: auto 12px 62px 12px; }
 }
+
+/* Keep the composer action and its keyboard hint in one footer row. The send
+   control should read as part of the input, not as a floating button below it. */
+#app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-composer-footer{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  min-width:0; width:100%;
+}
+#app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-composer-keyhint{
+  flex:1 1 auto; min-width:0; padding:0 2px; line-height:1.4;
+}
+#app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-agent-submit{
+  display:flex; align-items:center; justify-content:flex-end; align-self:auto;
+  flex:0 0 auto; width:auto; min-width:0; gap:6px; margin:0; padding:0; border:0;
+}
+#app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-agent-submit > :is(.primary,.agent-stop-button){
+  flex:0 0 auto; min-height:36px; min-width:64px; padding:7px 14px; border-radius:9px;
+}
+@media(max-width:760px){
+  #app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-composer-footer{
+    gap:8px;
+  }
+  #app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-agent-submit > :is(.primary,.agent-stop-button){
+    min-height:44px;
+  }
+}

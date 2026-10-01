@@ -69,8 +69,8 @@ def test_scene_detail_states(mode,width,theme):
                     background=page.locator('.scene-discussion-mode').evaluate('(node)=>getComputedStyle(node).backgroundColor')
                     assert background=='rgb(37, 45, 57)'
             elif mode=='preparing':
-                expect(page.locator('.scene-discussion-mode')).to_contain_text('正在检查起草条件')
-                expect(page.locator('.scene-discussion-mode')).to_contain_text('系统正在读取本场已确认资料')
+                expect(page.locator('.scene-discussion-mode')).to_contain_text('正在准备本场资料')
+                expect(page.locator('.scene-discussion-mode')).to_contain_text('完成后会显示缺项。')
                 expect(page.locator('[data-action="assemble-context"]')).to_have_count(0)
                 expect(page.locator('[data-start-scene-manual]')).to_be_visible()
             else:
