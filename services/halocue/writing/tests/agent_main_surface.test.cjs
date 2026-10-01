@@ -90,6 +90,15 @@ test('new work entry invites intent in conversation instead of adding a second p
  assert.match(index,/Agent 会按类型引导/);
 });
 
+test('new work defaults to agent-led ideation instead of opening the outline first',()=>{
+ const index=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8');
+ assert.match(index,/接下来先做/);
+ assert.match(index,/name="start_at" value="ideation" checked/);
+ assert.doesNotMatch(index,/name="start_at" value="outline" checked/);
+ assert.match(source,/const destination=fields\.start_at\|\|'ideation'/);
+ assert.match(source,/name="start_at" value="ideation" checked/);
+});
+
 test('conversation task labels cover non-wizard creation intents',()=>{
  const start=source.indexOf('function userFacingConversationTask(');
  const end=source.indexOf('\n\n/* Final surface overrides',start);
