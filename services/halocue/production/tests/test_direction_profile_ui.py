@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
+from services.halocue._test_support import CHROMIUM_UNSAFE_PORTS
 
 
 playwright_api = pytest.importorskip("playwright.sync_api")
@@ -36,7 +37,13 @@ class QuietStaticHandler(SimpleHTTPRequestHandler):
 @pytest.fixture(scope="module")
 def ui_url():
     handler = functools.partial(QuietStaticHandler, directory=str(UI_ROOT))
-    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    for _ in range(100):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        if server.server_port not in CHROMIUM_UNSAFE_PORTS:
+            break
+        server.server_close()
+    else:
+        pytest.fail("Unable to bind a browser-safe localhost port")
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     try:

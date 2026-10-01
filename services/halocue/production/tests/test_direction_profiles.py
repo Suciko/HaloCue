@@ -61,6 +61,7 @@ def direction_service(settings, tmp_path, monkeypatch):
         json.dumps(
             {
                 "bg": {"BG_Black": 1, "BG_Classroom": 2},
+                "bg_label": {key: {"source_kind": "official_base"} for key in ("BG_Black", "BG_Classroom")},
                 "sounds": [],
                 "characters": [],
                 "enums": {"emoticon": {}, "action": {}},

@@ -23,6 +23,7 @@ def test_sel_release_review_build_install_and_switch_back(settings, tmp_path, cg
         json.dumps(
             {
                 "bg": {"BG_Black": 0, "BG_CS_Fixture": 1},
+                "bg_label": {key: {"source_kind": "official_base"} for key in ("BG_Black", "BG_CS_Fixture")},
                 "characters": [],
                 "sounds": [],
                 "enums": {"emoticon": {}, "action": {}},

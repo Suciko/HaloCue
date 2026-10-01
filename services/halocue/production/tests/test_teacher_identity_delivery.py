@@ -26,6 +26,7 @@ def test_release_teacher_review_bundle_and_explicit_install(settings, tmp_path, 
         json.dumps(
             {
                 "bg": {"BG_Black": 0, "BG_CS_Fixture": 1},
+                "bg_label": {key: {"source_kind": "official_base"} for key in ("BG_Black", "BG_CS_Fixture")},
                 "sounds": [],
                 "characters": [],
                 "enums": {"emoticon": {}, "action": {}},

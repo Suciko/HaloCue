@@ -1,14 +1,19 @@
 """Frozen annotation visibility, with synthetic data and no writes to user runs."""
 
 import copy
+import json
 
 from halocue_production.legacy_adapter import Legacy093Adapter
 
 
-def adapter_with(resources):
+def adapter_with(resources, settings=None):
     import annotate
 
-    adapter = object.__new__(Legacy093Adapter)
+    adapter = Legacy093Adapter(settings) if settings else object.__new__(Legacy093Adapter)
+    if settings:
+        frozen = adapter.store.get_draft_path("token") / "resources.json"
+        frozen.parent.mkdir(parents=True, exist_ok=True)
+        frozen.write_text(json.dumps(resources), encoding="utf-8")
     adapter._modules = {"annotate": annotate}
     adapter._draft_resources = lambda token: copy.deepcopy(resources)
     adapter._task_custom_assets = lambda token: []
@@ -91,7 +96,7 @@ def test_direct_face_annotation_wins_and_old_faces_still_work():
     assert faces[2] == {"id": "02", "raw": "02", "label": "02"}
 
 
-def test_background_usage_survives_api_and_searches_positive_alias_only():
+def test_background_usage_survives_api_and_searches_positive_alias_only(settings):
     source = {
         "bg": {"BG_Test": 1},
         "bg_label": {"BG_Test": {"label": "社团室", "place": "室内"}},
@@ -108,7 +113,7 @@ def test_background_usage_survives_api_and_searches_positive_alias_only():
             }
         },
     }
-    adapter = adapter_with(source)
+    adapter = adapter_with(source, settings)
     result = adapter.list_draft_resources("token", "backgrounds", query="游戏开发")
     assert result["total"] == 1
     row = result["items"][0]

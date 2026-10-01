@@ -1196,7 +1196,7 @@
 
   function mappingLabel(mapping) {
     if (!mapping || mapping.kind === "unset") return "尚未映射";
-    if (mapping.role === "teacher") return mapping.name || "老师";
+    if (mapping.role === "teacher") return [mapping.name || "老师", mapping.club].filter(Boolean).join(" / ");
     if (mapping.kind === "narrator") return "旁白（不显示角色）";
     if (mapping.kind === "voice") return mapping.display_name || "无立绘角色";
     return mapping.name || mapping.display_name || "已选择角色";

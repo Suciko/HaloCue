@@ -93,7 +93,7 @@ def test_scene_id_must_resolve_to_current_scene():
         assert error.value.code == "scene_not_found"
 
 
-def test_adapter_ranks_entire_frozen_catalogue_before_paging():
+def test_adapter_ranks_entire_frozen_catalogue_before_paging(settings):
     resources = {
         "bg": {"BG_Day": 1, "BG_Night": 2},
         "bg_label": {
@@ -101,7 +101,7 @@ def test_adapter_ranks_entire_frozen_catalogue_before_paging():
             "BG_Night": {"label": "Z", "place": "社团室", "time": "夜晚", "indoor_outdoor": "室内"},
         },
     }
-    adapter = adapter_with(resources)
+    adapter = adapter_with(resources, settings)
     adapter.draft_detail = lambda token: {"cards": scene_cards()}
     filters = {"scene_card_id": "s1", "scene_time": "深夜"}
     first = adapter.list_draft_resources("token", "backgrounds", limit=1, filters=filters)

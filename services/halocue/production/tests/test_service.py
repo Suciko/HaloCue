@@ -26,7 +26,7 @@ SCRIPT = """# 第一章
 """
 
 
-def configured_resource_settings(settings, tmp_path):
+def configured_resource_settings(settings, tmp_path, *, official=False):
     index = tmp_path / "resources.json"
     index.write_text(
         json.dumps(
@@ -51,6 +51,10 @@ def configured_resource_settings(settings, tmp_path):
         ),
         encoding="utf-8",
     )
+    if official:
+        resources = json.loads(index.read_text(encoding="utf-8"))
+        resources["bg_label"] = {key: {"source_kind": "official_base"} for key in resources["bg"]}
+        index.write_text(json.dumps(resources, ensure_ascii=False), encoding="utf-8")
     return Settings(
         project_root=settings.project_root,
         data_dir=settings.data_dir,
@@ -1851,6 +1855,12 @@ def test_resource_index_rebuild_is_isolated_persistent_and_does_not_touch_aa_wor
     sentinel = aa_data / "projects" / "existing.aap"
     sentinel.write_text('{"unchanged": true}', encoding="utf-8")
 
+    # Rebuild consumes explicit shared exports, never private story history.
+    (aa_data / "aa_resources.json").write_text(json.dumps({
+        "bg": {"BG_Classroom": 42},
+        "bg_label": {"BG_Classroom": {"source_kind": "official_base"}},
+    }), encoding="utf-8")
+
     service = ProductionService(settings)
     service.configure_aa_workspace({"path": str(aa_data)})
 
@@ -2279,7 +2289,7 @@ def test_popup_catalog_is_separate_from_cg_background_selection(settings, tmp_pa
     popup_dir = aa_data / "overrides" / "popups"
     popup_dir.mkdir()
     (popup_dir / "Event03_CH0070.png").write_bytes(b"test")
-    configured = configured_resource_settings(settings, tmp_path)
+    configured = configured_resource_settings(settings, tmp_path, official=True)
     configured = Settings(
         project_root=configured.project_root,
         data_dir=configured.data_dir,
@@ -2478,7 +2488,7 @@ def test_cg_segment_compiles_as_background_with_named_slot_zero_and_no_portraits
     popup_dir = aa_data / "overrides" / "popups"
     popup_dir.mkdir()
     (popup_dir / "Event03_CH0070.png").write_bytes(b"test")
-    configured = configured_resource_settings(settings, tmp_path)
+    configured = configured_resource_settings(settings, tmp_path, official=True)
     configured = Settings(
         project_root=configured.project_root,
         data_dir=configured.data_dir,
@@ -2552,7 +2562,7 @@ def test_cg_segment_rejects_portrait_stage_commands(settings, tmp_path):
     popup_dir = aa_data / "overrides" / "popups"
     popup_dir.mkdir()
     (popup_dir / "Event03_CH0070.png").write_bytes(b"test")
-    configured = configured_resource_settings(settings, tmp_path)
+    configured = configured_resource_settings(settings, tmp_path, official=True)
     configured = Settings(
         project_root=configured.project_root,
         data_dir=configured.data_dir,
