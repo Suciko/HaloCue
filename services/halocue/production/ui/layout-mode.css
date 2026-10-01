@@ -18,3 +18,13 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Focus belongs to the option card, not the narrow native radio box. */
+.layout-mode-fieldset .mode-choice input[type="radio"]:focus {
+  outline: none;
+  box-shadow: none;
+}
+.layout-mode-fieldset .mode-choice:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}

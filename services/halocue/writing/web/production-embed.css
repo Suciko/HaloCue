@@ -3453,3 +3453,9 @@ body:has(.app-shell.production-mode) #saveStatus {
   :host .embedded-production-shell #page-generation .scene-plan-thumb { max-width:none; }
   :host .embedded-production-shell #page-generation .scene-plan-card > footer > button { min-height:44px; }
 }
+
+/* Keep keyboard focus on the execution option card. */
+:host .embedded-production-shell .layout-mode-fieldset .mode-choice input[type="radio"]:focus {
+  outline: none;
+  box-shadow: none;
+}
