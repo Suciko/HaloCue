@@ -521,7 +521,7 @@ def test_performance_preview_uses_current_draft_and_frozen_cast(settings, tmp_pa
     assert frame["presentation"] == "dialogue"
     assert frame["background_key"] == "BG_Classroom"
     assert frame["background_preview_available"] is False
-    assert frame["speaker"] == {"name": "爱丽丝", "mapping_kind": "portrait", "character_id": "alice-school"}
+    assert frame["speaker"] == {"name": "爱丽丝", "source_name": "爱丽丝", "mapping_kind": "portrait", "character_id": "alice-school"}
     assert {item["kind"]: item["value"] for item in frame["annotations"]} == {"表情": "01", "画面效果": "特写"}
     assert "private_source" not in json.dumps(preview, ensure_ascii=False)
     service.jobs.close()
@@ -2119,7 +2119,7 @@ def test_structured_directive_edit_validates_input_and_resets_review(settings):
     service.jobs.close()
 
 
-def test_real_compile_and_install_use_isolated_workspace(settings, tmp_path):
+def test_real_compile_and_install_use_isolated_workspace(settings, tmp_path, monkeypatch):
     aa_data = tmp_path / "aa-data"
     for name in ("projects", "saves", "overrides", "settings"):
         (aa_data / name).mkdir(parents=True)
@@ -2134,6 +2134,9 @@ def test_real_compile_and_install_use_isolated_workspace(settings, tmp_path):
         port=0,
     )
     service = ProductionService(configured)
+    import aa_project_assets
+
+    monkeypatch.setattr(aa_project_assets, "is_aa_running", lambda: False)
     created = service.create_run(
         {"project": "隔离构建测试", "source": {"kind": "inline", "text": "旁白: 测试\n"}}
     )
@@ -2260,15 +2263,15 @@ def test_character_name_baseline_controls_display_search_and_frozen_import(setti
     service = ProductionService(configured)
 
     catalog = service.list_resources("characters", query="アリス")
-    assert catalog["items"][0]["name"] == "爱丽丝"
-    assert catalog["items"][0]["name_source"] == "zh_cn_official_or_curated"
+    assert catalog["items"][0]["name"] == "天童爱丽丝"
+    assert catalog["items"][0]["name_source"] == "ja_fandom_curated"
     assert service.character_resource("alice-school")["character"]["source_name"] == "愛麗絲"
 
     created = service.create_run(
         {"project": "译名快照", "source": {"kind": "inline", "text": "老师: 测试。\n"}}
     )
     frozen = service.run_character_resource(created["run"]["run_id"], "alice-school")["character"]
-    assert frozen["name"] == "爱丽丝"
+    assert frozen["name"] == "天童爱丽丝"
     assert frozen["source_name"] == "愛麗絲"
     mapped = service.update_cast(
         created["run"]["run_id"],
@@ -2278,7 +2281,14 @@ def test_character_name_baseline_controls_display_search_and_frozen_import(setti
             "expected_draft_version": created["draft"]["draft_version"],
         },
     )
-    assert mapped["draft"]["cast"]["cast"]["老师"]["name"] == "爱丽丝"
+    assert mapped["draft"]["cast"]["cast"]["老师"]["name"] == "天童爱丽丝"
+    assert service.list_resources("characters", query="爱丽丝")["items"][0]["identifier"] == "alice-school"
+    preview = service.performance_preview(created["run"]["run_id"])
+    frame = next(item for item in preview["frames"] if item["card_kind"] == "line")
+    assert frame["title"] == "天童爱丽丝"
+    assert frame["speaker"]["source_name"] == "老师"
+    assert frame["speaker"]["character_id"] == "alice-school"
+    assert next(c for c in mapped["draft"]["cards"] if c["kind"] == "line")["current"]["who"] == "老师"
     service.jobs.close()
 
 
@@ -3312,4 +3322,41 @@ def test_install_preflight_rejects_a_build_from_an_older_draft(
 
     assert error.value.code == "build_stale"
     assert called == []
+    service.jobs.close()
+
+
+def test_fandom_only_baseline_preserves_identity_and_other_translation_alias(tmp_path):
+    from halocue_production.name_baseline import CharacterNameBaseline
+
+    baseline = tmp_path / "names.json"
+    baseline.write_text(json.dumps({"characters": [{"identifier": "serika", "name_ja_fandom": "芹香"}]}, ensure_ascii=False), encoding="utf8")
+    source = {"identifier": "serika", "name": "茜香", "name_zh_cn": "另一译名"}
+    resolved = CharacterNameBaseline(baseline).decorate(source)
+    assert resolved["name"] == "芹香"
+    assert resolved["name_source"] == "ja_fandom_curated"
+    assert resolved["identifier"] == "serika"
+    assert resolved["source_name"] == "茜香"
+    assert {"芹香", "茜香", "另一译名"}.issubset(resolved["aliases"])
+    assert source["name"] == "茜香"
+
+
+def test_explicit_rebinding_adopts_fandom_policy_without_changing_frozen_resource(settings, tmp_path):
+    from halocue_production.name_baseline import CharacterNameBaseline
+
+    service = ProductionService(configured_resource_settings(settings, tmp_path))
+    created = service.create_run({"project": "旧任务译名", "source": {"kind": "inline", "text": "原稿姓名: 台词。\n@camera_hold 原稿姓名,auto\n"}})
+    run_id = created["run"]["run_id"]
+    frozen = service.run_character_resource(run_id, "alice-school")
+    baseline = tmp_path / "names.json"
+    baseline.write_text(json.dumps({"characters": [{"identifier": "alice-school", "name_ja_fandom": "日服译名"}]}), encoding="utf8")
+    service.name_baseline = CharacterNameBaseline(baseline)
+    mapped = service.update_cast(run_id, {"speaker": "原稿姓名", "mapping": {"kind": "portrait", "id": "alice-school", "name": "错误客户端名称"}, "expected_draft_version": created["draft"]["draft_version"]})
+    assert mapped["draft"]["cast"]["cast"]["原稿姓名"]["name"] == "日服译名"
+    assert service.run_character_resource(run_id, "alice-school") == frozen
+    line = next(c for c in mapped["draft"]["cards"] if c["kind"] == "line")
+    assert line["current"]["who"] == "原稿姓名"
+    assert line["review_state"] == "pending"
+    direction = next(f for f in service.performance_preview(run_id)["frames"] if f["card_kind"] == "dir")
+    assert direction["text"] == "日服译名,auto"
+    assert next(c for c in mapped["draft"]["cards"] if c["kind"] == "dir")["current"]["arg"] == "原稿姓名,auto"
     service.jobs.close()

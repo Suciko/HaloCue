@@ -42,3 +42,12 @@ cannot be assumed from a local installation or a decompiled directory.
   ownership.
 - Requests to commit a real game asset, bundle, or copied private file block on
   provenance and redistribution approval.
+
+## Maintainer clarification: Chinese names (2026-10-01)
+
+Chinese scripts and production presentation prefer curated Japanese-server
+Chinese fandom translations. Other translations remain aliases; the resource
+identifier and source release remain stable. Explicitly rebinding an older
+production draft may adopt the confirmed name baseline and requires renewed
+review. See [product direction](../product-direction-1.x.md#character-naming-maintainer-clarification-2026-10-01)
+and [acceptance handoff](../handoffs/2026-10-01-1.0-aa-character-names.md).

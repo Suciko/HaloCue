@@ -1511,7 +1511,8 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
             speaker = str(current.get("who") or "").strip()
             mapping = cast.get(speaker) if isinstance(cast.get(speaker), dict) else {"kind": "unset"}
             speaker_display = {
-                "name": speaker,
+                "name": str(mapping.get("name_ja_fandom") or mapping.get("name") or mapping.get("display_name") or speaker),
+                "source_name": speaker,
                 "mapping_kind": str(mapping.get("kind") or "unset"),
                 "character_id": str(mapping.get("id") or ""),
             }
@@ -1549,6 +1550,11 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
                 presentation = "direction"
                 title = f"@{command or '指令'}"
                 text = str(current.get("arg") or card.get("raw") or "")
+                if command in {"camera", "camera_hold", "enter", "exit", "move"}:
+                    text = "".join(
+                        str(cast.get(part, {}).get("name_ja_fandom") or cast.get(part, {}).get("name") or part)
+                        for part in re.split(r"([,，\s]+)", text)
+                    )
             else:
                 presentation = "note"
                 title = kind or "文本"
@@ -1782,8 +1788,9 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
                 if character.get("role") == "teacher":
                     raise ProductionError("teacher_requires_no_portrait", "老师身份不能作为立绘角色绑定", status=409)
                 mapping = dict(mapping)
-                # The task snapshot owns display names. Ignore stale client labels.
-                mapping["name"] = str(character.get("name") or identifier)
+                # Rebinding explicitly adopts the confirmed naming policy, while
+                # the task resource snapshot and AA identity remain unchanged.
+                mapping.update(self.name_baseline.resolve(character))
         try:
             expected = int(payload["expected_draft_version"])
         except (KeyError, TypeError, ValueError) as exc:

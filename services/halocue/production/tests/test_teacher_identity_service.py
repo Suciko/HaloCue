@@ -118,7 +118,8 @@ def test_teacher_rename_updates_explicit_aliases_not_source_or_ordinary_voice(se
         assert frame["speaker"]["organization"] == ""
         assert frame["speaker"]["source_name"] in ("SourceTeacher", "SenseiAlias")
     assert frames[1]["speaker"] == {
-        "name": "Clerk",
+        "name": "Receptionist",
+        "source_name": "Clerk",
         "mapping_kind": "voice",
         "character_id": "Receptionist",
     }

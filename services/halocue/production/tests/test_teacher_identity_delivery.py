@@ -17,7 +17,10 @@ def files(root):
 
 
 @pytest.mark.parametrize("cg", [False, True])
-def test_release_teacher_review_bundle_and_explicit_install(settings, tmp_path, cg):
+def test_release_teacher_review_bundle_and_explicit_install(settings, tmp_path, cg, monkeypatch):
+    import aa_project_assets
+
+    monkeypatch.setattr(aa_project_assets, "is_aa_running", lambda: False)
     aa_data = tmp_path / "synthetic-aa"
     for name in ("projects", "saves", "settings", "overrides"):
         (aa_data / name).mkdir(parents=True)

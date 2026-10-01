@@ -2197,7 +2197,7 @@
       const sceneId = scene.card?.card_id || scene.cards[0]?.card_id || "";
       return `<article class="scene-plan-row scene-plan-card generation-scope-card">
         <div class="scene-plan-card-heading"><span class="scene-plan-number">${esc(String(scene.index + 1).padStart(2, "0"))}</span><div><strong>${esc(scene.title)}</strong><small>${dialogueCount} 段正文 · ${pending ? `${pending} 张待审` : "已审"}</small></div></div>
-        <div class="scene-plan-background-block"><div class="scene-plan-thumb">${preview}</div><div><em>${esc(scene.speakers.join("、") || "无台词")}</em>${sceneBackgroundAvailability(backgroundKey)}</div></div>
+        <div class="scene-plan-background-block"><div class="scene-plan-thumb">${preview}</div><div><em>${esc(scene.speakers.map(productionSpeakerName).join("、") || "无台词")}</em>${sceneBackgroundAvailability(backgroundKey)}</div></div>
         <footer><button type="button" data-scene-plan-card="${esc(sceneId)}" ${active ? "disabled" : ""}>审查本场</button></footer>
       </article>`;
     }).join("") : '<p class="empty">草稿中还没有可制作的场景。</p>';
@@ -2405,10 +2405,32 @@
   const cardKindLabels = { line: "对白", dir: "演出指令", scene: "场景", title: "章节标题", unknown: "未识别内容", background_request: "背景请求", sound_request: "音效请求" };
   const directiveLabels = { bg: "切换背景", place: "地点", camera_hold: "保持镜头", wait: "停顿", enter: "角色入场", exit: "角色退场", move: "角色移动", se: "音效", bgm: "背景音乐", shot: "镜头", trans: "转场", bgfx: "背景效果", fx: "画面效果" };
   function cardKindLabel(card) { return cardKindLabels[card?.kind] || "文本内容"; }
+  function productionSpeakerName(speaker) {
+    const mapping = mappingFor(String(speaker || "").trim());
+    if (mapping.kind === "narrator") return "旁白";
+    return mapping.name_ja_fandom || mapping.name || mapping.display_name || speaker || "未映射";
+  }
+  function productionDirectiveArgument(current) {
+    const arg = String(current.arg || "");
+    if (["camera", "camera_hold", "enter", "exit", "move"].includes(current.cmd)) {
+      return arg.split(/([,，\s]+)/).map((part) => productionSpeakerName(part) === "未映射" ? part : productionSpeakerName(part)).join("");
+    }
+    return arg;
+  }
+  function previewFrameTitle(frame) {
+    const card = (state.currentDraft?.cards || []).find((item) => item.card_id === frame.card_id);
+    return frame.card_kind === "line" && frame.presentation !== "cg"
+      ? productionSpeakerName(frame.speaker?.source_name || card?.current?.who || frame.title)
+      : frame.title;
+  }
+  function previewFrameText(frame) {
+    const card = (state.currentDraft?.cards || []).find((item) => item.card_id === frame.card_id);
+    return card?.kind === "dir" ? productionDirectiveArgument(card.current || {}) : frame.text;
+  }
   function cardHeadline(card) {
     const current = card.current || {};
-    if (card.kind === "line") return `${current.who || "未映射"}：${current.text || ""}`;
-    if (card.kind === "dir") return `${directiveLabels[current.cmd] || current.cmd || "演出指令"} · ${current.arg || "无参数"}`;
+    if (card.kind === "line") return `${productionSpeakerName(current.who)}：${current.text || ""}`;
+    if (card.kind === "dir") return `${directiveLabels[current.cmd] || current.cmd || "演出指令"} · ${productionDirectiveArgument(current) || "无参数"}`;
     return current.title || current.text || current.description || current.query || card.raw || cardKindLabel(card);
   }
 
@@ -2542,7 +2564,7 @@
       : "";
     const organization = frame.speaker?.role === "teacher" && frame.speaker.organization ? ` · ${frame.speaker.organization}` : "";
     target.className = "persistent-preview-stage";
-    target.innerHTML = `${background}<div class="persistent-preview-card"><small>${esc(persistentPreviewLabel(frame))}</small><strong>${esc(frame.title || "未命名卡片")}${esc(organization)}</strong><p>${esc(frame.text || "此卡没有可显示的文本。")}</p>${annotations}</div>`;
+    target.innerHTML = `${background}<div class="persistent-preview-card"><small>${esc(persistentPreviewLabel(frame))}</small><strong>${esc(previewFrameTitle(frame) || "未命名卡片")}${esc(organization)}</strong><p>${esc(previewFrameText(frame) || "此卡没有可显示的文本。")}</p>${annotations}</div>`;
     counter.textContent = `${state.previewIndex + 1} / ${frames.length}`;
     $("#reviewPreviewPrevious").disabled = state.previewIndex <= 0;
     $("#reviewPreviewNext").disabled = state.previewIndex >= frames.length - 1;
@@ -2812,7 +2834,7 @@
         : reply?.reply_id && typeof reply.text === "string"
           ? `<button type="button" class="preview-teacher-reply" data-teacher-reply-id="${esc(reply.reply_id)}">${esc(reply.text)}</button>`
           : '<div class="preview-reply-complete" role="status">老师回答暂不可预览</div>'
-      : `<div class="preview-dialogue ${isCg ? "is-cg" : ""}"><small>${esc(isCg ? "CG 空镜段落" : frame.presentation === "request" ? "需要处理" : frame.presentation === "direction" ? "演出指令" : "当前台词")}</small><strong>${esc(frame.title || "未命名卡片")}</strong>${organization}<p>${esc(frame.text || "此卡没有可显示的文本。")}</p>${annotations}</div>`;
+      : `<div class="preview-dialogue ${isCg ? "is-cg" : ""}"><small>${esc(isCg ? "CG 空镜段落" : frame.presentation === "request" ? "需要处理" : frame.presentation === "direction" ? "演出指令" : "当前台词")}</small><strong>${esc(previewFrameTitle(frame) || "未命名卡片")}</strong>${organization}<p>${esc(previewFrameText(frame) || "此卡没有可显示的文本。")}</p>${annotations}</div>`;
     target.className = `performance-preview-frame presentation-${esc(frame.presentation)}`;
     target.innerHTML = `<section class="preview-stage">${background}<div class="preview-stage-overlay"></div><div class="preview-progress">${state.previewIndex + 1} / ${frames.length} · 第 ${esc(frame.line_no || "-")} 张 · ${esc(statusLabel)}</div>${cg}${dialogue}</section><div class="preview-card-strip" aria-label="草稿卡片定位">${frames.map((item, index) => `<button type="button" class="${index === state.previewIndex ? "active" : ""}" data-preview-index="${index}" aria-label="跳到第 ${esc(item.line_no || "-")} 张卡片">${esc(String(item.line_no || index + 1).padStart(2, "0"))}</button>`).join("")}</div>`;
     status.textContent = state.previewCompleted ? "本段预览结束，草稿没有被修改。"
@@ -3111,7 +3133,7 @@
     if (!card) return;
     const current = card.current || {};
     $("#inspectorTitle").textContent = `正在编辑：第 ${card.line_no || "-"} 张 · ${cardKindLabel(card)}`;
-    let body = `<p class="inspector-note">${esc(card.raw || "")}</p>`;
+    let body = `<p class="inspector-note">${esc(cardHeadline(card))}</p><details class="mapping-evidence-details"><summary>原稿与映射来源</summary><p>${esc(card.raw || "")}</p></details>`;
     if (card.cg) {
       body += `<section class="cg-inspector"><small>所属 CG 段落</small><strong>${esc(card.cg.label)}</strong><p>背景：${esc(card.cg.background_key)} · 具名无立绘</p><button id="deleteCgSegment">删除此 CG 段落</button></section>`;
     }
@@ -3282,7 +3304,7 @@
   function cardOption(card) {
     const current = card.current || {};
     const summary = card.kind === "line"
-      ? `${current.who || "未映射"}: ${current.text || ""}`
+      ? `${productionSpeakerName(current.who)}: ${current.text || ""}`
       : `${current.cmd || card.kind} ${current.arg || ""}`;
     return `第 ${card.line_no || "-"} 行 · ${summary}`.slice(0, 100);
   }

@@ -33,7 +33,7 @@ class CharacterNameBaseline:
             }
             if not any(keys):
                 continue
-            if not str(row.get("name_zh_cn") or "").strip():
+            if not any(str(row.get(field) or "").strip() for field in ("name_zh_cn", "name_ja_fandom")):
                 continue
             for key in keys:
                 if key:
@@ -73,8 +73,8 @@ class CharacterNameBaseline:
         ).strip()
         aliases = self._aliases((entry or {}).get("aliases"))
         aliases.extend(self._aliases(character.get("aliases")))
-        aliases.extend(name for name in (source_name, fandom_name) if name)
-        display_name = explicit_cn or baseline_cn or source_name
+        aliases.extend(name for name in (source_name, fandom_name, explicit_cn, baseline_cn) if name)
+        display_name = fandom_name or explicit_cn or baseline_cn or source_name
         return {
             "name": display_name,
             "name_zh_cn": explicit_cn or baseline_cn,
@@ -82,7 +82,7 @@ class CharacterNameBaseline:
             "aliases": list(dict.fromkeys(aliases)),
             "source_name": source_name,
             "name_source": (
-                "zh_cn_official_or_curated"
+                "ja_fandom_curated" if fandom_name else "zh_cn_official_or_curated"
                 if explicit_cn or baseline_cn
                 else "legacy_source_unreviewed"
             ),

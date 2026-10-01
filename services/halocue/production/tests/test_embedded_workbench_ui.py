@@ -39,6 +39,7 @@ def embedded_page(profile_browser):
         job_details=None,
         speakers=None,
         stage="generation",
+        draft=None,
     ):
         result = run_reply("conservative", job_state=job_state)
         if job_details:
@@ -76,6 +77,8 @@ def embedded_page(profile_browser):
             }
             for i in range(review_cards)
         )
+        if draft is not None:
+            result["draft"].update(draft)
         api = ProductionApiFixture(result)
         api.asset_failure = asset_failure
         api.task_assets = task_assets or []
@@ -601,3 +604,22 @@ def test_background_gallery_is_compact_and_details_do_not_select(embedded_page, 
     expect(page.locator(".background-gallery-details code")).to_have_text("BG_Available")
     expect(page.locator(".background-gallery-details .resource-annotation")).to_be_visible()
     assert api.posts == before
+
+
+@pytest.mark.parametrize("width", [390, 1280])
+def test_review_uses_mapped_fandom_names_without_rewriting_source(embedded_page, width):
+    page, api = embedded_page("format_only", width=width, stage="mapping", playback=True, draft={
+        "cast": {"cast": {"黑见芹香": {"kind": "portrait", "id": "serika", "name": "茜香", "name_ja_fandom": "芹香"}}},
+        "cards": [
+            {"card_id": "line-1", "kind": "line", "line_no": 1, "raw": "黑见芹香: 原文台词", "current": {"who": "黑见芹香", "text": "原文台词"}, "review_state": "approved"},
+            {"card_id": "camera-1", "kind": "dir", "line_no": 2, "raw": "@camera_hold 黑见芹香", "current": {"cmd": "camera_hold", "arg": "黑见芹香"}, "review_state": "approved"},
+        ],
+    })
+    page.locator('.embedded-production-shell [data-stage="review"]').click()
+    expect(page.locator("#cardList [data-card-id='line-1']")).to_contain_text("芹香：原文台词")
+    expect(page.locator("#cardList")).not_to_contain_text("黑见芹香")
+    expect(page.locator("#persistentPerformancePreview")).to_contain_text("芹香")
+    page.locator("#cardList [data-card-id='camera-1']").click()
+    expect(page.locator("#editDirectiveArg")).to_have_value("黑见芹香")
+    expect(page.locator("#selectedCardToolbarLabel")).to_contain_text("芹香")
+    assert api.posts == []

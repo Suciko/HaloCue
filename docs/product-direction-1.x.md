@@ -65,6 +65,17 @@ and portrait layout templates without duplicating the authored conversation.
 
 ## AI boundary
 
+### Character naming (maintainer clarification, 2026-10-01)
+
+For Chinese authoring, use the familiar Japanese-server Chinese fandom
+translation as the canonical name when curated metadata supplies it. New
+scripts follow the selected character profiles consistently; mainland and
+international translations and full/short names remain searchable aliases.
+AA production cards, preview and delivery use the mapped character's display
+name under the same convention, while AA resource identifiers remain unchanged.
+Keep original authored speaker names as source evidence; changing a naming
+preference does not silently rewrite an immutable published script release.
+
 AI operates above the renderer:
 
 ```text
