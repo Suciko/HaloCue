@@ -781,8 +781,8 @@
 
     const leadKicker = lead.querySelector("small");
     const leadTitle = lead.querySelector("h3");
-    if (leadKicker) leadKicker.textContent = "第三步 · 场景与演出";
-    if (leadTitle) leadTitle.textContent = "场景与演出";
+    if (leadKicker) leadKicker.textContent = "第三步";
+    if (leadTitle) leadTitle.textContent = "场景制作计划";
 
     const flow = document.createElement("div");
     flow.className = "production-generation-flow";
@@ -792,7 +792,6 @@
     plan.setAttribute("aria-labelledby", "productionGenerationPlanTitle");
     plan.innerHTML = `
       <header class="production-generation-section-head">
-        <span class="production-generation-step-index" aria-hidden="true">3A</span>
         <div>
           <small>场景制作计划</small>
           <h4 id="productionGenerationPlanTitle">场景与素材</h4>
@@ -806,7 +805,6 @@
     decision.setAttribute("aria-labelledby", "productionGenerationDecisionTitle");
     decision.innerHTML = `
       <header class="production-generation-section-head">
-        <span class="production-generation-step-index" aria-hidden="true">3B</span>
         <div>
           <small>草稿编排</small>
           <h4 id="productionGenerationDecisionTitle">演出设置</h4>
@@ -818,7 +816,7 @@
     // Keep native inputs and their event handlers; this layer only explains
     // the two independent settings rather than inventing a combined mode.
     layoutMode.querySelector("legend").textContent = "执行方式 · 谁负责安排演出";
-    decision.append(layoutMode, directionProfile);
+    decision.append(generationJob, actionPanel, layoutMode, directionProfile);
     const formatNote = document.createElement("p");
     formatNote.className = "production-format-note";
     formatNote.textContent = "当前仅转换格式，保留原文与已有 AA 指令，不调用 AI 安排演出。";
@@ -828,10 +826,10 @@
     gateSurface.className = "production-generation-gates";
     gateSurface.innerHTML = '<div class="production-generation-gates-head"><strong>准备状态</strong><small>进入审查前检查</small></div>';
     gateSurface.append(gates);
-    decision.append(gateSurface, actionPanel);
+    decision.append(gateSurface);
 
     flow.append(plan, decision);
-    generation.append(flow, generationJob);
+    generation.append(flow);
     generation.classList.add("production-generation-workbench");
     generation.dataset.productionGenerationSplit = "true";
     installScenePlanTools(scenePlan);
@@ -851,7 +849,7 @@
           if (!button.matches("[data-scene-plan-official], [data-mapping-scene-official]") && button !== review) content.append(button);
         });
         // Move, never clone: production's listeners and scene IDs stay intact.
-        if (review) footer.append(review);
+        if (review) footer.insertBefore(review, footer.querySelector(":scope > .scene-plan-evidence"));
         footer.append(more);
       });
     };

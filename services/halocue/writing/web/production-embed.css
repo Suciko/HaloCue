@@ -3395,3 +3395,50 @@ body:has(.app-shell.production-mode) #saveStatus {
     max-width: 100%;
   }
 }
+
+/* Compact production plan, with the task alongside the decisions it affects. */
+:host .embedded-production-shell #page-generation .page-lead { margin-bottom:18px; }
+:host .embedded-production-shell .production-generation-flow { gap:20px; grid-template-columns:minmax(0,1fr) 360px; }
+:host .embedded-production-shell .production-generation-section-head { min-height:0; padding:16px 18px; }
+:host .embedded-production-shell .production-generation-plan > .scene-plan { padding:14px 16px 16px; }
+:host .embedded-production-shell #page-generation .scene-plan-card-heading { padding:12px 14px; }
+:host .embedded-production-shell #page-generation .scene-plan-background-block { grid-template-columns:160px minmax(0,1fr); gap:14px; padding:12px 14px; }
+:host .embedded-production-shell #page-generation .scene-plan-background-block p:empty { display:none; }
+:host .embedded-production-shell #page-generation .scene-plan-card > .scene-plan-evidence { margin:0 14px; }
+:host .embedded-production-shell #page-generation .scene-plan-card > footer { padding:10px 14px; }
+:host .embedded-production-shell #page-generation .scene-plan-card > footer > .scene-plan-evidence { margin:0; }
+:host .embedded-production-shell #page-generation .scene-plan-card > footer > .scene-plan-evidence[open] { flex:1 0 100%; min-width:0; }
+:host .embedded-production-shell .production-generation-decision > #layoutModeFieldset { margin-top:14px; gap:6px; padding:0 16px 14px; }
+:host .embedded-production-shell .production-generation-decision > #layoutModeFieldset legend { margin-bottom:8px; }
+:host .embedded-production-shell .production-generation-decision > #layoutModeFieldset .mode-choice { padding:8px 10px; min-height:52px; }
+:host .embedded-production-shell .production-generation-decision > #layoutModeFieldset .mode-choice small { font-size:11px; line-height:1.5; }
+:host .embedded-production-shell .production-generation-decision > #directionProfileControl { padding:14px 16px; }
+:host .embedded-production-shell #page-generation .profile-picker-heading { margin-bottom:10px; }
+:host .embedded-production-shell #page-generation .profile-choice-body { min-height:88px; padding:10px; gap:5px; }
+:host .embedded-production-shell #page-generation .profile-choice-detail { display:none; }
+:host .embedded-production-shell #page-generation .profile-status { min-height:0; padding:8px 10px; margin-top:10px; }
+:host .embedded-production-shell #page-generation .profile-boundary-note { min-height:0; margin-top:8px; }
+:host .embedded-production-shell .production-generation-decision > #generationJob { margin:14px 16px 0; padding:14px; background:var(--surface-soft); border:1px solid var(--line); border-radius:10px; box-shadow:none; }
+:host .embedded-production-shell #page-generation .generation-job > header > b { border:0; background:var(--surface); color:var(--muted); }
+:host .embedded-production-shell #page-generation .generation-job[data-state="failed"] > header > b { color:var(--danger); background:var(--danger-soft); }
+:host .embedded-production-shell #page-generation .generation-job[data-state="failed"] h3 { color:var(--danger); }
+:host .embedded-production-shell #page-generation .generation-progress { background:var(--line); border:0; }
+:host .embedded-production-shell #page-generation .generation-progress > i { background:var(--accent); }
+:host .embedded-production-shell #page-generation .generation-controls { background:transparent; border:0; box-shadow:none; padding:0; }
+:host .embedded-production-shell #page-generation .generation-metrics { border:0; }
+:host .embedded-production-shell #page-generation .generation-metrics > div { border-left:0; border-top:0; }
+:host .embedded-production-shell #page-generation .generation-diagnostics summary { background:transparent; }
+:host .embedded-production-shell #page-generation .generation-log summary { padding:8px 0; background:transparent; font-size:11px; }
+:host .embedded-production-shell #page-generation .job-log-row { grid-template-columns:minmax(0,1fr); gap:3px; }
+:host .embedded-production-shell .production-generation-gates { padding:14px 16px; }
+:host .embedded-production-shell .production-generation-gates-head { margin-bottom:4px; }
+:host .embedded-production-shell .production-generation-decision #generationGates .gate-card { padding:8px 0; }
+:host .embedded-production-shell .production-generation-decision #generationGates .gate-card small:last-child { display:none; }
+:host .embedded-production-shell .production-generation-decision > .action-panel { padding:14px 16px; gap:10px; border-radius:0; border-top:0; border-bottom:1px solid var(--line); background:transparent; }
+:host .embedded-production-shell .production-generation-decision:has(> #generationJob:not(.hidden)) > .action-panel > div:first-child { display:none; }
+@media(max-width:1100px) { :host .embedded-production-shell .production-generation-flow { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:600px) {
+  :host .embedded-production-shell #page-generation .scene-plan-background-block { grid-template-columns:minmax(0,1fr); }
+  :host .embedded-production-shell #page-generation .scene-plan-thumb { max-width:none; }
+  :host .embedded-production-shell #page-generation .scene-plan-card > footer > button { min-height:44px; }
+}

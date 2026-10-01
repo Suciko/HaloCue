@@ -2106,6 +2106,7 @@
     const progress = job.progress || {};
     const { percent, indeterminate } = jobProgressDisplay(job);
     const progressNode = $("#generationProgress");
+    progressNode.hidden = !jobIsActive(job) && job.state !== "succeeded";
     progressNode.classList.toggle("indeterminate", indeterminate);
     if (indeterminate) progressNode.removeAttribute("aria-valuenow");
     else progressNode.setAttribute("aria-valuenow", String(Math.round(percent)));
@@ -2129,27 +2130,49 @@
     const count = progress.total
       ? ` · 当前场景块 ${numberLabel(progress.current)} / ${numberLabel(progress.total)}${job.state === "succeeded" ? " · 已完成" : "（非完成比例）"}`
       : "";
-    $("#generationJobDetail").textContent = `${progress.detail || job.next_action?.detail || "等待后台状态更新。"}${count}`;
+    const failed = ["failed", "interrupted"].includes(job.state);
+    const guidance = $("#generationJobGuidance");
+    guidance.hidden = !failed && !["paused", "cancelled", "superseded"].includes(job.state);
+    if (failed) {
+      const schemaFailure = /structured_output|schema/.test(job.error?.message || "");
+      $("#generationJobDetail").textContent = schemaFailure
+        ? "模型返回的演出内容格式不符合要求，本次生成已停止。"
+        : job.state === "interrupted" ? "服务重启中断了演出生成。" : job.error?.message || "演出生成未完成。";
+      guidance.textContent = canResumeSelectedDirection()
+        ? "可从检查点继续未完成的部分。当前草稿保留，生成完成后仍需审查。"
+        : "当前草稿保留。可检查演出设置后重新生成，或展开运行详情查看原因。";
+    } else {
+      const detail = progress.detail || job.next_action?.detail || "等待后台状态更新。";
+      $("#generationJobDetail").textContent = jobIsActive(job) ? `${detail}${count}`
+        : job.state === "succeeded" ? "演出草稿已生成，可以逐场审查。" : job.next_action?.detail || "任务已停止。";
+      guidance.textContent = job.state === "superseded" ? "草稿已更新，旧任务结果不会覆盖当前内容。"
+        : "当前草稿和检查点已保留，可继续未完成的部分。";
+    }
 
     const metrics = generationMetrics(job);
+    const reported = Number.isFinite(Number(metrics.requests)) && metrics.requests != null;
+    $("#generationDiagnosticsSummary").textContent = reported ? `${numberLabel(metrics.requests)} 次请求 · 用量与日志` : "用量与错误日志";
     $("#generationMetrics").innerHTML = [
-      ["模型请求", numberLabel(metrics.requests)],
-      ["恢复动作", `${numberLabel(metrics.retries)} 次重试（传输 ${numberLabel(metrics.transport_retries)}） · ${numberLabel(metrics.subdivisions)} 次细分`],
-      ["Token", `${numberLabel(metrics.input_tokens)} 输入 · ${numberLabel(metrics.output_tokens)} 输出`],
-      ["提示缓存", cacheLabel(metrics)],
-      ["暖缓存", warmCacheLabel(metrics)],
-      ["失败消耗", failedCostLabel(metrics)],
-      ["单位产出", unitCostLabel(metrics)],
-      ["输入裁剪", promptOptimizationLabel(metrics)],
-    ].map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join("");
+      ["模型请求", numberLabel(metrics.requests), metrics.requests != null],
+      ["恢复动作", `${numberLabel(metrics.retries)} 次重试（传输 ${numberLabel(metrics.transport_retries)}） · ${numberLabel(metrics.subdivisions)} 次细分`, metrics.retries != null],
+      ["Token", `${numberLabel(metrics.input_tokens)} 输入 · ${numberLabel(metrics.output_tokens)} 输出`, metrics.input_tokens != null || metrics.output_tokens != null],
+      ["提示缓存", cacheLabel(metrics), metrics.cache_reported === true],
+      ["暖缓存", warmCacheLabel(metrics), metrics.warm_cache_hit_rate != null],
+      ["失败消耗", failedCostLabel(metrics), metrics.failed_request_count != null],
+      ["单位产出", unitCostLabel(metrics), metrics.uncached_input_tokens_per_completed_target != null],
+      ["输入裁剪", promptOptimizationLabel(metrics), !!metrics.prompt_optimization],
+    ].filter(([, , available]) => available).map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join("")
+      || '<div><dt>暂无用量数据</dt><dd>本次任务未返回用量统计，请求与错误记录可在下方查看。</dd></div>';
 
     const pending = state.jobActionPending;
     $("#pauseGeneration").hidden = !job.can_pause;
     $("#pauseGeneration").disabled = state.busy || !!pending || !job.can_pause;
-    $("#resumeGeneration").hidden = !canResumeSelectedDirection();
+    // The primary action panel owns resume/retry; keep a single recovery action.
+    $("#resumeGeneration").hidden = true;
     $("#resumeGeneration").disabled = state.busy || !!pending || !canResumeSelectedDirection();
     $("#cancelGeneration").hidden = !job.can_cancel;
     $("#cancelGeneration").disabled = state.busy || !!pending || !job.can_cancel;
+    $(".generation-controls").hidden = !job.can_pause && !job.can_cancel;
     const rows = jobLogRows(job, metrics);
     $("#generationLogCount").textContent = String(rows.length);
     $("#generationLog").innerHTML = rows.join("") || '<p class="empty">等待第一条运行记录。</p>';
@@ -2175,14 +2198,13 @@
       const dialogueCount = scene.cards.filter((card) => card.kind === "line").length;
       const requests = scene.cards.filter((card) => ["background_request", "sound_request"].includes(card.kind));
       const evidence = scene.evidence.length ? scene.evidence.map((line) => `<li>${esc(line)}</li>`).join("") : "<li>本场景没有台词证据。</li>";
-      const reason = aiScene?.background_reason || aiScene?.reason || (scene.background ? "当前背景来自冻结草稿，可继续更换或保留。" : "当前草稿没有背景卡，需要人工选择素材。 ");
+      const reason = aiScene?.background_reason || aiScene?.reason || (scene.background ? "" : "请选择本场背景。 ");
       const sceneId = scene.card?.card_id || scene.cards[0]?.card_id || "";
       return `<article class="scene-plan-row scene-plan-card ${scene.background?.current?.arg === "BG_Black" ? "ready" : "background-unverified"}">
         <div class="scene-plan-card-heading"><span class="scene-plan-number">${esc(String(scene.index + 1).padStart(2, "0"))}</span><div><small>第 ${esc(scene.firstLine)}–${esc(scene.lastLine)} 行</small><strong>${esc(scene.title)}</strong></div><b>${scene.background ? "当前采用" : "待补充"}</b></div>
-        <details class="scene-plan-evidence"><summary>原文证据 · ${scene.evidence.length} 条</summary><ul>${evidence}</ul></details>
         <div class="scene-plan-background-block"><div class="scene-plan-thumb">${preview}</div><div><small>背景</small><strong>${esc(backgroundLabel)}</strong><p>${esc(reason)}</p>${sceneBackgroundAvailability(backgroundKey)}<em>人物 / 旁白：${esc(scene.speakers.join("、") || "无台词")} · ${dialogueCount} 段台词 · ${scene.cards.length} 张卡片${pending ? ` · ${pending} 张待审` : " · 已审"}</em>${backgroundKey ? `<details class="scene-plan-evidence scene-plan-resource-details"><summary>素材信息</summary><ul><li>资源标识：${esc(backgroundKey)}</li></ul></details>` : ""}</div></div>
         ${requests.length ? `<section class="scene-plan-gap"><small>素材缺口</small>${requests.map((request) => `<p>${esc(request.current?.description || request.current?.query || request.raw || request.kind)}</p>`).join("")}</section>` : ""}
-        <footer><button type="button" class="primary" data-scene-plan-official="${esc(sceneId)}">${scene.background ? "更换AA / 任务背景" : "查找AA 背景"}</button><button type="button" data-scene-plan-prompt="${esc(sceneId)}">生成生图提示词</button><button type="button" data-scene-plan-generated="${esc(sceneId)}">导入生成结果</button><button type="button" data-scene-plan-history="${esc(sceneId)}">从历史项目导入</button><button type="button" data-scene-plan-import="${esc(sceneId)}">添加自定义背景</button><button type="button" data-scene-plan-workbench="${esc(sceneId)}">打开素材工作台</button><button type="button" data-scene-plan-card="${esc(sceneId)}">打开场景审查</button></footer>
+        <footer><button type="button" class="primary" data-scene-plan-official="${esc(sceneId)}">${scene.background ? "更换AA / 任务背景" : "查找AA 背景"}</button><button type="button" data-scene-plan-prompt="${esc(sceneId)}">生成生图提示词</button><button type="button" data-scene-plan-generated="${esc(sceneId)}">导入生成结果</button><button type="button" data-scene-plan-history="${esc(sceneId)}">从历史项目导入</button><button type="button" data-scene-plan-import="${esc(sceneId)}">添加自定义背景</button><button type="button" data-scene-plan-workbench="${esc(sceneId)}">打开素材工作台</button><button type="button" data-scene-plan-card="${esc(sceneId)}">打开场景审查</button><details class="scene-plan-evidence"><summary>原文证据</summary><ul>${evidence}</ul></details></footer>
       </article>`;
     }).join("") : '<p class="empty">草稿中还没有可制作的场景。</p>';
     updateSceneBackgroundSummary(target);
@@ -2223,7 +2245,7 @@
     setLayoutMode(state.currentRun.source_summary?.layout_mode || savedLayoutMode());
     $("#layoutModeFieldset")?.classList.toggle("hidden", mode !== "ai_direction");
     $("#generationModeBadge").textContent = mode === "ai_direction" ? "AI 安排演出" : "仅转换格式";
-    $("#generationDescription").textContent = mode === "ai_direction" ? "角色映射完成后，后台模型会在冻结草稿副本上安排演出。" : "格式草稿已经建立，下一步是处理素材请求并逐卡审查。";
+    $("#generationDescription").textContent = mode === "ai_direction" ? "确认各场背景，选择演出方式，再生成待审草稿。" : "确认各场背景与人物，继续审查格式草稿。";
     const missingMappings = workflowSnapshot().missingMappings;
     const cards = [
       ["角色映射", missingMappings ? `${missingMappings} 位待确认` : "已通过", missingMappings === 0],

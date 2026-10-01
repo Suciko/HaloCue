@@ -315,8 +315,12 @@ def test_older_adapter_disables_unsupported_strategy(profile_page):
     expect(
         page.locator('#sourceDirectionProfile option[value="conservative"]')
     ).to_have_js_property("disabled", True)
-    expect(page.locator('input[name="sourceDirectionProfileChoice"][value="conservative"]')).to_be_disabled()
-    expect(page.locator('input[name="sourceDirectionProfileChoice"][value="standard"]')).to_be_enabled()
+    expect(
+        page.locator('input[name="sourceDirectionProfileChoice"][value="conservative"]')
+    ).to_be_disabled()
+    expect(
+        page.locator('input[name="sourceDirectionProfileChoice"][value="standard"]')
+    ).to_be_enabled()
 
 
 def test_embedded_workbench_loads_the_same_profile_styles():
@@ -466,6 +470,43 @@ def test_current_chunk_does_not_claim_generation_is_complete(profile_page):
     assert api.posts == []
 
 
+@pytest.mark.parametrize("width", [390, 1280])
+def test_failed_generation_shows_reason_without_progress_or_duplicate_resume(profile_page, width):
+    result = run_reply("conservative", job_state="failed")
+    job = result["last_job"]
+    job.update(
+        resumable=True,
+        progress={
+            "phase": "annotating",
+            "current": 1,
+            "total": 2,
+            "percent": 50,
+            "detail": "正在标注第 1/2 个场景块",
+        },
+        error={
+            "code": "direction_generation_failed",
+            "message": "structured_output_invalid: schema 不允许的字段",
+        },
+    )
+    page, api = profile_page(result)
+    page.set_viewport_size({"width": width, "height": 900})
+    page.locator('.stage-list [data-stage="generation"]').click()
+    expect(page.locator("#generationJobDetail")).to_contain_text("本次生成已停止")
+    expect(page.locator("#generationJobGuidance")).to_contain_text("当前草稿保留")
+    expect(page.locator("#generationProgress")).to_be_hidden()
+    expect(page.locator("#generationMetrics")).to_be_hidden()
+    expect(page.locator("#resumeGeneration")).to_be_hidden()
+    expect(page.locator("#generateOrReview")).to_have_text("继续生成")
+    page.locator(".generation-diagnostics > summary").click()
+    expect(page.locator("#generationMetrics")).to_be_visible()
+    expect(page.locator("#generationMetrics")).to_contain_text("暂无用量数据")
+    expect(page.locator("#generationMetrics")).not_to_contain_text("尚未上报")
+    page.locator(".generation-log > summary").click()
+    expect(page.locator("#generationLog")).to_contain_text("schema 不允许的字段")
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    assert api.posts == []
+
+
 def test_layout_mode_names_make_ai_backend_boundary_explicit():
     html = (UI_ROOT / "index.html").read_text(encoding="utf-8")
     styles = (UI_ROOT / "direction-profile.css").read_text(encoding="utf-8")
@@ -551,9 +592,11 @@ def test_pointer_transition_is_real_and_keeps_layout_stable(profile_page):
 def test_quick_strategy_switch_keeps_last_selection_without_generation(profile_page):
     page, api = profile_page(run_reply("standard", completed=True))
     page.locator('.stage-list [data-stage="generation"]').click()
-    for value in ('conservative', 'standard', 'conservative'):
+    for value in ("conservative", "standard", "conservative"):
         page.locator(f'input[name="directionProfileChoice"][value="{value}"]').click()
-    expect(page.locator('#directionProfile')).to_have_value('conservative')
-    expect(page.locator('#directionProfileStatus')).to_contain_text('简洁 · 尚未应用')
-    expect(page.locator('#directionProfileStatus .profile-status-row').first).to_contain_text('标准')
+    expect(page.locator("#directionProfile")).to_have_value("conservative")
+    expect(page.locator("#directionProfileStatus")).to_contain_text("简洁 · 尚未应用")
+    expect(page.locator("#directionProfileStatus .profile-status-row").first).to_contain_text(
+        "标准"
+    )
     assert api.posts == []
