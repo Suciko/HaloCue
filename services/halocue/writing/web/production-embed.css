@@ -3430,6 +3430,17 @@ body:has(.app-shell.production-mode) #saveStatus {
 :host .embedded-production-shell #page-generation .generation-diagnostics summary { background:transparent; }
 :host .embedded-production-shell #page-generation .generation-log summary { padding:8px 0; background:transparent; font-size:11px; }
 :host .embedded-production-shell #page-generation .job-log-row { grid-template-columns:minmax(0,1fr); gap:3px; }
+:host .embedded-production-shell #page-generation .job-log-row { background:var(--surface); color:var(--ink); border-left-color:var(--line-strong); }
+:host .embedded-production-shell #page-generation .job-log-row.error { background:var(--danger-soft); color:var(--ink); border-left-color:var(--danger); }
+:host .embedded-production-shell #page-generation .job-log-row :is(p, strong, pre) { color:var(--ink); }
+:host .embedded-production-shell #page-generation .job-log-row time { color:var(--muted); }
+:host .embedded-production-shell #page-generation .job-log-error { background:var(--surface-soft); color:var(--ink); white-space:pre-wrap; overflow-wrap:anywhere; }
+:host .embedded-production-shell #page-generation .generation-metrics > div:only-child { grid-column:1 / -1; }
+:host .embedded-production-shell #returnToMapping { margin-left:auto; flex-shrink:0; font-size:12px; }
+:host .embedded-production-shell #page-generation .generation-scope-card { position:relative; }
+:host .embedded-production-shell #page-generation .generation-scope-card .scene-plan-background-block { grid-template-columns:80px minmax(0,1fr); padding-top:0; }
+:host .embedded-production-shell #page-generation .generation-scope-card .scene-plan-card-heading small { display:block; margin-top:4px; }
+:host .embedded-production-shell #page-generation .generation-scope-card > footer { justify-content:flex-end; border:0; padding-top:0; }
 :host .embedded-production-shell .production-generation-gates { padding:14px 16px; }
 :host .embedded-production-shell .production-generation-gates-head { margin-bottom:4px; }
 :host .embedded-production-shell .production-generation-decision #generationGates .gate-card { padding:8px 0; }

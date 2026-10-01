@@ -261,6 +261,9 @@ def build_compact_chunk_schema(target_count: int, target_ids: Sequence[str] = ()
     # compact `d`. Accept only known annotation names here; expansion below
     # restores their canonical row-level location before protocol validation.
     row_properties["d"] = _direction_schema(annotation_aliases=True)
+    # The prompt documents both wire spellings. Validate the full spelling
+    # identically and canonicalize it before applying any director state.
+    row_properties["direction"] = _direction_schema(annotation_aliases=True)
     row_schema = {
         "type": "object", "properties": row_properties,
         "required": ["i"], "additionalProperties": False,
@@ -324,13 +327,20 @@ def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, 
             for name, value in line_state.items():
                 if name not in root_state:
                     root_state[name] = value
-        unknown = set(compact) - ({"i", "d"} | set(ANNOTATION_FIELDS) | DIRECTION_FIELDS)
+        unknown = set(compact) - ({"i", "d", "direction"} | set(ANNOTATION_FIELDS) | DIRECTION_FIELDS)
         if unknown:
             raise ChunkProtocolError("invalid_line", f"compact line 包含未知字段: {sorted(unknown)}")
         raw_direction = _require_dict(
             compact.get("d", {}), "invalid_line", "compact line.d must be an object",
         )
         raw_direction = dict(raw_direction)
+        full_direction = _require_dict(
+            compact.get("direction", {}), "invalid_line", "compact line.direction must be an object",
+        )
+        for name, value in full_direction.items():
+            if name in raw_direction and raw_direction[name] != value:
+                raise ChunkProtocolError("invalid_line", f"compact line.direction.{name} 与 compact line.d.{name} 冲突")
+            raw_direction[name] = value
         for name in DIRECTION_FIELDS:
             if name not in compact:
                 continue
@@ -370,7 +380,7 @@ def expand_compact_chunk_response(response: Any, targets: Sequence[Mapping[str, 
             if name != "continuity"
         })
         row["direction"]["continuity"].update(continuity_patch)
-        if "d" in compact:
+        if "d" in compact or "direction" in compact:
             director_intents[row["source_id"]] = dict(direction_patch)
         for name in ANNOTATION_FIELDS:
             if name in compact:

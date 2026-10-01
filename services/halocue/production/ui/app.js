@@ -339,7 +339,7 @@
       item.setAttribute("aria-label", `${item.querySelector("strong")?.textContent || "步骤"}${active ? "，当前步骤" : "，点击进入"}`);
     });
     $$(".page").forEach((page) => page.classList.toggle("active", page.id === `page-${stage}`));
-    const labels = { source: "选择剧本", mapping: "角色与素材", generation: "场景制作计划", review: "审查与安装" };
+    const labels = { source: "选择剧本", mapping: "角色与素材", generation: "演出生成", review: "审查与安装" };
     $("#breadcrumb").textContent = `制作 / ${labels[stage]}`;
     $("#pageTitle").textContent = stage === "source" ? "把已有剧本转换为 AA 工程" : labels[stage];
     document.querySelector(".workspace").scrollTo({ top: 0, behavior: "instant" });
@@ -389,7 +389,7 @@
             ? "查看错误并继续生成"
             : run.state === "direction_cancelled"
               ? "继续或重新生成演出"
-              : "完成场景制作计划";
+              : "完成演出生成";
     } else if (run && !reviewDone) {
       recommendedStage = "review";
       recommendedLabel = state.gates?.compile?.passed ? "编译并安装 AA 工程" : "继续逐卡审查";
@@ -422,7 +422,7 @@
       };
     }
     if (stage === "review" && !state.currentDraft) {
-      return { allowed: false, reason: "草稿还没有载入，请先完成场景制作计划。" };
+      return { allowed: false, reason: "草稿还没有载入，请先完成演出生成。" };
     }
     return { allowed: true, reason: "" };
   }
@@ -1261,9 +1261,9 @@
     if (hasDirection) return { className: "ready", label: "已有演出草稿", detail: "可在逐卡审查中继续调整" };
     const runState = state.currentRun?.state;
     if (runState === "generating_direction") return { className: "running", label: "演出生成中", detail: "等待生成任务完成" };
-    if (runState === "direction_failed") return { className: "failed", label: "演出生成失败", detail: "回到场景制作计划重试" };
+    if (runState === "direction_failed") return { className: "failed", label: "演出生成失败", detail: "回到演出生成重试" };
     if (state.currentRun?.source_summary?.generation_mode === "ai_direction") {
-      return { className: "pending", label: "待生成演出", detail: "完成角色映射后进入场景制作计划" };
+      return { className: "pending", label: "待生成演出", detail: "完成角色映射后进入演出生成" };
     }
     return { className: "stable", label: "沿用剧本演出", detail: "当前任务不会自动添加 AI 演出" };
   }
@@ -1400,7 +1400,7 @@
           <article class="ai-preflight-scene-panel"><header><div><small>场景演出规划</small><h4>${latest ? "地点、时间和背景建议" : "规则识别到的场景"}</h4></div><button type="button" class="quiet" data-ai-preflight-action="assets">处理素材</button></header><ul class="ai-preflight-scene-list">${sceneRows}</ul></article>
         </div>
         <article class="ai-preflight-issues-panel ${ambiguities.length ? "has-errors" : ""}"><header><div><small>需要处理</small><h4>${ambiguities.length ? `${ambiguities.length} 项待确认` : "暂无必须处理的问题"}</h4></div><span>${latest ? "AI 只提供建议" : "运行后显示"}</span></header><ul>${ambiguityRows}</ul></article>
-        <footer class="ai-preflight-decision-footer"><span>${latest ? "确认映射和演出规划后，再进入场景制作计划。" : "先运行 AI 初审，再检查角色、场景和素材建议。"}</span><button type="button" class="quiet" data-ai-preflight-action="confirm-mapping">回到角色映射</button></footer>
+        <footer class="ai-preflight-decision-footer"><span>${latest ? "确认映射和演出规划后，再进入演出生成。" : "先运行 AI 初审，再检查角色、场景和素材建议。"}</span><button type="button" class="quiet" data-ai-preflight-action="confirm-mapping">回到角色映射</button></footer>
       </div>
     </details>`;
     panel.innerHTML = `<header class="ai-preflight-head ai-preflight-compact"><div><small>可选 · AI 演出建议</small><h3>${esc(aiSummary)}</h3><p>${esc(aiSummaryDetail)}</p></div><div class="ai-preflight-actions">${action}${latest ? `<button type="button" class="quiet" data-ai-preflight-details>查看建议</button>` : ""}</div></header>${result}`;
@@ -2057,7 +2057,9 @@
 
   function jobLogRows(job, metrics) {
     const rows = (job?.events || []).map((event) => {
-      const detail = event.detail || event.message || event.reason || event.state || event.kind || "状态更新";
+      const eventLabels = { waiting: "等待模型响应", completed: "模型响应已返回", retrying: "正在重试", subdividing: "拆分场景块", timed_out: "请求超时", output_capacity: "输出长度不足，拆分后继续", structured_output_invalid: "返回格式不符合要求" };
+      const rawDetail = event.detail || event.message || event.reason || event.state || event.kind || "状态更新";
+      const detail = eventLabels[rawDetail] || rawDetail;
       const context = [
         event.chunk_current && event.chunk_total ? `块 ${event.chunk_current}/${event.chunk_total}` : "",
         event.request_index ? `请求 ${event.request_index}` : "",
@@ -2183,53 +2185,24 @@
     if (!target || !state.currentDraft) return;
     const scenes = draftSceneGroups();
     const cards = state.currentDraft.cards || [];
-    const requestCount = cards.filter((card) => ["background_request", "sound_request"].includes(card.kind)).length;
-    target.dataset.materialRequests = String(requestCount);
+    const active = jobIsActive(state.currentJob);
+    target.dataset.materialRequests = String(cards.filter((card) => ["background_request", "sound_request"].includes(card.kind)).length);
     target.innerHTML = scenes.length ? scenes.map((scene) => {
-      const aiScene = aiSceneForDraft(scene);
       const backgroundKey = scene.background?.current?.arg || "";
-      const backgroundLabel = backgroundKey
-        ? resourceDisplayName({ key: backgroundKey }, { kind: "backgrounds", currentBackgroundKey: backgroundKey, currentBackgroundLabel: sceneTitleLabel(scene.title) })
-        : (aiScene?.background_need || "尚未设置");
       const preview = backgroundKey && backgroundKey !== "BG_Black"
         ? previewImage("backgrounds", backgroundKey, backgroundKey, "scene-plan-thumb-image", null)
         : `<span class="scene-plan-thumb-empty">${backgroundKey === "BG_Black" ? "黑屏" : "缺背景"}</span>`;
       const pending = scene.cards.filter((card) => card.review_state === "pending").length;
       const dialogueCount = scene.cards.filter((card) => card.kind === "line").length;
-      const requests = scene.cards.filter((card) => ["background_request", "sound_request"].includes(card.kind));
-      const evidence = scene.evidence.length ? scene.evidence.map((line) => `<li>${esc(line)}</li>`).join("") : "<li>本场景没有台词证据。</li>";
-      const reason = aiScene?.background_reason || aiScene?.reason || (scene.background ? "" : "请选择本场背景。 ");
       const sceneId = scene.card?.card_id || scene.cards[0]?.card_id || "";
-      return `<article class="scene-plan-row scene-plan-card ${scene.background?.current?.arg === "BG_Black" ? "ready" : "background-unverified"}">
-        <div class="scene-plan-card-heading"><span class="scene-plan-number">${esc(String(scene.index + 1).padStart(2, "0"))}</span><div><small>第 ${esc(scene.firstLine)}–${esc(scene.lastLine)} 行</small><strong>${esc(scene.title)}</strong></div><b>${scene.background ? "当前采用" : "待补充"}</b></div>
-        <div class="scene-plan-background-block"><div class="scene-plan-thumb">${preview}</div><div><small>背景</small><strong>${esc(backgroundLabel)}</strong><p>${esc(reason)}</p>${sceneBackgroundAvailability(backgroundKey)}<em>人物 / 旁白：${esc(scene.speakers.join("、") || "无台词")} · ${dialogueCount} 段台词 · ${scene.cards.length} 张卡片${pending ? ` · ${pending} 张待审` : " · 已审"}</em>${backgroundKey ? `<details class="scene-plan-evidence scene-plan-resource-details"><summary>素材信息</summary><ul><li>资源标识：${esc(backgroundKey)}</li></ul></details>` : ""}</div></div>
-        ${requests.length ? `<section class="scene-plan-gap"><small>素材缺口</small>${requests.map((request) => `<p>${esc(request.current?.description || request.current?.query || request.raw || request.kind)}</p>`).join("")}</section>` : ""}
-        <footer><button type="button" class="primary" data-scene-plan-official="${esc(sceneId)}">${scene.background ? "更换AA / 任务背景" : "查找AA 背景"}</button><button type="button" data-scene-plan-prompt="${esc(sceneId)}">生成生图提示词</button><button type="button" data-scene-plan-generated="${esc(sceneId)}">导入生成结果</button><button type="button" data-scene-plan-history="${esc(sceneId)}">从历史项目导入</button><button type="button" data-scene-plan-import="${esc(sceneId)}">添加自定义背景</button><button type="button" data-scene-plan-workbench="${esc(sceneId)}">打开素材工作台</button><button type="button" data-scene-plan-card="${esc(sceneId)}">打开场景审查</button><details class="scene-plan-evidence"><summary>原文证据</summary><ul>${evidence}</ul></details></footer>
+      return `<article class="scene-plan-row scene-plan-card generation-scope-card">
+        <div class="scene-plan-card-heading"><span class="scene-plan-number">${esc(String(scene.index + 1).padStart(2, "0"))}</span><div><strong>${esc(scene.title)}</strong><small>${dialogueCount} 段正文 · ${pending ? `${pending} 张待审` : "已审"}</small></div></div>
+        <div class="scene-plan-background-block"><div class="scene-plan-thumb">${preview}</div><div><em>${esc(scene.speakers.join("、") || "无台词")}</em>${sceneBackgroundAvailability(backgroundKey)}</div></div>
+        <footer><button type="button" data-scene-plan-card="${esc(sceneId)}" ${active ? "disabled" : ""}>审查本场</button></footer>
       </article>`;
     }).join("") : '<p class="empty">草稿中还没有可制作的场景。</p>';
     updateSceneBackgroundSummary(target);
     const sceneById = (id) => scenes.find((scene) => (scene.card?.card_id || scene.cards[0]?.card_id) === id);
-    $$('[data-scene-plan-official]').forEach((button) => button.addEventListener("click", () => {
-      const scene = sceneById(button.dataset.scenePlanOfficial); if (!scene?.card) return;
-      chooseResource("backgrounds", "场景背景", (item) => insertSceneBackground(scene.card, item), {
-        source: "snapshot", eyebrow: "AA 与本任务背景", title: `为“${scene.title}”选择背景`, status: "选择后建立或替换当前场景的 @bg 卡，不改写剧本。", selectionNote: "将采用此背景。", actionLabel: "采用此结果",
-      });
-    }));
-    $$('[data-scene-plan-history]').forEach((button) => button.addEventListener("click", () => {
-      const scene = sceneById(button.dataset.scenePlanHistory); if (scene?.card) chooseSceneLibraryBackground(scene.card);
-    }));
-    $$('[data-scene-plan-prompt]').forEach((button) => button.addEventListener("click", () => {
-      const scene = sceneById(button.dataset.scenePlanPrompt); if (scene) openBackgroundPrompt(scene);
-    }));
-    $$('[data-scene-plan-generated]').forEach((button) => button.addEventListener("click", () => {
-      const scene = sceneById(button.dataset.scenePlanGenerated); if (scene) openBackgroundPrompt(scene, { importImmediately: true });
-    }));
-    $$('[data-scene-plan-workbench]').forEach((button) => button.addEventListener("click", () => {
-      const scene = sceneById(button.dataset.scenePlanWorkbench); if (scene) openSceneAssetWorkbench(scene);
-    }));
-    $$('[data-scene-plan-import]').forEach((button) => button.addEventListener("click", () => {
-      const scene = sceneById(button.dataset.scenePlanImport); if (scene?.card) openSceneBackgroundImport(scene.card);
-    }));
     $$('[data-scene-plan-card]').forEach((button) => button.addEventListener("click", () => {
       const scene = sceneById(button.dataset.scenePlanCard); if (!scene) return;
       state.selectedCard = scene.card || scene.cards[0] || null;
@@ -2245,7 +2218,7 @@
     setLayoutMode(state.currentRun.source_summary?.layout_mode || savedLayoutMode());
     $("#layoutModeFieldset")?.classList.toggle("hidden", mode !== "ai_direction");
     $("#generationModeBadge").textContent = mode === "ai_direction" ? "AI 安排演出" : "仅转换格式";
-    $("#generationDescription").textContent = mode === "ai_direction" ? "确认各场背景，选择演出方式，再生成待审草稿。" : "确认各场背景与人物，继续审查格式草稿。";
+    $("#generationDescription").textContent = mode === "ai_direction" ? "沿用已确认的人物与背景，生成并审查演出。" : "格式草稿已建立，继续审查演出。";
     const missingMappings = workflowSnapshot().missingMappings;
     const cards = [
       ["角色映射", missingMappings ? `${missingMappings} 位待确认` : "已通过", missingMappings === 0],
@@ -2671,7 +2644,7 @@
     const compile = state.gates?.compile;
     const install = state.gates?.install;
     const guidance = {
-      draft_missing: ["回到场景制作计划，等待草稿载入。", ""],
+      draft_missing: ["回到演出生成，等待草稿载入。", ""],
       blocking_diagnostics: ["先定位有问题的卡片，处理标出的错误。", "blocking"],
       unresolved_issues: ["逐项核对卡片提示和未落实的素材请求。", "issues"],
       pending_review: ["检查内容后，由你逐张标记已审。", "pending"],
@@ -4569,6 +4542,7 @@
   $("#reloadRuns").addEventListener("click", loadRuns);
   $("#refreshRun").addEventListener("click", () => refreshCurrentRun().catch(handleError));
   $("#mappingContinue").addEventListener("click", () => showStage("generation"));
+  $("#returnToMapping").addEventListener("click", () => showStage("mapping"));
   $("#generateOrReview").addEventListener("click", startGeneration);
   $("#regenerateDirection").addEventListener("click", () => startGeneration({ restart: true }));
   $("#directionProfile").addEventListener("change", (event) => {

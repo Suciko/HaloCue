@@ -36,10 +36,13 @@ def embedded_page(profile_browser):
         asset_failure=False,
         playback=False,
         job_state=None,
+        job_details=None,
         speakers=None,
         stage="generation",
     ):
         result = run_reply("conservative", job_state=job_state)
+        if job_details:
+            result["last_job"].update(job_details)
         result["run"]["source_summary"]["generation_mode"] = mode
         if speakers is not None:
             result["run"]["source_summary"]["speakers"] = speakers
@@ -170,6 +173,44 @@ def embedded_page(profile_browser):
     assert errors == []
 
 
+@pytest.mark.parametrize("width", [390, 1280])
+def test_failed_logs_are_readable_in_dark_mode_and_show_reported_usage(embedded_page, width):
+    page, api = embedded_page(width=width, theme="dark", job_state="failed", job_details={
+        "error": {"code": "direction_generation_failed", "message": "structured_output_invalid"},
+        "events": [{"kind": "model_activity", "state": "waiting"}],
+        "result": {"metrics": {"requests": 2, "input_tokens": 30845, "output_tokens": 1278,
+                               "failed_request_count": 2, "failed_request_input_tokens": 30845,
+                               "failed_request_output_tokens": 1278}},
+    })
+    page.locator(".generation-diagnostics > summary").click()
+    expect(page.locator("#generationMetrics")).to_contain_text("30,845")
+    expect(page.locator("#generationMetrics")).not_to_contain_text("暂无用量")
+    page.locator(".generation-log > summary").click()
+    expect(page.locator("#generationLog")).to_contain_text("等待模型响应")
+    for row in page.locator(".job-log-row").all():
+        colors = row.evaluate("e => [getComputedStyle(e).backgroundColor, getComputedStyle(e).color].map(c => c.match(/[\\d.]+/g).slice(0,3).map(Number))")
+        assert max(colors[0]) < 150
+        def luminance(rgb):
+            values = [v / 255 for v in rgb]
+            linear = [v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in values]
+            return sum(v * w for v, w in zip(linear, [0.2126, 0.7152, 0.0722]))
+        light, dark = sorted([luminance(c) for c in colors], reverse=True)
+        assert (light + 0.05) / (dark + 0.05) >= 4.5
+    assert api.posts == []
+
+
+@pytest.mark.parametrize("width", [390, 1280])
+def test_generation_scope_is_read_only_and_links_back_to_materials(embedded_page, width):
+    page, api = embedded_page(width=width)
+    expect(page.locator("#page-generation [data-scene-plan-official]")).to_have_count(0)
+    expect(page.locator("#page-generation .production-scene-tools")).to_have_count(0)
+    expect(page.locator("#scenePlan [data-scene-plan-card]")).to_have_count(1)
+    page.locator("#returnToMapping").click()
+    expect(page.locator("#page-mapping")).to_be_visible()
+    expect(page.locator("#mappingScenePlan [data-mapping-scene-official]")).to_be_visible()
+    assert api.posts == []
+
+
 def test_embedded_speaker_mapping_wraps_names_and_keeps_role_chip_compact(embedded_page):
     speaker = "阿拜多斯对策委员会·砂狼白子验收用长名字"
     page, api = embedded_page("format_only", width=1600, speakers=[speaker], stage="mapping")
@@ -230,8 +271,7 @@ def test_embedded_settings_are_distinct_and_fit_viewport(embedded_page, width, m
 @pytest.mark.parametrize(
     "stage,card,official,expected_direct_buttons",
     [
-        ("generation", "#scenePlan .scene-plan-card", "data-scene-plan-official", 2),
-        ("mapping", "#mappingScenePlan .mapping-scene-card", "data-mapping-scene-official", 1),
+                ("mapping", "#mappingScenePlan .mapping-scene-card", "data-mapping-scene-official", 1),
     ],
 )
 def test_material_disclosure_retains_actions_after_rerender(embedded_page, stage, card, official, expected_direct_buttons):
@@ -369,18 +409,18 @@ def test_dark_theme_covers_embedded_surfaces_and_resets_to_light(embedded_page, 
 
 @pytest.mark.parametrize("initial_dark", [True, False])
 def test_dark_dialog_and_media_survive_live_theme_switch(embedded_page, initial_dark):
-    page, api = embedded_page(background="BG_Available", theme="dark" if initial_dark else "light")
-    image = page.locator("#scenePlan img").first
+    page, api = embedded_page(background="BG_Available", theme="dark" if initial_dark else "light", stage="mapping")
+    image = page.locator("#mappingScenePlan img").first
     expect(image).to_have_js_property("naturalWidth", 1)
     source = image.get_attribute("src")
-    page.locator("[data-scene-plan-official]").first.click()
+    page.locator("[data-mapping-scene-official]").first.click()
     dialog = page.locator("#resourceDialog")
     expect(dialog).to_be_visible()
     page.evaluate("document.documentElement.dataset.theme='dark'")
     expect(dialog).to_have_css("background-color", "rgb(32, 38, 49)")
     page.keyboard.press("Escape")
-    page.locator("#scenePlan .production-scene-tools > summary").first.click()
-    page.locator("[data-scene-plan-prompt]").first.click()
+    page.locator("#mappingScenePlan .production-scene-tools > summary").first.click()
+    page.locator("[data-mapping-scene-prompt]").first.click()
     expect(page.locator("#backgroundPromptText")).to_have_css("color", "rgb(225, 231, 238)")
     expect(page.locator("#backgroundPromptText")).to_have_css("background-color", "rgb(25, 30, 39)")
     page.keyboard.press("Escape")

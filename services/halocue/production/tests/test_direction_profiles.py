@@ -332,6 +332,35 @@ def test_failed_model_generation_retains_profile_audit(direction_service, monkey
     assert audit["status"] == "failed"
     assert audit["direction_profile_snapshot"] == accepted["direction_profile_snapshot"]
     assert service.run_detail(run_id)["draft"]["draft_version"] == version
+    assert job["result"]["metrics"]["requests"] == audit["metrics"]["requests"]
+    assert service.run_detail(run_id)["last_job"]["result"]["metrics"] == job["result"]["metrics"]
+    monkeypatch.setattr(service.adapter, "direction_proposals", lambda _: {"generations": [{
+        "generation_id": accepted["generation_id"], "metrics": {"requests": 99},
+    }]})
+    assert service.job_detail(job["job_id"])["job"]["result"]["metrics"]["requests"] == audit["metrics"]["requests"]
+
+
+def test_failed_job_projects_complete_receipts_but_does_not_invent_missing_tokens(direction_service, monkeypatch):
+    service = direction_service
+    monkeypatch.setattr(service.direction_models, "provider", lambda: FixtureProvider(fail=True))
+    run_id, version = mapped_run(service, "conservative")
+    _, accepted = service.generate_direction(run_id, {"expected_draft_version": version})
+    job_id = accepted["job"]["job_id"]
+    assert finished_job(service, job_id)["state"] == "failed"
+    records = [{"input_tokens": 10, "output_tokens": 3, "cache_read_tokens": 0, "outcome": "failed"},
+               {"input_tokens": 20, "output_tokens": 4, "cache_read_tokens": 0, "outcome": "failed"}]
+    monkeypatch.setattr(service.adapter, "direction_proposals", lambda _: {"generations": [{
+        "generation_id": accepted["generation_id"],
+        "metrics": {"requests": 2, "failed_request_count": 2, "request_records": records},
+    }]})
+    raw_job = service.jobs.get(job_id).to_dict()
+    raw_job["events"] = []
+    metrics = service._job_with_direction_metrics(raw_job)["result"]["metrics"]
+    assert (metrics["input_tokens"], metrics["output_tokens"], metrics["failed_request_input_tokens"]) == (30, 7, 30)
+    assert metrics["cache_read_tokens"] == 0 and metrics["cache_reported"] is True
+    records[1].pop("input_tokens")
+    metrics = service._job_with_direction_metrics(raw_job)["result"]["metrics"]
+    assert "input_tokens" not in metrics and "failed_request_input_tokens" not in metrics
 
 
 def test_capabilities_describe_profiles_and_compatibility_defaults(settings):

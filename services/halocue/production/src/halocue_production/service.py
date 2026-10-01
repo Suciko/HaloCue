@@ -582,6 +582,18 @@ class ProductionService:
                             latest.state = "direction_failed"
                         latest.updated_at = utc_now()
                         self.repository.save_run(latest)
+                # A resumed generation reuses its generation ID. Preserve the
+                # failed attempt's sanitized usage on this job before retry can
+                # replace the shared generation audit.
+                try:
+                    audits = self.adapter.direction_proposals(str(run.draft_token))
+                    audit = next((item for item in audits.get("generations", [])
+                                  if item.get("generation_id") == generation_id), None)
+                    if audit and audit.get("metrics"):
+                        control.record_event({"kind": "generation_summary", "state": "failed",
+                                              "generation_id": generation_id, "metrics": audit["metrics"]})
+                except (ProductionError, OSError, ValueError):
+                    pass
                 raise
             finally:
                 remove_stop_callback()
@@ -1470,8 +1482,8 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
             "draft_direction_profile": self.adapter.committed_direction_profile(
                 str(run.draft_token), run.last_direction_generation_id,
             ) if run.draft_token else None,
-            "active_job": self._job_public(active_job.to_dict()) if active_job else None,
-            "last_job": self._job_public(last_job.to_dict()) if last_job else None,
+            "active_job": self._job_with_direction_metrics(active_job.to_dict()) if active_job else None,
+            "last_job": self._job_with_direction_metrics(last_job.to_dict()) if last_job else None,
         }
 
     def performance_preview(self, run_id: str) -> dict[str, Any]:
@@ -2190,7 +2202,47 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         job = self.jobs.get(job_id)
         if not job:
             raise ProductionError("job_not_found", "后台任务不存在", status=404)
-        return {"ok": True, "job": self._job_public(job.to_dict())}
+        return {"ok": True, "job": self._job_with_direction_metrics(job.to_dict())}
+
+    def _job_with_direction_metrics(self, job: dict[str, Any]) -> dict[str, Any]:
+        public = self._job_public(job)
+        if job.get("kind") != "direction_generation" or job.get("state") not in {
+            "failed", "interrupted", "paused", "cancelled", "succeeded",
+        }:
+            return public
+        context = job.get("retry_context") or {}
+        generation_id = context.get("generation_id")
+        if not generation_id or not job.get("run_id"):
+            return public
+        summary = next((event for event in reversed(job.get("events") or [])
+                        if event.get("kind") == "generation_summary" and event.get("metrics")), None)
+        audit = {"metrics": summary["metrics"]} if summary else None
+        if audit is None:
+            run = self._run(str(job["run_id"]))
+            if not run.draft_token or run.last_job_id != job.get("job_id"):
+                return public
+            # Backfill legacy latest jobs only. An older attempt must not inherit
+            # a later resumed attempt's metrics from the shared audit file.
+            audits = self.adapter.direction_proposals(str(run.draft_token))
+            audit = next((entry for entry in audits.get("generations", [])
+                          if entry.get("generation_id") == generation_id), None)
+        if audit and audit.get("metrics"):
+            metrics = dict(audit["metrics"])
+            records = metrics.get("request_records") or []
+            # Older failure audits contain physical records but no totals.
+            # Sum only a complete set with reported values; absence is not zero.
+            if records and len(records) == metrics.get("requests"):
+                for field in ("input_tokens", "output_tokens", "cache_read_tokens"):
+                    if field not in metrics and all(isinstance(row.get(field), (int, float)) for row in records):
+                        metrics[field] = sum(row[field] for row in records)
+                if "cache_read_tokens" in metrics:
+                    metrics.setdefault("cache_reported", True)
+                failed = [row for row in records if row.get("outcome") == "failed"]
+                for field in ("input_tokens", "output_tokens"):
+                    if failed and all(isinstance(row.get(field), (int, float)) for row in failed):
+                        metrics.setdefault("failed_request_" + field, sum(row[field] for row in failed))
+            public["result"] = {**(public.get("result") or {}), "metrics": metrics}
+        return public
 
     def cancel_job(self, job_id: str) -> dict[str, Any]:
         with self._state_lock:

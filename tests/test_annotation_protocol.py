@@ -470,6 +470,21 @@ def test_compact_protocol_recovers_line_emo_accidentally_nested_in_direction():
     }
 
 
+def test_compact_full_direction_alias_preserves_intent_and_rejects_conflicts():
+    response = {"lines": [{"i": 1, "direction": {"emo": "惊叹", "continuity": {"emo": "start"}}}],
+                "state_delta": {}, "memory_events": []}
+    llm.validate_json_schema(response, build_compact_chunk_schema(2))
+    expanded = expand_compact_chunk_response(response, TARGETS)
+    assert expanded["lines"][0]["emo"] == "惊叹"
+    assert expanded.director_intents["src-1-0-a"] == {"continuity": {"emo": "start"}}
+    response["lines"][0]["d"] = {"emo": "疑问"}
+    with pytest.raises(ChunkProtocolError, match="冲突"):
+        expand_compact_chunk_response(response, TARGETS)
+    response["lines"][0]["direction"]["unknown_command"] = "unsafe"
+    with pytest.raises(llm.StructuredOutputError):
+        llm.validate_json_schema(response, build_compact_chunk_schema(2))
+
+
 def test_compact_protocol_rejects_conflicting_nested_annotation_alias():
     response = {
         "lines": [{"i": 1, "emo": "疑问", "d": {"emo": "惊叹"}}],

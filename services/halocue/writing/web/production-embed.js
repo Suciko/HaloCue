@@ -265,7 +265,7 @@
         <section class="production-task-provenance" aria-label="当前任务来源与版本"><div><small>来源</small><strong>${escapeHtml(sourceLabel)}</strong></div><div><small>下游版本</small><strong>审查草稿 v${escapeHtml(draft?.draft_version || "-")}</strong></div><div class="${buildState === "构建已落后于当前草稿" ? "is-stale" : ""}"><small>构建状态</small><strong>${escapeHtml(buildState)}</strong></div></section>
         <section class="production-frozen-source"><header><div><small>1A · 当前使用的冻结剧本</small><h4>不会改写写作正文</h4></div><details><summary>展开剧本</summary><pre>${escapeHtml(sourceText || "当前任务未提供可展开的剧本文本")}</pre></details></header></section>
         <section class="production-frozen-scenes"><header><div><small>1B · 已确认的场景判断</small><h4>下游制作沿用这些边界</h4></div><span>只读</span></header><ol>${sceneList}</ol></section>
-        <footer class="production-current-task-actions"><span>下一步：${escapeHtml(snapshot.stage === "review" ? "进入逐卡审查" : snapshot.stage === "generation" ? "完成场景制作计划" : "处理角色与素材")}</span><div><button type="button" class="quiet" data-current-task-continue>继续当前任务</button><button type="button" class="primary" data-current-task-new>新建另一项制作</button></div></footer>`;
+        <footer class="production-current-task-actions"><span>下一步：${escapeHtml(snapshot.stage === "review" ? "进入逐卡审查" : snapshot.stage === "generation" ? "完成演出生成" : "处理角色与素材")}</span><div><button type="button" class="quiet" data-current-task-continue>继续当前任务</button><button type="button" class="primary" data-current-task-new>新建另一项制作</button></div></footer>`;
       panel.querySelector("[data-current-task-continue]")?.addEventListener("click", () => shell.haloCueShowStage?.(snapshot.stage));
       panel.querySelector("[data-current-task-new]")?.addEventListener("click", () => shell.haloCueShowNewProduction?.());
     };
@@ -782,7 +782,7 @@
     const leadKicker = lead.querySelector("small");
     const leadTitle = lead.querySelector("h3");
     if (leadKicker) leadKicker.textContent = "第三步";
-    if (leadTitle) leadTitle.textContent = "场景制作计划";
+    if (leadTitle) leadTitle.textContent = "演出生成";
 
     const flow = document.createElement("div");
     flow.className = "production-generation-flow";
@@ -793,11 +793,12 @@
     plan.innerHTML = `
       <header class="production-generation-section-head">
         <div>
-          <small>场景制作计划</small>
-          <h4 id="productionGenerationPlanTitle">场景与素材</h4>
-          <p>逐场确认背景与人物，不改写原剧本。</p>
+          <small>演出生成</small>
+          <h4 id="productionGenerationPlanTitle">本次演出范围</h4>
+          <p>沿用第二步确认的人物与背景。</p>
         </div>
       </header>`;
+    plan.querySelector("header").append(scenePlan.querySelector("#returnToMapping"));
     plan.append(scenePlan);
 
     const decision = document.createElement("section");
@@ -832,7 +833,6 @@
     generation.append(flow);
     generation.classList.add("production-generation-workbench");
     generation.dataset.productionGenerationSplit = "true";
-    installScenePlanTools(scenePlan);
   }
 
   function installScenePlanTools(scenePlan) {

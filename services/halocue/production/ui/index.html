@@ -39,7 +39,7 @@
       <ol class="stage-list" aria-label="制作流程">
         <li class="active" data-stage="source" role="button" tabindex="0"><b>1</b><span><strong>读取与场景判断</strong><small>先读剧本，再确认分场</small></span><em data-stage-state aria-hidden="true">当前</em></li>
         <li data-stage="mapping" role="button" tabindex="-1" aria-disabled="true"><b>2</b><span><strong>角色与素材</strong><small>映射、证据与缺口</small></span><em data-stage-state aria-hidden="true">未开始</em></li>
-        <li data-stage="generation" role="button" tabindex="-1" aria-disabled="true"><b>3</b><span><strong>场景制作计划</strong><small>背景、人物与演出</small></span><em data-stage-state aria-hidden="true">未开始</em></li>
+        <li data-stage="generation" role="button" tabindex="-1" aria-disabled="true"><b>3</b><span><strong>演出生成</strong><small>生成与审查演出</small></span><em data-stage-state aria-hidden="true">未开始</em></li>
         <li data-stage="review" role="button" tabindex="-1" aria-disabled="true"><b>4</b><span><strong>审查与安装</strong><small>逐卡确认并交付 AA</small></span><em data-stage-state aria-hidden="true">未开始</em></li>
       </ol>
       <section class="side-status">
@@ -171,12 +171,12 @@
           <summary><span>可选：AI 演出建议 <b class="support-optional-badge">可选</b></span><small>不改变已冻结的场景判断</small></summary>
           <section class="ai-preflight-panel" id="aiPreflight" aria-live="polite"><p class="empty">正在检查 AI 演出建议是否可用。</p></section>
         </details>
-        <div class="sticky-actions"><span id="mappingStatus">完成全部映射后继续。</span><button class="primary" id="mappingContinue">进入场景制作计划</button></div>
+        <div class="sticky-actions"><span id="mappingStatus">完成全部映射后继续。</span><button class="primary" id="mappingContinue">进入演出生成</button></div>
       </section>
 
       <section class="page" id="page-generation">
         <div class="page-lead"><div><small>场景制作</small><h3>安排画面与演出</h3><p id="generationDescription">当前任务使用仅转换格式，草稿已经建立。</p></div><span class="mode-badge" id="generationModeBadge">仅转换格式</span></div>
-        <section class="scene-plan" aria-labelledby="scenePlanTitle"><header><div><h4 id="scenePlanTitle">场景计划</h4></div><span id="scenePlanStatus">正在整理场景</span></header><div id="scenePlan" class="scene-plan-list"><p class="empty">正在读取场景。</p></div></section>
+        <section class="scene-plan" aria-labelledby="scenePlanTitle"><header><div><h4 id="scenePlanTitle">演出范围</h4></div><button type="button" id="returnToMapping">修改人物与背景</button><span id="scenePlanStatus">正在整理场景</span></header><div id="scenePlan" class="scene-plan-list"><p class="empty">正在读取场景。</p></div></section>
         <section class="direction-profile-control profile-picker direction-profile-bar hidden" id="directionProfileControl" data-profile-picker="directionProfile"><header class="profile-picker-heading"><div><small>演出风格</small><h4>演出策略</h4></div><span class="profile-lock" id="directionProfileLock" hidden>本次策略已锁定</span></header><select id="directionProfile" hidden aria-hidden="true" tabindex="-1"><option value="conservative">简洁（保守）</option><option value="standard" selected>标准（原版）</option></select><div class="profile-choice-grid" role="radiogroup" aria-label="演出策略" aria-describedby="directionProfileStatus"><label class="profile-choice"><input type="radio" name="directionProfileChoice" value="conservative"><span class="profile-choice-body"><span class="profile-choice-heading"><strong>简洁</strong><span class="profile-choice-check" aria-hidden="true">✓</span></span><span class="profile-choice-caption">克制演出 · 优先稳定</span><span class="profile-choice-detail">少动作、少特效，保持情绪连贯。</span></span></label><label class="profile-choice"><input type="radio" name="directionProfileChoice" value="standard" checked><span class="profile-choice-body"><span class="profile-choice-heading"><strong>标准</strong><span class="profile-choice-check" aria-hidden="true">✓</span></span><span class="profile-choice-caption">细腻演出 · 更多表现</span><span class="profile-choice-detail">保留更多情绪变化与演出细节。</span></span></label></div><div class="profile-status" id="directionProfileStatus" role="status" aria-live="polite" aria-atomic="true"></div><p class="profile-boundary-note">仅影响下次生成，不会立即改写当前草稿。</p></section>
         <section class="action-panel"><div><small>下一步</small><h3 id="generationActionTitle">打开草稿审查</h3><p id="generationActionCopy">逐卡处理未登记背景、音效和待审内容。</p></div><div class="direction-generation-actions"><button type="button" id="regenerateDirection" hidden>重新生成</button><button class="primary" id="generateOrReview">进入审查</button></div></section>
         <section class="generation-job hidden" id="generationJob" aria-live="polite">
