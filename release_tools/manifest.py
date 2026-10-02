@@ -141,6 +141,7 @@ def is_public_source_path(relative_path: str) -> bool:
             return True
         if normalized in {
             "services/halocue/runtime_layout.py",
+            "services/halocue/http_server.py",
             "services/halocue/_test_support.py",
         }:
             return True

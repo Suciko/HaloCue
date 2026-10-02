@@ -61,6 +61,7 @@ def test_public_manifest_includes_runtime_frontend_tests_and_tools(tmp_path):
             "branding/halocue-icon.png": b"public icon",
             "tests/test_smoke.py": "def test_smoke(): assert True\n",
             "services/halocue/_test_support.py": "CHROMIUM_UNSAFE_PORTS = {1723}\n",
+            "services/halocue/http_server.py": "# shared local HTTP runtime\n",
             "services/halocue/writing/web/vendor/echarts/LICENSE": "Apache-2.0\n",
             "services/halocue/writing/web/vendor/echarts/NOTICE": "Apache Software Foundation\n",
             "tools/check.py": "# tool\n",
@@ -79,6 +80,7 @@ def test_public_manifest_includes_runtime_frontend_tests_and_tools(tmp_path):
     paths = set(public_source_paths(source))
 
     assert REQUIRED_ROOT_MODULES <= paths
+    assert "services/halocue/http_server.py" in paths
     assert {
         "css/app.css",
         "js/app.js",
