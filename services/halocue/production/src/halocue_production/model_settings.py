@@ -14,10 +14,14 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .errors import ProductionError
+from services.halocue.codex_agent import (
+    CodexError, connection as codex_connection, validate_config as validate_codex_config,
+    enable_subscription_only, require_subscription_provider, subscription_only_enabled,
+)
 from .model_capabilities import normalize_advanced, ADVANCED_FIELDS
 
 
-PROVIDERS = {"openai", "anthropic"}
+PROVIDERS = {"openai", "anthropic", "codex"}
 
 VENDOR_PRESETS: list[dict[str, Any]] = [
     {
@@ -240,6 +244,14 @@ class DirectionModelSettings:
                 if field not in requested:
                     candidate.pop(field, None)
         provider = str(candidate.get("provider") or "openai").strip().lower()
+        try:
+            require_subscription_provider(provider)
+        except CodexError as error:
+            raise ProductionError(error.code, error.message, status=409) from error
+        if provider == "codex":
+            clean = {key: candidate.get(key) for key in ("model", "timeout", "subscription_only_acknowledged")}
+            clean.update({key: requested[key] for key in ("api_key", "api_key_env", "base_url") if key in requested})
+            return {**self._validated({**clean, "provider": "codex"}), "api_key": ""}
         default_url = "https://api.anthropic.com/v1" if provider == "anthropic" else "https://api.openai.com/v1"
         candidate["provider"] = provider
         raw_url = requested.get("base_url") if "base_url" in requested else (
@@ -309,6 +321,11 @@ class DirectionModelSettings:
     @staticmethod
     def _validated(payload: dict[str, Any]) -> dict[str, Any]:
         provider = str(payload.get("provider") or "").strip().lower()
+        if provider == "codex":
+            try:
+                return validate_codex_config(payload)
+            except CodexError as error:
+                raise ProductionError(error.code, error.message, details=error.details) from error
         if provider not in PROVIDERS:
             raise ProductionError(
                 "invalid_model_provider",
@@ -369,8 +386,14 @@ class DirectionModelSettings:
         )
         is_local = urlparse(str(value.get("base_url") or "")).hostname in {"localhost", "127.0.0.1", "::1"}
         configured = bool(value.get("provider") and value.get("model") and (secret_source != "none" or is_local))
+        if value.get("provider") == "codex":
+            secret_source = "codex_managed_login"
+            configured = bool(value.get("model") and value.get("subscription_only_acknowledged"))
+        elif subscription_only_enabled():
+            configured = False
         return {
             "ok": True,
+            "subscription_only": subscription_only_enabled(),
             "model": {
                 **value,
                 "configured": configured,
@@ -401,6 +424,8 @@ class DirectionModelSettings:
             json.dumps(public, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         os.replace(temporary, self.path)
+        if public["provider"] == "codex" and connection_test:
+            enable_subscription_only()
         if api_key and not public["api_key_env"]:
             try:
                 self.secret.save(api_key)
@@ -411,6 +436,11 @@ class DirectionModelSettings:
     def fetch_models(self, payload: dict[str, Any] | None = None) -> list[str]:
         import urllib.request
         req_data = self.resolve_candidate(payload, require_model=False)
+        if req_data.get("provider") == "codex":
+            try:
+                return [item["id"] for item in codex_connection().status()["models"]]
+            except CodexError as error:
+                raise ProductionError(error.code, error.message, details=error.details) from error
         provider = str(req_data.get("provider") or "").strip().lower()
         base_url = str(req_data.get("base_url") or "").strip().rstrip("/")
         api_key = str(req_data.get("api_key") or "").strip()
@@ -459,6 +489,7 @@ class DirectionModelSettings:
             "provider", "base_url", "model", "max_tokens", "annotation_max_tokens",
             "timeout", "wall_timeout", "reasoning_mode", "reasoning_wire_protocol",
             "source_context_strategy", "transport_retries", "credential_revision", "api_key_env",
+            "subscription_only_acknowledged", "billing",
         ) + ADVANCED_FIELDS
         canonical = json.dumps({key: public.get(key) for key in fields},
                                sort_keys=True, ensure_ascii=False, separators=(",", ":"))
@@ -474,6 +505,8 @@ class DirectionModelSettings:
                 "AI 安排演出的模型尚未配置",
                 status=409,
             )
+        if public.get("provider") == "codex":
+            return "codex", {**public, "api_key": ""}
         secret = self._secret_store(public).load() or os.environ.get(str(public.get("api_key_env") or ""), "")
         if secret:
             public["api_key"] = secret

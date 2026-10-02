@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from .errors import ProductionError
 from .legacy_modules import load_module
 from .model_settings import DirectionModelSettings
+from services.halocue.codex_agent import CodexError, require_subscription_provider
 
 
 class DirectionModelGateway:
@@ -24,6 +25,14 @@ class DirectionModelGateway:
             else self.settings.provider_settings()
         )
         provider_settings = dict(provider_settings)
+        try:
+            require_subscription_provider(provider_name)
+        except CodexError as error:
+            raise ProductionError(error.code, error.message, status=409) from error
+        if provider_name == "codex":
+            from .codex_provider import CodexDirectionProvider
+
+            return CodexDirectionProvider(provider_settings)
         if provider_name == "anthropic":
             effort = provider_settings.get("reasoning_effort", "auto")
             if effort == "none":
@@ -38,7 +47,16 @@ class DirectionModelGateway:
             provider_settings["api_key"] = "halocue-local-keyless"
         try:
             module = load_module("llm", self.legacy_root)
-            return module.make_provider_from_settings(provider_name, provider_settings)
+            provider = module.make_provider_from_settings(provider_name, provider_settings)
+            binder = getattr(provider, "bind_request_guard", None)
+            if callable(binder):
+                def guard():
+                    try:
+                        require_subscription_provider(provider_name)
+                    except CodexError as error:
+                        raise ProductionError(error.code, error.message, status=409) from error
+                binder(guard)
+            return provider
         except ProductionError:
             raise
         except Exception as exc:

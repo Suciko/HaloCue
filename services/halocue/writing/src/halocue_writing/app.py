@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .errors import DomainError
+from services.halocue.codex_agent import CodexError, connection as codex_connection
 from .service import WritingService
 from .model_capabilities import capabilities
 
@@ -253,6 +254,11 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "data": self.service.get_intent_plan(parts[3])})
             if parts == ["api", "v1", "settings", "writing-model"]:
                 return self._json(self.service.writing_model_settings_public())
+            if parts == ["api", "v1", "settings", "codex"]:
+                try:
+                    return self._json({"ok": True, "connection": codex_connection().status()})
+                except CodexError as error:
+                    raise DomainError(error.code, error.message, status=409, details=error.details) from error
             if parts == ["api", "v1", "settings", "preferences"]:
                 return self._json(self.service.user_preferences())
             if parts == ["api", "v1", "settings", "diagnostics"]:
@@ -390,6 +396,15 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
             if handled:
                 return self._json({"ok": True, "data": authoring_result})
             result = None
+            if parts[:4] == ["api", "v1", "settings", "codex"] and len(parts) == 5:
+                actions = {"login": lambda: codex_connection().login(), "logout": lambda: codex_connection().logout(), "configure": lambda: codex_connection().configure(payload)}
+                action = actions.get(parts[4])
+                if action is None:
+                    raise DomainError("route_not_found", "Codex 操作不存在", status=404)
+                try:
+                    return self._json({"ok": True, "connection": action()})
+                except CodexError as error:
+                    raise DomainError(error.code, error.message, status=409, details=error.details) from error
             if parts == ["api", "v1", "settings", "writing-model:activate"]:
                 result = self.service.activate_writing_model(payload)
                 return self._json(result)

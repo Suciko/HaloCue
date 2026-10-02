@@ -42,7 +42,7 @@ function harness(sourcePath) {
   const h = {element, calls, toasts, timers, apiResult: async (route, body) => ({model: body?.model || 'model-a', models: ['model-a'], latency_ms: 1}),
     fetchResult: async () => ({ok: true, environment: {workspace: {valid: false, path: null}, issues: []}})};
   const context = {
-    console, URL, URLSearchParams, AbortController, Option: class { constructor(text, value) {this.text = text; this.value = value;} }, clearTimeout() {}, window: {location: {search: ''}},
+    console, URL, URLSearchParams, AbortController, CustomEvent: class { constructor(type, options) {this.type=type; this.detail=options.detail;} }, Option: class { constructor(text, value) {this.text = text; this.value = value;} }, clearTimeout() {}, window: {location: {search: ''}, dispatchEvent() {}},
     document: {getElementById: element, addEventListener() {}},
     FormData: class {get(name) {return fields[name] ? element(fields[name]).value : null;}},
     api: async (route, options) => {
@@ -82,6 +82,25 @@ function harness(sourcePath) {
 }
 
 const cases = {
+  codex_connection_shares_provider_workspace_without_api_fields(source) {
+    const h = harness(source), c = h.controller;
+    c.cachedPresets.unshift({id:'codex', name:'Codex', provider:'codex', base_url:'', models:[]});
+    c.selectPreset('codex');
+    assert.equal(h.element('codexConnection').hidden, false);
+    assert.equal(h.element('settingsModelForm').hidden, true);
+    assert.equal(h.element('settingsModelForm').inert, true);
+    assert.equal(h.calls.length, 0);
+    c.selectPreset('a');
+    assert.equal(h.element('codexConnection').hidden, true);
+    assert.equal(h.element('settingsModelForm').hidden, false);
+    c.subscriptionOnly = true;
+    c.activePresetId = 'codex';
+    c.renderProviderPresets();
+    assert(h.element('vendorPresetGrid').innerHTML.includes('Codex'));
+    assert(!h.element('vendorPresetGrid').innerHTML.includes('Synthetic A'));
+    c.selectPreset('a');
+    assert.equal(c.activePresetId, 'codex');
+  },
   async provider_free_access_badges_are_visible_searchable_and_escaped(source) {
     const h = harness(source);
     const preset = h.controller.cachedPresets[0];

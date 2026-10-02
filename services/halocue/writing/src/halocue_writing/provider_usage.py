@@ -66,6 +66,8 @@ def normalize_usage(value):
 
 def merge_usage(first, second):
     # An empty accumulator is an identity, not an unknown physical request.
+    if not first and not second:
+        return {}
     if not first:
         return normalize_usage(second)
     if not second:

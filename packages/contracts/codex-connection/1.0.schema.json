@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://halocue.local/contracts/codex-connection/1.0.schema.json",
+  "title": "Public managed Codex connection state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "installed", "logged_in", "billing", "models", "state"],
+  "properties": {
+    "schema_version": {"const": "codex-connection/1.0"},
+    "installed": {"type": "boolean"},
+    "logged_in": {"type": "boolean"},
+    "billing": {"const": "chatgpt_subscription"},
+    "state": {"enum": ["not_installed", "codex_login_required", "codex_subscription_required", "ready", "quota_exhausted"]},
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "name", "default"],
+        "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "default": {"type": "boolean"}}
+      }
+    },
+    "account": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "plan_type"],
+      "properties": {"type": {"const": "chatgpt"}, "plan_type": {"type": ["string", "null"]}}
+    },
+    "limits": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "status": {"enum": ["reported", "not_reported"]},
+        "resets_at": {"type": ["integer", "null"]},
+        "rate_limits": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object", "additionalProperties": false,
+            "properties": {"primary": {"$ref": "#/$defs/window"}, "secondary": {"$ref": "#/$defs/window"}}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "window": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "usedPercent": {"type": "number", "minimum": 0},
+        "windowDurationMins": {"type": "integer", "minimum": 0},
+        "resetsAt": {"type": ["integer", "null"]}
+      }
+    }
+  }
+}
