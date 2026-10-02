@@ -1727,7 +1727,8 @@ def test_blocked_scene_agent_keeps_discussion_composer_but_denies_candidate_gene
     assert "正文候选暂不可生成" in script
     assert "当前缺少：" in script
     # Labels no longer change semantics by viewport; candidate gating still does.
-    assert "canChat&&!discussionOnly&&!proposal" in script
+    assert "canSend&&!discussionOnly&&!proposal" in script
+    assert "canSend=Boolean(canChat&&!preparingContext)" in script
     # Candidate generation is initiated through the discussion composer.
     # Recovery may still expose an explicit retry, but the normal composer no
     # longer renders a duplicate generate button.

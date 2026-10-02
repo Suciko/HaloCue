@@ -288,3 +288,50 @@ def test_chapter_review_waits_for_initial_scene_thread(local_authoring, browser,
     finally:
         release.set()
         page.close()
+
+
+def test_late_review_status_preserves_manuscript_input_focus(local_authoring, browser, monkeypatch):
+    """A read-only status response must leave the author's active editor intact."""
+    import threading
+    from playwright.sync_api import expect
+
+    service, url = local_authoring
+    work = service.create_work({'title': '检查状态不会打断输入', 'world_seed': 'blank'})
+    chapter = work['chapters'][0]['id']
+    made = service.create_scene(work['id'], chapter, {'expected_version': work['version'], 'title': '正文'})
+    saved = service.save_scene_manuscript(work['id'], made['scene_id'], {
+        'expected_version': made['work']['version'],
+        'blocks': [{'id': 'block-review-focus', 'type': 'narration', 'text': '原来的正文。'}],
+    })
+    service.create_conversation_thread(work['id'], {
+        'expected_version': saved['work']['version'], 'scope_type': 'scene',
+        'scope_id': made['scene_id'], 'title': '本场讨论', 'permission_mode': 'review',
+    })
+    entered, release = threading.Event(), threading.Event()
+    route = service.authoring.route
+
+    def delayed_review(method, parts, *args, **kwargs):
+        if method == 'GET' and parts and parts[-1] == 'review':
+            entered.set()
+            assert release.wait(15), 'test did not release status request'
+        return route(method, parts, *args, **kwargs)
+
+    monkeypatch.setattr(service.authoring, 'route', delayed_review)
+    page = browser.new_page()
+    try:
+        page.goto(f'{url}/?section=writing&stage=draft&work_id={work["id"]}&chapter_id={chapter}&scene_id={made["scene_id"]}')
+        page.locator('[data-chapter-text]').first.wait_for()
+        assert entered.wait(5)
+        page.wait_for_function('()=>Boolean(state._contextBlocked)')
+        field = page.locator('[data-chapter-text]').first
+        field.fill('正在修改的正文。')
+        field.evaluate('el=>el.setSelectionRange(3,3)')
+        expect(field).to_be_focused()
+        release.set()
+        expect(page.locator('.chapter-review-status')).to_have_text('尚未检查')
+        expect(field).to_be_focused()
+        expect(field).to_have_value('正在修改的正文。')
+        assert field.evaluate('el=>el.selectionStart') == 3
+    finally:
+        release.set()
+        page.close()

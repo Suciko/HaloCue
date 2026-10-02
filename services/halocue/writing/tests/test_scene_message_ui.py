@@ -25,7 +25,7 @@ def scene_page():
         )
         page.add_script_tag(
             content="""
-          const state={work:{id:'work-a',version:1},sceneId:'scene-a',activeAgentRunId:''};
+          const state={work:{id:'work-a',version:1},sceneId:'scene-a',context:{scene_id:'scene-a'},activeAgentRunId:''};
           let hcWorkLoadEpoch=1;
           const hcPendingMessages=new Set(),hcPendingProposals=new Set(),hcTransientViews=new Map();
           const io={calls:[],renders:0,recoveries:0,polls:[],status:[],toasts:[]};
