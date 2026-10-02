@@ -88,7 +88,7 @@
    monograms next to the outline icon. Other product workspaces are untouched. */
 #app#app.hc-redesign[data-surface="writing"] .primary-nav .nav-glyph,
 #app#app.hc-redesign[data-surface="writing"] .primary-nav .nav-item::before { display: none !important; }
-#app#app.hc-redesign[data-surface="writing"] .primary-nav .agent-nav-icon { display: block; width: 19px; height: 19px; flex: none; margin: 0 auto 5px; }
+#app#app.hc-redesign[data-surface="writing"] .primary-nav .agent-nav-icon { display: block; width: 19px; height: 19px; flex: none; margin: 0; }
 #app#app.hc-redesign[data-surface="writing"] .primary-nav .nav-item { font-size: 10px; line-height: 1.5; }
 #app#app.hc-redesign[data-surface="writing"] .chapter-manuscript-flow { max-width: var(--author-reading-width); margin-inline: auto; }
 #app#app.hc-redesign[data-surface="writing"] .scene-inline-review { border: 0; box-shadow: none; border-radius: 0; }
@@ -1397,4 +1397,62 @@ html[data-theme="dark"] #app.hc-redesign[data-surface="writing"] .scene-context-
   #app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-agent-submit > :is(.primary,.agent-stop-button){
     min-height:44px;
   }
+}
+
+/* Shared 1.0 chrome: one icon-to-label gap across every workspace. */
+@media(min-width:761px) {
+  #app#app#app.hc-redesign .primary-nav .nav-item {
+    display:flex !important; flex-direction:column !important; justify-content:center !important;
+    align-items:center !important; gap:6px !important; line-height:14px !important;
+    text-align:center !important; padding:6px 2px !important;
+  }
+  #app#app#app.hc-redesign .primary-nav .agent-nav-icon {
+    width:20px; height:20px; margin:0 !important; flex:0 0 20px; display:block;
+  }
+}
+#app#app#app.hc-redesign .hc-topbar {
+  gap:12px !important; padding-inline:18px !important; color:var(--hc-text);
+}
+#app#app#app.hc-redesign .hc-topbar :is(.provider-badge,.help-entry) { display:none !important; }
+#app#app#app.hc-redesign .hc-topbar .brand {
+  min-height:32px; padding:4px 6px; border-radius:6px; letter-spacing:-.3px;
+}
+#app#app#app.hc-redesign .hc-topbar .brand:hover { background:var(--hc-hover); }
+#app#app#app.hc-redesign .hc-topbar .save-indicator {
+  border:0; background:transparent; padding:0; max-width:140px;
+}
+#app#app#app.hc-redesign.production-mode .hc-topbar :is(#crumb,.hc-topbar-divider) { display:none !important; }
+#app#app#app.hc-redesign.production-mode .production-context-name {
+  flex:1 1 0; min-width:0; max-width:none; font-size:13px; font-weight:500; color:var(--hc-text);
+}
+#app#app#app.hc-redesign .hc-topbar .top-actions { margin-left:auto !important; gap:8px !important; }
+#app#app#app.hc-redesign .production-top-actions { gap:6px; }
+#app#app#app.hc-redesign .production-more-actions > summary {
+  display:flex; align-items:center; gap:8px; min-height:32px; padding:6px 10px;
+  list-style:none; border:1px solid var(--hc-line); border-radius:7px;
+  background:var(--hc-panel); color:var(--hc-text); font-size:12px;
+}
+#app#app#app.hc-redesign .production-more-actions > summary:hover,
+#app#app#app.hc-redesign .production-more-actions[open] > summary { background:var(--hc-hover); }
+#app#app#app.hc-redesign .production-more-actions > div {
+  min-width:176px; padding:6px; border-color:var(--hc-line); border-radius:10px;
+  background:var(--hc-panel); box-shadow:0 8px 24px #0002;
+}
+#app#app#app.hc-redesign .production-more-actions > div button {
+  min-height:36px; padding:8px 12px; border-radius:6px; color:var(--hc-text); font-size:12px;
+  border:0 !important; box-shadow:none !important; background:transparent !important;
+}
+#app#app#app.hc-redesign .production-more-actions > div button:hover { background:var(--hc-hover) !important; }
+@media(max-width:760px) {
+  #app#app#app.hc-redesign .hc-topbar { padding-inline:10px !important; gap:6px !important; }
+  #app#app#app.hc-redesign.production-mode .production-context-name { font-size:12px; }
+}
+/* Opt in only when a desktop host supplies real native window controls.
+   --hc-window-controls-width can override the Windows overlay reservation. */
+html[data-window-chrome="overlay"] #app#app#app.hc-redesign .hc-topbar {
+  -webkit-app-region:drag; app-region:drag;
+  padding-right:calc(var(--hc-window-controls-width, 140px) + 12px) !important;
+}
+html[data-window-chrome="overlay"] #app#app#app.hc-redesign .hc-topbar :is(button,a,input,select,textarea,summary,[role="menu"]) {
+  -webkit-app-region:no-drag; app-region:no-drag;
 }

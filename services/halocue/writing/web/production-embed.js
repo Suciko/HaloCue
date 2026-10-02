@@ -17,6 +17,7 @@
   let previousChrome = null;
   let activeContext = null;
   let openEpoch = 0;
+  let menuEvents = null;
 
   const sleep = (delay) => new Promise(resolve => setTimeout(resolve, delay));
   const app = () => document.querySelector("#app");
@@ -136,16 +137,18 @@
   function installOuterActions(root) {
     const topActions = document.querySelector("#app > .topbar .top-actions");
     if (!topActions) return;
+    menuEvents?.abort();
+    menuEvents = new AbortController();
     topActions.querySelector(".production-top-actions")?.remove();
     const controls = document.createElement("span");
     controls.className = "production-top-actions";
     controls.innerHTML = `
-      <button type="button" class="quiet production-new" data-production-proxy="startNewProduction">新建制作</button>
       <button type="button" class="quiet production-assets" data-production-proxy="openAssetLibrary">制作素材</button>
-      <button type="button" class="quiet production-overview" data-production-proxy="openRunOverview">任务总览</button>
       <details class="production-more-actions">
-        <summary>更多</summary>
+        <summary aria-label="更多制作操作" title="更多制作操作">更多<span aria-hidden="true">⌄</span></summary>
         <div role="menu">
+          <button type="button" class="production-overview" data-production-proxy="openRunOverview" role="menuitem">任务总览</button>
+          <button type="button" class="production-new" data-production-proxy="startNewProduction" role="menuitem">新建制作</button>
           <button type="button" data-production-proxy="openTasks" role="menuitem">后台任务</button>
           <button type="button" data-production-proxy="refreshRun" role="menuitem" aria-label="刷新制作任务">刷新制作任务</button>
         </div>
@@ -158,6 +161,29 @@
       button.closest("details")?.removeAttribute("open");
     });
     topActions.prepend(controls);
+    const menu = controls.querySelector("details");
+    controls.addEventListener("keydown", event => {
+      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+        const items = [...menu.querySelectorAll("button:not([hidden]):not(:disabled)")];
+        if (!items.length) return;
+        event.preventDefault();
+        menu.open = true;
+        const current = items.indexOf(document.activeElement);
+        const index = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+          : event.key === "ArrowDown" ? (current + 1) % items.length
+          : (current < 0 ? items.length - 1 : (current + items.length - 1) % items.length);
+        items[index].focus();
+        return;
+      }
+      if (event.key !== "Escape" || !menu.open) return;
+      event.preventDefault();
+      event.stopPropagation();
+      menu.open = false;
+      menu.querySelector("summary")?.focus();
+    });
+    document.addEventListener("pointerdown", event => {
+      if (!menu.contains(event.target)) menu.open = false;
+    }, { signal: menuEvents.signal });
     const syncAvailability = () => {
       const assetButton = controls.querySelector(".production-assets");
       const newButton = controls.querySelector(".production-new");
@@ -179,6 +205,8 @@
   }
 
   function restoreOuterChrome() {
+    menuEvents?.abort();
+    menuEvents = null;
     if (!previousChrome) return;
     const crumb = document.querySelector("#crumb");
     const save = document.querySelector("#saveStatus");
