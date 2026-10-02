@@ -19,7 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_compressed_reference_payload_is_inspected(tmp_path):
     path = tmp_path / "scenario.jsonl.gz"
-    path.write_bytes(gzip.compress(b'{"source":"D:/Desktop/private/project"}\n'))
+    source_path = "D:" + "/Desktop/private/project"
+    path.write_bytes(gzip.compress((json.dumps({"source": source_path}) + "\n").encode()))
     assert "personal-path" in _codes(scan_tree(tmp_path, mode="source"))
     path.write_bytes(b"not gzip")
     assert "archive-invalid" in _codes(scan_tree(tmp_path, mode="source"))
