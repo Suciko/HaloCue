@@ -241,6 +241,7 @@ def test_production_navigation_uses_router_and_preserves_history(runtime, width)
             f"http://127.0.0.1:{runtime.port}/?section=writing&stage=draft&work_id={work['id']}",
             wait_until="networkidle",
         )
+        page.wait_for_function("()=>Boolean(window.HaloCueRouter)&&!document.body.classList.contains('app-loading')")
         # Synthetic unsaved state; never create or overwrite a real manuscript.
         page.evaluate("state.manuscriptDirty=true; state.manuscriptSceneId=state.sceneId")
         page.locator(
@@ -277,6 +278,7 @@ def test_production_navigation_uses_router_and_preserves_history(runtime, width)
         assert page.evaluate("HaloCueRouter.getRoute().section") == "production"
         assert page.evaluate("history.state.hcIndex") == 1
         page.reload(wait_until="networkidle")
+        pw.expect(page.locator("#app")).to_have_class(re.compile("production-mode"))
         assert page.evaluate("HaloCueRouter.getRoute().section") == "production"
         assert page.evaluate("history.state.hcIndex") == 1
         browser.close()

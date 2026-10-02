@@ -79,7 +79,7 @@ def page(browser):
 
 def test_full_workbench_projection_focus_and_source_edit(browser, tmp_path):
     import threading
-    from http.server import ThreadingHTTPServer
+    from services.halocue.http_server import LocalHTTPServer as ThreadingHTTPServer
     from halocue_writing.app import make_handler
     from halocue_writing.service import WritingService
     from playwright.sync_api import expect

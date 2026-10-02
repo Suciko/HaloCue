@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import mimetypes
 import re
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+from services.halocue.http_server import LocalHTTPServer as ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from services.halocue.runtime_layout import service_root

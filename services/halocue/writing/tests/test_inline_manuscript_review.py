@@ -111,3 +111,42 @@ def test_chat_result_locates_changed_paragraph_without_review_button(local_autho
     page.wait_for_timeout(1200)
     assert page.evaluate("""()=>{const change=document.querySelector('.chapter-inline-change'),workspace=document.querySelector('#workspace');const a=change.getBoundingClientRect(),b=workspace.getBoundingClientRect();return a.top>=b.top&&a.bottom<=b.bottom;}""")
     page.close()
+
+
+def test_pending_context_keeps_message_until_editing_is_ready(local_authoring, browser, monkeypatch):
+    """A slow context fetch must not silently downgrade an edit to discussion."""
+    import threading
+
+    service, url = local_authoring
+    work_id, scene_id, work = create_ready_scene(service)
+    blocks = [{'id': f'block-{i}', 'type': 'narration', 'text': f'原来的第{i+1}段。'} for i in range(5)]
+    saved = service.save_scene_manuscript(work_id, scene_id, {'expected_version': work['version'], 'blocks': blocks})
+    create_scene_thread(service, work_id, scene_id, saved['work'])
+    service.provider = MultiEditProvider()
+    initial_runs = {item['id'] for item in service.get_work(work_id)['agent_runs']}
+    entered, release = threading.Event(), threading.Event()
+    assemble = service.assemble_context
+
+    def delayed_context(*args, **kwargs):
+        entered.set()
+        assert release.wait(15), 'test did not release context request'
+        return assemble(*args, **kwargs)
+
+    monkeypatch.setattr(service, 'assemble_context', delayed_context)
+    page = browser.new_page()
+    try:
+        page.goto(f'{url}/?section=writing&stage=draft&work_id={work_id}&chapter_id={work["chapters"][0]["id"]}&scene_id={scene_id}')
+        assert entered.wait(5)
+        composer = page.locator('#sceneConversationForm textarea')
+        expect(composer).to_be_visible()
+        composer.fill('润色第二段和第四段，其余不改。')
+        expect(page.locator('#sceneConversationForm').get_by_role('button', name='发送', exact=True)).to_be_disabled()
+        assert {item['id'] for item in service.get_work(work_id)['agent_runs']} == initial_runs
+        release.set()
+        expect(page.locator('#sceneConversationForm').get_by_role('button', name='发送', exact=True)).to_be_enabled()
+        expect(composer).to_have_value('润色第二段和第四段，其余不改。')
+        page.locator('#sceneConversationForm').get_by_role('button', name='发送', exact=True).click()
+        expect(page.locator('.chapter-inline-change')).to_have_count(2, timeout=20000)
+    finally:
+        release.set()
+        page.close()

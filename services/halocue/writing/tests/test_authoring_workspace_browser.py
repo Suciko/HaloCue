@@ -1,7 +1,7 @@
 """Exercise world-first and outline authoring through the real local HTTP UI."""
 
 import threading
-from http.server import ThreadingHTTPServer
+from services.halocue.http_server import LocalHTTPServer as ThreadingHTTPServer
 from pathlib import Path
 
 import pytest

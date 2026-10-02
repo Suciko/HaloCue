@@ -6,7 +6,7 @@ import sys
 import threading
 from dataclasses import replace
 from datetime import datetime, timezone
-from http.server import ThreadingHTTPServer
+from services.halocue.http_server import LocalHTTPServer as ThreadingHTTPServer
 from pathlib import Path
 
 from .gateway import create_gateway

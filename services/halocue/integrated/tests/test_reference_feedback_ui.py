@@ -4,7 +4,10 @@ import pytest
 from playwright.sync_api import expect
 
 
-def test_locked_writing_step_and_unavailable_corpus_have_inline_guidance(runtime):
+def test_locked_writing_step_and_unavailable_corpus_have_inline_guidance(runtime, tmp_path):
+    # The shipping default now includes the official corpus. Exercise an
+    # explicitly unavailable installation for this fallback-only scenario.
+    runtime.writing_service.official_references.corpus_dir = tmp_path / "absent-corpus"
     playwright = pytest.importorskip("playwright.sync_api")
     work = runtime.writing_service.create_work({"title": "Synthetic feedback check"})
     origin = f"http://127.0.0.1:{runtime.port}"

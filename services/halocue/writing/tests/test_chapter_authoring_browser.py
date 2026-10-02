@@ -251,3 +251,40 @@ def test_continuous_chapter_exposes_scene_memory_maintenance(local_authoring, br
     expect(page.locator("[data-scene-memory]")).to_be_visible()
     expect(page.get_by_role("button", name="沉淀本场变化", exact=True)).to_be_visible()
     page.close()
+
+
+def test_chapter_review_waits_for_initial_scene_thread(local_authoring, browser, monkeypatch):
+    """Automatic thread creation must settle before a versioned chapter review."""
+    import threading
+    from playwright.sync_api import expect
+
+    service, url = local_authoring
+    service.provider = FakeWritingProvider()
+    work = service.create_work({'title': '启动版本同步', 'world_seed': 'blank'})
+    chapter = work['chapters'][0]['id']
+    made = service.create_scene(work['id'], chapter, {'expected_version': work['version'], 'title': '正文'})
+    service.save_scene_manuscript(work['id'], made['scene_id'], {
+        'expected_version': made['work']['version'],
+        'blocks': [{'id': 'block-startup', 'type': 'narration', 'text': '学生归还了借阅卡。'}],
+    })
+    entered, release = threading.Event(), threading.Event()
+    create_thread = service.create_conversation_thread
+
+    def delayed_thread(*args, **kwargs):
+        entered.set()
+        assert release.wait(15), 'test did not release thread request'
+        return create_thread(*args, **kwargs)
+
+    monkeypatch.setattr(service, 'create_conversation_thread', delayed_thread)
+    page = browser.new_page()
+    try:
+        page.goto(f'{url}/?section=writing&stage=draft&work_id={work["id"]}&scene_id={made["scene_id"]}')
+        assert entered.wait(5)
+        expect(page.locator('[data-chapter-review-run]')).to_be_disabled()
+        release.set()
+        expect(page.locator('[data-chapter-review-run]')).to_be_enabled()
+        page.locator('[data-chapter-review-run]').click()
+        expect(page.locator('.chapter-review-status')).to_have_text('待确认剧情记忆', timeout=20000)
+    finally:
+        release.set()
+        page.close()

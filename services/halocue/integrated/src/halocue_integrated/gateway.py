@@ -5,7 +5,8 @@ import json
 import mimetypes
 import secrets
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+from services.halocue.http_server import LocalHTTPServer as ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit

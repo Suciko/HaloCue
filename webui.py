@@ -10,7 +10,8 @@ AA 剧本编译器 · 本地网页界面
 import argparse, hashlib, io, json, mimetypes, os, re, signal, socket, subprocess, sys, tempfile, threading, time, traceback, uuid, webbrowser
 from contextlib import ExitStack
 from dataclasses import replace
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler
+from services.halocue.http_server import LocalHTTPServer as ThreadingHTTPServer
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, quote, unquote, urlencode

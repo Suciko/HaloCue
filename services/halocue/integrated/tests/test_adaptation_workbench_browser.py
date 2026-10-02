@@ -149,6 +149,10 @@ def test_shipping_prose_import_review_adoption_freeze_handoff(tmp_path, monkeypa
             pw.expect(page.locator("#app")).to_have_attribute("data-surface", "writing")
             pw.expect(page.locator(".chapter-authoring-scene")).to_be_visible()
             assert page.evaluate("id=>state.sceneId===id&&state.stage==='draft'", scene_id)
+            # Opening the scene creates a versioned discussion thread. Wait for
+            # that committed result before closing the browser and taking over
+            # this same work through direct service calls.
+            page.wait_for_function("()=>Boolean(sceneConversationThread(selectedScene()))&&!state._sceneThreadLoading")
             assert not errors, errors
             browser.close()
         writing.agent_dispatcher.close()
