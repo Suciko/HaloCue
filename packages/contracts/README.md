@@ -22,3 +22,7 @@ pack. The importer verifies the selected file's SHA-256 and may stage a copy in
 the user's local project/cache directory. The staged bytes remain user data and
 are never committed, bundled into a public release, or used as a license grant.
 Public fixtures use placeholders so CI stays deterministic.
+
+External scene edit tasks use `external-agent-task/task-1.0.schema.json` and
+`external-agent-task/result-1.0.schema.json`. File exchange and MCP share the
+same frozen scope, validation and pending-proposal receipt.

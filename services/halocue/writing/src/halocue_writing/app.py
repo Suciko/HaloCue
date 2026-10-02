@@ -167,6 +167,62 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
         self._headers(status, content_type, len(body))
         self.wfile.write(body)
 
+    def _external_agent_route(self, method, parts, payload=None):
+        if parts[:3] != ["api", "v1", "external-agent"]:
+            return None
+        origin = self.headers.get("Origin")
+        if origin:
+            parsed = urlparse(origin)
+            if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+                raise DomainError("external_origin_denied", "外部任务只接受本机应用请求。", status=403)
+        exchange = self.service.external_agents
+        tail = parts[3:]
+        query = parse_qs(urlparse(self.path).query)
+        if len(tail) == 3 and tail[0] == "bridge":
+            task_id, action = tail[1:]
+            exchange.authorize(task_id, self.headers.get("X-HaloCue-External-Token", ""))
+            if method == "GET" and action == "status":
+                return exchange.status(task_id)
+            if method == "GET" and action in {"task", "cards", "window"}:
+                package = exchange.package(task_id)
+                if action == "cards":
+                    return {"character_cards": package["character_cards"]}
+                if action == "window":
+                    try:
+                        start = int(query.get("offset", ["0"])[0])
+                        limit = int(query.get("limit", ["20"])[0])
+                    except ValueError:
+                        raise DomainError("external_scope_invalid", "读取范围必须是整数。") from None
+                    if not 0 <= start <= 40 or not 1 <= limit <= 40:
+                        raise DomainError("external_scope_invalid", "读取范围无效。")
+                    blocks = package["source"]["blocks"]
+                    return {"blocks": blocks[start:start + limit], "total": len(blocks), "next_offset": start + limit if start + limit < len(blocks) else None}
+                return package
+            if method == "POST" and action == "submit":
+                if payload.get("task_id") != task_id:
+                    raise DomainError("external_result_scope", "连接只能提交当前任务的结果。", status=403)
+                return exchange.submit(payload, transport="mcp")
+        if tail == ["tasks"]:
+            if method == "POST":
+                return exchange.create(payload)
+            if method == "GET":
+                return {"tasks": exchange.list_tasks(query.get("work_id", [""])[0], query.get("scene_id", [""])[0])}
+        if tail == ["result"] and method == "POST":
+            return exchange.submit(payload)
+        if len(tail) == 3 and tail[0] == "tasks":
+            task_id, action = tail[1:]
+            if action == "revoke" and method == "POST":
+                return exchange.revoke(task_id)
+            if method == "GET":
+                if action == "status":
+                    return exchange.status(task_id)
+                if action == "package":
+                    return exchange.package(task_id)
+                if action == "mcp-config":
+                    endpoint = query.get("endpoint", [f"http://127.0.0.1:{self.server.server_port}"])[0]
+                    return exchange.mcp_config(task_id, endpoint)
+        raise DomainError("route_not_found", "外部任务接口不存在。", status=404)
+
     def _body(self, max_bytes: int = 8_000_000):
         lengths = self.headers.get_all("Content-Length", [])
         if len(lengths) > 1 or self.headers.get_all("Transfer-Encoding", []):
@@ -203,6 +259,9 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
     def _dispatch_GET(self):
         try:
             parts = self._parts()
+            external = self._external_agent_route("GET", parts)
+            if external is not None:
+                return self._json({"ok": True, "data": external})
             if parts == ["api", "v1", "settings", "model-capabilities"]:
                 query = parse_qs(urlparse(self.path).query)
                 return self._json({"ok": True, "data": capabilities(query.get("model", [""])[0], query.get("provider", ["openai"])[0], query.get("base_url", [""])[0], include_registry=True)})
@@ -377,6 +436,10 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
     def _dispatch_POST(self):
         try:
             parts = self._parts()
+            if parts[:3] == ["api", "v1", "external-agent"]:
+                external = self._external_agent_route("POST", parts, self._body(max_bytes=1_000_000))
+                if external is not None:
+                    return self._json({"ok": True, "data": external})
             body_limit = 128_000_000 if parts in (
                 ["api", "v1", "settings", "backups", "inspect"],
                 ["api", "v1", "settings", "backups", "restore"],

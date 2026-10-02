@@ -1,0 +1,14 @@
+<evaluation>
+  <!-- Run independently against the synthetic exchange fixture before submission.
+       SDK assertions verify answers; no external LLM evaluator was invoked. -->
+  <qa_pair><question>Compare the task resource, task tool and exported scene window. What exact task kind permits changes to that window?</question><answer>scene.text.edit</answer></qa_pair>
+  <qa_pair><question>Read the task, page through its authorized window and compare total_blocks. How many paragraphs are actually authorized for this connection?</question><answer>1</answer></qa_pair>
+  <qa_pair><question>Compare the authorized window with the frozen task source metadata. How many paragraphs existed in the saved scene overall?</question><answer>2</answer></qa_pair>
+  <qa_pair><question>Read the task resource and paragraph window and match their first original text hashes. Which stable block ID is shared?</question><answer>block-a</answer></qa_pair>
+  <qa_pair><question>Compare the selected paragraph in the task and window against the character references. What paragraph type must be retained for this edit?</question><answer>narration</answer></qa_pair>
+  <qa_pair><question>Read the task instructions and first authorized window, then verify against the task resource. What exact original prose is authorized for replacement?</question><answer>窗外下着一场雨。</answer></qa_pair>
+  <qa_pair><question>Compare task character snapshots with the dedicated cards tool. What confirmed canonical character name appears in both?</question><answer>爱丽丝</answer></qa_pair>
+  <qa_pair><question>Read the task instruction, scene window and character cards. What exact first OOC constraint limits speculation in the proposed rewrite?</question><answer>不替别人猜测动机</answer></qa_pair>
+  <qa_pair><question>Read the task and window totals, then request offset 1 with limit 40. How many additional paragraphs become readable beyond the authorized first paragraph?</question><answer>0</answer></qa_pair>
+  <qa_pair><question>Compare the task resource and status tool before any submission. What state permits a result to be submitted for this task?</question><answer>open</answer></qa_pair>
+</evaluation>

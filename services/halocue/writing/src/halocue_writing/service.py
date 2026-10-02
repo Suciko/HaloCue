@@ -105,6 +105,8 @@ class WritingService:
 
     def _initialize(self, data_dir, production_url, official_corpus_dir):
         self.repo = Repository(data_dir)
+        from .external_agents import ExternalAgentExchange
+        self.external_agents = ExternalAgentExchange(self)
         self.authoring = AuthoringWorkspace(self)
         self.request_ledger = RequestLedger(self.repo)
         self.request_ledger.recover_interrupted()

@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="/writing-workbench.css?v=20260929-chapter-toolbar4">
   <link rel="stylesheet" href="/production-embed.css?v=20260929-overview-origin-dark2">
   <link rel="stylesheet" href="/settings-center.css?v=20261003-codex-unified1">
+  <link rel="stylesheet" href="/external-agents.css?v=20261003-exchange1">
   <link rel="stylesheet" href="/adaptation-workbench.css?v=20260927-targets1">
   <link rel="stylesheet" href="/redesign.css?v=20260926-modal3">
   <link rel="stylesheet" href="/theme.css?v=20260929-scene-memory-dark1">
@@ -152,6 +153,25 @@
     </form>
   </div>
 
+  <dialog id="externalAgentDialog" aria-labelledby="externalAgentTitle">
+    <div class="external-agent-dialog">
+      <header class="dialog-head"><div><h2 id="externalAgentTitle">外部 Agent</h2><p data-external-scene>本场正文修改</p></div><button type="button" class="icon-button" data-external-close aria-label="关闭外部 Agent">×</button></header>
+      <p class="form-note">使用已保存正文及相关人物资料。支持 MCP 的工具可直接提交；其他工具用任务包交换。返回后先审查候选。</p>
+      <form data-external-create>
+        <label>修改要求<textarea name="instruction" required maxlength="4000" placeholder="说明希望改哪些内容，以及需要保留什么。"></textarea></label>
+        <div class="external-range"><label>起始段落<input name="start" type="number" min="1" max="100000" value="1" required></label><label>段落数量<input name="limit" type="number" min="1" max="40" value="40" required></label><button type="submit" class="primary">建立任务</button></div>
+      </form>
+      <div data-external-history></div>
+      <section data-external-task hidden>
+        <p data-external-state role="status" aria-live="polite"></p>
+        <div class="external-actions"><button type="button" class="quiet" data-external-download>导出任务包</button><button type="button" class="quiet" data-external-mcp>MCP 连接配置</button><button type="button" class="quiet" data-external-refresh>刷新状态</button><button type="button" class="quiet" data-external-review hidden>查看候选</button><button type="button" class="quiet" data-external-revoke>撤销任务</button></div>
+        <details data-external-config hidden><summary>MCP 配置</summary><pre data-external-config-text></pre><button type="button" class="quiet" data-external-config-download>保存配置</button><p class="form-note">在外部 Agent 中添加此 stdio 配置，再让它读取并完成当前任务。HaloCue 需保持打开；本机连接 24 小时后失效。配置包含本机路径，请勿公开。</p></details>
+        <label class="external-import-file">导入结果文件<input data-external-file type="file" accept=".json,application/json"></label>
+        <form data-external-import><label>或粘贴结果 JSON<textarea name="result" required maxlength="1000000" placeholder="粘贴任务包要求的完整 JSON 结果"></textarea></label><button type="submit" class="primary">校验并生成候选</button></form>
+      </section>
+      <p data-external-message role="status" aria-live="polite"></p>
+    </div>
+  </dialog>
   <dialog id="workSwitchDialog">
     <form method="dialog" class="work-switch-dialog">
       <div class="dialog-head"><div><p>WORKS</p><h2>切换作品</h2></div><button value="cancel" class="icon-button" title="关闭">×</button></div>
@@ -905,9 +925,10 @@
   <script src="/knowledge-graph-ui.js?v=20260930-graph-fix1" defer></script>
   <script src="/app.js?v=20261003-codex-unified1" defer></script>
   <script src="/codex-connection.js?v=20261003-subscription1" defer></script>
+  <script src="/external-agents.js?v=20261003-exchange1" defer></script>
   <!-- writing-workbench.js?v=20260821-39, writing-workbench.js?v=20260822-65 retained for contract compatibility; the resource version below is current. -->
   <script src="/adaptation-workbench.js?v=20260927-adaptation4" defer></script>
-  <script src="/writing-workbench.js?v=20260930-inline-rewrite4" defer></script>
+  <script src="/writing-workbench.js?v=20261003-external-agent1" defer></script>
   <script src="/shell.js?v=20260924-navigation5" defer></script>
   <script src="/production-embed.js?v=20261002-shell-chrome1" defer></script>
   <script src="/app-chrome.js?v=20260925-global1" defer></script>
