@@ -14,7 +14,11 @@ from test_teacher_identity_delivery import files
 
 
 @pytest.mark.parametrize("cg", [False, True])
-def test_sel_release_review_build_install_and_switch_back(settings, tmp_path, cg):
+def test_sel_release_review_build_install_and_switch_back(settings, tmp_path, cg, monkeypatch):
+    # This test installs only into the synthetic workspace below. An unrelated
+    # user AA process must not change its outcome; real process guarding is
+    # exercised separately by the project-asset and install-manager tests.
+    monkeypatch.setattr("aa_project_assets.is_aa_running", lambda: False)
     aa_data = tmp_path / "synthetic-aa"
     for part in ("projects", "saves", "settings", "overrides"):
         (aa_data / part).mkdir(parents=True)

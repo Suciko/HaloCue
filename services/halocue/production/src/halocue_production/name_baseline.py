@@ -5,6 +5,17 @@ from pathlib import Path
 from typing import Any
 
 
+# Maintainer-reviewed names from the official-story acceptance cast. Keep exact
+# AA identities: unreviewed costume/variant identifiers do not inherit a name.
+_DEFAULT_NAMES: dict[str, dict[str, Any]] = {
+    "세리카": {"name_ja_fandom": "芹香", "aliases": ["黑见芹香", "黑见茜香", "茜香"]},
+    "시로코": {"name_ja_fandom": "白子", "aliases": ["砂狼白子"]},
+    "호시노": {"name_ja_fandom": "星野"},
+    "노노미": {"name_ja_fandom": "野乃美"},
+    "아야네": {"name_ja_fandom": "绫音", "aliases": ["綾音"]},
+}
+
+
 class CharacterNameBaseline:
     """Resolve user-facing names without changing AA resource identities."""
 
@@ -44,7 +55,9 @@ class CharacterNameBaseline:
             }
             if not any(keys):
                 continue
-            if not any(str(row.get(field) or "").strip() for field in ("name_zh_cn", "name_ja_fandom")):
+            if not any(
+                str(row.get(field) or "").strip() for field in ("name_zh_cn", "name_ja_fandom")
+            ):
                 continue
             for key in keys:
                 if key:
@@ -80,6 +93,8 @@ class CharacterNameBaseline:
             ),
             None,
         )
+        if entry is None and not str(character.get("name_ja_fandom") or "").strip():
+            entry = _DEFAULT_NAMES.get(str(character.get("identifier") or "").strip())
         explicit_cn = str(character.get("name_zh_cn") or "").strip()
         baseline_cn = str(entry.get("name_zh_cn") or "").strip() if entry else ""
         fandom_name = str(
@@ -87,7 +102,9 @@ class CharacterNameBaseline:
         ).strip()
         aliases = self._aliases((entry or {}).get("aliases"))
         aliases.extend(self._aliases(character.get("aliases")))
-        aliases.extend(name for name in (source_name, fandom_name, explicit_cn, baseline_cn) if name)
+        aliases.extend(
+            name for name in (source_name, fandom_name, explicit_cn, baseline_cn) if name
+        )
         display_name = fandom_name or explicit_cn or baseline_cn or source_name
         return {
             "name": display_name,
@@ -96,7 +113,9 @@ class CharacterNameBaseline:
             "aliases": list(dict.fromkeys(aliases)),
             "source_name": source_name,
             "name_source": (
-                "ja_fandom_curated" if fandom_name else "zh_cn_official_or_curated"
+                "ja_fandom_curated"
+                if fandom_name
+                else "zh_cn_official_or_curated"
                 if explicit_cn or baseline_cn
                 else "legacy_source_unreviewed"
             ),
