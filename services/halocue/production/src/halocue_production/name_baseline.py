@@ -11,19 +11,30 @@ class CharacterNameBaseline:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path
         self._by_key: dict[str, dict[str, Any]] = {}
+        self._signature: tuple[int, int] | None = None
         self._load()
 
     def _load(self) -> None:
-        if not self.path or not self.path.is_file():
+        try:
+            stat = self.path.stat() if self.path else None
+        except OSError:
+            stat = None
+        signature = (stat.st_mtime_ns, stat.st_size) if stat else None
+        if signature == self._signature:
+            return
+        if signature is None:
+            self._by_key = {}
+            self._signature = signature
             return
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            self._by_key = {}
+            self._signature = signature
             return
         rows = payload.get("characters") if isinstance(payload, dict) else None
-        if not isinstance(rows, list):
-            return
-        for row in rows:
+        entries: dict[str, dict[str, Any]] = {}
+        for row in rows if isinstance(rows, list) else []:
             if not isinstance(row, dict):
                 continue
             keys = {
@@ -37,7 +48,9 @@ class CharacterNameBaseline:
                 continue
             for key in keys:
                 if key:
-                    self._by_key[key] = row
+                    entries[key] = row
+        self._by_key = entries
+        self._signature = signature
 
     @staticmethod
     def _aliases(value: Any) -> list[str]:
@@ -47,6 +60,7 @@ class CharacterNameBaseline:
 
     def resolve(self, character: dict[str, Any]) -> dict[str, Any]:
         """Return presentation metadata while retaining the original legacy name."""
+        self._load()
         source_name = str(
             character.get("source_name")
             or character.get("legacy_name")

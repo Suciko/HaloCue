@@ -64,7 +64,7 @@ def test_explicit_standard_keeps_original_system_and_versioned_rules_identity():
     for story_type, expected_hash in fixture["standard_rules_sha256"].items():
         assert prompt.profile_snapshot("standard", story_type=story_type) == {
             "id": "standard",
-            "version": "1.0",
+            "version": "1.1",
             "rules_sha256": expected_hash,
         }
         assert prompt.build_rules(story_type, direction_profile="standard") == prompt.build_rules(
@@ -135,7 +135,7 @@ def test_profile_snapshot_identifies_the_selected_rules_without_shared_mutable_s
 
     assert conservative == {
         "id": "conservative",
-        "version": "1.0",
+        "version": "1.1",
         "rules_sha256": hashlib.sha256(rules.encode("utf-8")).hexdigest(),
     }
     assert (

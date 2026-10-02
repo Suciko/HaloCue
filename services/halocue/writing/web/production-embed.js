@@ -775,7 +775,7 @@
     const actionPanel = generation?.querySelector(":scope > .action-panel");
     const generationJob = generation?.querySelector(":scope > #generationJob");
     const gates = generation?.querySelector(":scope > #generationGates");
-    const layoutMode = generation?.querySelector(":scope > #layoutModeFieldset");
+    const layoutMode = generation?.querySelector(":scope > #generationExecutionNote");
     if (!generation || !lead || !scenePlan || !directionProfile || !actionPanel || !generationJob || !gates || !layoutMode) return;
     if (generation.dataset.productionGenerationSplit === "true") return;
 
@@ -814,9 +814,7 @@
     const decisionHead = decision.querySelector(".production-generation-section-head");
     const modeBadge = lead.querySelector("#generationModeBadge");
     if (modeBadge) decisionHead?.querySelector("div")?.append(modeBadge);
-    // Keep native inputs and their event handlers; this layer only explains
-    // the two independent settings rather than inventing a combined mode.
-    layoutMode.querySelector("legend").textContent = "执行方式 · 谁负责安排演出";
+    // Preserve the strategy controls and the shared execution explanation.
     decision.append(generationJob, actionPanel, layoutMode, directionProfile);
     const formatNote = document.createElement("p");
     formatNote.className = "production-format-note";

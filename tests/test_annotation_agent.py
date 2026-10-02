@@ -911,6 +911,10 @@ def test_corrected_protocol_error_does_not_shrink_the_next_scene(tmp_path):
     assert result["metrics"]["retries"] == 1
     assert [len(request["target_ids"]) for request in provider.requests] == [20, 20, 20]
     assert not result["metrics"]["chunk_adaptations"]
+    retry = next(d for d in result["diagnostics"] if d["code"] == "protocol_retry")
+    assert retry["reason"] == "invalid_state_delta"
+    assert "positions" in retry["detail"]
+    assert retry["chunk_id"]
 
 
 def test_capacity_success_teaches_remaining_chunks_the_safe_limit(tmp_path):

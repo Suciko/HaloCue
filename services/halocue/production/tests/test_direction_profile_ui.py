@@ -514,14 +514,19 @@ def test_failed_generation_shows_reason_without_progress_or_duplicate_resume(pro
     assert api.posts == []
 
 
-def test_layout_mode_names_make_ai_backend_boundary_explicit():
-    html = (UI_ROOT / "index.html").read_text(encoding="utf-8")
-    styles = (UI_ROOT / "direction-profile.css").read_text(encoding="utf-8")
-    assert "执行方式" in html
-    assert "协同 AI" in html
-    assert "AI 判断演出意图，后端修正站位与连续性" in html
-    assert "决定谁负责安排镜头与连续性" in html
-    assert ".layout-mode-fieldset legend small" in styles
+@pytest.mark.parametrize("legacy_mode", ["pure_ai", "rules"])
+def test_removed_execution_choices_cannot_leak_from_legacy_preferences(profile_page, legacy_mode):
+    reply = run_reply("standard")
+    reply["run"]["source_summary"]["layout_mode"] = legacy_mode
+    page, api = profile_page(reply)
+    page.evaluate("value => localStorage.setItem('halocue.layoutMode', value)", legacy_mode)
+    page.reload()
+    expect(page.locator("#generationExecutionNote")).to_be_visible()
+    expect(page.locator('input[name="layoutMode"]')).to_have_count(0)
+    expect(page.locator("#page-generation")).not_to_contain_text("纯 AI")
+    expect(page.locator("#page-generation")).not_to_contain_text("稳定后端")
+    page.locator("#generateOrReview").click()
+    assert api.posts[-1][2]["layout_mode"] == "ai"
 
 
 def test_strategy_cards_distinguish_current_and_next_without_writes(profile_page):

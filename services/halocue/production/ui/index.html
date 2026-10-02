@@ -192,7 +192,7 @@
           <details class="generation-diagnostics"><summary>运行详情 <span id="generationDiagnosticsSummary">请求、用量与日志</span></summary><dl class="generation-metrics" id="generationMetrics"></dl><details class="generation-log"><summary>请求与错误日志 <span id="generationLogCount">0</span></summary><div id="generationLog"></div></details></details>
         </section>
         <div class="gate-grid" id="generationGates"></div>
-        <fieldset class="layout-mode-fieldset" id="layoutModeFieldset"><legend>执行方式 <small>决定谁负责安排镜头与连续性</small></legend><label class="mode-choice"><input type="radio" name="layoutMode" value="pure_ai"><span><b>纯 AI</b><small>AI 负责镜头、站位、入退场、位移与无台词反应链</small></span></label><label class="mode-choice"><input type="radio" name="layoutMode" value="ai" checked><span><b>协同 AI</b><small>AI 判断演出意图，后端修正站位与连续性</small></span></label><label class="mode-choice"><input type="radio" name="layoutMode" value="rules"><span><b>稳定后端</b><small>使用固定、安全且可复现的标准演出规则</small></span></label></fieldset>
+        <p class="muted" id="generationExecutionNote">AI 安排演出，程序检查资源、站位与连续性；生成后可逐卡调整。</p>
       </section>
 
       <section class="page" id="page-review">
@@ -219,7 +219,7 @@
         <div class="review-layout">
           <div class="review-column"><div class="filterbar"><button class="active" data-filter="all">全部</button><button data-filter="pending">待审</button><button data-filter="blocking">待处理</button><button data-filter="direction">演出</button></div><div id="cardList" class="card-list"></div></div>
           <aside class="review-side-rail">
-            <section class="persistent-preview-panel" aria-labelledby="persistentPreviewTitle"><header><div><small>随卡片同步</small><h3 id="persistentPreviewTitle">剧情预览</h3></div><span id="persistentPreviewCounter">— / —</span></header><div id="persistentPerformancePreview" class="persistent-preview-empty"><strong>选择一张卡片</strong><p>预览会显示当前背景、卡片内容和演出注释。</p></div><footer><button id="reviewPreviewPrevious" aria-label="上一张">◀ 上一张</button><button id="reviewPreviewPlay" class="primary" aria-label="播放或暂停">播放</button><button id="reviewPreviewNext" aria-label="下一张">下一张 ▶</button></footer></section>
+            <section class="persistent-preview-panel" aria-labelledby="persistentPreviewTitle"><header><div><small>随卡片同步</small><h3 id="persistentPreviewTitle">草稿预览</h3></div><span id="persistentPreviewCounter">— / —</span></header><div id="persistentPerformancePreview" class="persistent-preview-empty"><strong>选择一张卡片</strong><p>预览会显示当前背景、卡片内容和演出注释。</p></div><footer><button id="reviewPreviewPrevious" aria-label="上一张">◀ 上一张</button><button id="reviewPreviewPlay" class="primary" aria-label="自动翻卡或暂停">自动翻卡</button><button id="reviewPreviewNext" aria-label="下一张">下一张 ▶</button></footer><p class="muted">显示背景、台词与演出标注；动画、音效与节奏请在 AA 中检查。</p></section>
             <section class="inspector"><small>当前决定</small><h3 id="inspectorTitle">选择一张卡片</h3><div id="inspectorBody"><p>在左侧选择卡片后，可编辑内容或处理素材请求。</p></div></section>
             <section class="review-task-assets" aria-labelledby="reviewTaskAssetsTitle"><header><div><small>任务素材</small><h3 id="reviewTaskAssetsTitle">本剧情自定义素材</h3></div><span id="reviewTaskAssetCount">待读取</span></header><div id="reviewTaskAssets" aria-live="polite"></div><footer><button type="button" id="reviewAssetsImport">从本地导入</button><button type="button" id="reviewAssetsManage">素材工作台</button><button type="button" id="reviewAssetsRefresh" aria-label="重新读取本剧情素材">刷新</button></footer></section>
           </aside>

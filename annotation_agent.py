@@ -1141,6 +1141,12 @@ def run_annotation_agent(
                         continue
                 if kind == "protocol" and protocol_attempts == 0:
                     observe_chunk({"success": False, "reason": "protocol"}, scene_id=str(chunk["scene_id"]), chunk_id=chunk_id)
+                    diagnostics.append({
+                        "code": "protocol_retry", "level": "warning",
+                        "scene_id": str(chunk["scene_id"]), "chunk_id": chunk_id,
+                        "reason": request_error_code,
+                        "detail": _chunk_error_detail(exc)[:1000],
+                    })
                     protocol_attempts += 1
                     retries += 1
                     if model_activity:
@@ -1148,6 +1154,7 @@ def run_annotation_agent(
                             {
                                 "state": "retrying",
                                 "reason": _chunk_error_code(exc),
+                                "detail": _chunk_error_detail(exc)[:1000],
                             },
                             scene_id=str(chunk["scene_id"]),
                             chunk_id=chunk_id,

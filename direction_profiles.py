@@ -4,7 +4,7 @@ from typing import Literal
 
 
 DirectionProfile = Literal["standard", "conservative"]
-PROFILE_VERSION = "1.0"
+PROFILE_VERSION = "1.1"
 
 
 class DirectionProfileChanged(ValueError):

@@ -3348,8 +3348,9 @@ def test_explicit_rebinding_adopts_fandom_policy_without_changing_frozen_resourc
     run_id = created["run"]["run_id"]
     frozen = service.run_character_resource(run_id, "alice-school")
     baseline = tmp_path / "names.json"
-    baseline.write_text(json.dumps({"characters": [{"identifier": "alice-school", "name_ja_fandom": "日服译名"}]}), encoding="utf8")
+    baseline.write_text(json.dumps({"characters": [{"identifier": "alice-school", "name_ja_fandom": "旧名称"}]}), encoding="utf8")
     service.name_baseline = CharacterNameBaseline(baseline)
+    baseline.write_text(json.dumps({"characters": [{"identifier": "alice-school", "name_ja_fandom": "日服译名"}]}), encoding="utf8")
     mapped = service.update_cast(run_id, {"speaker": "原稿姓名", "mapping": {"kind": "portrait", "id": "alice-school", "name": "错误客户端名称"}, "expected_draft_version": created["draft"]["draft_version"]})
     assert mapped["draft"]["cast"]["cast"]["原稿姓名"]["name"] == "日服译名"
     assert service.run_character_resource(run_id, "alice-school") == frozen
@@ -3360,3 +3361,16 @@ def test_explicit_rebinding_adopts_fandom_policy_without_changing_frozen_resourc
     assert direction["text"] == "日服译名,auto"
     assert next(c for c in mapped["draft"]["cards"] if c["kind"] == "dir")["current"]["arg"] == "原稿姓名,auto"
     service.jobs.close()
+
+
+def test_removed_name_baseline_does_not_keep_a_stale_curated_name(tmp_path):
+    from halocue_production.name_baseline import CharacterNameBaseline
+
+    path = tmp_path / "names.json"
+    path.write_text(json.dumps({"characters": [{"identifier": "actor", "name_ja_fandom": "已确认名称"}]}), encoding="utf8")
+    names = CharacterNameBaseline(path)
+    character = {"identifier": "actor", "name": "素材原名"}
+    assert names.resolve(character)["name"] == "已确认名称"
+    path.unlink()
+    assert names.resolve(character)["name"] == "素材原名"
+    assert character == {"identifier": "actor", "name": "素材原名"}

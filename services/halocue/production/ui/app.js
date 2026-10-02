@@ -168,30 +168,6 @@
     });
   }
 
-  function savedLayoutMode() {
-    try {
-      const mode = localStorage.getItem("halocue.layoutMode");
-      return ["pure_ai", "ai", "rules"].includes(mode) ? mode : "ai";
-    } catch (_) {
-      return "ai";
-    }
-  }
-
-  function selectedLayoutMode() {
-    const mode = $('input[name="layoutMode"]:checked')?.value;
-    return ["pure_ai", "ai", "rules"].includes(mode) ? mode : "ai";
-  }
-
-  function setLayoutMode(value) {
-    const mode = ["pure_ai", "ai", "rules"].includes(value) ? value : "ai";
-    const input = $(`input[name="layoutMode"][value="${mode}"]`);
-    if (input) input.checked = true;
-  }
-
-  function rememberLayoutMode() {
-    try { localStorage.setItem("halocue.layoutMode", selectedLayoutMode()); } catch (_) { /* unavailable */ }
-  }
-
   function savedRunId() {
     try { return localStorage.getItem("halocue.currentRunId") || ""; } catch (_) { return ""; }
   }
@@ -1971,9 +1947,6 @@
         || (needsDirectionGeneration && directionActive)
         || state.currentRun?.state === "compiling";
     }
-    $$('#layoutModeFieldset input[name="layoutMode"]').forEach((input) => {
-      input.disabled = state.busy || directionActive;
-    });
     $("#sourceDirectionProfile").disabled = state.busy;
     $("#directionProfile").disabled = state.busy || directionActive
       || !!state.jobActionPending || state.currentRun?.state === "compiling";
@@ -2215,8 +2188,7 @@
     const mode = state.currentRun.source_summary?.generation_mode || "format_only";
     $("#directionProfileControl").classList.toggle("hidden", mode !== "ai_direction");
     $("#directionProfile").value = state.directionProfile;
-    setLayoutMode(state.currentRun.source_summary?.layout_mode || savedLayoutMode());
-    $("#layoutModeFieldset")?.classList.toggle("hidden", mode !== "ai_direction");
+    $("#generationExecutionNote")?.classList.toggle("hidden", mode !== "ai_direction");
     $("#generationModeBadge").textContent = mode === "ai_direction" ? "AI 安排演出" : "仅转换格式";
     $("#generationDescription").textContent = mode === "ai_direction" ? "沿用已确认的人物与背景，生成并审查演出。" : "格式草稿已建立，继续审查演出。";
     const missingMappings = workflowSnapshot().missingMappings;
@@ -2298,13 +2270,12 @@
         method: "POST", body: JSON.stringify({
           expected_draft_version: state.currentDraft.draft_version,
           story_type: "auto",
-          layout_mode: selectedLayoutMode(),
+          layout_mode: "ai",
           direction_profile: state.directionProfile,
         })
       });
       state.currentJob = result.job;
-      state.currentRun.source_summary.layout_mode = result.layout_mode || selectedLayoutMode();
-      rememberLayoutMode();
+      state.currentRun.source_summary.layout_mode = result.layout_mode || "ai";
       await refreshCurrentRun();
       showStage("generation", { force: true });
       pollJob(result.job.job_id, "演出安排").catch(handleError);
@@ -2569,7 +2540,7 @@
     $("#reviewPreviewPrevious").disabled = state.previewIndex <= 0;
     $("#reviewPreviewNext").disabled = state.previewIndex >= frames.length - 1;
     $("#reviewPreviewPlay").disabled = frames.length < 2;
-    $("#reviewPreviewPlay").textContent = state.previewPlayTimer ? "暂停" : "播放";
+    $("#reviewPreviewPlay").textContent = state.previewPlayTimer ? "暂停" : "自动翻卡";
   }
 
   async function ensurePerformancePreview(force = false) {
@@ -4574,7 +4545,6 @@
   $("#pauseGeneration").addEventListener("click", pauseGenerationJob);
   $("#resumeGeneration").addEventListener("click", resumeGenerationJob);
   $("#cancelGeneration").addEventListener("click", cancelGenerationJob);
-  $$('#layoutModeFieldset input[name="layoutMode"]').forEach((input) => input.addEventListener("change", rememberLayoutMode));
   $("#validateDraft").addEventListener("click", validateDraft);
   $("#approveAll").addEventListener("click", () => approveCards(null));
   $("#compileButton").addEventListener("click", compileRun);

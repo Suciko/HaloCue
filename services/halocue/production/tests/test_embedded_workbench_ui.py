@@ -253,15 +253,15 @@ def test_embedded_settings_are_distinct_and_fit_viewport(embedded_page, width, m
     page, api = embedded_page(mode, width)
     if mode == "ai_direction":
         expect(page.locator("#directionProfileControl")).to_be_visible()
-        expect(page.locator("#layoutModeFieldset")).to_be_visible()
+        expect(page.locator("#generationExecutionNote")).to_be_visible()
         expect(page.locator(".production-format-note")).to_be_hidden()
         expect(page.locator("#directionProfile")).to_have_value("conservative")
         expect(page.locator("#directionProfileControl .profile-boundary-note")).to_contain_text("不会立即改写")
         page.locator('input[name="directionProfileChoice"][value="standard"]').check()
-        expect(page.locator('input[name="layoutMode"]:checked')).to_have_value("ai")
+        expect(page.locator('input[name="layoutMode"]')).to_have_count(0)
     else:
         expect(page.locator("#directionProfileControl")).to_be_hidden()
-        expect(page.locator("#layoutModeFieldset")).to_be_hidden()
+        expect(page.locator("#generationExecutionNote")).to_be_hidden()
         expect(page.locator(".production-format-note")).to_be_visible()
     for selector in ["#page-generation", ".production-generation-flow", ".scene-plan-card"]:
         bounds = page.locator(selector).evaluate(

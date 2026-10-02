@@ -178,7 +178,7 @@ def test_generation_freezes_selected_profile_and_ignores_client_snapshot(
     assert job["state"] == "succeeded", job
     snapshot = job["direction_profile_snapshot"]
     assert snapshot["id"] == "conservative"
-    assert snapshot["version"] == "1.0"
+    assert snapshot["version"] == "1.1"
     assert re.fullmatch(r"[0-9a-f]{64}", snapshot["rules_sha256"])
     assert accepted["direction_profile_snapshot"] == snapshot
     audit = service.direction_proposals(run_id)["generations"][0]
@@ -305,7 +305,7 @@ def test_rule_upgrade_rejects_resume_without_new_model_call(direction_service, m
     import prompt
 
     if change == "version":
-        monkeypatch.setattr(prompt, "PROFILE_VERSION", "1.1")
+        monkeypatch.setattr(prompt, "PROFILE_VERSION", "next-test-version")
     else:
         monkeypatch.setattr(
             prompt, "CONSERVATIVE_RULES", prompt.CONSERVATIVE_RULES + "\nNew rules."
@@ -368,7 +368,7 @@ def test_capabilities_describe_profiles_and_compatibility_defaults(settings):
     service = ProductionService(settings)
     try:
         profiles = service.capabilities()["direction_profiles"]
-        assert profiles["version"] == "1.0"
+        assert profiles["version"] == "1.1"
         assert profiles["default_api"] == "standard"
         assert profiles["default_new_project_ui"] == "conservative"
         assert {item["id"] for item in profiles["items"]} == {"standard", "conservative"}
