@@ -14,14 +14,21 @@
   }
   function render(value) {
     config=null;panel.querySelector('[data-mcp-config]').hidden=true;panel.querySelector('[data-mcp-config-text]').textContent='';
-    panel.querySelector('[data-mcp-summary]').textContent=value.connected?`已连接 · ${value.allowed_work_ids.length} 个作品`:'未连接';
+    panel.querySelector('[data-mcp-summary]').textContent=value.connected?`已连接 · ${value.allowed_work_ids.length} 个作品 · ${(value.allowed_run_ids||[]).length} 个 AA 任务`:'未连接';
     const holder=panel.querySelector('[data-mcp-works]');holder.replaceChildren();
     for(const work of value.works){
       const label=document.createElement('label');const checkbox=document.createElement('input');
       checkbox.type='checkbox';checkbox.name='work_ids';checkbox.value=work.id;checkbox.checked=value.allowed_work_ids.includes(work.id);
       const title=document.createElement('span');title.textContent=work.title;label.append(checkbox,title);holder.append(label);
     }
-    if(!value.works.length)holder.textContent='先创建或导入作品，再启用连接。';
+    if(!value.works.length)holder.textContent='暂无作品';
+    const tasks=panel.querySelector('[data-mcp-productions]');tasks.replaceChildren();
+    for(const task of value.productions||[]){
+      const label=document.createElement('label'),input=document.createElement('input'),title=document.createElement('span');
+      input.type='checkbox';input.name='run_ids';input.value=task.id;input.checked=(value.allowed_run_ids||[]).includes(task.id);
+      title.textContent=task.title;label.append(input,title);tasks.append(label);
+    }
+    if(!(value.productions||[]).length)tasks.textContent='先在 AA 制作中建立任务，再刷新连接。';
     panel.querySelector('[data-mcp-action=disconnect]').hidden=!value.connected;
     if(!value.connected){config=null;panel.querySelector('[data-mcp-config]').hidden=true;panel.querySelector('[data-mcp-config-text]').textContent='';}
   }
@@ -32,13 +39,14 @@
   }
   async function refresh(){
     const value=await request('settings');render(value);if(value.connected)await readConfig();
-    note(value.connected?'在 Agent 软件中添加配置后，直接描述要操作的作品与场景。':'选择作品后启用，配置一次即可使用。');
+    note(value.connected?'在 Agent 软件中添加配置后，直接描述要操作的作品与场景。':'选择作品或 AA 制作任务后启用，配置一次即可使用。');
   }
   form.addEventListener('submit',event=>{
     event.preventDefault();run(async()=>{
       const work_ids=[...form.querySelectorAll('input[name=work_ids]:checked')].map(el=>el.value);
-      if(!work_ids.length)throw new Error('至少选择一个允许访问的作品。');
-      render(await request('connect',{work_ids}));await readConfig(true);
+      const run_ids=[...form.querySelectorAll('input[name=run_ids]:checked')].map(el=>el.value);
+       if(!work_ids.length&&!run_ids.length)throw new Error('至少选择一个作品或 AA 制作任务。');
+      render(await request('connect',{work_ids,run_ids}));await readConfig(true);
       note('已启用。把配置添加到外部 Agent，之后无需任务包交换；模型调用由外部软件负责。');
     });
   });

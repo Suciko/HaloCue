@@ -141,3 +141,7 @@
 #page-generation .job-log-row { grid-template-columns:60px minmax(0,1fr); }
 #page-generation .job-log-error { max-height:260px; overflow:auto; }
 @media(max-width:600px) { #page-generation .generation-metrics { grid-template-columns:minmax(0,1fr); } }
+
+#externalAgentPerformanceProposals { margin-block: 12px; }
+#externalAgentPerformanceProposals .proposal-summary { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+#externalAgentPerformanceProposals .proposal-change span { overflow-wrap:anywhere; white-space:pre-wrap; }

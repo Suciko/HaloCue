@@ -1,0 +1,12 @@
+<evaluation>
+  <qa_pair><question>当前授权范围内有几个 AA 制作任务？ Use read-only AA tools on the synthetic fresh fixture; make no edits.</question><answer>1</answer></qa_pair>
+  <qa_pair><question>这份 AA 草稿共有几张卡片？ Use read-only AA tools on the synthetic fresh fixture; make no edits.</question><answer>4</answer></qa_pair>
+  <qa_pair><question>第一句台词在第几张卡片？ Use read-only AA tools on the synthetic fresh fixture; make no edits.</question><answer>3</answer></qa_pair>
+  <qa_pair><question>第一句台词由谁说？ Use read-only AA tools on the synthetic fresh fixture; make no edits.</question><answer>爱丽丝</answer></qa_pair>
+  <qa_pair><question>第一句台词的原文是什么？ Use read-only AA tools on the synthetic fresh fixture; make no edits.</question><answer>提示灯亮了。</answer></qa_pair>
+  <qa_pair><question>第二句台词的原文是什么？ Use read-only AA tools on the synthetic fresh fixture; make no edits.</question><answer>先确认眼前的情况。</answer></qa_pair>
+  <qa_pair><question>爱丽丝使用的冻结角色键是什么？ Use read-only AA tools on the synthetic fresh fixture; make no edits.</question><answer>alice</answer></qa_pair>
+  <qa_pair><question>该冻结角色有几个可选表情？ Use read-only AA tools on the synthetic fresh fixture; make no edits.</question><answer>2</answer></qa_pair>
+  <qa_pair><question>认真表情的编号是什么？ Use read-only AA tools on the synthetic fresh fixture; make no edits.</question><answer>01</answer></qa_pair>
+  <qa_pair><question>编号 01 的冻结表情含义是什么？ Use read-only AA tools on the synthetic fresh fixture; make no edits.</question><answer>认真</answer></qa_pair>
+</evaluation>

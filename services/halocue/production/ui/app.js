@@ -541,6 +541,10 @@
   }
 
   function adoptRunResult(result, { replaceJob = false } = {}) {
+    if (Object.prototype.hasOwnProperty.call(result, "external_agent_proposals")) {
+      state.externalAgentProposals = result.external_agent_proposals;
+      renderExternalPerformanceProposals(result.external_agent_proposals);
+    }
     const selectedId = state.selectedCard?.card_id;
     const previousRun = state.currentRun;
     state.currentRun = result.run || state.currentRun;
@@ -578,6 +582,7 @@
   }
 
   function currentRunOpeningStage() {
+    if (state.externalAgentProposals?.some(p => p.state === "pending")) return "review";
     const snapshot = workflowSnapshot();
     if (snapshot.missingMappings) return "mapping";
     if (!snapshot.done.generation) return "generation";
@@ -2849,6 +2854,32 @@
       $("#performancePreview").innerHTML = `<strong>无法读取草稿预览</strong><p>${esc(error.message)}</p>`;
       $("#performancePreviewStatus").textContent = "草稿没有被修改。";
     }
+  }
+
+  function renderExternalPerformanceProposals(proposals) {
+    const target = $("#externalAgentPerformanceProposals");
+    if (!target) return;
+    const pending = proposals.filter(p => p.state === "pending");
+    target.innerHTML = `<div class="proposal-summary"><strong>外部 Agent 演出建议${pending.length ? ` · ${pending.length} 项待审` : ""}</strong><button type="button" data-refresh-aa-proposals>刷新建议</button></div>` + pending.map(p => {
+      const changes = p.changes.map(c => {
+        const describe = fields => fields.cmd
+          ? `${directiveLabels[fields.cmd] || fields.cmd} · ${productionDirectiveArgument(fields) || "无参数"}`
+          : Object.keys(c.after).map(key => `${proposalFieldLabel(key)}：${fields[key] || "未设置"}`).join(" · ");
+        return `<li><strong>第 ${esc(c.card)} 张${c.operation === "insert_after" ? "之后插入" : "修改"}</strong>${c.before?.text ? `<p>${esc(c.before.who || "")}：${esc(c.before.text)}</p>` : ""}<div class="proposal-change"><span>原值：${esc(c.before ? describe(c.before) : "无新增指令")}</span><span>建议：${esc(describe(c.after))}</span></div></li>`;
+      }).join("");
+      return `<section class="proposal-generation"><h4>${esc(p.reason)}</h4><p>尚未写入草稿。采用后可在逐卡审查和草稿预览中检查。</p><ul class="proposal-list">${changes}</ul><div class="proposal-actions"><button type="button" data-aa-decision="approve" data-aa-proposal="${esc(p.proposal_id)}" ${p.can_apply_safely ? "" : "disabled"}>采用演出建议</button><button type="button" data-aa-decision="reject" data-aa-proposal="${esc(p.proposal_id)}">拒绝建议</button>${p.can_apply_safely ? "" : "<span>草稿已变化，请让 Agent 重新读取后提出建议。</span>"}</div></section>`;
+    }).join("");
+    target.querySelector('[data-refresh-aa-proposals]').addEventListener('click', async () => {
+      try { applyRun(await api(`/production-runs/${encodeURIComponent(state.currentRun.run_id)}`)); } catch(error) {handleError(error);}
+    });
+    target.querySelectorAll('[data-aa-decision]').forEach(button => button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        const result = await api(`/production-runs/${encodeURIComponent(state.currentRun.run_id)}/direction-proposals/${encodeURIComponent(button.dataset.aaProposal)}`, {method:"POST", body:JSON.stringify({action:button.dataset.aaDecision,expected_draft_version:state.currentDraft.draft_version})});
+        applyRun(result);
+        toast(button.dataset.aaDecision === "approve" ? "已采用演出建议，请检查草稿预览并逐卡审查。" : "已拒绝，草稿没有变化。");
+      } catch(error) {button.disabled=false;handleError(error);}
+    }));
   }
 
   function proposalFieldLabel(field) {
