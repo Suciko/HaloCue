@@ -403,6 +403,11 @@ html[data-theme="dark"] .chapter-authoring-block[data-block-type="dialogue"]{--t
 #app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode .scene-discussion-actions{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0 7px}
 #app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode .scene-discussion-actions button{min-height:30px;padding:5px 9px;font-size:11px}
 #app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode>small{display:block;font-size:10px;line-height:1.45}
+/* Short phone screens need room for the discussion as well as the composer. */
+@media(max-width:760px) and (max-height:720px){
+  #app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode{padding:8px 10px;margin-bottom:8px}
+  #app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode .scene-discussion-actions{margin:6px 0 4px}
+}
 #app#app.hc-redesign[data-surface="writing"] #sceneConversationForm .scene-discussion-mode :is(p,small){
   color:var(--hc-muted,#67758a)!important;
 }

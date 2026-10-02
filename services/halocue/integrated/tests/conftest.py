@@ -3,6 +3,8 @@
 import sys
 import json
 import threading
+import random
+import socket
 from pathlib import Path
 
 import pytest
@@ -24,13 +26,26 @@ from halocue_integrated.server import IntegratedRuntime  # noqa: E402
 
 @pytest.fixture
 def runtime(tmp_path):
+    # Windows can allocate port 0 below 10000, including Chromium-blocked ports.
+    # Pick an available high port for the browser-facing gateway only.
+    gateway_port = None
+    for _ in range(100):
+        candidate = random.SystemRandom().randrange(20000, 60000)
+        with socket.socket() as probe:
+            try:
+                probe.bind(("127.0.0.1", candidate))
+            except OSError:
+                continue
+            gateway_port = candidate
+            break
+    assert gateway_port is not None, "No available browser-safe test port"
     resource_index = tmp_path / "resources.json"
     resource_index.write_text(
         json.dumps({"bg": {}, "sounds": [], "characters": []}), encoding="utf-8"
     )
     instance = IntegratedRuntime(
         host="127.0.0.1",
-        port=0,
+        port=gateway_port,
         writing_data_dir=tmp_path / "writing",
         production_data_dir=tmp_path / "production",
         resource_index=resource_index,

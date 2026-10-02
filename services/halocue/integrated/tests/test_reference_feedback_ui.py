@@ -26,8 +26,18 @@ def test_locked_writing_step_and_unavailable_corpus_have_inline_guidance(runtime
                 wait_until="networkidle",
             )
             expect(page.locator(".catalog-availability-warning")).to_be_visible()
-            expect(page.locator("#officialReferenceSearchForm input")).to_be_disabled()
-            expect(page.locator("#officialReferenceSearchForm button")).to_be_disabled()
+            expect(page.locator(".catalog-availability-warning")).to_contain_text("仍可检索")
+            expect(page.locator("#officialReferenceSearchForm input")).to_be_enabled()
+            expect(page.locator("#officialReferenceSearchForm button")).to_be_enabled()
+            searches = []
+            page.on("request", lambda request: searches.append(request.url)
+                    if "/resources/search?" in request.url else None)
+            page.locator("#officialReferenceSearchForm input").fill("白子")
+            page.locator("#officialReferenceSearchForm button").click()
+            expect(page.locator(".search-summary")).to_contain_text("随包 BA 资料索引")
+            expect(page.locator(".bundled-reference-record").filter(has_text="白子").first).to_be_visible()
+            assert any("kind=characters" in url for url in searches)
+            assert any("kind=backgrounds" in url for url in searches)
             assert not page.locator("#toast").first.evaluate("el => el.classList.contains('show')")
         finally:
             browser.close()

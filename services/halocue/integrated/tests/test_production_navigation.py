@@ -357,7 +357,6 @@ def test_scene_active_run_is_polled_after_reload_without_generation(runtime, wid
         pw.expect(page.locator(".scene-agent-panel > header p")).to_contain_text("恢复场景")
         pw.expect(page.locator(".scene-agent-panel .agent-running-message")).to_be_visible()
         pw.expect(page.locator("#sceneAgentMessage")).to_be_disabled()
-        pw.expect(page.locator("[data-generate-scene-proposal]")).to_be_disabled()
         candidate = page.locator("[data-generate-scene-proposal]")
         pw.expect(candidate).to_be_hidden()
         pw.expect(page.locator('[data-agent-cancel-run="agent-ui-test"]')).to_be_visible()
@@ -434,7 +433,7 @@ def test_mobile_scene_chat_keeps_send_visible_and_scrolls_messages(runtime, heig
             send.bounding_box()["y"] + send.bounding_box()["height"]
             <= page.locator(".mobile-nav").bounding_box()["y"]
         )
-        scroll = page.locator("[data-scene-conversation-scroll]")
+        scroll = page.locator("[data-scene-conversation-scroll]:visible")
         assert scroll.evaluate("e=>e.clientHeight") >= 60
         assert (
             page.locator(".scene-message-body > p").first.evaluate(
@@ -951,8 +950,18 @@ def test_manual_manuscript_partial_proposal_review_and_production_journey(runtim
     from halocue_writing.workflow_pack import ENGINE_RULE_SOURCE, MODE_SOURCES, WORKFLOW_RULE_SOURCES
 
     class JourneyProvider(FakeWritingProvider):
-        def rewrite_scene(self, context, base_text, instruction):
-            return base_text.replace("灯亮着。", "灯轻轻闪了一下。") + "旁白: 门外传来脚步声。\n"
+        def discuss_work(self, messages, context):
+            manuscript = context["scene_conversation_context"]["current_manuscript"]
+            blocks = manuscript["content"]["blocks"]
+            edits = [
+                {"block_id": blocks[0]["id"], "old_text": blocks[0]["text"], "new_text": "灯轻轻闪了一下。"},
+                {"block_id": blocks[-1]["id"], "old_text": blocks[-1]["text"], "new_text": "我会在这里等。门外传来脚步声。"},
+            ]
+            return {"text": "已提出两处修改，等待逐条审阅。", "questions": [],
+                    "ready_for_proposal": False, "tool_calls": [{"id": "journey-edit",
+                    "tool": "propose_scene_text_edit", "arguments": {
+                        "base_revision_id": manuscript["revision_id"],
+                        "reason": "按用户要求修改灯光与结尾。", "edits": edits}}]}
 
     rules = tmp_path / "journey-rules"
     for relative in [p for group in WORKFLOW_RULE_SOURCES.values() for p in group] + list(MODE_SOURCES.values()) + [ENGINE_RULE_SOURCE, "knowledge/老师在场规则.md"]:
@@ -1013,13 +1022,12 @@ def test_manual_manuscript_partial_proposal_review_and_production_journey(runtim
                 page.locator('[data-writing-mobile-view="agent"]').click()
             page.locator('#sceneAgentMessage').fill("只提出两处修改：灯轻轻闪一下，结尾加脚步声。")
             page.locator('#sceneConversationForm button[type=submit]:not([data-save-for-agent])').click()
-            pw.expect(page.locator('[data-generate-scene-proposal]:visible')).to_be_enabled(timeout=20000)
-            page.locator('[data-generate-scene-proposal]:visible').click()
+            pw.expect(page.locator('[data-generate-scene-proposal]')).to_have_count(0)
             pw.expect(page.locator('[data-scene-change]')).to_have_count(2, timeout=20000)
             assert next(scene for chapter in service.get_work(work["id"])["chapters"] for scene in chapter["scenes"])["current_revision_id"] == first_revision
-            page.locator('.chapter-authoring-related > summary').filter(has_text="AI 候选").click()
+            # Changes are already shown at their manuscript paragraph positions.
             page.locator('[data-scene-change]').nth(1).uncheck()
-            page.locator('[data-apply-scene-changes]').click()
+            page.locator('[data-apply-scene-changes]').first.click()
             pw.expect(page.locator('[data-scene-change]')).to_have_count(0)
             updated = service.get_work(work["id"])
             manuscript = next(a for a in updated["artifacts"] if a["kind"] == "scene_script" and a["scope_id"] == scene_id)["current_revision"]

@@ -463,6 +463,7 @@ def test_cli_reports_snapshot_input_errors_without_traceback(tmp_path, bad_snaps
     completed = subprocess.run(
         [
             sys.executable,
+            "-X", "utf8",
             str(script),
             "--before-manifest", str(tmp_path / "before-manifest.json"),
             "--after-manifest", str(tmp_path / "after-manifest.json"),
@@ -471,6 +472,7 @@ def test_cli_reports_snapshot_input_errors_without_traceback(tmp_path, bad_snaps
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
 
     assert completed.returncode == 2
