@@ -15,6 +15,7 @@ from .repository import canonical_json, new_id, now, sha256_text
 class McpWorkspace:
     def __init__(self, service):
         self.service, self.repo = service, service.repo
+        self.production = None
 
     def status(self):
         with self.repo.transaction() as db:
@@ -23,23 +24,35 @@ class McpWorkspace:
             ).fetchone()
         works = [{"id": work["id"], "title": work["title"]} for work in self.service.list_works()]
         return {
-            "schema_version": "halocue-mcp-connection/1.0",
+            "schema_version": "halocue-mcp-connection/1.1",
             "connected": bool(row),
             "connection_id": row["id"] if row else None,
             "allowed_work_ids": json.loads(row["work_ids_json"]) if row else [],
             "works": works,
-            "capabilities": ["read_materials", "read_scene", "propose_scene_edit"],
+            "allowed_run_ids": json.loads(row["run_ids_json"]) if row else [],
+            "productions": self.production.runs() if self.production else [],
+            "capabilities": ["read_materials", "read_scene", "propose_scene_edit"]
+            + (
+                ["read_production", "read_production_resources", "propose_performance_edit"]
+                if self.production
+                else []
+            ),
         }
 
     def connect(self, payload):
-        ids = payload.get("work_ids")
+        ids = payload.get("work_ids", [])
+        runs = payload.get("run_ids", [])
         if (
-            set(payload) != {"work_ids"}
+            set(payload) - {"work_ids", "run_ids"}
             or not isinstance(ids, list)
-            or not ids
+            or not isinstance(runs, list)
+            or not (ids or runs)
             or len(ids) > 200
+            or len(runs) > 200
             or any(not isinstance(item, str) for item in ids)
+            or any(not isinstance(item, str) for item in runs)
             or len(set(ids)) != len(ids)
+            or len(set(runs)) != len(runs)
         ):
             raise DomainError("mcp_scope_invalid", "请选择允许外部 Agent 访问的作品。")
         token, connection_id = secrets.token_urlsafe(32), new_id("mcp-connection")
@@ -48,10 +61,22 @@ class McpWorkspace:
                 not db.execute("SELECT 1 FROM works WHERE id=?", (item,)).fetchone() for item in ids
             ):
                 raise DomainError("mcp_scope_invalid", "授权作品不存在，请刷新后重新选择。")
+            available_runs = (
+                {run["id"] for run in self.production.runs()} if self.production else set()
+            )
+            if set(runs) - available_runs:
+                raise DomainError("mcp_scope_invalid", "授权 AA 制作任务不存在，请刷新后重新选择。")
             db.execute("UPDATE mcp_connections SET status='revoked' WHERE status='active'")
             db.execute(
-                "INSERT INTO mcp_connections VALUES (?,?,?,?,?)",
-                (connection_id, sha256_text(token), canonical_json(ids), "active", now()),
+                "INSERT INTO mcp_connections (id,token_hash,work_ids_json,status,created_at,run_ids_json) VALUES (?,?,?,?,?,?)",
+                (
+                    connection_id,
+                    sha256_text(token),
+                    canonical_json(ids),
+                    "active",
+                    now(),
+                    canonical_json(runs),
+                ),
             )
             path = self._connection_path(connection_id)
             try:
@@ -135,6 +160,10 @@ class McpWorkspace:
             "read_scene": {"scene_id", "start", "limit", "query"},
             "search_materials": {"scene_id", "kind", "query"},
             "propose_scene_edit": {"read_id", "edits", "reason"},
+            "find_productions": {"query", "offset"},
+            "read_production": {"run_id", "start", "limit", "query"},
+            "search_production_resources": {"run_id", "kind", "query", "offset", "character"},
+            "propose_performance_edit": {"read_id", "edits", "reason"},
         }
         if not isinstance(tool, str) or tool not in fields:
             raise DomainError("mcp_tool_denied", "该操作未开放给外部 MCP。", status=403)
@@ -142,6 +171,33 @@ class McpWorkspace:
             raise DomainError("mcp_arguments_invalid", "工具含有未声明的参数。")
         with self.repo.transaction() as db:
             allowed = self._authorize(db, connection_id, token)
+            if tool in {
+                "find_productions",
+                "read_production",
+                "search_production_resources",
+                "propose_performance_edit",
+            }:
+                if not self.production:
+                    raise DomainError(
+                        "mcp_production_unavailable",
+                        "请在 HaloCue 一体化工作区使用 AA 制作连接。",
+                        status=503,
+                    )
+                runs = json.loads(
+                    db.execute(
+                        "SELECT run_ids_json FROM mcp_connections WHERE id=?", (connection_id,)
+                    ).fetchone()[0]
+                )
+                try:
+                    return self.production.call(connection_id, runs, tool, arguments)
+                except Exception as error:
+                    from halocue_production.errors import ProductionError
+
+                    if isinstance(error, ProductionError):
+                        raise DomainError(
+                            error.code, str(error), status=error.status, details=error.details
+                        ) from error
+                    raise
             if tool == "find_scenes":
                 query = self._query(arguments).casefold()
                 offset = arguments.get("offset", 0)

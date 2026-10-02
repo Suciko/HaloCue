@@ -93,6 +93,8 @@ class ProductionService:
         )
         self._state_lock = threading.RLock()
         self.jobs = JobRegistry(settings.data_dir / "jobs")
+        from .mcp_workspace import ProductionMcpWorkspace
+        self.mcp_workspace = ProductionMcpWorkspace(self)
         self.asset_staging = AssetStaging(settings.data_dir / "uploads")
         self.custom_assets = CustomAssetLibrary(settings.data_dir / "custom-asset-library")
         self._recover_interrupted_runs()
@@ -1479,6 +1481,7 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
             "run": run.to_dict(),
             "gates": gates,
             "draft": draft,
+            "external_agent_proposals": self.mcp_workspace.proposals(run, draft["draft_version"]) if draft else [],
             "draft_direction_profile": self.adapter.committed_direction_profile(
                 str(run.draft_token), run.last_direction_generation_id,
             ) if run.draft_token else None,
@@ -1617,11 +1620,14 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
             "run_id": run_id,
             "generation_mode": run.source_summary.get("generation_mode"),
             "draft_version": self.adapter.draft_detail(str(run.draft_token)).get("draft_version"),
+            "external_agent_proposals": self.mcp_workspace.proposals(run),
             **audit,
         }
 
     def decide_direction_proposal(self, run_id: str, proposal_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         run = self._run(run_id)
+        if self.mcp_workspace.decide(run, proposal_id, payload):
+            return self.run_detail(run_id)
         self.adapter.decide_direction_proposal(
             token=str(run.draft_token),
             proposal_id=proposal_id,

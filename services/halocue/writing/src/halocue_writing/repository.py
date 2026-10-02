@@ -470,6 +470,9 @@ class Repository:
 
     def _migrate_domain_schema(self, connection):
         """Add durable writing-domain fields without replacing an existing workspace."""
+        mcp_columns = {row["name"] for row in connection.execute("PRAGMA table_info(mcp_connections)")}
+        if "run_ids_json" not in mcp_columns:
+            connection.execute("ALTER TABLE mcp_connections ADD COLUMN run_ids_json TEXT NOT NULL DEFAULT '[]'")
         connection.execute("DROP INDEX IF EXISTS idx_conversation_scope")
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_conversation_scope_lookup ON conversation_threads(work_id, scope_type, scope_id, updated_at)"

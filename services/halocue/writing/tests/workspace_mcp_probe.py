@@ -14,7 +14,7 @@ async def main():
         async with ClientSession(r, w) as host:
             await host.initialize()
             tools = await host.list_tools()
-            assert len(tools.tools) == 4
+            assert len(tools.tools) == 8
             for tool in tools.tools:
                 assert tool.outputSchema
                 properties = tool.inputSchema["properties"]

@@ -75,3 +75,11 @@ Results include inline diff, proposal status and a local review link.
 This is a 1.0 source-preview change on Issue #46 / stacked PR #47, pending review.
 The published Beta artifact is not rebuilt. SDK/client evidence is distinct from
 compatibility evidence for any named third-party Agent host.
+
+## 2026-10-03 amendment: direct AA performance proposals
+
+Maintainer explicitly prioritizes AA production above prose MCP. Issue #48 extends the integrated 1.0 connection to independently selected production run IDs (connection contract 1.1), including legacy/imported tasks without a writing origin. Work grants do not imply AA grants; migration defaults old connections to an empty AA scope.
+
+Four additional tools find productions, read bounded card windows, retrieve frozen resource choices and propose performance batches. Read IDs hide stable card IDs and draft versions. Proposals can change line annotations, edit directives, resolve background requests or insert validated directives, preserving source dialogue/speakers. Background/sound keys must already belong to the task's frozen resource snapshot. New asset import and cast mapping remain explicit HC task operations. There is no inference, author-acceptance, compile or install tool exposed to external hosts.
+
+Production owns the versioned external-performance-proposal/1.0 projection and task-local private snapshots/receipts. The main review surface displays human-readable before/after changes and author apply/reject actions. Applying revalidates draft/face/resource choices, locks the draft, commits the batch with a fixed-file rollback journal and invalidates prior build/install claims; startup/next-read recovery rolls back interrupted acceptance. Rejection leaves the draft unchanged, including stale proposals. SDK plus synthetic preview/compile evidence is separate from named-host subscription compatibility or native AA playback evidence. This source-preview amendment remains pending PR review.

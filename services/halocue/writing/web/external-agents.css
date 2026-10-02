@@ -29,9 +29,9 @@
 #settingsDialog .mcp-workspace-content p { color:var(--hc-muted); line-height:1.6; }
 #settingsDialog .mcp-workspace-content form { border:0; padding:0; background:transparent; }
 #settingsDialog .mcp-workspace-content fieldset { border:1px solid var(--hc-line); border-radius:8px; padding:12px; }
-#settingsDialog [data-mcp-works] { display:grid; gap:8px; max-height:220px; overflow:auto; }
-#settingsDialog [data-mcp-works] label { display:flex; flex-direction:row; justify-content:flex-start; align-items:center; gap:9px; margin:0; color:var(--hc-ink); }
-#settingsDialog [data-mcp-works] input { flex:0 0 16px; width:16px; height:16px; accent-color:var(--hc-action); }
+#settingsDialog [data-mcp-works], #settingsDialog [data-mcp-productions] { display:grid; gap:8px; max-height:220px; overflow:auto; }
+#settingsDialog [data-mcp-works] label, #settingsDialog [data-mcp-productions] label { display:flex; flex-direction:row; justify-content:flex-start; align-items:center; gap:9px; margin:0; color:var(--hc-ink); }
+#settingsDialog [data-mcp-works] input, #settingsDialog [data-mcp-productions] input { flex:0 0 16px; width:16px; height:16px; accent-color:var(--hc-action); }
 #settingsDialog .mcp-workspace-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
 #settingsDialog [data-mcp-config] { margin-top:14px; }
 #settingsDialog [data-mcp-config-text] { background:var(--hc-surface-soft); color:var(--hc-ink); padding:12px; border-radius:8px; font-size:12px; white-space:pre-wrap; overflow-wrap:anywhere; }

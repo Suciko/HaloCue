@@ -231,7 +231,7 @@ def test_connection_survives_restart_but_backup_cannot_resurrect_it(exchange):
     service, payload, root = exchange
     credentials = connect(service, payload["work_id"])
     schema = json.loads(
-        (ROOT / "packages/contracts/mcp-workspace-connection/1.0.schema.json").read_text()
+        (ROOT / "packages/contracts/mcp-workspace-connection/1.1.schema.json").read_text()
     )
     jsonschema.validate(service.mcp_workspace.status(), schema)
     restarted = WritingService(root / "writing")

@@ -56,6 +56,7 @@ class IntegratedRuntime:
         production_address = ("127.0.0.1", self.production_server.server_port)
 
         self.writing_service = WritingService(writing_data_dir, f"http://127.0.0.1:{self.production_server.server_port}")
+        self.writing_service.mcp_workspace.production = self.production_service.mcp_workspace
         writing_handler = make_handler(self.writing_service, WRITING_ROOT / "web")
         self.writing_server = ThreadingHTTPServer(("127.0.0.1", 0), writing_handler)
         writing_address = ("127.0.0.1", self.writing_server.server_port)
