@@ -133,14 +133,25 @@ def is_public_source_path(relative_path: str) -> bool:
     if path.parts[0] not in _PUBLIC_DIRECTORIES:
         return False
     if path.parts[0] == "services":
-        if normalized in {"services/halocue/runtime_layout.py", "services/halocue/_test_support.py"}:
+        if normalized in {
+            "services/halocue/writing/web/vendor/echarts/LICENSE",
+            "services/halocue/writing/web/vendor/echarts/NOTICE",
+        }:
+            return True
+        if normalized in {
+            "services/halocue/runtime_layout.py",
+            "services/halocue/_test_support.py",
+        }:
             return True
         if normalized.startswith("services/halocue/writing/skill/ba-writing/"):
             return path.suffix.casefold() == ".md"
-        return (len(path.parts) >= 5 and path.parts[1] == "halocue"
-                and path.parts[2] in {"writing", "production", "integrated"}
-                and path.parts[3] in {"src", "web", "ui", "static"}
-                and path.suffix.casefold() in {".py", ".html", ".css", ".js", ".json", ".svg"})
+        return (
+            len(path.parts) >= 5
+            and path.parts[1] == "halocue"
+            and path.parts[2] in {"writing", "production", "integrated"}
+            and path.parts[3] in {"src", "web", "ui", "static"}
+            and path.suffix.casefold() in {".py", ".html", ".css", ".js", ".json", ".svg"}
+        )
     if path.parts[0] == "data":
         return normalized == "data/halocue_labels.db"
     return True
@@ -245,8 +256,7 @@ def export_public_source(
             )
         manifest_path = destination / "PUBLIC_MANIFEST.json"
         manifest_path.write_text(
-            json.dumps({"files": manifest}, ensure_ascii=False, indent=2, sort_keys=True)
-            + "\n",
+            json.dumps({"files": manifest}, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
             newline="\n",
         )

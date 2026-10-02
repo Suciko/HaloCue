@@ -53,6 +53,12 @@ Authoritative package license texts and project links are available in their
 shipped `.dist-info` metadata and upstream distributions. PyInstaller's
 bootloader terms are documented at <https://pyinstaller.org/en/stable/license.html>.
 
+## Web components
+
+`Apache ECharts` 6.0.0 is licensed under Apache-2.0. Its license text and
+Apache Software Foundation NOTICE accompany the vendored JavaScript in
+`services/halocue/writing/web/vendor/echarts/` (under `_internal` in Windows bundles).
+
 ## Native runtime components
 
 | Component | License/source |

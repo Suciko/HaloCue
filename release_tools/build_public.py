@@ -163,7 +163,11 @@ def _load_source_manifest(source_root: Path) -> None:
         if not isinstance(relative, str) or not relative:
             raise ValueError("valid PUBLIC_MANIFEST.json is required")
         normalized = PurePosixPath(relative).as_posix()
-        if normalized != relative or relative.startswith("/") or ".." in PurePosixPath(relative).parts:
+        if (
+            normalized != relative
+            or relative.startswith("/")
+            or ".." in PurePosixPath(relative).parts
+        ):
             raise ValueError("valid PUBLIC_MANIFEST.json is required")
         path = actual.get(relative)
         if path is None:
@@ -187,9 +191,7 @@ def _require_clean_public_source(source_root: Path) -> None:
         raise ValueError("public source is missing required files: " + ", ".join(missing))
     findings = scan_tree(source_root, mode="source")
     if findings:
-        summary = ", ".join(
-            f"{finding.code}:{finding.relative_path}" for finding in findings[:12]
-        )
+        summary = ", ".join(f"{finding.code}:{finding.relative_path}" for finding in findings[:12])
         raise ValueError(f"public source scan failed: {summary}")
 
 
@@ -242,9 +244,15 @@ def _run_pyinstaller(
     updater_spec = source_root / "HaloCueUpdater.spec"
     if updater_spec.is_file():
         updater_command = [
-            str(python_executable), "-m", "PyInstaller", "--noconfirm", "--clean",
-            "--distpath", str(work_root / "dist"),
-            "--workpath", str(work_root / "updater-work"),
+            str(python_executable),
+            "-m",
+            "PyInstaller",
+            "--noconfirm",
+            "--clean",
+            "--distpath",
+            str(work_root / "dist"),
+            "--workpath",
+            str(work_root / "updater-work"),
             str(updater_spec),
         ]
         subprocess.run(updater_command, cwd=work_root, env=environment, check=True)
@@ -319,8 +327,7 @@ def _remove_environment_payloads(bundle_dir: Path) -> None:
         return
     for path in list(internal.rglob("*")):
         if path.is_file() and (
-            path.suffix.casefold() == ".gif"
-            or path.name.casefold() == "direct_url.json"
+            path.suffix.casefold() == ".gif" or path.name.casefold() == "direct_url.json"
         ):
             path.unlink()
     for relative in ("_tcl_data", "_tk_data", "tcl8", "tcl86t.dll", "tk86t.dll"):
@@ -361,10 +368,7 @@ def audit_third_party_notices(bundle_dir: Path) -> tuple[str, ...]:
 
     notice_path = bundle_dir / "THIRD_PARTY_NOTICES.md"
     notice = notice_path.read_text(encoding="utf-8")
-    declared = {
-        _normalized_component(token)
-        for token in re.findall(r"`([^`]+)`", notice)
-    }
+    declared = {_normalized_component(token) for token in re.findall(r"`([^`]+)`", notice)}
     components: dict[str, str] = {}
     for metadata in bundle_dir.rglob("*.dist-info/METADATA"):
         match = re.search(
@@ -375,9 +379,21 @@ def audit_third_party_notices(bundle_dir: Path) -> tuple[str, ...]:
             name = match.group(1).strip()
             components[_normalized_component(name)] = name
     internal = bundle_dir / "_internal"
+    echarts = internal / "services/halocue/writing/web/vendor/echarts"
+    if (echarts / "echarts-6.0.0.min.js").is_file():
+        components[_normalized_component("Apache ECharts")] = "Apache ECharts"
+        for filename in ("LICENSE", "NOTICE"):
+            document = echarts / filename
+            if not document.is_file() or not document.read_text(encoding="utf-8").strip():
+                raise ValueError(f"Apache ECharts missing {filename}")
     native_components = (
         ("CPython", tuple(internal.glob("python*.dll"))),
-        ("Microsoft Visual C++ Runtime", tuple(internal.glob("VCRUNTIME*.dll")) + tuple(internal.glob("MSVCP*.dll")) + tuple(internal.glob("ucrtbase.dll"))),
+        (
+            "Microsoft Visual C++ Runtime",
+            tuple(internal.glob("VCRUNTIME*.dll"))
+            + tuple(internal.glob("MSVCP*.dll"))
+            + tuple(internal.glob("ucrtbase.dll")),
+        ),
         ("OpenSSL", tuple(internal.glob("libcrypto*.dll")) + tuple(internal.glob("libssl*.dll"))),
         ("SQLite", tuple(internal.glob("sqlite3.dll"))),
         ("zlib", tuple(internal.glob("zlib.dll"))),
@@ -406,12 +422,9 @@ def _write_manifest(bundle_dir: Path, manifest_path: Path) -> None:
     entries = []
     for relative, path in _regular_files(bundle_dir).items():
         data = path.read_bytes()
-        entries.append(
-            {"path": relative, "size": len(data), "sha256": _sha256(data)}
-        )
+        entries.append({"path": relative, "size": len(data), "sha256": _sha256(data)})
     manifest_path.write_text(
-        json.dumps({"files": entries}, ensure_ascii=False, indent=2, sort_keys=True)
-        + "\n",
+        json.dumps({"files": entries}, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -429,7 +442,9 @@ def _write_stable_zip(bundle_dir: Path, archive_path: Path) -> None:
             info = zipfile.ZipInfo(f"{_BUNDLE_NAME}/{relative}", _ZIP_TIMESTAMP)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = (0o100755 if path.suffix.casefold() == ".exe" else 0o100644) << 16
-            archive.writestr(info, path.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+            archive.writestr(
+                info, path.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9
+            )
 
 
 def build_public_release(
@@ -469,9 +484,7 @@ def build_public_release(
     audit_third_party_notices(bundle_dir)
     findings = scan_tree(bundle_dir, mode="public")
     if findings:
-        summary = ", ".join(
-            f"{finding.code}:{finding.relative_path}" for finding in findings[:12]
-        )
+        summary = ", ".join(f"{finding.code}:{finding.relative_path}" for finding in findings[:12])
         raise ValueError(f"public bundle scan failed: {summary}")
     _write_manifest(bundle_dir, manifest_path)
     _write_stable_zip(bundle_dir, archive_path)
@@ -512,9 +525,7 @@ def finalize_existing_bundle(
     audit_third_party_notices(bundle_dir)
     findings = scan_tree(bundle_dir, mode="public")
     if findings:
-        summary = ", ".join(
-            f"{finding.code}:{finding.relative_path}" for finding in findings[:12]
-        )
+        summary = ", ".join(f"{finding.code}:{finding.relative_path}" for finding in findings[:12])
         raise ValueError(f"public bundle scan failed: {summary}")
     archive_path = _contained_target(output_root / PUBLIC_ARCHIVE_NAME, output_root)
     manifest_path = _contained_target(output_root / _BUILD_MANIFEST, output_root)
