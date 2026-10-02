@@ -15,7 +15,6 @@ import weakref
 from pathlib import Path
 
 from services.halocue.runtime_layout import integrated_data_root
-from model_capabilities import ModelCapabilityError, compact_request_context
 
 
 class CodexError(RuntimeError):
@@ -351,6 +350,10 @@ class CodexTurn:
     def __init__(
         self, config: dict, system: str, user: str, *, schema=None, tools=None, cancelled=None
     ):
+        # Resolve bundled capabilities only for a native Codex turn. Eager root
+        # imports would pollute the independently selected legacy code family.
+        from model_capabilities import ModelCapabilityError, compact_request_context
+
         self.client = connection().new_client(
             timeout=float(config.get("timeout") or 120), cancelled=cancelled
         )
