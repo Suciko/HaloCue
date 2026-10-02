@@ -48,7 +48,9 @@ def require(condition: bool, message: str) -> None:
         raise VerificationError(message)
 
 
-def json_request(base: str, path: str, payload: dict | None = None) -> tuple[int, dict]:
+def json_request(
+    base: str, path: str, payload: dict | None = None, *, timeout: float = 10
+) -> tuple[int, dict]:
     body = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
         base + path,
@@ -57,7 +59,7 @@ def json_request(base: str, path: str, payload: dict | None = None) -> tuple[int
         headers={"Content-Type": "application/json"} if body is not None else {},
     )
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.status, json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         return exc.code, json.loads(exc.read().decode("utf-8"))
@@ -358,6 +360,9 @@ def _exercise_workflow(base: str, source_script: Path, model_url: str) -> str:
                 "vision": False,
             },
         },
+        # Cold frozen-provider initialization exceeded 10 seconds during QA.
+        # Keep ordinary health/data requests on the short default deadline.
+        timeout=90,
     )
     require(
         status == 200 and model_test.get("ok") is True, "fake local model response was rejected"

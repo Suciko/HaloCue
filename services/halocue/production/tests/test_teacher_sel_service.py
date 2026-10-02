@@ -126,7 +126,10 @@ def test_old_adapter_rejects_mode_before_mutating_identity(service, monkeypatch)
 
 
 def test_switching_presentation_supersedes_late_model_result(service, monkeypatch):
-    from test_direction_profiles import FixtureProvider, finished_job
+    from services.halocue.production.tests.test_direction_profiles import (
+        FixtureProvider,
+        finished_job,
+    )
 
     monkeypatch.setenv("HALOCUE_SEL_TEST_KEY", "synthetic-secret")
     service.configure_direction_model(
