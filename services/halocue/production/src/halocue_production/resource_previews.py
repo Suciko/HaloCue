@@ -140,9 +140,6 @@ class ResourcePreviewCatalog:
         # the complete background catalogue. Restrict lookup to this workspace.
         if not key or key in {".", ".."} or any(char in key for char in "/\\:\x00"):
             return None
-        cached = self._background_cache.get(key)
-        if cached and cached[0] == signature and cached[1].path.is_file():
-            return cached[1]
         if self.resource_index:
             stamp = signature[0]
             with self._preview_lock:
@@ -173,6 +170,11 @@ class ResourcePreviewCatalog:
                         if preview is not None:
                             self._background_cache[key] = (signature, preview)
                         return preview
+        # Directory timestamps can remain unchanged after rapid writes on Windows.
+        # Always resolve higher-priority overrides before reusing an official cache.
+        cached = self._background_cache.get(key)
+        if cached and cached[0] == signature and cached[1].path.is_file():
+            return cached[1]
         official = self._as_preview(self._official("background", key))
         if official is not None:
             self._background_cache[key] = (signature, official)

@@ -98,7 +98,7 @@ def test_version_gate_accepts_only_exact_release_tag_and_metadata():
     # Public-source exports intentionally have no .git directory. Keep tag and
     # metadata validation hermetic; Git cleanliness is covered separately below.
     check_release_version(f"v{VERSION}", ROOT, verify_database=False)
-    for tag in (VERSION, "v1.0.0", "v1.0.0-beta.0", "v1.0.0-beta.2", "v0.9.1", "release-0.9.2"):
+    for tag in (VERSION, "v1.0.0", "v1.0.0-beta.0", "v1.0.0-beta.1", "v0.9.1", "release-0.9.2"):
         with pytest.raises(ReleaseVersionError):
             check_release_version(tag, ROOT, verify_database=False)
 

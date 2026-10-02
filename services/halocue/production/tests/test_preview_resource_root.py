@@ -143,13 +143,16 @@ def test_background_override_wins_over_cached_official_image(tmp_path):
     assert catalog.background("BG_RainyStation").path == image.resolve()
 
 
-def test_cached_preview_detects_removed_image_and_new_override(tmp_path):
+def test_cached_preview_detects_removed_image_and_new_override(tmp_path, monkeypatch):
     from halocue_production.resource_previews import ResourcePreviewCatalog
 
     cached_image = manifest(tmp_path, name="cached.jpg")
     folder = tmp_path / "aa" / "overrides" / "bgs"
     folder.mkdir(parents=True)
     catalog = ResourcePreviewCatalog(tmp_path, tmp_path / "aa")
+    # Model an unchanged directory generation, as observed on the Windows runner.
+    signature = catalog._background_signature()
+    monkeypatch.setattr(catalog, "_background_signature", lambda: signature)
     assert catalog.background("BG_RainyStation").path == cached_image.resolve()
     override = folder / "BG_RainyStation.png"
     override.write_bytes(b"new-override")

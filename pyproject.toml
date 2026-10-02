@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "halocue"
-version = "1.0.0b1"
+version = "1.0.0b2"
 description = "Narrative staging for AzureArchive"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"

@@ -10,14 +10,14 @@ Esoteric Software 均无隶属关系。HaloCue 不提供游戏资源，也不授
 
 ## 下载与开始
 
-当前候选为 **`v1.0.0-beta.1` 预发行版**，不是正式稳定版。
+当前候选为 **`v1.0.0-beta.2` 预发行版**，不是正式稳定版。
 下载入口见 [GitHub Releases](https://github.com/Suciko/HaloCue/releases)。
-完整代码、依赖、启动方式与已验证范围见 [Beta 1 发布说明](docs/releases/1.0.0-beta.1.md)。
+完整代码、依赖、启动方式与已验证范围见 [Beta 2 发布说明](docs/releases/1.0.0-beta.2.md)。
 
-普通 Windows 用户下载 `HaloCue-1.0.0-beta.1-windows-x64.zip`：
+普通 Windows 用户下载 `HaloCue-1.0.0-beta.2-windows-x64.zip`：
 
 如确有逐文件书面授权，私发覆盖包固定命名为
-`HaloCue-1.0.0-beta.1-private-windows-x64.zip`，不上传 GitHub。
+`HaloCue-1.0.0-beta.2-private-windows-x64.zip`，不上传 GitHub。
 
 1. 完整解压 ZIP，不要直接在压缩包里运行。
 2. 双击 `HaloCue.exe`，程序会直接打开独立应用窗口，不会启动系统浏览器。

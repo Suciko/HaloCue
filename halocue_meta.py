@@ -1,7 +1,7 @@
 PRODUCT_NAME = "HaloCue"
 CHINESE_SUBTITLE = "AzureArchive 剧情演出工具"
 ENGLISH_SUBTITLE = "Narrative Staging for AzureArchive"
-VERSION = "1.0.0-beta.1"
+VERSION = "1.0.0-beta.2"
 DISPLAY_NAME = f"{PRODUCT_NAME} {VERSION}"
 LEGACY_VERSION = "0.9.3"
 APP_ID = "halocue-local-server-v1"
