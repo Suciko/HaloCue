@@ -2321,13 +2321,15 @@ function taskTokenDiagnosticsMarkup(item){
     }
     const priced=typeof usage.estimated_cost==='number'&&Number.isFinite(usage.estimated_cost)&&usage.estimated_cost>=0;
     const costAmount=priced?(usage.estimated_cost>0&&usage.estimated_cost<0.000001?'< USD 0.000001':'USD '+usage.estimated_cost.toFixed(6)):'';
-    rows+=row('费用估算',priced?costAmount+(usage.cost_status==='complete_estimate'?'（按配置单价，非账单）':'（仅已记录部分，非账单）'):'未知（缺少单价或用量）');
+    const codexTurn=ledger?.accounting_scope==='observed_codex_turns';
+    rows+=row(codexTurn?'计费方式':'费用估算',codexTurn?'ChatGPT 订阅额度':priced?costAmount+(usage.cost_status==='complete_estimate'?'（按配置单价，非账单）':'（仅已记录部分，非账单）'):'未知（缺少单价或用量）');
     if(observed){
-      rows+=row('HTTP 请求 / 逻辑请求',number(ledger.physical_request_count)+' / '+number(ledger.logical_request_count));
+      rows+=row(codexTurn?'Codex 任务 / 逻辑请求':'HTTP 请求 / 逻辑请求',number(ledger.physical_request_count)+' / '+number(ledger.logical_request_count));
       rows+=row('未完整报告用量的请求',number(ledger.unknown_usage_count));
       rows+=row('仍待确认 / 中断',number(ledger.pending_count)+' / '+number(ledger.interrupted_count));
     }
     let notes=observed?'包含已记录的重试和失败请求；未报告部分不计入已知小计。':'旧版或未接入计量的调用，覆盖范围未知。';
+    if(codexTurn)notes='按 Codex 完整任务的累计回执记录，包含工具往返；内部 HTTP 请求次数不对 HaloCue 可见。';
     if(noSend)notes='当前请求在本地预算校验阶段停止；输入估算不是已消耗 token。';
     if(d.request_status==='rejected_before_http'&&observed)notes+=' 本轮后续请求在发送前被拦截，不抵消前面请求的消耗。';
     if(usage.input_tokens_semantics==='total_including_cache')notes+=' 输入已包含缓存读取和写入，缓存是分项，不要再次相加。';
@@ -5566,7 +5568,8 @@ function compactTokenCount(value){
 function agentRequestUsageMarkup(run){
   const ledger=run?.request_usage;
   if(!ledger?.physical_request_count)return '<small class="agent-usage-empty">物理请求未记录；旧版或独立调用的覆盖范围未知</small>';
-  return `<small class="agent-request-coverage">HTTP 请求 ${esc(ledger.physical_request_count)} · 逻辑请求 ${esc(ledger.logical_request_count)} · ${esc(ledger.unknown_usage_count)} 次未报告用量${ledger.pending_count?` · ${esc(ledger.pending_count)} 次仍在等待结果或记录确认`:''}${ledger.pending_receipt_count?` · ${esc(ledger.pending_receipt_count)} 份已收到的结果待同步记录`:""}。仅覆盖已接入的写作请求。</small>`;
+  const codex=ledger.accounting_scope==='observed_codex_turns';
+  return `<small class="agent-request-coverage">${codex?'Codex 任务':'HTTP 请求'} ${esc(ledger.physical_request_count)} · 逻辑请求 ${esc(ledger.logical_request_count)} · ${esc(ledger.unknown_usage_count)} 次未报告用量${ledger.pending_count?` · ${esc(ledger.pending_count)} 次仍在等待结果或记录确认`:''}${ledger.pending_receipt_count?` · ${esc(ledger.pending_receipt_count)} 份已收到的结果待同步记录`:""}。${codex?'包含工具往返；内部 HTTP 次数不可见。':'仅覆盖已接入的写作请求。'}</small>`;
 }
 function agentObservedUsage(run,fallback={}){
   return run?.request_usage?.physical_request_count?run.request_usage.totals:(run?.policy?.usage||fallback);
@@ -6529,11 +6532,11 @@ const SettingsController = {
       const card = document.getElementById(`${role}ModelRoleCard`);
       if (name) name.textContent = result === undefined ? '正在读取配置' : configured ? model.model : (model ? '等待配置' : '状态暂不可读');
       if (stateEl) stateEl.textContent = label;
-      if (endpoint) endpoint.textContent = model?.base_url || '—';
+      if (endpoint) endpoint.textContent = model?.provider === 'codex' ? 'Codex · ChatGPT 订阅' : model?.base_url || '—';
       if (card) card.dataset.status = verified ? 'ready' : configured ? 'pending' : 'unavailable';
     }
     const notice = document.getElementById('modelScopeNotice');
-    if (notice) notice.textContent = '写作与 AA 制作分别保存配置。默认只启用写作；AA 制作服务可用后，再选择同时启用。';
+    if (notice) notice.textContent = '写作与演出分别启用，在下方选择连接方式和用途。';
   },
 
   renderArchivedConversations(errorMessage = '') {
@@ -6598,15 +6601,28 @@ const SettingsController = {
 
   renderModelSettings(data, { preserveDraft = false } = {}) {
     const model = data.model || {};
+    const legacyConfig = document.getElementById('modelConfigDetails');
+    const legacyFields = document.getElementById('modelConfigFields');
+    const legacyNotice = document.getElementById('subscriptionOnlyNotice');
+    if (legacyNotice) legacyNotice.hidden = !data.subscription_only;
+    this.subscriptionOnly = !!data.subscription_only;
+    if (legacyFields) legacyFields.disabled = false;
+    if (legacyConfig) {
+      legacyConfig.hidden = false;
+    }
     this.savedModelConfig = model;
     const form = document.getElementById('modelConfigDetails');
     if (form) {
       let saved = document.getElementById('registeredWritingModels');
-      if (!saved) { saved = document.createElement('details'); saved.id = 'registeredWritingModels'; form.before(saved); }
+      if (!saved) { saved = document.createElement('details'); saved.id = 'registeredWritingModels'; form.after(saved); }
       const models = data.registered_models || [];
       saved.innerHTML = `<summary>已保存的写作模型 · ${models.length}</summary><p>在下方配置并保存模型后，会加入快捷选择列表。切换模型可直接使用聊天输入框旁的模型入口。</p>${models.map(item => `<div class="registered-model-row"><span><strong>${esc(item.model)}</strong><small>${esc(item.base_url)}</small></span><small>${item.current ? '当前使用' : '已保存'}</small></div>`).join('') || '<p>尚未保存模型。</p>'}`;
     }
     const presets = Array.isArray(data.presets) && data.presets.length ? [...data.presets] : [...this.cachedPresets];
+    if (!presets.some(item => item.id === 'codex')) {
+      presets.unshift({id:'codex', name:'Codex', provider:'codex', base_url:'', models:[],
+        access_badge:'订阅', notes:'ChatGPT 账号登录 · 无需 API 密钥'});
+    }
     if (!presets.some(item => item.id === 'custom')) {
       presets.push({ id: 'custom', name: '自定义接口', provider: 'openai', base_url: '', models: [], notes: '填写自己的兼容服务地址和模型名称' });
     }
@@ -6614,7 +6630,7 @@ const SettingsController = {
     this.capabilityCatalog = new Map((data.capability_catalog || []).map(item => [item.model, item]));
     if (!preserveDraft) {
       const savedEndpoint = this.modelEndpointIdentity(model.provider, model.base_url || '');
-      this.activePresetId = presets.find(item => item.id !== 'custom'
+      this.activePresetId = (!model.provider || data.subscription_only) ? 'codex' : presets.find(item => item.id !== 'custom'
         && this.modelEndpointIdentity(item.provider, item.base_url) === savedEndpoint)?.id || 'custom';
     }
 
@@ -6647,11 +6663,11 @@ const SettingsController = {
 
         const currentPreset = presets.find(p => p.id === model.preset_id);
         if (vendorText) {
-          vendorText.textContent = currentPreset?.name || (model.base_url?.includes('deepseek') ? 'DeepSeek 官方' : (model.base_url?.includes('siliconflow') ? '硅基流动 SiliconFlow' : (model.base_url?.includes('11434') ? '本地 Ollama' : '自定义接入点')));
+          vendorText.textContent = model.provider === 'codex' ? 'Codex 订阅' : currentPreset?.name || (model.base_url?.includes('deepseek') ? 'DeepSeek 官方' : (model.base_url?.includes('siliconflow') ? '硅基流动 SiliconFlow' : (model.base_url?.includes('11434') ? '本地 Ollama' : '自定义接入点')));
         }
-        if (endpointText) endpointText.textContent = model.base_url || '默认服务端点';
+        if (endpointText) endpointText.textContent = model.provider === 'codex' ? 'ChatGPT 订阅额度 · 本地 Codex' : model.base_url || '默认服务端点';
         if (secretText) {
-          secretText.textContent = model.secret_source === 'environment'
+          secretText.textContent = model.provider === 'codex' ? '由 Codex 管理 ChatGPT 登录' : model.secret_source === 'environment'
             ? '由系统安全配置提供'
             : model.secret_source === 'dpapi' ? '本机加密保存' : '以服务端密钥配置为准';
         }
@@ -6708,7 +6724,7 @@ const SettingsController = {
     const statusBadge = document.getElementById('modelConfigStatusBadge');
     const hintEl = document.getElementById('apiKeyStatusHint');
 
-    if (providerEl) providerEl.value = model.provider === 'anthropic' ? 'anthropic' : 'openai';
+    if (providerEl) providerEl.value = this.activePresetId === 'codex' ? 'codex' : model.provider === 'anthropic' ? 'anthropic' : 'openai';
     if (baseUrlEl) baseUrlEl.value = model.base_url || '';
     this.syncModelEndpoint();
     if (modelNameEl) modelNameEl.value = model.model || '';
@@ -6723,7 +6739,7 @@ const SettingsController = {
     if (outputCostEl && model.output_cost_per_million !== undefined) outputCostEl.value = model.output_cost_per_million;
     if (reasoningEl && model.reasoning_mode) reasoningEl.value = model.reasoning_mode;
     this.setManualModelParams(false);
-    this.queueModelCapabilities();
+    if (this.activePresetId !== 'codex') this.queueModelCapabilities();
 
     if (hintEl) {
       if (model.secret_source === 'dpapi') {
@@ -6752,22 +6768,23 @@ const SettingsController = {
     const count = document.getElementById('providerPresetCount');
     if (!grid) return;
     const query = this.providerSearchQuery.trim().toLocaleLowerCase();
-    const presets = this.cachedPresets.filter(preset => !query ||
+    const availablePresets = this.cachedPresets.filter(preset => !this.subscriptionOnly || preset.id === 'codex');
+    const presets = availablePresets.filter(preset => !query ||
       `${preset.name || ''} ${preset.access_badge || ''} ${preset.notes || ''} ${preset.default_model || ''} ${(preset.models || []).join(' ')}`
         .toLocaleLowerCase().includes(query));
     if (count) {
       count.textContent = query
         ? `找到 ${presets.length} 个服务商`
-        : `${this.cachedPresets.length} 个服务商 · 选择后配置连接`;
+        : this.subscriptionOnly ? '仅订阅连接' : `${availablePresets.length} 个服务商 · 选择后配置连接`;
     }
     if (!presets.length) {
-      grid.innerHTML = '<div class="vendor-empty"><b>没有匹配的服务商</b><span>可以搜索模型名，或清空关键词后选择“自定义接口”。</span></div>';
+      grid.innerHTML = this.subscriptionOnly ? '<div class="vendor-empty"><b>没有匹配的连接</b><span>清空关键词后选择 Codex。</span></div>' : '<div class="vendor-empty"><b>没有匹配的服务商</b><span>可以搜索模型名，或清空关键词后选择“自定义接口”。</span></div>';
       return;
     }
     grid.innerHTML = presets.map(preset => {
       const selected = preset.id === this.activePresetId;
       return `
-        <button type="button" aria-pressed="${selected ? 'true' : 'false'}" class="vendor-card ${selected ? 'active' : ''}" data-preset-id="${esc(preset.id)}">
+        <button type="button" ${this.subscriptionOnly && preset.id !== 'codex' ? 'disabled title="仅订阅模式已停用 API 连接"' : ''} aria-pressed="${selected ? 'true' : 'false'}" class="vendor-card ${selected ? 'active' : ''}" data-preset-id="${esc(preset.id)}">
           <span class="vendor-card-title"><strong>${esc(preset.name)}</strong><span class="vendor-card-check" aria-hidden="true">✓</span></span>
           ${preset.access_badge ? `<span class="vendor-access-badge" title="${esc(preset.access_note || '')}">${esc(preset.access_badge)}</span>` : ''}
           <small>${esc(preset.notes || preset.default_model || '手动配置连接')}</small>
@@ -6777,6 +6794,12 @@ const SettingsController = {
   },
 
   updateSelectedProviderSummary(preset) {
+    const codexSelected = preset?.id === 'codex';
+    const codexPanel = document.getElementById('codexConnection');
+    const apiForm = document.getElementById('settingsModelForm');
+    if (codexPanel) codexPanel.hidden = !codexSelected;
+    if (apiForm) { apiForm.hidden = codexSelected; apiForm.inert = codexSelected || !!this.subscriptionOnly; }
+    window.dispatchEvent(new CustomEvent('halocue:connection-selected', {detail:{provider:codexSelected ? 'codex' : preset?.provider, model:this.savedModelConfig?.provider === 'codex' ? this.savedModelConfig.model : ''}}));
     const name = document.getElementById('selectedProviderName');
     const notes = document.getElementById('selectedProviderNotes');
     const protocol = document.getElementById('selectedProviderProtocol');
@@ -7132,7 +7155,7 @@ const SettingsController = {
 
   selectPreset(presetId) {
     const preset = this.cachedPresets.find(p => p.id === presetId);
-    if (!preset) return;
+    if (!preset || (this.subscriptionOnly && presetId !== 'codex')) return;
     const changed = presetId !== this.activePresetId;
     this.invalidateModelResult();
     this.activePresetId = presetId;
@@ -7154,7 +7177,7 @@ const SettingsController = {
       const budget = document.getElementById('settingsMaxTokens'); if (budget) budget.value = '8192';
       const parameter = document.getElementById('settingsTokenLimitParameter'); if (parameter) parameter.value = 'auto';
     }
-    this.queueModelCapabilities({ reset: true });
+    if (presetId !== 'codex') this.queueModelCapabilities({ reset: true });
 
     this.fillModelOptions(preset.models || []);
     this.updateSelectedProviderSummary(preset);

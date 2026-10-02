@@ -181,7 +181,9 @@ class RequestLedger:
             "pending_receipt_count": pending_count,
             "interrupted_count": sum(r["status"] == "interrupted" for r in rows),
             "totals": normalize_usage(total),
-            "accounting_scope": "observed_writing_http_attempts",
+            "accounting_scope": "observed_codex_turns" if rows and all(
+                "provider_json" in row.keys() and json.loads(row["provider_json"]).get("provider") == "codex" for row in rows
+            ) else "observed_writing_http_attempts",
         }
 
     def summaries(self, connection, work_id):

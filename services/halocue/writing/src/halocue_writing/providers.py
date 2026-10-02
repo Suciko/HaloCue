@@ -829,8 +829,11 @@ class LLMWritingProvider(WritingProvider):
         }
 
     def descriptor(self) -> dict:
+        from services.halocue.codex_agent import subscription_only_enabled
+
         return {
             **super().descriptor(),
+            "can_call_model": not subscription_only_enabled() or self.provider_type == "codex",
             "provider": self.provider_type,
             "model": self.model,
             "settings_version": max(1, int(self.credentials.get("settings_version") or 1)),
@@ -1263,6 +1266,12 @@ class LLMWritingProvider(WritingProvider):
         tools: list[dict] | None = None,
         tool_results: list[dict] | None = None,
     ) -> LLMCallResult:
+        from services.halocue.codex_agent import CodexError, require_subscription_provider
+
+        try:
+            require_subscription_provider(self.provider_type)
+        except CodexError as error:
+            raise DomainError(error.code, error.message, status=409) from error
         system_prompt = system_prompt.rstrip() + self._reasoning_instruction()
         if tool_results is None:
             self._thread_state.pending_exchange = None
@@ -2012,6 +2021,12 @@ def make_writing_provider(settings_or_credentials, prompt_assembler=None) -> Wri
     else:
         return FakeWritingProvider()
 
-    if pub.get("configured") and creds.get("model"):
+    from services.halocue.codex_agent import subscription_only_enabled
+
+    if creds.get("model") and (pub.get("configured") or subscription_only_enabled()):
+        if creds.get("provider") == "codex":
+            from .codex_provider import CodexWritingProvider
+
+            return CodexWritingProvider(creds, prompt_assembler)
         return LLMWritingProvider(creds, prompt_assembler)
     return FakeWritingProvider()

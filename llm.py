@@ -325,6 +325,15 @@ class Provider:
         self._active_request_lock = threading.RLock()
         self._active_request_handle = None
         self._cancelled_callback = None
+        self._request_guard = None
+
+    def bind_request_guard(self, callback):
+        """Let an owning application check policy before each outbound attempt."""
+        self._request_guard = callback if callable(callback) else None
+
+    def _check_request_guard(self):
+        if self._request_guard:
+            self._request_guard()
 
     def bind_cancellation(self, callback):
         self._cancelled_callback = callback if callable(callback) else None
@@ -611,6 +620,7 @@ class AnthropicProvider(Provider):
         self._apply_configured_options(kw)
 
         try:
+            self._check_request_guard()
             with self.client.messages.stream(**kw) as stream:
                 with self._track_active_request(
                     stream, wall_timeout=getattr(self, "wall_timeout", 300),
@@ -666,6 +676,7 @@ class AnthropicProvider(Provider):
                   output_config={"format": {"type": "json_schema", "schema": schema}})
         self._apply_configured_options(kw)
         try:
+            self._check_request_guard()
             with self.client.messages.stream(**kw) as stream:
                 with self._track_active_request(
                     stream, wall_timeout=getattr(self, "wall_timeout", 300),
@@ -731,6 +742,7 @@ class AnthropicProvider(Provider):
         first_delta_ms = None
         guard = None
         try:
+            self._check_request_guard()
             with self.client.messages.stream(**kw) as stream:
                 with self._track_active_request(
                     stream, wall_timeout=getattr(self, "wall_timeout", 300),
@@ -919,6 +931,7 @@ class OpenAIProvider(Provider):
         )
         guard = None
         try:
+            self._check_request_guard()
             with urlopen(request, timeout=self.timeout) as response:
                 with self._track_active_request(
                     response, wall_timeout=self.wall_timeout,
@@ -1094,6 +1107,7 @@ class OpenAIProvider(Provider):
         activity.setdefault("content_chars", 0)
         guard = None
         try:
+            self._check_request_guard()
             with urlopen(request, timeout=self.timeout) as response:
                 with self._track_active_request(
                     response, wall_timeout=self.wall_timeout,

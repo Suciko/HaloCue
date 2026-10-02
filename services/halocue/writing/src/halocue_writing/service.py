@@ -654,6 +654,8 @@ class WritingService:
         total = normalize_usage(total)
         input_tokens = total["input_tokens"]
         cache_read = total["cache_read_tokens"]
+        codex_turn_count = sum(v["physical_request_count"] for v in request_summaries.values()
+                               if v["accounting_scope"] == "observed_codex_turns")
         return {
             "schema_version": "agent-usage/1.0", "work_id": work_id,
             **{key: total[key] for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "usage_status", "cache_status", "input_tokens_semantics", "cost_status")},
@@ -664,11 +666,14 @@ class WritingService:
             "unknown_usage_run_count": unknown_usage_count,
             "priced_run_count": priced_run_count,
             "physical_request_count": sum(v["physical_request_count"] for v in request_summaries.values()),
+            "codex_turn_count": codex_turn_count,
+            "observed_http_request_count": sum(v["physical_request_count"] for v in request_summaries.values()
+                                               if v["accounting_scope"] != "observed_codex_turns"),
             "logical_request_count": sum(v["logical_request_count"] for v in request_summaries.values()),
             "unknown_physical_request_count": sum(v["unknown_usage_count"] for v in request_summaries.values()),
             "pending_physical_request_count": sum(v["pending_count"] for v in request_summaries.values()),
             "untracked_run_count": len(policies) - len(request_summaries),
-            "accounting_scope": "writing_http_attempts_plus_legacy_summaries" if request_summaries else "recorded_logical_calls",
+            "accounting_scope": "provider_calls_plus_legacy_summaries" if codex_turn_count else "writing_http_attempts_plus_legacy_summaries" if request_summaries else "recorded_logical_calls",
             "runs_by_status": {item["status"]: item["count"] for item in statuses},
             "currency": "USD", "cost_is_estimate": True,
         }
@@ -3180,10 +3185,11 @@ class WritingService:
             reset()
         failure = None
         observe = getattr(provider, "observe_requests", None)
+        cancellation = getattr(provider, "cancellation_scope", None)
         def observer(event):
             return self.request_ledger.observe(run_id, event)
         try:
-            with observe(observer) if callable(observe) else nullcontext():
+            with (observe(observer) if callable(observe) else nullcontext()), (cancellation(lambda: not self._agent_run_is_running(run_id)) if callable(cancellation) else nullcontext()):
                 yield
         except Exception as error:
             failure = error
@@ -3200,7 +3206,8 @@ class WritingService:
                     row = connection.execute("SELECT policy_json FROM agent_runs WHERE id=?", (run_id,)).fetchone()
                     if row:
                         policy = json.loads(row["policy_json"] or "{}")
-                        policy["usage"] = merge_usage(policy.get("usage") or {}, usage)
+                        if usage:
+                            policy["usage"] = merge_usage(policy.get("usage") or {}, usage)
                         pending = getattr(failure, "pending_request_record", None)
                         if isinstance(pending, dict):
                             policy.setdefault("pending_request_records", {})[pending["id"]] = pending
@@ -3212,6 +3219,9 @@ class WritingService:
 
     def _provider_usage(self, provider=None) -> dict:
         provider = provider or self.provider
+        pending = getattr(provider, "usage_receipt_pending", None)
+        if callable(pending) and pending():
+            return {}
         getter = getattr(provider, "last_usage", None)
         value = getter() if callable(getter) else getattr(provider, "_last_usage", {})
         return normalize_usage(value)
@@ -15313,10 +15323,11 @@ class WritingService:
             "preset_id", "provider", "base_url", "model", "api_key", "api_key_env",
             "max_tokens", "timeout", "reasoning_mode", "reasoning_wire_protocol",
             "wall_timeout", "annotation_max_tokens",
+            "subscription_only_acknowledged", "billing",
         }
         fields.update(ADVANCED_FIELDS)
         candidate = {name: credentials[name] for name in fields if name in credentials}
-        if not candidate.get("api_key") and not candidate.get("api_key_env"):
+        if candidate.get("provider") != "codex" and not candidate.get("api_key") and not candidate.get("api_key_env"):
             if urlparse(str(candidate.get("base_url") or "")).hostname not in {"localhost", "127.0.0.1", "::1"}:
                 raise DomainError("model_secret_required", "当前写作模型没有可用于 AA 演出助手的密钥。", status=409)
 
@@ -15328,7 +15339,7 @@ class WritingService:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=min(600, int(candidate.get("timeout") or 120) + 10)) as response:
                 result = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             raise DomainError(

@@ -93,6 +93,9 @@ class IntegratedRuntime:
         self.production_server.shutdown()
         self.production_server.server_close()
         self.production_service.jobs.close()
+        from services.halocue.codex_agent import close_connections
+
+        close_connections()
         for thread in self._threads:
             thread.join(timeout=3)
 

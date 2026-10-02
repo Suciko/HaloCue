@@ -5,6 +5,8 @@
 
 集成写作界面的 AI 可以提出新正文和改编候选；只有用户采纳才会写入正式修订。AA 制作中的 AI 用于演出标注，用户可以在编译前审查和修改结果。
 
+源码候选新增 [Codex 订阅连接](docs/codex-subscription.md)：在统一模型配置面板中登录 ChatGPT，选择模型及写作、演出用途。此功能尚未包含在已发布的 Beta 2 ZIP 中。
+
 这是第三方项目，与 AzureArchive 作者、Nexon、Yostar、NAT Games 和
 Esoteric Software 均无隶属关系。HaloCue 不提供游戏图像、音频或骨骼资源，也不授予任何第三方素材的使用权。随包人物参考与原作演出文本保留原权利人的权属，详见资料包说明。
 

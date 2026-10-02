@@ -10,6 +10,7 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 CASES = [
+    "codex_connection_shares_provider_workspace_without_api_fields",
     "provider_free_access_badges_are_visible_searchable_and_escaped",
     "paid_or_custom_providers_do_not_keep_free_access_labels",
     "known_model_auto_fills_limits_and_maximum_output",

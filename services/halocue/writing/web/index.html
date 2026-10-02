@@ -13,7 +13,7 @@
   <!-- writing-workbench.css?v=20260821-39 retained for contract compatibility; the resource version below is current. -->
   <link rel="stylesheet" href="/writing-workbench.css?v=20260929-chapter-toolbar4">
   <link rel="stylesheet" href="/production-embed.css?v=20260929-overview-origin-dark2">
-  <link rel="stylesheet" href="/settings-center.css?v=20260927-provider-dark-hover1">
+  <link rel="stylesheet" href="/settings-center.css?v=20261003-codex-unified1">
   <link rel="stylesheet" href="/adaptation-workbench.css?v=20260927-targets1">
   <link rel="stylesheet" href="/redesign.css?v=20260926-modal3">
   <link rel="stylesheet" href="/theme.css?v=20260929-scene-memory-dark1">
@@ -361,7 +361,7 @@
             <div class="pane-lead">
               <p class="settings-kicker">CONNECTIONS / 连接</p>
               <h3>模型服务</h3>
-              <p>写作负责故事，演出负责舞台。可以共用一个模型，也可以分别配置。</p><div class="settings-guidance"><b>还没有模型也可以继续</b><span>未连接真实模型时，仍可手写正文、整理资料和导入人物。本地模拟不是实际模型输出；生成定稿仍需完成当前审查，不会跳过检查。</span></div>
+              <p>管理写作与 AA 演出使用的模型连接。</p>
             </div>
 
             <div class="model-role-grid" aria-label="当前模型连接" aria-live="polite">
@@ -415,9 +415,10 @@
 
             </details>
 
+            <p id="subscriptionOnlyNotice" class="model-scope-notice" hidden>仅订阅模式：API 连接已停用。</p>
             <details id="modelConfigDetails" class="model-config-details" open>
               <summary class="model-config-summary" data-model-config-toggle>
-                <span><b>配置或更换模型</b><small>选择服务商，填写密钥，选择模型</small></span>
+                <span><b>模型连接</b><small>选择服务，再完成登录和模型配置</small></span>
                 <strong>收起</strong>
               </summary>
             <fieldset id="modelConfigFields" class="model-config-fields"><legend class="sr-only">模型服务连接设置</legend>
@@ -469,7 +470,20 @@
               </div>
               </aside>
 
-              <form id="settingsModelForm" class="settings-form model-provider-detail">
+            <section id="codexConnection" class="codex-connection model-provider-detail" hidden aria-labelledby="codexConnectionTitle">
+              <header><div><span class="section-label">CODEX / 订阅</span><h4 id="codexConnectionTitle">账号与模型</h4></div><button type="button" class="quiet" data-codex-action="refresh">检查连接</button></header>
+              <div class="codex-auth-row"><p data-codex-status role="status" aria-live="polite">检查本机安装和登录状态后，选择模型。</p>
+              <div class="codex-actions"><button type="button" class="quiet" data-codex-action="login">登录 ChatGPT</button><button type="button" class="quiet" data-codex-action="logout" hidden>退出登录</button><a data-codex-login-link target="_blank" rel="noopener noreferrer" hidden>打开登录页面</a></div></div>
+              <p data-codex-quota hidden></p>
+              <form data-codex-form>
+                <label>Codex 模型<select name="model" required disabled><option value="">先检查连接</option></select></label>
+                <label class="codex-check"><input type="checkbox" name="subscription_only_acknowledged" required><span>我已关闭 ChatGPT 账号的额外付费用量；额度用完时停止。</span></label>
+                <fieldset class="codex-scope"><legend>模型用途</legend><label><input type="radio" name="scope" value="both" checked><span>写作与 AA 演出</span></label><label><input type="radio" name="scope" value="writing"><span>仅写作</span></label><label><input type="radio" name="scope" value="direction"><span>仅 AA 演出</span></label></fieldset>
+                <div class="codex-apply"><span data-codex-active>测试成功后启用</span><button type="submit" class="primary" disabled>测试并启用</button></div>
+              </form>
+              <details><summary>安装位置</summary><form data-codex-path-form><label>Codex 原生程序路径<input name="cli_path" placeholder="自动检测；Windows 可手动指定 codex.exe" autocomplete="off"></label><button type="submit" class="quiet">保存并检查</button></form><p>登录由 Codex 管理。HaloCue 不接收 API Key，不会自动转用 API；本次连接支持文字写作与演出安排。</p></details>
+            </section>
+              <form id="settingsModelForm" class="settings-form model-provider-detail" hidden>
                 <header class="provider-detail-head">
                   <div>
                     <span class="section-label">服务商</span>
@@ -519,6 +533,7 @@
                     <select id="settingsProvider" name="provider">
                       <option value="openai">OpenAI 兼容 · Chat Completions</option>
                       <option value="anthropic">Anthropic · Messages</option>
+                      <option value="codex" disabled>Codex · 在账号与模型面板管理</option>
                     </select>
                     <small class="field-hint">大多数第三方服务和本地模型选择 OpenAI 兼容。</small>
                   </label>
@@ -888,7 +903,8 @@
   <script src="/chapter-authoring-ui.js?v=20260930-inline-rewrite4" defer></script>
   <script src="/vendor/echarts/echarts-6.0.0.min.js" defer></script>
   <script src="/knowledge-graph-ui.js?v=20260930-graph-fix1" defer></script>
-  <script src="/app.js?v=20260930-routing-fallback1" defer></script>
+  <script src="/app.js?v=20261003-codex-unified1" defer></script>
+  <script src="/codex-connection.js?v=20261003-subscription1" defer></script>
   <!-- writing-workbench.js?v=20260821-39, writing-workbench.js?v=20260822-65 retained for contract compatibility; the resource version below is current. -->
   <script src="/adaptation-workbench.js?v=20260927-adaptation4" defer></script>
   <script src="/writing-workbench.js?v=20260930-inline-rewrite4" defer></script>

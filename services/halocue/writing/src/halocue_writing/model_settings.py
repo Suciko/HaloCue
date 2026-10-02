@@ -17,11 +17,16 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .errors import DomainError
+from services.halocue.codex_agent import (
+    CodexError, connection as codex_connection,
+    test_connection as test_codex_connection, validate_config as validate_codex_config,
+    enable_subscription_only, require_subscription_provider, subscription_only_enabled,
+)
 from .provider_response import validate_completion
 from .model_capabilities import capabilities, model_catalog, normalize_advanced, upstream_capabilities, completion_parameters, ADVANCED_FIELDS
 
 
-PROVIDERS = {"openai", "anthropic"}
+PROVIDERS = {"openai", "anthropic", "codex"}
 
 VENDOR_PRESETS: list[dict[str, Any]] = [
     {
@@ -311,6 +316,15 @@ class WritingModelSettings:
                 if field not in requested:
                     candidate.pop(field, None)
         provider = str(candidate.get("provider") or "openai").strip().lower()
+        try:
+            require_subscription_provider(provider)
+        except CodexError as error:
+            raise DomainError(error.code, error.message, status=409) from error
+        if provider == "codex":
+            # Switching provider must not inherit old URL/secret/price settings.
+            clean = {key: candidate.get(key) for key in ("model", "timeout", "subscription_only_acknowledged")}
+            clean.update({key: requested[key] for key in ("api_key", "api_key_env", "base_url") if key in requested})
+            return {**self._validated({**clean, "provider": "codex"}), "api_key": ""}
         default_url = "https://api.anthropic.com/v1" if provider == "anthropic" else "https://api.openai.com/v1"
         candidate["provider"] = provider
         raw_url = requested.get("base_url") if "base_url" in requested else (
@@ -380,6 +394,8 @@ class WritingModelSettings:
                 "input_cost_per_million",
                 "output_cost_per_million",
                 "credential_revision",
+                "subscription_only_acknowledged",
+                "billing",
             )
         }
         public_config.update({key: value.get(key) for key in ADVANCED_FIELDS})
@@ -442,6 +458,11 @@ class WritingModelSettings:
     @classmethod
     def _validated(cls, payload: dict[str, Any]) -> dict[str, Any]:
         provider = str(payload.get("provider") or "openai").strip().lower()
+        if provider == "codex":
+            try:
+                return validate_codex_config(payload)
+            except CodexError as error:
+                raise DomainError(error.code, error.message, details=error.details) from error
         if provider not in PROVIDERS:
             raise DomainError(
                 "invalid_model_provider",
@@ -499,6 +520,11 @@ class WritingModelSettings:
         # Ollama / local can be configured without key
         is_local = urlparse(str(value.get("base_url") or "")).hostname in {"localhost", "127.0.0.1", "::1"}
         configured = bool(value.get("provider") and value.get("model") and (secret_source != "none" or is_local))
+        if value.get("provider") == "codex":
+            secret_source = "codex_managed_login"
+            configured = bool(value.get("model") and value.get("subscription_only_acknowledged"))
+        elif subscription_only_enabled():
+            configured = False
         if value:
             value = {
                 **value,
@@ -511,6 +537,7 @@ class WritingModelSettings:
             }
         return {
             "ok": True,
+            "subscription_only": subscription_only_enabled(),
             "registered_models": [
                 {"id": self._registered_id(item), "model": item["model"], "provider": item.get("provider"), "base_url": item.get("base_url"), "current": self._registered_id(item) == self._registered_id(value)}
                 for item in self._registered_configs(value)
@@ -575,6 +602,8 @@ class WritingModelSettings:
             json.dumps(public_cfg, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         os.replace(temporary, self.path)
+        if public_cfg.get("provider") == "codex" and connection_test:
+            enable_subscription_only()
         # Keep the legacy inspection path synchronized for older local tooling;
         # runtime resolution remains bound to credential_revision above.
         if api_key and not public_cfg["api_key_env"]:
@@ -596,6 +625,8 @@ class WritingModelSettings:
         public_cfg = self._load_public()
         if not public_cfg:
             return {}
+        if public_cfg.get("provider") == "codex":
+            return {**public_cfg, "api_key": ""}
         secret = self._secret_store(public_cfg).load()
         if not secret and public_cfg.get("api_key_env"):
             secret = os.environ.get(str(public_cfg["api_key_env"]))
@@ -611,6 +642,11 @@ class WritingModelSettings:
 
     def fetch_models(self, payload: dict[str, Any] | None = None) -> list[str] | dict[str, Any]:
         req_data = self.resolve_candidate(payload, require_model=False)
+        if req_data.get("provider") == "codex":
+            try:
+                return [item["id"] for item in codex_connection().status()["models"]]
+            except CodexError as error:
+                raise DomainError(error.code, error.message, details=error.details) from error
         provider = str(req_data.get("provider") or "").strip().lower()
         base_url = str(req_data.get("base_url") or "").strip().rstrip("/")
         api_key = str(req_data.get("api_key") or "").strip()
@@ -656,6 +692,11 @@ class WritingModelSettings:
 
     def test_connection(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         req_data = self.resolve_candidate(payload)
+        if req_data.get("provider") == "codex":
+            try:
+                return test_codex_connection(req_data)
+            except CodexError as error:
+                raise DomainError(error.code, error.message, status=502, details=error.details) from error
         provider = str(req_data.get("provider") or "").strip().lower()
         base_url = str(req_data.get("base_url") or "").strip().rstrip("/")
         model = str(req_data.get("model") or "").strip()

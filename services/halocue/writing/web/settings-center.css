@@ -292,3 +292,37 @@
 #settingsDialog .provider-title-row h4 { margin: 0; }
 #settingsDialog .provider-detail-head .provider-access-note { margin-top: 8px; font-size: 11px; line-height: 1.7; }
 #settingsDialog .vendor-access-badge[hidden], #settingsDialog .provider-access-note[hidden] { display: none !important; }
+/* Subscription connection uses the same surfaces in both light and dark themes. */
+#settingsDialog #pane-models .pane-lead h3 { display:none; }
+#settingsDialog #pane-models .model-role-card > p { display:none; }
+#settingsDialog #pane-models .model-role-card { border-top-width:1px; }
+#settingsDialog .model-connection-details { margin-top:12px; }
+#settingsDialog .codex-connection { min-width: 0; margin: 0; padding: 24px; background: var(--hc-surface); }
+#settingsDialog .codex-connection header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+#settingsDialog .codex-connection h4 { margin: 4px 0 0; color:var(--hc-ink); font:650 20px/1.4 var(--hc-font-ui); }
+#settingsDialog .codex-connection p { color: var(--hc-muted); margin: 10px 0; }
+#settingsDialog .codex-connection [data-failed="true"] { color: var(--hc-danger, #bf4747); }
+#settingsDialog .codex-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+#settingsDialog .codex-auth-row { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:16px 0 10px; }
+#settingsDialog .codex-auth-row > p { margin:0; font-size:12px; }
+#settingsDialog .codex-connection form { display: grid; gap: 12px; margin-top: 16px; padding:0; }
+#settingsDialog .codex-connection label { display: grid; gap: 7px; }
+#settingsDialog .codex-connection .codex-check { display: flex; flex-direction:row; align-items: flex-start; gap: 8px; color: var(--hc-muted); }
+#settingsDialog .codex-check input { width: 16px; height: 16px; flex: 0 0 16px; margin: 3px 0 0; accent-color: var(--hc-action); }
+#settingsDialog .codex-connection details { margin-top: 16px; color: var(--hc-muted); }
+#settingsDialog .codex-connection select, #settingsDialog .codex-connection input:not([type=checkbox]):not([type=radio]) { width: 100%; color: var(--hc-ink); background: var(--hc-surface-soft); border: 1px solid var(--hc-line); border-radius: 7px; padding: 10px 12px; }
+#settingsDialog .codex-scope { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:8px; margin:8px 0; padding:0; border:0; }
+#settingsDialog .codex-scope legend { margin-bottom:10px; color:var(--hc-ink); font-weight:600; }
+#settingsDialog .codex-scope label { display:flex; flex-direction:row; align-items:center; gap:8px; padding:12px; border:1px solid var(--hc-line); border-radius:8px; cursor:pointer; }
+#settingsDialog .codex-scope input { width:15px; height:15px; flex:0 0 15px; margin:0; accent-color:var(--hc-action); }
+#settingsDialog .codex-scope label:has(input:checked) { background:var(--hc-action-soft); border-color:var(--hc-action); }
+#settingsDialog .codex-apply { display:flex; align-items:center; justify-content:space-between; gap:16px; padding-top:16px; border-top:1px solid var(--hc-line); }
+#settingsDialog .codex-apply > span { color:var(--hc-muted); font-size:12px; }
+#settingsDialog .codex-actions a { color:var(--hc-action); }
+#settingsDialog .codex-connection [data-codex-quota] { padding:10px 12px; border-radius:7px; background:var(--hc-surface-soft); font-size:12px; }
+@media (max-width:720px) {
+  #settingsDialog .codex-connection { padding:18px; }
+  #settingsDialog .codex-scope { grid-template-columns:minmax(0,1fr); }
+  #settingsDialog .codex-apply { flex-wrap:wrap; }
+  #settingsDialog .codex-auth-row { align-items:flex-start; flex-direction:column; }
+}
