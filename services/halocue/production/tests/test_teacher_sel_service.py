@@ -69,7 +69,7 @@ def test_old_client_rename_keeps_sel_after_restart_and_switch_back_requires_revi
 
 
 def test_sel_http_round_trip_unknown_version_and_stale_version(service):
-    from test_http_api import api, request
+    from production_http_helpers import api, request
 
     with api(service.settings) as base:
         _, _, created = request(
@@ -126,7 +126,10 @@ def test_old_adapter_rejects_mode_before_mutating_identity(service, monkeypatch)
 
 
 def test_switching_presentation_supersedes_late_model_result(service, monkeypatch):
-    from test_direction_profiles import FixtureProvider, finished_job
+    from services.halocue.production.tests.test_direction_profiles import (
+        FixtureProvider,
+        finished_job,
+    )
 
     monkeypatch.setenv("HALOCUE_SEL_TEST_KEY", "synthetic-secret")
     service.configure_direction_model(

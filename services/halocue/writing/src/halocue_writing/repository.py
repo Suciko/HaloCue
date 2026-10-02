@@ -6,9 +6,11 @@ import os
 import sqlite3
 import tempfile
 import uuid
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from .workspace_access import workspace_access, workspace_operation
 
 
 COMMIT_PROJECTION_KINDS = (
@@ -41,6 +43,11 @@ def sha256_bytes(content: bytes) -> str:
 
 class Repository:
     def __init__(self, data_dir: Path):
+        self.data_access = workspace_access(data_dir)
+        with self.data_access.operation():
+            self._initialize(data_dir)
+
+    def _initialize(self, data_dir):
         self.data_dir = Path(data_dir).resolve()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.artifact_dir = self.data_dir / "artifacts"
@@ -53,6 +60,12 @@ class Repository:
         self._init_schema()
         self.recover_attempts()
 
+    @workspace_operation
+    def initialize_after_restore(self):
+        """Reopen restored schema/state without invalidating consumer references."""
+        self._init_schema()
+        return self.recover_attempts()
+
     def connect(self):
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
@@ -61,16 +74,17 @@ class Repository:
 
     @contextmanager
     def transaction(self):
-        connection = self.connect()
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            yield connection
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
+        with self.data_access.operation():
+            connection = self.connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                yield connection
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
 
     def _init_schema(self):
         schema = """
@@ -161,6 +175,13 @@ class Repository:
           id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works(id),
           kind TEXT NOT NULL, automation_level TEXT NOT NULL, status TEXT NOT NULL,
           pinned_input_refs_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS release_asset_receipts (
+          release_id TEXT NOT NULL REFERENCES script_releases(id),
+          production_run_id TEXT NOT NULL, scene_id TEXT NOT NULL,
+          reference_id TEXT NOT NULL, receipt_json TEXT NOT NULL,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+          PRIMARY KEY (release_id, production_run_id, scene_id, reference_id)
         );
         CREATE TABLE IF NOT EXISTS work_items (
           id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES production_runs(id),
@@ -376,6 +397,13 @@ class Repository:
         CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_run ON agent_tool_calls(agent_run_id, ordinal);
         CREATE INDEX IF NOT EXISTS idx_agent_dispatch_claim ON agent_dispatch_jobs(status, available_at, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_dispatch_lease ON agent_dispatch_jobs(status, lease_expires_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_dispatch_knowledge_revision
+          ON agent_dispatch_jobs (
+            json_extract(payload_json, '$.work_id'),
+            json_extract(payload_json, '$.scope_id'),
+            json_extract(payload_json, '$.request._source_revision_id'),
+            created_at DESC
+          ) WHERE operation='knowledge.discover' AND json_valid(payload_json);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_dispatch_active_run
           ON agent_dispatch_jobs(agent_run_id)
           WHERE agent_run_id IS NOT NULL AND status IN ('ready','running');
@@ -411,6 +439,12 @@ class Repository:
         connection = self.connect()
         try:
             connection.executescript(schema)
+            from .request_ledger import SCHEMA as REQUEST_SCHEMA
+            connection.executescript(REQUEST_SCHEMA)
+            from .authoring_workspace import WORLD_DRAFT_SCHEMA
+            connection.executescript(WORLD_DRAFT_SCHEMA)
+            from .chapter_review import SCHEMA as CHAPTER_REVIEW_SCHEMA
+            connection.executescript(CHAPTER_REVIEW_SCHEMA)
             self._migrate_domain_schema(connection)
             connection.commit()
         finally:
@@ -918,22 +952,49 @@ class Repository:
         available_at: str | None = None,
         retry_of: str | None = None,
         dedupe_by_payload: bool = False,
+        dedupe_knowledge_revision: tuple[str, str, str] | None = None,
     ) -> dict:
         """Persist one ready job and return ``{created, job}``.
 
         An active ``agent_run_id`` is an idempotency key. Concurrent enqueues for
         the same run return the existing ready/running job instead of dispatching
-        the provider twice.
+        the provider twice. Knowledge discovery uses its pinned scene revision as
+        a durable key across all job states, checked inside this write transaction.
         """
         operation = str(operation or "").strip()
         if not operation:
             raise ValueError("operation is required")
         if payload is not None and not isinstance(payload, dict):
             raise ValueError("payload must be a dict")
+        if dedupe_knowledge_revision is not None and operation != "knowledge.discover":
+            raise ValueError("revision dedupe is only available for knowledge discovery")
+        if dedupe_knowledge_revision is not None:
+            request = (payload or {}).get("request")
+            request = request if isinstance(request, dict) else {}
+            payload_revision = (
+                (payload or {}).get("work_id"),
+                (payload or {}).get("scope_id"),
+                request.get("_source_revision_id"),
+            )
+            if payload_revision != dedupe_knowledge_revision:
+                raise ValueError("revision dedupe key must match the job payload")
         timestamp = now()
         job_id = new_id("agent-job")
         payload_json = canonical_json(payload or {})
         with self.transaction() as connection:
+            if dedupe_knowledge_revision is not None:
+                existing = connection.execute(
+                    """SELECT * FROM agent_dispatch_jobs
+                       WHERE operation='knowledge.discover'
+                         AND json_valid(payload_json)
+                         AND json_extract(payload_json, '$.work_id')=?
+                         AND json_extract(payload_json, '$.scope_id')=?
+                         AND json_extract(payload_json, '$.request._source_revision_id')=?
+                       ORDER BY created_at DESC LIMIT 1""",
+                    dedupe_knowledge_revision,
+                ).fetchone()
+                if existing:
+                    return {"created": False, "job": self._agent_work_row(existing)}
             if agent_run_id:
                 existing = connection.execute(
                     """SELECT * FROM agent_dispatch_jobs
@@ -988,6 +1049,7 @@ class Repository:
             ).fetchone()
             return {"created": True, "job": self._agent_work_row(row)}
 
+    @workspace_operation
     def claim_agent_work(self, *, lease_owner: str, lease_seconds: float = 30) -> dict:
         """Atomically claim the oldest available job; return ``{claimed, job}``."""
         lease_owner = str(lease_owner or "").strip()
@@ -996,15 +1058,20 @@ class Repository:
         if lease_seconds <= 0:
             raise ValueError("lease_seconds must be positive")
         timestamp = now()
+        candidate_query = """SELECT id FROM agent_dispatch_jobs
+            WHERE status='ready' AND cancel_requested_at IS NULL AND available_at<=?
+            ORDER BY available_at,created_at,id LIMIT 1"""
+        # Idle polls must not compete for SQLite's writer lock. Close this read
+        # connection before claiming; another worker may win after the probe.
+        with closing(self.connect()) as connection:
+            if connection.execute(candidate_query, (timestamp,)).fetchone() is None:
+                return {"claimed": False, "job": None}
+        timestamp = now()
         expires_at = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
         lease_token = uuid.uuid4().hex
         with self.transaction() as connection:
-            row = connection.execute(
-                """SELECT id FROM agent_dispatch_jobs
-                   WHERE status='ready' AND cancel_requested_at IS NULL AND available_at<=?
-                   ORDER BY available_at,created_at,id LIMIT 1""",
-                (timestamp,),
-            ).fetchone()
+            # Only this authoritative query/update awards a lease.
+            row = connection.execute(candidate_query, (timestamp,)).fetchone()
             if not row:
                 return {"claimed": False, "job": None}
             changed = connection.execute(
@@ -1175,6 +1242,7 @@ class Repository:
             "retryable": True,
         })
         resumable_bound_operations = {
+            "adaptation.chapter.generate",
             "conversation.message",
             "scene.candidate.generate",
             "scene.draft.generate",
@@ -1187,6 +1255,18 @@ class Repository:
             "knowledge.discover",
         }
         with self.transaction() as connection:
+            # The candidate/run transaction may commit just before the worker dies.
+            # Reconcile its durable receipt rather than execute the provider again.
+            connection.execute(
+                """UPDATE agent_dispatch_jobs
+                   SET status='succeeded',lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,
+                       updated_at=?
+                   WHERE operation='adaptation.chapter.generate' AND status='running'
+                     AND lease_expires_at<=? AND cancel_requested_at IS NULL
+                     AND agent_run_id IN (SELECT id FROM agent_runs WHERE status='completed'
+                                          AND proposal_id IS NOT NULL)""",
+                (timestamp, timestamp),
+            )
             expired = connection.execute(
                 """SELECT id,agent_run_id,operation FROM agent_dispatch_jobs
                    WHERE status='running' AND lease_expires_at IS NOT NULL
@@ -1199,6 +1279,8 @@ class Repository:
             ]
             interrupted_ids = [row["id"] for row in interrupted]
             interrupted_run_ids = [row["agent_run_id"] for row in interrupted]
+            adaptation_job_ids = {row["id"] for row in interrupted if row["operation"] == "adaptation.chapter.generate"}
+            adaptation_creation_ids = set()
             for job_id, run_id in zip(interrupted_ids, interrupted_run_ids):
                 connection.execute(
                     """UPDATE agent_dispatch_jobs
@@ -1226,10 +1308,22 @@ class Repository:
                            WHERE id=? AND status IN ('ready','queued','running')""",
                         (interrupted_error, timestamp, item["id"]),
                     )
+                    if job_id in adaptation_job_ids:
+                        adaptation_creation_ids.add(item["run_id"])
                     connection.execute(
                         "UPDATE production_runs SET status='failed',updated_at=? WHERE id=? AND status='running'",
                         (timestamp, item["run_id"]),
                     )
+            # Recompute after all expired siblings transition, independent of row order.
+            for creation_id in adaptation_creation_ids:
+                states = {row[0] for row in connection.execute(
+                    "SELECT status FROM work_items WHERE run_id=?", (creation_id,)
+                )}
+                summary = "running" if states & {"ready", "queued", "running"} else (
+                    "waiting_user" if "waiting_user" in states else "failed"
+                )
+                connection.execute("UPDATE production_runs SET status=?,updated_at=? WHERE id=?",
+                                   (summary, timestamp, creation_id))
             requeued = connection.execute(
                 """UPDATE agent_dispatch_jobs
                    SET status='ready',lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,
@@ -1377,6 +1471,7 @@ class Repository:
             ).rowcount
         return changed == 1
 
+    @workspace_operation
     def atomic_write_bytes(self, relative: str, content: bytes) -> tuple[str, str]:
         target = (self.data_dir / relative).resolve()
         if self.data_dir not in target.parents:
@@ -1390,6 +1485,7 @@ class Repository:
         os.replace(temporary, target)
         return str(target.relative_to(self.data_dir)).replace("\\", "/"), sha256_bytes(content)
 
+    @workspace_operation
     def atomic_write_text(self, relative_uri: str, content: str) -> tuple[str, str]:
         target = (self.data_dir / relative_uri).resolve()
         if self.data_dir not in target.parents:
@@ -1407,6 +1503,7 @@ class Repository:
                 os.unlink(temporary)
         return relative_uri.replace("\\", "/"), sha256_text(content)
 
+    @workspace_operation
     def read_text(self, uri: str) -> str:
         path = (self.data_dir / uri).resolve()
         if self.data_dir not in path.parents:

@@ -136,3 +136,15 @@ external-inputs/
 docs/handoffs/_generated/
 artifacts/
 acceptance-output/
+
+# Local collaborator review state
+/.review-data/
+/.review-venv/
+
+# Maintainer-local acceptance probes and backups; retain locally, never publish.
+/.scratch/
+/.tmp/
+/05-deliverables/
+/migration-status.json
+/services/.tmp/
+/services/halocue/writing/web_backup_before_phase1/

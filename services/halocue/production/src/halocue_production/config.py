@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from services.halocue.runtime_layout import service_root, repository_root as application_root
 
 
 @dataclass(frozen=True)
@@ -24,9 +25,9 @@ class Settings:
         port: int | None = None,
         data_dir: str | Path | None = None,
     ) -> "Settings":
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = service_root("production")
         workspace_root = project_root.parent
-        repository_root = project_root.parents[2]
+        repository_root = application_root()
         resolved_data = Path(
             data_dir
             or os.getenv("HALOCUE_DATA_DIR")

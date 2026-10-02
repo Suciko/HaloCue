@@ -334,7 +334,9 @@ def test_project_pair_lock_is_held_across_processes(tmp_path):
     process.start()
     entered = threading.Event()
     try:
-        assert ready.wait(5)
+        # Spawn imports are slower during full Windows/browser suite runs.
+        # Keep the lock-contention assertion below independent of startup time.
+        assert ready.wait(15), f"Lock holder did not start; exit code: {process.exitcode}"
 
         def acquire_in_parent():
             with aa_project_assets.project_target_lock(target):

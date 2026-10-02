@@ -1207,7 +1207,7 @@
     const story = currentStory();
     if (!story) return null;
     try {
-      const response = await post('/api/preflight', {story_token: story.story_token, model_profile_id: legacyModelProfileId()});
+      const response = await post('/api/preflight', {story_token: story.story_token, model_profile_id: legacyModelProfileId(), use_ai: document.querySelector('input[name=anno]:checked')?.value === 'ai'});
       if (response && response.job_id) {
         const job = await window.Api.poll('/api/jobs/' + response.job_id, function (item) { return ['succeeded', 'failed', 'cancelled'].includes(item.state); }, {isCurrent: function () { return isCurrentOperation('analyze', op) && currentStory() && currentStory().story_token === storyToken; }, onRetry: function () { if (isCurrentOperation('analyze', op)) { $('#preflightStatus').textContent = '连接中断，正在重试'; setScriptScanProgress('ai', 'AI 初审连接中断，正在重试…'); } }});
         if (!job || job.state !== 'succeeded') throw new Error((job && job.error) || (job && job.state === 'cancelled' ? '初审任务已取消' : '初审任务未完成'));

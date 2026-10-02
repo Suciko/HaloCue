@@ -1,0 +1,630 @@
+/* Shared appearance tokens; loaded after the legacy workbench skins. */
+:root { --hc-nav-width: 64px; }
+/* The appearance pane lives inside the existing Settings dialog; it does not introduce a second settings shell. */
+:root {
+  --appearance-accent: #2f65a5;
+  --appearance-accent-soft: #eaf1fb;
+  --appearance-accent-line: #b8cbea;
+}
+html[data-appearance-palette="sakura"] { --appearance-accent: #c74670; --appearance-accent-soft: #fff0f4; --appearance-accent-line: #efbfd0; --accent: #c74670; --accent-hover: #ab345c; --accent-soft: #fff0f4; --action: #c74670; --action-hover: #ab345c; --action-soft: #fff0f4; --action-line: #df92ab; --hc-action: #c74670; --hc-action-hover: #ab345c; --hc-action-soft: #fff0f4; }
+html[data-appearance-palette="forest"] { --appearance-accent: #26725d; --appearance-accent-soft: #eaf6f1; --appearance-accent-line: #b4daca; --accent: #26725d; --accent-hover: #1f5e4d; --accent-soft: #eaf6f1; --action: #26725d; --action-hover: #1f5e4d; --action-soft: #eaf6f1; --action-line: #8bc2aa; --hc-action: #26725d; --hc-action-hover: #1f5e4d; --hc-action-soft: #eaf6f1; }
+html[data-appearance-palette="amber"] { --appearance-accent: #aa6919; --appearance-accent-soft: #fff5e7; --appearance-accent-line: #e8c796; --accent: #aa6919; --accent-hover: #895312; --accent-soft: #fff5e7; --action: #aa6919; --action-hover: #895312; --action-soft: #fff5e7; --action-line: #d6ac70; --hc-action: #aa6919; --hc-action-hover: #895312; --hc-action-soft: #fff5e7; }
+html[data-appearance-scale="small"] :is(#app.hc-redesign, #settingsDialog, #helpDialog) :is(p,button,label,input,textarea,select,summary,h1,h2,h3,h4,h5) { font-size: calc(1em * .94) !important; }
+html[data-appearance-scale="large"] :is(#app.hc-redesign, #settingsDialog, #helpDialog) :is(p,button,label,input,textarea,select,summary,h1,h2,h3,h4,h5) { font-size: calc(1em * 1.12) !important; }
+
+#settingsDialog .appearance-pane { max-width: 960px; }
+#settingsDialog .appearance-lead { margin-bottom: 22px; }
+#settingsDialog .appearance-section { padding: 26px 0; border-bottom: 1px solid var(--hc-line); }
+#settingsDialog .appearance-section:first-of-type { padding-top: 0; }
+#settingsDialog .appearance-section:last-child { padding-bottom: 0; border-bottom: 0; }
+#settingsDialog .appearance-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 17px; }
+#settingsDialog .appearance-section h4 { margin: 0; color: var(--hc-ink); font: 650 16px/1.35 var(--hc-font-ui); letter-spacing: -.01em; }
+#settingsDialog .appearance-section p { margin: 5px 0 0; color: var(--hc-muted); font-size: 12px; line-height: 1.65; }
+#settingsDialog .appearance-saved { flex: 0 0 auto; padding: 3px 8px; border: 1px solid var(--appearance-accent-line); border-radius: 999px; background: var(--appearance-accent-soft); color: var(--appearance-accent); font-size: 10px; font-weight: 650; }
+#settingsDialog .appearance-mode-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+#settingsDialog .appearance-mode-card, #settingsDialog .appearance-palette-card { width: 100%; margin: 0; border: 1px solid var(--hc-line); border-radius: 12px; background: var(--hc-surface); color: var(--hc-ink); text-align: left; box-shadow: none; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+#settingsDialog .appearance-mode-card { min-height: 148px; padding: 12px; }
+#settingsDialog .appearance-mode-card:hover, #settingsDialog .appearance-palette-card:hover { border-color: var(--appearance-accent-line); transform: translateY(-1px); }
+#settingsDialog .appearance-mode-card[aria-pressed="true"], #settingsDialog .appearance-palette-card[aria-pressed="true"] { border-color: var(--appearance-accent); box-shadow: 0 0 0 2px var(--appearance-accent-soft); }
+#settingsDialog .appearance-mode-card > span:last-child { display: grid; gap: 2px; margin-top: 10px; }
+#settingsDialog .appearance-mode-card b, #settingsDialog .appearance-palette-card b { color: var(--hc-ink); font-size: 13px; font-weight: 650; }
+#settingsDialog .appearance-mode-card small, #settingsDialog .appearance-palette-card small { color: var(--hc-muted); font-size: 11px; }
+#settingsDialog .appearance-preview { display: flex; position: relative; height: 75px; overflow: hidden; border: 1px solid rgb(15 35 58 / 9%); border-radius: 8px; }
+#settingsDialog .appearance-preview::before { content: ''; position: absolute; top: 13px; left: 12px; width: 40%; height: 5px; border-radius: 99px; background: currentColor; opacity: .42; }
+#settingsDialog .appearance-preview i { display: block; position: absolute; left: 12px; right: 12px; height: 7px; border-radius: 99px; background: currentColor; opacity: .16; }
+#settingsDialog .appearance-preview i:nth-child(1) { top: 31px; right: 29%; }
+#settingsDialog .appearance-preview i:nth-child(2) { top: 45px; }
+#settingsDialog .appearance-preview i:nth-child(3) { top: 59px; right: 46%; }
+#settingsDialog .appearance-preview-light { background: #fbfcfe; color: #506078; }
+#settingsDialog .appearance-preview-dark { background: #242b35; color: #edf2f8; }
+#settingsDialog .appearance-preview-system { color: #566477; background: linear-gradient(90deg, #fbfcfe 0 50%, #242b35 50% 100%); }
+#settingsDialog .appearance-preview-system i:nth-child(n+1), #settingsDialog .appearance-preview-system::before { background: linear-gradient(90deg, #566477 0 50%, #edf2f8 50% 100%); opacity: .54; }
+#settingsDialog .appearance-palette-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+#settingsDialog .appearance-palette-card { display: grid; grid-template-columns: 104px minmax(0, 1fr); column-gap: 12px; align-items: center; min-height: 85px; padding: 10px; }
+#settingsDialog .appearance-palette-card b, #settingsDialog .appearance-palette-card small { grid-column: 2; }
+#settingsDialog .appearance-palette-preview { grid-row: span 2; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; height: 58px; padding: 6px; overflow: hidden; border-radius: 7px; background: var(--preview-soft); }
+#settingsDialog .appearance-palette-preview::before, #settingsDialog .appearance-palette-preview::after { content: ''; display: block; border-radius: 3px; background: var(--preview-surface); box-shadow: 0 2px 6px rgb(30 41 59 / 12%); }
+#settingsDialog .appearance-palette-preview i { display: block; grid-column: 1 / -1; height: 3px; margin: -33px 6px 0; border-radius: 99px; background: var(--preview-ink); opacity: .68; }
+#settingsDialog .appearance-palette-preview i:nth-child(2) { width: 48%; margin-top: -22px; }
+#settingsDialog .appearance-palette-preview i:nth-child(3) { width: 66%; margin-top: -11px; }
+#settingsDialog .palette-azure { --preview-soft: #eaf1fb; --preview-surface: #fff; --preview-ink: #2f65a5; }
+#settingsDialog .palette-sakura { --preview-soft: #fff0f4; --preview-surface: #fffafb; --preview-ink: #c74670; }
+#settingsDialog .palette-forest { --preview-soft: #eaf6f1; --preview-surface: #fbfffd; --preview-ink: #26725d; }
+#settingsDialog .palette-amber { --preview-soft: #fff5e7; --preview-surface: #fffdfa; --preview-ink: #aa6919; }
+#settingsDialog .appearance-options { padding-block: 0; }
+#settingsDialog .appearance-option-row { display: flex; align-items: center; justify-content: space-between; gap: 28px; min-height: 90px; padding: 20px 0; border-bottom: 1px solid var(--hc-line); }
+#settingsDialog .appearance-option-row:last-child { border-bottom: 0; }
+#settingsDialog .appearance-option-row h4 { font-size: 15px; }
+#settingsDialog .appearance-switch { position: relative; flex: 0 0 auto; width: 46px; height: 27px; padding: 3px; border: 0; border-radius: 999px; background: #dce3ec; box-shadow: inset 0 0 0 1px rgb(30 45 65 / 5%); }
+#settingsDialog .appearance-switch span { display: block; width: 21px; height: 21px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(30 45 65 / 25%); transition: transform .16s ease; }
+#settingsDialog .appearance-switch[aria-pressed="true"] { background: var(--appearance-accent); }
+#settingsDialog .appearance-switch[aria-pressed="true"] span { transform: translateX(19px); }
+#settingsDialog .appearance-segmented { display: inline-flex; overflow: hidden; border: 1px solid var(--hc-line); border-radius: 9px; }
+#settingsDialog .appearance-segmented button { min-width: 58px; min-height: 34px; margin: 0; padding: 5px 11px; border: 0; border-right: 1px solid var(--hc-line); border-radius: 0; background: var(--hc-surface); color: var(--hc-muted); font: 600 12px/1 var(--hc-font-ui); box-shadow: none; }
+#settingsDialog .appearance-segmented button:last-child { border-right: 0; }
+#settingsDialog .appearance-segmented button[aria-pressed="true"] { background: var(--appearance-accent); color: #fff; }
+#settingsDialog :is(.appearance-mode-card,.appearance-palette-card,.appearance-switch,.appearance-segmented button):focus-visible { outline: 2px solid var(--appearance-accent); outline-offset: 2px; }
+
+html[data-appearance-contrast="high"] { --line: #728197; --line-strong: #4a5a70; --hc-line: #728197; --muted: #3d4b5e; --hc-muted: #3d4b5e; }
+html[data-theme="dark"][data-appearance-contrast="high"] { --line: #a5b1c3; --line-strong: #dbe4ef; --hc-line: #a5b1c3; --muted: #d4deeb; --hc-muted: #d4deeb; }
+html[data-theme="dark"][data-appearance-palette="sakura"] { --appearance-accent: #f08baa; --appearance-accent-soft: #462a36; --appearance-accent-line: #8c4f62; --accent: #f08baa; --accent-hover: #ffb4c9; --accent-soft: #462a36; --action: #f08baa; --action-hover: #ffb4c9; --action-soft: #462a36; --action-line: #8c4f62; --hc-action: #f08baa; --hc-action-hover: #ffb4c9; --hc-action-soft: #462a36; }
+html[data-theme="dark"][data-appearance-palette="forest"] { --appearance-accent: #8bd6b8; --appearance-accent-soft: #203d34; --appearance-accent-line: #497d68; --accent: #8bd6b8; --accent-hover: #afe7d1; --accent-soft: #203d34; --action: #8bd6b8; --action-hover: #afe7d1; --action-soft: #203d34; --action-line: #497d68; --hc-action: #8bd6b8; --hc-action-hover: #afe7d1; --hc-action-soft: #203d34; }
+html[data-theme="dark"][data-appearance-palette="amber"] { --appearance-accent: #efbb72; --appearance-accent-soft: #443623; --appearance-accent-line: #89683c; --accent: #efbb72; --accent-hover: #ffd49a; --accent-soft: #443623; --action: #efbb72; --action-hover: #ffd49a; --action-soft: #443623; --action-line: #89683c; --hc-action: #efbb72; --hc-action-hover: #ffd49a; --hc-action-soft: #443623; }
+
+/* Symmetric hit areas: the active marker must never push the label sideways. */
+#app.hc-redesign .primary-nav {
+  width: var(--hc-nav-width) !important;
+  padding: 10px 6px !important; scrollbar-width: none;
+}
+#app.hc-redesign .primary-nav .nav-item {
+  width: 100% !important; border: 0 !important; padding: 5px 0 !important;
+  border-radius: 8px !important; white-space: nowrap !important;
+}
+#app.hc-redesign .primary-nav .nav-item::before {
+  width: 26px; height: 26px; font-family: var(--font-ui);
+  font-size: 18px; font-weight: 500;
+}
+#app.hc-redesign .primary-nav .nav-item.active::after {
+  content: ""; display: block !important; position: absolute;
+  inset: 18px auto 18px 0; width: 3px; border-radius: 3px;
+  background: #8abcf0;
+}
+#app.hc-redesign .primary-nav .nav-item:focus-visible {
+  outline: 2px solid #8abcf0; outline-offset: 2px;
+}
+#app.hc-redesign .primary-nav .nav-feedback { margin-top: 8px !important; }
+@media (max-height: 760px) and (min-width: 761px) {
+  #app.hc-redesign .primary-nav { gap: 2px !important; padding-block: 6px !important; }
+  #app.hc-redesign .primary-nav .nav-item {
+    height: 50px !important; min-height: 50px !important; flex-basis: 50px !important;
+  }
+  #app.hc-redesign .primary-nav .nav-item[data-section="assets"] { margin-top: 6px !important; }
+}
+
+/* The catalogue shares the shell's quieter density and control geometry. */
+#app.hc-redesign .asset-catalog-workbench { max-width: 1340px; margin-inline: auto; padding: 36px 40px 48px; }
+#app.hc-redesign .asset-catalog-hero h2 { font-family: var(--font-ui); font-size: 30px; font-weight: 600; }
+#app.hc-redesign .asset-catalog-hero > div > p:not(.eyebrow) { font-size: 14px; line-height: 1.7; }
+#app.hc-redesign .asset-catalog-toolbar > nav { border-radius: 10px; overflow: hidden; }
+#app.hc-redesign .asset-catalog-toolbar form { display: flex; gap: 8px; }
+#app.hc-redesign .asset-catalog-toolbar input { border-radius: 7px; font-weight: 400; }
+#app.hc-redesign .asset-catalog-boundary { border-radius: 7px; }
+#app.hc-redesign .asset-catalog-unavailable { border-radius: 10px; padding: 28px; }
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #191e27; --paper-2: #202631; --surface: #202631; --surface-soft: #252d39;
+  --line: #343e4c; --line-strong: #4b596b; --ink: #e1e7ee; --ink-2: #c9d4df; --muted: #a1adbc;
+  --accent: #8ccbb5; --accent-hover: #a3dcc8; --accent-soft: #253b37;
+  --green: var(--accent); --green-soft: var(--accent-soft);
+  --action: #8ab4ed; --action-hover: #a7c9f6; --action-soft: #28394f; --action-line: #49617e;
+  --success: #91ceb0; --success-soft: #253a31; --amber: #e0bc82; --amber-soft: #3b3328; --red: #efa9a5;
+  --hc-bg: #191e27; --hc-panel: #1d232d; --hc-rail: #222a35;
+  --hc-text: #e1e7ee; --hc-muted: #a1adbc; --hc-line: #343e4c;
+  --hc-accent: #85afea; --hc-selected: #2b3b52;
+  --hc-canvas: var(--hc-bg); --hc-surface: var(--hc-panel); --hc-surface-soft: var(--surface-soft);
+  --hc-ink: var(--ink); --hc-action: var(--action); --hc-action-hover: var(--action-hover);
+  --hc-action-soft: var(--action-soft); --hc-success: var(--success); --hc-success-soft: var(--success-soft);
+  --hc-warning: var(--amber); --hc-warning-soft: var(--amber-soft);
+  --hc-danger: var(--red); --hc-danger-soft: #422d32;
+  --shadow: 0 12px 40px #0005;
+}
+html[data-theme="dark"] body { background: var(--hc-bg); color: var(--ink); }
+html[data-theme="dark"] #app.hc-redesign :is(.topbar,.mobile-nav,.hc-context-panel,#treePanel,#inspector) {
+  background: var(--hc-rail) !important; border-color: var(--line) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .primary-nav { background: #171e28 !important; }
+html[data-theme="dark"] :is(#app.hc-redesign,dialog,.boot-screen) :is(h1,h2,h3,h4,h5,b,strong,label,legend) {
+  color: var(--ink) !important;
+}
+html[data-theme="dark"] :is(#app.hc-redesign,dialog,.boot-screen) :is(p,small,dt,summary,.eyebrow,.lede,.field-hint,.code-meta) {
+  color: var(--muted) !important;
+}
+html[data-theme="dark"] #app.hc-redesign :is(.brand,.hc-work-switch) { color: var(--ink) !important; }
+html[data-theme="dark"] :is(dialog,.boot-screen,.toast,#toast) {
+  background: var(--surface) !important; color: var(--ink); border-color: var(--line) !important;
+}
+html[data-theme="dark"] dialog::backdrop { background: #080d16a6; }
+html[data-theme="dark"] :is(#app.hc-redesign,dialog) :is(input,textarea,select) {
+  background: var(--hc-bg) !important; color: var(--ink) !important; border-color: var(--line-strong) !important;
+  caret-color: var(--hc-accent); accent-color: var(--hc-accent);
+}
+html[data-theme="dark"] :is(input,textarea)::placeholder { color: #8997a8 !important; opacity: 1; }
+html[data-theme="dark"] :is(#app.hc-redesign,dialog) :is(.quiet,.icon-button,.provider-badge,.save-indicator,.rail-new-thread,.panel-divider-toggle) {
+  background: var(--surface-soft) !important; color: var(--ink-2) !important; border-color: var(--line) !important;
+}
+html[data-theme="dark"] :is(#app.hc-redesign,dialog) :is(.primary,.send-button) {
+  background: #486fae !important; color: #fff !important; border-color: #6589be !important;
+}
+html[data-theme="dark"] :is(#app.hc-redesign,dialog) :is(.primary,.send-button):hover { background: #557fbe !important; }
+html[data-theme="dark"] :is(#app.hc-redesign,dialog) :is(.quiet,.icon-button):hover { background: #303e51 !important; }
+html[data-theme="dark"] #app.hc-redesign :is(
+  .workspace-inner,.hc-idea-canvas,.work-agent-main,.work-agent-conversation,.conversation-stream,
+  .conversation-composer,.work-agent-composer,.intent-composer,.writing-desk,.manuscript,
+  .manuscript-sheet,.manuscript-block,.scene-context,.scene-contract-editor,.artifact,
+  .overview-section,.decision-option,.decision-card,.work-decision-card,.asset-catalog-card,
+  .asset-catalog-toolbar > nav,.asset-catalog-toolbar > nav > button,.asset-catalog-empty,
+  .intent-start,.mobile-more-menu > div,.hc-task-empty,.task-item,
+  .thread-search,.rail-thread-search-toggle,.thread-action-popover,.work-agent-bottom,
+  .hc-starters button,.attachment-menu > summary,.attachment-popover,
+  .agent-inline-artifact,.agent-inline-artifact > summary,.director-pending,.work-decision-dock,
+  .projected-agent-card,.decision-card-head,.decision-card-footer,.decision-reopen,
+  .agent-provider-chip,.scope-chip,.inspector-tabs,.library-workbench,.library-main,
+  .library-subnav button,.library-brief,.library-control-deck,.library-summary,.library-editor,.library-empty
+) { background: var(--hc-panel) !important; border-color: var(--line) !important; color: var(--ink) !important; }
+html[data-theme="dark"] #app.hc-redesign :is(
+  .work-agent-thread,.work-thread-item,.agent-message,.conversation-message,.stage-list button,
+  .asset-source-tabs button,.asset-catalog-toolbar button,.work-switch-row,.reference-row
+) { color: var(--ink-2) !important; border-color: var(--line) !important; }
+html[data-theme="dark"] #app.hc-redesign .task-item-head :is(span,em) {
+  color: var(--ink-2) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .task-item.failed {
+  border-left-color: #d77d72 !important;
+}
+html[data-theme="dark"] #app.hc-redesign :is(
+  .work-agent-thread.active,.work-thread-item.active,.stage-list button.active,
+  .asset-catalog-toolbar > nav > button.active,.decision-option[aria-checked="true"]
+) { background: var(--hc-selected) !important; border-color: var(--hc-accent) !important; }
+html[data-theme="dark"] #app.hc-redesign :is(.asset-source-tabs button.active,.asset-catalog-toolbar > nav > button > span) {
+  color: var(--accent) !important; border-color: var(--accent) !important; background: var(--accent-soft) !important;
+}
+html[data-theme="dark"] #app.hc-redesign :is(.asset-catalog-boundary,.notice,.workflow-guide,.step-band) {
+  background: var(--accent-soft) !important; color: var(--accent) !important; border-color: #45685c !important;
+}
+html[data-theme="dark"] #app.hc-redesign :is(.asset-catalog-unavailable,.notice.bad) {
+  background: #302a29 !important; border-color: #665146 !important; color: var(--amber) !important;
+}
+html[data-theme="dark"] #app.hc-redesign :is(.asset-catalog-hero,.asset-source-tabs,.asset-card-technical,.asset-catalog-card footer,.hc-rail-footer) {
+  border-color: var(--line) !important;
+}
+html[data-theme="dark"] #app.hc-redesign :is(.asset-card-visual,.diff-view) {
+  background: var(--surface-soft) !important; color: var(--ink-2) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .message-bubble { color: var(--ink) !important; }
+html[data-theme="dark"] #app.hc-redesign .conversation-message.user .message-bubble {
+  background: var(--surface-soft) !important; border-color: var(--line) !important;
+}
+html[data-theme="dark"] :is(#settingsDialog,#helpDialog) :is(
+  .settings-header,.settings-content,.settings-actions-footer,.model-role-card,.model-config-details,
+  .model-config-summary,.model-config-workspace,.model-provider-detail,.active-model-card,
+  .password-input-group,.model-input-group,.role-option,.apply-result,.backup-scope-card,
+  .data-maintenance-section,.about-help-card,.environment-status-card,.help-header,.help-content,
+  .settings-shortcut-grid button,.model-endpoint-preview,.model-capability-panel
+) { background: var(--hc-panel) !important; border-color: var(--line) !important; color: var(--ink) !important; }
+html[data-theme="dark"] #settingsDialog .model-endpoint-fields { background:var(--hc-rail) !important; border-color:var(--line) !important; }
+html[data-theme="dark"] #settingsDialog .settings-shortcut-grid button:hover { background:var(--hc-selected) !important; border-color:var(--action-line) !important; }
+html[data-theme="dark"] :is(#settingsDialog,#helpDialog) :is(.settings-nav,.vendor-preset-section,.help-nav) {
+  background: var(--hc-rail) !important; border-color: var(--line) !important;
+}
+html[data-theme="dark"] #settingsDialog :is(.settings-nav-btn,.vendor-card) { color: var(--ink-2) !important; }
+html[data-theme="dark"] #app.hc-redesign .asset-catalog-boundary > span { color: var(--accent) !important; }
+html[data-theme="dark"] #app.hc-redesign :is(#referencesNav button,.production-top-actions button,.production-top-actions summary) { background: var(--surface-soft) !important; color: var(--ink-2) !important; }
+html[data-theme="dark"] #app.hc-redesign #referencesNav button.active { background: var(--hc-selected) !important; color: var(--hc-accent) !important; }
+html[data-theme="dark"] #settingsDialog .aa-setup-callout { background: var(--hc-selected) !important; border-color: var(--action-line) !important; }
+html[data-theme="dark"] #settingsDialog :is(.settings-nav-btn.active,.vendor-card.active) {
+  background: var(--hc-selected) !important; color: var(--hc-accent) !important;
+}
+html[data-theme="dark"] :is(#app.hc-redesign,dialog) .diff-add { background: #263d32 !important; color: #a1dabb !important; }
+html[data-theme="dark"] :is(#app.hc-redesign,dialog) .diff-del { background: #482e36 !important; color: #f0b5bc !important; }
+
+@media (max-width: 760px) {
+  #app.hc-redesign .asset-catalog-workbench { padding: 24px 18px 36px; }
+  #app.hc-redesign .top-actions { gap: 6px; }
+  #app.hc-redesign .top-actions .help-entry { display: none; }
+  #settingsDialog .appearance-section { padding: 20px 0; }
+  #settingsDialog .appearance-mode-grid, #settingsDialog .appearance-palette-grid { grid-template-columns: 1fr; }
+  #settingsDialog .appearance-mode-card { min-height: 0; display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 12px; align-items: center; }
+  #settingsDialog .appearance-mode-card > span:last-child { margin-top: 0; }
+  #settingsDialog .appearance-option-row { align-items: flex-start; }
+  #app.hc-redesign .hc-work-switch { min-width: 0; }
+}
+@media (max-width: 430px) { #app.hc-redesign .save-indicator { display: none; } }
+/* Writing reading surface and scene Agent are separate from the outer shell.
+   Use the same dark tokens for late-rendered blocks and inline editing. */
+html[data-theme="dark"] #app.hc-redesign :is(
+  .scene-agent-panel,.scene-conversation-composer,.scene-conversation-scroll,
+  .chapter-agent-panel,.chapter-agent-conversation,.chapter-agent-composer,
+  .next-command,.chapter-inline-manuscript,.chapter-inline-manuscript-bar,
+  .manuscript-reading,.writing-scene,.writing-scene button,.inspector-tabs button,
+  .chapter-stage-tabs button,.chapter-stage-nav button,.writing-stage-tabs button,
+  .scene-agent-panel > header,.scene-agent-panel footer,.scene-agent-panel .agent-context-brief,
+  .chapter-scene-section,.chapter-inline-manuscript-list,.manuscript-editor
+) { background: var(--hc-panel) !important; color: var(--ink) !important; border-color: var(--line) !important; }
+html[data-theme="dark"] #app.hc-redesign :is(.manuscript-reading-text,.manuscript-reading-speaker,.manuscript-speaker-readonly) {
+  color: var(--ink) !important;
+}
+html[data-theme="dark"] #app.hc-redesign :is(.manuscript-reading-type,.manuscript-insert-button,.manuscript-insert-button span) {
+  background: var(--surface-soft) !important; color: var(--muted) !important; border-color: var(--line) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .manuscript-insert-bar > span { background: var(--line) !important; }
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .manuscript-block[data-block-type="dialogue"] {
+  --speaker-ink: #9fc4f1;
+  --speaker-soft: #223751;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .manuscript-block[data-speaker-tone="1"] { --speaker-ink: #f0a5bb; --speaker-soft: #4b2a3a; }
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .manuscript-block[data-speaker-tone="2"] { --speaker-ink: #88d6c0; --speaker-soft: #20433d; }
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .manuscript-block[data-speaker-tone="3"] { --speaker-ink: #c6afea; --speaker-soft: #392c50; }
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .manuscript-block[data-speaker-tone="4"] { --speaker-ink: #e1be84; --speaker-soft: #493a27; }
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .manuscript-block[data-speaker-tone="5"] { --speaker-ink: #8ccddd; --speaker-soft: #24424a; }
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .manuscript-block[data-speaker-tone="6"] { --speaker-ink: #dfa8d2; --speaker-soft: #482e45; }
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .manuscript-block[data-speaker-tone="7"] { --speaker-ink: #b4d598; --speaker-soft: #31412d; }
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .manuscript-block[data-block-type="dialogue"] :is(.manuscript-reading-speaker,.manuscript-reading-text) {
+  color: var(--speaker-ink) !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .manuscript-block[data-block-type="dialogue"] .manuscript-reading-type {
+  background: var(--speaker-soft) !important;
+  color: var(--speaker-ink) !important;
+}
+@media (max-width: 760px), (hover: none), (pointer: coarse) {
+  html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .manuscript-insert-button {
+    border-color: transparent !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+}
+html[data-theme="dark"] #app.hc-redesign :is(.next-command,.manuscript-block.is-editing) {
+  background: var(--surface-soft) !important; border-color: var(--accent) !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-fields :is(input,textarea) {
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--speaker-ink, var(--ink-2)) !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing:is([data-block-type="action"],[data-block-type="narration"]) .block-fields textarea {
+  color: var(--ink-2) !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-meta select {
+  border: 0 !important;
+  background: var(--speaker-soft, var(--surface-soft)) !important;
+  color: var(--speaker-ink, var(--muted)) !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .next-command.is-complete {
+  background: transparent !important;
+  border-bottom-color: var(--line) !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .next-command.is-complete :is(strong,p,.scene-memory-status) {
+  color: var(--ink-2) !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .next-command.is-complete strong::before {
+  color: #7bd0ae !important;
+}
+html[data-theme="dark"] #app.hc-redesign :is(.writing-scene.active,.inspector-tabs button.active,
+  .chapter-stage-tabs button.active,.chapter-stage-nav button.active,.writing-stage-tabs button.active) {
+  background: var(--accent-soft) !important; color: var(--ink) !important; border-color: var(--accent) !important;
+}
+html[data-theme="dark"] #app.hc-redesign :is(.manuscript-state.saved,.writing-tree em.done) {
+  background: var(--success-soft) !important; color: var(--success) !important; border-color: var(--success) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .manuscript-reading:hover { background: var(--surface-soft) !important; }
+html[data-theme="dark"] #app.hc-redesign :is(.chapter-more-tools > summary,.chapter-more-tools > div) {
+  background: var(--surface-soft) !important; color: var(--ink) !important; border-color: var(--line) !important;
+}
+html[data-theme="dark"] #app.hc-redesign :is(.writing-tree-head,.writing-volume-head,.writing-chapter-button,.writing-add-scene,.hc-context-panel) :is(span,button),
+html[data-theme="dark"] #app.hc-redesign .writing-add-scene { color: var(--muted) !important; }
+html[data-theme="dark"] #app.hc-redesign :is(.writing-chapter-button em.done,.writing-tree em.done) {
+  background: var(--success-soft) !important; color: var(--success) !important; border-color: var(--success) !important;
+}
+html[data-theme="dark"] #app.hc-redesign :is(.work-agent-thread-row,.message-avatar,.decision-option-index,.agent-run,
+  .library-decision-queue,.library-decision-queue > li,.library-decision-queue > li > span) {
+  background: var(--surface-soft) !important; color: var(--ink) !important; border-color: var(--line) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .work-agent-thread-row.active { background: var(--accent-soft) !important; }
+html[data-theme="dark"] #app.hc-redesign .catalog-availability-warning {
+  background: var(--amber-soft) !important; color: var(--amber) !important; border-color: var(--amber) !important;
+}
+
+/* Unsaved-content confirmation must remain legible in the night palette,
+   including its separate footer and destructive action. */
+html[data-theme="dark"] #unsavedManuscriptDialog .unsaved-manuscript-actions {
+  background: var(--surface-soft) !important;
+  border-color: var(--line) !important;
+}
+html[data-theme="dark"] #unsavedManuscriptDialog .unsaved-manuscript-copy > span,
+html[data-theme="dark"] #app.hc-redesign .manuscript-state.dirty {
+  background: var(--amber-soft) !important;
+  color: var(--amber) !important;
+  border-color: var(--amber) !important;
+}
+html[data-theme="dark"] #unsavedManuscriptDialog [data-unsaved-manuscript-discard] {
+  background: var(--hc-danger-soft) !important;
+  color: var(--red) !important;
+  border-color: #97545f !important;
+}
+html[data-theme="dark"] #unsavedManuscriptDialog [data-unsaved-manuscript-discard]:hover {
+  background: #563640 !important;
+}
+#unsavedManuscriptDialog button:focus-visible {
+  outline: 2px solid var(--accent, #2f65a5);
+  outline-offset: 3px;
+}
+
+html[data-theme="dark"] #app.hc-redesign .writing-mobile-tabs {
+  background: var(--hc-rail) !important;
+  border-color: var(--line) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .writing-mobile-tabs button {
+  background: var(--surface-soft) !important;
+  color: var(--muted) !important;
+  border-color: var(--line) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .writing-mobile-tabs button.active {
+  background: var(--hc-selected) !important;
+  color: var(--ink) !important;
+  border-color: var(--hc-accent) !important;
+}
+
+/* Scene chat actions need distinct rows on narrow inspectors, not three
+   competing flex items that crush the candidate label into vertical text. */
+#app.hc-redesign .scene-conversation-composer .scene-agent-submit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(88px, .85fr);
+  align-items: center;
+  gap: 8px;
+}
+#app.hc-redesign .scene-agent-submit > .permission-menu {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+#app.hc-redesign .scene-conversation-composer .scene-agent-submit > button {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding-inline: 10px;
+  white-space: nowrap;
+}
+html[data-theme="dark"] #app.hc-redesign :is(.writing-mobile-pane,.mobile-scene-trigger) {
+  background: var(--hc-panel) !important;
+  color: var(--ink) !important;
+  border-color: var(--line) !important;
+}
+html[data-theme="dark"] #app.hc-redesign :is(.scene-agent-submit,.chapter-continuous-head) {
+  border-color: var(--line) !important;
+}
+
+#toast:not(.show) { visibility: hidden; pointer-events: none; }
+#toast .toast-dismiss {
+  pointer-events: auto;
+  margin-left: 10px;
+  width: 30px; height: 30px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font-size: 18px;
+  vertical-align: middle;
+}
+#toast .toast-dismiss:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Live scene messages use the night palette as well as the outer panel. */
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .scene-conversation-message.user .scene-message-body {
+  background: var(--hc-selected) !important;
+  border-color: var(--hc-accent) !important;
+  color: var(--ink) !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .scene-conversation-message.assistant .scene-message-body {
+  background: var(--hc-panel) !important;
+  border-color: var(--line) !important;
+  color: var(--ink-2) !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .scene-message-role { color: var(--muted) !important; }
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .scene-agent-heading h3 {
+  color: var(--ink) !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .scene-agent-panel > header > p:last-child {
+  color: var(--muted) !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .scene-agent-state {
+  background: #244038 !important;
+  color: #a6d6bc !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .scene-agent-state:is([data-state="running"],[data-state="preparing"]) {
+  background: #263c55 !important;
+  color: #a9c9f2 !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .scene-agent-state[data-state="pending"] {
+  background: #483c25 !important;
+  color: #e6c78e !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .scene-agent-state[data-state="blocked"] {
+  background: #4a2d31 !important;
+  color: #eda8aa !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .scene-conversation-message.assistant .scene-message-body,
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .scene-message-full > .scene-message-transcript {
+  color: var(--ink) !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .scene-message-full > .scene-message-transcript {
+  border-color: var(--line) !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage :is(.scene-message-expander,.scene-message-collapser) {
+  color: #a9c9f2 !important;
+}
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .scene-message-resolved {
+  background: var(--surface-soft) !important;
+  color: var(--ink-2) !important;
+}
+html[data-theme="dark"] #app.writing-workbench-stage .manuscript-selection-actions { color: var(--ink-2); }
+html[data-theme="dark"] #app.writing-workbench-stage .manuscript-selection-actions button {
+  border-color: var(--line);
+  background: var(--surface-soft);
+  color: #a9c9f2;
+}
+html[data-theme="dark"] #app.writing-workbench-stage .manuscript-selection-actions button:is(:hover,:focus-visible) { background: var(--hc-selected); }
+html[data-theme="dark"] #app.writing-workbench-stage .scene-agent-selection { border-color: var(--line); color: var(--ink-2); }
+html[data-theme="dark"] #app.writing-workbench-stage .scene-agent-selection-label { background: var(--hc-selected); color: #a9c9f2; }
+html[data-theme="dark"] #app.writing-workbench-stage .scene-agent-selection button { color: var(--ink-2); }
+html[data-theme="dark"] #app.writing-workbench-stage .scene-agent-selection button:is(:hover,:focus-visible) { background: var(--hc-selected); color: var(--ink); }
+
+html[data-theme="dark"] #app.hc-redesign .inspector-impact {
+  background: var(--success-soft) !important; border-color: var(--success) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .inspector-impact :is(span,b) { color: var(--ink) !important; }
+
+/* Proposal review is part of the writing surface, including its late-mounted
+   header, selected changes and sticky apply controls. Preserve red/green meaning. */
+html[data-theme="dark"] #app.hc-redesign :is(
+  .scene-inline-review,.scene-inline-review > .desk-head,.scene-diff-choices,
+  .scene-full-context,.scene-full-context > header,.scene-diff-actions,.scene-proposal-impact
+) { background: var(--hc-panel) !important; border-color: var(--line) !important; color: var(--ink) !important; }
+html[data-theme="dark"] #app.hc-redesign .scene-diff-choice {
+  background: var(--surface-soft) !important; border-color: var(--line) !important; color: var(--ink) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .scene-diff-choice:has(input:checked) {
+  background: var(--hc-selected) !important; border-color: var(--hc-accent) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .scene-context-line { color: var(--ink) !important; }
+html[data-theme="dark"] #app.hc-redesign .scene-context-line.is-added {
+  background: var(--success-soft) !important; color: var(--success) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .scene-context-line.is-removed {
+  background: var(--hc-danger-soft) !important; color: var(--red) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .scene-context-copy b { color: inherit !important; }
+html[data-theme="dark"] #app.hc-redesign .scene-inline-review .status-chip {
+  background: var(--amber-soft) !important; color: var(--amber) !important; border-color: var(--amber) !important;
+}
+
+html[data-theme="dark"] #app.hc-redesign .scene-agent-pending {
+  background: var(--amber-soft) !important; border-color: var(--amber) !important; color: var(--ink) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .scene-agent-pending b { color: var(--ink) !important; }
+html[data-theme="dark"] #app.hc-redesign .scene-agent-pending span { color: var(--ink-2) !important; }
+/* User-facing next action must not retain the daytime paper background. */
+html[data-theme="dark"] #app.hc-redesign .work-user-status {
+  background: var(--surface-soft) !important;
+  border-color: var(--line) !important;
+  border-left-color: var(--accent) !important;
+  color: var(--ink) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .work-user-status-copy h3 {
+  color: var(--ink) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .work-user-status-copy > p {
+  color: var(--muted) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .work-user-status-copy .work-user-status-error {
+  background: rgba(165, 71, 64, .16) !important;
+  border-left-color: #e39b91 !important;
+  color: #f2c1ba !important;
+}
+html[data-theme="dark"] #app.hc-redesign .work-user-status-copy .eyebrow {
+  color: var(--accent) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .work-user-status-copy ul {
+  color: var(--amber) !important;
+}
+
+/* Release checks are mounted after navigation. Their daytime paper backgrounds
+   must follow the same palette as the rest of the writing workbench. */
+html[data-theme="dark"] #app.hc-redesign :is(.release-memory-guidance,.release-review-step,.release-findings-surface) {
+  background: var(--hc-panel);
+  border-color: var(--line);
+  color: var(--ink);
+}
+html[data-theme="dark"] #app.hc-redesign .release-review-step {
+  border-left-color: var(--amber);
+}
+html[data-theme="dark"] #app.hc-redesign .release-review-step.is-complete {
+  border-left-color: var(--success);
+}
+html[data-theme="dark"] #app.hc-redesign :is(.release-memory-guidance button,.release-review-step-status,.release-finding-counts span) {
+  background: var(--surface-soft);
+  border-color: var(--line);
+  color: var(--ink-2);
+}
+html[data-theme="dark"] #app.hc-redesign .release-memory-guidance button:hover {
+  background: var(--hc-selected);
+  border-color: var(--hc-accent);
+}
+html[data-theme="dark"] #app.hc-redesign :is(.release-review-step.is-complete .release-review-step-status,.release-finding-counts .resolved,.release-freeze-preflight > header > span) {
+  background: var(--success-soft);
+  border-color: var(--success);
+  color: var(--success);
+}
+html[data-theme="dark"] #app.hc-redesign :is(.release-gate-drift,.release-finding-counts .blocking,.release-findings-surface.has-blocker .release-finding-row.blocking span) {
+  background: var(--hc-danger-soft);
+  border-color: var(--red);
+  color: var(--red);
+}
+html[data-theme="dark"] #app.hc-redesign .release-gate-drift :is(b,strong) { color: var(--red); }
+html[data-theme="dark"] #app.hc-redesign .release-freeze-preflight {
+  background: var(--success-soft);
+  border-color: var(--success);
+  color: var(--ink);
+}
+html[data-theme="dark"] #app.hc-redesign .release-finding-row { border-color: var(--line); }
+html[data-theme="dark"] #app.hc-redesign .release-status-banner[data-state="waiting"] {
+  background: var(--hc-panel) !important;
+  border-color: var(--line) !important;
+  color: var(--ink) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .release-status-banner[data-state="blocked"] {
+  background: var(--hc-danger-soft) !important;
+  border-color: var(--red) !important;
+  color: var(--ink) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .release-status-banner:is([data-state="passed"],[data-state="frozen"]) {
+  background: var(--success-soft) !important;
+  border-color: var(--success) !important;
+  color: var(--ink) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .release-status-banner span { color: var(--muted) !important; }
+html[data-theme="dark"] #app.hc-redesign.writing-workbench-stage .scene-memory-action {
+  border-color: var(--line) !important;
+  color: var(--ink-2) !important;
+  background: var(--hc-panel) !important;
+}
+html[data-theme="dark"] #app.hc-redesign .release-neutral-note {
+  background: var(--hc-panel) !important;
+  border-color: var(--line) !important;
+  color: var(--muted) !important;
+}
+html[data-theme="dark"] #app.hc-redesign :is(.release-quick-review,.release-detailed-checks) {
+  background: var(--hc-panel);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+/* The production overflow menu is outside the embedded AA shadow surface. */
+html[data-theme="dark"] #app .production-more-actions > div {
+  background: var(--surface) !important;
+  border-color: var(--line) !important;
+  color: var(--ink) !important;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .42);
+}
+html[data-theme="dark"] #app .production-more-actions > div button {
+  border-color: transparent !important;
+  background: transparent !important;
+  color: var(--ink-2) !important;
+}
+html[data-theme="dark"] #app .production-more-actions > div button:hover,
+html[data-theme="dark"] #app .production-more-actions > div button:focus-visible {
+  background: var(--hc-selected) !important;
+  color: var(--ink) !important;
+}

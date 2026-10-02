@@ -552,8 +552,9 @@ def test_unresolved_character_rolls_back_the_existing_install(
     assert (save_dir / "manifest.json").read_bytes() == manifest_bytes
 
 
+@pytest.mark.parametrize("source_kind", [None, "task_import", "official_resource_pack", "extra_pack"])
 def test_missing_custom_background_rolls_back_the_existing_install(
-    temp_environment
+    temp_environment, source_kind
 ):
     env = temp_environment
     store = env["store"]
@@ -586,6 +587,8 @@ def test_missing_custom_background_rolls_back_the_existing_install(
     index = json.loads(index_path.read_text(encoding="utf-8"))
     index.setdefault("bg", {})[background_name] = 987654321
     index.setdefault("bg_label", {})[background_name] = {"label": "缺失背景"}
+    if source_kind:
+        index["bg_label"][background_name]["source_kind"] = source_kind
     index_path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
     _rehash_bundle_file(bundle_dir, index_path)
 

@@ -674,3 +674,61 @@ def test_http_file_source_and_aa_environment_routes(settings, tmp_path):
         )
         assert status == 201
         assert created["run"]["source_summary"]["source_filename"] == "chapter.md"
+
+
+def test_http_detect_then_adopt_uses_resolved_path_and_rechecks_structure(settings, tmp_path):
+    """A successful inspection request is not itself workspace validation."""
+    valid = tmp_path / "synthetic-aa"
+    for name in ("projects", "saves", "overrides", "settings"):
+        (valid / name).mkdir(parents=True)
+    missing = tmp_path / "not-present"
+    with api(settings) as base:
+        status, _, invalid = request(
+            base, "/api/v1/settings/aa-environment", {"selection": str(missing)}, "POST"
+        )
+        assert status == 200 and invalid["ok"] is True
+        assert invalid["environment"]["workspace"]["valid"] is False
+
+        status, _, detected = request(
+            base, "/api/v1/settings/aa-environment", {"selection": str(valid)}, "POST"
+        )
+        assert status == 200 and detected["environment"]["workspace"]["valid"] is True
+        path = detected["environment"]["workspace"]["path"]
+        # This is the exact request field consumed by the unified settings fix.
+        status, _, adopted = request(
+            base, "/api/v1/settings/aa-workspace", {"path": path}, "POST"
+        )
+        assert status == 200
+        assert adopted["aa_workspace"]["valid"] is True
+        assert adopted["aa_workspace"]["path"] == path
+        status, _, wrong_field = request(
+            base, "/api/v1/settings/aa-workspace", {"aa_data": path}, "POST"
+        )
+        assert status == 400 and wrong_field["error"]["code"] == "aa_workspace_required"
+
+        (valid / "settings").rmdir()  # Empty synthetic directory, not an installed AA workspace.
+        status, _, changed = request(
+            base, "/api/v1/settings/aa-workspace", {"path": path}, "POST"
+        )
+        assert status == 400 and changed["error"]["code"] == "invalid_aa_workspace"
+
+def test_http_resource_index_rebuild_route(settings, monkeypatch):
+    expected = {"ok": True, "resource_index": {"path": "C:/index.json"}}
+    monkeypatch.setattr(ProductionService, "rebuild_resource_index", lambda self: expected)
+    with api(settings) as base:
+        status, _, result = request(base, "/api/v1/settings/resource-index:rebuild", {}, "POST")
+    assert status == 200
+    assert result == expected
+
+
+def test_http_aa_workspace_picker_returns_selected_local_path(settings, monkeypatch):
+    selected = r"C:\\Synthetic\\AzureArchive.exe"
+    monkeypatch.setattr(
+        ProductionService,
+        "pick_aa_executable",
+        lambda self: {"ok": True, "selected": True, "path": selected},
+    )
+    with api(settings) as base:
+        status, _, result = request(base, "/api/v1/settings/aa-workspace:pick", {}, "POST")
+    assert status == 200
+    assert result == {"ok": True, "selected": True, "path": selected}

@@ -1,28 +1,29 @@
 from __future__ import annotations
 
-import importlib
 import hashlib
 import json
 import os
 import re
 import shutil
-import sys
 import threading
 import mimetypes
 import copy
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
 from .config import Settings
+from .legacy_modules import CORE_MODULES, load_module, load_modules
 from . import cg_advice, cg_segments
 from .errors import ProductionError
+from .background_names import background_name_metadata
+from .background_library import BackgroundLibraryScope
+from .background_search import background_search_document, background_search_score
 from .models import StagedDirectionResult, new_id, utc_now
 from .name_baseline import CharacterNameBaseline
-from .resource_previews import ResourcePreviewCatalog
+from .resource_previews import ResourcePreview, ResourcePreviewCatalog
 
 
-_IMPORT_LOCK = threading.RLock()
 _COMPILE_LOCK = threading.RLock()
 AA_WORKSPACE_DIRS = ("projects", "saves", "overrides", "settings")
 RESOURCE_SNAPSHOT_PREWARM_BYTES = 8 * 1024 * 1024
@@ -50,20 +51,22 @@ class Legacy093Adapter:
         self.settings = settings
         self.compat_root = settings.data_dir / "legacy-runtime"
         self.compat_root.mkdir(parents=True, exist_ok=True)
-        self.legacy_version = self._detect_legacy_version(settings.legacy_root)
         self._modules: dict[str, Any] = {}
         self._resource_snapshot_lock = threading.RLock()
+        self._background_pages: dict[tuple[str, bool], tuple] = {}
+        self._background_cache_lock = threading.RLock()
         self._resource_snapshot_signature: tuple[tuple[str, int, int], ...] | None = None
         self._resource_snapshot: dict[str, Any] | None = None
         self._resource_snapshot_scope: str | None = None
         self.name_baseline = CharacterNameBaseline(settings.name_baseline)
-        self.previews = ResourcePreviewCatalog(settings.legacy_root, settings.aa_data)
+        self.previews = ResourcePreviewCatalog(settings.legacy_root, settings.aa_data, settings.resource_index)
         self._load_modules()
+        self.legacy_version = self._detect_legacy_version(self.code_root)
         self.store = self._modules["draft_store"].DraftStore(
             base_dir=str(settings.data_dir / "drafts")
         )
         self._teacher_module = (
-            importlib.import_module("teacher_identity")
+            self._legacy_module("teacher_identity")
             if callable(getattr(self.store, "update_teacher_identity", None)) else None
         )
         # Building the labelled resource base can be expensive for a full AA
@@ -74,31 +77,11 @@ class Legacy093Adapter:
             self._refresh_resource_snapshot()
 
     def _load_modules(self) -> None:
-        if not self.settings.legacy_root.is_dir():
-            raise ProductionError(
-                "legacy_adapter_unavailable",
-                "找不到兼容转换模块",
-                status=503,
-                details={"legacy_root": str(self.settings.legacy_root)},
-            )
-        with _IMPORT_LOCK:
-            os.environ.setdefault("HALOCUE_USER_DATA_DIR", str(self.compat_root))
-            legacy = str(self.settings.legacy_root)
-            if legacy not in sys.path:
-                sys.path.insert(0, legacy)
-            for name in (
-                "document",
-                "draft_store",
-                "build_bundle",
-                "install_manager",
-                "annotate",
-                "assetdb",
-                "asset_catalog",
-                "portrait_layout",
-                "asset_import",
-                "aa_install_discovery",
-            ):
-                self._modules[name] = importlib.import_module(name)
+        os.environ.setdefault("HALOCUE_USER_DATA_DIR", str(self.compat_root))
+        self.code_root, self._modules = load_modules(self.settings.legacy_root, CORE_MODULES)
+
+    def _legacy_module(self, name: str):
+        return load_module(name, self.settings.legacy_root)
 
     @staticmethod
     def _detect_legacy_version(root: Path) -> str:
@@ -109,7 +92,7 @@ class Legacy093Adapter:
                 text = path.read_text(encoding="utf-8")
             except (OSError, UnicodeError):
                 continue
-            match = re.search(r"(?im)(?:^version\s*=\s*|HALOCUE_VERSION\s*=\s*[\"'])([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[-+][^\s\"']+)?)", text)
+            match = re.search(r"(?im)^(?:version|HALOCUE_VERSION)\s*=\s*[\"']?([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[-+][^\s\"']+)?)", text)
             if match:
                 return match.group(1)
             match = re.search(r"\b(0\.9(?:\.\d+)?|0\.95(?:\.\d+)?)\b", text)
@@ -140,6 +123,8 @@ class Legacy093Adapter:
             self._file_signature(self.settings.legacy_root / "aa_assets.db"),
             self._file_signature(self.settings.name_baseline),
             self._file_signature(layout_catalog),
+            self._file_signature(self.settings.aa_data / "overrides" / "manifest.json" if self.settings.aa_data else None),
+            self._file_signature(self.settings.aa_data / "halocue-official-previews" / "manifest.json" if self.settings.aa_data else None),
         )
 
     def _should_prewarm_resource_snapshot(self) -> bool:
@@ -193,6 +178,13 @@ class Legacy093Adapter:
             self._resource_snapshot = self.name_baseline.decorate_resource_payload(
                 source_resources
             )
+            visible = BackgroundLibraryScope(self.settings.aa_data, index_path).visible_keys(self._resource_snapshot)
+            for field in ("bg", "bg_label", "background_media"):
+                if isinstance(self._resource_snapshot.get(field), dict):
+                    self._resource_snapshot[field] = {key: value for key, value in self._resource_snapshot[field].items() if key in visible}
+            scene_labels = self._resource_snapshot.get("scene_labels") or {}
+            if isinstance(scene_labels.get("background"), dict):
+                scene_labels["background"] = {key: value for key, value in scene_labels["background"].items() if key in visible}
             self._resource_snapshot_signature = signature
             self._resource_snapshot_scope = snapshot_scope
 
@@ -220,6 +212,8 @@ class Legacy093Adapter:
             "legacy_adapter": {
                 "state": "available",
                 "version": self.legacy_version,
+                "code_root": str(self.code_root),
+                "data_root": str(self.settings.legacy_root.resolve()),
                 "mode": "domain_modules",
             },
             "script_import": {"state": "available"},
@@ -303,12 +297,12 @@ class Legacy093Adapter:
                 raise ProductionError("teacher_presentation_unavailable", "当前兼容模块不支持此老师呈现设置", status=409)
             return {"schema_version": "teacher-presentation/1.0", "mode": "slot_zero"}
         with self._teacher_error_boundary():
-            return importlib.import_module("teacher_presentation").effective_teacher_presentation(cast_data)
+            return self._legacy_module("teacher_presentation").effective_teacher_presentation(cast_data)
 
     def teacher_reply(self, card_id: str, text: str) -> dict[str, str]:
         with self._teacher_error_boundary():
-            importlib.import_module("teacher_reply_plan").validate_reply_text(text)
-            return {**importlib.import_module("teacher_presentation").teacher_reply_ids(card_id),
+            self._legacy_module("teacher_reply_plan").validate_reply_text(text)
+            return {**self._legacy_module("teacher_presentation").teacher_reply_ids(card_id),
                     "source_card_id": card_id, "text": text}
 
     @contextmanager
@@ -338,6 +332,7 @@ class Legacy093Adapter:
         discovery = self._modules["aa_install_discovery"].discover_aa(
             selection or None,
             config_path=self.settings.legacy_root / "aa_config.json",
+            include_resource_cache=False,
         )
 
         def value(path: Path | None) -> str | None:
@@ -362,6 +357,10 @@ class Legacy093Adapter:
             "resource_cache": {
                 "available": discovery.resource_cache is not None,
                 "path": value(discovery.resource_cache),
+            },
+            "aa_resources": {
+                "local_only": True,
+                "overrides_available": discovery.overrides is not None,
             },
             "recent_projects": [path.name for path in discovery.recent_project_files[:12]],
             "requires_selection": discovery.requires_selection,
@@ -416,7 +415,10 @@ class Legacy093Adapter:
         dialogue_nodes = [node for node in nodes if node.kind == "line"]
         directive_nodes = [node for node in nodes if node.kind == "dir"]
         scene_nodes = [node for node in nodes if node.kind == "scene"]
-        meaningful = [node for node in nodes if node.kind not in {"blank", "separator"}]
+        # Document titles are metadata, not part of a scene. Counting an
+        # opening `# Title` as script content creates a phantom "未分段开场"
+        # before the first explicit `## Scene` heading.
+        meaningful = [node for node in nodes if node.kind not in {"blank", "separator", "title"}]
         speaker_rows: dict[str, dict[str, Any]] = {}
         for node in dialogue_nodes:
             who = str(node.fields.get("who") or "").strip()
@@ -440,10 +442,16 @@ class Legacy093Adapter:
             if node.kind == "unknown" and str(node.raw).lstrip().startswith("@"):
                 issues.append({"severity": "error", "code": "invalid_directive", "line_no": node.line_no, "message": f"第 {node.line_no} 行的 AA 指令格式无法识别。", "action": "请使用“@指令 参数”的格式后重新检查。"})
 
+        # Share the lossless Pending check with compile_document. Static
+        # preflight has no cast yet; parsed dialogue is its consumption event.
+        from diagnostics import unconsumed_prefix_diagnostics
+
+        issues.extend(unconsumed_prefix_diagnostics(nodes))
+
         if not meaningful:
             format_summary = {"kind": "empty", "label": "空剧本", "confidence": "low", "message": "没有读到可转换内容。请先输入剧本文本。"}
         elif len(dialogue_nodes) >= 2:
-            marked = bool(directive_nodes or scene_nodes)
+            marked = bool(directive_nodes)
             format_summary = {"kind": "aa_mixed" if marked else "dialogue", "label": "AA 指令混合格式" if marked else "角色台词格式", "confidence": "high" if len(dialogue_nodes) >= 4 else "medium", "message": "已识别“角色: 台词”结构。建立任务后，请确认每位说话者的角色映射。"}
         elif dialogue_nodes:
             format_summary = {"kind": "partial_dialogue", "label": "部分角色台词格式", "confidence": "medium", "message": "只识别到少量角色台词；建立任务后请核对识别结果。"}
@@ -454,9 +462,75 @@ class Legacy093Adapter:
             actions.insert(0, {"id": "map_speakers", "label": "任务建立后确认角色映射", "detail": f"已识别 {len(speakers)} 位说话者；每位可选择立绘、旁白或无立绘角色。", "available": True})
         if issues:
             actions.insert(0, {"id": "repair_source", "label": "先修正指令问题", "detail": "修正后再次检查，避免把明显的格式错误带入制作草稿。", "available": True})
+
+        # Scene judgement is deliberately deterministic and independent from AI
+        # direction.  It describes the source boundaries that the operator is
+        # about to confirm before a production run can be created.
+        source_line_count = max(1, len(text.splitlines()))
+        scene_ranges: list[dict[str, Any]] = []
+        ordered_scenes = sorted(scene_nodes, key=lambda node: node.line_no)
+        first_meaningful_line = min((node.line_no for node in meaningful), default=1)
+        last_meaningful_line = max((node.line_no for node in meaningful), default=source_line_count)
+        if ordered_scenes and first_meaningful_line < ordered_scenes[0].line_no:
+            scene_ranges.append({
+                "title": "未分段开场",
+                "line_no": first_meaningful_line,
+                "end_line": ordered_scenes[0].line_no - 1,
+                "implicit": True,
+            })
+        for index, node in enumerate(ordered_scenes):
+            next_line = ordered_scenes[index + 1].line_no if index + 1 < len(ordered_scenes) else None
+            scene_ranges.append({
+                "title": str(node.fields.get("title") or "未命名场景"),
+                "line_no": node.line_no,
+                "end_line": (next_line - 1) if next_line is not None else max(source_line_count, node.line_no),
+                "implicit": False,
+            })
+        if not scene_ranges and meaningful:
+            scene_ranges.append({
+                "title": "未分段开场",
+                "line_no": first_meaningful_line,
+                "end_line": max(source_line_count, last_meaningful_line),
+                "implicit": True,
+            })
+
+        for scene in scene_ranges:
+            within = [
+                node for node in nodes
+                if scene["line_no"] <= node.line_no <= scene["end_line"]
+            ]
+            scene_dialogue = [node for node in within if node.kind == "line"]
+            scene_directives = [node for node in within if node.kind == "dir"]
+            scene_speakers: list[dict[str, Any]] = []
+            scene_speaker_rows: dict[str, dict[str, Any]] = {}
+            for node in scene_dialogue:
+                who = str(node.fields.get("who") or "").strip()
+                if not who:
+                    continue
+                row = scene_speaker_rows.setdefault(who, {"name": who, "count": 0})
+                row["count"] += 1
+            for name in sorted(scene_speaker_rows, key=lambda value: value.casefold()):
+                scene_speakers.append(scene_speaker_rows[name])
+            background_nodes = [
+                node for node in scene_directives
+                if str(node.fields.get("cmd") or "").strip().casefold() == "bg"
+            ]
+            scene.update({
+                "speakers": scene_speakers,
+                "dialogue_count": len(scene_dialogue),
+                "directive_count": len(scene_directives),
+                "has_background": bool(background_nodes),
+                "background": str(background_nodes[-1].fields.get("arg") or "").strip() if background_nodes else "",
+            })
+
         return {
             "ok": True, "kind": "static_preflight", "format": format_summary, "speakers": speakers,
-            "scenes": [{"title": str(node.fields.get("title") or "未命名场景"), "line_no": node.line_no} for node in scene_nodes],
+            "scenes": scene_ranges,
+            "scene_judgement": {
+                "count": len(scene_ranges),
+                "implicit_count": sum(1 for scene in scene_ranges if scene["implicit"]),
+                "missing_background_count": sum(1 for scene in scene_ranges if not scene["has_background"]),
+            },
             "directives": {"total": len(directive_nodes), "recognized": len(directive_nodes) - sum(1 for issue in issues if issue["code"] == "unknown_directive"), "issues": issues},
             "actions": actions,
         }
@@ -521,6 +595,95 @@ class Legacy093Adapter:
             except (OSError, json.JSONDecodeError):
                 return {}
             return value if isinstance(value, dict) else {}
+
+    def _background_library(self) -> dict[str, Any]:
+        path = self.settings.resource_index
+        if not path or not path.is_file():
+            return {}
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ProductionError("resource_index_corrupted", "背景库无法读取", status=500) from exc
+        return value if isinstance(value, dict) else {}
+
+    def _background_page_source(self, token: str, library_scope: bool):
+        """Cache only the small background view, not the full character index."""
+        path = self.store.get_draft_path(token) / "resources.json"
+        signature = (
+            self._file_signature(path),
+            self._file_signature(self.settings.resource_index if library_scope else None),
+            self._file_signature(self.settings.aa_data / "overrides" / "manifest.json" if self.settings.aa_data else None),
+            self._file_signature(self.settings.aa_data / "halocue-official-previews" / "manifest.json" if self.settings.aa_data else None),
+        )
+        cache_key = (token, library_scope)
+        with self._background_cache_lock:
+            cached = self._background_pages.get(cache_key)
+            if cached and cached[0] == signature:
+                return cached[1:]
+            resources = self._draft_resources(token)
+            frozen = set(resources.get("bg") or {})
+            if library_scope:
+                resources = self._merge_backgrounds(self._background_library(), resources)
+            resources = {name: resources.get(name) or {} for name in ("bg", "bg_label", "scene_labels")}
+            resources["scene_labels"] = {"background": resources["scene_labels"].get("background") or {}}
+            rows = self._resource_items(resources, "backgrounds")
+            for row in rows:
+                row["_search_document"] = background_search_document(row)
+            visible = BackgroundLibraryScope(self.settings.aa_data, self.settings.resource_index).visible_keys(resources)
+            if len(self._background_pages) >= 8:
+                self._background_pages.pop(next(iter(self._background_pages)))
+            self._background_pages[cache_key] = (signature, resources, frozen, rows, visible)
+            return resources, frozen, rows, visible
+
+    @staticmethod
+    def _merge_backgrounds(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+        result = dict(base)
+        for field in ("bg", "bg_label"):
+            result[field] = {**(base.get(field) or {}), **(overlay.get(field) or {})}
+        result["scene_labels"] = {**(base.get("scene_labels") or {}), **(overlay.get("scene_labels") or {})}
+        result["scene_labels"]["background"] = {
+            **((base.get("scene_labels") or {}).get("background") or {}),
+            **((overlay.get("scene_labels") or {}).get("background") or {}),
+        }
+        return result
+
+    @contextmanager
+    def selected_background(self, token: str, key: str, expected_version: int):
+        """Stage only the explicit selection; rejected edits restore the snapshot."""
+        with self.store.draft_lock(token):
+            detail = self.draft_detail(token)
+            if detail["draft_version"] != expected_version:
+                raise ProductionError("revision_conflict", "草稿版本已经变化", status=409)
+            if key == "BG_Black":
+                yield
+                return
+            resources = self._draft_resources(token)
+            if key in (resources.get("bg") or {}):
+                yield
+                return
+            library = self._background_library()
+            if key not in BackgroundLibraryScope(self.settings.aa_data, self.settings.resource_index).visible_keys(library):
+                raise ProductionError("background_not_found", "所选背景不在背景库中", status=404)
+            selected = {"bg": {key: library["bg"][key]}}
+            if key in (library.get("bg_label") or {}):
+                selected["bg_label"] = {key: library["bg_label"][key]}
+            metadata = (library.get("scene_labels") or {}).get("background") or {}
+            if key in metadata:
+                selected["scene_labels"] = {"background": {key: metadata[key]}}
+            path = self.store.get_draft_path(token) / "resources.json"
+            existed = path.exists()
+            original = path.read_bytes() if existed else b""
+            _write_json_atomic(path, self._merge_backgrounds(resources, selected))
+            try:
+                yield
+            except Exception:
+                if existed:
+                    temporary = path.with_suffix(".rollback.tmp")
+                    temporary.write_bytes(original)
+                    os.replace(temporary, path)
+                else:
+                    path.unlink(missing_ok=True)
+                raise
 
     def draft_resource_contains(self, token: str, kind: str, key: str) -> bool:
         resources = self._draft_resources(token)
@@ -614,12 +777,57 @@ class Legacy093Adapter:
         if kind == "backgrounds":
             raw = resources.get("bg") if isinstance(resources.get("bg"), dict) else {}
             labels = resources.get("bg_label") if isinstance(resources.get("bg_label"), dict) else {}
+            scene_labels = resources.get("scene_labels") if isinstance(resources.get("scene_labels"), dict) else {}
+            scene_backgrounds = scene_labels.get("background") if isinstance(scene_labels.get("background"), dict) else {}
             rows = []
             for key in raw:
-                label = labels.get(str(key))
-                if isinstance(label, dict):
-                    label = label.get("label") or label.get("description")
-                rows.append({"key": str(key), "name": str(label or key)})
+                token = str(key)
+                label_value = labels.get(token)
+                label_metadata = label_value if isinstance(label_value, dict) else {}
+                scene_metadata = scene_backgrounds.get(token) if isinstance(scene_backgrounds.get(token), dict) else {}
+                metadata = {**label_metadata, **{name: value for name, value in scene_metadata.items() if value is not None and value != ""}}
+                label = metadata.get("label") or metadata.get("description") or (label_value if isinstance(label_value, str) else None)
+                tags = metadata.get("tags")
+                if isinstance(tags, str):
+                    tags = [item.strip() for item in tags.split(",") if item.strip()]
+                elif isinstance(tags, list):
+                    tags = [str(item).strip() for item in tags if str(item).strip()]
+                else:
+                    tags = []
+                row = {
+                    "key": token,
+                    **background_name_metadata(token, {**metadata, "label": label or token}),
+                }
+                if tags:
+                    row["tags"] = tags
+                aliases = {
+                    "place": ("place",),
+                    "time": ("time", "time_of_day"),
+                    "weather": ("weather",),
+                    "indoor_outdoor": ("indoor_outdoor",),
+                    "season": ("season",),
+                    "usage_hint": ("usage_hint_cn", "usage_hint"),
+                    "avoid_when": ("avoid_when_cn", "avoid_when"),
+                    "mood": ("mood",),
+                    "subcategory": ("subcategory",),
+                    "category": ("category_path_cn", "main_category_cn", "source_category"),
+                    "source_kind": ("source_kind",),
+                    "status": ("status",),
+                    "description": ("description",),
+                }
+                for public_name, candidates in aliases.items():
+                    value = next((metadata.get(name) for name in candidates if metadata.get(name) not in (None, "")), None)
+                    if value not in (None, ""):
+                        row[public_name] = str(value)
+                for name in ("dialogue_suitable", "has_fixed_characters"):
+                    if isinstance(metadata.get(name), bool):
+                        row[name] = metadata[name]
+                search_terms = metadata.get("search_terms_cn")
+                if isinstance(search_terms, list):
+                    row["search_terms"] = [str(term) for term in search_terms if isinstance(term, str)]
+                elif isinstance(search_terms, str):
+                    row["search_terms"] = [search_terms]
+                rows.append(row)
             return rows
         if kind == "sounds":
             raw = resources.get("sounds") if isinstance(resources.get("sounds"), list) else []
@@ -668,6 +876,27 @@ class Legacy093Adapter:
             return self.previews.background(key) is not None
         return self.previews.cg(key) is not None
 
+    def draft_resource_preview(self, token: str, kind: str, key: str) -> ResourcePreview | None:
+        """Keep frozen task assets previewable after the live catalogue changes."""
+        resources = self._draft_resources(token)
+        if kind == "backgrounds":
+            backgrounds = resources.get("bg")
+            if isinstance(backgrounds, dict) and key in backgrounds:
+                return self.previews.background(key)
+        elif kind == "characters":
+            characters = resources.get("characters")
+            for item in characters if isinstance(characters, list) else []:
+                if isinstance(item, dict) and str(item.get("identifier") or "") == key:
+                    return self.previews.avatar(
+                        avatar_key=str(item.get("avatar") or item.get("avatar_key") or ""),
+                        spine=str(item.get("spine") or ""),
+                    )
+        elif kind == "cg":
+            popups = resources.get("popups")
+            if isinstance(popups, list) and key in {str(value) for value in popups}:
+                return self.previews.cg(key)
+        return None
+
     def _registered_custom_background_keys(self) -> set[str]:
         database = self.settings.legacy_root / "aa_assets.db"
         if not database.is_file():
@@ -703,30 +932,107 @@ class Legacy093Adapter:
         return rows
 
     def list_draft_resources(
-        self, token: str, kind: str, *, query: str = "", offset: int = 0, limit: int = 80
+        self,
+        token: str,
+        kind: str,
+        *,
+        query: str = "",
+        offset: int = 0,
+        limit: int = 80,
+        filters: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        resources = self._draft_resources(token)
+        library_scope = kind == "backgrounds" and (filters or {}).get("scope") == "library"
+        if kind == "backgrounds":
+            resources, frozen_keys, background_rows, official_backgrounds = self._background_page_source(token, library_scope)
+        else:
+            resources = self._draft_resources(token)
+            frozen_keys = set(resources.get("bg") or {})
+        scene_advice = None
+        if kind == "backgrounds" and (filters or {}).get("scene_card_id"):
+            from .scene_backgrounds import scene_context
+            scene_advice = scene_context(
+                self.draft_detail(token)["cards"], str(filters["scene_card_id"]),
+                {name: str(filters.get(f"scene_{name}") or "") for name in ("place", "time", "space", "weather")},
+            )
         needle = query.strip().casefold()
+        active_filters = {
+            str(key): str(value).strip().casefold()
+            for key, value in (filters or {}).items()
+            if str(value).strip()
+        }
         internal_kind = {"backgrounds": "background", "cg-backgrounds": "background", "sounds": "sound", "characters": "character", "cg": "cg"}.get(kind)
         imported = {
             str(asset.get("key") or ""): self.task_asset_public(asset)
             for asset in self._task_custom_assets(token)
             if asset.get("kind") == internal_kind
         }
-        source_items = self._cg_background_items(token, resources) if kind == "cg-backgrounds" else self._resource_items(resources, kind)
-        items = [
-            {
-                **{key: value for key, value in item.items() if key != "avatar_key"},
-                "source": "task_import" if str(item.get("key") or "") in imported else "task_snapshot",
-                "preview_available": self._preview_available(token, kind, item),
-                **({"asset_id": imported[str(item.get("key") or "")]["asset_id"]}
-                   if str(item.get("key") or "") in imported else {}),
+        source_items = background_rows if kind == "backgrounds" else self._cg_background_items(token, resources) if kind == "cg-backgrounds" else self._resource_items(resources, kind)
+        background_previews = self.previews.backgrounds_available(
+            item["key"] for item in source_items
+            if item["key"] in official_backgrounds and item["key"] not in imported
+            and background_search_score(item["_search_document"], needle) is not None
+        ) if kind == "backgrounds" else {}
+        items: list[dict[str, Any]] = []
+        for item in source_items:
+            key = str(item.get("key") or "")
+            if kind == "backgrounds" and key not in official_backgrounds:
+                if active_filters.get("source") != "task_import" or key not in imported:
+                    continue
+            group = "cg" if key.casefold().startswith("bg_cs_") else "scene" if key.casefold().startswith("bg_") else "custom"
+            if kind == "backgrounds" and active_filters.get("group") and active_filters["group"] != group:
+                continue
+            score = background_search_score(item["_search_document"], needle) if kind == "backgrounds" else 0
+            if score is None:
+                continue
+            public = {
+                **{name: value for name, value in item.items() if name != "avatar_key" and not name.startswith("_")},
+                "_search_score": score,
+                "source": "task_import" if key in imported else "background_library" if library_scope and key not in frozen_keys else "task_snapshot",
+                "preview_available": background_previews.get(key, False) if kind == "backgrounds" and key not in imported else self._preview_available(token, kind, item),
+                **({"asset_id": imported[key]["asset_id"]} if key in imported else {}),
             }
-            for item in source_items
-            if not needle or any(needle in str(item.get(name) or "").casefold() for name in ("key", "name", "club"))
-            or any(needle in str(alias).casefold() for alias in item.get("aliases", []))
-        ]
-        items.sort(key=lambda item: (str(item.get("name") or "").casefold(), str(item["key"]).casefold()))
+            searchable = [public.get(name) for name in ("key", "name", "club", "place", "time", "weather", "mood", "subcategory", "category", "description", "indoor_outdoor", "season", "usage_hint")]
+            searchable.extend(public.get("search_terms", []))
+            searchable.extend(public.get("aliases", []) if isinstance(public.get("aliases"), list) else [])
+            searchable.extend(public.get("tags", []) if isinstance(public.get("tags"), list) else [public.get("tags")])
+            if kind != "backgrounds" and needle and not any(needle in str(value or "").casefold() for value in searchable):
+                continue
+            if active_filters.get("source") and str(public.get("source") or "").casefold() != active_filters["source"]:
+                continue
+            if active_filters.get("ready") in {"1", "true", "yes"} and public.get("preview_available") is not True:
+                continue
+            filter_fields = {
+                "category": ("category", "subcategory", "name", "key", "tags"),
+                "place": ("indoor_outdoor", "place", "category", "subcategory", "tags"),
+                "time": ("time", "name", "key", "tags"),
+                "weather": ("weather", "name", "key", "tags"),
+                "tags": ("tags", "category", "subcategory", "place", "mood", "description"),
+            }
+            rejected = False
+            for filter_name, fields in filter_fields.items():
+                value = active_filters.get(filter_name)
+                if not value:
+                    continue
+                haystack: list[str] = []
+                for field in fields:
+                    candidate = public.get(field)
+                    if isinstance(candidate, list):
+                        haystack.extend(str(entry).casefold() for entry in candidate)
+                    else:
+                        haystack.append(str(candidate or "").casefold())
+                if not any(value in candidate for candidate in haystack):
+                    rejected = True
+                    break
+            if not rejected:
+                items.append(public)
+        items.sort(key=lambda item: (-item.pop("_search_score", 0), str(item.get("name") or "").casefold(), str(item["key"]).casefold()))
+        if scene_advice is not None:
+            from .scene_backgrounds import rank_items
+            items = rank_items(items, scene_advice)
+            scene_advice["counts"] = {
+                status: sum(item["scene_match"]["status"] == status for item in items)
+                for status in ("match", "unknown", "conflict")
+            }
         start = max(0, offset)
         page_size = max(1, min(limit, 200))
         page = items[start : start + page_size]
@@ -734,12 +1040,14 @@ class Legacy093Adapter:
             "ok": True,
             "kind": kind,
             "query": query,
+            "filters": active_filters,
+            **({"scene_context": scene_advice} if scene_advice is not None else {}),
             "items": page,
             "total": len(items),
             "offset": start,
             "limit": page_size,
             "has_more": start + len(page) < len(items),
-            "frozen": True,
+            "frozen": not library_scope,
         }
 
     def draft_character_detail(self, token: str, identifier: str) -> dict[str, Any]:
@@ -759,6 +1067,21 @@ class Legacy093Adapter:
                 "character_not_found", "该角色不在当前任务冻结的素材清单中", status=404
             )
         raw_faces = value.get("faces") if isinstance(value.get("faces"), list) else []
+        # Enrich only existing frozen face IDs, from the exact selected variant.
+        # Never infer a face from a different outfit or enlarge the allowlist.
+        capabilities = resources.get("face_capabilities") or {key: value.get("face_capabilities", [])}
+        variants = self._modules["annotate"]._selected_variants(
+            capabilities, key, str(value.get("spine_signature") or ""), str(value.get("outfit_key") or "")
+        )
+        evidence = {
+            str(face.get("id") or ""): face
+            for variant in (variants if len(variants) == 1 else [])
+            for face in variant.get("faces", []) if isinstance(face, dict)
+        }
+        annotation_fields = (
+            "semantic_cn", "cn", "emotion_family", "intensity", "expression_class",
+            "beat_fit", "hold_policy", "special_tags", "avoid_when_cn", "usage_hint_cn",
+        )
         faces = []
         for face in raw_faces:
             if isinstance(face, dict):
@@ -768,7 +1091,23 @@ class Legacy093Adapter:
             else:
                 face_id = raw = label = str(face or "").strip()
             if face_id or raw or label:
-                faces.append({"id": face_id, "raw": raw, "label": label})
+                annotation = dict(evidence.get(face_id, {}))
+                if isinstance(face, dict):
+                    annotation.update({name: item for name, item in face.items() if item is not None and item != ""})
+                public = {"id": face_id, "raw": raw, "label": label}
+                for name in annotation_fields:
+                    item = annotation.get(name)
+                    if name == "intensity":
+                        # Older manual labels store numeric levels as strings.
+                        if type(item) in (int, float) and item in (0, 1, 2, 3):
+                            public[name] = int(item)
+                        elif isinstance(item, str) and item.strip() in {"0", "1", "2", "3"}:
+                            public[name] = int(item.strip())
+                    elif isinstance(item, str):
+                        public[name] = item[:500]
+                    elif name in {"beat_fit", "special_tags"} and isinstance(item, list):
+                        public[name] = [entry[:120] for entry in item[:8] if isinstance(entry, str)]
+                faces.append(public)
         return {
             "ok": True,
             "frozen": True,
@@ -920,6 +1259,10 @@ class Legacy093Adapter:
         key = result["stem"] if kind in {"background", "sound", "cg"} else str(identifier).strip()
         metadata = result["metadata"]
         default_name = labels.get("label") if kind == "cg" else ""
+        # A library asset's nickname is a free-form note. Only an explicit club
+        # label may become character organization; legacy task imports still use
+        # nickname for that field.
+        club = str(labels.get("club") or ("" if library_asset_id else nickname)).strip()
         record = {
             "asset_id": asset_id, "kind": kind, "key": key, "display_name": display_name.strip() or default_name or key,
             "nickname": nickname.strip(), "labels": labels if isinstance(labels, dict) else {},
@@ -956,7 +1299,7 @@ class Legacy093Adapter:
                 else:
                     rows = resources.setdefault("characters", [])
                     rows.append({
-                        "identifier": key, "name": record["display_name"], "club": record["nickname"],
+                        "identifier": key, "name": record["display_name"], "club": club,
                         "spine": str(Path("characters") / key / record["outfit_key"]),
                         "outfit_key": record["outfit_key"], "spine_signature": metadata.get("spine_signature", ""),
                         "faces": [{"id": str(face), "raw": str(face), "label": str(face)} for face in metadata.get("faces", [])],
@@ -991,7 +1334,9 @@ class Legacy093Adapter:
         return {
             "asset_id": str(item.get("asset_id") or ""), "kind": str(item.get("kind") or ""),
             "key": str(item.get("key") or ""), "name": str(item.get("display_name") or item.get("key") or ""),
-            "club": str(item.get("nickname") or ""), "labels": item.get("labels") if isinstance(item.get("labels"), dict) else {},
+            "club": str((item.get("labels") or {}).get("club") or ("" if item.get("library_asset_id") else item.get("nickname") or "")),
+            "nickname": str(item.get("nickname") or ""),
+            "labels": item.get("labels") if isinstance(item.get("labels"), dict) else {},
             "metadata": Legacy093Adapter._asset_metadata_public(str(item.get("kind") or ""), metadata),
             "library_asset_id": str(item.get("library_asset_id") or ""),
             "recognition": item.get("recognition") if isinstance(item.get("recognition"), dict) else None,
@@ -1058,6 +1403,10 @@ class Legacy093Adapter:
             card["issues"].extend(
                 issue for issue in cg_issues if issue.get("card_id") == card["card_id"]
             )
+        try:
+            frozen_source_text = (self.store.get_draft_path(token) / "source.txt").read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            frozen_source_text = ""
         counts = {
             "total": len(cards),
             "pending": sum(card["review_state"] == "pending" for card in cards),
@@ -1071,6 +1420,7 @@ class Legacy093Adapter:
         return {
             "draft_token": token,
             "project": draft["session"].get("project"),
+            "frozen_source_text": frozen_source_text,
             "draft_version": draft["session"]["draft_version"],
             "content_revision": draft["session"]["content_revision"],
             "cards": cards,
@@ -1191,7 +1541,7 @@ class Legacy093Adapter:
             "ambiguities": normalized_ambiguities,
         }
 
-    def execute_ai_preflight(self, *, token: str, preflight_id: str, provider: Any) -> dict[str, Any]:
+    def execute_ai_preflight(self, *, token: str, preflight_id: str, provider: Any, publish=None) -> dict[str, Any]:
         """Run a source-only AI preflight without modifying the draft or cast."""
         draft_dir = self.store.get_draft_path(token)
         draft = self.store.load_draft(token)
@@ -1204,6 +1554,11 @@ class Legacy093Adapter:
             "不选择角色骨骼、不登记素材。只返回 JSON。potential_speakers 只列出规则解析可能遗漏的说话者；"
             "scenes 只在地点、室内外或时间明确变化时分段；background_need 写该段需要的背景描述，"
             "不确定则留空字符串；ambiguities 只列必须由用户确认、且会影响场景或角色理解的信息。"
+            "输出必须是一个对象，且只包含 potential_speakers、scenes、ambiguities 三个数组。"
+            "scenes 每项是对象，使用整数 start_line/end_line 和字符串 location/time/background_need。"
+            'ambiguities 每项必须是 {"line":整数行号,"message":"待确认的问题"} 对象，'
+            "不能输出字符串列表，也不能填 null；没有必要确认的问题时输出空数组 []。"
+            "所有行号引用下方 L 后的原文行号，不要发明行号，不要把这些格式说明当作待确认问题。"
         )
         # Keep server-only validation metadata out of the model context. The
         # provider validates the returned JSON against a strict schema, and
@@ -1231,13 +1586,19 @@ class Legacy093Adapter:
             "model": {"provider": str(getattr(provider, "name", "")), "name": str(getattr(provider, "model", ""))},
             "analysis": analysis,
         }
-        output_dir = draft_dir / "ai-preflights"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output = output_dir / f"{preflight_id}.json"
-        temporary = output.with_suffix(".json.tmp")
-        temporary.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temporary, output)
-        return record
+        def persist():
+            output_dir = draft_dir / "ai-preflights"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output = output_dir / f"{preflight_id}.json"
+            temporary = output.with_suffix(".json.tmp")
+            try:
+                temporary.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.replace(temporary, output)
+            finally:
+                temporary.unlink(missing_ok=True)
+            return record
+
+        return publish(persist) if publish is not None else persist()
 
     def ai_preflights(self, token: str) -> dict[str, Any]:
         root = self.store.get_draft_path(token) / "ai-preflights"
@@ -1318,6 +1679,22 @@ class Legacy093Adapter:
             return None
         value = str(value).strip()
         return value[:240] if value else None
+
+    def committed_direction_profile(self, token: str, generation_id: str | None) -> dict[str, str] | None:
+        """Read the last committed generation, not the latest attempted strategy."""
+        if not generation_id or not re.fullmatch(r"direction-[0-9a-f]{12}", generation_id):
+            return None
+        root = self.store.get_draft_path(token) / "direction-generations" / generation_id
+        try:
+            result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(result, dict) or result.get("status") != "succeeded":
+            return None
+        profile = result.get("direction_profile")
+        if profile not in {"conservative", "standard"}:
+            return None
+        return {"id": profile, "generation_id": generation_id}
 
     def direction_proposals(self, token: str) -> dict[str, Any]:
         """Expose task-local AI suggestions with conservative stable-card links."""
@@ -1720,6 +2097,10 @@ class Legacy093Adapter:
             normalized = {"kind": "unset"}
         elif not str(mapping.get("id") or "").strip():
             raise ProductionError("cast_id_required", "有立绘角色必须提供 AA 角色 ID")
+        else:
+            # The explicit UI kind is authoritative over absent/stale legacy
+            # flags; the compiler and model evidence guards consume these flags.
+            normalized.update(portrait=True, narrator=False)
         try:
             with self._teacher_error_boundary():
                 self.store.update_cast(
@@ -1818,14 +2199,18 @@ class Legacy093Adapter:
         expected_draft_version: int,
     ) -> dict[str, Any]:
         try:
-            self.store.insert_card(
-                token=token,
-                after_card_id=after_card_id,
-                kind=kind,
-                payload=fields,
-                origin="manual",
-                expected_draft_version=expected_draft_version,
-            )
+            selection = self.selected_background(token, str(fields.get("arg") or "").strip(), expected_draft_version) if kind == "dir" and fields.get("cmd") == "bg" else nullcontext()
+            with selection:
+                if after_card_id and not any(card["card_id"] == after_card_id for card in self.draft_detail(token)["cards"]):
+                    raise ProductionError("card_not_found", "插入位置不存在，请刷新草稿", status=404)
+                self.store.insert_card(
+                    token=token,
+                    after_card_id=after_card_id,
+                    kind=kind,
+                    payload=fields,
+                    origin="manual",
+                    expected_draft_version=expected_draft_version,
+                )
         except self._modules["draft_store"].RevisionConflictError as exc:
             raise ProductionError("revision_conflict", str(exc), status=409) from exc
         return self.draft_detail(token)
@@ -1890,19 +2275,23 @@ class Legacy093Adapter:
         card = next((item for item in detail["cards"] if item["card_id"] == card_id), None)
         if not card:
             raise ProductionError("card_not_found", "卡片不存在", status=404)
-        if card["kind"] != "background_request":
+        current = card.get("current") or {}
+        if card["kind"] != "background_request" and not (
+            card["kind"] == "dir" and current.get("cmd") == "bg"
+        ):
             raise ProductionError(
                 "card_is_not_background_request",
-                "只能处理背景请求卡",
+                "只能处理背景请求或已有背景指令卡",
                 status=409,
             )
         try:
-            self.store.resolve_background_request(
-                token=token,
-                card_id=card_id,
-                bg_name=background_key,
-                expected_draft_version=expected_draft_version,
-            )
+            with self.selected_background(token, background_key, expected_draft_version):
+                self.store.resolve_background_request(
+                    token=token,
+                    card_id=card_id,
+                    bg_name=background_key,
+                    expected_draft_version=expected_draft_version,
+                )
         except self._modules["draft_store"].RevisionConflictError as exc:
             raise ProductionError("revision_conflict", str(exc), status=409) from exc
         return self.draft_detail(token)
@@ -2012,9 +2401,39 @@ class Legacy093Adapter:
         except self._modules["build_bundle"].CompileInputStaleError as exc:
             raise ProductionError("compile_input_stale", str(exc), status=409) from exc
 
+    def frozen_resource_index_issue(self, token: str) -> tuple[str | None, list[str]]:
+        # The compile gate and snapshot must inspect the same task-local index.
+        resource_path = self.store.get_draft_path(token) / "resources.json"
+        if not resource_path.is_file():
+            return "resource_index_not_configured", ["resources"]
+        try:
+            resources = json.loads(resource_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError):
+            return "resource_index_incomplete", ["resources"]
+        required = {"bg": dict, "sounds": list, "characters": list, "enums": dict}
+        missing = [
+            name for name, kind in required.items()
+            if not isinstance(resources, dict) or not isinstance(resources.get(name), kind)
+        ]
+        if isinstance(resources, dict) and isinstance(resources.get("enums"), dict):
+            missing.extend(
+                f"enums.{name}" for name in ("emoticon", "action")
+                if not isinstance(resources["enums"].get(name), dict)
+            )
+        return ("resource_index_incomplete", missing) if missing else (None, [])
+
     def _create_compile_snapshot_locked(self, token: str, expected_draft_version: int) -> str:
         draft_dir = self.store.get_draft_path(token)
         self.store.assert_review_ready(token)
+        issue, missing = self.frozen_resource_index_issue(token)
+        if issue:
+            raise ProductionError(
+                issue,
+                "制作任务缺少冻结的 AA 资源索引，请重新导入 AA 资源并建立制作任务"
+                if issue == "resource_index_not_configured" else
+                "冻结的 AA 资源索引不完整，请重新导入资源后再编译",
+                status=409, details={"missing": missing} if issue == "resource_index_incomplete" else None,
+            )
         manager = self._modules["build_bundle"].BuildBundleManager(store=self.store)
         build_id = manager.create_compile_snapshot(token, expected_draft_version)
         input_dir = draft_dir / "builds" / ".tmp" / build_id / "input"
@@ -2035,7 +2454,7 @@ class Legacy093Adapter:
             cast_data.setdefault("cast", {}).update(aliases)
             reply_plan_path = input_dir / "teacher-reply-plan.json"
             if reply_plan_path.is_file():
-                reply_plan = importlib.import_module("teacher_reply_plan").retarget_reply_plan(
+                reply_plan = self._legacy_module("teacher_reply_plan").retarget_reply_plan(
                     json.loads(reply_plan_path.read_text(encoding="utf-8")), transformed, cast_data,
                 )
                 _write_json_atomic(reply_plan_path, reply_plan)
@@ -2048,7 +2467,7 @@ class Legacy093Adapter:
 
     def execute_compile(self, token: str, build_id: str) -> dict[str, Any]:
         with _COMPILE_LOCK, self._teacher_error_boundary():
-            script2aap = importlib.import_module("script2aap")
+            script2aap = self._legacy_module("script2aap")
             original_here = script2aap.HERE
             build_bundle = self._modules["build_bundle"]
             original_compile = build_bundle.compile_script
@@ -2063,7 +2482,15 @@ class Legacy093Adapter:
             build_bundle.compile_script = isolated_compile
             try:
                 output_root = self.store.get_draft_path(token) / "builds" / ".tmp" / build_id / "compile-output"
-                manager = build_bundle.BuildBundleManager(store=self.store, output_root=str(output_root))
+                try:
+                    manager = build_bundle.BuildBundleManager(store=self.store, output_root=str(output_root))
+                except TypeError as exc:
+                    # Real 0.95 releases predate the isolated output_root constructor.
+                    # Their worker already writes exclusively beneath the immutable build snapshot,
+                    # so falling back to the historical signature preserves isolation and parity.
+                    if "output_root" not in str(exc):
+                        raise
+                    manager = build_bundle.BuildBundleManager(store=self.store)
                 result = manager.execute_build_worker(token, build_id)
                 self._inject_task_assets_into_bundle(token=token, bundle_dir=Path(result["bundle_dir"]))
                 return result
@@ -2077,7 +2504,7 @@ class Legacy093Adapter:
         if not custom_assets:
             return
         project = bundle_dir / "project"
-        aa_registry = importlib.import_module("aa_registry")
+        aa_registry = self._legacy_module("aa_registry")
         manifest = aa_registry.load_manifest(project)
         for item in custom_assets:
             kind = str(item.get("kind") or "")
@@ -2362,6 +2789,7 @@ class Legacy093Adapter:
                 "agent": agent,
                 "metrics": agent.get("metrics") if isinstance(agent.get("metrics"), dict) else {},
                 "diagnostics": list(value.get("diagnostics") or []),
+                "reaction_records": list(value.get("reaction_records") or []),
                 "proposal_count": len(value.get("proposals") or []),
                 "direction_change_count": int(value.get("direction_change_count") or 0),
                 "cancelled": bool(value.get("cancelled")),
@@ -2457,6 +2885,11 @@ class Legacy093Adapter:
                 "background_not_in_manifest": "所选背景不在冻结素材清单中，草稿未被修改",
             }
             code = str(getattr(exc, "code", ""))
+            if code == "reaction_intent_lost":
+                raise ProductionError(
+                    code, "反应镜头未保留目标或已确认演出，草稿未被修改。", status=409,
+                    details=exception_details if isinstance(exception_details, dict) else {},
+                ) from exc
             if code in contract_errors:
                 raise ProductionError(code, contract_errors[code], status=409) from exc
             raise ProductionError(
@@ -2488,6 +2921,16 @@ class Legacy093Adapter:
             _write_json_atomic(attempt_dir / "result.json", summary)
             return summary
 
+        source_by_line = {
+            card.get("line_no"): card for card in source_cards
+            if isinstance(card, dict) and card.get("kind") == "line"
+        }
+        result["reaction_records"] = [
+            {**record,
+             "source_card_id": source_by_line.get(record.get("source_line"), {}).get("card_id"),
+             "source_id": source_by_line.get(record.get("source_line"), {}).get("source_id")}
+            for record in result.get("reaction_records", [])
+        ]
         effective_proposals = [
             proposal
             for proposal in (result.get("proposals") or [])

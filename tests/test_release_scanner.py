@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import io
+import gzip
 import json
-import os
 from pathlib import Path
 import shutil
 import sqlite3
@@ -15,6 +15,15 @@ from release_tools.scanner import ScanFinding, scan_tree
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_compressed_reference_payload_is_inspected(tmp_path):
+    path = tmp_path / "scenario.jsonl.gz"
+    source_path = "D:" + "/Desktop/private/project"
+    path.write_bytes(gzip.compress((json.dumps({"source": source_path}) + "\n").encode()))
+    assert "personal-path" in _codes(scan_tree(tmp_path, mode="source"))
+    path.write_bytes(b"not gzip")
+    assert "archive-invalid" in _codes(scan_tree(tmp_path, mode="source"))
 
 
 def _codes(findings: tuple[ScanFinding, ...]) -> set[str]:
@@ -116,18 +125,24 @@ def test_scanner_does_not_suppress_placeholder_words_inside_real_api_key(tmp_pat
     assert credential_value not in repr(findings)
 
 
-def test_scanner_does_not_treat_domain_identifier_tokens_as_credentials(tmp_path):
-    (tmp_path / "workflow.py").write_text(
-        "token = 'legacy-resource-layout'\n", encoding="utf-8"
+def test_scanner_does_not_treat_css_class_names_as_credentials(tmp_path):
+    (tmp_path / "styles.css").write_text(
+        ".sk-preflight-status-line { display: block; }\n.sk-preflight-detail-list { margin: 0; }\n",
+        encoding="utf-8",
     )
+
+    assert scan_tree(tmp_path, mode="source") == ()
+
+
+def test_scanner_does_not_treat_domain_identifier_tokens_as_credentials(tmp_path):
+    (tmp_path / "workflow.py").write_text("token = 'legacy-resource-layout'\n", encoding="utf-8")
 
     assert scan_tree(tmp_path, mode="source") == ()
 
 
 def test_scanner_ignores_obvious_assignment_placeholders(tmp_path):
     (tmp_path / "example.py").write_text(
-        "apiKey='replace-with-your-api-key'\n"
-        "token='test-token-placeholder-value'\n",
+        "apiKey='replace-with-your-api-key'\ntoken='test-token-placeholder-value'\n",
         encoding="utf-8",
     )
 
@@ -181,6 +196,7 @@ def test_scanner_refuses_symlinks_that_escape_root(tmp_path):
 
 def test_scanner_rejects_unexpected_public_executables_and_all_public_spine(tmp_path):
     (tmp_path / "HaloCue.exe").write_bytes(b"expected launcher")
+    (tmp_path / "HaloCueUpdater.exe").write_bytes(b"expected updater")
     (tmp_path / "helper.exe").write_bytes(b"unexpected")
     spine = tmp_path / "vendor" / "Spine.com"
     spine.parent.mkdir()
@@ -192,7 +208,7 @@ def test_scanner_rejects_unexpected_public_executables_and_all_public_spine(tmp_
     assert "unexpected-executable" in _codes(findings)
     assert [finding.code for finding in findings].count("spine-runtime") == 2
     assert not any(
-        finding.relative_path == "HaloCue.exe"
+        finding.relative_path in {"HaloCue.exe", "HaloCueUpdater.exe"}
         and finding.code == "unexpected-executable"
         for finding in findings
     )
@@ -238,15 +254,12 @@ def test_scanner_shares_member_budget_across_nested_archive_tree(tmp_path, monke
             "three.txt": "three\n",
         }
     )
-    (tmp_path / "nested.zip").write_bytes(
-        _zip_bytes({"first.zip": inner, "second.zip": inner})
-    )
+    (tmp_path / "nested.zip").write_bytes(_zip_bytes({"first.zip": inner, "second.zip": inner}))
 
     findings = scan_tree(tmp_path, mode="source")
 
     assert any(
-        finding.code == "archive-content"
-        and "second.zip" in finding.relative_path
+        finding.code == "archive-content" and "second.zip" in finding.relative_path
         for finding in findings
     )
 
@@ -260,8 +273,7 @@ def test_scanner_shares_byte_budget_across_nested_archive_tree(tmp_path, monkeyp
     findings = scan_tree(tmp_path, mode="source")
 
     assert any(
-        finding.code == "archive-content"
-        and "inner.zip" in finding.relative_path
+        finding.code == "archive-content" and "inner.zip" in finding.relative_path
         for finding in findings
     )
 
@@ -288,9 +300,7 @@ def test_scanner_accepts_audited_public_seed_and_safe_nested_json(tmp_path):
     database = tmp_path / "data" / "halocue_labels.db"
     database.parent.mkdir()
     shutil.copyfile(ROOT / "data" / "halocue_labels.db", database)
-    (tmp_path / "metadata.json").write_text(
-        '{"labels":[{"name":"smile"}]}', encoding="utf-8"
-    )
+    (tmp_path / "metadata.json").write_text('{"labels":[{"name":"smile"}]}', encoding="utf-8")
 
     assert scan_tree(tmp_path, mode="source") == ()
 
@@ -312,8 +322,7 @@ def test_scanner_rejects_private_relative_values_in_public_seed_storage_fields(
     shutil.copyfile(ROOT / "data" / "halocue_labels.db", database)
     connection = sqlite3.connect(database)
     connection.execute(
-        f'UPDATE "{table}" SET "{column}" = ? '
-        f'WHERE rowid = (SELECT rowid FROM "{table}" LIMIT 1)',
+        f'UPDATE "{table}" SET "{column}" = ? WHERE rowid = (SELECT rowid FROM "{table}" LIMIT 1)',
         ("private/relative/value",),
     )
     connection.commit()

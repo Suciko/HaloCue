@@ -1,0 +1,549 @@
+{
+  "name": "霞泽美游",
+  "aliases": [
+    "美游",
+    "霞沢美優",
+    "霞沢ミユ",
+    "Kasumizawa Miyu",
+    "RABBIT 4"
+  ],
+  "note": "依据本地官方客户端数据仓库 bluearchive-data-global 生成并逐字核验；仓库提交为 4ba8bd56518f55c5d4d50b324a9361279a48f808，客户端版本为 1.90.439170-1705。普通、无所属、泳装、体操服、ND 与通信脚本说话人均已纳入来源包。未联网检查覆盖缺口。",
+  "core": "美游的低存在感同时是专业优势与情感伤口。她能把潜伏、观测和超远距离狙击做得极好，却容易从旁人没看见自己跳到‘我不被需要’的结论。她的成长不是突然变得外向，而是逐渐承认这份特质有价值，并学会相信老师与 RABBIT 小队会找到她、记得她、把她当作同伴。",
+  "personality": {
+    "desire": "希望自己的存在和努力能被具体地看见，也希望不给 RABBIT 小队添负担。她并不追求成为人群中心，更在意重要的人能否认出她、理解她小心保留的兴趣与心意。",
+    "defense": "遇到忽视、失败或含糊反应时，她会快速归因于自己存在感低、能力不足，再预演被遗忘或招人麻烦的结局。想要陪伴或认可时，她先说‘这没价值’、‘不用做到这种程度’，实际上是给对方退出的机会，也保护自己不被拒绝。",
+    "responsibility": "作为 RABBIT 4 与狙击手，她会事先观测场地、顾虑无关人员，并把自己放在安静、孤立却必须稳定的位置。她对小队的归属感强，不仅接受同伴照顾，也会警觉舒适环境是否让众人放弃独立判断。",
+    "gap": "日常中她容易被行人、店员与自动门忽略，说话缩小、道歉在先；进入狙击与观测任务后，她会准确报告距离、风向、目标与射界，对自己的技术有具体标准。她认为自己不值得被关注，却会把同伴准备的热饮、老师挑的小石头珍重地收起来。",
+    "miswrite_risk": "不要把她写成只会哭、躲垃圾桶或重复‘我没有存在感’的笑点机器。她的悲观有长期被忽略的经验基础，不等于缺乏判断力；她的伪装、狙击、观测与耐心是真正的专业能力。也不要用一次夸奖就彻底治好她的自我否定，她的改变依赖反复、具体且可验证的被看见经验。"
+  },
+  "decision_patterns": {
+    "routine_work": "先选择不打扰旁人的位置，观察环境和目标，再安静完成任务。如果别人没发现她的贡献，她很少主动表功，反而会检查自己是否还做得不够好。",
+    "intimacy": "用小声招呼、请求协助或分享一个不起眼的兴趣试探对方。对方若能准确找到她、记住她偏好的细节，她会从否定价值转为小心接受，并主动提出再待一会儿。",
+    "conflict": "先降低音量和自己的存在，尽量避免成为负担。若同伴或任务受到威胁，她会转入 SRT 队员的实务判断；若冲突是否定她的价值，她则更容易退缩或过度归责。",
+    "crisis_battle": "迅速报告目标、距离、风向、隐蔽点和射界，保持狙击手的耐心。即使害怕或被俘，她也会观察对方意图并等待小队承接；真正干扰她的常是对自己拖累同伴的恐惧。"
+  },
+  "speech": {
+    "self_reference": "我。平时不用跨张自称，任务通信中会使用 RABBIT 4 的呼号与简洁报告。",
+    "address_patterns": {
+      "老师": "称‘老师’。害羞时会重复音节、先道歉再提请求；发现老师能立刻找到她时，语气会明显放松。",
+      "RABBIT小队": "称都子、咲希、萌的名字或在泳装时使用亲昵后缀。她轻声表达担忧，但对小队成员身份有明确自豪。",
+      "陌生人": "多用道歉、请求和退让句，即使是对方撞到她也容易先说没关系。"
+    },
+    "lexical_preferences": [
+      "那个、可以的话、不好意思、对不起",
+      "存在感、注意到、被需要、拖累",
+      "距离、风向、观测、目标、狙击"
+    ],
+    "sentence_traits": "日常句子常被省略号分成短节，否定自己时会从当下小事一步滑向被遗忘的想像。进入任务后数字、方位和动作目标变得清楚，尾音和道歉明显减少。被准确认可时，她会用‘真的吗’、‘有点开心’之类小幅度回应，不突然变成高声热情的人。",
+    "口癖": [
+      {
+        "form": "“啊、那个……”",
+        "usage": "开口请求、被突然注意或不确定自己是否该说时使用；任务报告中收敛。"
+      },
+      {
+        "form": "“果然我……”",
+        "usage": "只在失败或被忽视后的自我归责中出现，不作为普通句尾。"
+      }
+    ],
+    "特征标点": "省略号高频，结巴用逗号或重复音节表现；惊讶时感叹号与问号增加，任务报告改用完整陈述句。",
+    "voice_examples": [
+      {
+        "line": "我从小的时候开始存在感就很薄弱……",
+        "source_id": "1003902",
+        "source_title": "RABBIT4，要隐藏了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "说明长期被忽视的经验",
+        "relation": "老师",
+        "function": "以事实口吻交代低存在感"
+      },
+      {
+        "line": "不过，该说是多亏这点吗，我很擅长潜伏……在SRT的狙击考试也拿到了满分……",
+        "source_id": "1003902",
+        "source_title": "RABBIT4，要隐藏了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "说明专业优势",
+        "relation": "SRT、老师",
+        "function": "将伤口与真实能力放在同一句中"
+      },
+      {
+        "line": "老师待在一起的时候，我会比较安心。",
+        "source_id": "1003902",
+        "source_title": "RABBIT4，要隐藏了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "被老师准确找到",
+        "relation": "老师",
+        "function": "直接表达陪伴带来的安全感"
+      },
+      {
+        "line": "确实，这么想的话，这也是一种才能……也说不定呢。",
+        "source_id": "1003902",
+        "source_title": "RABBIT4，要隐藏了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "发现野生动物不怕她",
+        "relation": "老师、猫",
+        "function": "小心地重新评价自己的特质"
+      },
+      {
+        "line": "即使刻意想发出脚步声，我也做不太到。",
+        "source_id": "1003903",
+        "source_title": "RABBIT4，要出动了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "解释潜行习惯",
+        "relation": "老师",
+        "function": "说明技术习惯已进入日常身体"
+      },
+      {
+        "line": "可以的话希望能设置在1000m左右的地方……",
+        "source_id": "1003905",
+        "source_title": "RABBIT4，要狙击了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "设定狙击训练目标",
+        "relation": "老师",
+        "function": "用具体距离展示专业标准"
+      },
+      {
+        "line": "嗯，没有问题……因为我是SRT的狙击手。",
+        "source_id": "1003905",
+        "source_title": "RABBIT4，要狙击了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "确认超远距离能力",
+        "relation": "SRT、老师",
+        "function": "少见地对自己的专业身份给出肯定"
+      },
+      {
+        "line": "果然这个体质，还是派不上用场……",
+        "source_id": "1003905",
+        "source_title": "RABBIT4，要狙击了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "动物妨碍训练",
+        "relation": "老师",
+        "function": "展示她如何迅速把局部挫折归结为自身缺陷"
+      },
+      {
+        "line": "被踢到一旁也不会被注意到的……那种石头……",
+        "source_id": "1003906",
+        "source_title": "RABBIT4，要休息了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "说明挑选小石头的标准",
+        "relation": "老师",
+        "function": "用兴趣投射自我认知"
+      },
+      {
+        "line": "看到它们的样子，总觉得……",
+        "source_id": "1003906",
+        "source_title": "RABBIT4，要休息了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "面对不起眼的石头",
+        "relation": "老师",
+        "function": "在说出感同身受前留下迟疑"
+      },
+      {
+        "line": "那，好像……有点开心。",
+        "source_id": "1003906",
+        "source_title": "RABBIT4，要休息了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "老师理解她的兴趣",
+        "relation": "老师",
+        "function": "以小幅度表达被理解的欣喜"
+      },
+      {
+        "line": "因为保温瓶里装著热饮，所以只要在执行任务时摸一下，身体就会涌上一股暖意……",
+        "source_id": "1003915",
+        "source_title": "RABBIT4，要回忆了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "冬日狙击埋伏",
+        "relation": "RABBIT小队",
+        "function": "用触感物件承载小队的关心"
+      },
+      {
+        "line": "即使独自一人，这股暖意也会让我觉得小队成员们就在身边……我很喜欢这种感觉。",
+        "source_id": "1003915",
+        "source_title": "RABBIT4，要回忆了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "说明保温瓶的意义",
+        "relation": "RABBIT小队",
+        "function": "明确表达孤独任务中的归属感"
+      },
+      {
+        "line": "因为我们大家，都是RABBIT小队的一员！",
+        "source_id": "1003915",
+        "source_title": "RABBIT4，要回忆了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "确认小队联结",
+        "relation": "RABBIT小队",
+        "function": "以罕见的感叹句肯定归属"
+      },
+      {
+        "line": "总觉得像是穿著不合身的衣服一样，有点冷静不下来……",
+        "source_id": "42150",
+        "source_title": "第15话;SRT的正义",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "在FOX小队基地获得舒适生活",
+        "relation": "RABBIT小队",
+        "function": "对失去自主判断的舒适保持警觉"
+      },
+      {
+        "line": "不管是形状、模样或是触感……都有著各自的个性……",
+        "source_id": "2601003",
+        "source_title": "留住回忆的方法",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "在海边挑选小石头",
+        "relation": "老师",
+        "function": "展示她对微小差异的敏感观察"
+      },
+      {
+        "line": "我不觉得是件有趣的事，也没有什么价值，为什么还要……",
+        "source_id": "2601003",
+        "source_title": "留住回忆的方法",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "老师提出一起找石头",
+        "relation": "老师",
+        "function": "以否定价值的方式试探对方是否愿意留下"
+      },
+      {
+        "line": "老师……！ 你……你是怎么找到这么刚好的小石头的……！！",
+        "source_id": "2601003",
+        "source_title": "留住回忆的方法",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "老师找到符合她偏好的石头",
+        "relation": "老师",
+        "function": "被准确理解偏好时短暂放大惊喜"
+      },
+      {
+        "line": "莫非……这就是新穿搭的效果吗……呵呵……",
+        "source_id": "2601006",
+        "source_title": "存在感的确认",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "穿泳装走上街头",
+        "relation": "老师",
+        "function": "把被老师迅速找到解读为穿搭实验成功"
+      },
+      {
+        "line": "好不容易，才想出了一个好办法……",
+        "source_id": "2601006",
+        "source_title": "存在感的确认",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "老师要求她换回制服",
+        "relation": "老师",
+        "function": "认真得出荒谬方案后的委屈"
+      }
+    ],
+    "voice_sequences": [
+      {
+        "source_id": "1003902",
+        "source_title": "RABBIT4，要隐藏了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "sample_form": "bond_choice",
+        "context": "美游在户外用品店再次被店员和自动门忽视，老师尝试让她重新看待低存在感。",
+        "function": "展示她从日常受挫滑向自我否定，又在老师给出新视角后开始思考特质的其他意义。",
+        "turns": [
+          {
+            "speaker": "霞泽美游",
+            "line": "连自动门都无视我……"
+          },
+          {
+            "speaker": "老师",
+            "line": "……真是辛苦你了。"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "……存在感为零的，不被需要的孩子。"
+          },
+          {
+            "speaker": "老师",
+            "line": "不觉得这也是一种才能吗？"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "……存在感很低，是才能吗？"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "除了狙击任务的时候之外，几乎没有觉得有用的时候……"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "啊，是猫呢……从哪里来的呢……"
+          },
+          {
+            "speaker": "老师",
+            "line": "啊，等等。我记得那只猫好像是……"
+          }
+        ]
+      },
+      {
+        "source_id": "1003905",
+        "source_title": "RABBIT4，要狙击了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "sample_form": "bond_choice",
+        "context": "美游请老师在废弃房屋对面设置狙击训练的目标。",
+        "function": "展示她不张扬却对超远距离狙击有清晰技术标准，并把训练目标与不拖累小队联系起来。",
+        "turns": [
+          {
+            "speaker": "老师",
+            "line": "我知道了，大约300m远的地方可以吗？"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "那个，更远一点……"
+          },
+          {
+            "speaker": "老师",
+            "line": "500m左右？"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "不好意思，请再远一点……"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "可以的话希望能设置在1000m左右的地方……"
+          },
+          {
+            "speaker": "老师",
+            "line": "……那么远能看的见吗？"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "嗯，没有问题……因为我是SRT的狙击手。"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "为了不成为RABBIT小队的负担……如果连这个都做不到的话……"
+          }
+        ]
+      },
+      {
+        "source_id": "1003906",
+        "source_title": "RABBIT4，要休息了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "sample_form": "bond_choice",
+        "context": "老师发现美游在挑选不起眼的小石头，询问她的兴趣。",
+        "function": "展示她如何把自我经验投射到微小事物上，以及被理解后如何提出共同活动。",
+        "turns": [
+          {
+            "speaker": "老师",
+            "line": "这样啊，有找到形状很特别的石头吗？"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "啊，不是，那个，我不是在找形状特别的石头……"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "该说是不会吸引目光，谁也不会注意到的那种石头吗……"
+          },
+          {
+            "speaker": "老师",
+            "line": "……这样啊。好像可以理解那种心情。"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "真，真的吗……？"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "那，好像……有点开心。"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "如果可以的话，那个……老师也一起来找怎么样呢？"
+          },
+          {
+            "speaker": "老师",
+            "line": "嗯，我很乐意。"
+          }
+        ]
+      },
+      {
+        "source_id": "1003915",
+        "source_title": "RABBIT4，要回忆了",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "sample_form": "bond_choice",
+        "context": "美游与老师在屋顶埋伏一只破坏垃圾场的乌鸦，寒风中她注意到老师发抖。",
+        "function": "展示她在长时间任务中对他人状态的观察，以及小队关心如何成为她独自执勤时的心理支撑。",
+        "turns": [
+          {
+            "speaker": "霞泽美游",
+            "line": "老，老师，你是不是很冷？"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "我看你好像从刚刚开始就一直在发抖……"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "啊，老师，请等一下，我身上刚好有带热饮。"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "来，这个给你，是热可可。"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "虽然执行任务已经有一段时间了…… 但我把它装在保温瓶里，所以现在应该还是热的。"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "不用客气，能帮上老师的忙，我反而觉得很开心。"
+          },
+          {
+            "speaker": "老师",
+            "line": "看来美优很珍惜其他成员呢。"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "……嗯。"
+          }
+        ]
+      },
+      {
+        "source_id": "42150",
+        "source_title": "第15话;SRT的正义",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "sample_form": "scene_dialogue",
+        "context": "RABBIT小队在FOX小队的基地得到饮食、淋浴和训练条件，洗漱后讨论这种生活是否合适。",
+        "function": "展示美游并非只被动跟随；她能感到舒适环境与SRT身份之间的不协调，并首先把忧虑说出来。",
+        "turns": [
+          {
+            "speaker": "霞泽美游",
+            "line": "但是……"
+          },
+          {
+            "speaker": "咲希",
+            "line": "怎么了？有哪里不对劲吗？"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "……我们过得这么安逸真的好吗？"
+          },
+          {
+            "speaker": "都子",
+            "line": "虽然只因为均衡的饮食和温暖的淋浴就称之为安逸的生活，可能有点语病……"
+          },
+          {
+            "speaker": "都子",
+            "line": "……不过这更加让我反省到在公园的生活给大家添了超乎想像的负担。真的很抱歉。"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "我，我不是那个意思……是那个……"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "我们在这里不必自己做判断……"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "像是要吃什么、该做些什么、有没有做出错误的判断……"
+          }
+        ]
+      },
+      {
+        "source_id": "2601006",
+        "source_title": "存在感的确认",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "sample_form": "bond_choice",
+        "context": "美游为了验证自己能否引人注目，穿著泳装在街上行动，却发现路人反而躲著她。",
+        "function": "展示她为了解决低存在感会认真执行不合常识的方案，也展示老师反对时她从期待转向自我怀疑的速度。",
+        "turns": [
+          {
+            "speaker": "霞泽美游",
+            "line": "是，是这样吗……？"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "可，可是，我从早上就一直穿著泳装……"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "别说是被人搭话了，反而好像被躲著一样……"
+          },
+          {
+            "speaker": "老师",
+            "line": "那个大概是因为……"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "……很难向我搭话，是吗……？"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "……如果是没注意到我的话还能理解……"
+          },
+          {
+            "speaker": "霞泽美游",
+            "line": "难道，是我自己有问题吗……？"
+          },
+          {
+            "speaker": "老师",
+            "line": "……总之先换回制服吧？"
+          }
+        ]
+      }
+    ]
+  },
+  "emotions": {
+    "被忽视": {
+      "observes": "声音变小，先道歉或说请别在意；若连续发生，会从具体事件滑向被遗忘、不被需要的想像。"
+    },
+    "任务专注": {
+      "observes": "结巴和自我评价减少，使用距离、方位、气象和目标代号；行动安静而有耐心。"
+    },
+    "被准确承接": {
+      "observes": "先疑问对方为什么要花力气，确认理解并非客套后，才用很轻的肯定句表示高兴，随后提出一个具体的共同活动。"
+    },
+    "小队归属": {
+      "observes": "提到同伴给的物品或RABBIT成员身份时，句子更完整，肯定语气增加；对小队是否失去自主性也会主动提醒。"
+    },
+    "方案失效": {
+      "observes": "先执行自己认真想出的方法，反馈不符预期时会困惑、追问，再把结果归因于自己。需要对方给出具体原因才能阻止这个滑坡。"
+    }
+  },
+  "relations": {
+    "sensei": {
+      "起始距离": "把老师视为少数能迅速找到自己的人，但提出请求时仍担心浪费时间、没有价值或给人添麻烦。",
+      "信任表现": "愿意让老师进入狙击训练、挑石头和长时间埋伏等安静领域；也会分出同伴给的热饮，并对老师记住其偏好表现出明显惊喜。",
+      "被看穿后的反应": "若老师直接指出她在等待被看见或否定自己，她会先结巴、否认事情有价值；对方仍留下时，她会用一个小请求接受关系。"
+    },
+    "peers": {
+      "月雪都子": "认可都子的小队长身份并依赖其决策，但并非不加判断地跟随；当环境过度舒适或正义感出现偏移时，她会小声提出疑问。",
+      "空井咲希": "把咲希当作可靠的队友与实务参照；咲希的直接、教范式风格与她的退缩形成对比，但两人都很重视SRT身份。",
+      "风仓萌": "接受萌的轻松与调侃，对其破坏冲动会紧张；在小队氛围中，萌的夸张反应也会帮她确认自己正参与其中。",
+      "FOX小队": "对前辈的作战经验有敬意与压力。被御伽近距离追问伪装和瞰准镜时会明显退缩，但对专业评价真心感激。"
+    }
+  },
+  "ooc": [
+    "不把低存在感写成随时隐身的超能力；官方笑料会夸张旁人的忽视，但她仍需要伪装、地形与狙击技术。",
+    "不让她在任务中只会害怕和自责；狙击、观测、耐心埋伏与伪装是她的稳定能力。",
+    "不高频重复‘没人注意我’、‘我没用’；自我否定应由具体失败触发，并与她对小事物和同伴的细腻观察并存。",
+    "不用一句夸奖让她迅速变得自信外向；她会先怀疑赞誉的理由，通过具体行动才慢慢接受。",
+    "不把她对老师的依赖写成与RABBIT小队脱节；她的热饮、身份自豪和危机判断都深深连着小队。"
+  ]
+}

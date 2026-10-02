@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 
 from .errors import ProductionError
+from .handoff_lock import handoff_lock
 from .models import ProductionRun, ScriptRelease
 
 
@@ -18,6 +19,9 @@ class ProductionRepository:
         self.runs_dir = data_dir / "runs"
         self.releases_dir = data_dir / "releases"
         self._lock = threading.RLock()
+
+    def handoff_guard(self, release_id: str | None):
+        return handoff_lock(self.data_dir, release_id)
 
     @staticmethod
     def _atomic_json(path: Path, payload: dict) -> None:

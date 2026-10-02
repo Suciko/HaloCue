@@ -22,13 +22,12 @@ def validate_provider_knowledge_suggestions(
     *,
     scene_id: str,
     scene_block_ids: set[str],
+    known_character_ids: set[str] | None = None,
 ) -> list[dict]:
     """Validate optional formal-knowledge suggestions from memory extraction.
 
-    They are deliberately narrower than memory items: the first product slice
-    only permits new WorkCanon facts backed by the pinned scene revision. The
-    caller still has to persist each item as a Proposal before it can become a
-    formal Revision.
+    Only pinned scene evidence and existing character IDs may enter the review
+    queue. The caller persists candidates as Proposals, never formal Revisions.
     """
 
     if not isinstance(value, dict):
@@ -39,7 +38,7 @@ def validate_provider_knowledge_suggestions(
     if not isinstance(raw_items, list) or len(raw_items) > 12:
         raise DomainError(
             "provider_output_invalid",
-            "作品事实建议必须是最多 12 条的数组。",
+            "资料建议必须是最多 12 条的数组。",
             status=502,
             details={"field": "knowledge_suggestions"},
         )
@@ -55,8 +54,6 @@ def validate_provider_knowledge_suggestions(
                 details={"index": index},
             )
         kind = str(raw.get("kind") or "canon_fact").strip()
-        text = str(raw.get("text") or "").strip()
-        scope = str(raw.get("scope") or "work").strip()
         confidence = str(raw.get("confidence_status") or "open").strip()
         block_ids = [
             str(item).strip()
@@ -64,26 +61,12 @@ def validate_provider_knowledge_suggestions(
             if str(item).strip()
         ] if isinstance(raw.get("source_block_ids"), list) else []
         unknown = sorted(set(block_ids).difference(scene_block_ids))
-        if kind != "canon_fact":
+        if kind not in {"canon_fact", "character_relationship"}:
             raise DomainError(
                 "provider_output_invalid",
-                "后台资料维护目前只允许提出作品事实候选。",
+                "后台资料建议类型无效。",
                 status=502,
                 details={"index": index, "kind": kind},
-            )
-        if not text or len(text) > 4000:
-            raise DomainError(
-                "provider_output_invalid",
-                "作品事实建议需要具体且长度受限的内容。",
-                status=502,
-                details={"index": index, "field": "text"},
-            )
-        if scope not in {"work", "chapter", "scene"}:
-            raise DomainError(
-                "provider_output_invalid",
-                "作品事实建议的作用域无效。",
-                status=502,
-                details={"index": index, "scope": scope},
             )
         if confidence not in {"open", "inferred"}:
             raise DomainError(
@@ -99,17 +82,50 @@ def validate_provider_knowledge_suggestions(
                 status=502,
                 details={"index": index, "scene_id": scene_id, "unknown_block_ids": unknown},
             )
+        if kind == "canon_fact":
+            text = str(raw.get("text") or "").strip()
+            scope = str(raw.get("scope") or "work").strip()
+            if not text or len(text) > 4000:
+                raise DomainError(
+                    "provider_output_invalid", "作品事实建议需要具体且长度受限的内容。",
+                    status=502, details={"index": index, "field": "text"},
+                )
+            if scope not in {"work", "chapter", "scene"}:
+                raise DomainError(
+                    "provider_output_invalid", "作品事实建议的作用域无效。",
+                    status=502, details={"index": index, "scope": scope},
+                )
+            suggestions.append({
+                "kind": kind, "text": text, "scope": scope,
+                "confidence_status": confidence,
+                "source_block_ids": list(dict.fromkeys(block_ids))[:80],
+            })
+            continue
+        from_id = str(raw.get("from_character_id") or "").strip()
+        to_id = str(raw.get("to_character_id") or "").strip()
+        relation_kind = str(raw.get("relation_kind") or "").strip()
+        summary = str(raw.get("summary") or "").strip()
+        known = known_character_ids or set()
+        if not from_id or not to_id or from_id == to_id or from_id not in known or to_id not in known:
+            raise DomainError(
+                "provider_output_invalid", "人物关系必须引用本场已识别的两张不同人物卡。",
+                status=502, details={"index": index, "field": "character_ids"},
+            )
+        if not relation_kind or len(relation_kind) > 120 or not summary or len(summary) > 1000:
+            raise DomainError(
+                "provider_output_invalid", "人物关系需要简短类型和具体说明。",
+                status=502, details={"index": index, "field": "relationship"},
+            )
         suggestions.append({
-            "kind": "canon_fact",
-            "text": text,
-            "scope": scope,
+            "kind": kind, "from_character_id": from_id, "to_character_id": to_id,
+            "relation_kind": relation_kind, "summary": summary,
             "confidence_status": confidence,
             "source_block_ids": list(dict.fromkeys(block_ids))[:80],
         })
     return suggestions
 
 
-def validate_provider_memory_bundle(value: dict, *, scene_id: str) -> dict:
+def validate_provider_memory_bundle(value: dict, *, scene_id: str, scene_block_ids: set[str] | None = None) -> dict:
     if not isinstance(value, dict):
         raise DomainError("provider_output_invalid", "模型返回的长期记忆候选不是对象。", status=502)
     raw_items = value.get("items")
@@ -158,6 +174,15 @@ def validate_provider_memory_bundle(value: dict, *, scene_id: str) -> dict:
             str(item).strip() for item in raw.get("source_block_ids", [])
             if str(item).strip()
         ] if isinstance(raw.get("source_block_ids"), list) else []
+        if scene_block_ids is not None:
+            raw_ids = raw.get("source_block_ids")
+            if (not isinstance(raw_ids, list) or not raw_ids
+                    or any(not isinstance(block_id, str) or not block_id.strip() for block_id in raw_ids)
+                    or not set(source_block_ids).issubset(scene_block_ids)):
+                raise DomainError(
+                    "provider_output_invalid", "长期记忆必须引用固定场景修订中存在的正文块。",
+                    status=502, details={"index": index, "scene_id": scene_id, "field": "source_block_ids"},
+                )
         items.append({
             "kind": kind,
             "operation": operation,

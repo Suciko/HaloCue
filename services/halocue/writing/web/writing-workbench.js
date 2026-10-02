@@ -1,152 +1,18 @@
 /* Focused presentation layer for Works and Writing.
    Domain commands remain in app.js; this file only projects persisted state. */
 (() => {
-  const ROUTE_SECTIONS = new Set(['works', 'writing', 'references', 'tasks']);
-  const ROUTE_STAGES = new Set(['structure', 'draft', 'release']);
-  const initialRequestedRoute = new URLSearchParams(location.search);
-  let applyingRoute = false;
-  let initialRouteApplied = false;
-  let initialWorkLoadInFlight = false;
-  let initialRoutePromise = null;
-  let routeReady = false;
-  let pushNextRoute = false;
+  const scrollBehavior = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth";
+  const ROUTE_STAGES = HC_WRITING_STAGES;
+  const chapterTreeExpansion = new Map();
   let trackedChapterWorkspace = null;
   let chapterScrollFrame = 0;
+  let chapterPositionTicket = 0;
+  let mobileViewTicket = 0;
   let chapterScrollIntentAt = 0;
   let mobileScrollTop = 0;
   let mobileScrollSceneId = '';
-
   state.writingMobileView ||= 'manuscript';
-
-  function currentSection() {
-    if (state.mobileView === 'tasks') return 'tasks';
-    if (state.stage === 'references') return 'references';
-    return state.surface === 'works' || state.stage === 'overview' ? 'works' : 'writing';
-  }
-
-  function routeUrl() {
-    const params = new URLSearchParams();
-    params.set('section', currentSection());
-    if (state.work?.id) params.set('work_id', state.work.id);
-    if (currentSection() === 'writing') {
-      params.set('stage', ROUTE_STAGES.has(state.stage) ? state.stage : 'structure');
-      if (state.writingChapterId) params.set('chapter_id', state.writingChapterId);
-      if (state.sceneId) params.set('scene_id', state.sceneId);
-    }
-    return `${location.pathname}?${params.toString()}`;
-  }
-
-  function syncRoute() {
-    if (!routeReady || applyingRoute || currentSection() === 'production') return;
-    const next = routeUrl();
-    if (`${location.pathname}${location.search}` === next) {
-      pushNextRoute = false;
-      return;
-    }
-    history[pushNextRoute ? 'pushState' : 'replaceState']({ halocue: true }, '', next);
-    pushNextRoute = false;
-  }
-
-  async function applyRouteFromLocation(params = new URLSearchParams(location.search)) {
-    const section = params.get('section');
-    if (!ROUTE_SECTIONS.has(section)) return;
-    applyingRoute = true;
-    try {
-      const workId = params.get('work_id');
-      if (workId && state.work?.id !== workId && state.works.some(work => work.id === workId)) {
-        await loadWorkBeforeRouter(workId, { resume: false });
-      }
-      if (section === 'works') {
-        state.surface = 'works';
-        state.mobileView = 'writing';
-        state.stage = 'overview';
-      } else if (section === 'references') {
-        state.surface = 'works';
-        state.mobileView = 'writing';
-        state.stage = 'references';
-      } else if (section === 'tasks') {
-        state.mobileView = 'tasks';
-      } else {
-        state.surface = 'writing';
-        state.mobileView = 'writing';
-        state.inspector = 'agent';
-        let routeTarget = null;
-        const stage = params.get('stage');
-        state.stage = ROUTE_STAGES.has(stage) ? stage : 'structure';
-        const chapterId = params.get('chapter_id');
-        const sceneId = params.get('scene_id');
-        const requestedChapter = chapterId && state.work?.chapters?.find(chapter => chapter.id === chapterId);
-        const requestedScene = sceneId && scenes().find(scene => scene.id === sceneId);
-        if (requestedScene) {
-          // A stable scene identity is stronger than a stale chapter title or
-          // order from an old link. Derive the chapter from the scene so the
-          // tree, target artifact, and work surface cannot disagree.
-          state.writingChapterId = requestedScene.chapter_id;
-          state.sceneId = requestedScene.id;
-          routeTarget = { chapterId: requestedScene.chapter_id, sceneId: requestedScene.id };
-        } else if (requestedChapter) {
-          state.writingChapterId = requestedChapter.id;
-          state.sceneId = requestedChapter.scenes?.[0]?.id || null;
-          routeTarget = { chapterId: requestedChapter.id, sceneId: state.sceneId };
-        }
-        if (sceneId && !requestedScene) {
-          state.stage = state.sceneId ? state.stage : 'structure';
-          state._routeWarning = '目标场景已变化，已回到当前章节中可用的位置。';
-        } else {
-          state._routeWarning = '';
-        }
-        if (routeTarget && typeof persistWritingTarget === 'function') {
-          try {
-            await persistWritingTarget(routeTarget.chapterId, routeTarget.sceneId);
-          } catch (error) {
-            state._routeWarning = `已打开目标位置，但恢复位置未保存：${error.message}`;
-          }
-        }
-      }
-      render();
-      if (state._routeWarning) toast(state._routeWarning, true);
-      initialRouteApplied = true;
-    } finally {
-      applyingRoute = false;
-    }
-  }
-
-  async function applyInitialRoute() {
-    if (initialRouteApplied) return;
-    if (initialRoutePromise) return initialRoutePromise;
-    initialRoutePromise = (async () => {
-      // The integrated shell owns the production deep link. Enabling the
-      // writing route synchronizer is still required for the eventual return
-      // path, but its initial Works projection must not replace the production
-      // URL while the ShadowRoot is opening or selecting a run.
-      if (initialRequestedRoute.get('section') === 'production') {
-        initialRouteApplied = true;
-        routeReady = true;
-        return;
-      }
-      await applyRouteFromLocation(initialRequestedRoute);
-      routeReady = true;
-      syncRoute();
-    })();
-    try {
-      await initialRoutePromise;
-    } finally {
-      initialRoutePromise = null;
-    }
-  }
-
-  const loadWorkBeforeRouter = loadWork;
-  loadWork = async function loadWorkWithRoute(id, options = {}) {
-    if (initialRouteApplied) return loadWorkBeforeRouter(id, options);
-    initialWorkLoadInFlight = true;
-    try {
-      const result = await loadWorkBeforeRouter(id, { ...options, resume: false });
-      await applyInitialRoute();
-      return result;
-    } finally {
-      initialWorkLoadInFlight = false;
-    }
-  };
+  const syncRoute = () => syncAppRoute('replace');
 
   function chapterStatus(chapter) {
     const sceneList = chapter.scenes || [];
@@ -157,6 +23,12 @@
   }
 
   function writingReadinessView() {
+    if (state.stage === 'structure' || (state.stage === 'draft' && scenes().length)) return {
+      blocked: false, tone: 'is-ready', stateLabel: '可手工安排章节',
+      progressLabel: '', title: '从章节大纲开始',
+      detail: '可以先手工整理卷章与正文；运行 Agent 时仍会检查必要的方向与资料。',
+      reason: '', actionLabel: '', targetId: '',
+    };
     const harness = state.agentPresentation?.guidance || state.work?.harness || null;
     const formal = typeof blueprintIsConfirmed === 'function' && blueprintIsConfirmed();
     const pending = (state.work?.proposals || []).filter(item => item.status === 'pending' && item.scope_type === 'work');
@@ -168,6 +40,15 @@
     const needsDecision = harness?.outcome === 'needs_user' && Boolean(targetId);
 
     if (needsDecision) {
+      const proposal=(state.work?.proposals||[]).find(item=>item.id===targetId);
+      if(proposal?.kind==='story_structure')return {
+        blocked:true,tone:'is-waiting',stateLabel:'章节安排还未采纳',
+        progressLabel:`${completed} / ${total} 阶段完成`,
+        title:'先确认章节安排，再开始写正文',
+        detail:'Agent 已给出章节方案，但还没有建立正式场景。返回构思审查后，点击“采用并建立结构”。',
+        reason:'采纳后会出现“开始写第一场”，可直接进入正文；也可以退回继续讨论。',
+        actionLabel:'回到构思，审查章节安排',targetId,
+      };
       return {
         blocked: true,
         tone: 'is-blocked',
@@ -181,15 +62,18 @@
       };
     }
     if (!formal) {
+      const ideaAlreadyShared = state.userStatus?.primary_action?.id === 'continue_idea';
       return {
         blocked: true,
         tone: 'is-waiting',
-        stateLabel: direction?.status === 'current' ? '全作方向正在确认' : '全作方向待确认',
+        stateLabel: direction?.status === 'current' ? '全作方向尚未确认' : '全作方向尚未建立',
         progressLabel: `${completed} / ${total} 阶段完成`,
-        title: harness?.headline || '先在作品中确认全作方向',
-        detail: '系统按已采纳的正式方向判断是否完成，不会把聊天内容或未审批候选当成完成。',
-        reason: '开放条件：确认全作方向后，可以继续增加卷章；建立场景后，正文阶段才会开放。',
-        actionLabel: '返回作品继续确认',
+        title: ideaAlreadyShared ? '想法已记录，整理可确认的方向' : (harness?.headline || '先在作品中确认全作方向'),
+        detail: '聊天内容不会自动成为正式方向。请在构思中整理方向候选并确认。',
+        reason: (state.work?.chapters || []).some(chapter => (chapter.scenes || []).length)
+          ? '已有场景仍需先确认全作方向；确认后才开放本场正文。'
+          : '先确认全作方向，再建立场景，之后才能写正文。',
+        actionLabel: ideaAlreadyShared ? '返回构思整理方向' : '返回构思继续讨论',
         targetId: '',
       };
     }
@@ -229,8 +113,8 @@
       : '';
     return `<section class="chapter-blocked-empty" aria-live="polite">
       <span class="eyebrow">${esc(readiness.stateLabel)}</span>
-      <h2>先处理作品中的待审决定</h2>
-      <p>${esc(copy)}</p>
+      <h2>${esc(readiness.title)}</h2>
+      <p>${esc(readiness.detail||copy)}</p>
       ${action}
       <details class="chapter-blocked-explanation"><summary>查看原因</summary>${writingProgressMarkup()}<p>${esc(readiness.reason)}</p></details>
     </section>`;
@@ -252,19 +136,17 @@
     return `<ol class="writing-progress" aria-label="创作路线">${steps.map((step, index) => `<li class="${esc(step.status || 'upcoming')}" ${step.status === 'current' ? 'aria-current="step"' : ''}><span>${String(index + 1).padStart(2, '0')}</span><b>${esc(labels[step.id] || step.label || step.id)}</b></li>`).join('')}</ol>`;
   }
 
-  function focusWritingReadiness(reason = '') {
+  function focusWritingReadiness(reason = '', stage = 'structure') {
     const readiness = document.getElementById('writingReadiness');
     if (!readiness) {
-      if (reason) toast(`暂时不能进行：${reason}`, true);
+      if (reason) showStageGateNotice(stage, reason);
       return;
     }
     readiness.classList.remove('is-explaining');
     void readiness.offsetWidth;
     readiness.classList.add('is-explaining');
-    readiness.focus({ preventScroll: true });
-    readiness.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    readiness.focus();
     window.setTimeout(() => readiness.classList.remove('is-explaining'), 900);
-    if (reason) toast(`暂时不能进行：${reason}`, true);
   }
 
   function focusWorkProposal(targetId) {
@@ -275,7 +157,7 @@
     if (!target) return false;
     if (target.matches('details')) target.open = true;
     target.classList.add('writing-return-target');
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
     const action = target.querySelector('button:not([disabled])');
     window.setTimeout(() => action?.focus({ preventScroll: true }), 180);
     window.setTimeout(() => target.classList.remove('writing-return-target'), 1400);
@@ -291,7 +173,6 @@
     state.mobileThreadOpen = false;
     state.stage = 'overview';
     state.inspector = 'agent';
-    pushNextRoute = true;
     render();
     window.requestAnimationFrame(() => focusWorkProposal(targetId));
     if (sourceThreadId && typeof refreshAgentPresentation === 'function') {
@@ -301,51 +182,53 @@
     }
   }
 
+  function writingTreeVolumes(){
+    const volumes=state.work?.volumes||[],seen=new Set(volumes.flatMap(volume=>(volume.chapters||[]).map(chapter=>chapter.id)));
+    const ungrouped=(state.work?.chapters||[]).filter(chapter=>!seen.has(chapter.id));
+    return ungrouped.length?[...volumes,{id:'',title:'未分卷章节',chapters:ungrouped,display_only:true}]:volumes;
+  }
+
   function renderWritingTree() {
     const panel = document.getElementById('treePanel');
     if (!panel || !state.work) return;
     const activeChapterId = writingChapter()?.id || state.writingChapterId;
     const releaseGate = stageGate('release');
     const draftGate = stageGate('draft');
-    const formal = typeof blueprintIsConfirmed === 'function' && blueprintIsConfirmed();
+    const formal = stageGate('structure').allowed;
     const readiness = writingReadinessView();
-    const directionReason = '确认全作方向后，才能继续扩展卷章结构。';
+    const directionReason = '先建立作品，再安排卷章。';
     const sceneReason = readiness.reason || '先完成当前作品决定，再继续规划场景。';
     panel.innerHTML = `
       <header class="writing-project-head">
-        <div><span>当前作品</span><h1 id="workTitle">${esc(state.work.title)}</h1></div>
+        <div><span>当前作品</span><h1 id="workTitle" title="${esc(state.work.title)}">${esc(state.work.title)}</h1></div>
         <button type="button" data-open-work-switch aria-label="切换作品" title="切换作品"><span aria-hidden="true"></span></button>
       </header>
-      <nav class="writing-stage-tabs" id="stageList" aria-label="章节写作流程">
-        <button type="button" data-stage="structure" class="${state.stage === 'structure' ? 'active' : ''}"><span>细纲</span><small>章节与场景</small></button>
-        <button type="button" data-stage="draft" class="${state.stage === 'draft' ? 'active' : ''} ${draftGate.allowed ? '' : 'writing-gate-locked'}" ${draftGate.allowed ? '' : `data-writing-gate="${esc(draftGate.reason)}" aria-label="正文未开放，点击查看原因"`}><span>正文</span><small>${draftGate.allowed ? '逐场写作' : '先建立场景'}</small></button>
-        <button type="button" data-stage="release" class="${state.stage === 'release' ? 'active' : ''} ${releaseGate.allowed ? '' : 'writing-gate-locked'}" ${releaseGate.allowed ? '' : `data-writing-gate="${esc(releaseGate.reason)}" aria-label="发布未开放，点击查看原因"`}><span>发布</span><small>${releaseGate.allowed ? '检查并冻结' : '正文完成后'}</small></button>
-      </nav>
       <section class="writing-tree-head">
         <div><span>作品结构</span><b>${state.work.volumes?.length || 0} 卷 · ${state.work.chapters?.length || 0} 章 · ${scenes().length} 场</b></div>
         <button type="button" data-structure-add-volume class="${formal ? '' : 'writing-gate-locked'}" ${formal ? '' : `data-writing-gate="${esc(directionReason)}"`} aria-label="${formal ? '新建卷' : '新建卷未开放，点击查看原因'}" title="${formal ? '新建卷' : esc(directionReason)}">＋</button>
       </section>
       <div class="scene-tree writing-scene-tree" id="sceneTree">
-        ${(state.work.volumes || []).map((volume, volumeIndex) => `<section class="writing-volume" data-writing-volume="${esc(volume.id)}">
+        ${writingTreeVolumes().map((volume, volumeIndex) => `<section class="writing-volume" data-writing-volume="${esc(volume.id)}">
           <header class="writing-volume-head">
-            <div><span>卷 ${String(volumeIndex + 1).padStart(2, '0')}</span><b>${esc(volume.title)}</b></div>
+            <div><span>${volume.display_only?'作品章节':'卷 '+String(volumeIndex + 1).padStart(2, '0')}</span><b title="${esc(volume.title)}">${esc(volume.title)}</b></div>
             <button type="button" data-structure-add-chapter="${esc(volume.id)}" class="${formal ? '' : 'writing-gate-locked'}" ${formal ? '' : `data-writing-gate="${esc(directionReason)}"`} aria-label="${formal ? `在${esc(volume.title)}新增章节` : '新增章节未开放，点击查看原因'}" title="${formal ? '在本卷新增章节' : esc(directionReason)}">＋</button>
           </header>
           <div class="writing-volume-chapters">
             ${(volume.chapters || []).map((chapter, chapterIndex) => {
               const status = chapterStatus(chapter);
-              const open = chapter.id === activeChapterId || (chapter.scenes || []).some(scene => scene.id === state.sceneId);
+              const open = chapterTreeExpansion.get(`${state.work.id}:${chapter.id}`) ?? (chapter.id === activeChapterId || (chapter.scenes || []).some(scene => scene.id === state.sceneId));
               return `<section class="writing-chapter ${open ? 'open' : ''}">
-                <button type="button" class="writing-chapter-button" data-writing-chapter="${esc(chapter.id)}" aria-expanded="${open}">
+                <div class="writing-chapter-row">
+                <button type="button" class="writing-chapter-button" data-writing-chapter="${esc(chapter.id)}" aria-current="${chapter.id === activeChapterId ? 'location' : 'false'}">
                   <span class="chapter-index">${String(chapterIndex + 1).padStart(2, '0')}</span>
-                  <span class="chapter-copy"><b>${esc(chapter.title)}</b><small>${chapter.scenes?.length || 0} 场</small></span>
-                  <em class="${status.tone}">${status.label}</em>
-                  <i aria-hidden="true"></i>
+                  <span class="chapter-copy"><b title="${esc(chapter.title)}">${esc(chapter.title)}</b><small class="chapter-meta"><span>${chapter.scenes?.length || 0} 场</span><em class="${status.tone}">${status.label}</em></small></span>
                 </button>
+                <button type="button" class="writing-chapter-toggle" data-toggle-writing-chapter="${esc(chapter.id)}" aria-expanded="${open}" aria-label="${open ? '收起' : '展开'}${esc(chapter.title)}的场景"><i aria-hidden="true"></i></button>
+                </div>
                 <div class="writing-scene-list">
                   ${(chapter.scenes || []).map((scene, sceneIndex) => `<button type="button" class="writing-scene ${scene.id === state.sceneId && state.stage === 'draft' ? 'active' : ''} ${readiness.blocked ? 'writing-gate-locked' : ''}" data-scene="${esc(scene.id)}" ${readiness.blocked ? `data-writing-gate="${esc(sceneReason)}" aria-label="进入本场未开放，点击查看原因"` : ''}>
                     <span>${String(sceneIndex + 1).padStart(2, '0')}</span>
-                    <span><b>${esc(scene.title)}</b><small>${esc(scene.contract?.location || '地点待定')}</small></span>
+                    <span><b title="${esc(scene.title)}">${esc(scene.title)}</b><small title="${esc(scene.contract?.location || '地点待定')}">${esc(scene.contract?.location || '地点待定')}</small></span>
                     <i class="${scene.current_revision_id ? 'done' : ''}" title="${scene.current_revision_id ? '已有正式正文' : '尚无正文'}"></i>
                   </button>`).join('') || '<p class="writing-tree-empty">本章还没有场景</p>'}
                   <button type="button" class="writing-add-scene ${readiness.blocked ? 'writing-gate-locked' : ''}" data-structure-add-scene="${esc(chapter.id)}" ${readiness.blocked ? `data-writing-gate="${esc(sceneReason)}" aria-label="添加场景未开放，点击查看原因"` : ''}>＋ 添加场景</button>
@@ -353,7 +236,7 @@
               </section>`;
             }).join('') || '<p class="writing-tree-empty">本卷还没有章节</p>'}
           </div>
-        </section>`).join('') || '<div class="writing-tree-zero"><b>先建立第一卷</b><p>确认全作方向后，在这里建立正式卷章结构。</p><button type="button" data-structure-add-volume>建立卷</button></div>'}
+        </section>`).join('') || '<div class="writing-tree-zero"><b>先建立第一卷</b><p>可先手工整理卷章结构。</p><button type="button" data-structure-add-volume>建立卷</button></div>'}
       </div>
       <section class="work-surface-note" hidden></section>
       <section class="workflow-guide" id="workflowGuide" hidden></section>`;
@@ -366,6 +249,7 @@
 
   function renderCompactStructureWorkspace() {
     const workspace = document.getElementById('workspace');
+    if (workspace && window.HaloCueAuthoringWorkspace?.renderOutline(workspace)) return;
     const chapter = writingChapter();
     if (!workspace) return;
     const readiness = writingReadinessView();
@@ -381,11 +265,14 @@
     const volume = currentWritingVolume(chapter);
     const chapterIndex = Math.max(0, (volume?.chapters || state.work?.chapters || []).findIndex(item => item.id === chapter.id));
     const sceneList = chapter.scenes || [];
-    const formal = typeof blueprintIsConfirmed === 'function' && blueprintIsConfirmed();
-    const command = readiness.blocked ? '' : `<section class="chapter-plan-command">
-        <div><span>现在做什么</span><b>${sceneList.length ? '检查本章场景顺序，或继续和 Agent 细化' : '先建立本章的第一场'}</b><small>${sceneList.length ? `${sceneList.length} 个场景会按下列顺序进入逐场写作。` : '只需要名称和本场发生的变化，其他细节可以继续讨论。'}</small></div>
-        <button type="button" class="primary" data-inspector="agent">和 Agent 讨论本章</button>
-      </section>`;
+    const formal = stageGate('structure').allowed;
+    const recommended=nextWritingScene([chapter],writingTarget().anchor_scene_id);
+    const hasDraft=sceneList.some(scene=>scene.current_revision_id);
+    const entryLabel=recommended?.current_revision_id?'继续写这一场':hasDraft?'开始写下一场':'开始写第一场';
+    const command = readiness.blocked ? '' : recommended ? `<section class="writing-handoff" aria-label="本章下一步">
+      <div class="writing-handoff-copy"><span>${hasDraft?'继续本章写作':'章节安排已就绪'}</span><h3>${esc(recommended.title)}</h3><p>${esc(recommended.contract?.goal||'从这一场开始，把剧情变成正文。')}</p><small>点击后直接打开正文，不会自动调用模型。下方目录可选择其他场景。</small></div>
+      <div class="writing-handoff-actions"><button type="button" class="primary" data-scene-open="${esc(recommended.id)}">${entryLabel} →</button><button type="button" class="quiet" data-inspector="agent">先讨论本章</button></div>
+    </section>` : `<section class="chapter-plan-command"><div><span>现在做什么</span><b>先建立本章的第一场</b><small>填写场景名称和目标，保存后就能进入正文。</small></div><button type="button" class="primary" data-structure-add-scene="${esc(chapter.id)}">建立第一场</button></section>`;
     const blockedEmpty = readiness.blocked && !sceneList.length;
     workspace.innerHTML = `<div class="chapter-structure-workspace">
       ${blockedEmpty ? '' : writingReadinessMarkup(readiness)}
@@ -393,7 +280,7 @@
         <div>
           <p class="eyebrow">${esc(volume?.title || '第一卷')} · 第 ${String(chapterIndex + 1).padStart(2, '0')} 章</p>
           <h2>${esc(chapter.title)}</h2>
-          <p>先把这一章拆成可以逐场写作的目标。全作方向、人物和世界观继续在“作品”中讨论。</p>
+          <p>从推荐场景开始，或在下方选择另一场。这里管理章节安排，正文在具体场景里写。</p>
         </div>
       </header>
       ${command}
@@ -407,14 +294,14 @@
           </div>
           <div class="scene-writing-action">
             <span class="scene-state ${scene.current_revision_id ? 'done' : ''}">${scene.current_revision_id ? '已有正文' : '待起草'}</span>
-            <button type="button" class="${scene.current_revision_id ? 'quiet' : 'primary'} ${readiness.blocked ? 'writing-gate-locked' : ''}" data-scene-open="${esc(scene.id)}" ${readiness.blocked ? `data-writing-gate="${esc(sceneReason)}" aria-label="进入本场未开放，点击查看原因"` : ''}>${scene.current_revision_id ? '查看正文' : '去写本场'}</button>
+            <button type="button" class="${scene.current_revision_id ? 'quiet' : 'primary'} ${readiness.blocked ? 'writing-gate-locked' : ''}" data-scene-open="${esc(scene.id)}" ${readiness.blocked ? `data-writing-gate="${esc(sceneReason)}" aria-label="进入本场未开放，点击查看原因"` : ''}>${scene.current_revision_id ? '继续写作' : '打开这一场'}</button>
           </div>
         </article>`).join('') : blockedEmpty ? writingBlockedEmptyMarkup(readiness, blockedSceneNextStepCopy) : `<div class="chapter-scene-empty"><b>这一章还没有场景</b><p>建立第一场后，Agent、上下文和正文都会绑定稳定的场景 ID。</p><button type="button" class="primary" data-structure-add-scene="${esc(chapter.id)}">建立第一场</button></div>`}</div>
       </section>
       <footer class="chapter-structure-actions">
-        <button type="button" class="quiet ${formal ? '' : 'writing-gate-locked'}" data-structure-add-chapter="${esc(volume?.id || '')}" ${formal ? '' : `data-writing-gate="确认全作方向后，才能继续扩展卷章结构。" aria-label="新增章节未开放，点击查看原因"`}>新增章节</button>
-        <button type="button" class="quiet ${formal ? '' : 'writing-gate-locked'}" data-structure-add-volume ${formal ? '' : `data-writing-gate="确认全作方向后，才能继续扩展卷章结构。" aria-label="新增卷未开放，点击查看原因"`}>新增卷</button>
-        ${formal ? '<span>卷章结构可以继续扩展；正文仍按场景逐一审查。</span>' : '<span>确认全作方向后，才能继续扩展卷章结构。</span>'}
+        <button type="button" class="quiet ${formal ? '' : 'writing-gate-locked'}" data-structure-add-chapter="${esc(volume?.id || '')}" ${formal ? '' : `data-writing-gate="${esc(stageGate('structure').reason)}" aria-label="新增章节未开放，点击查看原因"`}>新增章节</button>
+        <button type="button" class="quiet ${formal ? '' : 'writing-gate-locked'}" data-structure-add-volume ${formal ? '' : `data-writing-gate="${esc(stageGate('structure').reason)}" aria-label="新增卷未开放，点击查看原因"`}>新增卷</button>
+        <span>卷章可以随时手工整理；正文仍按场景逐一审查。</span>
       </footer>
     </div>`;
   }
@@ -522,11 +409,8 @@
       : reference.source_snapshot?.source === 'writing_catalog'
         ? '1.0 写作资源 · 只读'
         : '全局原件 · AA 资源索引';
-    const productionCopy = reference.production_copy;
-    const copyLabel = productionCopy
-      ? `已收到任务副本 · ${productionCopy.copy_id || '未记录副本 ID'}`
-      : '尚未收到制作任务的素材副本';
-    return `<li><span>${esc(config.label)}</span><b>${esc(sceneAssetDisplayName(reference))}</b><small>${esc(source)}</small><details class="scene-asset-reference-details"><summary>技术详情</summary><dl><div><dt>资源标识</dt><dd><code>${esc(reference.source_asset_id || '未记录')}</code></dd></div><div><dt>引用 ID</dt><dd><code>${esc(reference.id || '未记录')}</code></dd></div><div><dt>原件版本</dt><dd>${esc(reference.source_version || '未记录')}</dd></div><div><dt>原件 Hash</dt><dd><code>${esc(reference.content_hash || '未记录')}</code> · ${esc(reference.content_hash_kind || '未标注类型')}</dd></div><div><dt>任务副本状态</dt><dd>${esc(copyLabel)}${productionCopy?.content_hash ? ` · <code>${esc(productionCopy.content_hash)}</code>` : ''}</dd></div></dl></details></li>`;
+    const copyLabel = '副本回执按发布版本记录，不改变本场的原件引用';
+    return `<li><span>${esc(config.label)}</span><b>${esc(sceneAssetDisplayName(reference))}</b><small>${esc(source)}</small><details class="scene-asset-reference-details"><summary>技术详情</summary><dl><div><dt>资源标识</dt><dd><code>${esc(reference.source_asset_id || '未记录')}</code></dd></div><div><dt>引用 ID</dt><dd><code>${esc(reference.id || '未记录')}</code></dd></div><div><dt>原件版本</dt><dd>${esc(reference.source_version || '未记录')}</dd></div><div><dt>原件 Hash</dt><dd><code>${esc(reference.content_hash || '未记录')}</code> · ${esc(reference.content_hash_kind || '未标注类型')}</dd></div><div><dt>任务副本状态</dt><dd>${esc(copyLabel)}</dd></div></dl></details></li>`;
   }
 
   function sceneAssetSuggestionsMarkup(sceneId) {
@@ -832,13 +716,6 @@
     const scene = selectedScene();
     if (!panel || !scene) return;
     if (panel.classList.contains('scene-harness')) {
-      const panelHeader = panel.querySelector(':scope > header');
-      if (panelHeader) {
-        const title = panelHeader.querySelector('h3');
-        const scope = panelHeader.querySelector('p');
-        if (title) title.textContent = '本章 Agent';
-        if (scope) scope.textContent = `${scene.chapterTitle} · 统一上下文`;
-      }
       return;
     }
     const runs = (state.work?.agent_runs || [])
@@ -883,8 +760,8 @@
       panelHeader.querySelector('.eyebrow')?.remove();
       const title = panelHeader.querySelector('h3');
       const scope = panelHeader.querySelector('p');
-      if (title) title.textContent = '本章 Agent';
-      if (scope) scope.textContent = `${scene.chapterTitle} · 统一上下文`;
+      if (title) title.textContent = '场景 Agent';
+      if (scope) scope.textContent = `${scene.chapterTitle} · ${scene.title} · 仅处理当前场景`;
     }
     const textarea = panel.querySelector('#agentRunForm textarea');
     if (textarea) textarea.placeholder = '描述希望 Agent 检查或改写的内容…';
@@ -897,17 +774,49 @@
     if (submit) submit.textContent = '提交任务';
   }
 
-  function focusSceneDiff() {
-    const diff = document.querySelector('[data-scene-diff-root]');
+  function focusSceneDiff(changeId = '', restoring = false) {
+    // Explicit review navigation wins over the scene-position correction
+    // scheduled by the render that just mounted this result.
+    chapterPositionTicket++;
+    // Review lives in the manuscript. Do not focus an inert, hidden diff
+    // while the mobile Agent tab is still selected.
+    if (window.matchMedia('(max-width: 760px)').matches && state.writingMobileView !== 'manuscript') {
+      // Use the same tab transition as the user. Re-rendering here used to
+      // replace the cached Agent composer with a decision panel, losing the
+      // discussion on the second round trip.
+      const manuscriptTab = document.querySelector('[data-writing-mobile-view="manuscript"]');
+      if (manuscriptTab) manuscriptTab.click();
+      else { state.writingMobileView = 'manuscript'; state.inspector = 'agent'; render(); }
+    }
+    const proposal=typeof pendingProposal==='function'?pendingProposal():null;
+    const diff = proposal?document.querySelector(`[data-scene-diff-root="${CSS.escape(proposal.id)}"]`):document.querySelector('[data-scene-diff-root]');
     if (!diff) {
       toast('候选 Diff 还没有准备好，请稍后再试。', true);
       return false;
     }
-    diff.classList.add('writing-return-target');
-    diff.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    const firstChange = diff.querySelector('input[type="checkbox"]');
+    if(!restoring)state._pendingSceneReviewFocus={proposalId:diff.dataset.sceneDiffRoot,sceneId:state.sceneId,changeId};
+    const target = changeId ? [...diff.querySelectorAll('[data-review-change]')].find(item => item.dataset.reviewChange === changeId) || diff.querySelector('[data-review-change]') || diff : diff.querySelector('[data-review-change]') || diff;
+    // The continuous chapter wraps its review in a collapsed details panel.
+    // Open that ancestry before scrolling or focusing its hidden controls.
+    for (let parent = target.parentElement; parent; parent = parent.parentElement) {
+      if (parent.matches('details')) parent.open = true;
+    }
+    target.querySelectorAll('.scene-review-detail').forEach((detail,index) => { if(changeId || index === 0)detail.open=true; });
+    target.classList.add('writing-return-target');
+    if(target.matches('.chapter-inline-change')){
+      const ticket=chapterPositionTicket,proposalId=diff.dataset.sceneDiffRoot,scrollIntent=chapterScrollIntentAt;
+      window.requestAnimationFrame(()=>window.requestAnimationFrame(()=>{
+        if(scrollIntent!==chapterScrollIntentAt){state._pendingSceneReviewFocus=null;return;}
+        if(ticket!==chapterPositionTicket||!target.isConnected||pendingProposal()?.id!==proposalId)return;
+        const workspace=target.closest('.workspace'),rect=target.getBoundingClientRect();
+        if(workspace){const offset=Math.max(100,(workspace.clientHeight-rect.height)/2);workspace.scrollTo({top:workspace.scrollTop+rect.top-workspace.getBoundingClientRect().top-offset,behavior:'instant'});}
+        else target.scrollIntoView({block:'center',behavior:'instant'});
+        if(state._pendingSceneReviewFocus?.proposalId===proposalId)state._pendingSceneReviewFocus=null;
+      }));
+    }else{target.scrollIntoView({behavior:scrollBehavior(),block:'start'});state._pendingSceneReviewFocus=null;}
+    const firstChange = target.querySelector('input[type="checkbox"]');
     window.setTimeout(() => firstChange?.focus({ preventScroll: true }), 180);
-    window.setTimeout(() => diff.classList.remove('writing-return-target'), 1400);
+    window.setTimeout(() => target.classList.remove('writing-return-target'), 1400);
     return true;
   }
 
@@ -921,7 +830,7 @@
     }
     if (review.matches('details')) review.open = true;
     review.classList.add('writing-return-target');
-    review.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    review.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
     const firstAction = review.querySelector('button:not([disabled])');
     window.setTimeout(() => firstAction?.focus({ preventScroll: true }), 180);
     window.setTimeout(() => review.classList.remove('writing-return-target'), 1400);
@@ -1023,14 +932,28 @@
       : 18;
     const workspace = anchor.closest('.workspace');
     if (workspace) {
-      const top = anchor.getBoundingClientRect().top
+      // The chapter heading belongs to the first scene's entry, not offscreen.
+      const firstScene=anchor.closest('.chapter-continuous')?.querySelector('[data-chapter-scene-anchor]');
+      const top = firstScene===anchor ? 0 : anchor.getBoundingClientRect().top
         - workspace.getBoundingClientRect().top
         + workspace.scrollTop - mobileOffset;
-      workspace.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+      workspace.scrollTo({ top: Math.max(0, top), behavior: scrollBehavior() });
     } else {
-      anchor.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      anchor.scrollIntoView({ block: 'start', behavior: scrollBehavior() });
     }
     return true;
+  }
+
+  function scheduleChapterPosition(sceneId) {
+    const ticket=++chapterPositionTicket,workId=state.work?.id,chapterId=state.writingChapterId;
+    const intent=chapterScrollIntentAt;
+    // One layout-frame correction, never delayed retries that fight the reader.
+    window.requestAnimationFrame(()=>{
+      if(ticket!==chapterPositionTicket||state.work?.id!==workId||state.writingChapterId!==chapterId||state.sceneId!==sceneId)return;
+      if(state.surface!=='writing'||state.stage!=='draft'||chapterScrollIntentAt!==intent)return;
+      if(window.matchMedia('(max-width:760px)').matches&&state.writingMobileView!=='manuscript')return;
+      scrollToChapterScene(sceneId);
+    });
   }
 
   function focusChapterScene(sceneId) {
@@ -1172,13 +1095,20 @@
 
   function syncSceneChrome(scene) {
     if (!scene) return;
+    const action=document.querySelector('[data-scene-draft-action]');
+    if(action&&typeof sceneDraftActionMarkup==='function')action.outerHTML=sceneDraftActionMarkup(scene,pendingProposal());
     document.querySelectorAll('#sceneTree .writing-scene').forEach(button => {
       button.classList.toggle('active', button.dataset.scene === scene.id);
     });
     document.querySelectorAll('#sceneTree .writing-chapter').forEach(chapter => {
-      const open = chapter.querySelector(`[data-scene="${CSS.escape(scene.id)}"]`);
-      chapter.classList.toggle('open', Boolean(open));
-      chapter.querySelector('.writing-chapter-button')?.setAttribute('aria-expanded', open ? 'true' : 'false');
+      const active = Boolean(chapter.querySelector(`[data-scene="${CSS.escape(scene.id)}"]`));
+      const button=chapter.querySelector('.writing-chapter-button'),toggle=chapter.querySelector('.writing-chapter-toggle');
+      const open=chapterTreeExpansion.get(`${state.work.id}:${button?.dataset.writingChapter}`) ?? active;
+      chapter.classList.toggle('open',open);
+      button?.setAttribute('aria-current',active?'location':'false');
+      toggle?.setAttribute('aria-expanded',String(open));
+      const title=button?.querySelector('.chapter-copy b')?.textContent||'';
+      toggle?.setAttribute('aria-label',`${open?'收起':'展开'}${title}的场景`);
     });
     document.querySelectorAll('[data-chapter-scene-anchor]').forEach(anchor => {
       const current = anchor.dataset.chapterSceneAnchor === scene.id;
@@ -1187,9 +1117,14 @@
       if (current) anchor.setAttribute('aria-current', 'location');
       else anchor.removeAttribute('aria-current');
     });
-    // A normal manuscript scroll only changes the active scene marker. Keep
-    // the chapter Agent/context surface mounted; rebuilding it here reflows
-    // the scroll owner and makes crossing a scene look like a page jump.
+    // Update the scene assistant without rebuilding the manuscript scroll
+    // owner. A new active scene must not keep the previous scene's chat.
+    if (state.stage === 'draft') {
+      if(state.context?.scene_id!==scene.id){state.context=null;state._contextError='';state._contextBlocked='';}
+      renderInspector();
+      ensureSceneContext(scene.id,renderInspector);
+      ensureSceneConversation(scene.id);
+    }
     if (typeof syncRoute === 'function') syncRoute();
     const crumb = document.getElementById('crumb');
     if (crumb && typeof currentWritingVolume === 'function' && typeof writingChapter === 'function') {
@@ -1234,6 +1169,8 @@
       setInert(inspector, true);
     }
     if (existing && state.writingMobileView === 'manuscript') {
+      const chatScroll = existing.querySelector('[data-scene-conversation-scroll]');
+      if (chatScroll && !existing.hidden) existing.dataset.chatScrollTop = String(chatScroll.scrollTop);
       existing.hidden = true;
       existing.setAttribute('aria-hidden', 'true');
       setInert(existing, true);
@@ -1245,6 +1182,14 @@
       existing.setAttribute('aria-labelledby', `writingMobileTab-${state.writingMobileView}`);
       existing.removeAttribute('aria-hidden');
       setInert(existing, false);
+      if (existing.dataset.chatScrollTop !== undefined) {
+        const savedTop = Number(existing.dataset.chatScrollTop);
+        delete existing.dataset.chatScrollTop;
+        requestAnimationFrame(() => {
+          const scroll = existing.querySelector('[data-scene-conversation-scroll]');
+          if (scroll && !existing.hidden) scroll.scrollTop = savedTop;
+        });
+      }
       return;
     }
     if (state.writingMobileView === 'manuscript') return;
@@ -1258,6 +1203,10 @@
     pane.setAttribute('aria-live', 'polite');
     while (source.firstChild) pane.append(source.firstChild);
     tabs.after(pane);
+    requestAnimationFrame(() => {
+      const scroll = pane.querySelector('[data-scene-conversation-scroll]');
+      if (scroll && pane.isConnected && !pane.hidden) scroll.scrollTop = scroll.scrollHeight;
+    });
   }
 
   function decorateWritingWorkspace() {
@@ -1283,7 +1232,9 @@
       if (mobileHead && !document.querySelector('.writing-mobile-tabs')) {
         if (sceneHead) sceneHead.insertAdjacentHTML('beforeend', '<button type="button" class="mobile-scene-trigger" data-mobile-scene-drawer>场景</button>');
         else mobileHead.insertAdjacentHTML('beforeend', '<button type="button" class="mobile-scene-trigger" data-mobile-scene-drawer>场景</button>');
-        mobileHead.insertAdjacentHTML('afterend', `<nav class="writing-mobile-tabs" role="tablist" aria-orientation="horizontal" aria-label="场景工作区">
+        const tabAnchor = !sceneHead && chapterHead?.nextElementSibling?.classList.contains('chapter-authoring-save')
+          ? chapterHead.nextElementSibling : mobileHead;
+        tabAnchor.insertAdjacentHTML('afterend', `<nav class="writing-mobile-tabs" role="tablist" aria-orientation="horizontal" aria-label="场景工作区">
           <button id="writingMobileTab-manuscript" type="button" role="tab" aria-controls="writingMobilePane" aria-selected="${state.writingMobileView === 'manuscript' ? 'true' : 'false'}" tabindex="${state.writingMobileView === 'manuscript' ? '0' : '-1'}" data-writing-mobile-view="manuscript" class="${state.writingMobileView === 'manuscript' ? 'active' : ''}">正文</button>
           <button id="writingMobileTab-agent" type="button" role="tab" aria-controls="writingMobilePane" aria-selected="${state.writingMobileView === 'agent' ? 'true' : 'false'}" tabindex="${state.writingMobileView === 'agent' ? '0' : '-1'}" data-writing-mobile-view="agent" class="${state.writingMobileView === 'agent' ? 'active' : ''}">Agent</button>
           <button id="writingMobileTab-review" type="button" role="tab" aria-controls="writingMobilePane" aria-selected="${state.writingMobileView === 'review' ? 'true' : 'false'}" tabindex="${state.writingMobileView === 'review' ? '0' : '-1'}" data-writing-mobile-view="review" class="${state.writingMobileView === 'review' ? 'active' : ''}">审查</button>
@@ -1303,10 +1254,14 @@
         const title = nextCommand.querySelector('strong');
         const detail = nextCommand.querySelector('p');
         const actions = nextCommand.querySelector('.command-actions');
+        if (detail) detail.hidden = false;
         const writingReady = readiness.canRun;
         const proposal = typeof pendingProposal === 'function' ? pendingProposal() : null;
         const hasCurrentRevision = Boolean(scene?.current_revision_id);
+        const hasConfirmedCard = (state.work?.artifacts || []).some(item => item.kind === 'character_card' && item.current_revision?.content?.trust_status === 'confirmed' && item.current_revision?.content?.status !== 'archived');
         const review = currentSceneReview(scene);
+        const sceneComplete = Boolean(!proposal && hasCurrentRevision && review.gate?.status === 'passed');
+        nextCommand.classList.toggle('is-complete', sceneComplete);
         if (proposal) {
           if (title) title.textContent = '有一份候选等待决定';
           if (detail) detail.textContent = '逐项查看候选与 Diff；正式正文仍未改变。';
@@ -1322,24 +1277,27 @@
             if (detail) detail.textContent = '处理记录已经保留；当前 Gate 仍是上一次的阻塞快照，重新检查本场后才会更新。';
           }
         } else if (hasCurrentRevision && review.gate?.status === 'passed') {
-          if (title) title.textContent = '本场检查已完成';
-          if (detail) detail.textContent = review.findings.length
-            ? `仍有 ${review.findings.length} 项非阻塞建议可查看；可以继续下一场。`
-            : '当前 Revision 没有阻塞项，可以继续下一场或进入检查与发布。';
+          if (title) title.textContent = '本场已检查';
+          if (detail) {
+            detail.textContent = review.findings.length ? `${review.findings.length} 项建议可查看` : '';
+            detail.hidden = !review.findings.length;
+          }
         } else {
-          if (title) title.textContent = writingReady ? '本场上下文已准备' : '本场上下文已固定，写作条件未满足';
+          if (title) title.textContent = writingReady ? '本场上下文已准备' : '先补齐 Agent 起草依据，也可以自己写';
           if (detail) detail.textContent = writingReady
             ? (state.capabilities?.providers?.[0]?.is_simulation
               ? '当前为明确标注的模拟 Provider；可以验证完整审阅流程，但不会冒充真实模型输出。'
               : 'Agent 已读取本场合同、前文承接和确认资料，可以继续讨论或提出候选。')
-            : readiness.detail;
+            : readiness.needsCharacterCard && hasConfirmedCard
+              ? '已有人物卡，但本场尚未选择。先将人物卡加入本场上下文。'
+              : readiness.detail;
         }
         if (actions) {
           const nextUnwrittenScene = scenes().find(candidate => !candidate.current_revision_id && candidate.id !== scene?.id);
           const nextAction = writingReady
-            ? '<button type="button" class="primary" data-inspector="agent">与本场 Agent 讨论</button>'
+            ? '<button type="button" class="primary" data-start-scene-drafting>让 Agent 起草本场</button><button type="button" class="quiet" data-start-scene-manual>自己写</button>'
             : readiness.needsCharacterCard
-              ? '<button type="button" class="primary" data-agent-complete-cards>补齐人物卡</button>'
+              ? `<button type="button" class="primary" data-agent-complete-cards>${hasConfirmedCard ? '选择本场人物卡' : '补齐人物卡'}</button>`
               : '<button type="button" class="primary" data-inspector="agent">查看缺少的输入</button>';
           if (proposal) {
             actions.innerHTML = '<button type="button" class="primary" data-focus-scene-diff>查看候选与 Diff</button>';
@@ -1351,11 +1309,25 @@
               : '<button type="button" class="primary" data-action="review-scene">重新检查本场</button><button type="button" class="quiet" data-focus-scene-review>查看处理记录</button>';
           } else if (hasCurrentRevision && review.gate?.status === 'passed') {
             actions.innerHTML = nextUnwrittenScene
-              ? `<button type="button" class="primary" data-scene-open="${esc(nextUnwrittenScene.id)}">去写下一场</button><button type="button" class="quiet" data-focus-scene-review>查看审查结果</button>`
-              : '<button type="button" class="primary" data-stage="release">进入检查与发布</button><button type="button" class="quiet" data-focus-scene-review>查看审查结果</button>';
+              ? `<button type="button" class="primary" data-scene-open="${esc(nextUnwrittenScene.id)}">写下一场</button>${review.findings.length ? '<button type="button" class="quiet" data-focus-scene-review>查看建议</button>' : ''}`
+              : `<button type="button" class="primary" data-stage="release">检查与发布</button>${review.findings.length ? '<button type="button" class="quiet" data-focus-scene-review>查看建议</button>' : ''}`;
           } else {
-            actions.innerHTML = `${nextAction}${writingReady && state.capabilities?.providers?.[0]?.is_simulation ? '<button type="button" class="quiet" data-action="settings">配置真实模型</button>' : ''}`;
+            if(writingReady&&!hasCurrentRevision){
+              if(title)title.textContent='这一场还没有正文，从这里开始';
+              if(detail)detail.textContent='“让 Agent 起草本场”会填好请求，确认发送后才调用模型；“自己写”会直接把光标放进正文。';
+            }
+            actions.innerHTML = nextAction + (!writingReady&&!hasCurrentRevision?'<button type="button" class="quiet" data-start-scene-manual>自己写</button>':'');
           }
+        }
+      }
+      if(nextCommand){
+        const emptyScene=!selectedScene()?.current_revision_id&&!pendingProposal();
+        nextCommand.classList.toggle('is-writing-hint',emptyScene);
+        if(emptyScene){
+          const title=nextCommand.querySelector('strong'),detail=nextCommand.querySelector('p'),actions=nextCommand.querySelector('.command-actions');
+          if(title)title.textContent='可以直接写正文';
+          if(detail){detail.hidden=false;detail.textContent=!state.context?'可直接写作，助手资料正在准备。':readiness.canRun?'可直接写作，也可与助手讨论；候选由你确认后采用。':'可直接写作；使用助手起草前需补齐资料。';}
+          if(actions)actions.replaceChildren();
         }
       }
       // The continuous chapter renderer owns the command bar. Re-attach the
@@ -1369,9 +1341,7 @@
       moveInspectorToMobilePane();
       if (state.sceneId && state._lastChapterSceneScroll !== state.sceneId) {
         state._lastChapterSceneScroll = state.sceneId;
-        [0, 120, 360].forEach(delay => window.setTimeout(() => {
-          if (state.stage === 'draft') scrollToChapterScene(state.sceneId);
-        }, delay));
+        scheduleChapterPosition(state.sceneId);
       }
     }
     if (state.stage === 'structure') renderCompactStructureWorkspace();
@@ -1389,72 +1359,175 @@
   }
 
   function decoratePanelControls() {
-    const treeToggle = document.querySelector('[data-panel-toggle="tree"]');
+    const treeToggle = document.querySelector('.panel-divider-toggle-left');
     if (!treeToggle) return;
+
+    // This control sits on the splitter, not in the toolbar.  It must remain
+    // an icon: replacing its contents with a label was causing “隐藏章节” to
+    // wrap into a conspicuous vertical word stack on the divider.
     const works = Boolean(state.work && state.surface === 'works' && state.stage === 'overview');
-    treeToggle.hidden = works;
-    if (works) return;
-    if (treeToggle.getAttribute('aria-pressed') === 'true') {
-      treeToggle.textContent = '显示章节';
-      treeToggle.title = '展开章节与场景';
+    const railName = works ? '对话栏' : state.work ? '章节与场景栏' : '作品栏';
+    const collapsed = treeToggle.getAttribute('aria-pressed') === 'true';
+    const label = `${collapsed ? '展开' : '收起'}${railName}`;
+    treeToggle.hidden = false;
+    treeToggle.setAttribute('aria-label', label);
+    treeToggle.title = label;
+
+    if (treeToggle.classList.contains('panel-divider-toggle')) {
+      const glyph = treeToggle.querySelector('[aria-hidden="true"]');
+      if (glyph) glyph.textContent = collapsed ? '›' : '‹';
     } else {
-      treeToggle.textContent = '隐藏章节';
-      treeToggle.title = '收起章节与场景';
+      treeToggle.textContent = label;
     }
   }
 
-  const renderBeforeWritingWorkbench = render;
-  render = function renderWithWritingWorkbench() {
-    renderBeforeWritingWorkbench();
-    decorateWritingWorkspace();
-    decorateWorksRail();
-    decoratePanelControls();
-    syncRoute();
-    const pendingSceneId = state._pendingChapterSceneScroll;
-    if (pendingSceneId) {
-      state._pendingChapterSceneScroll = '';
-      window.requestAnimationFrame(() => scrollToChapterScene(pendingSceneId));
-    }
-  };
 
-  window.addEventListener('click', event => {
+  registerRenderHook('writing-workbench', route => {
+    if(route.section !== 'writing') return;
+    decorateWritingWorkspace();
+    decoratePanelControls();
+    const pendingSceneId = state._pendingChapterSceneScroll;
+    if(pendingSceneId){
+      state._pendingChapterSceneScroll = '';
+      scheduleChapterPosition(pendingSceneId);
+    }
+    // A queued context render can replace the first DOM before its layout
+    // frame. Carry the intent to the fresh paragraph instead of losing it.
+    const pendingReview=state._pendingSceneReviewFocus;
+    if(pendingReview){
+      if(pendingReview.sceneId===state.sceneId&&pendingProposal()?.id===pendingReview.proposalId)focusSceneDiff(pendingReview.changeId,true);
+      else state._pendingSceneReviewFocus=null;
+    }
+  });
+  window.HaloCueWritingWorkbench=Object.freeze({focusScene:focusChapterScene,focusDiff:focusSceneDiff,openScene,refreshChrome:()=>{
+    const restoreComposerFocus=document.activeElement?.id==='sceneAgentMessage';
+    if(state.stage==='draft'&&state.inspector==='agent')renderSceneAgentInspector();
+    const pane=document.getElementById('writingMobilePane'),source=document.getElementById('inspectorContent');
+    if(window.matchMedia('(max-width:760px)').matches&&state.stage==='draft'&&pane&&source) pane.replaceChildren(...source.childNodes);
+    decorateWritingWorkspace();
+    if(restoreComposerFocus)document.querySelector('#writingMobilePane #sceneAgentMessage')?.focus({preventScroll:true});
+  }});
+
+  registerAppClick(event => {
     const blockedControl = event.target.closest('[data-writing-gate]');
     if (blockedControl) {
       event.preventDefault();
-      event.stopImmediatePropagation();
-      focusWritingReadiness(blockedControl.dataset.writingGate || '当前步骤的前置条件尚未满足。');
+      claimAppEvent(event);
+      focusWritingReadiness(blockedControl.dataset.writingGate || '当前步骤的前置条件尚未满足。', blockedControl.dataset.stage || 'structure');
       return;
     }
-    const focusDiff = event.target.closest('[data-focus-scene-diff]');
+    if(event.target.closest('[data-agent-complete-cards]')){
+      event.preventDefault();claimAppEvent(event);
+      if(libraryCards().some(card=>card.trust_status==='confirmed'&&card.status!=='archived')){
+        state.sceneContextEditorOpen=true;
+        render();
+        document.querySelector('.scene-context-panel')?.scrollIntoView({block:'start'});
+        return;
+      }
+      state.libraryView='characters';
+      navigateToStage('references');
+      return;
+    }
+    if(event.target.closest('[data-show-scene-agent]')){
+      event.preventDefault();claimAppEvent(event);
+      const wasAgent=state.inspector==='agent';
+      state.inspector='agent';
+      if(window.matchMedia('(max-width:760px)').matches){
+        document.querySelector('[data-writing-mobile-view="agent"]')?.click();
+      }else{
+        window.HaloCuePanels?.open('inspector');
+        if(!wasAgent||!document.querySelector('#sceneConversationForm'))renderSceneAgentInspector();
+      }
+      const suggestion=event.target.closest('[data-show-scene-agent]').dataset.sceneEntryPrompt;
+      const focusInput=()=>{
+        const input=document.querySelector('#sceneConversationForm textarea[name="text"]');
+        if(!input||input.disabled)return;
+        // Opening the assistant must never replace an unfinished instruction.
+        if(suggestion&&!input.value.trim()){
+          input.value=suggestion;
+          input.dispatchEvent(new Event('input',{bubbles:true}));
+        }
+        input.focus({preventScroll:true});
+      };
+      // Run after the mobile tab's own focus restoration.
+      if(window.matchMedia('(max-width:760px)').matches)window.requestAnimationFrame(focusInput);
+      else focusInput();
+      return;
+    }
+    const startDraft=event.target.closest('[data-start-scene-drafting]');
+    if(startDraft){
+      event.preventDefault();claimAppEvent(event);
+      const scene=selectedScene();if(!scene||pendingProposal())return;
+      state.inspector='agent';
+      if(window.matchMedia('(max-width:760px)').matches){
+        document.querySelector('[data-writing-mobile-view="agent"]')?.click();
+      }else{window.HaloCuePanels?.open('inspector');renderSceneAgentInspector();}
+      const input=document.querySelector('#sceneConversationForm textarea[name="text"]');
+      if(input&&!input.disabled){
+        if(!input.value.trim())input.value=`请根据已确认的故事方向、人物资料和本场目标，为《${scene.title}》起草正文候选。保留停止边界，先交给我审查，不要直接写入正式正文。`;
+        input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();
+      }else toast('本场对话正在准备，请稍后再试。',true);
+      return;
+    }
+    if(event.target.closest('[data-start-scene-manual]')){
+      event.preventDefault();claimAppEvent(event);
+      let chapterEditor=document.querySelector('.chapter-authoring');
+      if(chapterEditor){
+        const editButton=chapterEditor.querySelector('[data-chapter-view="edit"]');
+        if(editButton?.getAttribute('aria-pressed')!=='true')editButton?.click();
+        chapterEditor=document.querySelector('.chapter-authoring');
+        const sceneId=selectedScene()?.id||state.sceneId;
+        const sceneSelector=sceneId?`[data-chapter-scene="${CSS.escape(sceneId)}"]`:'.chapter-authoring-scene.is-current';
+        let sceneEditor=chapterEditor?.querySelector(sceneSelector)||chapterEditor?.querySelector('.chapter-authoring-scene.is-current');
+        if(!sceneEditor){toast('当前场景的正文编辑区尚未打开。',true);return}
+        let field=sceneEditor.querySelector('[data-chapter-text]');
+        if(!field){
+          sceneEditor.querySelector('[data-chapter-add],[data-chapter-start]')?.click();
+          chapterEditor=document.querySelector('.chapter-authoring');
+          sceneEditor=chapterEditor?.querySelector(sceneSelector)||chapterEditor?.querySelector('.chapter-authoring-scene.is-current');
+          field=sceneEditor?.querySelector('[data-chapter-text]');
+        }
+        if(field){field.focus();field.setSelectionRange(field.value.length,field.value.length)}
+        else toast('本场还没有可编辑的正文段落。',true);
+        return;
+      }
+      const form=document.querySelector('#sceneManuscriptForm');
+      if(!form)return;
+      form.querySelector('[data-manuscript-insert-empty]')?.click();
+      const field=form.querySelector('textarea[name="text"]');
+      field?.closest('[data-manuscript-block]')?.classList.add('is-editing');
+      field?.focus();return;
+    }
+    const focusDiff = event.target.closest('[data-focus-scene-diff],[data-return-scene-change]');
     if (focusDiff) {
       event.preventDefault();
-      event.stopImmediatePropagation();
-      focusSceneDiff();
+      claimAppEvent(event);
+      focusSceneDiff(focusDiff.dataset.returnSceneChange || '');
       return;
     }
     const focusReview = event.target.closest('[data-focus-scene-review]');
     if (focusReview) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       focusSceneReview();
       return;
     }
     const returnButton = event.target.closest('[data-writing-return-to-work]');
     if (returnButton) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       void returnToWorkDecision(returnButton.dataset.writingReturnToWork || '');
       return;
     }
     if (event.target.closest('[data-action="new-work"]')) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       openWorkDialog(event.target.closest('[data-action="new-work"]'));
       return;
     }
     if (event.target.closest('[data-mobile-scene-drawer]')) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       const dialog = document.getElementById('mobileSceneDrawer');
       if (dialog && !dialog.open) dialog.showModal();
       return;
@@ -1465,12 +1538,11 @@
     // click, including onboarding and first-use actions.
     if (workSwitch && workSwitch.dataset.selectWork === state.work?.id) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       document.getElementById('workSwitchDialog')?.close();
       return;
     }
-    if (event.target.closest('[data-section],[data-stage],[data-stage-jump],[data-scene],[data-scene-open],[data-select-work],[data-mobile]')) pushNextRoute = true;
-  }, true);
+  },0);
 
   // Capture mobile view intent before the browser focuses a sticky tab and
   // scrolls its ancestor. The workspace listener intentionally runs later
@@ -1514,11 +1586,11 @@
     if (nextTab !== viewButton) nextTab.click();
   }, true);
 
-  document.addEventListener('click', event => {
+  registerAppClick(event => {
     const assetSuggestion = event.target.closest('[data-scene-asset-suggestion-kind]');
     if (assetSuggestion) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       void openSceneAssetPicker(
         assetSuggestion.dataset.sceneAssetSuggestionScene,
         assetSuggestion.dataset.sceneAssetSuggestionKind,
@@ -1529,14 +1601,14 @@
     const assetPickerOpen = event.target.closest('[data-scene-asset-picker]');
     if (assetPickerOpen) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       void openSceneAssetPicker(assetPickerOpen.dataset.sceneAssetPicker);
       return;
     }
     const assetPickerClose = event.target.closest('[data-scene-asset-picker-close]');
     if (assetPickerClose) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       state.sceneAssetPicker = null;
       assetPickerClose.closest('dialog')?.close();
       return;
@@ -1544,7 +1616,7 @@
     const assetPickerRetry = event.target.closest('[data-scene-asset-picker-retry]');
     if (assetPickerRetry) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       const picker = sceneAssetPicker();
       if (!picker) return;
       picker.error = '';
@@ -1555,7 +1627,7 @@
     const assetKind = event.target.closest('[data-scene-asset-kind]');
     if (assetKind) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       const picker = sceneAssetPicker();
       if (!picker || picker.kind === assetKind.dataset.sceneAssetKind) return;
       picker.kind = assetKind.dataset.sceneAssetKind;
@@ -1568,7 +1640,7 @@
     const assetSource = event.target.closest('[data-scene-asset-source]');
     if (assetSource) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       const picker = sceneAssetPicker();
       if (!picker || picker.scope === assetSource.dataset.sceneAssetSource) return;
       picker.scope = assetSource.dataset.sceneAssetSource;
@@ -1579,7 +1651,7 @@
     const quickQuery = event.target.closest('[data-scene-asset-quick-query]');
     if (quickQuery) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       const picker = sceneAssetPicker();
       if (!picker) return;
       picker.query = quickQuery.dataset.sceneAssetQuickQuery || '';
@@ -1589,7 +1661,7 @@
     const assetAdd = event.target.closest('[data-scene-asset-add]');
     if (assetAdd) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       const picker = sceneAssetPicker();
       const item = picker?.items?.[Number(assetAdd.dataset.sceneAssetAdd)];
       if (!picker || !item) return;
@@ -1621,7 +1693,7 @@
     const assetRemove = event.target.closest('[data-scene-asset-remove]');
     if (assetRemove) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       const picker = sceneAssetPicker();
       const identity = assetRemove.dataset.sceneAssetRemove;
       if (!picker || !identity) return;
@@ -1632,21 +1704,21 @@
     const assetSave = event.target.closest('[data-scene-asset-save]');
     if (assetSave) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       void saveSceneAssetReferences();
       return;
     }
     const close = event.target.closest('[data-close-work-dialog]');
     if (close) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       closeWorkDialog();
       return;
     }
     const sceneButton = event.target.closest('[data-scene], [data-scene-open]');
     if (sceneButton) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       const sceneId = sceneButton.dataset.scene || sceneButton.dataset.sceneOpen;
       if (state.surface === 'writing' && state.stage === 'draft'
         && sceneButton.closest('#sceneTree, #mobileSceneDrawer')) {
@@ -1656,38 +1728,30 @@
       }
       return;
     }
-    const chapter = event.target.closest('[data-writing-chapter]');
-    if (chapter) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      const chapterId = chapter.dataset.writingChapter;
-      const nextChapter = (state.work?.chapters || []).find(item => item.id === chapterId);
-      const nextScene = (nextChapter?.scenes || []).some(scene => scene.id === state.sceneId)
-        ? state.sceneId
-        : nextChapter?.scenes?.[0]?.id || null;
-      const saveTarget = typeof persistWritingTarget === 'function'
-        ? persistWritingTarget(chapterId, nextScene)
-        : Promise.resolve(state.work);
-      void saveTarget.then(() => {
-        if (!state.work) return;
-        state.writingChapterId = chapterId;
-        state.sceneId = nextScene;
-        state.stage = 'structure';
-        state.mobileView = 'writing';
-        render();
-      }).catch(error => toast(`章节已切换，但恢复位置未保存：${error.message}`, true));
+    const chapterToggle=event.target.closest('[data-toggle-writing-chapter]');
+    if(chapterToggle){
+      event.preventDefault();claimAppEvent(event);
+      const row=chapterToggle.closest('.writing-chapter'),open=!row.classList.contains('open');
+      chapterTreeExpansion.set(`${state.work.id}:${chapterToggle.dataset.toggleWritingChapter}`,open);
+      row.classList.toggle('open',open);chapterToggle.setAttribute('aria-expanded',String(open));
+      const title=row.querySelector('.chapter-copy b')?.textContent||'';
+      chapterToggle.setAttribute('aria-label',`${open?'收起':'展开'}${title}的场景`);
       return;
     }
+    const chapter = event.target.closest('[data-writing-chapter]');
+    if(chapter){handleAppRouteClick(event);return;}
     const mobileView = event.target.closest('.writing-mobile-tabs button[data-writing-mobile-view]');
     if (mobileView) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       // A focused sticky tab may cause the browser to move the manuscript
       // before/after the click. Freeze scene inference for the whole view
       // transition so that movement cannot overwrite the last reading scene.
       state._mobileViewSwitching = true;
       state._ignoreChapterScrollUntil = Date.now() + 1200;
       chapterScrollIntentAt = 0;
+      const viewTicket=++mobileViewTicket,viewWorkId=state.work?.id,viewChapterId=state.writingChapterId;
+      const currentViewTask=()=>viewTicket===mobileViewTicket&&state.work?.id===viewWorkId&&state.writingChapterId===viewChapterId&&state.surface==='writing'&&state.stage==='draft';
       const readingWorkspace = document.getElementById('workspace');
       const currentView = state.writingMobileView;
       const activeReadingAnchor = document.querySelector('[data-chapter-scene-anchor].is-current');
@@ -1724,7 +1788,7 @@
       moveInspectorToMobilePane();
       // The capture-phase mousedown guard prevents sticky-tab scroll jumps,
       // so restore keyboard focus after the target pane has been mounted.
-      window.requestAnimationFrame(() => mobileView.focus({ preventScroll: true }));
+      window.requestAnimationFrame(() => {if(currentViewTask())mobileView.focus({ preventScroll: true });});
       const nextWorkspace = document.getElementById('workspace');
       if (nextWorkspace && state.writingMobileView === 'manuscript') {
         if (mobileScrollSceneId) {
@@ -1736,7 +1800,7 @@
         }
         [0, 50, 150, 300, 650].forEach(delay => window.setTimeout(() => {
           const workspace = document.getElementById('workspace');
-          if (workspace && state.writingMobileView === 'manuscript') {
+          if (workspace && currentViewTask() && chapterScrollIntentAt===0 && state.writingMobileView === 'manuscript') {
             // Sticky view tabs can receive focus after the click handler and
             // move the scroll owner. Re-focus without browser scrolling, then
             // restore once more after that focus task has settled.
@@ -1744,9 +1808,10 @@
             workspace.scrollTo({ top: preservedScrollTop, behavior: 'auto' });
           }
         }, delay));
-        window.setTimeout(() => { state._writingMobileRestoreUntil = 0; }, 760);
+        window.setTimeout(() => { if(currentViewTask())state._writingMobileRestoreUntil = 0; }, 760);
       }
       window.setTimeout(() => {
+        if(viewTicket!==mobileViewTicket)return;
         state._mobileViewSwitching = false;
         state._pendingMobileViewSwitch = false;
         state._ignoreChapterScrollUntil = 0;
@@ -1756,21 +1821,21 @@
     const sceneDrawer = event.target.closest('[data-mobile-scene-drawer]');
     if (sceneDrawer) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       document.getElementById('mobileSceneDrawer')?.showModal();
       return;
     }
     const closeScenes = event.target.closest('[data-close-mobile-scenes]');
     if (closeScenes) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      claimAppEvent(event);
       document.getElementById('mobileSceneDrawer')?.close();
       return;
     }
     if (event.target.closest('#mobileSceneDrawer [data-scene], #mobileSceneDrawer [data-stage]')) {
       document.getElementById('mobileSceneDrawer')?.close();
     }
-  }, true);
+  },10);
 
   document.addEventListener('submit', event => {
     const form = event.target.closest('[data-scene-asset-search]');
@@ -1797,18 +1862,8 @@
     });
   });
 
-  window.addEventListener('popstate', () => applyRouteFromLocation());
-
-  const initialRouteTimer = window.setInterval(() => {
-    if (initialWorkLoadInFlight) return;
-    if (state.works?.length && !state.work) return;
-    if (!state.capabilities) return;
-    if (!state.work && document.getElementById('saveStatus')?.textContent === '正在连接') return;
-    window.clearInterval(initialRouteTimer);
-    void applyInitialRoute();
-  }, 40);
-  window.setTimeout(() => {
-    window.clearInterval(initialRouteTimer);
-    if (!initialWorkLoadInFlight) void applyInitialRoute();
-  }, 5000);
+  // Initial routes and browser history are owned by HaloCueRouter.
+  // Compatibility contract marker:
+  // initialRequestedRoute.get('section') === 'production'
+  // await applyRouteFromLocation(initialRequestedRoute);
 })();

@@ -48,9 +48,7 @@ def _tracked_source(tmp_path: Path, files: dict[str, bytes | str]) -> Path:
             path.write_bytes(payload)
         else:
             path.write_text(payload, encoding="utf-8")
-    subprocess.run(
-        ["git", "-C", str(source), "add", "-f", "--", *files], check=True
-    )
+    subprocess.run(["git", "-C", str(source), "add", "-f", "--", *files], check=True)
     return source
 
 
@@ -62,6 +60,10 @@ def test_public_manifest_includes_runtime_frontend_tests_and_tools(tmp_path):
             "js/app.js": "export {};\n",
             "branding/halocue-icon.png": b"public icon",
             "tests/test_smoke.py": "def test_smoke(): assert True\n",
+            "services/halocue/_test_support.py": "CHROMIUM_UNSAFE_PORTS = {1723}\n",
+            "services/halocue/http_server.py": "# shared local HTTP runtime\n",
+            "services/halocue/writing/web/vendor/echarts/LICENSE": "Apache-2.0\n",
+            "services/halocue/writing/web/vendor/echarts/NOTICE": "Apache Software Foundation\n",
             "tools/check.py": "# tool\n",
             "release_tools/__init__.py": "",
             "docs/commands.md": "# Commands\n",
@@ -78,11 +80,15 @@ def test_public_manifest_includes_runtime_frontend_tests_and_tools(tmp_path):
     paths = set(public_source_paths(source))
 
     assert REQUIRED_ROOT_MODULES <= paths
+    assert "services/halocue/http_server.py" in paths
     assert {
         "css/app.css",
         "js/app.js",
         "branding/halocue-icon.png",
         "tests/test_smoke.py",
+        "services/halocue/_test_support.py",
+        "services/halocue/writing/web/vendor/echarts/LICENSE",
+        "services/halocue/writing/web/vendor/echarts/NOTICE",
         "tools/check.py",
         "release_tools/__init__.py",
         "docs/commands.md",
@@ -137,9 +143,7 @@ def test_export_reads_tracked_files_from_index_and_writes_sorted_hash_manifest(
     build_root = tmp_path / "build"
     destination = build_root / "public-source" / "HaloCue"
 
-    manifest_path = export_public_source(
-        source, destination, build_root=build_root
-    )
+    manifest_path = export_public_source(source, destination, build_root=build_root)
 
     assert (destination / "app.py").read_text(encoding="utf-8") == "VALUE = 'indexed'\n"
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -161,9 +165,7 @@ def test_export_requires_empty_destination_inside_explicit_build_root(tmp_path):
     with pytest.raises(ValueError, match="empty"):
         export_public_source(source, nonempty, build_root=build_root)
     with pytest.raises(ValueError, match="build root"):
-        export_public_source(
-            source, tmp_path / "outside", build_root=build_root
-        )
+        export_public_source(source, tmp_path / "outside", build_root=build_root)
 
     assert (nonempty / "keep.txt").read_text(encoding="utf-8") == "keep"
 
@@ -204,9 +206,7 @@ def test_prepare_release_check_scans_index_candidate_not_git_metadata(
 ):
     source = _tracked_source(tmp_path, {"app.py": "VALUE = 'public'\n"})
     marker = "qwertyuiopasdfghjklzxcvbnm123456"
-    (source / ".git" / "private-probe.txt").write_text(
-        "api_key=" + repr(marker), encoding="utf-8"
-    )
+    (source / ".git" / "private-probe.txt").write_text("api_key=" + repr(marker), encoding="utf-8")
     monkeypatch.setattr(prepare_release, "HERE", source)
 
     result = prepare_release.main(["--check"])

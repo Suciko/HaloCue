@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Saved card changes against completed scene review",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "knowledge-change-impact/1.0"
+    },
+    "work_id": {
+      "type": "string"
+    },
+    "work_version": {
+      "type": "integer"
+    },
+    "scope": {
+      "const": "character_and_world_cards"
+    },
+    "read_only": {
+      "const": true
+    },
+    "scenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scene_id": {
+            "type": "string"
+          },
+          "scene_title": {
+            "type": "string"
+          },
+          "chapter_id": {
+            "type": "string"
+          },
+          "chapter_title": {
+            "type": "string"
+          },
+          "has_manuscript": {
+            "type": "boolean"
+          },
+          "selection_mode": {
+            "enum": [
+              "explicit",
+              "legacy"
+            ]
+          },
+          "status": {
+            "enum": [
+              "needs_review",
+              "not_reviewed",
+              "baseline_unavailable",
+              "unchanged"
+            ]
+          },
+          "baseline": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "status": {
+                "enum": [
+                  "missing",
+                  "ready",
+                  "unavailable"
+                ]
+              },
+              "run_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "checked_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "gate_status": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "manuscript_matches": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "contract_matches": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "run_id",
+              "checked_at",
+              "gate_status",
+              "manuscript_matches",
+              "contract_matches"
+            ]
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "manuscript_changed",
+                "scene_contract_changed"
+              ]
+            }
+          },
+          "changed_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "character_card",
+                    "world_card"
+                  ]
+                },
+                "target_id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "changed",
+                    "added",
+                    "removed",
+                    "unavailable",
+                    "unchanged",
+                    "not_reviewed",
+                    "baseline_unavailable"
+                  ]
+                },
+                "fields": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "label"
+                    ]
+                  }
+                },
+                "selected": {
+                  "type": "boolean"
+                },
+                "available": {
+                  "type": "boolean"
+                },
+                "basis": {
+                  "enum": [
+                    "explicit_selection",
+                    "legacy_selection",
+                    "last_review"
+                  ]
+                },
+                "before_revision_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "current_revision_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "target_id",
+                "name",
+                "status",
+                "fields",
+                "selected",
+                "available",
+                "basis",
+                "before_revision_id",
+                "current_revision_id"
+              ]
+            }
+          }
+        },
+        "required": [
+          "scene_id",
+          "scene_title",
+          "chapter_id",
+          "chapter_title",
+          "has_manuscript",
+          "selection_mode",
+          "status",
+          "baseline",
+          "reasons",
+          "changed_count",
+          "dependencies"
+        ]
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "needs_review": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_reviewed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "baseline_unavailable": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unchanged": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "needs_review",
+        "not_reviewed",
+        "baseline_unavailable",
+        "unchanged"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "work_id",
+    "work_version",
+    "scope",
+    "read_only",
+    "scenes",
+    "summary"
+  ]
+}

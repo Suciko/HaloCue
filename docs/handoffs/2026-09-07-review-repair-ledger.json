@@ -1,0 +1,480 @@
+{
+  "date": "2026-09-07",
+  "branch": "codex/1.0-autonomous-hardening-ui",
+  "goal_status": "active_not_complete",
+  "baseline": "58d1128",
+  "missing_independent_review": "04",
+  "notes": [
+    "Statuses are bounded engineering claims, not global AA/provider acceptance.",
+    "Full raw reviewer reports remain local; this is an implementation ledger.",
+    "Future features are not automatically required to close the maintenance goal.",
+    "Evidence correction: pre-91663f5 synthetic resource indexes did not isolate legacy_root/aa_assets.db. Earlier pass totals are real, but synthetic-only claims were too strong; no before-hash proves the local catalog unchanged. See 2026-09-07-handoff-replay-ui.md. New fixture roots isolate production/integrated data.",
+    "Standalone pytest isolation correction: production-only root omitted parent fixtures and created a new synthetic repository aa_config.json at2026-09-07 20:57:35; timestamps/prior listing indicate new test file, not an overwritten original. Quarantined outside repo. Shared helper imported by both child roots; explicit tmp fixture; see runtime-path-consistency handoff. Older catalog caveat remains."
+  ],
+  "items": [
+    {
+      "id": "01-001",
+      "summary": "备份恢复在尚未替换原目录时失败，异常回滚反而删除原内容。",
+      "review_severity": "P1",
+      "status": "fixed_in_scope",
+      "note": "batch1：分阶段补偿与回滚副本保留"
+    },
+    {
+      "id": "01-002",
+      "summary": "恢复忙碌检查仍读取废弃线程表，真正运行的持久化调度任务不会阻止数据库替换。",
+      "review_severity": "P1",
+      "status": "fixed_in_scope",
+      "note": "batch2：协作进程锁、操作准入与待执行任务检查；不协调旧版/外部SQL写入"
+    },
+    {
+      "id": "01-004",
+      "summary": "生产回执被写入作者场景引用并进入下一份定稿，同素材再次发布会被生产端拒绝。",
+      "review_severity": "P1",
+      "status": "fixed_in_scope",
+      "note": "6f28ebb/12389a2：作者引用与按release/run隔离的回执投影分离；同素材R1/R2交接、历史引用删除、迁移与备份往返验证；旧冻结字节不改，带旧copy的定稿仍需重新审核发布。01-005/006仍待修。"
+    },
+    {
+      "id": "01-003",
+      "summary": "新原文目录 sources 未纳入备份白名单，恢复成功后源文件引用可以悬空。",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "batch1：sources/与来源URI闭包校验"
+    },
+    {
+      "id": "01-005",
+      "summary": "生产 run 已落盘但素材回执写入失败时，正常写作重试只查询，不重建缺失回执。",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "91663f5/72f24aa：已有run但缺回执时普通handoff重放冻结输入，补齐后核对；UI提供独立重试/副本状态，保留制作导航。含重启/坏schema/错run/作者引用删除/自定义副本回归；依赖不可用仍明确失败。"
+    },
+    {
+      "id": "01-006",
+      "summary": "生产交接幂等检查和创建不是原子操作，并发相同 release 会生成两个 run。",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "91663f5：本地目录内协作调用按上游release的OS文件锁覆盖查重、创建、回执；线程/多实例/Windows进程锁退出测试。非所有制作状态的跨进程安全；锁等待无超时，POSIX未运行验证。"
+    },
+    {
+      "id": "01-007",
+      "summary": "IntegratedRuntime.close 未关闭 WritingService，HTTP 关闭后写作调度器仍存活。",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "batch1：集成关闭写作调度器"
+    },
+    {
+      "id": "01-008",
+      "summary": "显式选择 legacy_root 不能隔离 Python 全局模块缓存，第二个适配器可能报 B 版本却执行 A 模块。",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "9cbcfa8/7f05887：单进程兼容代码根固定，共用core/teacher/compile/provider/Spine来源校验；拒绝多根/同名污染/缺失模块跨根回退，区分代码根与数据根并从实际源码目录读取版本。安装布局/无内置代码/传递模块manifest/链接来源/可选Spine回归；1810项固定源码测试通过。非import沙箱或同进程多版本隔离，frozen仅模拟未打包运行。详见legacy-module-provenance交接。"
+    },
+    {
+      "id": "01-009",
+      "summary": "写作 HTTP 接收非对象 JSON 后返回 internal_error，客户端输入错误被错误归类为 500。",
+      "review_severity": "P3",
+      "status": "fixed_in_scope",
+      "note": "85125a1：写作HTTP拒绝非对象JSON和非法/重复长度/传输编码，保留成功协议与路由体积限制；超大十进制比较、非ASCII空白、截断输入测试。非完整HTTP安全审计/读取超时实现。"
+    },
+    {
+      "id": "01-010",
+      "summary": "架构入口文档混用未来 1.x 所有权和当前 1.0 运行布局，易把占位模型当成现有真相。",
+      "review_severity": "P3",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "02-001",
+      "summary": "改编候选接受不存在的段落引用；非 JSON 回复也被包装为带来源的合法候选，人工采纳后进入正式修订。",
+      "review_severity": "P1",
+      "status": "fixed_in_scope",
+      "note": "45b58bc：拒绝非JSON/无效引用/非有限值；校验固定段落ID与原文精确摘录，采纳重验旧候选；不等于文学忠实性证明。"
+    },
+    {
+      "id": "02-002",
+      "summary": "单场 memory.extract 不校验 source_block_ids 是否存在，错误来源经人工采纳后升级为 confirmed 并进入后续记忆检索。",
+      "review_severity": "P1",
+      "status": "fixed_in_scope",
+      "note": "45b58bc：生成前验证修订文件，逐条验证真实正文块；采纳所选记忆时重验场景/修订/Hash/块ID；兼容纯文本旧修订。"
+    },
+    {
+      "id": "02-003",
+      "summary": "改编 run 将同章多个窗口反复覆盖到同一个 candidate_json，只留最后窗口；重复 run 还会覆盖已采纳章节的状态投影。",
+      "review_severity": "P1",
+      "status": "fixed_in_scope",
+      "note": "45b58bc：按章汇总全部窗口，分析另存dependency_json.analysis；重跑不覆盖待采纳/已采纳投影。"
+    },
+    {
+      "id": "02-004",
+      "summary": "改编 Proposal 没有目标正式稿 base_revision 约束；先采纳新候选，再采纳仍 pending 的旧候选，可以将当前稿改回旧内容。",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "45b58bc：生成前固定正式稿base_revision，发布与采纳双重版本核对，拒绝晚到结果和旧候选覆盖。"
+    },
+    {
+      "id": "02-005",
+      "summary": "改编候选绕过持久 AgentDispatcher，同步 HTTP 调用结束才返回 202；没有逐次执行身份/取消恢复，异常统一退回调用计数。",
+      "review_severity": "P2",
+      "status": "partial_or_mitigated",
+      "note": "6076ac0：章节HTTP202接入持久AgentDispatcher/AgentRun/任务尝试，固定输入与严格模型身份，取消/租约/原文计划正文漂移围栏，重启明确重试与已提交回执恢复，正常与恢复摘要保持活跃同级任务。逻辑失败调用不退还，完整usage/物理重试统计及输入限制仍待后续。1832项固定源码回归通过；02-007UI/正式场景链仍未完成。"
+    },
+    {
+      "id": "02-006",
+      "summary": "AI 演出预检取消后，晚到结果仍写入 ai-preflights，并可被下一次演出计划读取；Job 显示 cancelled 不能阻止该业务写入。",
+      "review_severity": "P1",
+      "status": "fixed_in_scope",
+      "note": "本批：只读预检可取消，模型后发布与取消线性化"
+    },
+    {
+      "id": "02-007",
+      "summary": "普通导入入口走附件/聊天分支，专用改编 API 未接到现有按钮；采纳的 adaptation_manuscript 也没有进入冻结发布所消费的场景正文链。",
+      "review_severity": "P1",
+      "status": "fixed_in_scope",
+      "note": "45d000d+d4e7cfa：普通TXT/DOCX入口使用原文/计划/持久章节任务，审核目标后采纳唯一scene_script，旧稿显式promotion；真实shipping浏览器TXT/DOCX保存→计划→生成→刷新恢复→采纳/场景导航，再普通API审核冻结及Production HTTP交接通过。AAP边界保留；1865项固定源码回归通过。真实模型质量/AA播放、完整输入/费用限制另列，不代表全目标完成。"
+    },
+    {
+      "id": "02-008",
+      "summary": "整理作品方案及章节计划时在 BEGIN IMMEDIATE 内等待 Provider，导致与该模型无关的写操作被锁住。",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "0811a4a：作品方案、章内细纲和兼容generate_blueprint均将Provider调用移出SQLite写事务；发布二次核对工作/线程版本、授权策略和候选唯一性。22项事件门控测试+审查通过；不扩展为全Agent生命周期/预算修复。"
+    },
+    {
+      "id": "02-009",
+      "summary": "保存正式场景会自动排队知识发现；会话 max_cost 只看该线程历史 assistant 估算，不覆盖此自动模型工作流，也不是单次调用前的统一硬预算。",
+      "review_severity": "P2",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "02-010",
+      "summary": "IntegratedRuntime.close 关闭服务器及制作 jobs，却没有调用 writing_service.close；写作 dispatcher 在集成关闭后仍为 running。",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "batch1：同01-007"
+    },
+    {
+      "id": "03-D01",
+      "summary": "经过合法性校验的非对白反应 beat 可继承不含目标角色的持有镜头，编译只剩等待而丢失目标表情/动作。",
+      "review_severity": "P1",
+      "status": "fixed_in_scope",
+      "note": "4d01195：反应节点单行camera目标，before节点保留原文前缀含trans承接；渲染sidecar→本地编译核验目标/表情/动作/等待，失败不写输出且制作409带来源定位；审计关联源卡。只保证生成快照，不限制后续作者显式编辑或等同AA实播。"
+    },
+    {
+      "id": "03-D02",
+      "summary": "表情资源白名单与编译器的 ID/语义名解析契约不一致：已知 S2_01 可被忽略并保留默认表情。",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "a8635f5：当前角色canonical face ID精确命中优先于数字兼容/标签；S2_01经证据过滤→渲染→解析→编译保留。保持证据/服装作用域与未知ID警告；不声称新增全面结构化非法ID诊断。"
+    },
+    {
+      "id": "03-D03",
+      "summary": "场尾/文件尾的合法一次性前缀指令无承载行时被丢弃，且没有“未消费指令”诊断。",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "dba22d7：21类一次性前缀于场景/分隔符/EOF无承接行时逐源行报dir.unconsumed；静态预检和现有制作审核/编译gate阻断，旧ready重验。未引入独立事件或强制所有裸legacy build调用阻断。"
+    },
+    {
+      "id": "03-C01",
+      "summary": "当前行明确的听者单人镜头与“必须保留说话者”后处理冲突；有效意图被无诊断改写为auto。",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "db0e8fa：保留原标准提示词的普通立绘说话者可见约束，不放开AI画外对白；新请求听者独镜被回退时给源ID/行号warning与before/after审稿记录，区别继承hold；手写camera不变。48组合渲染与基线相同。"
+    },
+    {
+      "id": "03-R01",
+      "summary": "历史/当前离线解析器将老师/选项文本统一放进partial，has_dialogue不覆盖它们；不能用现有标签做完整对白或静默节点基准。",
+      "review_severity": "P2",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "03-N01",
+      "summary": "可选：本地、只读、可追溯的演出证据检索，不把官方原文或命令流塞入默认写作提示。",
+      "review_severity": "P3",
+      "status": "proposal_not_committed_scope",
+      "note": ""
+    },
+    {
+      "id": "03-N02",
+      "summary": "可选：独立非对白环境事件，以最小承载节点表达等待/音效/清屏等，而非用假台词填满所有事件。",
+      "review_severity": "P3",
+      "status": "proposal_not_committed_scope",
+      "note": ""
+    },
+    {
+      "id": "05-001",
+      "summary": "改编 max_calls 会退回已收到失败响应的额度，章节调用也不进入常规用量汇总",
+      "review_severity": "P1",
+      "status": "partial_or_mitigated",
+      "note": "此前已不退还已尝试逻辑候选额度；6076ac0持久任务化，e65ae26使正常durable章节调用成功/失败usage进入Agent汇总，并明确未知/部分状态。逻辑调用不是物理请求，直接兼容内部调用/重试/崩溃账未完整；05-003仍待实现。"
+    },
+    {
+      "id": "05-002",
+      "summary": "标注检查点身份漏掉会改变语义的输入，可把旧计划或旧窗口策略当成当前结果恢复",
+      "review_severity": "P1",
+      "status": "partial_or_mitigated",
+      "note": "本批补齐端点/实际静态上下文/前后窗/背景计划/能力相关指纹；需继续审计其他演出执行选项"
+    },
+    {
+      "id": "05-003",
+      "summary": "物理请求、失败尝试和缺失 usage 的统计口径不闭合，不能把当前总量当完整成本账",
+      "review_severity": "P1",
+      "status": "pending",
+      "note": "e65ae26改善逻辑响应及失败用量保留/部分总计，但未实现完整物理请求账。外部合成探针确认一次逻辑调用timeout→success实际2次urlopen而snapshot仅最终响应；见physical-request-usage-ledger计划，不能拿1897工程测试当作完整账单证明。"
+    },
+    {
+      "id": "05-004",
+      "summary": "写作响应先校验后采 usage，失败成本丢失；上层还丢弃了未知状态与统计语义",
+      "review_severity": "P1",
+      "status": "fixed_in_scope",
+      "note": "e65ae26/f5ba3ea：每次完成请求重置usage，响应先采usage再验证内容；非法/缺失/部分桶不伪称已知零或完整价格。逻辑调用观察写入Agent policy及对话元数据，失败/取消保留用量且不复活正文；服务汇总/实际运行详情保留未知与部分语义。修复scope退出重复计数和调用前取消虚记。1897项固定源码回归通过；物理重试/崩溃窗口完整账另属05-003未完成。"
+    },
+    {
+      "id": "05-005",
+      "summary": "缩小目标行数不等于输入能装入模型；改编的分析窗口也没有约束实际章节请求",
+      "review_severity": "P1",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "05-006",
+      "summary": "超时返回的汇总早于finally落账，返回指标与已经写出的失败日志不一致",
+      "review_severity": "P2",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "05-007",
+      "summary": "同频角色集合排序没有稳定次键，同一输入跨进程形成不同提示词与检查点哈希",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "95a11fd：频率主排序、原文首次出现稳定次序、原角色ID去重；跨hashseed/别名/Unicode/演员表插入顺序验证静态提示与checkpoint身份稳定；规则原文不改、装配指纹显式版本。未测远端缓存收益。"
+    },
+    {
+      "id": "05-008",
+      "summary": "完整作品读取按历史无限展开，并重复读取当前修订，普通保存/加载成本随历史增长",
+      "review_severity": "P2",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "05-009",
+      "summary": "写作调度器空轮询仍开启BEGIN IMMEDIATE，空闲状态也争取SQLite写锁",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "1c5af69：空闲领取先只读探测并关闭连接，有候选才进入原BEGIN IMMEDIATE重新查询/领取；保留workspace恢复准入与租约原子性。含持有预留写锁时空读、双阳性探测竞争、取消/未来任务测试；48项定向及1788项固定源码广回归通过。未声称整体调度性能提升或解决预算/优先级。"
+    },
+    {
+      "id": "05-010",
+      "summary": "每个正式场景修订可触发后台知识模型工作，和前台任务共享FIFO及Provider锁，需明确预算与优先级",
+      "review_severity": "P2",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "05-011",
+      "summary": "测试擅长工程契约，但对生产输入装配、失败账、真实规则包与文学/播放质量的证明不足",
+      "review_severity": "P2",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "06-F01",
+      "summary": "切换服务商后，输入框残留 Key 被当作新凭据发送到新端点",
+      "review_severity": "P1",
+      "status": "fixed_in_scope",
+      "note": "batch3：切换端点/协议清空输入凭据并移除不匹配环境引用"
+    },
+    {
+      "id": "06-F02",
+      "summary": "四项创作与演出偏好只有保存和回填，没有执行消费者",
+      "review_severity": "P2",
+      "status": "partial_or_mitigated",
+      "note": "已撤销无效承诺并禁用四项未接通编辑，保存值保留；未实现这些生成参数，不作为功能完成"
+    },
+    {
+      "id": "06-F03",
+      "summary": "统一设置页把检测完成当成可用，并用错误字段提交采用工作区",
+      "review_severity": "P1",
+      "status": "fixed_in_scope",
+      "note": "batch3：检测有效性、已解析path采用与晚到状态隔离"
+    },
+    {
+      "id": "06-F04",
+      "summary": "无 Key 的本地 Ollama 可被标为已配置，但演出提供器在联网前拒绝创建",
+      "review_severity": "P1",
+      "status": "fixed_in_scope",
+      "note": "本批：OpenAI兼容loopback无Key构造一致；未实测用户本地模型"
+    },
+    {
+      "id": "06-F05",
+      "summary": "演出重试读取当前模型，checkpoint 身份又漏掉端点/配置修订，允许同代任务换提供器",
+      "review_severity": "P1",
+      "status": "partial_or_mitigated",
+      "note": "本批冻结保存配置及凭据版本；同名端点变更拒绝重试。环境变量值未保存时的变化不属于当前非秘密身份"
+    },
+    {
+      "id": "06-F06",
+      "summary": "模型设置的状态与测试对象不一致：统一面板只读写作，制作旧入口测试已保存值",
+      "review_severity": "P2",
+      "status": "partial_or_mitigated",
+      "note": "本批分别显示写作与演出状态；独立制作旧测试按钮仍使用已保存值，未宣称整个配置体系已统一"
+    },
+    {
+      "id": "06-F07",
+      "summary": "共用的推理模式和计价字段没有跨域等价语义",
+      "review_severity": "P2",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "06-F08",
+      "summary": "写作连接测试与执行请求使用不同 token 参数，成功/失败不能直接代表目标任务兼容性",
+      "review_severity": "P2",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "06-F09",
+      "summary": "偏好存储缺少类型/范围校验，损坏文件被静默恢复默认",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "85125a1：严格枚举/实际整数范围，损坏保存文件明确报错且原字节不改；原子替换、实例锁、UI读取告警与旧值清空；保留未接入偏好只读，不承诺跨进程/断电持久性。"
+    },
+    {
+      "id": "06-F10",
+      "summary": "改编 max_calls 退还所有失败请求，实际尝试次数可以超过声明预算",
+      "review_severity": "P2",
+      "status": "partial_or_mitigated",
+      "note": "45b58bc：max_calls正整数校验且失败不退还；目前限制逻辑候选派发次数，不宣称限制物理HTTP重试或费用。"
+    },
+    {
+      "id": "06-F11",
+      "summary": "Spine设置报告保存路径B，执行解析却可优先采用环境/旧配置A",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "459f3f2/88c29cb：Spine选择/执行/能力/UI共用描述；显式保存优先，失效不暗中回退，清除报告实际回退来源。保留旧配置首key优先语义；真实CLI许可/可执行性未验。1c5af69固定源码1788项回归通过。"
+    },
+    {
+      "id": "06-F12",
+      "summary": "AA工作区在进程内可改为B，但重启仍优先环境指定A；缺少“临时覆盖”语义",
+      "review_severity": "P3",
+      "status": "fixed_in_scope",
+      "note": "459f3f2/88c29cb：AA保留启动设置的重启优先级，公开当前/保存/启动/重启/来源与会话覆盖；写作/制作采用及再检测均保留提示。失效保存路径不冒充重启目标。1c5af69固定源码1788项回归通过，非真实AA播放验收。"
+    },
+    {
+      "id": "07-001",
+      "summary": "1.0手册让 HaloCue.exe 用户进入集成写作流程，但当前打包入口仍是根兼容制作界面。",
+      "review_severity": "P1",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "07-002",
+      "summary": "作品备份遗漏 SourceCatalog 保存的 sources/ 原文件与标准化文件，预检和恢复仍报告成功。",
+      "review_severity": "P1",
+      "status": "fixed_in_scope",
+      "note": "batch1：同01-003"
+    },
+    {
+      "id": "07-003",
+      "summary": "把全部1.0用户数据统一描述为 %LOCALAPPDATA%\\HaloCue，会漏掉集成/独立服务和源码兼容入口的数据。",
+      "review_severity": "P1",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "07-004",
+      "summary": "“仅转换格式”只控制后续生成；兼容入口在选择该模式之前已经尝试可选AI初审。",
+      "review_severity": "P1",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "07-005",
+      "summary": "README把AI概括为不创作不改写，但写作与改编候选会生成新正文；首次任务又混入制作卡片和写作发布术语。",
+      "review_severity": "P2",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "07-006",
+      "summary": "迁移功能只复制5个已知旧文件到兼容目标，未实现跨入口的作品/任务转换；“导入完成”的用户解释不充分。",
+      "review_severity": "P2",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "07-007",
+      "summary": "首次启动指南要求运行同目录检查运行环境.cmd，但桌面发行装配清单不复制它；源码脚本又依赖Python。",
+      "review_severity": "P2",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "07-008",
+      "summary": "普通frozen桌面分支丢弃--port，导致故障排查中的改端口建议在该入口不生效。",
+      "review_severity": "P2",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "07-009",
+      "summary": "“只读当前场景”和“所有诊断不含个人路径”的概括不成立，可选AI素材识别还会发送图片预览。",
+      "review_severity": "P2",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "07-010",
+      "summary": "AdaptationService.run逐窗口更新同一章节candidate_json，长章最终只留下最后窗口，却标记analyzed。",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "45b58bc：同02-003，全部窗口coverage按顺序保留。"
+    },
+    {
+      "id": "07-011",
+      "summary": "小说用户实际入口是解析→附件/预填要求→手动发送；原文版本/计划/逐章API未找到前端调用，不能凭接口补写按钮教程。",
+      "review_severity": "P2",
+      "status": "fixed_in_scope",
+      "note": "d4e7cfa：原文改编工作台实际连接原文版本/计划/章节任务/目标采纳/旧稿迁移，手册新增逐步操作与适用入口范围。连载、调用上限非费用账、真实模型发送、关闭不等于取消、重开恢复均明示；TXT/DOCX及新作品/AAP浏览器验证通过，1865项广回归。help端点/旧安装包入口问题仍单列待修。"
+    },
+    {
+      "id": "07-012",
+      "summary": "集成入口没有可用/help.html；根帮助内容混用写作和制作，已有文档测试只查文字存在而不查实际入口。",
+      "review_severity": "P2",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "07-013",
+      "summary": "帮助只泛谈取消/重试，未按写作取消、演出暂停、结束、重启和配置漂移给出安全操作。",
+      "review_severity": "P2",
+      "status": "pending",
+      "note": ""
+    },
+    {
+      "id": "07-014",
+      "summary": "老师/Sel和简洁/标准已有实现，但用户手册/help缺少操作链，且没有区分三种“模式”和新旧默认。",
+      "review_severity": "P3",
+      "status": "pending",
+      "note": ""
+    }
+  ],
+  "latest_verified_code": "db0e8faf91e988a13be27c64becdd99621ea7776",
+  "latest_regression": {
+    "passed": 1737,
+    "source_unchanged": true,
+    "real_provider": false,
+    "real_AA_playback": false,
+    "production_data_roots": "isolated test fixtures",
+    "scope": "services plus preserved prompts, compiler/reaction/stable assembly/listener policy"
+  },
+  "latest_focused_after_planning": {
+    "commit": "0811a4a7e1e27d55393f88f79224fe61da3fa8a",
+    "passed": 100,
+    "scope": "planning/provider/conversation/presentation",
+    "real_provider": false,
+    "real_AA_playback": false
+  }
+}

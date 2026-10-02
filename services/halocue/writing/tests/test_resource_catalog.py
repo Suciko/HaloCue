@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import json
 
+from halocue_writing import resource_catalog as resource_catalog_module
 from halocue_writing.resource_catalog import ResourceCatalog, SCHEMA_VERSION
 
 
@@ -24,7 +25,7 @@ def test_legacy_catalog_import_creates_independent_1_0_projection(tmp_path):
     connection.commit()
     connection.close()
 
-    catalog = ResourceCatalog(tmp_path / "writing-data")
+    catalog = ResourceCatalog(tmp_path / "writing-data", seed_bundled=False)
     result = catalog.import_legacy(source)
 
     assert result["schema_version"] == SCHEMA_VERSION
@@ -45,10 +46,23 @@ def test_legacy_catalog_import_creates_independent_1_0_projection(tmp_path):
     connection.close()
 
 
-def test_empty_1_0_catalog_does_not_claim_ready(tmp_path):
+def test_empty_1_0_catalog_does_not_claim_ready(tmp_path, monkeypatch):
+    monkeypatch.setattr(resource_catalog_module, "_bundled_metadata_database", lambda: None)
     descriptor = ResourceCatalog(tmp_path).descriptor()
     assert descriptor["schema_version"] == SCHEMA_VERSION
     assert descriptor["ready"] is False
+    assert descriptor["bundled_seed"]["status"] == "unavailable"
+
+
+def test_new_catalog_includes_shipped_ba_metadata_without_binary_assets(tmp_path):
+    descriptor = ResourceCatalog(tmp_path).descriptor()
+    assert descriptor["ready"] is True
+    assert descriptor["bundled_seed"]["status"] == "ready"
+    assert descriptor["bundled_seed"]["binary_assets"] is False
+    assert descriptor["counts"]["characters"] > 0
+    assert descriptor["counts"]["backgrounds"] > 0
+    assert descriptor["counts"]["faces"] > 0
+    assert descriptor["counts"]["expression_parts"] > 0
 
 
 def test_public_background_projection_hides_export_identifiers(tmp_path):
@@ -61,7 +75,7 @@ def test_public_background_projection_hides_export_identifiers(tmp_path):
             INSERT INTO bg VALUES ('BG_Roof', '屋顶', '校园屋顶', '', '', '');
             """
         )
-    catalog = ResourceCatalog(tmp_path / "writing-data")
+    catalog = ResourceCatalog(tmp_path / "writing-data", seed_bundled=False)
     catalog.import_legacy(source)
     named = catalog.search("backgrounds", "屋顶")["items"][0]
     assert catalog.search("backgrounds", "00000-123456")["items"] == []
@@ -93,7 +107,7 @@ def test_background_search_excludes_cg_effects_and_registered_custom_backgrounds
             """
         )
 
-    catalog = ResourceCatalog(tmp_path / "writing-data")
+    catalog = ResourceCatalog(tmp_path / "writing-data", seed_bundled=False)
     result = catalog.import_legacy(source)
 
     assert result["imported"]["backgrounds"] == 7
@@ -144,7 +158,7 @@ def test_catalog_merges_visual_labels_face_evidence_and_separate_user_overrides(
             """
         )
 
-    catalog = ResourceCatalog(tmp_path / "writing")
+    catalog = ResourceCatalog(tmp_path / "writing", seed_bundled=False)
     result = catalog.import_legacy(base, overlay_paths=[overlay])
 
     assert result["imported"]["expression_parts"] == 1
@@ -172,7 +186,7 @@ def test_catalog_merges_visual_labels_face_evidence_and_separate_user_overrides(
 
 
 def test_background_lookup_prefers_chinese_annotation_for_case_variant_key(tmp_path):
-    catalog = ResourceCatalog(tmp_path / "writing")
+    catalog = ResourceCatalog(tmp_path / "writing", seed_bundled=False)
     with sqlite3.connect(catalog.path) as connection:
         connection.execute(
             """INSERT INTO backgrounds(key,display_name,label,visual_kind,source_version,updated_at)
@@ -199,7 +213,7 @@ def test_background_lookup_prefers_chinese_annotation_for_case_variant_key(tmp_p
 
 
 def test_background_facets_only_expose_chinese_user_categories(tmp_path):
-    catalog = ResourceCatalog(tmp_path / "writing")
+    catalog = ResourceCatalog(tmp_path / "writing", seed_bundled=False)
     with sqlite3.connect(catalog.path) as connection:
         connection.executemany(
             """INSERT INTO backgrounds(
@@ -251,7 +265,7 @@ def test_095_identity_manifest_and_annotation_layers_are_retained(tmp_path):
         "SpinePortraitPath": "characters/alice-spine",
     }]}), encoding="utf-8")
 
-    catalog = ResourceCatalog(tmp_path / "writing")
+    catalog = ResourceCatalog(tmp_path / "writing", seed_bundled=False)
     result = catalog.import_legacy(source, "HaloCue 0.95 r17", character_aliases_path=aliases, manifest_path=manifest)
 
     assert result["imported"] == {"backgrounds": 1, "characters": 1, "variants": 1, "faces": 1, "expression_parts": 0}

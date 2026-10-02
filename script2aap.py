@@ -242,8 +242,13 @@ def res_lookup(idx):
             emo_cn[v["cn"]] = int(k)
     act = {v["verb"]: int(k) for k, v in idx["enums"]["action"].items()}
     act_cn = {v["cn"]: int(k) for k, v in idx["enums"]["action"].items() if v["cn"]}
-    faces = {c["identifier"]: {f["label"]: f["id"] for f in c["faces"] if f["label"]}
-             for c in idx["characters"]}
+    faces = {
+        c["identifier"]: {
+            "ids": {f["id"] for f in c["faces"]},
+            "aliases": {f["label"].casefold(): f["id"] for f in c["faces"] if f.get("label")},
+        }
+        for c in idx["characters"]
+    }
     return emo_sym, emo_cn, act, act_cn, faces
 
 
@@ -388,11 +393,15 @@ def resolve_face(tok, ident, faces, no):
     if not tok:
         return None
     t = tok.strip()
+    tbl = faces.get(ident, {})
+    # Resource IDs are exact and character-scoped; aliases cannot shadow them.
+    if t in tbl.get("ids", set()):
+        return t
     if re.fullmatch(r"\d{1,2}", t):
         return t.zfill(2)
-    tbl = faces.get(ident, {})
-    if t.lower() in tbl:
-        return tbl[t.lower()]
+    aliases = tbl.get("aliases", {})
+    if t.casefold() in aliases:
+        return aliases[t.casefold()]
     warn(no, f"「{ident}」没有名为「{t}」的表情，已忽略")
     return None
 

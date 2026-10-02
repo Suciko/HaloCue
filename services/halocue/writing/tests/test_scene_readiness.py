@@ -78,6 +78,23 @@ def test_assemble_context_zero_cards_never_claims_runtime_cards_are_ready(tmp_pa
     assert readiness["real_ba_writing"] == "blocked"
 
 
+def test_readiness_builder_allows_confirmed_narrator_only_scene_without_cards():
+    readiness = build_scene_readiness(
+        provider={"can_call_model": True, "is_simulation": False},
+        skill_runtime={"status": "ready"},
+        runtime_character_cards=[],
+        missing_runtime_character_cards=[],
+        explicit_character_selection=True,
+        narrator_only=True,
+    )
+
+    assert readiness["narrator_only"] is True
+    assert readiness["runtime_cards_ready"] is True
+    assert readiness["can_run"] is True
+    assert readiness["blocking_reasons"] == []
+    assert readiness["reason"] == "本场为纯旁白，Skill 与真实模型 Provider 均已就绪。"
+
+
 def test_assemble_context_keeps_legacy_fields_while_exposing_provider_blocker(tmp_path):
     service = WritingService(tmp_path)
     work_id, scene_id, work = create_scene(service, characters=["爱丽丝"])

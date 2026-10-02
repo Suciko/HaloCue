@@ -26,7 +26,7 @@ SCRIPT = """# 第一章
 """
 
 
-def configured_resource_settings(settings, tmp_path):
+def configured_resource_settings(settings, tmp_path, *, official=False):
     index = tmp_path / "resources.json"
     index.write_text(
         json.dumps(
@@ -51,6 +51,10 @@ def configured_resource_settings(settings, tmp_path):
         ),
         encoding="utf-8",
     )
+    if official:
+        resources = json.loads(index.read_text(encoding="utf-8"))
+        resources["bg_label"] = {key: {"source_kind": "official_base"} for key in resources["bg"]}
+        index.write_text(json.dumps(resources, ensure_ascii=False), encoding="utf-8")
     return Settings(
         project_root=settings.project_root,
         data_dir=settings.data_dir,
@@ -265,6 +269,7 @@ def test_task_cg_background_is_frozen_previewable_and_injected_as_bg_override(se
     assert imported == {
         "key": key,
         "name": "雨夜的约定",
+        "name_zh_cn": "雨夜的约定",
         "source": "task_import",
         "asset_id": registered["asset"]["asset_id"],
         "preview_available": True,
@@ -450,6 +455,9 @@ def test_task_preflight_summary_explains_frozen_draft_decisions(settings):
         }
     )
     summary = service.task_preflight_summary(created["run"]["run_id"])
+    detail = service.run_detail(created["run"]["run_id"])
+    assert detail["draft"]["frozen_source_text"].startswith("## 放学后的走廊")
+    assert "自定义背景" in detail["draft"]["frozen_source_text"]
     assert summary["kind"] == "task_preflight_summary"
     assert summary["source"] == "frozen_draft"
     assert [(item["speaker"], item["count"]) for item in summary["speakers"]] == [("凯伊", 1), ("爱丽丝", 1)]
@@ -513,7 +521,7 @@ def test_performance_preview_uses_current_draft_and_frozen_cast(settings, tmp_pa
     assert frame["presentation"] == "dialogue"
     assert frame["background_key"] == "BG_Classroom"
     assert frame["background_preview_available"] is False
-    assert frame["speaker"] == {"name": "爱丽丝", "mapping_kind": "portrait", "character_id": "alice-school"}
+    assert frame["speaker"] == {"name": "爱丽丝", "source_name": "爱丽丝", "mapping_kind": "portrait", "character_id": "alice-school"}
     assert {item["kind"]: item["value"] for item in frame["annotations"]} == {"表情": "01", "画面效果": "特写"}
     assert "private_source" not in json.dumps(preview, ensure_ascii=False)
     service.jobs.close()
@@ -584,12 +592,96 @@ def test_source_preflight_explains_structure_without_creating_persistent_work(se
     assert result["kind"] == "static_preflight"
     assert result["format"]["label"] == "AA 指令混合格式"
     assert [(item["name"], item["count"]) for item in result["speakers"]] == [("凯伊", 1), ("爱丽丝", 1)]
-    assert result["scenes"] == [{"title": "放学后的走廊", "line_no": 1}]
-    assert {item["code"] for item in result["directives"]["issues"]} == {
-        "missing_directive_argument", "unknown_directive"
+    assert result["scenes"] == [{
+        "title": "放学后的走廊",
+        "line_no": 1,
+        "end_line": 5,
+        "implicit": False,
+        "speakers": [{"name": "凯伊", "count": 1}, {"name": "爱丽丝", "count": 1}],
+        "dialogue_count": 2,
+        "directive_count": 2,
+        "has_background": False,
+        "background": "",
+    }]
+    assert result["scene_judgement"] == {
+        "count": 1, "implicit_count": 0, "missing_background_count": 1,
     }
+    assert {item["code"] for item in result["directives"]["issues"]} == {
+        "missing_directive_argument", "unknown_directive", "dir.unconsumed"
+    }
+    assert [(item["code"], item["line_no"]) for item in result["directives"]["issues"] if item["code"] == "dir.unconsumed"] == [("dir.unconsumed", 4)]
     assert not service.repository.list_runs()
     assert not list((settings.data_dir / "releases").glob("*"))
+    service.jobs.close()
+
+
+def test_source_preflight_separates_implicit_opening_and_reports_scene_backgrounds(settings):
+    service = ProductionService(settings)
+    result = service.preflight_source({
+        "source": {
+            "kind": "inline",
+            "text": (
+                "旁白: 开场没有场景标题。\n"
+                "\n"
+                "## 站前广场\n"
+                "@bg BG_CS_Abydos_06\n"
+                "爱丽丝: 开始调查。\n"
+                "\n"
+                "## 雨中月台\n"
+                "凯伊: 去候车室。\n"
+            ),
+        }
+    })
+
+    assert [(scene["title"], scene["implicit"]) for scene in result["scenes"]] == [
+        ("未分段开场", True), ("站前广场", False), ("雨中月台", False),
+    ]
+    assert result["scenes"][0]["speakers"] == [{"name": "旁白", "count": 1}]
+    assert result["scenes"][1]["has_background"] is True
+    assert result["scenes"][1]["background"] == "BG_CS_Abydos_06"
+    assert result["scenes"][2]["has_background"] is False
+    assert result["scene_judgement"] == {
+        "count": 3, "implicit_count": 1, "missing_background_count": 2,
+    }
+    assert not service.repository.list_runs()
+    service.jobs.close()
+
+
+def test_source_preflight_does_not_count_document_title_as_an_implicit_scene(settings):
+    service = ProductionService(settings)
+    result = service.preflight_source({
+        "source": {
+            "kind": "inline",
+            "text": (
+                "# 沙尘中的信号灯\n"
+                "\n"
+                "## 阿拜多斯旧校舍·傍晚\n"
+                "白子: 天黑前出发。\n"
+                "\n"
+                "## 北侧废弃车站·入夜\n"
+                "芹香: 先检查电线。\n"
+                "星野: 我来照路。\n"
+                "\n"
+                "## 阿拜多斯旧校舍屋顶·夜\n"
+                "野乃美: 晚饭已经热好了。\n"
+            ),
+        }
+    })
+
+    assert [(scene["title"], scene["implicit"]) for scene in result["scenes"]] == [
+        ("阿拜多斯旧校舍·傍晚", False),
+        ("北侧废弃车站·入夜", False),
+        ("阿拜多斯旧校舍屋顶·夜", False),
+    ]
+    assert result["scene_judgement"] == {
+        "count": 3,
+        "implicit_count": 0,
+        "missing_background_count": 3,
+    }
+    assert result["format"]["label"] == "角色台词格式"
+    assert {(speaker["name"], speaker["count"]) for speaker in result["speakers"]} == {
+        ("白子", 1), ("芹香", 1), ("星野", 1), ("野乃美", 1),
+    }
     service.jobs.close()
 
 
@@ -728,6 +820,10 @@ def test_ai_preflight_is_read_only_and_persists_a_safe_task_local_result(setting
         model = "preflight-model"
 
         def complete_json(self, _system, _volatile, _user, _schema):
+            assert '"line":整数行号' in _system
+            assert "不能输出字符串列表" in _system
+            assert "空数组 []" in _system
+            assert _schema["properties"]["ambiguities"]["items"]["type"] == "object"
             return {
                 "potential_speakers": ["老师"],
                 "scenes": [{
@@ -1733,6 +1829,12 @@ def test_aa_workspace_configuration_persists_and_enables_capabilities(
         "configured": True,
         "path": str(aa_data.resolve()),
         "valid": True,
+        "source": "settings",
+        "persisted_path": str(aa_data.resolve()),
+        "startup_path": None,
+        "restart_path": str(aa_data.resolve()),
+        "session_override": False,
+        "startup_overrides_saved": False,
     }
     assert configured["capabilities"]["install"]["state"] == "available"
     first.jobs.close()
@@ -1741,6 +1843,89 @@ def test_aa_workspace_configuration_persists_and_enables_capabilities(
     assert restored.settings.aa_data == aa_data.resolve()
     assert restored.aa_workspace_settings()["capabilities"]["install"]["state"] == "available"
     restored.jobs.close()
+
+
+def test_resource_index_rebuild_is_isolated_persistent_and_does_not_touch_aa_workspace(
+    settings, tmp_path, monkeypatch
+):
+    monkeypatch.delenv("HALOCUE_RESOURCE_INDEX", raising=False)
+    aa_data = tmp_path / "aa-data"
+    for name in ("projects", "saves", "overrides", "settings"):
+        (aa_data / name).mkdir(parents=True)
+    sentinel = aa_data / "projects" / "existing.aap"
+    sentinel.write_text('{"unchanged": true}', encoding="utf-8")
+
+    # Rebuild consumes explicit shared exports, never private story history.
+    (aa_data / "aa_resources.json").write_text(json.dumps({
+        "bg": {"BG_Classroom": 42},
+        "bg_label": {"BG_Classroom": {"source_kind": "official_base"}},
+    }), encoding="utf-8")
+
+    service = ProductionService(settings)
+    service.configure_aa_workspace({"path": str(aa_data)})
+
+    class Discovery:
+        resource_cache = None
+        catalog = None
+
+    class Builder:
+        EMOTICON = {0: ""}
+        EMOTICON_CN = {}
+        ACTION = {0: ""}
+        ACTION_CN = {}
+        APPEAR = {0: ""}
+        APPEAR_CN = {}
+        SHAPE = {0: ""}
+        SHAPE_CN = {}
+
+        @staticmethod
+        def harvest_bg(_data):
+            return {"BG_Classroom": 42}, []
+
+        @staticmethod
+        def harvest_characters(_data):
+            return []
+
+        @staticmethod
+        def harvest_sounds(_data):
+            return ["SE_Bell"]
+
+        @staticmethod
+        def harvest_faces_used(_data):
+            return {}
+
+        @staticmethod
+        def harvest_face_capabilities(_data):
+            return {}
+
+    def legacy_module(name):
+        return type("DiscoveryModule", (), {"discover_aa": staticmethod(lambda *_args, **_kwargs: Discovery())}) if name == "aa_install_discovery" else Builder
+
+    monkeypatch.setattr(service.adapter, "_legacy_module", legacy_module)
+    rebuilt = service.rebuild_resource_index()
+
+    assert rebuilt["ok"] is True
+    assert rebuilt["resource_index"]["backgrounds"] == 1
+    assert rebuilt["resource_index"]["sounds"] == 1
+    assert rebuilt["resource_index"]["warnings"]
+    rebuilt_index = Path(rebuilt["resource_index"]["path"])
+    assert rebuilt_index.is_file()
+    assert sentinel.read_text(encoding="utf-8") == '{"unchanged": true}'
+    assert service.settings.resource_index == rebuilt_index
+    service.jobs.close()
+
+    restored = ProductionService(settings)
+    assert restored.settings.resource_index == rebuilt_index
+    restored.jobs.close()
+
+
+def test_resource_index_rebuild_requires_adopted_aa_workspace(settings):
+    service = ProductionService(settings)
+    with pytest.raises(ProductionError) as error:
+        service.rebuild_resource_index()
+    assert error.value.code == "aa_workspace_required"
+    assert error.value.status == 409
+    service.jobs.close()
 
 
 def test_invalid_aa_workspace_is_rejected(settings, tmp_path):
@@ -1753,6 +1938,39 @@ def test_invalid_aa_workspace_is_rejected(settings, tmp_path):
 
     assert error.value.code == "invalid_aa_workspace"
     assert error.value.details["missing"] == ["saves", "overrides", "settings"]
+    service.jobs.close()
+
+
+def test_unknown_card_can_be_promoted_to_a_dialogue_line(settings):
+    service = ProductionService(settings)
+    created = service.create_run({
+        "project": "未识别文本转台词",
+        "source": {"kind": "inline", "text": "这是一句漏写了说话者的台词。\n"},
+    })
+    unknown = created["draft"]["cards"][0]
+    assert unknown["kind"] == "unknown"
+
+    converted = service.update_card(
+        created["run"]["run_id"], unknown["card_id"],
+        {"patch": {"who": "旁白", "text": "这是一句漏写了说话者的台词。"}, "expected_draft_version": created["draft"]["draft_version"]},
+    )
+    card = next(item for item in converted["draft"]["cards"] if item["card_id"] == unknown["card_id"])
+    assert card["kind"] == "line"
+    assert card["current"]["who"] == "旁白"
+    assert card["current"]["text"] == "这是一句漏写了说话者的台词。"
+    assert card["review_state"] == "pending"
+    service.jobs.close()
+
+
+def test_unknown_card_requires_a_speaker_for_conversion(settings):
+    service = ProductionService(settings)
+    created = service.create_run({"project": "未识别文本", "source": {"kind": "inline", "text": "未标注行\n"}})
+    unknown = created["draft"]["cards"][0]
+    with pytest.raises(ProductionError) as error:
+        service.update_card(created["run"]["run_id"], unknown["card_id"], {
+            "patch": {"who": "", "text": "未标注行"}, "expected_draft_version": created["draft"]["draft_version"],
+        })
+    assert error.value.code == "unknown_card_speaker_required"
     service.jobs.close()
 
 
@@ -1901,7 +2119,7 @@ def test_structured_directive_edit_validates_input_and_resets_review(settings):
     service.jobs.close()
 
 
-def test_real_compile_and_install_use_isolated_workspace(settings, tmp_path):
+def test_real_compile_and_install_use_isolated_workspace(settings, tmp_path, monkeypatch):
     aa_data = tmp_path / "aa-data"
     for name in ("projects", "saves", "overrides", "settings"):
         (aa_data / name).mkdir(parents=True)
@@ -1916,6 +2134,9 @@ def test_real_compile_and_install_use_isolated_workspace(settings, tmp_path):
         port=0,
     )
     service = ProductionService(configured)
+    import aa_project_assets
+
+    monkeypatch.setattr(aa_project_assets, "is_aa_running", lambda: False)
     created = service.create_run(
         {"project": "隔离构建测试", "source": {"kind": "inline", "text": "旁白: 测试\n"}}
     )
@@ -2042,15 +2263,15 @@ def test_character_name_baseline_controls_display_search_and_frozen_import(setti
     service = ProductionService(configured)
 
     catalog = service.list_resources("characters", query="アリス")
-    assert catalog["items"][0]["name"] == "爱丽丝"
-    assert catalog["items"][0]["name_source"] == "zh_cn_official_or_curated"
+    assert catalog["items"][0]["name"] == "天童爱丽丝"
+    assert catalog["items"][0]["name_source"] == "ja_fandom_curated"
     assert service.character_resource("alice-school")["character"]["source_name"] == "愛麗絲"
 
     created = service.create_run(
         {"project": "译名快照", "source": {"kind": "inline", "text": "老师: 测试。\n"}}
     )
     frozen = service.run_character_resource(created["run"]["run_id"], "alice-school")["character"]
-    assert frozen["name"] == "爱丽丝"
+    assert frozen["name"] == "天童爱丽丝"
     assert frozen["source_name"] == "愛麗絲"
     mapped = service.update_cast(
         created["run"]["run_id"],
@@ -2060,7 +2281,14 @@ def test_character_name_baseline_controls_display_search_and_frozen_import(setti
             "expected_draft_version": created["draft"]["draft_version"],
         },
     )
-    assert mapped["draft"]["cast"]["cast"]["老师"]["name"] == "爱丽丝"
+    assert mapped["draft"]["cast"]["cast"]["老师"]["name"] == "天童爱丽丝"
+    assert service.list_resources("characters", query="爱丽丝")["items"][0]["identifier"] == "alice-school"
+    preview = service.performance_preview(created["run"]["run_id"])
+    frame = next(item for item in preview["frames"] if item["card_kind"] == "line")
+    assert frame["title"] == "天童爱丽丝"
+    assert frame["speaker"]["source_name"] == "老师"
+    assert frame["speaker"]["character_id"] == "alice-school"
+    assert next(c for c in mapped["draft"]["cards"] if c["kind"] == "line")["current"]["who"] == "老师"
     service.jobs.close()
 
 
@@ -2071,7 +2299,7 @@ def test_popup_catalog_is_separate_from_cg_background_selection(settings, tmp_pa
     popup_dir = aa_data / "overrides" / "popups"
     popup_dir.mkdir()
     (popup_dir / "Event03_CH0070.png").write_bytes(b"test")
-    configured = configured_resource_settings(settings, tmp_path)
+    configured = configured_resource_settings(settings, tmp_path, official=True)
     configured = Settings(
         project_root=configured.project_root,
         data_dir=configured.data_dir,
@@ -2270,7 +2498,7 @@ def test_cg_segment_compiles_as_background_with_named_slot_zero_and_no_portraits
     popup_dir = aa_data / "overrides" / "popups"
     popup_dir.mkdir()
     (popup_dir / "Event03_CH0070.png").write_bytes(b"test")
-    configured = configured_resource_settings(settings, tmp_path)
+    configured = configured_resource_settings(settings, tmp_path, official=True)
     configured = Settings(
         project_root=configured.project_root,
         data_dir=configured.data_dir,
@@ -2344,7 +2572,7 @@ def test_cg_segment_rejects_portrait_stage_commands(settings, tmp_path):
     popup_dir = aa_data / "overrides" / "popups"
     popup_dir.mkdir()
     (popup_dir / "Event03_CH0070.png").write_bytes(b"test")
-    configured = configured_resource_settings(settings, tmp_path)
+    configured = configured_resource_settings(settings, tmp_path, official=True)
     configured = Settings(
         project_root=configured.project_root,
         data_dir=configured.data_dir,
@@ -2674,7 +2902,11 @@ def test_empty_direction_failure_is_retryable_but_not_presented_as_checkpoint_re
             created_at="2026-09-04T00:00:00+00:00",
             updated_at="2026-09-04T00:00:01+00:00",
             run_id="run-000000000001",
-            retry_context={"expected_draft_version": 2, "generation_id": "direction-empty"},
+            # Modern retries carry model identity even when output was empty;
+            # legacy jobs without it require a fresh generation (separate test).
+            retry_context={"expected_draft_version": 2, "generation_id": "direction-empty",
+                           "model_identity": {"schema_version": "direction-model-identity/1.0",
+                                              "config_sha256": "0" * 64}},
             error={"code": "direction_generation_empty", "message": "没有有效演出修改"},
         ).to_dict()
     )
@@ -3091,3 +3323,54 @@ def test_install_preflight_rejects_a_build_from_an_older_draft(
     assert error.value.code == "build_stale"
     assert called == []
     service.jobs.close()
+
+
+def test_fandom_only_baseline_preserves_identity_and_other_translation_alias(tmp_path):
+    from halocue_production.name_baseline import CharacterNameBaseline
+
+    baseline = tmp_path / "names.json"
+    baseline.write_text(json.dumps({"characters": [{"identifier": "serika", "name_ja_fandom": "芹香"}]}, ensure_ascii=False), encoding="utf8")
+    source = {"identifier": "serika", "name": "茜香", "name_zh_cn": "另一译名"}
+    resolved = CharacterNameBaseline(baseline).decorate(source)
+    assert resolved["name"] == "芹香"
+    assert resolved["name_source"] == "ja_fandom_curated"
+    assert resolved["identifier"] == "serika"
+    assert resolved["source_name"] == "茜香"
+    assert {"芹香", "茜香", "另一译名"}.issubset(resolved["aliases"])
+    assert source["name"] == "茜香"
+
+
+def test_explicit_rebinding_adopts_fandom_policy_without_changing_frozen_resource(settings, tmp_path):
+    from halocue_production.name_baseline import CharacterNameBaseline
+
+    service = ProductionService(configured_resource_settings(settings, tmp_path))
+    created = service.create_run({"project": "旧任务译名", "source": {"kind": "inline", "text": "原稿姓名: 台词。\n@camera_hold 原稿姓名,auto\n"}})
+    run_id = created["run"]["run_id"]
+    frozen = service.run_character_resource(run_id, "alice-school")
+    baseline = tmp_path / "names.json"
+    baseline.write_text(json.dumps({"characters": [{"identifier": "alice-school", "name_ja_fandom": "旧名称"}]}), encoding="utf8")
+    service.name_baseline = CharacterNameBaseline(baseline)
+    baseline.write_text(json.dumps({"characters": [{"identifier": "alice-school", "name_ja_fandom": "日服译名"}]}), encoding="utf8")
+    mapped = service.update_cast(run_id, {"speaker": "原稿姓名", "mapping": {"kind": "portrait", "id": "alice-school", "name": "错误客户端名称"}, "expected_draft_version": created["draft"]["draft_version"]})
+    assert mapped["draft"]["cast"]["cast"]["原稿姓名"]["name"] == "日服译名"
+    assert service.run_character_resource(run_id, "alice-school") == frozen
+    line = next(c for c in mapped["draft"]["cards"] if c["kind"] == "line")
+    assert line["current"]["who"] == "原稿姓名"
+    assert line["review_state"] == "pending"
+    direction = next(f for f in service.performance_preview(run_id)["frames"] if f["card_kind"] == "dir")
+    assert direction["text"] == "日服译名,auto"
+    assert next(c for c in mapped["draft"]["cards"] if c["kind"] == "dir")["current"]["arg"] == "原稿姓名,auto"
+    service.jobs.close()
+
+
+def test_removed_name_baseline_does_not_keep_a_stale_curated_name(tmp_path):
+    from halocue_production.name_baseline import CharacterNameBaseline
+
+    path = tmp_path / "names.json"
+    path.write_text(json.dumps({"characters": [{"identifier": "actor", "name_ja_fandom": "已确认名称"}]}), encoding="utf8")
+    names = CharacterNameBaseline(path)
+    character = {"identifier": "actor", "name": "素材原名"}
+    assert names.resolve(character)["name"] == "已确认名称"
+    path.unlink()
+    assert names.resolve(character)["name"] == "素材原名"
+    assert character == {"identifier": "actor", "name": "素材原名"}

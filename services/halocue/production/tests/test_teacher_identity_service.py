@@ -118,7 +118,8 @@ def test_teacher_rename_updates_explicit_aliases_not_source_or_ordinary_voice(se
         assert frame["speaker"]["organization"] == ""
         assert frame["speaker"]["source_name"] in ("SourceTeacher", "SenseiAlias")
     assert frames[1]["speaker"] == {
-        "name": "Clerk",
+        "name": "Receptionist",
+        "source_name": "Clerk",
         "mapping_kind": "voice",
         "character_id": "Receptionist",
     }
@@ -146,7 +147,7 @@ def test_repeat_teacher_selection_retains_review_and_stale_selection_conflicts(s
 
 
 def test_teacher_http_contract_round_trip_and_unknown_version(service):
-    from test_http_api import api, request
+    from production_http_helpers import api, request
 
     with api(service.settings) as base:
         status, _, created = request(
@@ -230,7 +231,10 @@ def test_unsupported_legacy_teacher_capability_keeps_other_mappings_working(serv
 def test_teacher_change_supersedes_late_model_result_without_overwriting_identity(
     service, monkeypatch
 ):
-    from test_direction_profiles import FixtureProvider, finished_job
+    from services.halocue.production.tests.test_direction_profiles import (
+        FixtureProvider,
+        finished_job,
+    )
 
     monkeypatch.setenv("HALOCUE_TEACHER_FIXTURE_KEY", "synthetic-secret")
     service.configure_direction_model(

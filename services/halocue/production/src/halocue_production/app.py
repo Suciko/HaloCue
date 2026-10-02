@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import mimetypes
 import re
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+from services.halocue.http_server import LocalHTTPServer as ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from services.halocue.runtime_layout import service_root
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .errors import ProductionError
@@ -53,7 +55,7 @@ RESOURCE_PREVIEW_ROUTE = re.compile(r"^/api/v1/resources/(characters|backgrounds
 class ProductionHandler(BaseHTTPRequestHandler):
     service: ProductionService
     server_version = "HaloCueProduction/1.0"
-    ui_root = Path(__file__).resolve().parents[2] / "ui"
+    ui_root = service_root("production") / "ui"
 
     def log_message(self, format: str, *args: Any) -> None:
         return
@@ -214,11 +216,19 @@ class ProductionHandler(BaseHTTPRequestHandler):
                 return 200, self.service.aa_workspace_settings()
             if method == "POST":
                 return 200, self.service.configure_aa_workspace(self._body())
+        if path == "/api/v1/settings/aa-workspace:pick" and method == "POST":
+            # A native file dialog must only ever be triggered by a local
+            # HaloCue client, never by a request arriving over the network.
+            if self.client_address[0] not in {"127.0.0.1", "::1"}:
+                raise ProductionError("aa_picker_local_only", "只能从本机打开 AA 文件选择器。", status=403)
+            return 200, self.service.pick_aa_executable()
         if path == "/api/v1/settings/aa-environment":
             if method == "GET":
                 return 200, self.service.inspect_aa_environment()
             if method == "POST":
                 return 200, self.service.inspect_aa_environment(self._body())
+        if path == "/api/v1/settings/resource-index:rebuild" and method == "POST":
+            return 200, self.service.rebuild_resource_index()
         if path == "/api/v1/settings/spine-cli":
             if method == "GET":
                 return 200, self.service.spine_cli_settings()
@@ -264,8 +274,15 @@ class ProductionHandler(BaseHTTPRequestHandler):
                 limit = int(query.get("limit", ["80"])[0])
             except ValueError as exc:
                 raise ProductionError("invalid_pagination", "分页参数必须是整数") from exc
+            resource_filters = {
+                name: query.get(name, [""])[0]
+                for name in ("scope", "group", "source", "category", "place", "time", "weather", "tags", "ready",
+                             "scene_card_id", "scene_place", "scene_time", "scene_space", "scene_weather")
+                if query.get(name, [""])[0]
+            }
             return 200, self.service.list_run_resources(
-                match.group(1), match.group(2), query=query.get("q", [""])[0], offset=offset, limit=limit
+                match.group(1), match.group(2), query=query.get("q", [""])[0], offset=offset, limit=limit,
+                filters=resource_filters,
             )
         match = RUN_CHARACTER_RESOURCE_ROUTE.fullmatch(path)
         if match and method == "GET":
@@ -369,7 +386,7 @@ class ProductionHandler(BaseHTTPRequestHandler):
             if method == "GET" and path in {"/", "/index.html"}:
                 self._send_asset(self.ui_root / "index.html")
                 return
-            if method == "GET" and path in {"/app.css", "/direction-profile.css", "/layout-mode.css", "/previews.css", "/preflight.css", "/cg-responsive.css", "/workspace-migration.css", "/confirm-dialog.css", "/app.js"}:
+            if method == "GET" and path in {"/app.css", "/direction-profile.css", "/layout-mode.css", "/previews.css", "/review-parity.css", "/preflight.css", "/cg-responsive.css", "/workspace-migration.css", "/confirm-dialog.css", "/clarity.css", "/app.js"}:
                 self._send_asset(self.ui_root / path.lstrip("/"))
                 return
             match = RESOURCE_PREVIEW_ROUTE.fullmatch(path)

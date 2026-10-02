@@ -979,6 +979,7 @@ def run_annotation_agent(
             )
             request_outcome = "failed"
             request_error_code = None
+            terminal_result = None
             try:
                 request_count += 1
                 with _temporary_reasoning_mode(provider, reasoning_retry_mode):
@@ -1016,7 +1017,8 @@ def run_annotation_agent(
             except Exception as exc:
                 if isinstance(exc, RequestCancelledError) or (cancelled and cancelled()):
                     request_error_code = "model_request_cancelled"
-                    return cancelled_result()
+                    terminal_result = cancelled_result()
+                    return terminal_result
                 finish_reason = str(
                     getattr(provider, "_last_finish_reason", "") or ""
                 )
@@ -1062,7 +1064,8 @@ def run_annotation_agent(
                     retry_at = time.monotonic() + delay
                     while time.monotonic() < retry_at:
                         if cancelled and cancelled():
-                            return cancelled_result()
+                            terminal_result = cancelled_result()
+                            return terminal_result
                         time.sleep(min(0.1, retry_at - time.monotonic()))
                     continue
                 if _is_request_deadline(exc):
@@ -1096,7 +1099,7 @@ def run_annotation_agent(
                             current=current, total=total, request_index=request_count,
                             retry_count=retries, subdivision_count=subdivisions,
                         )
-                    return {
+                    terminal_result = {
                         "items": items, "rows_by_id": rows_by_id, "memory": memory,
                         "beats": beats, "metrics": build_metrics(),
                         "diagnostics": diagnostics,
@@ -1104,6 +1107,7 @@ def run_annotation_agent(
                         "cancelled": False, "timed_out": True,
                         **completion_status(),
                     }
+                    return terminal_result
                 if is_reasoning_only_capacity(exc) and reasoning_capacity_retries < 3:
                     larger_budget = grow_chunk_output_budget(output_budget, annotation_max_tokens)
                     if larger_budget is not None:
@@ -1137,6 +1141,12 @@ def run_annotation_agent(
                         continue
                 if kind == "protocol" and protocol_attempts == 0:
                     observe_chunk({"success": False, "reason": "protocol"}, scene_id=str(chunk["scene_id"]), chunk_id=chunk_id)
+                    diagnostics.append({
+                        "code": "protocol_retry", "level": "warning",
+                        "scene_id": str(chunk["scene_id"]), "chunk_id": chunk_id,
+                        "reason": request_error_code,
+                        "detail": _chunk_error_detail(exc)[:1000],
+                    })
                     protocol_attempts += 1
                     retries += 1
                     if model_activity:
@@ -1144,6 +1154,7 @@ def run_annotation_agent(
                             {
                                 "state": "retrying",
                                 "reason": _chunk_error_code(exc),
+                                "detail": _chunk_error_detail(exc)[:1000],
                             },
                             scene_id=str(chunk["scene_id"]),
                             chunk_id=chunk_id,
@@ -1177,6 +1188,8 @@ def run_annotation_agent(
                     outcome=request_outcome,
                     error_code=request_error_code,
                 )
+                if terminal_result is not None:
+                    terminal_result["metrics"] = build_metrics()
         if validated is None:
             subdivision = _next_subdivision_limit(len(targets))
             if subdivision is not None:

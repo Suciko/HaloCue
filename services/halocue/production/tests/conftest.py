@@ -1,21 +1,25 @@
 from __future__ import annotations
 
-import os
+import sys
 from pathlib import Path
 
 import pytest
 
-from halocue_production.config import Settings
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from services.halocue._test_support import (  # noqa: E402,F401
+    isolated_legacy_root,
+    isolated_production_defaults,
+)
+from halocue_production.config import Settings  # noqa: E402
 
 
 @pytest.fixture
-def settings(tmp_path: Path) -> Settings:
+def settings(tmp_path: Path, isolated_legacy_root: Path) -> Settings:  # noqa: F811
     project_root = Path(__file__).resolve().parents[1]
-    repository_root = project_root.parents[2]
-    legacy_root = Path(
-        os.environ.get("HALOCUE_LEGACY_ROOT")
-        or repository_root
-    ).resolve()
+    legacy_root = isolated_legacy_root
     value = Settings(
         project_root=project_root,
         data_dir=tmp_path / "data",

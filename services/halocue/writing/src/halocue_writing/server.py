@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
-from http.server import ThreadingHTTPServer
+from services.halocue.http_server import LocalHTTPServer as ThreadingHTTPServer
 from pathlib import Path
 
 from .app import make_handler

@@ -1,0 +1,199 @@
+/* Theme only editor chrome. Never filter/recolor the rendered story or assets.
+   Loaded after production + embed styles; selectors also cover dialogs that are
+   siblings of the shell in its ShadowRoot, and late-mounted components. */
+:host-context(html[data-theme="dark"]) {
+  color-scheme: dark;
+  --ink: #e1e7ee; --ink-2: #c9d4df; --muted: #aab7c8;
+  --paper: #202631; --paper-sidebar: #222a35; --canvas: #191e27;
+  --surface: #202631; --surface-soft: #252d39;
+  --line: #394656; --line-strong: #586b82;
+  --accent: var(--hc-action, #9bc4fa); --accent-hover: #c1daff;
+  --accent-soft: var(--hc-action-soft, #28394f);
+  --green: var(--accent); --green-hover: var(--accent-hover); --green-soft: var(--accent-soft);
+  --success: #91ceb0; --success-soft: #253a31;
+  --warn: #efc78d; --warn-soft: #3b3328;
+  --danger: #ffb0b0; --danger-soft: #422d32;
+  --production-ink: var(--ink); --production-muted: var(--muted);
+  --production-line: var(--line); --production-blue: var(--accent); --production-blue-soft: var(--accent-soft);
+  --shadow: 0 6px 20px #0003;
+}
+:host-context(html[data-theme="dark"]) :is(.embedded-production-shell,.workspace) {
+  background: var(--canvas) !important; color: var(--ink); border-color: var(--line);
+}
+:host-context(html[data-theme="dark"]) :is(
+  .stage-sidebar,.production-surface-state,.production-surface-state-card,
+  .source-form,.source-pane,.source-mode-selector,.source-workflow-block,.recent-runs,
+  .writing-release-card,.writing-releases-empty,.writing-works-list-container,
+  .mapping-focus,.mapping-support-panel,.mapping-row,.mapping-card,.character-row,
+  .preflight-panel,.task-preflight-panel,.ai-preflight-panel,.ai-preflight-decision-surface,
+  .ai-preflight-decision-grid > article,.ai-preflight-issues-panel,
+  .mapping-scene-workbench,.mapping-scene-list,.mapping-scene-card,
+  .production-generation-step,.scene-plan,.scene-plan-card,.gate-card,.generation-job,
+  .review-column,.production-review-commandbar,.production-review-tools,
+  .production-review-tool-list,.inspector,.persistent-preview-panel,.request-card-editor,
+  .production-review-side,.production-live-preview,.sticky-actions,.buildbar,
+  .run-row,.task-row,.production-settings-workbench,.dialog-shell,dialog,
+  .asset-library-item,.asset-detail-media,.resource-item,.cg-material-row,
+  .asset-import-shell,.action-confirm-shell
+) {
+  background: var(--surface) !important; color: var(--ink) !important;
+  border-color: var(--line) !important; box-shadow: none;
+}
+:host-context(html[data-theme="dark"]) :is(
+  .source-tabs,.source-read-gate,.workflow-hint,.mapping-focus > header,
+  .mapping-support-panel > summary,.mapping-current-summary,.mapping-special-block,
+  .mapping-alias-tools,.mapping-preview-notice,.mapping-dialog-note,
+  .mapping-scene-background,.scene-plan-background-block,.scene-plan-evidence,
+  .scene-plan-card-heading,.production-generation-section-head,
+  .production-generation-gates,.action-panel,.filterbar,.selected-card-toolbar,
+  .background-timeline,.background-timeline-node,.background-timeline-actions,
+  .inspector-context,.inspector-selection-context,.request-context,.request-resolution-note,
+  .generation-controls,.generation-metrics,.generation-log,.task-diagnostics,
+  .asset-workbench-detail,.asset-workbench-controls,.asset-workbench-catalog > footer,
+  .asset-detail-note,.asset-detail-tags span,.resource-ready-filter,.resource-source-tabs,
+  .resource-toolbar,.resource-detail,.resource-selection-note,.asset-library-toolbar,
+  .mapping-search-label,.teacher-identity-form,.teacher-presentation-control,
+  .background-prompt-hint,.production-render-summary,.settings-summary,
+  .settings-tabs,.settings-workspace-summary,.install-current-state,.install-target-summary,
+  .dialog-footer,th,pre,code
+) {
+  background: var(--surface-soft) !important; color: var(--ink-2) !important;
+  border-color: var(--line) !important;
+}
+:host-context(html[data-theme="dark"]) :is(.page-lead,.review-head) { background: transparent !important; }
+:host-context(html[data-theme="dark"]) :is(button,.source-tab,.production-review-tools > summary) {
+  background: var(--surface-soft) !important; color: var(--ink) !important;
+  border-color: var(--line-strong) !important; box-shadow: none;
+}
+:host-context(html[data-theme="dark"]) button:hover:not(:disabled),
+:host-context(html[data-theme="dark"]) .production-review-tools > summary:hover {
+  background: var(--accent-soft) !important; border-color: var(--accent) !important;
+}
+:host-context(html[data-theme="dark"]) :is(.primary,.select-writing-release-btn) {
+  background: #365f96 !important; color: #fff !important; border-color: #6d98d1 !important;
+}
+:host-context(html[data-theme="dark"]) .primary:hover:not(:disabled) { background: #436fa7 !important; }
+:host-context(html[data-theme="dark"]) :is(.draft-card.selected,.source-tab.active,.writing-release-card.selected,
+  .filterbar button.active,.mode-choice:has(input:checked),.asset-library-item.is-selected,
+  .resource-item.selected,.settings-tabs button.active,.production-flow-strip .stage-list li.active) {
+  background: var(--accent-soft) !important; border-color: var(--accent) !important; color: var(--ink) !important;
+}
+:host-context(html[data-theme="dark"]) .mode-choice {
+  background: var(--surface-soft) !important; border-color: var(--line-strong) !important;
+}
+:host-context(html[data-theme="dark"]) .modern-dropzone {
+  background: var(--surface-soft) !important;
+  color: var(--ink) !important;
+  border-color: var(--line-strong) !important;
+}
+:host-context(html[data-theme="dark"]) .modern-dropzone:hover,
+:host-context(html[data-theme="dark"]) .modern-dropzone.dragover {
+  background: var(--accent-soft) !important;
+  border-color: var(--accent) !important;
+}
+:host-context(html[data-theme="dark"]) .dropzone-file-info {
+  background: var(--surface-soft) !important;
+  color: var(--ink) !important;
+  border-color: var(--line) !important;
+}
+:host-context(html[data-theme="dark"]) :is(input,select,textarea) {
+  background: var(--canvas) !important; color: var(--ink) !important; border-color: var(--line-strong) !important;
+  caret-color: var(--accent); accent-color: var(--accent);
+}
+:host-context(html[data-theme="dark"]) :is(input,textarea)::placeholder { color: var(--muted); opacity: 1; }
+:host-context(html[data-theme="dark"]) :is(h1,h2,h3,h4,h5,b,strong,label,legend,dt,td,dd,em):not(
+  .persistent-preview-stage *,.performance-preview-frame *,.preview-stage *,.preview-dialogue *,.production-preview-stage *,button.primary *) {
+  color: var(--ink) !important;
+}
+:host-context(html[data-theme="dark"]) :is(p,small,summary,.empty,.resource-source,.source-status,.scene-plan-number,
+  .draft-card .card-meta,.draft-card .card-number,.production-review-card-total,
+  #mappingSceneStatus,#scenePlanStatus,#backgroundTimelineSummary):not(
+  .persistent-preview-stage *,.performance-preview-frame *,.preview-stage *,.preview-dialogue *,.production-preview-stage *,button.primary *) {
+  color: var(--muted) !important;
+}
+:host-context(html[data-theme="dark"]) :is(.draft-card,.card-copy,.card-text,.mapping-value) { color: var(--ink) !important; }
+:host-context(html[data-theme="dark"]) :is(.inspector-context,.inspector-selection-context) {
+  background: var(--accent-soft) !important; border-color: var(--accent) !important;
+}
+:host-context(html[data-theme="dark"]) :is(.mapping-state.ready,.status-dot.online,.manuscript-state.saved,.asset-source) {
+  background: var(--success-soft) !important; color: var(--success) !important; border-color: #4d7c66 !important;
+}
+:host-context(html[data-theme="dark"]) :is(.mapping-scene-issues,.scene-plan-gap,.gate-card.block,.warning,.mapping-focus-hint) {
+  background: var(--warn-soft) !important; color: var(--warn) !important; border-color: #927040 !important;
+}
+:host-context(html[data-theme="dark"]) :is(.danger,.danger-button,#toolbarDeleteCard) {
+  background: var(--danger-soft) !important; color: var(--danger) !important; border-color: #a16a70 !important;
+}
+:host-context(html[data-theme="dark"]) .gate-card.pass { border-color: #4d7c66 !important; }
+:host-context(html[data-theme="dark"]) :is(.scene-plan-card-heading > b,.mapping-scene-card > header > span) {
+  background: var(--success-soft) !important; color: var(--success) !important;
+}
+:host-context(html[data-theme="dark"]) .scene-background-availability[data-background-availability="unavailable"] { color: var(--warn) !important; }
+:host-context(html[data-theme="dark"]) .scene-background-availability[data-background-availability="available"] { color: var(--success) !important; }
+:host-context(html[data-theme="dark"]) :is(.resource-thumb,.preview-placeholder,.background-timeline-placeholder,.mapping-scene-thumb) {
+  background: var(--canvas) !important; color: var(--muted) !important; border-color: var(--line) !important;
+}
+:host-context(html[data-theme="dark"]) .production-flow-strip .stage-list li.done b {
+  background: var(--success-soft) !important; color: var(--success) !important; border-color: var(--success) !important;
+}
+:host-context(html[data-theme="dark"]) .production-flow-strip .stage-list li.active b {
+  background: #365f96 !important; color: #fff !important; border-color: var(--accent) !important;
+}
+:host-context(html[data-theme="dark"]) .production-flow-strip .stage-list li:hover:not(.active) {
+  background: var(--surface-soft) !important;
+}
+:host-context(html[data-theme="dark"]) .production-flow-strip .stage-list li::after {
+  background: var(--line) !important;
+}
+:host-context(html[data-theme="dark"]) :is(button,input,select,textarea,summary):focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 3px;
+}
+:host-context(html[data-theme="dark"]) .teacher-presentation-options {
+  background: var(--surface-soft); border-color: var(--line);
+}
+:host-context(html[data-theme="dark"]) .teacher-presentation-options label {
+  background: var(--surface); color: var(--ink-2); border-color: var(--line);
+}
+:host-context(html[data-theme="dark"]) .teacher-presentation-options label:has(input:checked) {
+  background: var(--accent-soft); color: var(--ink);
+}
+:host-context(html[data-theme="dark"]) dialog::backdrop { background: #080d16a6; }
+:host-context(html[data-theme="dark"]) { scrollbar-color: #586b82 var(--canvas); }
+:host-context(html[data-theme="dark"]) :is(.source-step-index,.release-tag.published,.mapping-role-chip,.mapping-current-summary .ready) {
+  background: var(--success-soft) !important; color: var(--success) !important; border-color: #4d7c66 !important;
+}
+:host-context(html[data-theme="dark"]) .source-tab.active .tab-mark { background: #365f96 !important; color: #fff !important; }
+:host-context(html[data-theme="dark"]) :is(#mappingStatus,.inspector-context > span) { color: var(--muted) !important; }
+:host-context(html[data-theme="dark"]) .asset-workbench-read-state {
+  background: var(--surface-soft) !important; color: var(--muted) !important; border-color: var(--line) !important;
+}
+
+/* Annotation inspection is editor chrome, not the story preview. */
+:host-context(html[data-theme="dark"]) :is(.line-performance-editor,.performance-loading,.performance-unavailable) {
+  background: var(--surface) !important; color: var(--ink) !important; border-color: var(--line-strong) !important;
+}
+:host-context(html[data-theme="dark"]) .line-performance-editor > header { border-color: var(--line) !important; }
+:host-context(html[data-theme="dark"]) .performance-character {
+  background: var(--accent-soft) !important; border-color: var(--line-strong) !important;
+}
+:host-context(html[data-theme="dark"]) .performance-character span { color: var(--muted) !important; }
+:host-context(html[data-theme="dark"]) .annotation-caution,
+:host-context(html[data-theme="dark"]) .annotation-caution dd { color: var(--warn) !important; }
+
+:host-context(html[data-theme="dark"]) #resourcePickerCount { color: var(--muted) !important; }
+:host-context(html[data-theme="dark"]) #resourceResults > p.empty {
+  background: var(--surface-soft) !important;
+  border-color: var(--line) !important;
+  color: var(--ink-2) !important;
+}
+
+/* First-step read-only scene judgement must not retain legacy white surfaces. */
+:host-context(html[data-theme="dark"]) :is(.preflight-summary-strip,.preflight-summary-strip > span,.scene-judgement-list > li,.preflight-confirm,.scene-evidence > span,.scene-order) {
+  background: var(--surface-soft) !important; color: var(--ink) !important; border-color: var(--line-strong) !important;
+}
+:host-context(html[data-theme="dark"]) :is(.scene-judgement-list > li.implicit,.scene-evidence .missing-background,.scene-title-row em) {
+  background: var(--warn-soft) !important; color: var(--warn) !important; border-color: var(--warn) !important;
+}
+:host-context(html[data-theme="dark"]) .scene-evidence .has-background {
+  background: var(--success-soft) !important; color: var(--success) !important; border-color: var(--success) !important;
+}

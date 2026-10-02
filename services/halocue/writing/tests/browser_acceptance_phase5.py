@@ -122,8 +122,8 @@ def collect_page_metrics(page: Page) -> dict:
         """() => ({
           viewport: {width: innerWidth, height: innerHeight},
           overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-          activeGlobalNav: [...document.querySelectorAll('.primary-nav [data-section].active')]
-            .map(element => element.dataset.section),
+          activeGlobalNav: [...document.querySelectorAll('.primary-nav [data-section].active,.primary-nav [data-creation-entry].active')]
+            .map(element => element.dataset.section || 'writing'),
           findingRows: {
             blocking: document.querySelectorAll('.release-finding-row.blocking').length,
             warning: document.querySelectorAll('.release-finding-row.warning').length,
@@ -211,6 +211,9 @@ def main() -> None:
                         if response is None or not response.ok:
                             raise AssertionError(f"release workbench navigation failed: {url}")
                         page.locator("body:not(.app-loading)").wait_for(timeout=20_000)
+                        # The default quick path folds the strict per-scene checks.
+                        # This acceptance case intentionally exercises the full path.
+                        page.locator(".release-detailed-checks > summary").click()
                         findings_surface = page.locator(".release-findings-surface")
                         findings_surface.wait_for(timeout=20_000)
                         page.wait_for_timeout(250)
@@ -238,7 +241,7 @@ def main() -> None:
                             "height": height,
                         }
                         assert metrics_before["overflowX"] == 0
-                        assert metrics_before["activeGlobalNav"] == ["writing"]
+                        assert metrics_before["activeGlobalNav"] == ["writing"], metrics_before
                         assert metrics_before["findingRows"] == fixture["expected_open"]
 
                         findings_surface.scroll_into_view_if_needed()
@@ -252,8 +255,9 @@ def main() -> None:
                         continuity_button.click()
                         try:
                             page.locator(".release-review-step.is-complete").wait_for(
-                                timeout=30_000
+                                state="attached", timeout=30_000
                             )
+                            page.locator(".release-detailed-checks > summary").click()
                         except Exception:
                             debug_work = service.get_work(work_id)
                             debug = {

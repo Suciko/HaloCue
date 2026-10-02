@@ -8,7 +8,9 @@ from .repository import canonical_json, sha256_text
 
 
 SCHEMA_VERSION = "conversation-summary/1.1"
+BUDGET_POLICY = "recent-12-or-16000/1"
 RECENT_MESSAGE_COUNT = 12
+RECENT_TOKEN_BUDGET = 16_000
 MAX_ACTIVE_CONSTRAINTS = 48
 MAX_CORRECTIONS = 24
 MAX_OPEN_QUESTIONS = 16
@@ -31,6 +33,7 @@ def _message_digest(row) -> str:
 def _entry(row, text: str) -> dict:
     return {
         "text": text[:600],
+        "text_truncated": len(text) > 600,
         "source_message_ids": [row["id"]],
         "ordinal": row["ordinal"],
         "message_digest": _message_digest(row),
@@ -75,6 +78,7 @@ def _initial_source_digest(thread_id: str) -> str:
 def _empty_summary(thread_id: str) -> dict:
     summary = {
         "schema_version": SCHEMA_VERSION,
+        "budget_policy": BUDGET_POLICY,
         "revision": 0,
         "thread_id": thread_id,
         "archived_message_count": 0,
@@ -187,9 +191,11 @@ def _finish_summary(summary: dict) -> dict:
     summary["omitted_message_count"] = max(
         0, summary["archived_message_count"] - len(summary["source_message_ids"])
     )
-    if summary["overflowed_user_context_count"]:
+    summary["truncated_user_context_count"] = sum(bool(item.get("text_truncated")) for key in
+        ("active_user_constraints", "corrections_and_rejections", "open_questions") for item in summary[key])
+    if summary["overflowed_user_context_count"] or summary["truncated_user_context_count"]:
         summary["continuation_note"] = (
-            f"有 {summary['overflowed_user_context_count']} 条更早的用户上下文未展开。"
+            "部分历史用户上下文未完整展开。"
             "需要据此形成正式资料时，必须回查原始消息，不能只依赖本摘要。"
         )
     else:
@@ -206,11 +212,27 @@ def _finish_summary(summary: dict) -> dict:
     return summary
 
 
+def recent_message_count(connection, thread_id: str) -> int:
+    """Keep the newest turn exact; archive older oversized turns with sources."""
+    rows = connection.execute("SELECT content_json FROM conversation_messages WHERE thread_id=? ORDER BY ordinal DESC LIMIT ?", (thread_id, RECENT_MESSAGE_COUNT)).fetchall()
+    count = 0
+    tokens = 0
+    for row in rows:
+        text = str(json.loads(row["content_json"] or "{}").get("text") or "")
+        unicode_chars = sum(ord(char) > 127 for char in text)
+        estimate = unicode_chars * 2 + (len(text) - unicode_chars) // 3 + 64
+        if count and tokens + estimate > RECENT_TOKEN_BUDGET:
+            break
+        tokens += estimate
+        count += 1
+    return count
+
+
 def refresh_conversation_summary(connection, thread_id: str, *, force_rebuild: bool = False) -> dict:
     total = connection.execute(
         "SELECT COUNT(*) AS count FROM conversation_messages WHERE thread_id=?", (thread_id,)
     ).fetchone()["count"]
-    archived_count = max(0, total - RECENT_MESSAGE_COUNT)
+    archived_count = max(0, total - recent_message_count(connection, thread_id))
     if not archived_count:
         return _empty_summary(thread_id)
 
@@ -357,7 +379,7 @@ def validate_conversation_summary(
         total = connection.execute(
             "SELECT COUNT(*) AS count FROM conversation_messages WHERE thread_id=?", (thread_id,)
         ).fetchone()["count"]
-        expected_archived = max(0, total - RECENT_MESSAGE_COUNT)
+        expected_archived = max(0, total - recent_message_count(connection, thread_id))
     if int(summary.get("archived_message_count") or 0) != expected_archived:
         fail("message_count")
     source = summary.get("source") if isinstance(summary.get("source"), dict) else {}
@@ -391,6 +413,7 @@ def validate_conversation_summary(
 
 
 def recent_conversation_history(connection, thread_id: str, limit: int = RECENT_MESSAGE_COUNT) -> list[dict]:
+    limit = min(limit, recent_message_count(connection, thread_id))
     rows = connection.execute(
         """SELECT id,role,content_json FROM conversation_messages
            WHERE thread_id=? ORDER BY ordinal DESC LIMIT ?""",

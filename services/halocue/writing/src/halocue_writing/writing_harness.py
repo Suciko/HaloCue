@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from .asset_references import source_reference_snapshot
 from .errors import NotFound
 from .repository import Repository, canonical_json, sha256_text
 
@@ -870,27 +871,7 @@ class WritingHarness:
                  WHEN 'sound' THEN 3 ELSE 4 END, created_at, id""",
             (work_id, scene_id),
         ).fetchall()
-        references = []
-        for row in rows:
-            references.append(
-                {
-                    "reference_id": row["id"],
-                    "asset_kind": row["asset_kind"],
-                    "source_type": row["source_type"],
-                    "source_asset_id": row["source_asset_id"],
-                    "display_name": row["display_name"],
-                    "source_version": row["source_version"],
-                    "content_hash": row["content_hash"],
-                    "content_hash_kind": row["content_hash_kind"],
-                    "source_snapshot": json.loads(row["source_snapshot_json"] or "{}"),
-                    "production_copy": (
-                        json.loads(row["production_copy_json"])
-                        if row["production_copy_json"]
-                        else None
-                    ),
-                }
-            )
-        return references
+        return source_reference_snapshot(rows)
 
     @staticmethod
     def _release_memory_snapshot(connection, work_id: str, scene_refs: list[dict]) -> list[dict]:

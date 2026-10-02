@@ -21,6 +21,21 @@ from annotation_memory import AnnotationCheckpointStore, build_run_fingerprint
 FIELDS = ("face", "emo", "act", "fx", "se", "bg", "bg_request", "place", "bgfx", "trans", "shot")
 
 
+@pytest.mark.parametrize("error_type", [llm.RequestDeadlineError, llm.RequestCancelledError])
+def test_terminal_failure_metrics_include_the_current_request(tmp_path, error_type):
+    class DeadlineProvider(RecordingProvider):
+        request_records = []
+        def complete_json(self, *args):
+            self.request_records = [{"request_index": 1, "input_tokens": 123,
+                                     "output_tokens": 0, "status": "failed"}]
+            raise error_type("stopped")
+
+    result = fixture(tmp_path, DeadlineProvider(), count=1)
+    assert result["timed_out"] or result["cancelled"]
+    assert len(result["metrics"]["request_records"]) == 1
+    assert result["metrics"]["failed_request_count"] == 1
+
+
 def test_chunk_output_budget_scales_with_wire_shape_and_reasoning_mode():
     compact = estimate_chunk_output_budget(
         20, compact=True, reasoning_mode="balanced", maximum=384_000,
@@ -896,6 +911,10 @@ def test_corrected_protocol_error_does_not_shrink_the_next_scene(tmp_path):
     assert result["metrics"]["retries"] == 1
     assert [len(request["target_ids"]) for request in provider.requests] == [20, 20, 20]
     assert not result["metrics"]["chunk_adaptations"]
+    retry = next(d for d in result["diagnostics"] if d["code"] == "protocol_retry")
+    assert retry["reason"] == "invalid_state_delta"
+    assert "positions" in retry["detail"]
+    assert retry["chunk_id"]
 
 
 def test_capacity_success_teaches_remaining_chunks_the_safe_limit(tmp_path):

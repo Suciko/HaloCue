@@ -246,7 +246,16 @@ def _manifest_character_has_assets(root: Path, row: Dict[str, Any]) -> bool:
 
 def _bundle_custom_backgrounds(project_dir: Path) -> set[str]:
     labels = _bundle_resource_index(project_dir).get("bg_label", {})
-    return set(labels) if isinstance(labels, dict) else set()
+    if not isinstance(labels, dict):
+        return set()
+    # Semantic labels also describe native AA backgrounds. Only explicitly
+    # identified base resources can use the runtime's own bytes; packs and
+    # legacy/unclassified custom labels still require installed overrides.
+    return {
+        key for key, metadata in labels.items()
+        if not isinstance(metadata, dict)
+        or str(metadata.get("source_kind") or "").casefold() != "official_base"
+    }
 
 
 def _find_character_source(

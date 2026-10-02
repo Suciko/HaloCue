@@ -87,3 +87,39 @@ def test_runtime_character_card_marks_legacy_missing_ooc_without_inventing_it():
     assert runtime["ooc_constraints"] == []
     assert runtime["validation"]["ooc_constraints"] == "missing"
 
+
+def test_runtime_card_only_keeps_scene_relations_and_dialogue_participants():
+    content = {
+        "name": "甲", "voice_anchors": ["先试灯。"],
+        "ooc_constraints": ["不知道的事实不说。"],
+        "ba_profile": {
+            "relations": {"sensei": {"summary": "老师"}, "peers": {"乙": "同伴", "丙": "无关"}},
+            "special_mechanisms": {"光环": "本场有关", "隐藏能力": "无关"},
+            "speech": {
+                "address_patterns": {"乙": "乙", "丙": "丙", "老师": "老师"},
+                "voice_sequences": [
+                    {"source_id": "local", "turns": [{"speaker": name, "line": "试灯"} for name in ["甲", "乙", "甲"]]},
+                    {"source_id": "teacher", "turns": [{"speaker": name, "line": "试灯"} for name in ["甲", "老师", "甲"]]},
+                ],
+            },
+        },
+    }
+    runtime = WritingService._runtime_character_card(content, "rev", {"goal": "光环映着灯光"}, ["甲", "乙"], False)
+    assert runtime["relations"] == {"peers": {"乙": "同伴"}}
+    assert runtime["address_patterns"] == {"乙": "乙"}
+    assert [item["source_id"] for item in runtime["speech"]["voice_sequences"]] == ["local"]
+    assert runtime["special_mechanisms"] == {"光环": "本场有关"}
+    with_teacher = WritingService._runtime_character_card(content, "rev", {}, ["甲", "乙"], True)
+    assert "sensei" in with_teacher["relations"]
+    assert "老师" in with_teacher["address_patterns"]
+    assert len(with_teacher["speech"]["voice_sequences"]) == 2
+    assert "丙" in content["ba_profile"]["relations"]["peers"]
+
+
+def test_runtime_card_uses_constraint_values_instead_of_category_keys():
+    runtime = WritingService._runtime_character_card(
+        {"name": "甲", "ba_profile": {"ooc_constraints": {"forbidden": ["不替别人猜动机。"], "boundary": "不读心。"}}},
+        "rev", {}, ["甲"], False,
+    )
+    assert runtime["ooc_constraints"] == ["不替别人猜动机。", "不读心。"]
+

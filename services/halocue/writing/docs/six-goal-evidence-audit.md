@@ -228,7 +228,7 @@
 ## 2026-08-19 增量证据（真实章节 Agent 与 65536 输出上限验证）
 
 - 通过用户提供的 OpenAI-compatible 端点 `http://59.110.165.151:3000/v1` 的 `/models` 与最小真实请求确认代理列出 `gemini-3.7-flash`，并接受 `max_tokens=65536`；最小请求返回真实 usage（`157` input / `1` completion），不能据此推断代理或模型的计费、缓存策略。正式写作配置已通过“先测试后激活”更新为 `max_tokens=65536`、`model-config-4`，密钥只保存在 Windows DPAPI，不进入日志或审计文本。
-- 隔离数据目录 `D:\Temp\halocue-real-slice-20260819` 的真实章节纵切完成：`work-61bb7e549961`、`scene-ce2ae1157c76` 在显式绑定两张已确认人物卡和就绪 WritingPack 后执行 `scene.candidate.generate`，真实运行 `agent-6ddd3da10b34` 由 `gemini-3.7-flash (openai)` 产生 `proposal-af35d349951d`。Proposal 包含 13 个结构化正文块、逐项 `block_changes`、当前/候选 Diff、证据修订 ID 和内容 Hash；usage 为 `10,548 input / 303 output`，cache read/write `0`，estimated cost `null`。
+- 隔离数据目录 `<isolated temp workspace>` 的真实章节纵切完成：`work-61bb7e549961`、`scene-ce2ae1157c76` 在显式绑定两张已确认人物卡和就绪 WritingPack 后执行 `scene.candidate.generate`，真实运行 `agent-6ddd3da10b34` 由 `gemini-3.7-flash (openai)` 产生 `proposal-af35d349951d`。Proposal 包含 13 个结构化正文块、逐项 `block_changes`、当前/候选 Diff、证据修订 ID 和内容 Hash；usage 为 `10,548 input / 303 output`，cache read/write `0`，estimated cost `null`。
 - 真实候选生成完成后 AgentRun 状态为 `waiting_user`，场景 `current_revision_id` 仍为空；内置 Browser 打开章节工作面后实际显示 `PROPOSAL / 未写入`、真实 Provider、运行 ID、Token、逐项复选框和“应用/退回”。在 `390x844` 滚动到 Diff 区，“应用 1 项修改”可见且页面/工作区横向溢出均为 `0`；点击采纳后作品版本 `10 -> 11`，建立结构化正文 `revision-1adf42cb2ca5`，页面显示 `MANUSCRIPT / 修订 1`、13 个正文块和“已保存”。
 - 本次 Browser 复核使用 `1920x1080`、`1440x900`、`1366x768`、`390x844`；移动底部导航和 Diff 主操作可见，视口结束已执行 `viewport.reset()` 并关闭隔离标签页。该次真实候选证据补足了“实际 Agent 调用 -> 可见文字变化 -> 用户采纳 -> 正文 Revision”链，但不替代真实费用、缓存命中或制作端副本证据。
 - 正式 `8910` 仍在线，Provider 健康状态为 `gemini-3.7-flash (openai)` / `can_call_model=true` / `is_simulation=false` / `model-config-4`；制作服务 `8892` 仍未运行。未修改 `08-HaloCue-1.0/`，`10-HaloCue-1.0-Integrated/` 未新增写作状态机或入口。
@@ -291,7 +291,7 @@
 - 新增两个 HTTP 静态合同，分别锁定初次异步打开和内部重绘后的焦点恢复。定向 `test_http_api.py` + `test_phase0_contracts.py` 为 `50 passed`，`node --check web/production-embed.js` 通过；完整 09 最终为 `432 passed in 239.29s (0:03:59)`，10 集成网关为 `3 passed in 35.80s`。
 - Codex 内置 Browser 在正式根 10 临时集成入口验证：初次打开后 `document.activeElement` 为 `SECTION#productionModule`；点击“选用此剧本制作”并等待内部重绘后仍为该宿主。`1440x900`、`1366x768`、`390x844` 均为 `overflowX=0`，桌面主导航、手机底部导航、制作步骤与冻结剧本选择可见，Console warning/error 为 `[]`，结束前执行 `viewport.reset()`。
 - 工具恢复事实：第一次误启动 `11-HaloCue-1.0-后端协作交接包` 中的历史 10/09 副本，浏览器仍复现旧焦点；检查服务响应脚本 Hash 和目录解析后关闭 PID `23632`，改用正式根目录 10 重试并通过。该失败没有写成产品验收证据。
-- 集成 Browser 使用 `D:\Temp\halocue-integrated-prod-ui-20260819c` 临时制作数据；未修改 `08-HaloCue-1.0` 或 `10-HaloCue-1.0-Integrated` 源码。08 制作 UI 的角色映射卡仍错误使用全局 `dialogue_count`，导致每个角色都显示总台词数；因未获 08 源码修改授权，本轮只记录为制作域缺口，没有在 09/10 复制覆盖逻辑。
+- 集成 Browser 使用 `<isolated integration workspace>` 临时制作数据；未修改 `08-HaloCue-1.0` 或 `10-HaloCue-1.0-Integrated` 源码。08 制作 UI 的角色映射卡仍错误使用全局 `dialogue_count`，导致每个角色都显示总台词数；因未获 08 源码修改授权，本轮只记录为制作域缺口，没有在 09/10 复制覆盖逻辑。
 - 仍未完成：制作端 `scene_asset_handoff`、带素材引用的 ProductionRun 资产副本回执、真实费用 receipt、cache 命中/策略、远端真实 429/504、真实 AA 编译/安装。正式 `8910` 仍是根 09 写作服务，健康状态为 `gemini-3.7-flash (openai)` / `can_call_model=true` / `is_simulation=false` / `model-config-4`；这轮未新增真实模型调用或 usage。
 
 ## 2026-08-19 增量证据（集成入口返回写作路径）
@@ -398,7 +398,7 @@
 - 同一隔离 ProductionRun 实际完成凯伊 -> `Key`、旁白 -> `narrator`、星野 -> `星野(一年级)` 映射；10 张卡全部审查后编译完成，构建 `build-734bb18d26c0`，compile gate passed。安装目标预检返回可用，但未执行对 AA 工作区的持久安装，不宣称安装完成。
 - Browser 检查编译完成页和返回写作路径，`overflowX=0`，Console warning/error 为空；验收结束已 `viewport.reset()` 并关闭标签。09 完整回归最终 `435 passed in 243.14s (0:04:03)`。
 - 仍缺：真实费用 receipt、代理 cache 命中/策略、远端真实 429/504、正式用户带素材 ProductionRun 副本回执和真实 AA 安装。`max_tokens=65536` 仅是官方最大输出与当前代理接受值的配置证据，不扩展为费用或缓存证据。
-- 隔离安装补充：使用临时 8917 服务并将 `HALOCUE_AA_DATA` 指向新建的 `D:\Temp\halocue-aa-install-20260819`，复用同一已编译 Run 完成真实安装回执。`state=installed`、项目 `真实 Provider 纵切（一次性测试） - v1`、`installed_build_id=build-734bb18d26c0`；`.aap` 18,360 bytes，SHA-256 `FC5A5C8798F1614F51C85D423726DA0D363FD8286874C67D3E8D934D70E8B07B`，项目目录和 saves 目录均生成。安装后停止 8917 并删除临时目录；正式 8910 与真实 AA 工作区未写入。此前“真实 AA 安装”缺口因此收窄为“正式用户真实工作区安装尚未执行”。
+- 隔离安装补充：使用临时 8917 服务并将 `HALOCUE_AA_DATA` 指向新建的 `<isolated AA install workspace>`，复用同一已编译 Run 完成真实安装回执。`state=installed`、项目 `真实 Provider 纵切（一次性测试） - v1`、`installed_build_id=build-734bb18d26c0`；`.aap` 18,360 bytes，SHA-256 `FC5A5C8798F1614F51C85D423726DA0D363FD8286874C67D3E8D934D70E8B07B`，项目目录和 saves 目录均生成。安装后停止 8917 并删除临时目录；正式 8910 与真实 AA 工作区未写入。此前“真实 AA 安装”缺口因此收窄为“正式用户真实工作区安装尚未执行”。
 
 ## 2026-08-19 首次使用连续 Browser 纵切
 
@@ -776,7 +776,7 @@
 - 正式服务 `http://127.0.0.1:8910/` 健康；Provider 为 `gemini-3.7-flash (openai)`，`can_call_model=true`、`is_simulation=false`，不是 Fake。隔离真实 Provider 纵切完成一轮作品讨论和一场场景 Proposal，Proposal 保持 pending，未采纳、未写入 Revision；累计 usage `19,545 input / 1,004 output`，费用未由 Provider 报告，不能视为免费；cache 命中/未命中未知。临时 8921 服务及隔离数据已停止并删除。
 - ProductionRun 只读回执核对：`run-608b2614ca91/resource-usage` 返回 `production-asset-usage/1.0`，含场景引用、原件版本、原件 Hash 和任务副本回执；未创建新任务，ScriptRelease/正文/WorkCanon 未被改变。10 的 `test_scene_asset_handoff_creates_a_verified_production_run_receipt` 已包含副本身份与回执合同证据。
 - 内置 Browser 正式页面四档验收（`1920x1080`、`1440x900`、`1366x768`、`390x844`）：写作候选页和 AA 制作页横向溢出均为 `0`；候选页唯一主操作、运行详情折叠、Proposal 未写入提示、移动 Composer/导航未遮挡，焦点进入候选区；AA 页 ShadowRoot 已挂载、首步制作入口可见、移动内容未被导航遮挡；Console warning/error 均为 `[]`。普通 UI 未显示 Revision/Run/Hash/Schema/内部英文状态，技术字段仍通过 API/折叠详情可追溯。
-- AA 能力门阻塞：请求目标 `D:\桌面\蔚蓝档案二创\AA自动写剧本文件\02-最终AA工程` 是 `.aap` 项目集合，不是现有 AA 后端认可的 `data` 工作区，环境探测 `adopted=false`。未创建伪工作区、未覆盖 `.aap`、未修改 08；正式 AA 安装因此不能声称完成。当前结论为“ProductionRun/素材交接完成，AA 安装因外部边界阻塞”。
+- AA 能力门阻塞：请求目标 `<authorized local AA project>` 是 `.aap` 项目集合，不是现有 AA 后端认可的 `data` 工作区，环境探测 `adopted=false`。未创建伪工作区、未覆盖 `.aap`、未修改 08；正式 AA 安装因此不能声称完成。当前结论为“ProductionRun/素材交接完成，AA 安装因外部边界阻塞”。
 - 未完成或无真实证据：真实费用 receipt、cache 命中策略、远端 429/504、正式 ScriptRelease 冻结后的新 ProductionRun、目标 AA 持久安装。后续只能在合法 AA 工作区和明确安装合同存在时继续。
 ## 2026-08-20 一句想法到 ProductionRun 联合闭环补证
 
@@ -788,7 +788,7 @@
 - AA 指定目标能力门仍阻塞：`02-最终AA工程` 不是现有 AA 后端认可的 `data` 工作区（`.aap` 项目集合，`adopted=false`），因此不能执行正式安装或声称 AA 工作区验收完成。
 ## 2026-08-20 外部工作区恢复后正式 AA 安装验收
 
-- 用户明确允许使用电脑中其他位置后，重新探测并采用现有 AA 后端认可的 `E:\AzureArchive\存储文件\data`；未修改 08 源码，也未使用或覆盖 `02-最终AA工程` 的 `.aap` 集合。
+- 用户明确允许使用电脑中其他位置后，重新探测并采用现有 AA 后端认可的 `<authorized local AA data root>`；未修改 08 源码，也未使用或覆盖 `02-最终AA工程` 的 `.aap` 集合。
 - 安装前只读能力门：workspace `valid=true`，compile/install/script-release-handoff/scene-asset-handoff 均 available；AA 进程未运行；唯一测试工程名 `HaloCue闭环验收-20260820-RealProvider-v2` 的 `install-check` 返回 `available=true`、`conflict=false`。
 - 正式安装回执：ProductionRun `run-608b2614ca91`、构建 `build-9f009eb8b711`、ScriptRelease `release-3b8020f120b1`，安装状态 `installed`；`.aap`、工程目录和 save 目录均已生成，`last_installed_project` 为唯一测试工程名。
 - 安装后只读核对：ScriptRelease 内容 Hash 与 manifest Hash 均为 `sha256:22285fb4622a4abaf82c0e6bea17f2362dbca016c285ab34719d9a79ff0315a3`，来源 Revision 仍为 `revision-293c472616cb`；ProductionRun 上游 release、写作正文和素材回执未漂移。回执 schema `production-asset-usage/1.0`，包含 1 条场景引用和任务副本 `copy-302f53732d4b`。

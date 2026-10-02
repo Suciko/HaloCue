@@ -624,25 +624,36 @@ def test_scene_asset_handoff_creates_a_verified_production_run_receipt(tmp_path)
             work["id"], {"expected_version": release_review["work"]["version"]}
         )
 
+        manifest_path = writing.repo.data_dir / writing.get_release(frozen["release_id"])["manifest_uri"]
+        original_manifest = manifest_path.read_bytes()
         handoff = writing.handoff_release(frozen["release_id"])
         receipt = runtime.production_service.resource_usage(handoff["production_run_id"])
         reference = writing.get_work(work["id"])["chapters"][-1]["scenes"][0]["asset_references"][0]
+        # Reusing the author's sources must create a new run-owned copy, not
+        # forward the previous run's receipt as a claimed input copy.
+        current = writing.get_work(work["id"])
+        reviewed = writing.review_continuity(work["id"], {"expected_version": current["version"]})
+        reviewed = writing.review_release(work["id"], {"expected_version": reviewed["work"]["version"]})
+        second = writing.freeze_release(work["id"], {"expected_version": reviewed["work"]["version"]})
+        assert second["manifest"]["asset_references"][0]["references"][0]["production_copy"] is None
+        assert writing.production_asset_status(second["release_id"])["copied_count"] == 0
+        second_handoff = writing.handoff_release(second["release_id"])
+        first_status = writing.production_asset_status(frozen["release_id"])
+        second_status = writing.production_asset_status(second["release_id"])
+        assert manifest_path.read_bytes() == original_manifest
     finally:
-        runtime.writing_server.shutdown()
-        runtime.writing_server.server_close()
-        runtime.production_server.shutdown()
-        runtime.production_server.server_close()
-        runtime.production_service.jobs.close()
-        for thread in runtime._threads:
-            thread.join(timeout=3)
-        runtime.gateway.server_close()
+        runtime.close(stop_gateway=False)
 
     assert runtime.production_service.capabilities()["scene_asset_handoff"]["state"] == "available"
     assert handoff["asset_handoff"]["status"] == "complete"
     assert receipt["schema_version"] == "production-asset-usage/1.0"
     assert receipt["references"][0]["source_asset_id"] == asset_id
     assert receipt["references"][0]["production_copy"]["copy_id"].startswith("copy-")
-    assert reference["production_copy"] == receipt["references"][0]["production_copy"]
+    assert reference["production_copy"] is None
+    assert first_status["references"] == receipt["references"]
+    assert first_status["status"] == second_status["status"] == "complete"
+    assert handoff["production_run_id"] != second_handoff["production_run_id"]
+    assert first_status["references"][0]["production_copy"]["copy_id"] != second_status["references"][0]["production_copy"]["copy_id"]
 
 
 @pytest.mark.parametrize(
@@ -652,13 +663,16 @@ def test_scene_asset_handoff_creates_a_verified_production_run_receipt(tmp_path)
         ("snapshot_asset_id", "library-asset-000000000002"),
         ("snapshot_sha256", "tampered-hash"),
         ("source_version", "2"),
+        ("production_copy", {"copy_id": "old-run-copy", "content_hash": "old-hash"}),
     ],
 )
 def test_custom_asset_handoff_rejects_a_stale_or_tampered_frozen_reference(
-    tmp_path, field, value
+    tmp_path, field, value, isolated_legacy_root
 ):
     service = IntegratedProductionService(
-        Settings.from_env(host="127.0.0.1", port=0, data_dir=tmp_path / "production")
+        Settings(project_root=WORKSPACE_ROOT / "production", data_dir=tmp_path / "production",
+                 legacy_root=isolated_legacy_root, resource_index=synthetic_resource_index(tmp_path),
+                 aa_data=None, host="127.0.0.1", port=0)
     )
     asset_id = "library-asset-000000000001"
     digest = "a" * 64
@@ -699,5 +713,5 @@ def test_custom_asset_handoff_rejects_a_stale_or_tampered_frozen_reference(
     finally:
         service.jobs.close()
 
-    assert caught.value.code == "asset_handoff_source_mismatch"
+    assert caught.value.code == ("asset_handoff_preclaimed_copy" if field == "production_copy" else "asset_handoff_source_mismatch")
     assert caught.value.status == 409

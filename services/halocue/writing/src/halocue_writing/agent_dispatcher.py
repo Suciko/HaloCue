@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .repository import Repository
+from .workspace_access import WorkspaceBusy, WorkspaceRecoveryRequired, workspace_operation
 
 
 AgentWorkHandler = Callable[[dict], Any]
@@ -39,6 +40,7 @@ class AgentDispatcher:
             raise ValueError("heartbeat_interval must be positive and shorter than lease_seconds")
 
         self.repository = repository
+        self.data_access = repository.data_access
         self.worker_id = worker_id or f"dispatcher-{uuid.uuid4().hex[:12]}"
         self.poll_interval = poll_interval
         self.lease_seconds = lease_seconds
@@ -66,6 +68,7 @@ class AgentDispatcher:
         with self._handlers_lock:
             self._handlers.pop(operation, None)
 
+    @workspace_operation
     def start(self) -> dict:
         """Start one daemon worker and return ``{started, worker_id}``."""
         if self._thread and self._thread.is_alive():
@@ -115,6 +118,14 @@ class AgentDispatcher:
 
     def run_once(self) -> dict:
         """Claim and execute at most one job; useful for controlled workers/tests."""
+        try:
+            with self.repository.data_access.operation():
+                return self._run_once()
+        except (WorkspaceBusy, WorkspaceRecoveryRequired) as error:
+            return {"handled": False, "job": None, "blocked": error.code,
+                    "error": {"code": error.code, "message": error.message}}
+
+    def _run_once(self) -> dict:
         claim = self.repository.claim_agent_work(
             lease_owner=self.worker_id,
             lease_seconds=self.lease_seconds,
@@ -129,7 +140,7 @@ class AgentDispatcher:
         while not self._stop.is_set():
             try:
                 result = self.run_once()
-                self.last_error = None
+                self.last_error = result.get("error")
             except Exception as exc:  # keep a transient SQLite failure from killing the worker
                 self.last_error = {
                     "code": "dispatcher_internal_error",

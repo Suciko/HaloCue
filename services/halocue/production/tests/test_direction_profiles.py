@@ -61,6 +61,7 @@ def direction_service(settings, tmp_path, monkeypatch):
         json.dumps(
             {
                 "bg": {"BG_Black": 1, "BG_Classroom": 2},
+                "bg_label": {key: {"source_kind": "official_base"} for key in ("BG_Black", "BG_Classroom")},
                 "sounds": [],
                 "characters": [],
                 "enums": {"emoticon": {}, "action": {}},
@@ -177,7 +178,7 @@ def test_generation_freezes_selected_profile_and_ignores_client_snapshot(
     assert job["state"] == "succeeded", job
     snapshot = job["direction_profile_snapshot"]
     assert snapshot["id"] == "conservative"
-    assert snapshot["version"] == "1.0"
+    assert snapshot["version"] == "1.1"
     assert re.fullmatch(r"[0-9a-f]{64}", snapshot["rules_sha256"])
     assert accepted["direction_profile_snapshot"] == snapshot
     audit = service.direction_proposals(run_id)["generations"][0]
@@ -304,7 +305,7 @@ def test_rule_upgrade_rejects_resume_without_new_model_call(direction_service, m
     import prompt
 
     if change == "version":
-        monkeypatch.setattr(prompt, "PROFILE_VERSION", "1.1")
+        monkeypatch.setattr(prompt, "PROFILE_VERSION", "next-test-version")
     else:
         monkeypatch.setattr(
             prompt, "CONSERVATIVE_RULES", prompt.CONSERVATIVE_RULES + "\nNew rules."
@@ -332,13 +333,42 @@ def test_failed_model_generation_retains_profile_audit(direction_service, monkey
     assert audit["status"] == "failed"
     assert audit["direction_profile_snapshot"] == accepted["direction_profile_snapshot"]
     assert service.run_detail(run_id)["draft"]["draft_version"] == version
+    assert job["result"]["metrics"]["requests"] == audit["metrics"]["requests"]
+    assert service.run_detail(run_id)["last_job"]["result"]["metrics"] == job["result"]["metrics"]
+    monkeypatch.setattr(service.adapter, "direction_proposals", lambda _: {"generations": [{
+        "generation_id": accepted["generation_id"], "metrics": {"requests": 99},
+    }]})
+    assert service.job_detail(job["job_id"])["job"]["result"]["metrics"]["requests"] == audit["metrics"]["requests"]
+
+
+def test_failed_job_projects_complete_receipts_but_does_not_invent_missing_tokens(direction_service, monkeypatch):
+    service = direction_service
+    monkeypatch.setattr(service.direction_models, "provider", lambda: FixtureProvider(fail=True))
+    run_id, version = mapped_run(service, "conservative")
+    _, accepted = service.generate_direction(run_id, {"expected_draft_version": version})
+    job_id = accepted["job"]["job_id"]
+    assert finished_job(service, job_id)["state"] == "failed"
+    records = [{"input_tokens": 10, "output_tokens": 3, "cache_read_tokens": 0, "outcome": "failed"},
+               {"input_tokens": 20, "output_tokens": 4, "cache_read_tokens": 0, "outcome": "failed"}]
+    monkeypatch.setattr(service.adapter, "direction_proposals", lambda _: {"generations": [{
+        "generation_id": accepted["generation_id"],
+        "metrics": {"requests": 2, "failed_request_count": 2, "request_records": records},
+    }]})
+    raw_job = service.jobs.get(job_id).to_dict()
+    raw_job["events"] = []
+    metrics = service._job_with_direction_metrics(raw_job)["result"]["metrics"]
+    assert (metrics["input_tokens"], metrics["output_tokens"], metrics["failed_request_input_tokens"]) == (30, 7, 30)
+    assert metrics["cache_read_tokens"] == 0 and metrics["cache_reported"] is True
+    records[1].pop("input_tokens")
+    metrics = service._job_with_direction_metrics(raw_job)["result"]["metrics"]
+    assert "input_tokens" not in metrics and "failed_request_input_tokens" not in metrics
 
 
 def test_capabilities_describe_profiles_and_compatibility_defaults(settings):
     service = ProductionService(settings)
     try:
         profiles = service.capabilities()["direction_profiles"]
-        assert profiles["version"] == "1.0"
+        assert profiles["version"] == "1.1"
         assert profiles["default_api"] == "standard"
         assert profiles["default_new_project_ui"] == "conservative"
         assert {item["id"] for item in profiles["items"]} == {"standard", "conservative"}
@@ -432,3 +462,218 @@ def test_conservative_fallback_reaches_reviewed_build_without_installing(
     assert service.run_detail(run_id)["run"]["last_build_id"] == compiled["build_id"]
     assert list((workspace / "projects").iterdir()) == []
     assert list((workspace / "saves").iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"base_url": "https://different.invalid/v1"},
+        {"max_tokens": 2048},
+        {"reasoning_mode": "quality"},
+    ],
+)
+def test_direction_retry_rejects_changed_model_configuration(
+    direction_service, monkeypatch, change
+):
+    service = direction_service
+    provider = FixtureProvider(blocked=True)
+    monkeypatch.setattr(service.direction_models, "provider", lambda: provider)
+    run_id, version = mapped_run(service)
+    _, original = service.generate_direction(run_id, {"expected_draft_version": version})
+    try:
+        assert provider.entered.wait(3)
+        service.pause_job(original["job"]["job_id"])
+    finally:
+        provider.released.set()
+    assert finished_job(service, original["job"]["job_id"])["state"] == "paused"
+    service.configure_direction_model({"api_key_env": "HALOCUE_PROFILE_TEST_KEY", **change})
+    with pytest.raises(ProductionError) as rejected:
+        service.retry_job(original["job"]["job_id"])
+    assert rejected.value.code == "direction_model_changed"
+    assert len(service.list_jobs()["items"]) == 1
+    assert provider.stats["calls"] == 1
+
+
+def test_cancelled_preflight_does_not_publish_late_analysis(direction_service, monkeypatch):
+    service = direction_service
+    entered, released = threading.Event(), threading.Event()
+
+    class LatePreflight:
+        name = "synthetic"
+        model = "preflight"
+
+        def complete_json(self, *args):
+            entered.set()
+            assert released.wait(8)
+            return {"potential_speakers": [], "scenes": [], "ambiguities": []}
+
+    monkeypatch.setattr(service.direction_models, "provider", LatePreflight)
+    run_id, _ = mapped_run(service)
+    _, accepted = service.start_ai_preflight(run_id)
+    try:
+        assert entered.wait(3)
+        service.cancel_job(accepted["job"]["job_id"])
+    finally:
+        released.set()
+    assert finished_job(service, accepted["job"]["job_id"])["state"] == "cancelled"
+    assert service.ai_preflights(run_id)["items"] == []
+
+
+def test_completed_preflight_publish_is_not_later_reported_cancelled(
+    direction_service, monkeypatch
+):
+    service = direction_service
+    committed, finish = threading.Event(), threading.Event()
+    original = service.adapter.execute_ai_preflight
+
+    class Preflight:
+        name = "synthetic"
+        model = "preflight"
+
+        def complete_json(self, *args):
+            return {"potential_speakers": [], "scenes": [], "ambiguities": []}
+
+    def hold_after_publish(**kwargs):
+        result = original(**kwargs)
+        committed.set()
+        assert finish.wait(8)
+        return result
+
+    monkeypatch.setattr(service.direction_models, "provider", Preflight)
+    monkeypatch.setattr(service.adapter, "execute_ai_preflight", hold_after_publish)
+    run_id, _ = mapped_run(service)
+    _, job = service.start_ai_preflight(run_id)
+    try:
+        assert committed.wait(3)
+        with pytest.raises(ProductionError) as rejected:
+            service.cancel_job(job["job"]["job_id"])
+        assert rejected.value.code == "job_not_cancellable"
+    finally:
+        finish.set()
+    assert finished_job(service, job["job"]["job_id"])["state"] == "succeeded"
+    assert len(service.ai_preflights(run_id)["items"]) == 1
+
+
+def test_old_direction_job_without_model_identity_requires_new_generation(
+    direction_service, monkeypatch
+):
+    service = direction_service
+    provider = FixtureProvider(blocked=True)
+    monkeypatch.setattr(service.direction_models, "provider", lambda: provider)
+    run_id, version = mapped_run(service)
+    _, accepted = service.generate_direction(run_id, {"expected_draft_version": version})
+    try:
+        assert provider.entered.wait(3)
+        service.pause_job(accepted["job"]["job_id"])
+    finally:
+        provider.released.set()
+    assert finished_job(service, accepted["job"]["job_id"])["state"] == "paused"
+    record = service.jobs.get(accepted["job"]["job_id"])
+    record.retry_context.pop("model_identity")
+    with pytest.raises(ProductionError) as rejected:
+        service.retry_job(record.job_id)
+    assert rejected.value.code == "job_retry_unavailable"
+    assert service.job_detail(record.job_id)["job"]["retryable"] is False
+    assert service.job_detail(record.job_id)["job"]["resumable"] is False
+
+
+def test_generation_fails_fast_while_model_activation_owns_config_lock(
+    direction_service, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+
+    service = direction_service
+    monkeypatch.setattr(service.direction_models, "provider", FixtureProvider)
+    run_id, version = mapped_run(service)
+    entered, release = threading.Event(), threading.Event()
+
+    def activation_in_progress():
+        with service.direction_model_settings.activation_lock:
+            entered.set()
+            assert release.wait(6)
+
+    thread = threading.Thread(target=activation_in_progress)
+    thread.start()
+    try:
+        assert entered.wait(2)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                service.generate_direction, run_id, {"expected_draft_version": version}
+            )
+            try:
+                with pytest.raises(ProductionError) as blocked:
+                    future.result(timeout=1)
+                assert blocked.value.code == "direction_model_busy"
+            except TimeoutError:
+                pytest.fail("generation held state lock while waiting for activation")
+            finally:
+                release.set()
+    finally:
+        release.set()
+        thread.join(3)
+
+
+def test_retry_cannot_deduplicate_to_fresh_job_after_model_change(direction_service, monkeypatch):
+    service = direction_service
+    original_provider = FixtureProvider(blocked=True)
+    monkeypatch.setattr(service.direction_models, "provider", lambda: original_provider)
+    run_id, version = mapped_run(service)
+    _, first = service.generate_direction(run_id, {"expected_draft_version": version})
+    try:
+        assert original_provider.entered.wait(3)
+        service.pause_job(first["job"]["job_id"])
+    finally:
+        original_provider.released.set()
+    assert finished_job(service, first["job"]["job_id"])["state"] == "paused"
+    service.configure_direction_model(
+        {"model": "different", "api_key_env": "HALOCUE_PROFILE_TEST_KEY"}
+    )
+    fresh_provider = FixtureProvider(blocked=True)
+    monkeypatch.setattr(service.direction_models, "provider", lambda: fresh_provider)
+    _, second = service.generate_direction(run_id, {"expected_draft_version": version})
+    try:
+        assert fresh_provider.entered.wait(3)
+        with pytest.raises(ProductionError) as rejected:
+            service.retry_job(first["job"]["job_id"])
+        assert rejected.value.code == "direction_model_changed"
+        assert len(service.list_jobs()["items"]) == 2
+    finally:
+        service.cancel_job(second["job"]["job_id"])
+        fresh_provider.released.set()
+    finished_job(service, second["job"]["job_id"])
+
+
+def test_committed_profile_survives_failed_attempt_and_read_is_nonmutating(
+    direction_service, monkeypatch
+):
+    service = direction_service
+    monkeypatch.setattr(service.direction_models, "provider", lambda: FixtureProvider())
+    run_id, version = mapped_run(service, "conservative")
+    assert service.run_detail(run_id)["draft_direction_profile"] is None
+    _, first = service.generate_direction(run_id, {"expected_draft_version": version})
+    assert finished_job(service, first["job"]["job_id"])["state"] == "succeeded"
+    detail = service.run_detail(run_id)
+    committed = detail["draft_direction_profile"]
+    assert committed["id"] == "conservative"
+    assert committed["generation_id"] == detail["run"]["last_direction_generation_id"]
+    frozen_draft = detail["draft"]
+    monkeypatch.setattr(service.direction_models, "provider", lambda: FixtureProvider(fail=True))
+    _, failed = service.generate_direction(
+        run_id,
+        {"expected_draft_version": frozen_draft["draft_version"], "direction_profile": "standard"},
+    )
+    assert finished_job(service, failed["job"]["job_id"])["state"] == "failed"
+    after = service.run_detail(run_id)
+    assert after["run"]["source_summary"]["direction_profile"] == "standard"
+    assert after["draft_direction_profile"] == committed
+    assert after["draft"] == frozen_draft
+
+
+def test_missing_profile_record_is_unknown_not_inferred_from_attempt(direction_service):
+    service = direction_service
+    run_id, _ = mapped_run(service, "standard")
+    run = service.repository.get_run(run_id)
+    run.last_direction_generation_id = "direction-123456abcdef"
+    service.repository.save_run(run)
+    assert service.run_detail(run_id)["draft_direction_profile"] is None
+    assert service.adapter.committed_direction_profile(run.draft_token, "../../outside") is None

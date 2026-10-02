@@ -1049,7 +1049,7 @@ def test_custom_background_candidate_preflight_job_keeps_story_preview_scope(tmp
         script = tmp_path / "Chapter One.txt"
         script_token = webui.register_file_token(str(script))
         status, accepted = _request(base, "/api/preflight", {
-            "story_token": story["story_token"], "file_token": script_token,
+            "story_token": story["story_token"], "file_token": script_token, "use_ai": True,
         }, "POST")
         job = _wait_for_job(base, accepted["job_id"])
         preview = _request_bytes(

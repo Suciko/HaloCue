@@ -24,6 +24,11 @@ def is_fx_allowed(value):
 def filter_annotation_row(row, item, character, constraints, *, include_details=False):
     """Return legal model fields and exact reasons for every rejected field."""
     clean, dropped, rejected_details = {}, [], []
+    authored_background = str(item.get("_authored_background") or "")
+    if authored_background:
+        # The original @bg remains in the source. Model output cannot replace
+        # it or add a contradictory missing-background request later in this scene.
+        row = {**row, "bg": "", "bg_request": ""}
     who = item["who"]
     portrait = character.get("portrait") and not character.get("narrator")
     for field in ("face", "emo", "act", "fx"):
@@ -129,6 +134,8 @@ def project_effective_annotation_row(row, item, character, constraints):
         row, item, character, constraints, include_details=True,
     )
     effective = dict(row)
+    if item.get("_authored_background"):
+        effective["bg_request"] = ""
     for field in RESOURCE_FIELDS:
         effective[field] = clean.get(field, "")
     bgfx = str(row.get("bgfx") or "")

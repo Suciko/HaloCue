@@ -2,7 +2,16 @@ import json
 import sqlite3
 import subprocess
 
-from build_desktop_release import copy_private_spine_runtime, prepare_release_seed
+from build_desktop_release import copy_private_spine_runtime, prepare_release_seed, scan_release_tree
+
+
+def test_release_scan_ignores_echarts_escaped_font_table_but_catches_real_paths(tmp_path):
+    bundle = tmp_path / "_internal/services/halocue/writing/web/vendor/echarts/echarts-6.0.0.min.js"
+    bundle.parent.mkdir(parents=True)
+    bundle.write_text(r'fontTable="zWW\\WQb\\0FWL";', encoding="utf-8")
+    (tmp_path / "README.txt").write_text(r"C:\Users\example\notes.txt", encoding="utf-8")
+
+    assert scan_release_tree(tmp_path) == ["README.txt:absolute_path"]
 
 
 def test_release_seed_is_path_free_and_removes_personal_state(tmp_path):

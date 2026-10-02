@@ -10,15 +10,16 @@ def test_settings_are_grouped_and_model_configuration_is_progressively_disclosed
     css = (WEB / "shell.css").read_text(encoding="utf-8")
     script = (WEB / "app.js").read_text(encoding="utf-8")
 
-    assert html.count('class="settings-nav-group"') == 3
-    assert "连接" in html
-    assert "写作" in html
-    assert "数据" in html
+    assert 'class="settings-nav"' in html
+    assert 'role="tablist"' in html
+    assert 'data-tab="models"' in html
+    assert 'data-tab="aa"' in html
+    assert 'data-tab="backups"' in html
     assert 'id="modelConfigDetails"' in html
     assert 'data-model-config-toggle' in html
-    assert 'class="model-technical-details"' in html
+    assert 'model-endpoint-fields' in html
+    assert '<details class="model-technical-details" id="modelEndpointDetails">' not in html
     assert "modelConfigDetails.open" in script
-    assert "settings-nav-group" in css
     assert ".settings-nav {" in css
     assert "overflow-x: visible" in css
 
@@ -28,7 +29,7 @@ def test_settings_do_not_expose_provider_internals_in_the_primary_summary():
 
     # Technical fields remain available when the user explicitly expands the
     # configuration, but the status summary must speak in user language.
-    assert 'class="model-technical-details"' in html
+    assert 'model-endpoint-fields' in html
     assert 'summary>技术连接详情</summary>' in html
     assert 'class="active-model-details-grid"' not in html
     assert "Fake Provider" not in html
@@ -106,8 +107,8 @@ def test_scene_review_collapses_repeated_full_context_until_requested():
 
 def test_mobile_section_navigation_closes_the_asset_overlay():
     script = (WEB / "app.js").read_text(encoding="utf-8")
-    handler = script.split("document.addEventListener('click',event=>{\n  const button=event.target.closest('button[data-mobile]');", 1)[1]
-    handler = handler.split("document.addEventListener('click',event=>{\n  const summary=", 1)[0]
+    handler = script.split("const button=event.target.closest('button[data-mobile]');", 1)[1]
+    handler = handler.split("registerAppClick(event=>{", 1)[0]
     assert "state.assetSurfaceOpen=false" in handler
 
 

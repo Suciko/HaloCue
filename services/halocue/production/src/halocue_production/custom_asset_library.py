@@ -165,7 +165,8 @@ class CustomAssetLibrary:
                 key = identifier.strip() if kind == "character" else str(validation.get("stem") or "").strip()
                 if not final_name:
                     final_name = str(labels.get("label") or key or Path(filename).stem)
-                tags = labels.get("tags") if isinstance(labels.get("tags"), list) else candidate.get("tags") if recognition_accepted else []
+                manual_tags = labels.get("tags") if isinstance(labels.get("tags"), list) else []
+                tags = manual_tags or (candidate.get("tags") if recognition_accepted else [])
                 tags = list(dict.fromkeys(str(item).strip() for item in (tags or []) if str(item).strip()))[:24]
                 merged_labels = {key: value for key, value in labels.items() if key != "tags"}
                 if recognition_accepted:
@@ -225,7 +226,7 @@ class CustomAssetLibrary:
                 "custom_asset_metadata_invalid", "搜索标签最多 24 个，每个不超过 80 个字符"
             )
         clean_labels: dict[str, str] = {}
-        for field, limit in {"place": 100, "time": 80, "mood": 80}.items():
+        for field, limit in {"place": 100, "time": 80, "mood": 80, "club": 120}.items():
             value = str(labels.get(field) or "").strip()
             if len(value) > limit:
                 raise ProductionError("custom_asset_metadata_invalid", "素材场景标签过长")
@@ -248,7 +249,7 @@ class CustomAssetLibrary:
             existing_labels = (
                 dict(record.get("labels")) if isinstance(record.get("labels"), dict) else {}
             )
-            for field in ("place", "time", "mood", "scene_type", "time_of_day"):
+            for field in ("place", "time", "mood", "club", "scene_type", "time_of_day"):
                 existing_labels.pop(field, None)
             existing_labels.update(clean_labels)
             record.update(

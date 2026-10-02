@@ -78,6 +78,7 @@ def test_provider_contract_exposes_structured_character_and_world_draft_fields()
     } <= set(character["properties"])
     relationship = character["properties"]["relationships"]["items"]
     assert relationship["required"] == ["target"]
+    assert "target_character_id" in relationship["properties"]
     assert relationship["additionalProperties"] is False
     assert relationship["properties"]["status"]["enum"] == [
         "confirmed", "inferred", "open", "conflict",
@@ -123,6 +124,42 @@ def test_character_draft_handler_preserves_all_declared_structured_content(tmp_p
     assert result.output["title"] == "凯伊"
     assert result.output["status"] == "discussion_draft"
     assert result.output["content"] == arguments
+
+
+def test_character_draft_only_keeps_stable_relationship_ids_from_this_work(tmp_path):
+    service = WritingService(tmp_path)
+    work = service.create_work({"title": "关系目标校验"})
+    target = service.save_character_card(
+        work["id"], {
+            "expected_version": work["version"], "name": "爱丽丝",
+            "source_type": "custom", "source_refs": ["作者确认"],
+        },
+    )
+    thread = target["work"]["conversation_threads"][0]
+    with service.repo.transaction() as connection:
+        context = context_for(service, connection, work["id"], thread["id"])
+        valid = service.agent_tools.execute(
+            context, "draft_character_card", {
+                "name": "凯伊",
+                "relationships": [{
+                    "target": "爱丽丝",
+                    "target_character_id": target["card_id"],
+                    "kind": "搭档",
+                }],
+            },
+        )
+        invalid = service.agent_tools.execute(
+            context, "draft_character_card", {
+                "name": "凯伊",
+                "relationships": [{
+                    "target": "不存在的人物", "target_character_id": "other-work-id",
+                }],
+            },
+        )
+    assert valid.status == "succeeded"
+    assert valid.output["content"]["relationships"][0]["target_character_id"] == target["card_id"]
+    assert invalid.status == "failed"
+    assert "当前作品" in invalid.error["message"]
 
 
 def test_world_draft_handler_preserves_all_declared_structured_content(tmp_path):

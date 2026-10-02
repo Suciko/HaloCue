@@ -37,6 +37,9 @@ class ToolExecutionContext:
     history: list[dict[str, Any]] = field(default_factory=list)
     allowed_actions: frozenset[str] = frozenset({"read", "discuss"})
     policy_status: str = "active"
+    task_contract_id: str = ""
+    task_contract: dict[str, Any] = field(default_factory=dict)
+    text_selection: dict | None = None
 
 
 @dataclass
@@ -220,6 +223,7 @@ class AgentToolRegistry:
             "type": "object",
             "properties": {
                 "target": {"type": "string", "minLength": 1, "maxLength": 120},
+                "target_character_id": {"type": "string", "minLength": 1, "maxLength": 120},
                 "kind": {"type": "string", "maxLength": 120},
                 "summary": {"type": "string", "maxLength": 1000},
                 "status": {
@@ -298,11 +302,45 @@ class AgentToolRegistry:
         }
         self.register(ToolSpec("load_workflow_template", "加载当前阶段任务契约", read_schema), lambda c, a: {"scope": c.scope_type})
         self.register(ToolSpec("read_work_context", "读取当前作品正式上下文", read_schema), self._read_work_context)
-        self.register(ToolSpec("read_conversation_history", "读取当前对话历史", read_schema), lambda c, a: c.history[-12:])
+        self.register(ToolSpec("read_conversation_history", "读取当前对话历史；摘要标记不完整时，用其中的 message_id 分段回查原始消息。", {
+            "type": "object", "properties": {"message_id": {"type": "string"},
+                "offset": {"type": "integer", "minimum": 0},
+                "length": {"type": "integer", "minimum": 1, "maximum": 6000}},
+            "additionalProperties": False,
+        }), self._read_history)
+        self.register(ToolSpec("read_scene_text_window", "按段落号或原文关键词读取本场正文窗口；有待审修改时读取最新候选。未加载区域先读取再编辑，每次最多40段。", {
+            "type": "object", "properties": {
+                "base_revision_id": {"type": "string"}, "replace_proposal_id": {"type": "string"},
+                "start": {"type": "integer", "minimum": 1},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 40},
+                "query": {"type": "string", "maxLength": 500},
+            }, "required": ["base_revision_id"], "additionalProperties": False,
+        }, allowed_scopes=frozenset({"scene"})), self._scene_text_window)
+        self.register(ToolSpec("propose_scene_text_edit", "按作者当前要求润色或修正本场已有正文；只提交指定段落的修改对比，其他段落保持原文。范围不清楚或作者只想讨论时不要调用。", {
+            "type": "object", "properties": {
+                "base_revision_id": {"type": "string", "minLength": 1},
+                "replace_proposal_id": {"type": "string", "minLength": 1, "description": "继续调整尚未采用的修改时，填写 pending_text_edit 的 id；以其 content.blocks 为原文。"},
+                "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
+                "edits": {"type": "array", "minItems": 1, "items": {
+                    "type": "object", "properties": {
+                        "block_id": {"type": "string", "minLength": 1},
+                        "old_text": {"type": "string", "minLength": 1},
+                        "old_text_sha256": {"type": "string", "minLength": 71, "maxLength": 71},
+                        "new_text": {"type": "string", "minLength": 1, "maxLength": 10000},
+                    }, "required": ["block_id", "new_text"], "additionalProperties": False,
+                }},
+            }, "required": ["base_revision_id", "reason", "edits"], "additionalProperties": False,
+        }, allowed_scopes=frozenset({"scene"}), required_action="discuss"), self._scene_text_edit)
         self.register(ToolSpec("search_character_cards", "检索当前作品人物卡", {"type": "object", "properties": {"query": {"type": "string"}}}), self._search_artifact("character_card"))
+        self.register(ToolSpec("search_bundled_character_metadata", "检索随软件提供的人物索引；仅作参考，不会自动成为人物卡或正式事实", {
+            "type": "object",
+            "properties": {"query": {"type": "string", "minLength": 1, "maxLength": 160}, "limit": {"type": "integer", "minimum": 1, "maximum": 12}},
+            "required": ["query"],
+            "additionalProperties": False,
+        }), self._search_bundled_character_metadata)
         self.register(ToolSpec("search_world_bible", "检索当前作品世界观", {"type": "object", "properties": {"query": {"type": "string"}}}), self._search_artifact("world_bible"))
         self.register(ToolSpec("search_work_canon", "检索当前作品事实", {"type": "object", "properties": {"query": {"type": "string"}}}), self._search_artifact("work_canon"))
-        self.register(ToolSpec("draft_character_card", "生成角色卡讨论草稿", character_draft_schema, required_action="discuss"), self._draft_character)
+        self.register(ToolSpec("draft_character_card", "生成角色卡讨论草稿；关系目标优先使用检索返回的当前作品人物 ID", character_draft_schema, required_action="discuss"), self._draft_character)
         self.register(ToolSpec("draft_world_card", "生成世界观讨论草稿", world_draft_schema, required_action="discuss"), self._draft_world)
         self.register(ToolSpec("draft_world_rule", "生成世界规则讨论草稿", world_rule_draft_schema, required_action="discuss"), self._draft_world_rule)
         self.register(ToolSpec("draft_canon_fact", "生成作品事实讨论草稿", {
@@ -319,8 +357,81 @@ class AgentToolRegistry:
             "additionalProperties": False,
         }, required_action="discuss"), self._draft_fact)
         self.register(ToolSpec("check_knowledge_conflicts", "检查资料重复与冲突", {"type": "object", "properties": {"kind": {"type": "string", "enum": ["character_card", "world_card", "world_rule", "canon_fact"]}, "content": {"type": "object"}}, "required": ["kind", "content"], "additionalProperties": False}), self._check_conflicts)
+        self.register(ToolSpec("organize_current_plan", "当本轮信息已经足够时自动整理当前阶段候选；只创建待审 Proposal，不写入正式资料", {
+            "type": "object",
+            "properties": {"reason": {"type": "string", "maxLength": 500}},
+            "additionalProperties": False,
+        }, allowed_scopes=frozenset({"work", "chapter"}), risk="medium", required_action="discuss"), self._organize_current_plan)
         self.register(ToolSpec("create_knowledge_proposal", "整理资料候选 Proposal", {"type": "object", "properties": {"kind": {"type": "string", "enum": ["character_card", "world_card", "world_rule", "canon_fact"]}}, "required": ["kind"], "additionalProperties": False}, risk="medium", requires_user_confirmation=True, required_action="discuss"), lambda c, a: {"next": "user_confirmation"})
         self.register(ToolSpec("store_conversation_attachments", "保存对话附件", {"type": "object", "properties": {"count": {"type": "integer"}}, "required": ["count"]}), lambda c, a: {"count": int(a.get("count", 0))})
+
+    def _scene_text_edit(self, context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        if context.task_contract_id != "scene.draft.rewrite":
+            raise ValueError("当前回合只讨论或尚无正文，不能提交正文修改。")
+        return context.service._prepare_scene_text_edit(context.connection, context.work_id, context.scope_id, arguments, selection=context.text_selection)
+
+    def _scene_text_window(self, context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        return context.service._read_scene_text_window(context.connection, context.work_id, context.scope_id, arguments)
+
+    @staticmethod
+    def _search_bundled_character_metadata(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        catalog = getattr(context.service, "resource_catalog", None)
+        if catalog is None:
+            raise ValueError("随软件提供的人物索引尚未初始化。")
+        result = catalog.search("characters", str(arguments.get("query") or ""), int(arguments.get("limit") or 8))
+        items = []
+        for item in result.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            items.append({
+                key: item[key]
+                for key in (
+                    "display_name", "canonical_name", "preferred_name", "club",
+                    "aliases", "identity_aliases", "outfits", "avatar_available",
+                )
+                if key in item
+            } | {
+                "source": "bundled_metadata_only",
+                "formal_card_available": False,
+                "binary_assets_included": False,
+            })
+        return {
+            "source": "bundled_metadata_only",
+            "write_boundary": "reference_only",
+            "query": result.get("query", ""),
+            "items": items,
+            "note": "这些是随软件提供的只读元数据；除非用户明确确认导入，否则不能当作正式人物卡或作品事实。",
+        }
+
+    @staticmethod
+    def _organize_current_plan(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        contract = context.task_contract if isinstance(context.task_contract, dict) else {}
+        scope = contract.get("task_scope") if isinstance(contract.get("task_scope"), dict) else {}
+        if scope.get("import_mode") or contract.get("creation_intent") == "novel_to_script_adaptation":
+            raise ValueError("小说改编使用独立改编工作流；请先导入来源，再由 Agent 检查并整理剧本候选。")
+        return {
+            "next": "create_proposal",
+            "scope": context.scope_type,
+            "task_id": context.task_contract_id,
+            "reason": str(arguments.get("reason") or "信息已足够，整理当前阶段候选。")[:500],
+            "write_boundary": "proposal_only",
+        }
+
+    @staticmethod
+    def _read_history(context: ToolExecutionContext, arguments: dict[str, Any]):
+        message_id = arguments.get("message_id")
+        if not message_id:
+            return context.history[-12:]
+        row = context.connection.execute("SELECT role,content_json FROM conversation_messages WHERE thread_id=? AND id=?", (context.thread_id, message_id)).fetchone()
+        if not row:
+            raise ValueError("原始消息不属于当前对话。")
+        text = str(__import__("json").loads(row["content_json"] or "{}").get("text") or "")
+        start = int(arguments.get("offset", 0))
+        end = start + min(6000, int(arguments.get("length", 6000)))
+        return {"message_id": message_id, "role": row["role"], "text": text[start:end],
+                "text_sha256": sha256_text(text), "total_characters": len(text),
+                "offset": start, "next_offset": end if end < len(text) else None,
+                "text_truncated": start > 0 or end < len(text)}
 
     def _read_work_context(self, context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
         rows = context.connection.execute("SELECT kind,scope_type,scope_id,current_revision_id FROM artifacts WHERE work_id=?", (context.work_id,)).fetchall()
@@ -365,6 +476,15 @@ class AgentToolRegistry:
     @staticmethod
     def _draft_character(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
         name = str(arguments.get("name", "")).strip() or "待命名角色"
+        known_ids = {
+            card["id"] for card in context.service._analysis_character_cards(
+                context.connection, context.work_id
+            )
+        }
+        for relation in arguments.get("relationships", []):
+            target_id = str(relation.get("target_character_id") or "").strip()
+            if target_id and target_id not in known_ids:
+                raise ValueError("人物关系目标 ID 不属于当前作品的有效人物卡。")
         content = {
             "name": name,
             "source_type": str(arguments.get("source_type") or "custom"),
@@ -380,7 +500,7 @@ class AgentToolRegistry:
             content["relationships"] = [
                 {
                     key: str(item[key]).strip()
-                    for key in ("target", "kind", "summary", "status")
+                    for key in ("target", "target_character_id", "kind", "summary", "status")
                     if key in item
                 }
                 for item in arguments["relationships"]

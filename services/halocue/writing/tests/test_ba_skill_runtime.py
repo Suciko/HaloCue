@@ -162,10 +162,28 @@ def test_planning_prompts_keep_brief_and_blueprint_out_of_formal_writing(tmp_pat
     assert "不写正文" in brief["system_prompt"]
     assert "一次最多提出两个" in brief["system_prompt"]
     assert "只选择一个主写作模式" in brief["system_prompt"]
+    assert "默认面向 AA 可演出剧本" in brief["system_prompt"]
+    assert "不要要求用户先选择小说还是剧本" in brief["system_prompt"]
+    assert "仅在用户明确要求小说化阅读时" in brief["system_prompt"]
     assert brief["output_mode"] == "discussion_json"
     assert "只整理 StoryBlueprint 候选" in blueprint["system_prompt"]
     assert "不得把推断升格为事实" in blueprint["system_prompt"]
     assert "Provider、Run、Revision" in blueprint["system_prompt"]
+
+
+def test_edit_patch_has_scoped_rules_without_writer_startup_and_scene_generation_keeps_full_rules(tmp_path):
+    skill_root = tmp_path / "ba-writing"
+    _write_skill(skill_root, full_pack=True)
+    registry = BaWritingSkillRegistry(skill_root)
+    registry.materialize(Repository(tmp_path / "data"))
+    assembler = BaWritingPromptAssembler(registry)
+    edit = assembler.assemble("scene.draft.rewrite", mode_key="bond_short", output_mode="edit_patch")
+    assert edit["source_files"] == ["knowledge/写作内核.md", "knowledge/人味对话机制.md", MODE_SOURCES["bond_short"]]
+    assert "skills/提示词组装.md" not in edit["system_prompt"]
+    assert "official_script 只允许" not in edit["system_prompt"]
+    generated = assembler.assemble("scene.draft.generate", mode_key="bond_short")
+    assert "skills/提示词组装.md" in generated["source_files"]
+    assert "agents/writer.md" in generated["source_files"]
 
 
 def test_engine_script_requires_skill_contract_and_fails_closed(tmp_path):

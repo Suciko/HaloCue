@@ -8,7 +8,7 @@ import pytest
 
 from halocue_production.errors import ProductionError
 from halocue_production.service import ProductionService
-from test_direction_profiles import finished_job
+from services.halocue.production.tests.test_direction_profiles import finished_job
 from test_teacher_identity_service import select_teacher
 
 
@@ -17,7 +17,10 @@ def files(root):
 
 
 @pytest.mark.parametrize("cg", [False, True])
-def test_release_teacher_review_bundle_and_explicit_install(settings, tmp_path, cg):
+def test_release_teacher_review_bundle_and_explicit_install(settings, tmp_path, cg, monkeypatch):
+    import aa_project_assets
+
+    monkeypatch.setattr(aa_project_assets, "is_aa_running", lambda: False)
     aa_data = tmp_path / "synthetic-aa"
     for name in ("projects", "saves", "settings", "overrides"):
         (aa_data / name).mkdir(parents=True)
@@ -26,6 +29,7 @@ def test_release_teacher_review_bundle_and_explicit_install(settings, tmp_path, 
         json.dumps(
             {
                 "bg": {"BG_Black": 0, "BG_CS_Fixture": 1},
+                "bg_label": {key: {"source_kind": "official_base"} for key in ("BG_Black", "BG_CS_Fixture")},
                 "sounds": [],
                 "characters": [],
                 "enums": {"emoticon": {}, "action": {}},

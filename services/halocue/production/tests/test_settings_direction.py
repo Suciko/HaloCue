@@ -35,3 +35,19 @@ def test_direction_model_settings_and_presets(tmp_path):
 
     file_content = json.loads(settings.path.read_text(encoding="utf-8"))
     assert "api_key" not in file_content
+
+
+@pytest.mark.parametrize("endpoint", ["http://localhost:11434/v1", "http://127.0.0.1:11434/v1", "http://[::1]:11434/v1"])
+def test_local_keyless_direction_provider_matches_configured_status(tmp_path, endpoint, monkeypatch):
+    from pathlib import Path
+    from halocue_production.direction_models import DirectionModelGateway
+
+    store = DirectionModelSettings(tmp_path)
+    store.save({"provider": "openai", "model": "synthetic-local", "base_url": endpoint})
+    assert store.public()["model"]["configured"] is True
+    gateway = DirectionModelGateway(store, Path(__file__).resolve().parents[4])
+    monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: pytest.fail("No network"))
+    provider = gateway.provider()
+    assert provider.model == "synthetic-local"
+    assert provider.cfg["base_url"] == endpoint
+    assert "api_key" not in store.public()["model"]

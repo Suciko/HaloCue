@@ -49,7 +49,7 @@
   padding: 10px 4px 12px !important;
 }
 .writing-workbench-stage .chapter-inline-manuscript .manuscript-block {
-  padding: 7px 4px 9px !important;
+  padding: 4px 4px 5px !important;
 }
 .writing-workbench-stage .chapter-inline-manuscript .block-gutter {
   position: relative;
@@ -73,7 +73,7 @@
   .writing-workbench-stage .manuscript-block[data-block-type="dialogue"] .manuscript-reading-text { font-size: 14px !important; line-height: 1.58 !important; }
   .writing-workbench-stage .manuscript-block[data-block-type="narration"] .manuscript-reading-text { font-size: 14px !important; line-height: 1.64 !important; }
   .writing-workbench-stage .manuscript-block { padding: 8px 2px 10px !important; }
-  .writing-workbench-stage .chapter-inline-manuscript .manuscript-block { padding: 7px 2px 9px !important; }
+  .writing-workbench-stage .chapter-inline-manuscript .manuscript-block { padding: 5px 2px 6px !important; }
   .writing-workbench-stage .chapter-inline-manuscript .manuscript-block {
     grid-template-columns: 26px minmax(0, 1fr) 22px;
     gap: 8px;
@@ -1603,8 +1603,8 @@
 .writing-workbench-stage .manuscript-insert-bar {
   position: relative;
   display: block;
-  height: 18px;
-  min-height: 18px;
+  height: 10px;
+  min-height: 10px;
   margin: 0 2px;
   cursor: pointer;
 }
@@ -1618,7 +1618,8 @@
   transform: translateY(-50%) scaleY(1);
   transform-origin: center;
   background: #e8edf2;
-  transition: background-color 180ms var(--wb-ease-out), transform 180ms var(--wb-ease-out);
+  opacity: 0;
+  transition: background-color 180ms var(--wb-ease-out), opacity 160ms var(--wb-ease-out), transform 180ms var(--wb-ease-out);
 }
 .writing-workbench-stage .manuscript-insert-button {
   position: absolute;
@@ -1643,6 +1644,7 @@
 .writing-workbench-stage .manuscript-insert-bar:focus-within > span,
 .writing-workbench-stage .manuscript-insert-bar:active > span {
   background: #9fb5ca;
+  opacity: 1;
   transform: translateY(-50%) scaleY(1.6);
 }
 .writing-workbench-stage .manuscript-insert-bar:hover .manuscript-insert-button,
@@ -1700,16 +1702,19 @@
    hit target because they have no hover state. */
 @media (max-width: 760px), (hover: none), (pointer: coarse) {
   .writing-workbench-stage .manuscript-insert-bar {
-    height: 22px;
-    min-height: 22px;
+    height: 14px;
+    min-height: 14px;
   }
   .writing-workbench-stage .manuscript-insert-bar > span {
-    background: #dfe7ee;
+    opacity: 0;
   }
   .writing-workbench-stage .manuscript-insert-button {
-    opacity: .28;
+    border-color: transparent;
+    background: transparent;
+    opacity: .45;
     pointer-events: auto;
     transform: translate(0, -50%) scale(.88);
+    box-shadow: none;
   }
   .writing-workbench-stage .manuscript-insert-bar:active > span,
   .writing-workbench-stage .manuscript-insert-bar:focus-within > span {
@@ -1827,7 +1832,7 @@
 
 .writing-workbench-stage .next-command {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
   gap: 12px;
   align-items: center;
   margin: 12px 0;
@@ -1836,6 +1841,17 @@
   border-radius: 5px;
   background: #f5f8fc;
   padding: 10px 12px;
+}
+
+.writing-workbench-stage .next-command > div:first-child,
+.writing-workbench-stage .command-actions {
+  min-width: 0;
+}
+
+.writing-workbench-stage .command-actions {
+  width: 100%;
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
 .writing-workbench-stage .next-command small,
@@ -1847,20 +1863,81 @@
 
 .writing-workbench-stage .next-command small {
   color: #66788d;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .writing-workbench-stage .next-command strong {
   margin-top: 3px;
   color: #26384d;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .writing-workbench-stage .next-command p {
   margin-top: 3px;
   color: #697789;
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.writing-workbench-stage .next-command.is-complete {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  margin: 4px 0 14px;
+  padding: 9px 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--wb-line);
+  border-radius: 0;
+  background: transparent;
+}
+.writing-workbench-stage .next-command.is-complete > div:first-child {
+  display: flex;
+  flex: 1 1 220px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+}
+.writing-workbench-stage .next-command.is-complete > div:first-child > small {
+  display: none;
+}
+.writing-workbench-stage .next-command.is-complete strong {
+  margin: 0;
+  font-size: 14px;
+}
+.writing-workbench-stage .next-command.is-complete strong::before {
+  content: "✓";
+  margin-right: 8px;
+  color: #28765f;
+}
+.writing-workbench-stage .next-command.is-complete p {
+  margin: 0;
+  font-size: 12px;
+}
+.writing-workbench-stage .scene-memory-status {
+  color: #4c6b60;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.writing-workbench-stage .next-command.is-complete .command-actions {
+  flex: 0 1 auto;
+  width: auto;
+  margin-left: auto;
+}
+.writing-workbench-stage .next-command.is-complete .command-actions .quiet {
+  border: 0;
+  background: transparent;
+  color: var(--wb-accent);
+}
+@media (max-width: 640px) {
+  .writing-workbench-stage .next-command.is-complete .command-actions {
+    display: flex;
+    width: 100%;
+    margin-left: 0;
+  }
+  .writing-workbench-stage .next-command.is-complete .command-actions .primary {
+    flex: 1;
+  }
 }
 
 .writing-workbench-stage .scene-context-panel {
@@ -2657,8 +2734,8 @@
 }
 .writing-workbench-stage .scene-diff-choice input { width: 15px; height: 15px; accent-color: var(--wb-accent); }
 .writing-workbench-stage .scene-diff-choice span { display: grid; min-width: 0; gap: 2px; }
-.writing-workbench-stage .scene-diff-choice b { color: #344b66; font-size: 11px; }
-.writing-workbench-stage .scene-diff-choice small { display: -webkit-box; overflow: hidden; color: var(--wb-muted); font-size: 10px; line-height: 1.35; text-overflow: ellipsis; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.writing-workbench-stage .scene-diff-choice b { color: #344b66; font-size: 12px; }
+.writing-workbench-stage .scene-diff-choice small { display: block; color: #45586d; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .writing-workbench-stage .scene-full-context {
   margin: 12px 18px 0;
   border: 1px solid #dbe3eb;
@@ -2895,6 +2972,8 @@
 .agent-recovery-card p { margin: 3px 0; color: var(--ink-2); font-size: 12px; line-height: 1.5; }
 .agent-recovery-card small { color: var(--muted); font-size: 11px; }
 .agent-recovery-card button { min-height: 34px; white-space: nowrap; }
+.scene-agent-recovery-card { grid-template-columns: 10px minmax(0, 1fr); align-items: start; }
+.scene-agent-recovery-card button { grid-column: 2; justify-self: start; margin-top: 4px; }
 
 @media (max-width: 640px) {
   .agent-presentation-summary > summary {
@@ -3769,12 +3848,11 @@
 
 .writing-workbench-stage .writing-readiness-inline {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  min-height: 38px;
+  gap: 4px 14px;
   border-left: 2px solid #b77a45;
-  padding: 4px 0 4px 9px;
+  padding: 10px 14px;
 }
 
 .writing-workbench-stage .writing-readiness header { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
@@ -3782,13 +3860,17 @@
 .writing-workbench-stage .writing-readiness header em { color: #7d8c85; font-size: 10px; font-style: normal; font-weight: 700; }
 .writing-workbench-stage .writing-progress { margin: 7px 0 5px; }
 .writing-workbench-stage .writing-progress li { border-top-width: 1px; padding-top: 3px; }
-.writing-workbench-stage .writing-readiness-body { min-width: 0; }
-.writing-workbench-stage .writing-readiness-body b { display: block; overflow: hidden; color: #243d36; font: 650 14px/1.3 var(--font-reading); text-overflow: ellipsis; white-space: nowrap; }
+.writing-workbench-stage .writing-readiness-body { display: block; min-width: 0; }
+.writing-workbench-stage .writing-readiness-body b { display: block; color: #243d36; font: 650 14px/1.35 var(--font-reading); }
 .writing-workbench-stage .writing-readiness-body p {
-  display: none;
+  display: block;
+  margin-top: 3px;
+  color: #53665c;
+  font-size: 12px;
+  line-height: 1.5;
 }
-.writing-workbench-stage .writing-readiness-inline > .primary { min-height: 34px; white-space: nowrap; }
-.writing-workbench-stage .writing-readiness-detail { position: relative; color: #718078; font-size: 11px; }
+.writing-workbench-stage .writing-readiness-inline > .primary { grid-column: 2; grid-row: 1 / span 2; min-height: 36px; white-space: nowrap; }
+.writing-workbench-stage .writing-readiness-detail { grid-column: 1 / -1; position: relative; color: #5b6d63; font-size: 12px; }
 .writing-workbench-stage .writing-readiness-detail summary { width: fit-content; cursor: pointer; color: #547062; font-weight: 700; white-space: nowrap; }
 .writing-workbench-stage .writing-readiness-detail p { max-width: 680px; margin: 5px 0 0; line-height: 1.45; }
 .writing-workbench-stage .writing-readiness-detail[open] { grid-column: 1 / -1; border-top: 1px solid #e7ece9; padding-top: 5px; }
@@ -4010,7 +4092,7 @@ body.onboarding-open { overflow: hidden; }
   align-items: start;
   min-height: 0;
   border: 0;
-  border-bottom: 1px solid #eef1f4;
+  border-bottom: 0;
   border-radius: 0;
   padding: 20px 4px 24px;
   background: transparent;
@@ -4342,12 +4424,12 @@ body.onboarding-open { overflow: hidden; }
   .writing-workbench-stage .writing-readiness { margin-top: 4px; }
   .writing-workbench-stage .writing-readiness-inline {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     gap: 5px 8px;
-    padding-left: 7px;
+    padding: 10px 12px;
   }
-  .writing-workbench-stage .writing-readiness-inline > header { grid-column: 1 / -1; }
-  .writing-workbench-stage .writing-readiness-inline > .primary { width: fit-content; max-width: 100%; }
+  .writing-workbench-stage .writing-readiness-inline > header { grid-column: 1; }
+  .writing-workbench-stage .writing-readiness-inline > .primary { grid-column: 1; grid-row: auto; width: fit-content; max-width: 100%; }
   .writing-workbench-stage .writing-readiness-detail { grid-column: 1 / -1; }
   .writing-workbench-stage .chapter-scene-empty { min-height: 190px; }
   .writing-workbench-stage .chapter-blocked-empty {
@@ -4464,8 +4546,8 @@ body.onboarding-open { overflow: hidden; }
 }
 .writing-workbench-stage .manuscript-block .manuscript-reading {
   display: grid !important;
-  grid-template-columns: auto minmax(92px, 148px) minmax(0, 1fr);
-  gap: 9px;
+  grid-template-columns: 34px minmax(54px, 82px) minmax(0, 1fr);
+  gap: 8px;
   width: 100%;
   align-items: baseline;
   border: 0;
@@ -4479,11 +4561,11 @@ body.onboarding-open { overflow: hidden; }
   display: inline-flex !important;
   min-height: 22px;
   align-items: center;
-  border: 1px solid #dfe5ec;
+  border: 0;
   border-radius: 4px;
-  background: #f5f7fa;
+  background: #f2f5f8;
   padding: 0 6px;
-  color: #6f7d8e;
+  color: #697989;
   font-size: 10px;
   white-space: nowrap;
 }
@@ -4491,28 +4573,67 @@ body.onboarding-open { overflow: hidden; }
   display: block !important;
   min-width: 0;
   overflow: hidden;
-  color: #2b3a4d;
+  color: #365f92;
   font: 650 14px/1.45 var(--font-reading);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .writing-workbench-stage .manuscript-block[data-block-type="action"] .manuscript-reading-speaker,
 .writing-workbench-stage .manuscript-block[data-block-type="narration"] .manuscript-reading-speaker {
-  color: transparent;
-  user-select: none;
+  display: none !important;
+}
+.intent-start-quiet { width:min(calc(100% - 48px),820px); margin:28px auto 0; padding:24px; border-color:var(--hc-line); border-radius:12px; background:var(--hc-panel); box-shadow:none; }
+.intent-start-quiet .intent-start-copy h2 { margin:4px 0 6px; color:var(--hc-text); font:650 22px/1.35 var(--font-reading); }
+.intent-start-quiet .intent-start-copy p:not(.eyebrow) { color:var(--hc-muted); font-size:13px; }
+.intent-start-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
+.intent-start-quiet .intent-composer { margin-top:18px; }
+.intent-start-quiet .intent-composer textarea { min-height:98px; border-color:var(--hc-line); background:var(--hc-panel); color:var(--hc-text); font-size:14px; }
+.intent-start-quiet .intent-attachment { border-color:var(--hc-line); color:var(--hc-action); }
+.writing-workbench-stage .manuscript-block[data-block-type="action"] .manuscript-reading,
+.writing-workbench-stage .manuscript-block[data-block-type="narration"] .manuscript-reading {
+  grid-template-columns: auto minmax(0, 1fr);
 }
 .writing-workbench-stage .manuscript-block .manuscript-reading-text {
   display: block !important;
   min-width: 0;
-  color: #263548;
+  color: #365f92;
   font: 16px/1.65 var(--font-reading);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 .writing-workbench-stage .manuscript-block[data-block-type="narration"] .manuscript-reading-text,
 .writing-workbench-stage .manuscript-block[data-block-type="action"] .manuscript-reading-text {
-  color: #58697b;
+  color: #626e7a;
   font-size: 15px;
+}
+.writing-workbench-stage .manuscript-block[data-block-type="dialogue"] .manuscript-reading-type {
+  background: #edf3fb;
+  color: #4a6d9b;
+}
+.writing-workbench-stage .manuscript-block[data-block-type="action"] .manuscript-reading-type {
+  background: #f5f1ea;
+  color: #866e51;
+}
+.writing-workbench-stage .manuscript-block[data-block-type="action"] .manuscript-reading-text {
+  color: #786c60;
+}
+.writing-workbench-stage .manuscript-block[data-block-type="dialogue"] {
+  --speaker-ink: #365f92;
+  --speaker-soft: #edf3fb;
+}
+.writing-workbench-stage .manuscript-block[data-speaker-tone="1"] { --speaker-ink: #974b65; --speaker-soft: #faeff3; }
+.writing-workbench-stage .manuscript-block[data-speaker-tone="2"] { --speaker-ink: #257264; --speaker-soft: #eaf6f2; }
+.writing-workbench-stage .manuscript-block[data-speaker-tone="3"] { --speaker-ink: #76559a; --speaker-soft: #f3eef9; }
+.writing-workbench-stage .manuscript-block[data-speaker-tone="4"] { --speaker-ink: #80602f; --speaker-soft: #f8f2e8; }
+.writing-workbench-stage .manuscript-block[data-speaker-tone="5"] { --speaker-ink: #286b82; --speaker-soft: #eaf5f8; }
+.writing-workbench-stage .manuscript-block[data-speaker-tone="6"] { --speaker-ink: #8b4d79; --speaker-soft: #f8eff6; }
+.writing-workbench-stage .manuscript-block[data-speaker-tone="7"] { --speaker-ink: #4d6f3d; --speaker-soft: #f0f6ec; }
+.writing-workbench-stage .manuscript-block[data-block-type="dialogue"] :is(.manuscript-reading-speaker,.manuscript-reading-text) {
+  color: var(--speaker-ink) !important;
+}
+.writing-workbench-stage .manuscript-block[data-block-type="dialogue"] .manuscript-reading-type {
+  background: var(--speaker-soft);
+  color: var(--speaker-ink);
 }
 .writing-workbench-stage .manuscript-block .block-meta input,
 .writing-workbench-stage .manuscript-block textarea {
@@ -4533,7 +4654,7 @@ body.onboarding-open { overflow: hidden; }
 }
 @media (max-width: 760px) {
   .writing-workbench-stage .manuscript-block .manuscript-reading {
-    grid-template-columns: auto minmax(76px, 112px) minmax(0, 1fr);
+    grid-template-columns: 30px minmax(34px, 48px) minmax(0, 1fr);
     gap: 6px;
   }
   .writing-workbench-stage .manuscript-block .manuscript-reading-text {
@@ -4829,8 +4950,14 @@ body.onboarding-open { overflow: hidden; }
     gap: 8px;
   }
 
+  .writing-workbench-stage .manuscript-block:not(.is-editing) .block-remove {
+    position: absolute;
+    top: 4px;
+    right: 2px;
+  }
+
   .writing-workbench-stage .manuscript-block .manuscript-reading {
-    grid-template-columns: auto minmax(48px, 84px) minmax(0, 1fr);
+    grid-template-columns: 30px minmax(34px, 54px) minmax(0, 1fr);
     gap: 5px;
   }
 
@@ -5245,4 +5372,594 @@ body.onboarding-open { overflow: hidden; }
   .writing-workbench-stage .chapter-continuous-actions { margin-top: 10px; }
   .writing-workbench-stage .chapter-continuous-actions > .primary { flex: 1 1 auto; }
   .writing-workbench-stage .chapter-more-tools > div { right: auto; left: 0; }
+}
+
+/* Mobile Agent: allocate the available workspace, not a guessed viewport
+   subtraction. Manuscript actions remain on the manuscript tab. */
+@media (max-width:760px) {
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] #workspace {
+    overflow: hidden !important;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .chapter-continuous {
+    display: flex !important;
+    flex-direction: column;
+    height: 100%; min-height: 0;
+    padding: 8px 14px !important;
+    overflow: hidden;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .chapter-continuous-head {
+    display: flex !important;
+    flex: 0 0 auto;
+    align-items: center; justify-content: space-between; gap: 8px;
+    margin: 0 !important; padding: 0 0 8px !important;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .chapter-continuous-head :is(.eyebrow,.lede,.chapter-continuous-actions),
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .chapter-manuscript-flow { display: none !important; }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .chapter-continuous-head h2 { margin: 0 !important; font-size: 16px !important; }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .writing-mobile-tabs {
+    position: relative !important; top: auto;
+    flex: 0 0 auto; margin: 0 0 8px !important;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .writing-mobile-pane:not([hidden]) {
+    flex: 1 1 0; height: auto !important; min-height: 0 !important; max-height: none !important;
+    margin: 0 !important; animation: none;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .scene-conversation-scroll { min-height: 0 !important; }
+}
+
+/* Preserve the model's paragraph/list breaks without interpreting generated HTML. */
+.writing-workbench-stage .scene-message-body > p {
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+/* Edit in the manuscript's reading grid. The controls replace the same cells
+   as the type, speaker and text, so focusing a line does not open a card. */
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing,
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing:hover,
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing:focus-within {
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-fields {
+  display: grid;
+  grid-template-columns: 34px minmax(54px, 82px) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing:is([data-block-type="action"],[data-block-type="narration"]) .block-fields {
+  grid-template-columns: 32px minmax(0, 1fr);
+}
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-meta {
+  display: contents !important;
+}
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-meta select {
+  grid-column: 1;
+  grid-row: 1;
+  display: block !important;
+  width: 34px;
+  min-width: 34px;
+  height: 22px;
+  min-height: 22px;
+  appearance: none;
+  border: 0;
+  border-radius: 4px;
+  background: #edf3fb;
+  padding: 0 4px;
+  color: #4a6d9b;
+  font: 10px/22px var(--font-ui);
+  cursor: pointer;
+}
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing[data-block-type="narration"] .block-meta select {
+  background: #f2f5f8;
+  color: #697989;
+}
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing[data-block-type="action"] .block-meta select {
+  background: #f5f1ea;
+  color: #866e51;
+}
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing[data-block-type="dialogue"] .block-meta select {
+  background: var(--speaker-soft);
+  color: var(--speaker-ink);
+}
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-meta input {
+  grid-column: 2;
+  grid-row: 1;
+  display: block !important;
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  min-height: 24px;
+  border: 0;
+  border-radius: 0;
+  background: transparent !important;
+  padding: 0;
+  color: var(--speaker-ink, #365f92);
+  font: 700 14px/1.45 var(--font-ui);
+  box-shadow: none !important;
+}
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-meta input:disabled {
+  display: none !important;
+}
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-fields textarea[name="text"] {
+  grid-column: 3;
+  grid-row: 1;
+  display: block !important;
+  width: 100%;
+  min-width: 0;
+  min-height: 24px;
+  height: auto;
+  field-sizing: content;
+  overflow: hidden;
+  resize: none;
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent !important;
+  padding: 0;
+  color: var(--speaker-ink, #365f92);
+  font: 520 15px/1.58 var(--font-ui);
+  letter-spacing: .012em;
+  box-shadow: none !important;
+}
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing:is([data-block-type="action"],[data-block-type="narration"]) .block-fields textarea[name="text"] {
+  grid-column: 2;
+  color: #626e7a;
+  font: 450 15px/1.66 var(--font-reading);
+  letter-spacing: .03em;
+}
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing[data-block-type="action"] .block-fields textarea[name="text"] {
+  color: #786c60;
+  font-size: 14px;
+  line-height: 1.62;
+}
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-fields :is(input,textarea):focus {
+  outline: 0;
+  box-shadow: inset 0 -1px currentColor !important;
+}
+#app.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-fields :is(input,textarea):focus {
+  outline: none !important;
+}
+.writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-meta select:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 2px;
+}
+@media (max-width: 760px) {
+  .writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing {
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 8px;
+  }
+  .writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-remove {
+    position: absolute;
+    top: -20px;
+    right: 4px;
+    z-index: 2;
+  }
+  .writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-gutter {
+    position: static;
+  }
+  .writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-move {
+    position: absolute;
+    top: -20px;
+    right: 33px;
+    left: auto;
+    z-index: 2;
+    gap: 2px;
+  }
+  .writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-fields {
+    grid-template-columns: 30px minmax(34px, 54px) minmax(0, 1fr);
+    gap: 5px;
+  }
+  .writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing:is([data-block-type="action"],[data-block-type="narration"]) .block-fields {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+  .writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-meta select {
+    width: 30px;
+    min-width: 30px;
+    padding: 0 2px;
+  }
+  .writing-workbench-stage .chapter-inline-manuscript .manuscript-block.is-editing .block-fields textarea[name="text"] {
+    font-size: 14px;
+    line-height: 1.58;
+  }
+}
+
+/* Scene Agent: one header, readable messages, and a compact transcript for
+   long generated drafts. The full reply remains available on demand. */
+#app.hc-redesign.writing-workbench-stage .inspector:has(.scene-harness) .inspector-tabs {
+  display: none !important;
+}
+#app.hc-redesign.writing-workbench-stage #inspectorContent:has(.scene-harness) {
+  height: 100% !important;
+}
+.writing-workbench-stage .scene-agent-panel > header {
+  padding: 0 0 12px;
+}
+.writing-workbench-stage .scene-agent-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.writing-workbench-stage .scene-agent-heading h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.writing-workbench-stage .scene-agent-state {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #edf5ef;
+  padding: 4px 8px;
+  color: #39765f;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.writing-workbench-stage .scene-agent-state[data-state="running"],
+.writing-workbench-stage .scene-agent-state[data-state="preparing"] {
+  background: #edf3fb;
+  color: #466f9d;
+}
+.writing-workbench-stage .scene-agent-state[data-state="pending"] {
+  background: #faf3e5;
+  color: #8f692b;
+}
+.writing-workbench-stage .scene-agent-state[data-state="blocked"] {
+  background: #fbefec;
+  color: #a34f47;
+}
+.writing-workbench-stage .scene-agent-panel > header > p:last-child {
+  margin: 5px 0 0;
+  overflow: visible;
+  color: #738295;
+  font-size: 11px;
+  line-height: 1.45;
+  text-overflow: clip;
+  white-space: normal;
+}
+.writing-workbench-stage .scene-conversation-scroll {
+  padding-top: 12px;
+}
+.writing-workbench-stage .scene-conversation-message {
+  gap: 5px;
+  margin-bottom: 15px;
+}
+.writing-workbench-stage .scene-message-role {
+  color: #697a8d;
+  font-size: 11px;
+  font-weight: 700;
+}
+.writing-workbench-stage .scene-message-body {
+  color: #344458;
+  font-size: 13px;
+  line-height: 1.62;
+}
+.writing-workbench-stage .scene-conversation-message.user .scene-message-body {
+  max-width: 96%;
+  padding: 9px 10px;
+}
+.writing-workbench-stage .scene-message-body > p {
+  font-size: 13px;
+  line-height: 1.62;
+}
+.writing-workbench-stage .scene-message-full {
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+}
+.writing-workbench-stage .scene-message-full > summary {
+  display: grid;
+  width: 100%;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+}
+.writing-workbench-stage .scene-message-full > summary::-webkit-details-marker {
+  display: none;
+}
+.writing-workbench-stage .scene-message-preview {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.62;
+}
+.writing-workbench-stage .scene-message-expander,
+.writing-workbench-stage .scene-message-collapser {
+  color: #456f9f;
+  font-size: 11px;
+  font-weight: 650;
+}
+.writing-workbench-stage .scene-message-collapser,
+.writing-workbench-stage .scene-message-full[open] .scene-message-expander,
+.writing-workbench-stage .scene-message-full[open] .scene-message-preview {
+  display: none;
+}
+.writing-workbench-stage .scene-message-full[open] .scene-message-collapser {
+  display: inline;
+}
+.writing-workbench-stage .scene-message-full > summary small {
+  color: #8493a3;
+  font-size: 10px;
+}
+.writing-workbench-stage .scene-message-full > .scene-message-transcript {
+  margin: 9px 0 0;
+  border-top: 1px solid #e5ebf1;
+  padding-top: 9px;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.writing-workbench-stage .scene-message-resolved {
+  display: inline-block;
+  margin-top: 7px;
+  border-radius: 4px;
+  background: #f0f3f6;
+  padding: 4px 7px;
+  color: #647486;
+  font-size: 11px;
+}
+#app.hc-redesign.writing-workbench-stage .scene-conversation-composer {
+  grid-template-columns: minmax(0, 1fr);
+}
+#app.hc-redesign.writing-workbench-stage .scene-conversation-composer .agent-chips {
+  grid-column: 1;
+  display: flex;
+  width: 100%;
+  height: auto;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+#app.hc-redesign.writing-workbench-stage .scene-conversation-composer .scene-agent-submit {
+  grid-column: 1;
+  grid-template-columns: 76px minmax(0, 1fr) 68px;
+  align-items: center;
+  gap: 6px;
+}
+#app.hc-redesign.writing-workbench-stage .scene-conversation-composer .scene-agent-submit > .permission-menu {
+  grid-column: 1;
+  grid-row: 1;
+  margin: 0;
+}
+#app.hc-redesign.writing-workbench-stage .scene-conversation-composer .scene-agent-submit > [data-generate-scene-proposal] {
+  grid-column: 2;
+  grid-row: 1;
+}
+#app.hc-redesign.writing-workbench-stage .scene-conversation-composer .scene-agent-submit > :is(button[type="submit"],.agent-stop-button) {
+  grid-column: 3;
+  grid-row: 1;
+}
+#app.hc-redesign.writing-workbench-stage .scene-conversation-composer .scene-agent-submit > button {
+  min-height: 36px;
+  padding-inline: 5px;
+  font-size: 11px;
+}
+@media (max-width: 760px) {
+  .writing-workbench-stage .writing-mobile-pane .scene-agent-panel {
+    padding: 14px 14px 12px;
+  }
+  .writing-workbench-stage .writing-mobile-pane .scene-conversation-scroll {
+    padding-top: 10px;
+  }
+}
+@media (max-width: 360px) {
+  #app.hc-redesign.writing-workbench-stage .scene-conversation-composer .agent-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  #app.hc-redesign.writing-workbench-stage .scene-conversation-composer .agent-chips button {
+    flex: 0 0 auto;
+  }
+  #app.hc-redesign.writing-workbench-stage .scene-conversation-composer .scene-agent-submit {
+    grid-template-columns: minmax(0, 1fr) 68px;
+    row-gap: 5px;
+  }
+  #app.hc-redesign.writing-workbench-stage .scene-conversation-composer .scene-agent-submit > .permission-menu {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  #app.hc-redesign.writing-workbench-stage .scene-conversation-composer .scene-agent-submit > [data-generate-scene-proposal] {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  #app.hc-redesign.writing-workbench-stage .scene-conversation-composer .scene-agent-submit > :is(button[type="submit"],.agent-stop-button) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+}
+
+/* On phones the Agent is the page itself. Do not nest a bordered panel inside
+   the already narrow writing workspace. */
+@media (max-width: 760px) {
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] #workspace {
+    scrollbar-gutter: auto !important;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .chapter-continuous {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .chapter-continuous-head {
+    min-height: 44px;
+    margin: 0 !important;
+    padding: 5px 16px !important;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .writing-mobile-tabs {
+    width: 100%;
+    margin: 0 !important;
+    padding: 0 16px !important;
+    border-bottom: 1px solid var(--hc-line) !important;
+    background: var(--hc-panel) !important;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .writing-mobile-tabs button {
+    min-height: 44px;
+    border: 0 !important;
+    border-bottom: 2px solid transparent !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .writing-mobile-tabs button.active {
+    border-bottom-color: var(--hc-accent) !important;
+    background: transparent !important;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .writing-mobile-tabs button:focus-visible {
+    outline: none !important;
+    box-shadow: inset 0 -3px var(--hc-accent) !important;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] #writingMobilePane:not([hidden]) {
+    width: 100% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: var(--hc-panel) !important;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .writing-mobile-pane .scene-agent-panel.scene-harness {
+    width: 100% !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: var(--hc-panel) !important;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .scene-agent-panel > header {
+    display: flex;
+    min-height: 48px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 16px !important;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .scene-agent-heading {
+    display: contents;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .scene-agent-heading h3 {
+    display: none;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .scene-agent-panel > header > p:last-child {
+    order: 1;
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    color: var(--hc-text) !important;
+    font-size: 13px;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .scene-agent-state {
+    order: 2;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .scene-conversation-scroll {
+    padding: 12px 16px 18px !important;
+    scrollbar-gutter: auto;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .scene-conversation-composer {
+    width: 100% !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-top: 1px solid var(--hc-line) !important;
+    border-radius: 0 !important;
+    background: var(--hc-panel) !important;
+    padding: 10px 16px 12px !important;
+    box-shadow: none !important;
+  }
+  #app#app.hc-redesign.writing-workbench-stage[data-writing-mobile-view="agent"] .scene-conversation-composer textarea {
+    min-height: 56px;
+    border: 1px solid var(--hc-line) !important;
+    border-radius: 7px;
+    background: var(--hc-rail) !important;
+    padding: 8px 10px;
+  }
+}
+
+/* Canvas-like selection actions stay attached to the manuscript line. */
+@media (max-width:760px) {
+  #app#app.hc-redesign.writing-workbench-stage:is([data-writing-mobile-view="agent"],[data-writing-mobile-view="review"]) .chapter-authoring > .chapter-review,
+  #app#app.hc-redesign.writing-workbench-stage:is([data-writing-mobile-view="agent"],[data-writing-mobile-view="review"]) .chapter-authoring > .chapter-authoring-save,
+  #app#app.hc-redesign.writing-workbench-stage:is([data-writing-mobile-view="agent"],[data-writing-mobile-view="review"]) .chapter-continuous-head p {
+    display: none !important;
+  }
+}
+
+#app.writing-workbench-stage .manuscript-selection-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 3px 0 0;
+  color: #728297;
+  font: 11px/1.4 var(--font-ui);
+}
+#app.writing-workbench-stage .manuscript-selection-actions > span { margin-right: 3px; }
+#app.writing-workbench-stage .manuscript-selection-actions button {
+  min-height: 28px;
+  border: 1px solid #d9e4f0;
+  border-radius: 5px;
+  background: #f6f9fd;
+  padding: 3px 9px;
+  color: #3c6293;
+  font: 650 11px/1.3 var(--font-ui);
+  cursor: pointer;
+}
+#app.writing-workbench-stage .manuscript-selection-actions button:hover,
+#app.writing-workbench-stage .manuscript-selection-actions button:focus-visible {
+  border-color: #93b1d6;
+  background: #eaf2fc;
+}
+#app.writing-workbench-stage .scene-agent-selection {
+  grid-column: 1;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  border: 0;
+  border-bottom: 1px solid #e5ebf2;
+  background: transparent;
+  padding: 1px 3px 7px;
+  color: #5c7088;
+  font-size: 11px;
+}
+#app.writing-workbench-stage .scene-agent-selection-label {
+  flex: 0 0 auto;
+  border-radius: 3px;
+  background: #edf3fb;
+  padding: 3px 5px;
+  color: #416795;
+  font-weight: 700;
+}
+#app.writing-workbench-stage .scene-agent-selection-quote {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#app.writing-workbench-stage .scene-agent-selection button {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #62758d;
+  font-size: 17px;
+  cursor: pointer;
+}
+#app.writing-workbench-stage .scene-agent-selection button:hover,
+#app.writing-workbench-stage .scene-agent-selection button:focus-visible {
+  background: #edf3fb;
+  color: #294b78;
 }

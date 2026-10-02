@@ -22,7 +22,9 @@ def test_mapping_support_panels_are_compact_and_keyboard_discoverable():
     assert ".mapping-focus{" in css
     assert ".mapping-support-panel>summary" in css
     assert ".mapping-support-panel[open]>summary::before" in css
-    assert "可选，不影响当前流程" in (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+    html = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+    assert "可选：AI 演出建议" in html
+    assert "不改变已冻结的场景判断" in html
 
 
 def test_ai_preflight_restores_the_full_review_decision_chain():
@@ -133,7 +135,8 @@ def test_embedded_production_keeps_low_frequency_controls_in_one_menu():
     ).read_text(encoding="utf-8")
     assert 'class="production-more-actions"' in embed_script
     assert 'data-production-proxy="openTasks"' in embed_script
-    assert 'data-production-proxy="openSettings"' in embed_script
+    assert 'data-production-proxy="openSettings"' not in embed_script
+    assert 'action.hidden = selector === "#openSettings";' in embed_script
     assert 'assetButton.disabled = !hasRun;' in embed_script
     assert 'assetButton.setAttribute("aria-disabled", String(!hasRun));' in embed_script
     assert '.production-more-actions > div button' in embed_styles
@@ -338,7 +341,7 @@ def test_generation_and_compile_buttons_are_derived_from_current_state():
     assert "dataset.locked" not in script
     assert "!!run.last_direction_generation_id" in script
     assert "if (state.currentRun.last_direction_generation_id)" in script
-    assert 'compile.textContent = compiling ? "正在编译" : "编译 AA 工程";' in script
+    assert 'compile.textContent = compiling ? "正在编译" : compiled ? "已编译（可安装）" : "编译 AA 工程";' in script
 
 
 def test_job_surfaces_expose_progress_cost_and_failure_diagnostics():
@@ -371,3 +374,33 @@ def test_standalone_production_does_not_probe_the_missing_writing_api():
     assert 'const IS_STANDALONE_PRODUCTION = location.port === "8892";' in script
     assert "if (IS_STANDALONE_PRODUCTION)" in script
     assert "当前处于独立 AA 制作模式" in script
+
+
+def test_empty_writing_release_state_keeps_source_choices_without_duplicate_guidance():
+    script = (ROOT / "ui" / "app.js").read_text(encoding="utf-8")
+    markup = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+    assert 'data-source-tab="writing"' in markup
+    assert 'data-source-tab="file"' in markup
+    assert 'data-source-tab="manual"' in markup
+    assert 'class="release-entry-next"' not in script
+    assert 'data-source-entry=' not in script
+    assert 'data-writing-release-review=' in script
+
+
+def test_source_tabs_use_one_controller():
+    script = (ROOT / "ui" / "app.js").read_text(encoding="utf-8")
+    assert 'setSourceMode(tab.dataset.sourceTab)' in script
+    assert 'setSourceMode(tabs[next].dataset.sourceTab)' in script
+
+
+def test_review_readiness_explains_backend_gates_without_automatic_actions():
+    script = (ROOT / "ui" / "app.js").read_text(encoding="utf-8")
+    start = script.index("  function reviewReadinessMarkup()")
+    end = script.index("  function renderReview()", start)
+    helper = script[start:end]
+    assert 'state.gates?.compile' in helper and 'state.gates?.install' in helper
+    assert '定位待审卡片' in helper and '查看制作环境' in helper
+    assert 'compile_not_configured' in helper and 'resource_index_incomplete' in helper
+    assert '不会自动确认卡片、编译、安装或调用模型' in helper
+    assert 'method:' not in helper
+    assert 'selectCard(card.card_id)' in helper

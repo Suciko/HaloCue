@@ -187,8 +187,9 @@ def test_reads_traditional_name_and_native_id_from_real_character_table():
 
 
 @pytest.mark.skipif(
-    not Path(r"E:\AzureArchive\资源文件").is_dir(),
-    reason="本机没有 AA 官方资源缓存",
+    not (Path(r"E:\AzureArchive\资源文件").is_dir()
+         and Path(r"E:\AzureArchive_084\AzureArchive_Data\StreamingAssets\aa\catalog.json").is_file()),
+    reason="本机没有完整的 AA 官方资源缓存与 Addressables 目录",
 )
 def test_locates_character_table_bundle_from_the_addressables_catalog():
     from official_catalog import locate_character_table_bundle
@@ -225,8 +226,9 @@ def test_matches_observed_native_variant_id_to_its_traditional_label():
 
 
 @pytest.mark.skipif(
-    not Path(r"E:\AzureArchive\资源文件").is_dir(),
-    reason="本机没有 AA 官方资源缓存",
+    not (Path(r"E:\AzureArchive\资源文件").is_dir()
+         and Path(r"E:\AzureArchive_084\AzureArchive_Data\StreamingAssets\aa\catalog.json").is_file()),
+    reason="本机没有完整的 AA 官方资源缓存与 Addressables 目录",
 )
 def test_build_index_harvests_official_native_records_with_observed_variant_ids():
     from build_index import harvest_official_characters

@@ -11,19 +11,30 @@ class CharacterNameBaseline:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path
         self._by_key: dict[str, dict[str, Any]] = {}
+        self._signature: tuple[int, int] | None = None
         self._load()
 
     def _load(self) -> None:
-        if not self.path or not self.path.is_file():
+        try:
+            stat = self.path.stat() if self.path else None
+        except OSError:
+            stat = None
+        signature = (stat.st_mtime_ns, stat.st_size) if stat else None
+        if signature == self._signature:
+            return
+        if signature is None:
+            self._by_key = {}
+            self._signature = signature
             return
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            self._by_key = {}
+            self._signature = signature
             return
         rows = payload.get("characters") if isinstance(payload, dict) else None
-        if not isinstance(rows, list):
-            return
-        for row in rows:
+        entries: dict[str, dict[str, Any]] = {}
+        for row in rows if isinstance(rows, list) else []:
             if not isinstance(row, dict):
                 continue
             keys = {
@@ -33,11 +44,13 @@ class CharacterNameBaseline:
             }
             if not any(keys):
                 continue
-            if not str(row.get("name_zh_cn") or "").strip():
+            if not any(str(row.get(field) or "").strip() for field in ("name_zh_cn", "name_ja_fandom")):
                 continue
             for key in keys:
                 if key:
-                    self._by_key[key] = row
+                    entries[key] = row
+        self._by_key = entries
+        self._signature = signature
 
     @staticmethod
     def _aliases(value: Any) -> list[str]:
@@ -47,6 +60,7 @@ class CharacterNameBaseline:
 
     def resolve(self, character: dict[str, Any]) -> dict[str, Any]:
         """Return presentation metadata while retaining the original legacy name."""
+        self._load()
         source_name = str(
             character.get("source_name")
             or character.get("legacy_name")
@@ -73,8 +87,8 @@ class CharacterNameBaseline:
         ).strip()
         aliases = self._aliases((entry or {}).get("aliases"))
         aliases.extend(self._aliases(character.get("aliases")))
-        aliases.extend(name for name in (source_name, fandom_name) if name)
-        display_name = explicit_cn or baseline_cn or source_name
+        aliases.extend(name for name in (source_name, fandom_name, explicit_cn, baseline_cn) if name)
+        display_name = fandom_name or explicit_cn or baseline_cn or source_name
         return {
             "name": display_name,
             "name_zh_cn": explicit_cn or baseline_cn,
@@ -82,7 +96,7 @@ class CharacterNameBaseline:
             "aliases": list(dict.fromkeys(aliases)),
             "source_name": source_name,
             "name_source": (
-                "zh_cn_official_or_curated"
+                "ja_fandom_curated" if fandom_name else "zh_cn_official_or_curated"
                 if explicit_cn or baseline_cn
                 else "legacy_source_unreviewed"
             ),

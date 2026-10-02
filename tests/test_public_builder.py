@@ -68,9 +68,7 @@ def test_pyinstaller_policy_uses_minimal_hidden_imports_and_excludes_global_stac
     } <= set(policy["excludes"])
     assert policy["metadata_recursive"] is False
     assert policy["version_file_environment"] == "HALOCUE_VERSION_FILE"
-    assert {"MarkupSafe", "tqdm", "tzdata"} <= set(
-        policy["metadata_distributions"]
-    )
+    assert {"MarkupSafe", "tqdm", "tzdata"} <= set(policy["metadata_distributions"])
 
 
 def _write_public_source(root: Path) -> None:
@@ -78,13 +76,8 @@ def _write_public_source(root: Path) -> None:
         "HaloCue.spec": b"# fixture spec\n",
         "README.md": b"# HaloCue\n",
         "LICENSE": b"MIT License\n",
-        "THIRD_PARTY_NOTICES.md": (
-            b"# Third-party notices\n- `CPython`\n- `PyInstaller`\n"
-        ),
-        "halocue_meta.py": (
-            b"PRODUCT_NAME = 'HaloCue'\n"
-            b"VERSION = '0.9.0-beta.1'\n"
-        ),
+        "THIRD_PARTY_NOTICES.md": (b"# Third-party notices\n- `CPython`\n- `PyInstaller`\n"),
+        "halocue_meta.py": (b"PRODUCT_NAME = 'HaloCue'\nVERSION = '0.9.0-beta.1'\n"),
         "ui.html": b"<!doctype html><title>HaloCue</title>\n",
         "js/app.js": b"window.HaloCue = true;\n",
         "css/app.css": b"body { color: #111; }\n",
@@ -184,7 +177,7 @@ def test_version_file_accepts_stable_public_versions(tmp_path):
 def test_public_spec_uses_only_the_desensitized_database_seed():
     spec = (ROOT / "HaloCue.spec").read_text(encoding="utf-8")
 
-    assert "data\" / \"halocue_labels.db" in spec
+    assert 'data" / "halocue_labels.db' in spec
     assert "HALOCUE_BUILD_SEED_DIR" not in spec
     assert "aa_assets.db" not in spec
     assert "aa_resources.json" not in spec
@@ -235,6 +228,21 @@ def test_dependency_notice_audit_requires_shipped_metadata_and_native_components
         "CPython",
         "sample-dep",
     )
+
+
+def test_dependency_notice_audit_requires_vendored_echarts_license_and_notice(tmp_path):
+    bundle = tmp_path / "HaloCue"
+    vendor = bundle / "_internal/services/halocue/writing/web/vendor/echarts"
+    vendor.mkdir(parents=True)
+    (vendor / "echarts-6.0.0.min.js").write_text("/* synthetic library */", encoding="utf-8")
+    (bundle / "THIRD_PARTY_NOTICES.md").write_text("`Apache ECharts`\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="ECharts missing LICENSE"):
+        public_builder.audit_third_party_notices(bundle)
+    (vendor / "LICENSE").write_text("Apache-2.0 fixture\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="ECharts missing NOTICE"):
+        public_builder.audit_third_party_notices(bundle)
+    (vendor / "NOTICE").write_text("Apache Software Foundation fixture\n", encoding="utf-8")
+    assert public_builder.audit_third_party_notices(bundle) == ("Apache ECharts",)
 
 
 def test_finalize_existing_bundle_replaces_only_notice_and_writes_artifacts(
@@ -294,9 +302,7 @@ def test_finalize_existing_bundle_replaces_only_notice_and_writes_artifacts(
     assert result.manifest_path.is_file()
 
 
-def _polluted_pyinstaller(
-    source_root: Path, work_root: Path, python_executable: Path
-) -> None:
+def _polluted_pyinstaller(source_root: Path, work_root: Path, python_executable: Path) -> None:
     _fake_pyinstaller(source_root, work_root, python_executable)
     internal = work_root / "dist" / "HaloCue" / "_internal"
     gif = internal / "_tk_data" / "images" / "logo.gif"
@@ -330,9 +336,7 @@ def test_public_builder_creates_exact_audited_archive_layout(tmp_path, monkeypat
 
     assert result.bundle_dir.name == "HaloCue"
     assert result.archive_path.name == PUBLIC_ARCHIVE_NAME
-    assert result.archive_sha256 == hashlib.sha256(
-        result.archive_path.read_bytes()
-    ).hexdigest()
+    assert result.archive_sha256 == hashlib.sha256(result.archive_path.read_bytes()).hexdigest()
     required = {
         "HaloCue/HaloCue.exe",
         "HaloCue/ui.html",
@@ -391,9 +395,7 @@ def test_public_manifest_hashes_every_shipped_file(tmp_path, monkeypatch):
 
     payload = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     entries = payload["files"]
-    assert [entry["path"] for entry in entries] == sorted(
-        entry["path"] for entry in entries
-    )
+    assert [entry["path"] for entry in entries] == sorted(entry["path"] for entry in entries)
     shipped = {
         path.relative_to(result.bundle_dir).as_posix(): path
         for path in result.bundle_dir.rglob("*")
@@ -413,9 +415,7 @@ def test_public_manifest_hashes_every_shipped_file(tmp_path, monkeypatch):
     )
 
 
-def test_public_builder_removes_environment_only_pyinstaller_payloads(
-    tmp_path, monkeypatch
-):
+def test_public_builder_removes_environment_only_pyinstaller_payloads(tmp_path, monkeypatch):
     source = tmp_path / "public-source" / "HaloCue"
     source.mkdir(parents=True)
     _write_public_source(source)
@@ -463,9 +463,7 @@ def test_public_builder_rejects_source_not_matching_export_manifest(tmp_path, mo
 
 
 @pytest.mark.skip(reason="0.9.2 frozen builds launch the embedded WebView2 desktop shell.")
-def test_frozen_launcher_calls_webui_directly_and_forwards_server_options(
-    tmp_path, monkeypatch
-):
+def test_frozen_launcher_calls_webui_directly_and_forwards_server_options(tmp_path, monkeypatch):
     calls: list[list[str]] = []
     fake_webui = SimpleNamespace(main=lambda argv: calls.append(argv) or 23)
     monkeypatch.setitem(sys.modules, "webui", fake_webui)

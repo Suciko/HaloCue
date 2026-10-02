@@ -10,6 +10,13 @@ distribution or recognized native runtime component is missing from this file.
 
 ## Python packages and bundler
 
+The separately authorized `data/reference-pack` contains maintainer-curated
+character references and extracted Blue Archive scenario staging data. Original
+game text and characters remain the property of their respective rights holders;
+they are not licensed under HaloCue's MIT code license. See the pack README and
+manifest for provenance and the 2026-10-02 maintainer inclusion authorization.
+
+
 | Component | License |
 |---|---|
 | `PyInstaller` bootloader | GPL-2.0 with the PyInstaller bootloader exception |
@@ -52,6 +59,12 @@ distribution or recognized native runtime component is missing from this file.
 Authoritative package license texts and project links are available in their
 shipped `.dist-info` metadata and upstream distributions. PyInstaller's
 bootloader terms are documented at <https://pyinstaller.org/en/stable/license.html>.
+
+## Web components
+
+`Apache ECharts` 6.0.0 is licensed under Apache-2.0. Its license text and
+Apache Software Foundation NOTICE accompany the vendored JavaScript in
+`services/halocue/writing/web/vendor/echarts/` (under `_internal` in Windows bundles).
 
 ## Native runtime components
 

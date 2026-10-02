@@ -139,7 +139,8 @@ def normalize_direction_plan(
                 item["_camera_reset"] = True
             else:
                 item.pop("_camera_reset", None)
-        if isinstance(intent, MutableMapping) and "visible_characters" in intent:
+        fresh_camera = isinstance(intent, MutableMapping) and "visible_characters" in intent
+        if fresh_camera:
             camera = tuple(str(name) for name in director.get("visible_characters", []) if str(name))
             if camera == last_camera:
                 intent.pop("visible_characters", None)
@@ -156,6 +157,8 @@ def normalize_direction_plan(
             # focus may use a two-shot, but it must not turn ordinary portrait
             # dialogue into an off-screen voice merely because the next row
             # omitted a new camera decision.
+            if fresh_camera:
+                _record_drop(item, "camera", list(last_camera), "portrait_speaker_not_visible")
             if isinstance(intent, MutableMapping):
                 intent.pop("visible_characters", None)
             item["_camera_reset"] = True
@@ -184,10 +187,16 @@ def normalize_direction_plan(
 
     for item in items:
         for drop in item.get("_direction_drops", []):
-            diagnostics.append({
+            diagnostic = {
                 "code": "director_policy_drop", "level": "info",
                 "source_id": str(item.get("annotation_id") or ""),
                 "field": str(drop.get("field") or ""),
                 "reason": str(drop.get("reason") or ""),
-            })
+            }
+            if drop.get("reason") == "portrait_speaker_not_visible":
+                diagnostic.update(
+                    level="warning", line_no=item.get("line_no"),
+                    message="本行模型镜头未包含有立绘的说话者，已退回自动镜头；请使用双方同框、独立反应节点或手写单行镜头。",
+                )
+            diagnostics.append(diagnostic)
     return kept_beats, diagnostics

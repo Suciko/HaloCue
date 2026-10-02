@@ -1,0 +1,110 @@
+/* World drafts and outline documents: local authoring surfaces. */
+@media (min-width:761px) {
+  #app.hc-redesign[data-surface="worlds"] {
+    grid-template-columns:var(--hc-nav-width,64px) minmax(0,1fr)!important;
+    grid-template-areas:"top top" "nav main"!important;
+  }
+}
+#app.hc-redesign[data-surface="worlds"] #workspace { min-width:0; background:var(--hc-bg); }
+#app.hc-redesign :is(.authoring-worlds,.authoring-outline) { max-width:1320px; margin:0 auto; padding:28px clamp(18px,3vw,42px) 52px; color:var(--hc-text); }
+#app.hc-redesign .authoring-page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; margin-bottom:22px; }
+#app.hc-redesign .authoring-page-head h1 { margin:3px 0 7px; font-size:23px; line-height:1.35; letter-spacing:-.02em; }
+#app.hc-redesign .authoring-page-head p { margin:0; color:var(--hc-muted); font-size:13px; line-height:1.65; }
+#app.hc-redesign .authoring-world-grid { display:grid; grid-template-columns:minmax(220px,28%) minmax(0,1fr); gap:20px; align-items:start; }
+#app.hc-redesign :is(.authoring-world-list,.authoring-world-editor,.authoring-outline-main,.authoring-outline-scopes) { min-width:0; border:1px solid var(--hc-line); border-radius:11px; background:var(--hc-panel); }
+#app.hc-redesign .authoring-world-list { padding:14px; }
+#app.hc-redesign .authoring-world-list-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
+#app.hc-redesign .authoring-world-list-head h2 { margin:0; font-size:15px; }
+#app.hc-redesign .authoring-world-row { display:grid; width:100%; gap:3px; margin:4px 0; padding:12px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--hc-text); text-align:left; }
+#app.hc-redesign .authoring-world-row:hover { background:var(--hc-bg); }
+#app.hc-redesign .authoring-world-row.active { border-color:var(--hc-action); background:var(--hc-action-soft); }
+#app.hc-redesign .authoring-world-row small { color:var(--hc-muted); }
+#app.hc-redesign .authoring-empty { color:var(--hc-muted); font-size:12px; line-height:1.6; }
+#app.hc-redesign .authoring-world-editor { padding:clamp(18px,2.2vw,30px); }
+#app.hc-redesign .authoring-work-overview { margin:14px 0 18px; padding:18px; border:1px solid var(--hc-line); border-radius:10px; background:var(--hc-panel); }
+#app.hc-redesign .authoring-work-overview h3 { margin:0 0 4px; font-size:15px; }
+#app.hc-redesign .authoring-work-overview p { margin:0 0 10px; color:var(--hc-muted); font-size:12px; line-height:1.55; overflow-wrap:anywhere; }
+#app.hc-redesign .authoring-work-overview textarea { width:100%; min-height:145px; padding:11px 13px; border:1px solid var(--hc-line); border-radius:8px; background:var(--hc-panel); color:var(--hc-text); font:13px/1.7 inherit; resize:vertical; }
+#app.hc-redesign :is(#worldDraftForm,#worldCreateWorkForm,#outlineDocumentForm) { display:grid; gap:16px; }
+#app.hc-redesign #worldDraftForm header { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+#app.hc-redesign #worldDraftForm h2,#app.hc-redesign .authoring-outline-main h2 { margin:0; font-size:19px; }
+#app.hc-redesign #worldDraftForm header span { color:var(--hc-muted); font-size:12px; }
+#app.hc-redesign :is(#worldDraftForm,#worldCreateWorkForm,#outlineDocumentForm) label { display:grid; gap:7px; color:var(--hc-text); font-size:12px; font-weight:600; }
+#app.hc-redesign :is(#worldDraftForm,#worldCreateWorkForm,#outlineDocumentForm) :is(input,select,textarea) { width:100%; min-width:0; padding:10px 12px; border:1px solid var(--hc-line); border-radius:8px; background:var(--hc-panel); color:var(--hc-text); font-size:13px; line-height:1.6; font-family:inherit; }
+#app.hc-redesign #worldDraftForm textarea { min-height:320px; resize:vertical; white-space:pre-wrap; }
+#app.hc-redesign #worldDraftForm .authoring-seed { display:flex; align-items:center; gap:8px; font-weight:400; }
+#app.hc-redesign #worldDraftForm .authoring-seed input { width:auto; }
+#app.hc-redesign .authoring-form-actions { display:flex; align-items:center; flex-wrap:wrap; gap:10px; border-top:1px solid var(--hc-line); padding-top:15px; color:var(--hc-muted); font-size:12px; }
+#app.hc-redesign .authoring-world-followup { margin-top:24px; padding-top:20px; border-top:1px solid var(--hc-line); }
+#app.hc-redesign .authoring-world-followup h3 { margin:0 0 4px; font-size:15px; }
+#app.hc-redesign .authoring-world-followup p { margin:0 0 14px; color:var(--hc-muted); font-size:12px; }
+#app.hc-redesign #worldCreateWorkForm { grid-template-columns:minmax(0,1fr) minmax(150px,25%) auto; align-items:end; gap:9px; }
+#app.hc-redesign .authoring-history { margin-top:20px; border-top:1px solid var(--hc-line); padding-top:13px; }
+#app.hc-redesign .authoring-history summary { cursor:pointer; color:var(--hc-action); font-size:12px; }
+#app.hc-redesign .authoring-history article { padding:11px 0; border-bottom:1px solid var(--hc-line); font-size:12px; }
+#app.hc-redesign .authoring-history time { margin-left:10px; color:var(--hc-muted); }
+#app.hc-redesign .authoring-history p { margin:4px 0 0; color:var(--hc-muted); white-space:pre-wrap; overflow-wrap:anywhere; }
+#app.hc-redesign .authoring-error { padding:11px 13px; border:1px solid #d6aaaa; border-radius:8px; background:var(--hc-danger-soft,#fff1f1); color:var(--hc-danger,#a14444); font-size:12px; }
+#app.hc-redesign .authoring-error button { margin-left:10px; border:0; background:transparent; color:inherit; text-decoration:underline; }
+#app.hc-redesign .authoring-conflict-compare { padding:12px; border:1px solid var(--hc-line); border-radius:8px; }
+#app.hc-redesign .authoring-conflict-compare summary { cursor:pointer; color:var(--hc-action); font-size:12px; }
+#app.hc-redesign .authoring-conflict-compare section { margin-top:12px; }
+#app.hc-redesign .authoring-conflict-compare pre { max-height:220px; overflow:auto; padding:11px; border:1px solid var(--hc-line); background:var(--hc-bg); color:var(--hc-text); white-space:pre-wrap; overflow-wrap:anywhere; }
+#app.hc-redesign .authoring-outline-grid { display:grid; grid-template-columns:minmax(200px,25%) minmax(0,1fr); gap:18px; align-items:start; }
+#app.hc-redesign .authoring-outline-scopes { display:grid; gap:3px; padding:12px; max-height:calc(100dvh - 190px); overflow:auto; }
+#app.hc-redesign .authoring-outline-scopes button { display:grid; gap:3px; width:100%; padding:10px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--hc-text); text-align:left; }
+#app.hc-redesign .authoring-outline-scopes button.active { border-color:var(--hc-action); background:var(--hc-action-soft); }
+#app.hc-redesign .authoring-outline-scopes button span { color:var(--hc-action); font-size:11px; }
+#app.hc-redesign .authoring-outline-scopes button b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+#app.hc-redesign .authoring-outline-main { padding:clamp(18px,2.2vw,30px); }
+#app.hc-redesign .authoring-chapter-plan { margin-bottom:28px; padding:20px 22px; border:1px solid var(--hc-line); border-radius:12px; background:var(--hc-panel); color:var(--hc-text); }
+#app.hc-redesign .authoring-chapter-plan-head { display:flex; align-items:center; justify-content:space-between; gap:18px; }
+#app.hc-redesign .authoring-chapter-plan-head h2 { margin:3px 0 6px; font-size:18px; }
+#app.hc-redesign .authoring-chapter-plan-head p:last-child,#app.hc-redesign .outline-plan-empty,#app.hc-redesign .outline-editor-hint { margin:0; color:var(--hc-muted); font-size:12px; line-height:1.7; }
+#app.hc-redesign .authoring-chapter-plan-head button { flex:none; }
+#app.hc-redesign .outline-plan-empty { margin-top:18px; padding-top:16px; border-top:1px solid var(--hc-line); }
+#app.hc-redesign .outline-plan-accepted,#app.hc-redesign .outline-plan-pending { margin-top:18px; padding-top:17px; border-top:1px solid var(--hc-line); }
+#app.hc-redesign .outline-plan-pending { padding:17px; border:1px solid var(--hc-action); border-radius:9px; background:var(--hc-action-soft); }
+#app.hc-redesign .outline-plan-copy h3 { margin:3px 0 7px; font-size:16px; }
+#app.hc-redesign .outline-plan-goal { margin:0 0 14px; font-size:14px; line-height:1.75; white-space:pre-wrap; }
+#app.hc-redesign .outline-plan-group { margin-top:13px; }
+#app.hc-redesign .outline-plan-group b { font-size:12px; }
+#app.hc-redesign .outline-plan-group :is(ol,ul) { margin:8px 0 0; padding-left:24px; color:var(--hc-text); font-size:13px; line-height:1.8; }
+#app.hc-redesign .outline-plan-group li { padding-left:4px; margin:4px 0; }
+#app.hc-redesign .outline-plan-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
+#app.hc-redesign .outline-editor-hint { margin:0 0 10px; }
+html[data-theme="dark"] #app.hc-redesign .director-panel .director-task-contract { background:var(--hc-panel)!important; border-color:var(--hc-line)!important; color:var(--hc-text)!important; }
+html[data-theme="dark"] #app.hc-redesign .director-panel .director-task-contract em { background:var(--hc-bg)!important; color:var(--hc-muted)!important; }
+#app.hc-redesign .mobile-outline-back { margin:0 0 14px; font-size:12px; }
+#app.hc-redesign #outlineDocumentForm textarea { min-height:300px; height:min(44vh,440px); resize:vertical; white-space:pre-wrap; line-height:1.8; }
+#app.hc-redesign #outlineDocumentForm .authoring-form-actions { position:sticky; bottom:0; z-index:2; margin-top:0; background:var(--hc-panel); }
+#app.hc-redesign .authoring-outline-state { flex:none; padding:5px 9px; border:1px solid var(--hc-line); border-radius:7px; color:var(--hc-muted); font-size:12px; }
+#app.hc-redesign .authoring-source-compare { border:1px solid var(--hc-line); border-radius:8px; padding:11px 13px; }
+#app.hc-redesign .authoring-source-compare summary { cursor:pointer; color:var(--hc-action); font-size:12px; }
+#app.hc-redesign .authoring-source-compare > div { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:12px 0; }
+#app.hc-redesign .authoring-source-compare section { min-width:0; }
+#app.hc-redesign .authoring-source-compare pre { min-height:100px; max-height:260px; overflow:auto; padding:12px; border:1px solid var(--hc-line); background:var(--hc-bg); color:var(--hc-text); font-size:12px; line-height:1.6; font-family:inherit; white-space:pre-wrap; overflow-wrap:anywhere; }
+#app.hc-redesign .authoring-source-compare button { margin:0 7px 4px 0; }
+#app.hc-redesign .authoring-notice { margin:0; padding:9px 12px; border-left:3px solid var(--hc-action); background:var(--hc-action-soft); font-size:12px; }
+#app.hc-redesign .authoring-scenes { margin-top:20px; padding:12px 0; border-top:1px solid var(--hc-line); }
+#app.hc-redesign .authoring-scenes summary { cursor:pointer; font-size:12px; }
+#app.hc-redesign .authoring-scenes > div { display:flex; align-items:center; justify-content:space-between; gap:9px; padding:8px 0; border-bottom:1px solid var(--hc-line); font-size:12px; }
+#app.hc-redesign .authoring-structure-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:20px; }
+@media (max-width:1500px) {
+  #app.hc-redesign .authoring-outline-grid { grid-template-columns:minmax(0,1fr); }
+  #app.hc-redesign .authoring-outline-scopes { display:flex; overflow-x:auto; max-height:none; }
+  #app.hc-redesign .authoring-outline-scopes button { flex:0 0 150px; }
+}
+@media (max-width:960px) {
+  #app.hc-redesign :is(.authoring-world-grid,.authoring-outline-grid) { grid-template-columns:minmax(0,1fr); }
+  #app.hc-redesign .authoring-outline-scopes { display:flex; overflow-x:auto; max-height:none; }
+  #app.hc-redesign .authoring-outline-scopes button { min-width:150px; }
+}
+@media (max-width:640px) {
+  #app.hc-redesign :is(.authoring-worlds,.authoring-outline) { padding:18px 14px 80px; }
+  #app.hc-redesign .authoring-page-head { display:grid; }
+  #app.hc-redesign #worldCreateWorkForm,#app.hc-redesign .authoring-source-compare > div { grid-template-columns:minmax(0,1fr); }
+  #app.hc-redesign #worldDraftForm textarea,#app.hc-redesign #outlineDocumentForm textarea { min-height:270px; }
+  #app.hc-redesign .authoring-chapter-plan { padding:16px; }
+  #app.hc-redesign .authoring-chapter-plan-head { align-items:stretch; flex-direction:column; }
+}

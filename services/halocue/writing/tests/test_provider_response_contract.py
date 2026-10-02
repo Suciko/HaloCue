@@ -37,3 +37,45 @@ def test_explicit_empty_review_is_valid(monkeypatch):
     monkeypatch.setattr(provider, "_scene_skill_request", lambda *a, **kw: {"system_prompt": "", "user_prompt": ""})
     monkeypatch.setattr(provider, "_call_llm", lambda *a, **kw: type("Call", (), {"text": '{"findings":[]}'})())
     assert provider.review_scene({}, "Narrator: supplied scene") == []
+
+
+@pytest.mark.parametrize("finish_reason", ["tool_calls", "stop"])
+def test_openai_tool_call_accepts_native_and_compatible_stop_reason(finish_reason):
+    validate_completion(
+        {
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {"name": "search_work_canon", "arguments": "{}"},
+                    }],
+                },
+                "finish_reason": finish_reason,
+            }],
+        },
+        "openai",
+        allow_tools=True,
+    )
+
+
+def test_openai_tool_call_still_requires_tool_permission():
+    with pytest.raises(DomainError) as rejected:
+        validate_completion(
+            {
+                "choices": [{
+                    "message": {
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {"name": "search_work_canon", "arguments": "{}"},
+                        }],
+                    },
+                    "finish_reason": "stop",
+                }],
+            },
+            "openai",
+        )
+    assert rejected.value.code == "provider_output_invalid"

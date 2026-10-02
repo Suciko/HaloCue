@@ -12,6 +12,7 @@ script2aap.py。任何超出资源表的标注都会被丢弃并告警——模�
 import argparse
 import hashlib
 import json
+import copy
 import os
 import re
 import sys
@@ -165,6 +166,34 @@ def _scoped_face_evidence(
     return evidence
 
 
+
+def _model_face_scope(index, character):
+    """Use the frozen character's selected variant when the cast omits selectors.
+
+    Visual annotations enrich existing asset face IDs; they never create new IDs.
+    Explicit selectors remain authoritative and ambiguous variants fail closed.
+    """
+    ident = character.get("id")
+    record = next((row for row in index.get("characters", []) if row.get("identifier") == ident), {})
+    explicit = bool(character.get("spine_signature") or character.get("outfit_key"))
+    selector = {
+        "spine_signature": character.get("spine_signature", "") if explicit else record.get("spine_signature", ""),
+        "outfit_key": character.get("outfit_key", "") if explicit else record.get("outfit_key", ""),
+    }
+    selected = _selected_variants(index.get("face_capabilities") or {}, ident, **selector)
+    if len(selected) > 1:
+        return {}, selector
+    capabilities = {ident: copy.deepcopy(selected)}
+    if not character.get("custom") and selected:
+        same_record = all(not selector[key] or selector[key] == record.get(key) for key in selector)
+        asset_ids = {str(face.get("id") or "") for face in record.get("faces", []) if isinstance(face, dict)} if same_record else set()
+        for variant in capabilities[ident]:
+            for face in variant.get("faces", []):
+                if str(face.get("id") or "") in asset_ids and face_visual_evidence(face) == "visual_confirmed":
+                    face["sources"] = list(dict.fromkeys([*face.get("sources", []), "atlas_candidate"]))
+    return capabilities, selector
+
+
 def annotation_constraints(idx, cast, *, usage_chain=None):
     """Build the complete allowlist used to filter one model response.
 
@@ -188,23 +217,20 @@ def annotation_constraints(idx, cast, *, usage_chain=None):
         for character in cast.values():
             ident = character.get("id")
             if ident:
-                selector = {
-                    "spine_signature": character.get("spine_signature", ""),
-                    "outfit_key": character.get("outfit_key", ""),
-                }
+                scoped_capabilities, selector = _model_face_scope(idx, character)
                 official = ident in {
                     record.get("identifier")
                     for record in idx.get("characters", [])
                 } and not character.get("custom")
                 faces_by_id[ident] = (
-                    semantic_face_allowlist(capabilities, ident, **selector)
+                    semantic_face_allowlist(scoped_capabilities, ident, **selector)
                     if ident in semantic_modular
-                    else official_basic_face_allowlist(capabilities, ident, **selector)
+                    else official_basic_face_allowlist(scoped_capabilities, ident, **selector)
                     if official
-                    else face_allowlist(capabilities, ident, **selector)
+                    else face_allowlist(scoped_capabilities, ident, **selector)
                 )
                 face_evidence_by_id[ident] = _scoped_face_evidence(
-                    capabilities, ident, faces_by_id[ident], **selector
+                    scoped_capabilities, ident, faces_by_id[ident], **selector
                 )
     else:
         faces_by_id = {
@@ -588,12 +614,12 @@ def build_static(idx, cast, cast_names, *, story_type="auto", direction_profile=
             expression_mode = character.get(
                 "_expression_mode", record.get("expression_mode", "opaque_custom")
             )
+            scoped_capabilities, selector = _model_face_scope(idx, character)
             faces_by_id[ident] = {
                 "faces": _allowed_face_records(
-                    capabilities,
+                    scoped_capabilities,
                     ident,
-                    spine_signature=character.get("spine_signature", ""),
-                    outfit_key=character.get("outfit_key", ""),
+                    **selector,
                     semantic=expression_mode == "semantic_modular",
                     official_basic=ident in character_records and not character.get("custom"),
                 ),
@@ -644,6 +670,7 @@ def parse_lines(path, cast):
         out.append(item)
     pending_directives = set()
     authored_camera_hold = False
+    authored_background = ""
     for item in out:
         if item.get("kind") != "line":
             raw = str(item.get("raw") or "")
@@ -655,17 +682,22 @@ def parse_lines(path, cast):
             if structural_boundary:
                 pending_directives.clear()
                 authored_camera_hold = False
+                authored_background = ""
             elif scene_directive:
                 authored_camera_hold = False
             match = re.match(r"^\s*@([A-Za-z_]+)\b\s*(.*)$", raw)
             if match and match.group(1).lower() in _DIRECTIVE_FIELDS:
                 command = match.group(1).lower()
+                if command == "bg":
+                    authored_background = match.group(2).strip()
                 pending_directives.add(_DIRECTIVE_FIELDS[command])
                 if command == "camera_hold":
                     authored_camera_hold = match.group(2).strip().lower() not in {"auto", "自动"}
                 elif command == "camera":
                     authored_camera_hold = False
             continue
+        if authored_background:
+            item["_authored_background"] = authored_background
         effective_directives = set(pending_directives)
         if authored_camera_hold:
             effective_directives.add("camera_hold")
@@ -705,7 +737,7 @@ def render(item):
     return f"{item['who']}{anno}: {item['text']}"
 
 
-def render_annotated_items(items):
+def render_annotated_items(items, *, reaction_records=None):
     """Render annotated items while avoiding redundant background switches."""
     out_lines = []
     last_bg = None
@@ -713,6 +745,10 @@ def render_annotated_items(items):
     for item in items:
         if item["kind"] != "line":
             out_lines.append(item["raw"])
+            authored_bg = re.match(r"^\s*@bg\s+(.+?)\s*$", item["raw"], re.IGNORECASE)
+            if authored_bg:
+                last_bg = authored_bg.group(1)
+                has_background = True
             continue
 
         background = item.get("bg")
@@ -737,34 +773,69 @@ def render_annotated_items(items):
         if item.get("wait_ms"):
             out_lines.append(f"@wait {item['wait_ms']}")
         out_lines.extend(annotation_directives(item))
+        if item.get("_annotation_beat"):
+            # Only this accepted reaction gets a camera override; never change
+            # the held camera inherited by subsequent authored dialogue.
+            out_lines.append(f"@camera {item['who']}")
+            if reaction_records is not None:
+                reaction_records.append({
+                    **item["_reaction_record"],
+                    "output_line": sum(line.count("\n") + 1 for line in out_lines) + 1,
+                })
         out_lines.append(render(item))
 
     return "\n".join(out_lines) + "\n"
 
 
 def insert_annotation_beats(items, beats):
-    """Insert validated dialogue-free reaction nodes around source anchors."""
+    """Insert reactions without consuming one-line prefixes owned by the anchor."""
+    from diagnostics import PENDING_PREFIX_COMMANDS, THEMATIC_BREAK_RE
+
+    # Transition lives outside Pending in the compiler, but is reset after
+    # one dialogue too. Keep it on the authored anchor during beat insertion.
+    anchor_prefixes = PENDING_PREFIX_COMMANDS | {"trans"}
     before, after = {}, {}
     for beat in beats or []:
         target = before if beat.get("position") == "before" else after
         target.setdefault(str(beat.get("anchor_id") or ""), []).append(beat)
     result = []
+    pending_start = None
     for item in items:
+        if item.get("kind") != "line":
+            raw = str(item.get("raw") or "").strip()
+            if raw.startswith("##") or THEMATIC_BREAK_RE.fullmatch(raw):
+                pending_start = None
+            match = re.match(r"^@([A-Za-z_]+)\b", raw)
+            if match and match.group(1).lower() in anchor_prefixes and pending_start is None:
+                pending_start = len(result)
+            result.append(item)
+            continue
         anchor_id = str(item.get("annotation_id") or "")
-        for beat in before.get(anchor_id, []):
-            result.append(_beat_item(beat))
+        reactions = [_beat_item(beat, item) for beat in before.get(anchor_id, [])]
+        if reactions:
+            # Keep authored camera/wait/fx and later directives together, in
+            # original order, for their intended next line instead of the beat.
+            insertion = pending_start if pending_start is not None else len(result)
+            result[insertion:insertion] = reactions
         result.append(item)
-        for beat in after.get(anchor_id, []):
-            result.append(_beat_item(beat))
+        result.extend(_beat_item(beat, item) for beat in after.get(anchor_id, []))
+        pending_start = None
     return result
 
 
-def _beat_item(beat):
+def _beat_item(beat, anchor):
+    identity = [beat.get("anchor_id"), beat.get("position"), beat.get("who")]
+    beat_id = "reaction-" + hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:16]
     return {
         "kind": "line", "raw": "", "who": beat["who"], "text": "",
         "face": beat.get("face", ""), "emo": beat.get("emo", ""),
         "act": beat.get("act", ""), "fx": "", "wait_ms": beat.get("wait_ms", 0),
         "_annotation_beat": True,
+        "_reaction_record": {
+            **dict(beat), "beat_id": beat_id, "source_line": anchor.get("line_no", 0),
+        },
     }
 
 
@@ -928,6 +999,22 @@ def apply_direction_supplements(items, cast):
         }]
 
 
+def ordered_annotation_speakers(items, todo, cast):
+    """Frequency first, first authored occurrence for ties, one name per identity."""
+    frequency = {}
+    for index in todo:
+        who = items[index]["who"]
+        frequency[who] = frequency.get(who, 0) + 1
+    used, seen_id = [], set()
+    # Dict insertion order supplies the stable first-source tie-breaker.
+    for who in sorted(frequency, key=lambda name: -frequency[name]):
+        identity = cast[who].get("id") or "旁白"
+        if identity not in seen_id:
+            seen_id.add(identity)
+            used.append(who)
+    return used
+
+
 def annotate_script(options: dict, provider_instance=None) -> dict:
     """演出标注纯函数接口（剥离 sys.argv 与全局状态）"""
     script_path = options["script"]
@@ -974,14 +1061,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         lo, hi = int(m.group(1)) - 1, int(m.group(2))
     todo = dialog[lo:hi]
 
-    used, seen_id = [], set()
-    for w in sorted({items[i]["who"] for i in todo},
-                    key=lambda w: -sum(1 for i in todo if items[i]["who"] == w)):
-        key = cast[w].get("id") or "旁白"
-        if key in seen_id:
-            continue
-        seen_id.add(key)
-        used.append(w)
+    used = ordered_annotation_speakers(items, todo, cast)
     script_text = open(script_path, encoding="utf-8").read()
     background_policy = (
         ConservativeBackgroundPolicy(items, idx, cfg, usage_chain)
@@ -1060,6 +1140,8 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
         model_config = {
             "provider": getattr(prov, "name", provider_name or llmcfg.get("provider") or ""),
             "model": getattr(prov, "model", ""),
+            "base_url": str(getattr(prov, "cfg", {}).get("base_url") or ""),
+            "source_context_strategy": source_context_strategy,
             "max_tokens": int(getattr(prov, "cfg", {}).get("max_tokens", 16000)),
             "annotation_max_tokens": int(getattr(prov, "cfg", {}).get("annotation_max_tokens") or getattr(prov, "cfg", {}).get("max_tokens", 16000)),
             "reasoning_mode": str(getattr(prov, "cfg", {}).get("reasoning_mode") or "balanced"),
@@ -1073,6 +1155,17 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
             model_config,
             story_type=story_type, director_version="stateful-v1",
         )
+        # Checkpoint identity is not a prompt policy. Both profiles must pin
+        # every input that can change the actual request/plan on resume.
+        fingerprint["speaker_order_version"] = "frequency-first-mention/1"
+        fingerprint["effective_static_sha256"] = hashlib.sha256(agent_static.encode("utf-8")).hexdigest()
+        fingerprint["planning_sha256"] = hashlib.sha256(json.dumps(
+            {"default_bg": cfg.get("default_bg"), "scene_bg": cfg.get("scene_bg"),
+             "usage_chain": usage_chain, "layout_mode": options.get("layout_mode"),
+             "context_before": int(llmcfg.get("agent_context_before", 15)),
+             "context_after": int(llmcfg.get("agent_context_after", 10))},
+            sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
         if direction_profile == "conservative":
             fingerprint["direction_profile"] = profile_snapshot
             fingerprint["static_prompt_sha256"] = hashlib.sha256(static.encode("utf-8")).hexdigest()
@@ -1235,7 +1328,13 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
     proposals.extend(build_postprocessor_proposals(items, rule="continuity_density"))
     normalize_bgfx_lifetime(items)
 
-    final_text = render_annotated_items(insert_annotation_beats(items, annotation_beats))
+    reaction_records = []
+    final_text = render_annotated_items(
+        insert_annotation_beats(items, annotation_beats), reaction_records=reaction_records,
+    )
+    if reaction_records:
+        from reaction_integrity import validate_reaction_output
+        reaction_records = validate_reaction_output(final_text, reaction_records, cast, idx, cfg)
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(final_text)
@@ -1268,6 +1367,7 @@ def annotate_script(options: dict, provider_instance=None) -> dict:
 
     return {
         "text": final_text,
+        "reaction_records": reaction_records,
         "proposals": proposals,
         "diagnostics": diagnostics,
         "out": out_path,

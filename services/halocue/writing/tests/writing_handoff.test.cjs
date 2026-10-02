@@ -1,0 +1,14 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');const path=require('node:path');const vm=require('node:vm');
+const source=fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8');
+function load(name,extras={}){const start=source.indexOf(`function ${name}(`),end=source.indexOf('\nfunction ',start+10);const ctx={esc:x=>String(x??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'),...extras};vm.createContext(ctx);vm.runInContext(source.slice(start,end),ctx);return ctx[name];}
+const choose=load('nextWritingScene');
+const chapters=[{id:'chapter1',title:'第一章',scenes:[{id:'first',title:'开场',contract:{goal:'发现录音'}},{id:'second',title:'追查'}]}];
+function handoff(work={},opts={}){const state={work:{chapters,proposals:[],harness:{outcome:'ready'},...work},agentPresentation:null};return load('writingHandoffMarkup',{state,blueprintIsConfirmed:()=>opts.formal!==false,stageGate:()=>({allowed:opts.allowed!==false}),workAgentActiveRun:()=>opts.running||null,workConversationThread:()=>({}),writingTarget:()=>({anchor_scene_id:opts.saved||''}),nextWritingScene:choose})();}
+test('first entry selects a real first scene and navigation is not generation',()=>{const html=handoff();assert.match(html,/开始写第一场/);assert.match(html,/data-scene-open="first"/);assert.match(html,/不会调用模型/);assert.doesNotMatch(html,/data-start-scene-drafting|data-generate/);});
+test('saved drafted scene resumes while new work starts at first unwritten scene',()=>{const list=structuredClone(chapters);list[0].scenes[0].current_revision_id='r';assert.equal(choose(list,'first').id,'first');assert.equal(choose(list,'invalid').id,'second');assert.match(handoff({chapters:list},{saved:'first'}),/继续写这一场/);});
+test('empty and fully written structures do not advertise starting first scene',()=>{assert.equal(handoff({chapters:[]}), '');const list=structuredClone(chapters);list[0].scenes.forEach(s=>s.current_revision_id='r');assert.equal(handoff({chapters:list}), '');});
+test('pending, blocked, unconfirmed, running and gate-locked states keep their real next action',()=>{assert.equal(handoff({proposals:[{status:'pending'}]}),'');for(const outcome of ['blocked','in_progress','needs_user'])assert.equal(handoff({harness:{outcome}}),'');for(const opts of [{formal:false},{allowed:false},{running:{id:'r'}}])assert.equal(handoff({},opts),'');});
+test('scene titles and goals are escaped',()=>{const list=structuredClone(chapters);list[0].scenes[0].title='<img src=x>';assert.doesNotMatch(handoff({chapters:list}),/<img/);});
+test('handoff replaces generic status rather than duplicating it',()=>{const html=load('workUserStatusMarkup',{state:{userStatus:{primary_action:{id:'old'}}},writingHandoffMarkup:()=>'<section>next-scene</section>'})();assert.equal(html,'<section>next-scene</section>');});

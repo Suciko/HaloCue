@@ -14,6 +14,16 @@ USAGE_A = {
 }
 
 
+NORMALIZED_USAGE_A = {
+    **USAGE_A,
+    "schema_version": "provider-usage/1.0",
+    "usage_status": "legacy_unknown",
+    "cache_status": "unknown",
+    "cost_status": "partial",
+    "input_tokens_semantics": "unknown",
+}
+
+
 class ReplacementProvider(FakeWritingProvider):
     kind = "provider-b"
     display_name = "Provider B"
@@ -256,9 +266,9 @@ def test_structure_plan_pins_provider_for_attempt_proposal_usage_and_result(tmp_
     assert result["simulation"] is False
     assert proposal["provider"]["config_digest"] == "digest-a"
     assert item["attempts"][0]["provider"] == "provider-a"
-    assert item["acceptance"]["usage"] == USAGE_A
+    assert item["acceptance"]["usage"] == NORMALIZED_USAGE_A
     assert message["provider"]["kind"] == "provider-a"
-    assert {key: message[key] for key in USAGE_A} == USAGE_A
+    assert {key: message[key] for key in NORMALIZED_USAGE_A} == NORMALIZED_USAGE_A
 
 
 def test_work_review_pins_provider_for_attempt_gate_usage_and_result(tmp_path):
@@ -274,9 +284,9 @@ def test_work_review_pins_provider_for_attempt_gate_usage_and_result(tmp_path):
     gate = next(item for item in result["work"]["gates"] if item["id"] == result["gate_id"])
     assert result["simulation"] is False
     assert item["attempts"][0]["provider"] == "provider-a"
-    assert item["acceptance"]["provider_usage"] == USAGE_A
+    assert item["acceptance"]["provider_usage"] == NORMALIZED_USAGE_A
     assert gate["snapshot"]["provider"]["config_digest"] == "digest-a"
-    assert gate["snapshot"]["provider_usage"] == USAGE_A
+    assert gate["snapshot"]["provider_usage"] == NORMALIZED_USAGE_A
 
 
 def test_memory_extract_pins_provider_for_attempt_proposal_usage_and_result(tmp_path):
@@ -296,8 +306,8 @@ def test_memory_extract_pins_provider_for_attempt_proposal_usage_and_result(tmp_
     assert result["simulation"] is False
     assert proposal["provider"]["config_digest"] == "digest-a"
     assert item["attempts"][0]["provider"] == "provider-a"
-    assert item["acceptance"]["usage"] == USAGE_A
-    assert run["policy"]["usage"] == USAGE_A
+    assert item["acceptance"]["usage"] == NORMALIZED_USAGE_A
+    assert run["policy"]["usage"] == NORMALIZED_USAGE_A
 
 
 def test_scene_retry_rejects_provider_configuration_change(tmp_path):

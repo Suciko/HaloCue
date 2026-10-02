@@ -168,6 +168,15 @@ def test_story_mode_preserves_source_and_compiles_director_cues(tmp_path, story_
     scenes = build(parse_script(output, cast), cast_data, cast, index, story_type)
     rows = [row for _title, scripts in scenes for row in scripts]
     assert len(rows) == len(case["source"].splitlines())
+    if story_type == "bond":
+        # Standard prompt requires ordinary portrait speakers in the picture;
+        # rejected listener-only intent must be explained, not silently applied.
+        first = rows[0]
+        assert first["speakerSlotNum"] > 0
+        assert first["characters"]["$values"][first["speakerSlotNum"]]["name"] == "rin"
+        rejected = [d for d in result["diagnostics"] if d.get("reason") == "portrait_speaker_not_visible"]
+        assert rejected and rejected[0]["line_no"] == 1
+        assert rejected[0]["source_id"]
     for row in rows:
         assert row["$type"].startswith("ScriptData")
         visible = [

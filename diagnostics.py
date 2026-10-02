@@ -11,6 +11,7 @@ DIAGNOSTIC_CODES = {
     "draft.blank_node": {"severity": "error", "message_tmpl": "草稿包含无意义的空白卡片"},
     "actor.unbound": {"severity": "error", "message_tmpl": "演员表里没有「{who}」，此行跳过"},
     "line.unparsable": {"severity": "error", "message_tmpl": "无法解析的行: {text}"},
+    "dir.unconsumed": {"severity": "error", "message_tmpl": "一次性前缀指令 @{cmd} 在当前场景内没有后续台词承接"},
     "dir.unknown": {"severity": "error", "message_tmpl": "未知指令: {cmd}"},
     "dir.argument_error": {"severity": "error", "message_tmpl": "指令参数格式错误: @{cmd} {arg}"},
     "face.invalid": {"severity": "error", "message_tmpl": "非法表情标识: {face}"},
@@ -55,6 +56,15 @@ KNOWN_COMMANDS = {
     "raw",
 }
 
+# These commands write the compiler's per-dialogue Pending state. Do not infer
+# this from KNOWN_COMMANDS: stage/auto/camera_hold and persistent scene settings
+# are intentionally exempt, even when they also update staging state.
+PENDING_PREFIX_COMMANDS = frozenset({
+    "wait", "se", "sound", "place", "popup", "raw", "bgshake", "clearst",
+    "hidemenu", "showmenu", "aronatouch", "shot", "st", "stm", "zoom",
+    "enter", "exit", "move", "fx", "camera", "hl",
+})
+
 THEMATIC_BREAK_RE = re.compile(r"^(?P<mark>[-*_])(?:\s*(?P=mark)){2,}$")
 
 
@@ -81,6 +91,52 @@ def create_diagnostic(
         "card_id": card_id,
         "message": message,
     }
+
+
+def unconsumed_prefix_diagnostics(
+    nodes: List[Any], cast: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """Locate every prefix lacking a dialogue event in its own scene.
+
+    No cast means static preflight (or compile_document's empty-cast mode):
+    every parsed dialogue emits an event. With bindings, use the compiler's
+    speaker resolution so a skipped, unbound line cannot consume Pending.
+    Keep occurrences, not just command names: duplicate prefixes each own a
+    source location. This does not validate arguments or mutate events/nodes.
+    """
+    # document imports this module; defer the shared resolver until invocation.
+    from document import split_head
+
+    diagnostics = []
+    pending = []
+
+    def flush() -> None:
+        diagnostics.extend(
+            create_diagnostic(
+                "dir.unconsumed", line_no=node.line_no,
+                cmd=node.fields.get("cmd", ""),
+            )
+            for node in pending
+        )
+        pending.clear()
+
+    for node in nodes:
+        kind = getattr(node, "kind", "")
+        fields = getattr(node, "fields", {})
+        if kind in {"scene", "separator"} or (
+            kind == "unknown"
+            and THEMATIC_BREAK_RE.fullmatch(getattr(node, "raw", "").strip())
+        ):
+            flush()
+        elif kind == "dir" and fields.get("cmd", "").lower() in PENDING_PREFIX_COMMANDS:
+            pending.append(node)
+        elif kind == "line":
+            who = fields.get("who", "")
+            real_who = (split_head(who, cast)[0] or who) if cast else who
+            if not cast or real_who in cast:
+                pending.clear()
+    flush()
+    return diagnostics
 
 
 def validate_script_diagnostics(
@@ -197,4 +253,5 @@ def validate_script_diagnostics(
                             create_diagnostic("shot.target_offscreen", line_no=line_no, target=target)
                         )
 
+    diagnostics.extend(unconsumed_prefix_diagnostics(nodes, cast))
     return diagnostics

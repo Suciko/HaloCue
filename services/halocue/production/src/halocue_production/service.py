@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
 import mimetypes
 import os
+import platform
 import re
+import subprocess
 import threading
 from dataclasses import replace
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +31,8 @@ from .model_settings import DirectionModelSettings
 from .repository import ProductionRepository
 from .resource_catalog import ResourceCatalog
 from .name_baseline import CharacterNameBaseline
-from .resource_previews import ResourcePreview
+from .background_import import prepare_background_import, aa_registered_resources
+from .resource_previews import ResourcePreview, ResourcePreviewCatalog
 from .settings_store import SettingsStore
 from .asset_staging import AssetStaging
 from .asset_recognition import recognize as recognize_asset_content
@@ -54,6 +59,8 @@ class ProductionService:
     def __init__(self, settings: Settings) -> None:
         settings.prepare()
         self.settings = settings
+        self._startup_aa_data = settings.aa_data
+        self._aa_session_selection = False
         self.repository = ProductionRepository(settings.data_dir)
         self.settings_store = SettingsStore(settings.data_dir)
         persisted = self.settings_store.load()
@@ -65,7 +72,13 @@ class ProductionService:
             except ProductionError:
                 configured_aa = None
             if configured_aa:
-                self.settings = replace(settings, aa_data=configured_aa)
+                self.settings = replace(self.settings, aa_data=configured_aa)
+        # An explicitly supplied environment index always wins.  Otherwise a
+        # locally rebuilt index survives a restart through settings.json.
+        if self.settings.resource_index is None and not os.getenv("HALOCUE_RESOURCE_INDEX"):
+            persisted_index = Path(str(persisted.get("resource_index") or "")).expanduser()
+            if persisted_index.is_file():
+                self.settings = replace(self.settings, resource_index=persisted_index.resolve())
         self.adapter = Legacy093Adapter(self.settings)
         self.name_baseline = CharacterNameBaseline(self.settings.name_baseline)
         self.resources = ResourceCatalog(
@@ -327,6 +340,18 @@ class ProductionService:
             saved = self.direction_model_settings._save_candidate(candidate, connection_test=tested)
         return {**saved, "test": tested}
 
+    @contextmanager
+    def _direction_model_access(self):
+        # Activation holds this lock across a connection test. Never wait for
+        # it while holding the state lock used by pause/cancel on other jobs.
+        lock = self.direction_model_settings.activation_lock
+        if not lock.acquire(blocking=False):
+            raise ProductionError("direction_model_busy", "模型配置正在测试或保存，请稍后重试生成。", status=409)
+        try:
+            yield
+        finally:
+            lock.release()
+
     def generate_direction(
         self,
         run_id: str,
@@ -335,8 +360,9 @@ class ProductionService:
         generation_id: str | None = None,
         resumed_from_job_id: str | None = None,
         frozen_direction_profile: dict[str, str] | None = None,
+        frozen_model_identity: dict[str, str] | None = None,
     ) -> tuple[int, dict[str, Any]]:
-        with self._state_lock:
+        with self._direction_model_access(), self._state_lock:
             run = self._run(run_id)
             if run.source_summary.get("generation_mode") != "ai_direction":
                 raise ProductionError(
@@ -366,6 +392,12 @@ class ProductionService:
                     status=409,
                 )
             direction_profile = direction_profile_snapshot["id"]
+            model_identity = self.direction_model_settings.execution_identity()
+            if frozen_model_identity is not None and frozen_model_identity != model_identity:
+                raise ProductionError(
+                    "direction_model_changed",
+                    "演出模型配置已变化，不能续用旧检查点；请发起新的生成任务。", status=409,
+                )
             active = self._assert_no_other_mutation_job(
                 run,
                 requested_kind="direction_generation",
@@ -373,6 +405,12 @@ class ProductionService:
             )
             if active:
                 context = active.retry_context if isinstance(active.retry_context, dict) else {}
+                if context.get("model_identity") != model_identity or (
+                    generation_id and generation_id != context.get("generation_id")
+                ):
+                    raise ProductionError(
+                        "direction_generation_conflict", "另一个模型配置或生成代次的任务正在运行。", status=409,
+                    )
                 active_profile = context.get("direction_profile_snapshot")
                 if active_profile is None:
                     active_profile = self.adapter.direction_profile_snapshot(
@@ -414,6 +452,8 @@ class ProductionService:
             generation_id = generation_id or new_id("direction")
             job_id = new_id("job")
             provider = self.direction_models.provider()
+            if self.direction_model_settings.execution_identity() != model_identity:
+                raise ProductionError("direction_model_changed", "模型配置正在变化，请重试。", status=409)
             run.state = "generating_direction"
             run.current_stage = "generation"
             run.active_job_id = job_id
@@ -542,6 +582,18 @@ class ProductionService:
                             latest.state = "direction_failed"
                         latest.updated_at = utc_now()
                         self.repository.save_run(latest)
+                # A resumed generation reuses its generation ID. Preserve the
+                # failed attempt's sanitized usage on this job before retry can
+                # replace the shared generation audit.
+                try:
+                    audits = self.adapter.direction_proposals(str(run.draft_token))
+                    audit = next((item for item in audits.get("generations", [])
+                                  if item.get("generation_id") == generation_id), None)
+                    if audit and audit.get("metrics"):
+                        control.record_event({"kind": "generation_summary", "state": "failed",
+                                              "generation_id": generation_id, "metrics": audit["metrics"]})
+                except (ProductionError, OSError, ValueError):
+                    pass
                 raise
             finally:
                 remove_stop_callback()
@@ -566,6 +618,7 @@ class ProductionService:
             cooperative=True,
             resumed_from_job_id=resumed_from_job_id,
             retry_context={
+                "model_identity": model_identity,
                 "expected_draft_version": expected,
                 "story_type": story_type,
                 "layout_mode": layout_mode,
@@ -586,6 +639,19 @@ class ProductionService:
 
     def aa_workspace_settings(self) -> dict[str, Any]:
         path = self.settings.aa_data
+        persisted = self.settings_store.load().get("aa_data")
+        startup = self._startup_aa_data
+        session_override = bool(self._aa_session_selection and startup and path != startup)
+        restart_path = startup
+        if restart_path is None and persisted:
+            # Match constructor validation: a stale saved workspace is not adopted.
+            try:
+                restart_path = self.settings_store.validate_aa_workspace(persisted)
+            except ProductionError:
+                restart_path = None
+        source = "settings_session_override" if session_override else (
+            "startup" if startup and not self._aa_session_selection else "settings" if path else "none"
+        )
         valid = bool(
             path
             and path.is_dir()
@@ -600,6 +666,12 @@ class ProductionService:
                 "configured": bool(path),
                 "path": str(path) if path else None,
                 "valid": valid,
+                "source": source,
+                "persisted_path": str(persisted) if persisted else None,
+                "startup_path": str(startup) if startup else None,
+                "restart_path": str(restart_path) if restart_path else None,
+                "session_override": session_override,
+                "startup_overrides_saved": bool(startup and persisted and Path(str(persisted)) != startup),
             },
             "capabilities": self.capabilities(),
         }
@@ -629,13 +701,88 @@ class ProductionService:
             "capabilities": self.capabilities(),
         }
 
+    def pick_aa_executable(self) -> dict[str, Any]:
+        """Open the native Windows picker for the AA executable on this host.
+
+        The picker intentionally lives behind the local production service:
+        browsers cannot reveal an absolute executable path from a normal file
+        input.  The returned path is *not* adopted here; the UI still inspects
+        the resolved workspace and asks the user to confirm binding it.
+        """
+        if platform.system() != "Windows":
+            raise ProductionError(
+                "aa_picker_windows_only",
+                "当前运行环境不是 Windows，无法打开 AzureArchive.exe 选择器。请手动输入路径。",
+                status=409,
+            )
+        script = r"""
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = '选择 AzureArchive.exe'
+$dialog.Filter = 'AzureArchive.exe|AzureArchive.exe|可执行文件 (*.exe)|*.exe|所有文件 (*.*)|*.*'
+$dialog.FileName = 'AzureArchive.exe'
+$dialog.CheckFileExists = $true
+$dialog.CheckPathExists = $true
+$dialog.Multiselect = $false
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+  [Console]::Write($dialog.FileName)
+}
+"""
+        try:
+            completed = subprocess.run(
+                [
+                    "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
+                    "-ExecutionPolicy", "Bypass", "-Command", script,
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120,
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except FileNotFoundError as exc:
+            raise ProductionError(
+                "aa_picker_unavailable",
+                "无法启动 Windows 文件选择器。请手动输入 AzureArchive.exe 路径。",
+                status=503,
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ProductionError(
+                "aa_picker_timeout",
+                "等待 Windows 文件选择器超时。请关闭选择窗口后重试，或手动输入路径。",
+                status=504,
+            ) from exc
+        if completed.returncode != 0:
+            raise ProductionError(
+                "aa_picker_failed",
+                "Windows 文件选择器没有正常启动。请手动输入 AzureArchive.exe 路径。",
+                status=503,
+            )
+        selected = completed.stdout.strip()
+        if not selected:
+            return {"ok": True, "selected": False, "path": None}
+        path = Path(selected).expanduser()
+        if path.suffix.lower() != ".exe" or not path.is_file():
+            raise ProductionError(
+                "aa_picker_invalid_selection",
+                "请选择一个存在的 AzureArchive.exe 文件。",
+                status=422,
+            )
+        return {"ok": True, "selected": True, "path": str(path.resolve())}
+
     def configure_aa_workspace(self, payload: dict[str, Any]) -> dict[str, Any]:
         path = self.settings_store.validate_aa_workspace(payload.get("path"))
         current = self.settings_store.load()
         current["aa_data"] = str(path)
         self.settings_store.save(current)
         self.settings = replace(self.settings, aa_data=path)
+        self._aa_session_selection = True
         self.adapter.settings = self.settings
+        self.adapter.previews = ResourcePreviewCatalog(self.settings.legacy_root, path, self.settings.resource_index)
         self.resources = ResourceCatalog(
             self.settings.resource_index,
             self.settings.aa_data,
@@ -644,33 +791,68 @@ class ProductionService:
         )
         return self.aa_workspace_settings()
 
-    def spine_cli_settings(self) -> dict[str, Any]:
-        persisted = self.settings_store.load().get("spine_cli")
-        path = None
-        if persisted:
-            try:
-                path = Path(str(persisted)).expanduser().resolve()
-            except (OSError, ValueError):
-                path = None
-        capability = spine_rendering.capability(
-            legacy_root=self.settings.legacy_root,
-            data_dir=self.settings.data_dir,
-        )
-        persisted_valid = bool(path and path.is_file()) if persisted else False
-        source = "settings" if persisted_valid else (
-            "environment" if os.environ.get("HALOCUE_SPINE_CLI") or os.environ.get("SPINE_CLI") else "none"
-        )
-        configured = persisted_valid or (not persisted and capability["state"] == "available")
+    def rebuild_resource_index(self) -> dict[str, Any]:
+        """Rebuild the selectable AA resource index without modifying AA projects."""
+        if not self.settings.aa_data:
+            raise ProductionError("aa_workspace_required", "请先采用一个有效的 AA 工作区", status=409)
+        output = self.settings.data_dir / "reference" / new_id("import") / "aa_resources.json"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            builder = self.adapter._legacy_module("build_index")
+            characters = builder.harvest_characters(str(self.settings.aa_data))
+            sounds = builder.harvest_sounds(str(self.settings.aa_data))
+            faces_used = builder.harvest_faces_used(str(self.settings.aa_data))
+            face_capabilities = builder.harvest_face_capabilities(str(self.settings.aa_data))
+            warnings = []
+            registered = aa_registered_resources(self.settings.aa_data, self.settings.resource_index)
+            # Backgrounds belong to the shared library. Story history may contain
+            # private images and must not be harvested into new tasks.
+            backgrounds = dict(registered.get("bg") or {})
+            conflicts = list(registered.get("bg_conflict") or [])
+            for key in conflicts:
+                backgrounds.pop(key, None)
+            local_ids = {str(row.get("identifier")) for row in characters}
+            characters.extend(row for row in registered.get("characters", []) if isinstance(row, dict) and row.get("identifier") and str(row["identifier"]) not in local_ids)
+            sounds = sorted(set(sounds) | {str(key) for key in registered.get("sounds", [])})
+            index = {"_source": str(self.settings.aa_data), "bg": backgrounds, "bg_conflict": conflicts, "sounds": sounds, "characters": characters, "faces_used": faces_used, "face_capabilities": face_capabilities, "enums": {"emoticon": {str(key): {"sym": builder.EMOTICON[key], "cn": builder.EMOTICON_CN.get(key, "")} for key in builder.EMOTICON}, "action": {str(key): {"verb": builder.ACTION[key], "cn": builder.ACTION_CN.get(key, "")} for key in builder.ACTION if key}, "appear": {str(key): {"verb": builder.APPEAR[key], "cn": builder.APPEAR_CN.get(key, "")} for key in builder.APPEAR if key}, "shape": {str(key): {"verb": builder.SHAPE[key], "cn": builder.SHAPE_CN.get(key, "")} for key in builder.SHAPE}}}
+            media_report = prepare_background_import(index, aa_data=self.settings.aa_data, output=output,
+                                                     previous_path=self.settings.resource_index, legacy_root=self.settings.legacy_root)
+            warnings.extend(media_report["warnings"])
+            output.write_text(json.dumps(index, ensure_ascii=False, indent=1), encoding="utf-8")
+            stats = {"warnings": warnings}
+        except ModuleNotFoundError as exc:
+            dependency = str(getattr(exc, "name", "") or "依赖")
+            raise ProductionError("resource_index_dependency_missing", f"无法导入 AA 资源索引：缺少 {dependency}。请安装对应解析依赖后重试。", status=409, details={"dependency": dependency}) from exc
+        except ProductionError:
+            raise
+        except Exception as exc:
+            raise ProductionError("resource_index_rebuild_failed", "资源索引重建失败；AA 工作区未被修改。", status=500, details={"reason": str(exc)[:500]}) from exc
+        current = self.settings_store.load()
+        current["resource_index"] = str(output)
+        self.settings_store.save(current)
+        self.settings = replace(self.settings, resource_index=output)
+        self.adapter.settings = self.settings
+        self.adapter.previews = ResourcePreviewCatalog(self.settings.legacy_root, self.settings.aa_data, output)
+        self.resources = ResourceCatalog(output, self.settings.aa_data, self.settings.legacy_root, self.name_baseline)
         return {
             "ok": True,
-            "spine_cli": {
-                "configured": configured,
-                "path": str(path) if path else None,
-                "source": source,
-                "valid": persisted_valid if persisted else capability["state"] == "available",
+            "resource_index": {
+                "path": str(output),
+                "backgrounds": len(index.get("bg") or {}),
+                "characters": len(index.get("characters") or []),
+                "sounds": len(index.get("sounds") or []),
+                "warnings": list(stats.get("warnings") or []),
+                "background_media": media_report["counts"],
             },
-            "capability": capability,
+            "next_step": "新建制作任务会冻结新的资源索引；现有任务保持原资源快照以保证可复现。",
         }
+
+    def spine_cli_settings(self) -> dict[str, Any]:
+        selection = spine_rendering.cli_selection(
+            legacy_root=self.settings.legacy_root, data_dir=self.settings.data_dir,
+        )
+        return {"ok": True, "spine_cli": selection,
+                "capability": spine_rendering.capability_from_selection(selection)}
 
     def configure_spine_cli(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.settings_store.load()
@@ -696,11 +878,18 @@ class ProductionService:
         return preview
 
     def list_run_resources(
-        self, run_id: str, kind: str, *, query: str = "", offset: int = 0, limit: int = 80
+        self,
+        run_id: str,
+        kind: str,
+        *,
+        query: str = "",
+        offset: int = 0,
+        limit: int = 80,
+        filters: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         run = self._run(run_id)
         return self.adapter.list_draft_resources(
-            str(run.draft_token), kind, query=query, offset=offset, limit=limit
+            str(run.draft_token), kind, query=query, offset=offset, limit=limit, filters=filters
         )
 
     def run_character_resource(self, run_id: str, identifier: str) -> dict[str, Any]:
@@ -1005,7 +1194,15 @@ class ProductionService:
         custom = self.adapter.task_asset_preview(str(run.draft_token), kind, key)
         if custom:
             return ResourcePreview(path=custom[0], media_type=custom[1])
-        return self.resource_preview(kind, key)
+        try:
+            return self.resource_preview(kind, key)
+        except ProductionError as exc:
+            if exc.code not in {"resource_preview_not_found", "resource_index_not_configured"}:
+                raise
+            frozen = self.adapter.draft_resource_preview(str(run.draft_token), kind, key)
+            if frozen is not None:
+                return frozen
+            raise
 
     def resource_usage(self, run_id: str) -> dict[str, Any]:
         """Return safe, task-local usage locations for registered resources."""
@@ -1042,6 +1239,15 @@ class ProductionService:
         return {"ok": True, "run_id": run_id, "usage": usage}
 
     def create_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        upstream = payload.get("script_release")
+        identity = str(upstream.get("id") or "").strip() if isinstance(upstream, dict) else ""
+        release_id = identity if UPSTREAM_RELEASE_ID.fullmatch(identity) else None
+        # Subclasses extend the protected template so receipt publication stays
+        # in this same identity-scoped admission, without recursive file locking.
+        with self.repository.handoff_guard(release_id):
+            return self._create_run(payload)
+
+    def _create_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         direction_profile = self.adapter.direction_profile_snapshot(
             payload.get("direction_profile")
         )["id"]
@@ -1178,7 +1384,8 @@ class ProductionService:
             )
             try:
                 result = self.adapter.execute_ai_preflight(
-                    token=str(run.draft_token), preflight_id=preflight_id, provider=provider
+                    token=str(run.draft_token), preflight_id=preflight_id, provider=provider,
+                    publish=control.commit_side_effect,
                 )
             finally:
                 remove_stop_callback()
@@ -1272,8 +1479,11 @@ class ProductionService:
             "run": run.to_dict(),
             "gates": gates,
             "draft": draft,
-            "active_job": self._job_public(active_job.to_dict()) if active_job else None,
-            "last_job": self._job_public(last_job.to_dict()) if last_job else None,
+            "draft_direction_profile": self.adapter.committed_direction_profile(
+                str(run.draft_token), run.last_direction_generation_id,
+            ) if run.draft_token else None,
+            "active_job": self._job_with_direction_metrics(active_job.to_dict()) if active_job else None,
+            "last_job": self._job_with_direction_metrics(last_job.to_dict()) if last_job else None,
         }
 
     def performance_preview(self, run_id: str) -> dict[str, Any]:
@@ -1301,7 +1511,8 @@ class ProductionService:
             speaker = str(current.get("who") or "").strip()
             mapping = cast.get(speaker) if isinstance(cast.get(speaker), dict) else {"kind": "unset"}
             speaker_display = {
-                "name": speaker,
+                "name": str(mapping.get("name_ja_fandom") or mapping.get("name") or mapping.get("display_name") or speaker),
+                "source_name": speaker,
                 "mapping_kind": str(mapping.get("kind") or "unset"),
                 "character_id": str(mapping.get("id") or ""),
             }
@@ -1339,20 +1550,29 @@ class ProductionService:
                 presentation = "direction"
                 title = f"@{command or '指令'}"
                 text = str(current.get("arg") or card.get("raw") or "")
+                if command in {"camera", "camera_hold", "enter", "exit", "move"}:
+                    text = "".join(
+                        str(cast.get(part, {}).get("name_ja_fandom") or cast.get(part, {}).get("name") or part)
+                        for part in re.split(r"([,，\s]+)", text)
+                    )
             else:
                 presentation = "note"
                 title = kind or "文本"
                 text = str(current.get("text") or current.get("title") or card.get("raw") or "")
-            background_preview_available = (
-                bool(background)
-                and (
-                    self.adapter.task_asset_preview(
-                        str(run.draft_token), "backgrounds", background
-                    )
-                    is not None
-                    or self.resources.preview("backgrounds", background) is not None
-                )
-            )
+            # Resource images are optional for a read-only draft preview.
+            # Reopening a durable task without a global AA index must not hide
+            # its frozen dialogue. Unexpected preview errors still propagate.
+            background_preview_available = False
+            if background:
+                try:
+                    self.run_resource_preview(run_id, "backgrounds", background)
+                    background_preview_available = True
+                except ProductionError as exc:
+                    if exc.code not in {
+                        "resource_preview_not_found", "resource_index_not_configured",
+                        "resource_index_corrupted",
+                    }:
+                        raise
             teacher_reply = None
             if kind == "line" and mapping.get("role") == "teacher" and teacher_mode == "sel_single":
                 teacher_reply = self.adapter.teacher_reply(str(card.get("card_id") or ""), text)
@@ -1509,6 +1729,10 @@ class ProductionService:
             blockers.append("pending_review")
         if caps["compile"]["state"] != "available":
             blockers.append("compile_not_configured")
+        elif run.draft_token:
+            resource_issue, _ = self.adapter.frozen_resource_index_issue(str(run.draft_token))
+            if resource_issue:
+                blockers.append(resource_issue)
         build_is_current = bool(run.last_build_id) and (
             run.last_build_draft_version == int(draft.get("draft_version") or -1)
         )
@@ -1564,8 +1788,9 @@ class ProductionService:
                 if character.get("role") == "teacher":
                     raise ProductionError("teacher_requires_no_portrait", "老师身份不能作为立绘角色绑定", status=409)
                 mapping = dict(mapping)
-                # The task snapshot owns display names. Ignore stale client labels.
-                mapping["name"] = str(character.get("name") or identifier)
+                # Rebinding explicitly adopts the confirmed naming policy, while
+                # the task resource snapshot and AA identity remain unchanged.
+                mapping.update(self.name_baseline.resolve(character))
         try:
             expected = int(payload["expected_draft_version"])
         except (KeyError, TypeError, ValueError) as exc:
@@ -1697,6 +1922,9 @@ class ProductionService:
     def _validated_card_patch(card: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         allowed = {
             "line": {"who", "text", "face", "emo", "act", "fx"},
+            # A raw/unknown card can only be promoted to an ordinary dialogue
+            # line; it cannot be silently edited while retaining unknown syntax.
+            "unknown": {"who", "text", "face", "emo", "act", "fx"},
             "dir": {"cmd", "arg"}, "scene": {"title"}, "title": {"title"}, "meta": {"text"},
         }.get(str(card.get("kind") or ""))
         if allowed is None:
@@ -1727,8 +1955,10 @@ class ProductionService:
             if command == "stage" and (not argument or any(not re.fullmatch(r".+@[1-5]", slot) for slot in argument.split())):
                 raise ProductionError("directive_argument_invalid", "@stage 请填写“角色@位置”，位置为 1 到 5")
             return {"cmd": command, "arg": argument}
-        if kind in {"line", "meta"} and "text" in normalized and not normalized["text"].strip():
+        if kind in {"line", "unknown", "meta"} and "text" in normalized and not normalized["text"].strip():
             raise ProductionError("card_text_required", "文本内容不能为空")
+        if kind == "unknown" and not normalized.get("who", "").strip():
+            raise ProductionError("unknown_card_speaker_required", "请先填写这句的说话者，再转换为台词卡")
         if kind in {"scene", "title"} and "title" in normalized and not normalized["title"].strip():
             raise ProductionError("card_title_required", "标题不能为空")
         return normalized
@@ -1829,10 +2059,6 @@ class ProductionService:
         )
         if not background_key:
             raise ProductionError("background_key_required", "必须选择一个背景")
-        if not self.adapter.draft_resource_contains(
-            str(run.draft_token), "backgrounds", background_key
-        ):
-            raise ProductionError("background_not_found", "所选背景不在资源索引中", status=404)
         self.adapter.resolve_background(
             token=str(run.draft_token),
             card_id=card_id,
@@ -1983,14 +2209,54 @@ class ProductionService:
         job = self.jobs.get(job_id)
         if not job:
             raise ProductionError("job_not_found", "后台任务不存在", status=404)
-        return {"ok": True, "job": self._job_public(job.to_dict())}
+        return {"ok": True, "job": self._job_with_direction_metrics(job.to_dict())}
+
+    def _job_with_direction_metrics(self, job: dict[str, Any]) -> dict[str, Any]:
+        public = self._job_public(job)
+        if job.get("kind") != "direction_generation" or job.get("state") not in {
+            "failed", "interrupted", "paused", "cancelled", "succeeded",
+        }:
+            return public
+        context = job.get("retry_context") or {}
+        generation_id = context.get("generation_id")
+        if not generation_id or not job.get("run_id"):
+            return public
+        summary = next((event for event in reversed(job.get("events") or [])
+                        if event.get("kind") == "generation_summary" and event.get("metrics")), None)
+        audit = {"metrics": summary["metrics"]} if summary else None
+        if audit is None:
+            run = self._run(str(job["run_id"]))
+            if not run.draft_token or run.last_job_id != job.get("job_id"):
+                return public
+            # Backfill legacy latest jobs only. An older attempt must not inherit
+            # a later resumed attempt's metrics from the shared audit file.
+            audits = self.adapter.direction_proposals(str(run.draft_token))
+            audit = next((entry for entry in audits.get("generations", [])
+                          if entry.get("generation_id") == generation_id), None)
+        if audit and audit.get("metrics"):
+            metrics = dict(audit["metrics"])
+            records = metrics.get("request_records") or []
+            # Older failure audits contain physical records but no totals.
+            # Sum only a complete set with reported values; absence is not zero.
+            if records and len(records) == metrics.get("requests"):
+                for field in ("input_tokens", "output_tokens", "cache_read_tokens"):
+                    if field not in metrics and all(isinstance(row.get(field), (int, float)) for row in records):
+                        metrics[field] = sum(row[field] for row in records)
+                if "cache_read_tokens" in metrics:
+                    metrics.setdefault("cache_reported", True)
+                failed = [row for row in records if row.get("outcome") == "failed"]
+                for field in ("input_tokens", "output_tokens"):
+                    if failed and all(isinstance(row.get(field), (int, float)) for row in failed):
+                        metrics.setdefault("failed_request_" + field, sum(row[field] for row in failed))
+            public["result"] = {**(public.get("result") or {}), "metrics": metrics}
+        return public
 
     def cancel_job(self, job_id: str) -> dict[str, Any]:
         with self._state_lock:
             job = self.jobs.get(job_id)
             if not job:
                 raise ProductionError("job_not_found", "后台任务不存在", status=404)
-            if job.run_id:
+            if job.run_id and job.kind != "ai_preflight":
                 run = self._run(job.run_id)
                 if run.active_job_id != job_id:
                     raise ProductionError(
@@ -2119,6 +2385,11 @@ class ProductionService:
                 )
                 _, response = self.request_cg_advice(run_id, payload)
             elif kind == "direction_generation":
+                model_identity = context.get("model_identity")
+                if not isinstance(model_identity, dict) or model_identity.get("schema_version") != "direction-model-identity/1.0":
+                    raise ProductionError(
+                        "job_retry_unavailable", "旧任务缺少模型身份，不能安全续跑；请新建生成任务。", status=409
+                    )
                 payload["story_type"] = str(context.get("story_type") or "auto")
                 payload["layout_mode"] = str(context.get("layout_mode") or "ai")
                 payload["direction_profile"] = context.get("direction_profile", "standard")
@@ -2132,6 +2403,7 @@ class ProductionService:
                     generation_id=generation_id if reuse_checkpoint else None,
                     resumed_from_job_id=job_id if reuse_checkpoint else None,
                     frozen_direction_profile=context.get("direction_profile_snapshot"),
+                    frozen_model_identity=model_identity,
                 )
             else:
                 _, response = self.compile(run_id, payload)
@@ -2155,8 +2427,11 @@ class ProductionService:
         retry_context = job.get("retry_context") if isinstance(job.get("retry_context"), dict) else {}
         error = job.get("error") if isinstance(job.get("error"), dict) else {}
         error_code = str(error.get("code") or "")
+        model_identity = retry_context.get("model_identity")
+        identity_known = isinstance(model_identity, dict) and model_identity.get("schema_version") == "direction-model-identity/1.0"
         resumable = (
-            kind == "direction_generation"
+            identity_known
+            and kind == "direction_generation"
             and state in {"paused", "cancelled", "failed", "interrupted"}
             and bool(job.get("run_id"))
             and "expected_draft_version" in retry_context
@@ -2167,6 +2442,7 @@ class ProductionService:
             or (kind == "ai_preflight" and bool(job.get("run_id")))
             or (
                 kind in {"cg_advice", "direction_generation", "compile"}
+                and (kind != "direction_generation" or identity_known)
                 and bool(job.get("run_id"))
                 and "expected_draft_version" in retry_context
                 and (
@@ -2209,6 +2485,8 @@ class ProductionService:
             }
         else:
             next_action = {"label": "正在执行", "detail": "完成后任务状态会自动更新。", "stage": None}
+        if kind == "direction_generation" and not identity_known and state in {"paused", "cancelled", "failed", "interrupted"}:
+            next_action = {"label": "发起新的生成任务", "detail": "旧任务没有模型身份，不能安全续用检查点。", "stage": "generation"}
         public = {key: value for key, value in job.items() if key != "retry_context"}
         if kind == "direction_generation":
             public["direction_profile"] = (

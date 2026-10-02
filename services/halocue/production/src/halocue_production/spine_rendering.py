@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-import importlib
+import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
 from .errors import ProductionError
+from .legacy_modules import load_module
+from .settings_store import SettingsStore
 
 
 def _legacy_module(name: str, legacy_root: Path):
-    root = str(legacy_root.resolve())
-    if root not in sys.path:
-        sys.path.insert(0, root)
-    return importlib.import_module(name)
+    return load_module(name, legacy_root)
 
 
 def _config_paths(legacy_root: Path, data_dir: Path) -> tuple[Path, ...]:
@@ -24,31 +22,96 @@ def _config_paths(legacy_root: Path, data_dir: Path) -> tuple[Path, ...]:
     )
 
 
-def resolve_cli(*, legacy_root: Path, data_dir: Path) -> Path | None:
-    """Resolve the local Spine CLI without exposing its path to the browser."""
-    explicit = os.environ.get("HALOCUE_SPINE_CLI", "").strip() or os.environ.get(
-        "SPINE_CLI", ""
-    ).strip()
+def _resolved_path(value) -> Path | None:
+    try:
+        return (
+            Path(value.strip()).expanduser().resolve()
+            if isinstance(value, str) and value.strip()
+            else None
+        )
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
+def cli_selection(*, legacy_root: Path, data_dir: Path) -> dict[str, Any]:
+    """One source of truth for selected, effective and persisted CLI paths."""
+    persisted = SettingsStore(data_dir).load()
+    if "spine_cli" in persisted:
+        path = _resolved_path(persisted["spine_cli"])
+        valid = bool(path and path.is_file())
+        return {
+            "configured": valid,
+            "valid": valid,
+            "source": "settings",
+            "path": str(path) if path else None,
+            "effective_path": str(path) if valid else None,
+            "persisted_path": str(path) if path else None,
+            "reason": None if valid else "saved_spine_cli_unavailable",
+        }
+    explicit = (
+        os.environ.get("HALOCUE_SPINE_CLI", "").strip() or os.environ.get("SPINE_CLI", "").strip()
+    )
     try:
         analysis = _legacy_module("spine_face_analysis", legacy_root)
-        return analysis.resolve_spine_cli(
+        path = analysis.resolve_spine_cli(
             explicit=explicit or None,
             config_path=legacy_root / "aa_config.json",
             fallback_config_paths=_config_paths(legacy_root, data_dir),
         )
+    except ProductionError as error:
+        if (
+            error.code != "legacy_module_missing"
+            or error.details.get("module") != "spine_face_analysis"
+        ):
+            raise
+        # Older selected checkouts can omit this optional preview integration.
+        # Origin conflicts are different: keep those actionable failures visible.
+        path = None
     except (ImportError, OSError, ValueError, TypeError):
-        return None
-
-
-def capability(*, legacy_root: Path, data_dir: Path) -> dict[str, Any]:
-    cli = resolve_cli(legacy_root=legacy_root, data_dir=data_dir)
+        path = None
+    source = "discovered" if path else "none"
+    if path:
+        for value in (explicit, os.environ.get("SPINE_CLI", "")):
+            if _resolved_path(value) == path:
+                source = "environment"
+                break
+        if source == "discovered":
+            for config in _config_paths(legacy_root, data_dir):
+                try:
+                    values = json.loads(config.read_text(encoding="utf-8-sig"))
+                except (OSError, ValueError):
+                    continue
+                if isinstance(values, dict) and _resolved_path(values.get("spine_cli")) == path:
+                    source = "legacy_config" if config.parent == legacy_root else "data_config"
+                    break
     return {
-        "state": "available" if cli else "not_configured",
+        "configured": bool(path),
+        "valid": bool(path),
+        "source": source,
+        "path": str(path) if path else None,
+        "effective_path": str(path) if path else None,
+        "persisted_path": None,
+        "reason": None if path else "spine_cli_not_configured",
+    }
+
+
+def resolve_cli(*, legacy_root: Path, data_dir: Path) -> Path | None:
+    selection = cli_selection(legacy_root=legacy_root, data_dir=data_dir)
+    return Path(selection["effective_path"]) if selection["effective_path"] else None
+
+
+def capability_from_selection(selection: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "state": "available" if selection["valid"] else "not_configured",
         "requires_explicit_opt_in": True,
         "supported_kinds": ["character"],
         "evidence_only": True,
-        "reason": None if cli else "spine_cli_not_configured",
+        "reason": selection["reason"],
     }
+
+
+def capability(*, legacy_root: Path, data_dir: Path) -> dict[str, Any]:
+    return capability_from_selection(cli_selection(legacy_root=legacy_root, data_dir=data_dir))
 
 
 def _bundle_root(source: Path) -> Path:

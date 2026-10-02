@@ -104,8 +104,10 @@ def _analyse_paragraphs(paragraphs: list[str]) -> dict:
     if not paragraphs:
         raise ValueError("文档中没有可识别的正文。")
 
-    explicit_chapters = any(CHAPTER_RE.match(item) for item in paragraphs)
-    explicit_scenes = any(SCENE_RE.match(item) for item in paragraphs)
+    def heading_text(item):
+        return re.sub(r"^#{1,6}\s+", "", item)
+    explicit_chapters = any(CHAPTER_RE.match(heading_text(item)) for item in paragraphs)
+    explicit_scenes = any(SCENE_RE.match(heading_text(item)) for item in paragraphs)
     chapters: list[dict] = []
     scenes: list[dict] = []
     characters: Counter[str] = Counter()
@@ -138,17 +140,18 @@ def _analyse_paragraphs(paragraphs: list[str]) -> dict:
         return current_scene
 
     for source_index, paragraph in enumerate(paragraphs, start=1):
-        if CHAPTER_RE.match(paragraph):
-            current_chapter = {"id": f"chapter-{len(chapters) + 1:06d}", "title": paragraph, "paragraph_count": 0, "scene_count": 0}
+        heading = heading_text(paragraph)
+        if CHAPTER_RE.match(heading):
+            current_chapter = {"id": f"chapter-{len(chapters) + 1:06d}", "title": heading, "paragraph_count": 0, "scene_count": 0}
             chapters.append(current_chapter)
             current_scene = None
             continue
-        if SCENE_RE.match(paragraph):
+        if SCENE_RE.match(heading):
             chapter = ensure_chapter()
             current_scene = {
                 "id": f"scene-{len(scenes) + 1:06d}",
                 "chapter_id": chapter["id"],
-                "title": paragraph,
+                "title": heading,
                 "chapter_title": chapter["title"],
                 "paragraph_count": 0,
                 "first_paragraph": len(lines) + 1,
@@ -211,8 +214,8 @@ def _analyse_paragraphs(paragraphs: list[str]) -> dict:
 def parse_story_bytes(filename: str, raw: bytes) -> dict:
     safe_name = _safe_filename(filename)
     suffix = PurePath(safe_name).suffix.lower()
-    if suffix not in {".txt", ".docx"}:
-        raise ValueError("请选择 TXT 或 DOCX 文档。")
+    if suffix not in {".txt", ".md", ".docx"}:
+        raise ValueError("请选择 TXT、Markdown 或 DOCX 文档。")
     if not raw:
         raise ValueError("导入文件为空。")
     if len(raw) > MAX_STORY_BYTES:

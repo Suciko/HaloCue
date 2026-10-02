@@ -1,0 +1,7 @@
+# Conversation rail collapse affordance — 2026-09-19
+
+User reported the conversation sidebar cannot collapse. Reproduced the available header control: it already collapses the rail to width 0; the sidebar itself lacked a desktop collapse entry after divider button was hidden by earlier styling. Added a visible SVG collapse button beside the rail title, using the same shell state owner. Keep icon markup when updating labels, reflect aria-expanded, and return focus to the visible header expand button when the rail containing focus disappears. Mobile retains its existing drawer-close control; new desktop control hidden below 761px.
+
+Changed app.js, shell.js, agent-workspace.css, index.html cache versions and agent_main_surface.test.cjs. No backend/runtime restart or user-content changes.
+
+Verification: syntax checks app.js and shell.js pass; node --test services/halocue/writing/tests/agent_main_surface.test.cjs: 11 passed. Actual embedded live workbench: sidebar icon collapses width 260 to 0 and focuses expand entry; reload preserves collapsed width 0; expand restores width 260 and SVG. Left sidebar restored to original expanded state afterward. Screenshots: output/2026-09-19-model-picker/sidebar-collapse-entry.png and sidebar-collapsed.png. No claim of reproducing a broken original header click; issue fixed is missing in-place affordance. Mobile behavior not reverified. No commit/push.

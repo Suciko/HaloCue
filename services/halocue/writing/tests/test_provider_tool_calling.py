@@ -203,6 +203,8 @@ def test_unknown_reasoning_mode_falls_back_to_balanced_prompt(monkeypatch):
     }, PROMPT_ASSEMBLER)
     current_provider.discuss_work([], {})
 
+    assert "不询问小说还是剧本" in captured["body"]["messages"][0]["content"]
+    assert "仅在用户明确要求小说化阅读时" in captured["body"]["messages"][0]["content"]
     assert current_provider.reasoning_mode == "balanced"
     assert "创意推进、事实约束和回答篇幅之间保持平衡" in captured["body"]["messages"][0]["content"]
 

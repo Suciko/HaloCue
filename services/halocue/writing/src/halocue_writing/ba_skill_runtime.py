@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from services.halocue.runtime_layout import repository_root as application_root
 
 from .workflow_pack import (
     COMMON_RULES,
@@ -34,7 +35,7 @@ class BaWritingSkillRegistry:
             # A repository-local Skill may be supplied later under this stable
             # boundary. User-specific writing material must be injected through
             # HALOCUE_BA_WRITING_SKILL_DIR and never becomes a repo prerequisite.
-            repository_root = Path(__file__).resolve().parents[5]
+            repository_root = application_root()
             root = repository_root / "services" / "halocue" / "writing" / "skill" / "ba-writing"
         self.root = root
         self._repo = None
@@ -73,6 +74,10 @@ class BaWritingSkillRegistry:
         output_mode: str | None = None,
     ) -> list[str]:
         paths = list(WORKFLOW_RULE_SOURCES.get(task_id, ["SKILL.md", *COMMON_RULES]))
+        if task_id == "scene.draft.rewrite" and output_mode == "edit_patch":
+            # Editing an existing passage needs prose/voice constraints, not
+            # the startup SOP or instructions for assembling a whole new story.
+            paths = ["knowledge/写作内核.md", "knowledge/人味对话机制.md"]
         if mode_key in MODE_SOURCES:
             paths.append(MODE_SOURCES[mode_key])
         if has_sensei:
@@ -347,7 +352,7 @@ class BaWritingPromptAssembler:
             f"输出载体：{output_mode}。\n"
             f"本阶段检查项：{json.dumps(contract['checks'], ensure_ascii=False)}。"
         )
-        if task_id in {"scene.draft.generate", "scene.draft.rewrite"}:
+        if task_id in {"scene.draft.generate", "scene.draft.rewrite"} and output_mode != "edit_patch":
             header += (
                 "\n只生成一个候选，不自评、不输出第二版。"
                 "official_script 只允许 `角色: 内容` 或 `旁白: 内容` 行。"
@@ -375,7 +380,7 @@ class BaWritingPromptAssembler:
                 "当前只澄清创意简报：不写正文、不创建正式人物卡/世界观卡、不声称已经保存。",
                 "把用户原话、原作证据、用户私设和 Agent 推断分开标记；不确定内容只能作为待核对问题。",
                 "一次最多提出两个真正会改变方向的关键问题；其余细节留到下一轮，避免把讨论变成表单。",
-                "只选择一个主写作模式；无法判断时先询问用户，不要混合加载多个模式。",
+                "只选择一个主写作模式；默认面向 AA 可演出剧本，不要要求用户先选择小说还是剧本。按情节自行路由主线、喜剧或短日常规则；仅在用户明确要求小说化阅读时使用 text_reading，不要混合加载多个模式。",
             ],
             "blueprint.generate": [
                 "当前只整理 StoryBlueprint 候选，不写正文、不修改正式资料；输出必须等待用户采纳。",

@@ -8,7 +8,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from annotation_chunks import context_indices
 
@@ -302,7 +302,11 @@ def assemble_chunk_context(
     body = [
         "Update continuity across lines from DIRECTOR_CONTEXT; do not reset direction state for each line.",
         "只为 TARGET 行输出标注；PAST_CONTEXT 和 FUTURE_CONTEXT 只用于理解，不得标注 FUTURE_CONTEXT。",
-        ("响应协议：只返回一个 JSON 对象；lines 使用从 1 开始的 i 对应 TARGET 顺序，只填写有值的演出字段；"
+        ("响应协议：只返回一个 JSON 对象，顶层必须有 lines、state_delta、memory_events；"
+         '即使没有变化也必须返回 {"lines":[],"state_delta":{},"memory_events":[]}，不能省略必需字段。'
+         "lines 使用从 1 开始的 i 对应 TARGET 顺序，只填写有值的演出字段；"
+         "state_delta 是对象；memory_events 是数组，无高价值事件时使用 []。"
+         "若记录记忆，source_ids 使用 TARGET 的整数序号，不使用字符串或哈希；evidence 必须原样摘录台词。"
          "没有任何标注或状态变化的 TARGET 行从 lines 中完全省略，由后端自动补为空操作；"
          "不要返回只有 i 的空行，也不要重复 DIRECTOR_CONTEXT 或 continuity=hold；"
          "不复述规则、哈希、原文或候选比较；每行只做一次决策，完成语义判断后立即返回 JSON。"
@@ -334,12 +338,17 @@ def build_run_fingerprint(
     safe_model = {
         "provider": str(model_config.get("provider") or ""),
         "model": str(model_config.get("model") or ""),
+        "endpoint_sha256": _sha(str(model_config.get("base_url") or "")),
+        "context_window_tokens": int(model_config.get("context_window_tokens") or 0),
+        "source_context_strategy": str(model_config.get("source_context_strategy") or "preserve"),
+        "compact_annotation": bool(model_config.get("compact_annotation", False)),
         "max_tokens": int(model_config.get("max_tokens") or 0),
         "annotation_max_tokens": int(model_config.get("annotation_max_tokens") or 0),
         "reasoning_mode": str(model_config.get("reasoning_mode") or ""),
         "reasoning_wire_protocol": str(model_config.get("reasoning_wire_protocol") or ""),
     }
     return {
+        "fingerprint_version": 2,
         "script_sha256": _sha(script_text), "cast_sha256": _sha(cast),
         "resources_sha256": _sha(resources), "prompt_version": str(prompt_version),
         "schema_version": int(schema_version), "chunk_version": str(chunk_version),

@@ -1,0 +1,529 @@
+{
+  "name": "乙花堇",
+  "aliases": [
+    "堇",
+    "乙花スミレ",
+    "스미레",
+    "乙花堇",
+    "乙花堇（泳装）",
+    "训练部部长",
+    "指导员",
+    "Otahana Sumire",
+    "Sumire"
+  ],
+  "note": "依据本地官方客户端数据仓库 bluearchive-data-global 的固定提交 4ba8bd56518f55c5d4d50b324a9361279a48f808、客户端版本 1.90.439170-1705 制作。基础形态角色 ID 为 10012；排除泳装形态专属声音。",
+  "core": "乙花堇是千年科学学园训练部部长，把体能训练视为可测量、可重复、能改善身心的科学。她会管理健身房安全、设计训练、观察姿势和恢复，也会把棒球、登山、饮料、睡眠与组织活动都转译成训练机会。她的怪力和耐力让普通人的尺度在她眼中失真，偶尔会把危险重量、极限重复或训练中途的健康风险说得过于轻松；但看到具体损伤、后辈恐惧或指导员疲劳时，她能立刻调整强度、提供饮料并承担照护。她热爱训练却不是只会逼人运动的机器，真正的信念是让身体成为支持他人选择和生活的基础。",
+  "personality": {
+    "desire": "让更多人理解健康身体带来的自由和自信，也让训练部成为安全、专业、能帮助各社团成长的组织。",
+    "defense": "被指出训练过量或把日常活动变成特训时，先用科学、体力和‘身体越用越强’解释；发现对方确实受伤或害怕后会降低强度、补水并改写方案。",
+    "responsibility": "管理训练部设施、会员安全、器材与教练安排，能从事故中增设防爆门、防弹玻璃和更清晰的指示牌。",
+    "gap": "外表和言谈沉稳认真，实际能轻松举起超重器材、连续训练到闭馆，也会在遇见真正强者时内心惊叹、迷路或因为社交距离而结巴。",
+    "miswrite_risk": "不要把堇写成只会强迫锻炼的怪力笑点。她会听取后辈意见、保护安全、照顾疲劳，也会承认自己对普通体能尺度的判断需要修正。"
+  },
+  "decision_patterns": {
+    "training_design": "先评估目标、姿势、器材、强度和恢复，再安排组数与替代动作；对新人使用清楚指令，对高手则允许挑战但持续观察风险。",
+    "safety_management": "事故后优先封锁危险点、修缮设备、补充警示并重新安排场地，不把责任归咎于单个会员。",
+    "health_care": "会准备水、运动饮料和蛋白质饮料，发现老师或学生状态异常先询问和补给，再决定是否训练。",
+    "social_translation": "把棒球、工作、饮料会议和登山解释为体力、恢复或团队协作问题；被提醒场合不适时会收回训练建议。",
+    "intimacy": "称老师为指导员，先用训练邀请建立亲近，再在疲劳、饮食和失误面前直接照顾对方。"
+  },
+  "speech": {
+    "self_reference": "日常使用‘我’，正式时说明自己是千年训练部部长；训练口令里会直接报组数、姿势与动作。",
+    "address_patterns": {
+      "指导员": "称老师为‘指导员’，语气认真而亲近；会邀请训练，也会在对方表情不对时先递水。",
+      "后辈": "称姓名或‘同学’，先给清晰动作建议，再肯定努力；不把害怕和退出简单骂成懒惰。",
+      "记者与公司": "能用体能、血液循环、恢复等具体术语提供意见，不会为了宣传夸大训练效果。"
+    },
+    "lexical_preferences": [
+      "训练、姿势、呼吸、组数、恢复、体力",
+      "安全、防爆门、防弹玻璃、健身礼仪",
+      "健康的身体、健全的精神、指导员、训练部"
+    ],
+    "sentence_traits": "训练时句子短、数字和动作清楚；日常说明温和完整。看到极端强者会出现括号内心声、重复数字和惊叹；被老师关心时先解释科学理由，再接受休息。",
+    "口癖": [
+      {
+        "pattern": "身体就是会越用越强的东西啊。",
+        "usage": "用来鼓励持续训练，但不能替代伤病判断。"
+      },
+      {
+        "pattern": "一、二！一、二！",
+        "usage": "训练节奏口令，前后要有动作或恢复变化。"
+      },
+      {
+        "pattern": "指导员！",
+        "usage": "发现异常、开始行动或兴奋分享训练成果时使用。"
+      }
+    ],
+    "特征标点": "训练口令用感叹号和数字，安全说明用句号；遇到强者、尴尬或尺度误判时省略号、括号和重复数字增多。",
+    "voice_examples": [
+      {
+        "line": "不过往好处想，刚好能趁这个机会增设防爆门与防弹玻璃， 并换上比以前更大的洗手间指示牌……这样会员们的安全应该也会更有保障吧。",
+        "source_id": "70007010",
+        "source_title": "清晨健身房",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "健身房事故后",
+        "relation": "会员",
+        "function": "把事故转成具体安全改进"
+      },
+      {
+        "line": "当，当然可以。 能协助训练总是件令人开心的事。",
+        "source_id": "70007010",
+        "source_title": "清晨健身房",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "帮助明美装杠片",
+        "relation": "明美",
+        "function": "面对强者请求仍认真协助"
+      },
+      {
+        "line": "四……四十！？明明已经超过一百下了啊！？",
+        "source_id": "70007020",
+        "source_title": "健身房极限训练",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "发现强者计数失真",
+        "relation": "明美",
+        "function": "暴露她罕见的尺度震动"
+      },
+      {
+        "line": "全身就像被丢进洗衣机里搅过一样……",
+        "source_id": "70007020",
+        "source_title": "健身房极限训练",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "跟随明美训练后",
+        "relation": "明美",
+        "function": "承认极限训练带来的疲劳"
+      },
+      {
+        "line": "到底发生什么事了，指导员？",
+        "source_id": "2004406",
+        "source_title": "运动饮料话题",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "发现老师表情异常",
+        "relation": "老师",
+        "function": "先询问状态而非直接训练"
+      },
+      {
+        "line": "水、运动饮料和蛋白质饮料都有。",
+        "source_id": "2004406",
+        "source_title": "运动饮料话题",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "给老师补给",
+        "relation": "老师",
+        "function": "把关心落实为可选择补给"
+      },
+      {
+        "line": "或许这份邀请，正如邀请者所说……会是个是将球场第一线的声音传达出去的大好机会。",
+        "source_id": "2004406",
+        "source_title": "运动饮料话题",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "接受饮料公司邀请",
+        "relation": "老师与公司",
+        "function": "把专业意见视为服务现场的机会"
+      },
+      {
+        "line": "那么指导员！ 既然决定了就事不宜迟，赶紧行动吧！",
+        "source_id": "2004406",
+        "source_title": "运动饮料话题",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "决定参加会议",
+        "relation": "老师",
+        "function": "从讨论转入行动"
+      },
+      {
+        "line": "我并不常到棒球场来，一想到是和指导员一起，感觉又更特别了呢。",
+        "source_id": "10043005",
+        "source_title": "白鸟系列赛",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "与老师看球",
+        "relation": "老师",
+        "function": "在训练建议前承认同行的特别"
+      },
+      {
+        "line": "不过如果能把这份热情稍微分配到其他地方…… 比如健康又充满活力的训练上就更好了。",
+        "source_id": "10043005",
+        "source_title": "白鸟系列赛",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "看球时仍想训练",
+        "relation": "老师与莉",
+        "function": "展示运动框架过强的日常偏差"
+      },
+      {
+        "line": "无论做任何事，都需要有体力作为基础。",
+        "source_id": "10043005",
+        "source_title": "白鸟系列赛",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "解释训练必要性",
+        "relation": "莉",
+        "function": "把训练原则转成生活判断"
+      },
+      {
+        "line": "189战189败……上面是这样写的。",
+        "source_id": "10043005",
+        "source_title": "白鸟系列赛",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "查到球队战绩",
+        "relation": "莉与老师",
+        "function": "用事实打断励志叙事"
+      },
+      {
+        "line": "毕竟就算输了也是「虽败犹荣」啊，莉同学。",
+        "source_id": "10043005",
+        "source_title": "白鸟系列赛",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "安慰棒球队",
+        "relation": "莉",
+        "function": "接受结果同时保留努力价值"
+      },
+      {
+        "line": "身体就是会越用越强的东西啊。",
+        "source_id": "10030070",
+        "source_title": "新年登山晨练",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "解释晨练恢复",
+        "relation": "真纪与老师",
+        "function": "把恢复感受说成训练信念"
+      },
+      {
+        "line": "只要莉同学持续和我一起训练，明年赛季要连续打出全垒打也不是梦哦。",
+        "source_id": "10030070",
+        "source_title": "新年登山晨练",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "鼓励莉训练",
+        "relation": "莉",
+        "function": "用训练承诺回应后辈目标"
+      },
+      {
+        "line": "虽然可惜，但这次你们最好放弃。",
+        "source_id": "10030070",
+        "source_title": "新年登山晨练",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "state": "发现云层遮挡日出",
+        "relation": "贝里塔斯成员",
+        "function": "以天气事实修正期待"
+      },
+      {
+        "line": "体能训练是科学。 是千年的最先进的理论大放异彩的领域。",
+        "source_id": "1",
+        "source_title": "登录与日常",
+        "source_origin": "official",
+        "evidence_status": "external_unverified",
+        "state": "训练宣言",
+        "relation": "老师",
+        "function": "概括训练部的世界观"
+      },
+      {
+        "line": "有健康的身体才有健全的精神！",
+        "source_id": "1",
+        "source_title": "登录与日常",
+        "source_origin": "official",
+        "evidence_status": "external_unverified",
+        "state": "训练口号",
+        "relation": "老师与部员",
+        "function": "以短句收束训练伦理"
+      }
+    ],
+    "voice_sequences": [
+      {
+        "source_id": "70007010",
+        "source_title": "清晨健身房",
+        "source_origin": "official",
+        "evidence_status": "external_unverified",
+        "sample_form": "scene_dialogue",
+        "context": "堇因健身房事故换场，遇到明美并观察其极限训练。",
+        "function": "安全管理与对强者的敬意在具体器材协助中交替。",
+        "turns": [
+          {
+            "speaker": "乙花堇",
+            "line": "明美"
+          },
+          {
+            "speaker": "明美",
+            "line": "请问……您有什么事要找小女子吗？"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "不好意思。 我正在找更衣室，结果不小心迷路了。"
+          },
+          {
+            "speaker": "明美",
+            "line": "哎呀，呵呵。 看来您找对地方了，更衣室就在这里没错唷。"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "谢谢你。 我是第一次来这间健身房，所以还不太熟。"
+          },
+          {
+            "speaker": "明美",
+            "line": "不用客气。我只是做了该做的事而已。"
+          },
+          {
+            "speaker": "明美",
+            "line": "那么！既然早上的蛋白质午茶时间也已经结束，就来正式开始训练吧？"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "（蛋白质午茶……？我还是第一次见到这种训练流程）"
+          }
+        ]
+      },
+      {
+        "source_id": "70007020",
+        "source_title": "健身房极限训练",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "sample_form": "scene_dialogue",
+        "context": "堇跟随明美训练，逐渐意识到自己也会被对方的体力拖到极限。",
+        "function": "内心惊叹和真实疲劳共同改变她对‘轻松’的判断。",
+        "turns": [
+          {
+            "speaker": "明美",
+            "line": "八，九……这样就二十下了！"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "（刚才不是三十吗！怎么又变得更少了！？）"
+          },
+          {
+            "speaker": "明美",
+            "line": "这样就……做完一百下了！ 呼！真舒服！"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "（实际上不是一百，而是七百八十五下……差点就跟著做到昏过去了！）"
+          },
+          {
+            "speaker": "明美",
+            "line": "接下来用跑步机放松一下腿部吧！"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "（跑步机的倾斜度调得这么高，这已经不是跑步而是登山了吧！！）"
+          },
+          {
+            "speaker": "健身房馆长",
+            "line": "那，那个！！两位会员！"
+          },
+          {
+            "speaker": "健身房馆长",
+            "line": "现在已经十一点，要打烊了！ 麻烦两位收拾一下！"
+          }
+        ]
+      },
+      {
+        "source_id": "2004406",
+        "source_title": "运动饮料话题",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "sample_form": "scene_dialogue",
+        "context": "运动饮料新闻让堇成为话题人物，公司邀请她提供现场意见。",
+        "function": "老师确认新闻后，堇把名声转成参与产品开发、传达第一线声音的机会。",
+        "turns": [
+          {
+            "speaker": "乙花堇",
+            "line": "指导员。"
+          },
+          {
+            "speaker": "老师",
+            "line": "嗯……？"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "现在……该不会是在报导我的事吧？"
+          },
+          {
+            "speaker": "老师",
+            "line": "好像是……"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "现在真的到处都在说这件事呢……"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "我不是饮料工读生，而是堂堂千年训练部的部长啊。"
+          },
+          {
+            "speaker": "老师",
+            "line": "来自饮料公司的……会议邀请函？"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "那么指导员！ 既然决定了就事不宜迟，赶紧行动吧！"
+          }
+        ]
+      },
+      {
+        "source_id": "10043005",
+        "source_title": "白鸟系列赛",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "sample_form": "scene_dialogue",
+        "context": "堇和指导员陪莉看棒球，堇不断把观赛情绪转成训练建议。",
+        "function": "她先承认同行特别，再被真实战绩和莉的解释迫使接受‘虽败犹荣’。",
+        "turns": [
+          {
+            "speaker": "乙花堇",
+            "line": "我并不常到棒球场来，一想到是和指导员一起，感觉又更特别了呢。"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "不过如果能把这份热情稍微分配到其他地方…… 比如健康又充满活力的训练上就更好了。"
+          },
+          {
+            "speaker": "莉",
+            "line": "前辈……怎么都到球场了还在说训练的事啊……"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "那当然啰，莉同学。 无论做任何事，都需要有体力作为基础。"
+          },
+          {
+            "speaker": "老师",
+            "line": "所以战绩怎么样？"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "189战189败……上面是这样写的。"
+          },
+          {
+            "speaker": "老师",
+            "line": "全败！？而且竟然打了将近200场！？"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "毕竟就算输了也是「虽败犹荣」啊，莉同学。"
+          }
+        ]
+      },
+      {
+        "source_id": "10030070",
+        "source_title": "新年登山晨练",
+        "source_origin": "official",
+        "evidence_status": "local_exact",
+        "sample_form": "scene_dialogue",
+        "context": "堇在新年登山时遇见贝里塔斯成员，发现她们只是想看日出而非训练。",
+        "function": "她先以训练视角判断，再因天气云层给出放弃建议。",
+        "turns": [
+          {
+            "speaker": "乙花堇",
+            "line": "咦，贝里塔斯的各位？还有指导员……"
+          },
+          {
+            "speaker": "真纪",
+            "line": "啊，是堇前辈。哈啰！"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "早安，真纪。 没想到又在这里碰面了呢。"
+          },
+          {
+            "speaker": "老师",
+            "line": "昨晚睡得好吗？"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "不，可能是因为很久没野外合宿兴奋过头的关系，昨晚睡得并不好……"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "所以为了让紧张的身体完全放松，我选择以登山作为晨练。"
+          },
+          {
+            "speaker": "莉",
+            "line": "一点都不轻松好吗！？"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "呵呵，身体就是会越用越强的东西啊。"
+          }
+        ]
+      },
+      {
+        "source_id": "10015030",
+        "source_title": "训练部日常",
+        "source_origin": "official",
+        "evidence_status": "external_unverified",
+        "sample_form": "scene_dialogue",
+        "context": "堇带领训练部进行深蹲和分组动作。",
+        "function": "短促口令保持节奏，同时把训练理解为可执行的照顾。",
+        "turns": [
+          {
+            "speaker": "乙花堇",
+            "line": "臀部往后，膝盖与脚尖的方向一致！"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "接著追加2组深蹲！"
+          },
+          {
+            "speaker": "训练部成员",
+            "line": "是，部长！"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "如果姿势不稳就先停下，不要为了数量勉强。"
+          },
+          {
+            "speaker": "训练部成员",
+            "line": "了解！"
+          },
+          {
+            "speaker": "乙花堇",
+            "line": "呼吸保持稳定，最后一组开始！"
+          }
+        ]
+      }
+    ]
+  },
+  "emotions": {
+    "部长常态": {
+      "observes": "动作与说明具体，优先训练目标、姿势、安全和恢复。"
+    },
+    "遇见强者": {
+      "observes": "内心旁白变多，惊叹数字与动作尺度，仍保持礼貌协助。"
+    },
+    "指导员疲劳": {
+      "observes": "先给水和运动饮料，再询问原因，必要时取消训练。"
+    },
+    "训练被误解": {
+      "observes": "短暂困惑或结巴，随后用科学和实际案例说明。"
+    },
+    "尊重选择": {
+      "observes": "承认退出、放弃观赛或调整目标的合理性，不把训练当作唯一答案。"
+    }
+  },
+  "relations": {
+    "sensei": {
+      "起始距离": "把老师视为指导员和可共同训练的伙伴。",
+      "信任表现": "会在工作、疲劳和饮料选择上直接求助或照顾，允许老师指出训练尺度问题。",
+      "亲近表达": "邀请晨练、看球、喝饮料和参与训练部事务。"
+    },
+    "peers": {
+      "莉": "以体能训练帮助棒球队，却会逐渐理解莉对比赛和坚持的情感。",
+      "训练部": "严格管理安全和动作，也保护会员休息与自愿选择。",
+      "贝里塔斯": "尊重她们的专业和生活节奏，偶尔把登山、露营和日出误判成训练机会。"
+    }
+  },
+  "ooc": [
+    "不把堇写成只会逼人深蹲的怪力角色；她会管理设施、补水、观察姿势和修正安全风险。",
+    "不把训练科学写成万能答案；伤病、疲劳、天气和本人选择都能改变方案。",
+    "不把她的耐力尺度当作普通人的尺度；她会被明美等强者震撼，也会承认自己跟不上。",
+    "不把对莉和老师的关心写成单向说教；对方回应后她必须调整训练建议或承认情绪价值。",
+    "不把健康口号写成压迫；她的目标是让身体支持生活，不是用训练取消他人的兴趣。"
+  ]
+}

@@ -3,6 +3,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import json
+import io
+import uuid
+from contextlib import contextmanager
 import re
 import socket
 import threading
@@ -13,7 +16,12 @@ import urllib.request
 from .agent_tools import AgentToolRegistry
 from .errors import DomainError
 from .provider_response import validate_completion
+from .provider_usage import token_count
 from .conversation_summary import RECENT_MESSAGE_COUNT
+from .discussion_prompt import discussion_context_json
+from .edit_prompt import project_edit_context
+from .memory_prompt import compact_memory_prompt_context
+from .model_capabilities import completion_parameters, compact_request_context
 
 
 @dataclass(frozen=True)
@@ -553,7 +561,7 @@ class FakeWritingProvider(WritingProvider):
             questions = ["是否有需要作为全篇问题处理的角色或伏笔？"]
             ready = True
         elif any(token in lower for token in ("整理", "形成方案", "生成方案", "定下来")):
-            text = "我已经把目前的讨论整理成一份可审查方案。它仍是候选，只有你采纳后才会写入正式 Brief 和故事方向。"
+            text = "这轮讨论已经有足够线索继续推进；系统会在信息足够时自动整理待审候选，采纳前不会写入正式 Brief 和故事方向。"
             questions = []
             ready = True
         elif len(user_turns) >= 2 or len(latest) >= 18:
@@ -589,7 +597,12 @@ class FakeWritingProvider(WritingProvider):
             "纯旁白", "只用旁白", "仅用旁白", "不出现对白角色", "narrator-only", "narrator only",
         ))
         analysis_context = analysis_context or {}
-        runtime_characters = analysis_context.get("runtime_character_cards", [])
+        runtime_characters = analysis_context.get("runtime_character_cards")
+        if runtime_characters is None:
+            runtime_characters = [
+                card for card in analysis_context.get("character_cards", [])
+                if card.get("trust_status") == "confirmed"
+            ]
         mentioned_cards = [
             card
             for card in runtime_characters
@@ -600,6 +613,17 @@ class FakeWritingProvider(WritingProvider):
         elif not characters:
             characters = [card.get("name") for card in mentioned_cards if card.get("name")]
         if not characters and not narrator_only:
+            pending_mentions = [
+                card.get("name", "") for card in analysis_context.get("character_cards", [])
+                if card.get("trust_status") != "confirmed"
+                and card.get("name") and card["name"] in idea
+            ]
+            if pending_mentions:
+                raise DomainError(
+                    "character_card_unconfirmed",
+                    f"请先确认「{pending_mentions[0]}」的人物卡，再形成故事方向。",
+                    status=409,
+                )
             if "爱丽丝" in idea or "凯伊" in idea:
                 characters = ["爱丽丝", "凯伊"]
             elif "日奈" in idea or "亚子" in idea:
@@ -652,6 +676,17 @@ class FakeWritingProvider(WritingProvider):
         }
 
     def generate_scene(self, context: dict) -> str:
+        if "adaptation_prompt" in context:
+            chapter = context["chapter"]
+            return json.dumps({
+                "schema_version": "adaptation-chapter/1.0",
+                "text": "旁白: 以下内容仅为合成流程测试。\n" + "\n".join(
+                    "旁白: " + item["text"] for item in chapter["paragraphs"]
+                ),
+                "source_refs": [{"paragraph_id": item["id"], "quote": item["text"][:160]}
+                                for item in chapter["paragraphs"]],
+                "deviations": [], "open_threads": [],
+            }, ensure_ascii=False)
         contract = context["scene_contract"]
         characters = [card.get("name") for card in context.get("runtime_character_cards", []) if card.get("name")]
         if not characters:
@@ -729,7 +764,7 @@ class LLMWritingProvider(WritingProvider):
         self.base_url = credentials.get("base_url", "")
         self.model = credentials.get("model", "gpt-4o")
         self.api_key = credentials.get("api_key", "")
-        self.max_tokens = int(credentials.get("max_tokens", 8192))
+        self.max_tokens = int(credentials.get("max_tokens") or credentials.get("max_output_tokens") or 8192)
         self.timeout = int(credentials.get("timeout", 120))
         self.display_name = f"{self.model} ({self.provider_type})"
         # Gemini 3 OpenAI-compatible gateways commonly reserve `max_tokens`
@@ -737,9 +772,11 @@ class LLMWritingProvider(WritingProvider):
         # compatible output budget is exposed as `max_completion_tokens`.
         self.token_limit_parameter = (
             "max_completion_tokens"
-            if self.provider_type == "openai" and self.model.lower().startswith("gemini-3")
+            if self.provider_type == "openai" and self.model.lower().startswith(("gemini-3", "gpt-5", "gpt-6", "o1", "o3", "o4"))
             else "max_tokens"
         )
+        if credentials.get("token_limit_parameter") in {"max_tokens", "max_completion_tokens"}:
+            self.token_limit_parameter = credentials["token_limit_parameter"]
         self._thread_state = threading.local()
         self.prompt_assembler = prompt_assembler
         self.input_cost_per_million = float(credentials.get("input_cost_per_million") or 0)
@@ -876,7 +913,9 @@ class LLMWritingProvider(WritingProvider):
             )
         system_prompt = assembled["system_prompt"]
         conversation_summary = context.get("conversation_summary")
-        if isinstance(conversation_summary, dict) and conversation_summary.get("archived_message_count"):
+        if output_mode in {"discussion_json", "edit_patch"} or (
+            isinstance(conversation_summary, dict) and conversation_summary.get("archived_message_count")
+        ):
             system_prompt += (
                 "\n\n对话摘要可信边界：conversation_summary 只是可重建的派生对话索引，"
                 "不是 WorkCanon、人物卡或 OfficialEvidence，也不能单独作为 Proposal 证据。"
@@ -933,50 +972,54 @@ class LLMWritingProvider(WritingProvider):
         )
 
     def _capture_usage(self, data: dict) -> ProviderUsageSnapshot:
-        usage_reported = isinstance(data.get("usage"), dict)
-        usage = data.get("usage") if usage_reported else {}
-        cache_signal_reported = False
+        usage = data.get("usage") if isinstance(data, dict) else None
+        usage = usage if isinstance(usage, dict) else {}
+        invalid = False
+
+        def count(mapping, name, default=0):
+            nonlocal invalid
+            if name not in mapping:
+                return default
+            value, valid = token_count(mapping[name])
+            invalid |= not valid
+            return value
+
+        primary = ("input_tokens", "output_tokens") if self.provider_type == "anthropic" else ("prompt_tokens", "completion_tokens")
+        known = sum(name in usage for name in primary)
+        status = "reported" if known == 2 else "partial" if known else "not_reported"
+        output_tokens = count(usage, primary[1])
         if self.provider_type == "anthropic":
-            uncached_input = int(usage.get("input_tokens") or 0)
-            output_tokens = int(usage.get("output_tokens") or 0)
-            cache_signal_reported = (
-                "cache_read_input_tokens" in usage
-                or "cache_creation_input_tokens" in usage
-            )
-            cache_read = int(usage.get("cache_read_input_tokens") or 0)
-            cache_write = int(usage.get("cache_creation_input_tokens") or 0)
+            uncached_input = count(usage, "input_tokens")
+            cache_read = count(usage, "cache_read_input_tokens")
+            cache_write = count(usage, "cache_creation_input_tokens")
             input_tokens = uncached_input + cache_read + cache_write
+            cache_signal = "cache_read_input_tokens" in usage or "cache_creation_input_tokens" in usage
         else:
-            details = usage.get("prompt_tokens_details") if isinstance(usage.get("prompt_tokens_details"), dict) else {}
-            input_tokens = int(usage.get("prompt_tokens") or 0)
-            output_tokens = int(usage.get("completion_tokens") or 0)
-            # OpenAI-compatible gateways use both the nested OpenAI field and
-            # the flat Gemini relay fields.  Prefer an explicit flat value,
-            # while retaining compatibility with the older nested contract.
-            flat_cache_read = usage.get("prompt_cache_hit_tokens")
-            flat_cache_miss = usage.get("prompt_cache_miss_tokens")
-            nested_cache_read = details.get("cached_tokens")
-            cache_read_value = flat_cache_read if flat_cache_read is not None else nested_cache_read
-            cache_signal_reported = cache_read_value is not None or flat_cache_miss is not None
-            cache_read = int(cache_read_value or 0)
+            input_tokens = count(usage, "prompt_tokens")
+            details = usage.get("prompt_tokens_details")
+            if details is not None and not isinstance(details, dict):
+                invalid = True
+            details = details if isinstance(details, dict) else {}
+            cache_read = count(usage, "prompt_cache_hit_tokens") if "prompt_cache_hit_tokens" in usage else count(details, "cached_tokens")
             cache_write = 0
-            uncached_input = (
-                max(0, int(flat_cache_miss or 0))
-                if flat_cache_miss is not None
-                else max(0, input_tokens - cache_read)
-            )
-        if cache_signal_reported:
-            cache_status = "supported_hit" if cache_read > 0 else "supported_miss"
-        elif not usage_reported:
-            cache_status = "unknown"
-        elif self.cache_support == "unsupported":
-            cache_status = "unsupported"
-        elif self.cache_support == "supported":
-            cache_status = "supported_miss"
-        else:
-            cache_status = "unknown"
+            cache_signal = any(k in usage for k in ("prompt_cache_hit_tokens", "prompt_cache_miss_tokens")) or "cached_tokens" in details
+            uncached_input = count(usage, "prompt_cache_miss_tokens") if "prompt_cache_miss_tokens" in usage else max(0, input_tokens-cache_read)
+            if cache_read > input_tokens or ("prompt_cache_miss_tokens" in usage and cache_read+uncached_input != input_tokens):
+                invalid = True
+        if invalid:
+            status = "invalid"
+        cache_status = ("supported_hit" if cache_read else "supported_miss") if cache_signal and not invalid else (
+            "unsupported" if usage and self.cache_support == "unsupported" else "unknown"
+        )
         estimated_cost = None
-        if usage_reported and (self.input_cost_per_million or self.output_cost_per_million):
+        # Settings use zero for an unspecified price, not evidence of free usage.
+        # Never present a one-sided subtotal as a complete estimate.
+        prices_cover_usage = (
+            (not input_tokens or self.input_cost_per_million > 0)
+            and (not output_tokens or self.output_cost_per_million > 0)
+            and (self.input_cost_per_million > 0 or self.output_cost_per_million > 0)
+        )
+        if status == "reported" and prices_cover_usage:
             estimated_cost = (
                 uncached_input * self.input_cost_per_million
                 + cache_read * self.input_cost_per_million * self.cache_read_cost_multiplier
@@ -984,17 +1027,13 @@ class LLMWritingProvider(WritingProvider):
                 + output_tokens * self.output_cost_per_million
             ) / 1_000_000
         return ProviderUsageSnapshot(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cache_read_tokens=cache_read,
-            cache_write_tokens=cache_write,
-            estimated_cost=estimated_cost,
-            usage_status="reported" if usage_reported else "not_reported",
-            cache_status=cache_status,
+            input_tokens=input_tokens, output_tokens=output_tokens,
+            cache_read_tokens=cache_read, cache_write_tokens=cache_write,
+            estimated_cost=estimated_cost, usage_status=status, cache_status=cache_status,
         )
 
     @staticmethod
-    def _agent_tool_contract() -> list[dict]:
+    def _agent_tool_contract(task_id: str = "") -> list[dict]:
         """Expose the registry contract to models without executable handlers."""
         return [
             {
@@ -1003,6 +1042,10 @@ class LLMWritingProvider(WritingProvider):
                 "input_schema": spec.input_schema,
             }
             for spec in AgentToolRegistry(service=None).specs()
+            if task_id != "scene.draft.rewrite" or spec.name in {
+                "read_scene_text_window", "propose_scene_text_edit", "read_conversation_history",
+                "search_character_cards", "search_bundled_character_metadata", "search_world_bible", "search_work_canon",
+            }
         ]
 
     @staticmethod
@@ -1038,10 +1081,18 @@ class LLMWritingProvider(WritingProvider):
 
     @staticmethod
     def _result_content(result: dict) -> str:
+        output = result.get("output")
+        if isinstance(output, dict) and output.get("kind") == "scene_text_edit":
+            # The server already owns the full candidate and base. Echoing both
+            # through every tool followup needlessly re-bills the whole scene.
+            output = {"kind": "scene_text_edit", "status": output.get("status"),
+                      "changed_blocks": [edit["block_id"] for edit in output.get("edits", [])],
+                      "base_revision_id": output.get("base_revision_id"),
+                      "reason": output.get("reason"), "unsubmitted_text_preserved": True}
         return json.dumps(
             {
                 "status": str(result.get("status") or "failed"),
-                "output": result.get("output"),
+                "output": output,
                 "error": result.get("error"),
             },
             ensure_ascii=False,
@@ -1143,7 +1194,69 @@ class LLMWritingProvider(WritingProvider):
             })
         return messages
 
-    def _call_llm(
+    @contextmanager
+    def observe_requests(self, observer):
+        previous = getattr(self._thread_state, "request_observer", None)
+        self._thread_state.request_observer = observer
+        try:
+            yield
+        finally:
+            self._thread_state.request_observer = previous
+
+    def reset_usage(self):
+        self._thread_state.last_usage = ProviderUsageSnapshot()
+
+    def _finish_physical_attempt(self, status, error=None, usage=None):
+        frame = getattr(self._thread_state, "request_frame", None)
+        event = frame.get("active") if frame else None
+        if event is None:
+            return
+        # Freeze the original terminal outcome before delivery. Observer retries
+        # must not turn a successful HTTP response into a failed transport record.
+        if "terminal" not in frame:
+            code = str(getattr(error, "code", type(error).__name__)) if error is not None else None
+            frame["terminal"] = {"phase":"finished", "id":event["id"], "status":status,
+                                 "usage":usage if usage is not None else self.last_usage(), "error_code":code}
+        terminal = frame["terminal"]
+        observer = getattr(self._thread_state, "request_observer", None)
+        if observer:
+            for delivery in range(2):
+                try:
+                    observer(dict(terminal))
+                    break
+                except Exception as cause:
+                    if delivery == 0 and not isinstance(cause, DomainError):
+                        continue  # Replay the receipt only, never the network request.
+                    failure = DomainError("request_accounting_unavailable", "请求已执行，但用量记录暂未确认；请刷新记录，不要盲目重发。", status=503)
+                    failure.pending_request_record = dict(terminal)
+                    failure.provider_usage = terminal["usage"]
+                    raise failure from cause
+        frame.pop("active", None)
+        frame.pop("terminal", None)
+
+    def _call_llm(self, system_prompt, user_prompt, tools=None, tool_results=None) -> LLMCallResult:
+        self.reset_usage()
+        previous = getattr(self._thread_state, "request_frame", None)
+        self._thread_state.request_frame = {"logical_id":"logical-"+uuid.uuid4().hex, "ordinal":0}
+        try:
+            try:
+                result = self._call_llm_impl(system_prompt, user_prompt, tools, tool_results)
+            except Exception as error:
+                usage = self.last_usage()
+                if not hasattr(error, "pending_request_record"):
+                    self._finish_physical_attempt("rejected" if isinstance(error, DomainError) else "failed", error, usage)
+                if isinstance(error, DomainError):
+                    error.details = {**error.details, "usage": usage}
+                else:
+                    error.provider_usage = usage
+                raise
+            else:
+                self._finish_physical_attempt("succeeded", usage=result.usage.as_dict())
+                return result
+        finally:
+            self._thread_state.request_frame = previous
+
+    def _call_llm_impl(
         self,
         system_prompt: str,
         user_prompt: str,
@@ -1161,7 +1274,6 @@ class LLMWritingProvider(WritingProvider):
             endpoint = f"{base_url}/messages"
             req_data = {
                 "model": self.model,
-                "max_tokens": self.max_tokens,
                 "system": [{
                     "type": "text",
                     "text": system_prompt,
@@ -1179,6 +1291,8 @@ class LLMWritingProvider(WritingProvider):
                     for tool in tools
                 ]
                 req_data["tool_choice"] = {"type": "auto"}
+            req_data, self._thread_state.context_compaction = compact_request_context(self.credentials, req_data)
+            req_data.update(completion_parameters(self.credentials, req_data, tools=bool(tools)))
             req_bytes = json.dumps(req_data).encode("utf-8")
             req = urllib.request.Request(endpoint, data=req_bytes, method="POST")
             req.add_header("Content-Type", "application/json")
@@ -1188,7 +1302,6 @@ class LLMWritingProvider(WritingProvider):
             endpoint = f"{self.base_url or 'https://api.openai.com/v1'}/chat/completions"
             req_data = {
                 "model": self.model,
-                self.token_limit_parameter: self.max_tokens,
                 "messages": [{"role": "system", "content": system_prompt}, *(native_messages or [{"role": "user", "content": user_prompt}])],
             }
             if tools:
@@ -1204,17 +1317,20 @@ class LLMWritingProvider(WritingProvider):
                     for tool in tools
                 ]
                 req_data["tool_choice"] = "auto"
+            req_data, self._thread_state.context_compaction = compact_request_context(self.credentials, req_data)
+            req_data.update(completion_parameters(self.credentials, req_data, tools=bool(tools)))
             req_bytes = json.dumps(req_data).encode("utf-8")
             req = urllib.request.Request(endpoint, data=req_bytes, method="POST")
             req.add_header("Content-Type", "application/json")
             if self.api_key:
                 req.add_header("Authorization", f"Bearer {self.api_key}")
 
+        req.add_header("User-Agent", "HaloCue/1.0")
         with self._open_with_retry(req) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            validate_completion(data, self.provider_type, allow_tools=bool(tools))
             usage = self._capture_usage(data)
             self._thread_state.last_usage = usage
+            validate_completion(data, self.provider_type, allow_tools=bool(tools))
             if self.provider_type == "anthropic":
                 content_blocks = data.get("content", [])
                 normalized_calls = self._validate_tool_calls(tuple(
@@ -1309,11 +1425,42 @@ class LLMWritingProvider(WritingProvider):
         return isinstance(exc, (TimeoutError, socket.timeout))
 
     def _open_with_retry(self, request: urllib.request.Request):
-        """Retry only failures that can plausibly succeed without user action."""
+        """Persist an intent for each actual transport attempt, including retries."""
         for attempt in range(self.request_attempts):
+            frame = getattr(self._thread_state, "request_frame", None)
+            observer = getattr(self._thread_state, "request_observer", None)
+            self.reset_usage()
+            if frame is not None:
+                frame["ordinal"] += 1
+                event = {"phase":"started", "id":"request-"+uuid.uuid4().hex,
+                         "logical_id":frame["logical_id"], "ordinal":frame["ordinal"],
+                         "provider":self.descriptor()}
+                if observer:
+                    observer(event)  # Fail closed before sending if the intent cannot persist.
+                frame["active"] = event
             try:
                 return urllib.request.urlopen(request, timeout=self.timeout)
             except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+                if isinstance(exc, urllib.error.HTTPError):
+                    # Preserve bounded diagnostic bytes for the existing error formatter;
+                    # the ledger receives only parsed usage and a status code, not this body.
+                    body = b""
+                    try:
+                        body = exc.read(65537)
+                    except Exception:
+                        pass  # Diagnostic IO must not replace the original HTTP status.
+                    finally:
+                        try:
+                            exc.close()
+                        except Exception:
+                            pass
+                    try:
+                        if len(body) <= 65536:
+                            self._thread_state.last_usage = self._capture_usage(json.loads(body.decode("utf-8")))
+                    except (ValueError, TypeError):
+                        pass  # Keep bounded raw bytes for the existing diagnostic formatter.
+                    exc.read = io.BytesIO(body[:65536]).read
+                self._finish_physical_attempt("failed", exc)
                 if not self._is_transient_request_error(exc) or attempt + 1 >= self.request_attempts:
                     raise
                 time.sleep(self._retry_delay(exc, attempt))
@@ -1321,6 +1468,8 @@ class LLMWritingProvider(WritingProvider):
 
     def _provider_failure(self, operation: str, exc: Exception | None = None):
         details = {"operation": operation, "provider": self.provider_type, "model": self.model}
+        if exc is not None and isinstance(getattr(exc, "provider_usage", None), dict):
+            details["usage"] = exc.provider_usage
         failure_kind = "provider_error"
         message = f"模型未能完成{operation}，本次没有回退为模拟结果。"
         if exc is not None:
@@ -1432,7 +1581,8 @@ class LLMWritingProvider(WritingProvider):
 
     def extract_memory_bundle(self, memory_context: dict) -> dict:
         try:
-            system_prompt = self._skill_system_prompt("canon.assemble", memory_context) + (
+            skill_prompt = self._skill_system_prompt("canon.assemble", memory_context)
+            system_prompt = skill_prompt + (
                 "\n\n你负责从一份已经固定的场景正式修订中提取长期写作记忆，不修改正文或正式资料。"
                 "只记录正文能够支持的内容，不把推测写成事实；已有记忆需要推进或回收时，"
                 "可用 update/retire 并指定系统提供的 target_memory_id。新记忆不得返回任何 ID。\n"
@@ -1458,13 +1608,43 @@ class LLMWritingProvider(WritingProvider):
                 '    "scope":"work|chapter|scene",\n'
                 '    "confidence_status":"open|inferred",\n'
                 '    "source_block_ids":["正文块 ID"]\n'
+                "  },{\n"
+                '    "kind":"character_relationship",\n'
+                '    "from_character_id":"known_characters 中的 ID",\n'
+                '    "to_character_id":"known_characters 中另一个 ID",\n'
+                '    "relation_kind":"例如：队友",\n'
+                '    "summary":"正文直接支持的当前关系",\n'
+                '    "confidence_status":"open|inferred",\n'
+                '    "source_block_ids":["正文块 ID"]\n'
                 "  }]\n"
                 "}\n"
-                "knowledge_suggestions 是可选数组，只放需要进入正式资料审核的长期事实；"
+                "knowledge_suggestions 是可选数组，只放需要进入正式资料审核的长期事实或人物关系；"
+                "其中事实 scope 只能使用 work、chapter 或 scene 这三个英文值。"
+                "人物关系两端必须是输入 known_characters 中已有的不同 ID，并有正文块直接支持；"
+                "仅凭人物同场出现、共同说话或模型推测，不构成人物关系。"
+                "其他人物专属经历或临时状态请放在 items，设置 scope_type=character；"
+                "不要在 knowledge_suggestions 中使用 character 或中文作用域，无法确定作用域时返回空数组。"
                 "不要重复已有 WorkCanon。摘要、记忆和资料建议都不是正式事实；"
                 "用户分别采纳对应 Proposal 后系统才会建立 confirmed Revision。"
             )
-            user_prompt = "记忆提取上下文: " + json.dumps(memory_context, ensure_ascii=False)
+            if memory_context.get("write_boundary") == "background_proposal_only":
+                system_prompt = skill_prompt + (
+                    "\n\n本次只检查已固定场景正文中值得长期维护的资料建议，不修改正文或正式资料。"
+                    "只输出纯 JSON："
+                    '{"schema_version":"memory-bundle/1.0","summary":"简短说明",'
+                    '"items":[],"knowledge_suggestions":[]}。'
+                    "items 必须为空。knowledge_suggestions 仅在正文块直接支持时添加："
+                    "事实使用 kind=canon_fact、text、scope(work|chapter|scene)、"
+                    "confidence_status(open|inferred)、source_block_ids；"
+                    "人物关系使用 kind=character_relationship、from_character_id、"
+                    "to_character_id、relation_kind、summary、confidence_status 和 source_block_ids。"
+                    "人物 ID 必须来自 known_characters 且两端不同；同场出现或共同说话不等于有关系。"
+                    "不要重复已有正式事实，不得把推测写成事实。"
+                    "结果只是待作者审核的建议，采纳前不是正式资料；没有明确新事实时返回空数组。"
+                )
+            user_prompt = "记忆提取上下文: " + json.dumps(
+                compact_memory_prompt_context(memory_context), ensure_ascii=False
+            )
             call = self._call_llm(system_prompt, user_prompt)
             data = self._parse_json_object(call.text)
             data["status"] = "proposed"
@@ -1481,12 +1661,25 @@ class LLMWritingProvider(WritingProvider):
                 "\n\n你负责清扫一章中全部已固定场景修订，找出跨场景遗漏、需要推进或应回收的长期记忆。"
                 "不得修改正文或正式资料，不得把推测写成事实；已有记忆可用 update/retire，"
                 "新记忆使用 create。系统 ID 只能从输入中引用，新记忆不得自行分配 ID。\n"
-                "必须返回纯 JSON，schema_version 为 memory-bundle/1.0；items 字段与场景记忆提取相同，"
-                "但每条必须额外提供 source_refs: "
-                '[{"scene_id":"输入中的场景 ID","source_block_ids":["对应正文块 ID"]}]。'
+                "必须返回纯 JSON，schema_version 为 memory-bundle/1.0。"
+                "kind 只能是 episode_memory、scene_state_snapshot、open_thread、decision_record 中的一个，"
+                "不得使用 plot、fact、relationship 等其它类型。scope_type 只能是 work、chapter、scene、character；"
+                "confidence_status 只能是 open 或 inferred。每项必须包含 operation、target_memory_id、title、summary、"
+                "details、scope_type、scope_id、confidence_status 和 source_refs；"
+                "create 的 target_memory_id 必须为 null，update/retire 必须引用输入中已有记忆 ID。"
+                "每条 source_refs 的 scene_id 与 source_block_ids 必须来自同一输入场景，不得自行编造。"
+                "输出结构示例（把占位 ID 换为输入中真实 ID）："
+                '{"schema_version":"memory-bundle/1.0","summary":"本章变化摘要","items":['
+                '{"kind":"episode_memory","operation":"create","target_memory_id":null,'
+                '"title":"简短标题","summary":"正文直接支持的内容","details":{},'
+                '"scope_type":"chapter","scope_id":"输入中的章节 ID","confidence_status":"open",'
+                '"source_refs":[{"scene_id":"输入中的场景 ID","source_block_ids":["对应正文块 ID"]}]}]}。'
+                "没有值得维护的变化时返回 items=[]，不要用占位内容凑条目。"
                 "用户采纳 Proposal 前，任何结果都不是正式长期记忆。"
             )
-            user_prompt = "章节记忆清扫上下文: " + json.dumps(memory_context, ensure_ascii=False)
+            user_prompt = "章节记忆清扫上下文: " + json.dumps(
+                compact_memory_prompt_context(memory_context), ensure_ascii=False
+            )
             call = self._call_llm(system_prompt, user_prompt)
             data = self._parse_json_object(call.text)
             data["status"] = "proposed"
@@ -1508,6 +1701,13 @@ class LLMWritingProvider(WritingProvider):
                 output_mode="discussion_json",
             ) + (
                 "\n\n你是作品当前阶段的创作导演，协助作者讨论并理清故事方向、人物关系与事实边界。\n"
+                "产品默认产出 AA 可演出剧本：没有明确文体要求时直接按剧本推进，不询问小说还是剧本，"
+                "也不把内部主写作模式作为开场必选题。仅在用户明确要求小说化阅读时使用 text_reading。"
+                "能根据上下文合理判断的细节先推进；只询问真正影响情节、人物关系或修改授权的问题。"
+                "默认用简短自然语言给出结论和建议，不逐段铺陈用户原话、原作证据、Agent 推断等分类；"
+                "但对未核实设定仍须明确说明，不得伪称已核实。\n"
+                "直接回应作者的写作目标，不在回复开头或结尾复述系统契约、规则包版本、"
+                "只读权限、Proposal 流程或本候选基于哪些内部输入；必要的采用状态由界面展示。\n"
                 "conversation_summary 只是由历史消息派生的续聊索引，不是 WorkCanon、人物卡、世界观卡或官方证据。"
                 "冲突时严格按已采纳正式 Artifact、较新的原始用户消息、派生摘要的顺序判断；"
                 "摘要不能单独支持任何正式资料 Proposal，必须回到原始消息、场景修订或文档引用。\n"
@@ -1519,19 +1719,60 @@ class LLMWritingProvider(WritingProvider):
                 '  "questions": ["1-2个引导性问题"],\n'
                 '  "decision_card": null,\n'
                 '  "reasoning_summary": "一句面向作者的判断依据摘要，不输出隐藏推理过程",\n'
-                '  "ready_for_proposal": true/false\n'
+                '  "ready_for_proposal": true/false,\n'
+                '  "ready_to_organize": true/false\n'
                 "}\n"
                 "只有当作者需要在 2-6 个明确互斥或可比较的选项中作选择时，才返回 decision_card；"
                 "普通选项卡的 kind 必须严格写成 choose（不要使用 choice/options/select 等别名）；"
                 "确认卡或 Proposal 卡才分别使用 confirm 或 proposal。它必须包含 kind、title、options（每项含 id、label、description）、submit_label 和 allow_custom。"
                 "开放式问题继续放在 questions，不要为了显示卡片而把普通追问改成选项。"
+                "不要要求作者点击‘形成方案’或‘整理细纲’；当信息足够、且当前不是改编任务时，直接调用 organize_current_plan。"
+                "该工具只会在服务端创建待审 Proposal，随后由作者采纳或退回；工具没有调用成功前不要声称候选已经生成。"
+                "如果仍缺一个会改变方向的关键条件，只问一个最重要的问题，不要展示额外的流程按钮。"
             )
+            creation_intent = str(task_contract.get("creation_intent") or "guided_ideation")
+            system_prompt += (
+                "\n当前创作意图由系统从对话和附件名做了轻量判断：" + creation_intent + "。"
+                "它只是路由提示，不是用户已确认的选项；必要时用一句问题校正。"
+                "短篇聚焦单一核心冲突、人物变化和篇幅边界；长篇聚焦长线冲突、卷章推进和可持续的关系变化；"
+                "续写先读取已有文章或附件，确认续写起点、不可改动边界和承接状态；"
+                "人物关系场景优先核对人物卡与关系证据，世界观先行优先核对规则和地点；"
+                "剧本/场景优先明确可演出动作、对白和停止边界；只要用户要的是大纲，就先整理结构而不是写正文。"
+            )
+            if creation_intent == "novel_to_script_adaptation" or (task_contract.get("task_scope") or {}).get("import_mode"):
+                system_prompt += (
+                    "\n这是小说/AAP 改编方向，必须使用独立改编/导入工作流。"
+                    "不要调用 organize_current_plan，也不要把来源文稿整理成普通全作方向；"
+                    "先检查来源结构、人物映射、对白、旁白、舞台动作和无法识别项，保留来源引用。"
+                )
             if task_id == "canon.assemble":
                 system_prompt += (
                     "\n当前任务是检查一份已经采纳的场景正文，提取新成立的事实、人物关系变化、"
                     "知情边界或伏笔状态。只提取正文能够支持的内容，不把推测写成事实。"
                     "需要沉淀时调用 draft_canon_fact，并把 scene_memory_context.scene.revision_id"
                     " 写入 source_refs；每轮最多形成一份资料讨论草稿，正式写回仍由 Proposal 决定。"
+                )
+            if task_id == "scene.draft.rewrite":
+                system_prompt = self._skill_system_prompt(task_id, work_context, output_mode="edit_patch") + (
+                    "\n你是当前正文的编辑助手，直接处理作者指出的措辞、润色方向和逻辑问题。"
+                    "编辑保留原文未涉及的内容、人物事实和语气。没有必要时不额外查询资料。"
+                    '不调用工具时返回 JSON {"text":"简短回答","questions":[],"ready_for_proposal":false}。'
+                    "工具成功后的最终回复也使用这个 JSON，只需一两句话。"
+                    "\n当前是已有正文的写作对话。作者明确要求润色、修改句子、调整某段方向或修正逻辑时，"
+                    "不要只在聊天里给替代文本，也不要让作者点击生成按钮；调用 propose_scene_text_edit。"
+                    "从 scene_conversation_context.current_manuscript 读取真实 revision_id 与 content.blocks。"
+                    "每项提供真实 block_id、old_text_sha256（读取窗口的 text_sha256）和修改后的完整段落 new_text；"
+                    "未提供 hash 的旧上下文才使用完整逐字一致的 old_text。只改涉及的段落，其余不提交。"
+                    "未加载的区域先调用 read_scene_text_window；不得猜测段落。大段修改每40段一个窗口，"
+                    "可提交多个互不重叠的工具批次；同一段只能提交一次，服务端最后合并为同一份待审稿。"
+                    "如果作者要继续调整未采用的修改，读取 scene_conversation_context.pending_text_edit 的候选段落，"
+                    "传入其 id 作为 replace_proposal_id，并使用候选里的 block_id 和 old_text；保留其他已有候选改动。"
+                    "只要存在 pending_text_edit，无论修改哪一段，都以它为当前有效稿；正式 current_manuscript 仅保留不可变的审查基准 revision_id。"
+                    "已加载窗口包含目标完整段落和 text_sha256 时直接提交修改，不要重复读取。"
+                    "作者只讨论、询问原因、明确说不要改或修改目标无法定位时，不调用修改工具；"
+                    "简短回答，确实无法判断时只问一个定位问题。工具只准备修改对比，应用状态由界面显示。"
+                    "工具执行成功后只用一到两句解释改了哪里；改前改后已由界面显示，不要重复引用正文。"
+                    "不要使用 Proposal、任务契约等内部术语，不要声称人物经常使用某个措辞，除非资料有直接依据。"
                 )
             document_skill = work_context.get("document_skill")
             if isinstance(document_skill, dict):
@@ -1547,19 +1788,22 @@ class LLMWritingProvider(WritingProvider):
                         "不得声称读取了未命中的部分；引用事实时使用 citation 的 display_label，"
                         "并保留 filename、chunk_id 和 paragraph_ids 以供界面核验。"
                     )
-            if tool_followup:
-                system_prompt += (
-                    "\n系统已经执行完上一轮工具。优先根据 tool_results 生成最终 JSON 回复；"
-                    "只有确实缺少另一项已提供的只读资料时，才能请求下一轮工具。"
-                    "整个用户回合最多允许三轮工具调用，绝不因此修改正式资料。"
-                )
-            user_prompt = f"作品上下文: {json.dumps(work_context, ensure_ascii=False)}\n历史消息:\n" + "\n".join(
+            # Keep the system prefix identical through native tool followups.
+            # Dynamic results remain user/tool data, never system instructions.
+            system_prompt += (
+                "\n如果系统提供了上一轮实际执行的 tool_results，优先根据工具结果生成最终 JSON 回复；"
+                "只有确实缺少另一项已提供的只读资料时，才能请求下一轮工具。"
+                "整个用户回合最多允许三轮工具调用，绝不因此修改正式资料。"
+            )
+            latest_instruction = next((m.get("text", "") for m in reversed(messages) if m.get("role") == "user"), "")
+            prompt_context = project_edit_context(work_context, latest_instruction)
+            user_prompt = f"作品上下文: {discussion_context_json(prompt_context)}\n历史消息:\n" + "\n".join(
                 f"{m.get('role')}: {m.get('text', '')}" for m in messages[-RECENT_MESSAGE_COUNT:]
             )
             call = self._call_llm(
                 system_prompt,
                 user_prompt,
-                tools=self._agent_tool_contract(),
+                tools=self._agent_tool_contract(task_id),
                 tool_results=work_context.get("tool_results") if tool_followup else None,
             )
             if call.text.strip():
@@ -1595,6 +1839,9 @@ class LLMWritingProvider(WritingProvider):
             ) + (
                 "\n\n你负责把已讨论的创意简报整理为结构化 StoryBlueprint，不写正文。\n"
                 "必须返回纯 JSON，包含 title, premise, theme, central_conflict, direction (数组), characters (数组), mode。\n"
+                "mode 只能填写以下机器值之一：main_battle（主线、任务或调查）、long_comedy（长篇喜剧）、"
+                "bond_short（羁绊短场景）、text_reading（明确要求小说化阅读）。"
+                "不要填写中文模式名称或自行发明模式；recommendations.secondary_scene_modes 若存在也只能使用这些机器值。\n"
                 "如果用户明确要求全篇只有旁白且没有任何对白角色，必须额外返回 narrator_only=true、characters=[]，"
                 "并建议 sensei_presence=absent；否则 narrator_only=false 且 characters 至少包含一个主要角色。\n"
             )

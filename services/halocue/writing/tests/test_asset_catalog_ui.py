@@ -53,7 +53,7 @@ def test_scene_writing_exposes_traceable_asset_reference_picker():
     assert "displayName !== sourceAssetId" in workbench
     assert "sceneAssetDisplayName(reference)" in workbench
     assert "source_version" in workbench
-    assert "production_copy" in workbench
+    assert "副本回执按发布版本记录" in workbench
     assert "<summary>技术详情</summary>" in workbench
     assert "引用 ID" in workbench
     assert "资源标识" in workbench

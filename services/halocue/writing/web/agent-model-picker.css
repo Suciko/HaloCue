@@ -1,0 +1,47 @@
+/* Top-layer picker is anchored above the composer and cannot be clipped by it. */
+#agentModelPicker{position:fixed;inset:auto;margin:0;padding:0;box-sizing:border-box;overflow:auto;border:1px solid #dedee5;border-radius:15px;background:#fff;color:#252528;box-shadow:0 14px 55px rgb(20 25 45 / .17);font-family:inherit;font-size:13px;line-height:1.5}
+#agentModelPicker::backdrop{background:rgb(0 0 0 / .06)}
+#agentModelPicker *{box-sizing:border-box}
+#agentModelPicker header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:17px 18px 10px}
+#agentModelPicker h2{margin:0;font-size:15px;line-height:1.5}
+#agentModelPicker header p{margin:4px 0 0;font-size:11px;color:#66666f;overflow-wrap:anywhere}
+#agentModelPicker button{font-family:inherit;cursor:pointer}
+#agentModelPicker .model-picker-close{flex:none;width:28px;height:28px;padding:0;border:0;border-radius:7px;background:transparent;color:inherit;font-size:21px}
+#agentModelPicker .model-picker-search{display:block;margin:0 14px}
+#agentModelPicker input{width:100%;height:36px;padding:7px 10px;border:1px solid #dcdce3;border-radius:8px;background:#f7f7f9;color:inherit;font:inherit}
+#agentModelPicker .model-picker-status{padding:0 18px;margin:9px 0;font-size:11px;color:#66666f;line-height:1.7}
+#agentModelPicker .is-error{color:#b33a42!important}
+#agentModelPicker .model-picker-options{max-height:240px;overflow-y:auto;padding:0 8px;scrollbar-width:thin}
+#agentModelPicker .model-picker-option{display:flex;align-items:center;gap:10px;justify-content:space-between;width:100%;padding:10px;border:0;border-radius:8px;background:transparent;color:inherit;text-align:left;font-size:12px;line-height:1.6}
+#agentModelPicker .model-picker-option>span{overflow-wrap:anywhere;min-width:0}
+#agentModelPicker .model-picker-option small{flex:none;font-size:10px;color:#66666f}
+#agentModelPicker .model-picker-option:hover{background:#f1f2f5}
+#agentModelPicker .model-picker-option[aria-pressed="true"]{background:#edf1ff;color:#304eae}
+#agentModelPicker .model-picker-empty{padding:12px 10px;color:#66666f;font-size:12px;line-height:1.8}
+#agentModelPicker footer{padding:12px 16px 14px;margin-top:8px;border-top:1px solid #e5e5e8}
+#agentModelPicker footer small{display:block;color:#66666f;font-size:10px;line-height:1.7}
+#agentModelPicker footer>div{display:flex;justify-content:space-between;gap:8px;margin-top:10px}
+#agentModelPicker footer button{border:0;background:transparent;color:#4263d4;font-size:12px;padding:5px 2px}
+#agentModelPicker button:disabled{cursor:wait;opacity:.55}
+#agentModelPicker :is(button,input):focus-visible{outline:2px solid #4263d4;outline-offset:1px}
+html[data-theme="dark"] #agentModelPicker#agentModelPicker{background:#27272b!important;color:#ededf0;border-color:#45454f!important}
+html[data-theme="dark"] #agentModelPicker#agentModelPicker :is(input,.model-picker-option:hover){background:#323238!important;color:#ededf0!important;border-color:#50505c!important}
+html[data-theme="dark"] #agentModelPicker#agentModelPicker .model-picker-option[aria-pressed="true"]{background:#303f69!important;color:#dce5ff!important}
+html[data-theme="dark"] #agentModelPicker#agentModelPicker :is(small,p){color:#aeaeb7!important}
+html[data-theme="dark"] #agentModelPicker#agentModelPicker footer{border-color:#45454f}
+html[data-theme="dark"] #agentModelPicker#agentModelPicker footer button{color:#a4b8ff}
+html[data-theme="dark"] #agentModelPicker#agentModelPicker .is-error{color:#ffb4b4!important}
+@media(max-width:760px){#agentModelPicker .model-picker-option{min-height:44px}#agentModelPicker .model-picker-options{max-height:35dvh}}
+
+#agentModelPicker .model-picker-endpoint{display:block;font-size:10px;margin-top:2px;overflow-wrap:anywhere}
+#app#app[data-surface="works"] #workConversationForm .agent-model-button{display:inline-flex;align-items:center;gap:6px;line-height:16px}
+#app#app[data-surface="works"] #workConversationForm .agent-model-chevron{display:block;width:14px;height:14px;flex:0 0 14px;align-self:center;transition:transform 150ms ease}
+#app#app[data-surface="works"] #workConversationForm .agent-model-button[aria-expanded="true"] .agent-model-chevron{transform:rotate(180deg)}
+@media(prefers-reduced-motion:reduce){#app#app #workConversationForm .agent-model-chevron{transition:none}}
+
+#registeredWritingModels{margin:14px 0;padding:12px 16px;border:1px solid var(--hc-border,#8884);border-radius:10px}
+#registeredWritingModels summary{cursor:pointer;font-size:13px;font-weight:600}
+#registeredWritingModels p{font-size:12px;line-height:1.7;color:var(--hc-muted)}
+#registeredWritingModels .registered-model-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:9px 0;font-size:12px}
+#registeredWritingModels .registered-model-row>span{min-width:0}
+#registeredWritingModels .registered-model-row small{display:block;font-size:11px;color:var(--hc-muted);overflow-wrap:anywhere}
