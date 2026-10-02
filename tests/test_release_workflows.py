@@ -92,13 +92,13 @@ def test_release_workflow_is_manual_and_public_only():
     assert lowered.count("secrets.") == 1
 
 
-def test_version_gate_accepts_only_exact_stable_tag_and_metadata():
+def test_version_gate_accepts_only_exact_release_tag_and_metadata():
     from tools.check_release_version import ReleaseVersionError, check_release_version
 
     # Public-source exports intentionally have no .git directory. Keep tag and
     # metadata validation hermetic; Git cleanliness is covered separately below.
     check_release_version(f"v{VERSION}", ROOT, verify_database=False)
-    for tag in (VERSION, "v0.9.1", "v0.9.2-beta.1", "release-0.9.2"):
+    for tag in (VERSION, "v1.0.0", "v1.0.0-beta.0", "v1.0.0-beta.2", "v0.9.1", "release-0.9.2"):
         with pytest.raises(ReleaseVersionError):
             check_release_version(tag, ROOT, verify_database=False)
 
@@ -161,9 +161,25 @@ def test_workflows_install_and_probe_pinned_ffmpeg_before_verification(
 
 def test_release_tag_must_point_to_checked_out_source(tmp_path):
     from tools.check_release_version import check_release_version, ReleaseVersionError
+
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+
     def git(*args):
-        subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=Test", "-c", "user.email=test@example.invalid", *args], check=True, capture_output=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(tmp_path),
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                *args,
+            ],
+            check=True,
+            capture_output=True,
+        )
+
     git("commit", "--allow-empty", "-qm", "first")
     git("tag", f"v{VERSION}")
     git("commit", "--allow-empty", "-qm", "second")

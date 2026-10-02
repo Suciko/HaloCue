@@ -1,6 +1,6 @@
 # HaloCue｜AA 剧本自动演出工具
 
-**HaloCue 1.0.0** 是一款面向
+**HaloCue 1.0.0 Beta 1** 是一款面向
 [AzureArchive](https://github.com/foxxlight/AzureArchive) 的 AA 剧本自动演出工具。它读取用户已经写好的中文剧本，安排表情、动作、站位、镜头、背景与声音，经过人工审查后编译为 AA 工程，同时帮助管理演员和素材。
 
 集成写作界面的 AI 可以提出新正文和改编候选；只有用户采纳才会写入正式修订。AA 制作中的 AI 用于演出标注，用户可以在编译前审查和修改结果。
@@ -10,10 +10,14 @@ Esoteric Software 均无隶属关系。HaloCue 不提供游戏资源，也不授
 
 ## 下载与开始
 
-普通 Windows 用户下载 `HaloCue-1.0.0-windows-x64.zip`：
+当前候选为 **`v1.0.0-beta.1` 预发行版**，不是正式稳定版。
+下载入口见 [GitHub Releases](https://github.com/Suciko/HaloCue/releases)。
+完整代码、依赖、启动方式与已验证范围见 [Beta 1 发布说明](docs/releases/1.0.0-beta.1.md)。
+
+普通 Windows 用户下载 `HaloCue-1.0.0-beta.1-windows-x64.zip`：
 
 如确有逐文件书面授权，私发覆盖包固定命名为
-`HaloCue-1.0.0-private-windows-x64.zip`，不上传 GitHub。
+`HaloCue-1.0.0-beta.1-private-windows-x64.zip`，不上传 GitHub。
 
 1. 完整解压 ZIP，不要直接在压缩包里运行。
 2. 双击 `HaloCue.exe`，程序会直接打开独立应用窗口，不会启动系统浏览器。

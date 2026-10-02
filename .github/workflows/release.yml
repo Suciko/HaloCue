@@ -6,7 +6,7 @@ on:
       release_tag:
         description: Existing Git tag to publish
         required: true
-        default: v1.0.0
+        default: v1.0.0-beta.1
       channel:
         description: Update channel written into the signed manifest
         required: true
@@ -14,7 +14,7 @@ on:
         options:
           - stable
           - beta
-        default: stable
+        default: beta
 
 permissions:
   contents: write

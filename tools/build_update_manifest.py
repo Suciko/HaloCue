@@ -36,8 +36,16 @@ def _private_key(value: str):
     raise ValueError("HALOCUE_UPDATE_SIGNING_KEY is not a valid Ed25519 private key")
 
 
-def build_manifest(*, archive: Path, archive_url: str, release_notes_url: str,
-                   version: str, channel: str, key_id: str, minimum: str) -> dict:
+def build_manifest(
+    *,
+    archive: Path,
+    archive_url: str,
+    release_notes_url: str,
+    version: str,
+    channel: str,
+    key_id: str,
+    minimum: str,
+) -> dict:
     private = _private_key(os.environ["HALOCUE_UPDATE_SIGNING_KEY"])
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     payload = {
@@ -49,7 +57,10 @@ def build_manifest(*, archive: Path, archive_url: str, release_notes_url: str,
         "platform": "windows-x64",
         "archive": {"url": archive_url, "size": archive.stat().st_size, "sha256": digest},
         "release_notes_url": release_notes_url,
-        "published_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "published_at": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
         "signature": {"algorithm": "ed25519", "key_id": key_id, "value": ""},
     }
     signature = private.sign(_canonical_payload(payload))
@@ -64,7 +75,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--release-notes-url", default="")
     parser.add_argument("--version", default=VERSION)
-    parser.add_argument("--minimum", default="1.0.0")
+    parser.add_argument("--minimum", default="1.0.0-beta.1")
     parser.add_argument("--channel", default=UPDATE_CHANNEL)
     parser.add_argument("--key-id", default="stable-2026")
     args = parser.parse_args()
@@ -80,7 +91,9 @@ def main() -> int:
         minimum=args.minimum,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     return 0
 
 

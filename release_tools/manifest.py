@@ -133,7 +133,7 @@ def is_public_source_path(relative_path: str) -> bool:
     if path.parts[0] not in _PUBLIC_DIRECTORIES:
         return False
     if path.parts[0] == "services":
-        if normalized == "services/halocue/runtime_layout.py":
+        if normalized in {"services/halocue/runtime_layout.py", "services/halocue/_test_support.py"}:
             return True
         if normalized.startswith("services/halocue/writing/skill/ba-writing/"):
             return path.suffix.casefold() == ".md"
