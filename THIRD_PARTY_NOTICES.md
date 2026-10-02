@@ -10,6 +10,13 @@ distribution or recognized native runtime component is missing from this file.
 
 ## Python packages and bundler
 
+The separately authorized `data/reference-pack` contains maintainer-curated
+character references and extracted Blue Archive scenario staging data. Original
+game text and characters remain the property of their respective rights holders;
+they are not licensed under HaloCue's MIT code license. See the pack README and
+manifest for provenance and the 2026-10-02 maintainer inclusion authorization.
+
+
 | Component | License |
 |---|---|
 | `PyInstaller` bootloader | GPL-2.0 with the PyInstaller bootloader exception |

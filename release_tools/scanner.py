@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import io
+import gzip
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -117,6 +118,7 @@ _TEXT_EXTENSIONS = {
     ".ini",
     ".js",
     ".json",
+    ".jsonl",
     ".md",
     ".ps1",
     ".py",
@@ -295,6 +297,23 @@ def _path_findings(relative: str, *, mode: ScanMode) -> list[ScanFinding]:
 
 def _payload_findings(relative: str, data: bytes) -> list[ScanFinding]:
     suffix = PurePosixPath(relative).suffix.casefold()
+    if relative.endswith((".json.gz", ".jsonl.gz")):
+        findings = []
+        total = 0
+        try:
+            with gzip.GzipFile(fileobj=io.BytesIO(data)) as stream:
+                while line := stream.readline(32 * 1024 * 1024 + 1):
+                    total += len(line)
+                    if len(line) > 32 * 1024 * 1024 or total > 512 * 1024 * 1024:
+                        return [
+                            _finding(
+                                "archive-limit", relative, "compressed reference limit exceeded"
+                            )
+                        ]
+                    findings.extend(_payload_findings(relative[:-3], line))
+        except (OSError, EOFError):
+            return [_finding("archive-invalid", relative, "compressed reference could not be read")]
+        return findings
     text = _decode_text(data, suffix)
     if text is None:
         return []
@@ -303,7 +322,7 @@ def _payload_findings(relative: str, data: bytes) -> list[ScanFinding]:
         findings.append(_finding("personal-path", relative, "personal absolute path detected"))
     if _has_credential(text):
         findings.append(_finding("credential", relative, "credential-like value detected"))
-    if suffix == ".json":
+    if suffix in {".json", ".jsonl"}:
         try:
             payload = json.loads(text)
         except (json.JSONDecodeError, UnicodeError):
@@ -374,10 +393,14 @@ def _archive_findings(
                 if member.file_size and not member.compress_size
                 else member.file_size / max(1, member.compress_size)
             )
-            if (
-                member.file_size > _MAX_ARCHIVE_MEMBER_BYTES
-                or ratio > _MAX_ARCHIVE_COMPRESSION_RATIO
-            ):
+            reference_shard = any(
+                member_name.endswith(
+                    f"data/reference-pack/official-staging/records/scenario_{shard}.jsonl.gz"
+                )
+                for shard in range(3)
+            )
+            member_byte_limit = 64 * 1024 * 1024 if reference_shard else _MAX_ARCHIVE_MEMBER_BYTES
+            if member.file_size > member_byte_limit or ratio > _MAX_ARCHIVE_COMPRESSION_RATIO:
                 findings.append(_finding("archive-limit", virtual, "archive member limit exceeded"))
                 continue
             try:
@@ -390,7 +413,7 @@ def _archive_findings(
                             break
                         member_total += len(chunk)
                         if (
-                            member_total > _MAX_ARCHIVE_MEMBER_BYTES
+                            member_total > member_byte_limit
                             or member_total > member.file_size
                             or not budget.charge_streamed(len(chunk))
                         ):

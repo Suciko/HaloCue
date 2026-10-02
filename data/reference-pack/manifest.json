@@ -1,0 +1,569 @@
+{
+  "schema_version": "halocue-reference-pack/1.0",
+  "authorization_date": "2026-10-02",
+  "character_source": "maintainer-curated BA writing reference cards",
+  "corpus_source": {
+    "audit": {
+      "command_event_count": 444046,
+      "record_counts": {
+        "shards": {
+          "0": 140277,
+          "1": 140277,
+          "2": 87478
+        },
+        "total": 368032
+      },
+      "unknown_command_count": 1,
+      "unmapped_group_count": 623,
+      "unresolved_resource_count": 70149
+    },
+    "extractor_version": "1.0",
+    "files": {
+      "audit/extraction_report.json": {
+        "bytes": 195,
+        "sha256": "448eebeefb6aa50ef6346a0ee1d25d03c2b9d6cd3a2123e7e82beed2fddbcc7c"
+      },
+      "audit/unknown_commands.jsonl": {
+        "bytes": 79,
+        "sha256": "0cf62778b5a87144586a34eb17e54ecc40273d35d15030d1db23ab692a42b348"
+      },
+      "audit/unmapped_groups.jsonl": {
+        "bytes": 27391,
+        "sha256": "b3e100135433fcd1948306d19c1d9b941143ea92eb51879c98b0e369af8513cc"
+      },
+      "audit/unresolved_resources.jsonl": {
+        "bytes": 713448,
+        "sha256": "d18a3d361f0e80106506714da53233c617d2f7db1485d11a1048b9352cdd05a8"
+      },
+      "indexes/command_catalog.json": {
+        "bytes": 614,
+        "sha256": "ed22f4cd0f5803c2b2820c8d44611650300d99e3a680387d4eb180f8987a3bf0"
+      },
+      "indexes/resource_catalog.json": {
+        "bytes": 1431492,
+        "sha256": "f320e9a1a5b0d073e96ff8ab6c76b8e2b2b98dceee528e187cbdefce48cd3e35"
+      },
+      "indexes/story_units.jsonl": {
+        "bytes": 8001853,
+        "sha256": "d792d5bb1f2e66db4d94b069a67a4b0bac3f691c1bf2201f90ccbcad1814f7d7"
+      },
+      "records/scenario_0.jsonl": {
+        "bytes": 432826332,
+        "sha256": "c3b8dfe42ac6b276d4832b521694a112cdb5409ac6d3d7cdfb2f0f103a47d7db"
+      },
+      "records/scenario_1.jsonl": {
+        "bytes": 439057349,
+        "sha256": "615db6b98f4eb2f96ed2bac60244e98c25da685960f6badd71634f5167caff87"
+      },
+      "records/scenario_2.jsonl": {
+        "bytes": 278461048,
+        "sha256": "73450441154642428816247c38b35c180de297da002645debca51b10d501d7c8"
+      },
+      "tools/extract_official_staging_corpus.py": {
+        "bytes": 21633,
+        "sha256": "7893206d407e8ba10e8b8056a60f0434d005f7274da23bd5cb1f7dc80c658f67"
+      }
+    },
+    "official_repo_commit": "4ba8bd56518f55c5d4d50b324a9361279a48f808",
+    "record_counts": {
+      "shards": {
+        "0": 140277,
+        "1": 140277,
+        "2": 87478
+      },
+      "total": 368032
+    },
+    "schema_version": "1.0",
+    "sources": {
+      "ScenarioScriptExcel_0.json": {
+        "bytes": 87424468,
+        "sha256": "351adc81f2fd74694933413fe5f1e8e202df09444658fc2fcb72c9918e2ee1ea"
+      },
+      "ScenarioScriptExcel_1.json": {
+        "bytes": 84287807,
+        "sha256": "b4afc9ea4c1921765412343029278a9ca1a6566894ce0dd6b489e5ab1697b2d2"
+      },
+      "ScenarioScriptExcel_2.json": {
+        "bytes": 54709241,
+        "sha256": "f2c93fab86d75c03e2eaaae76fb8becb75d30310aa31aaa78d16b4580e6b4fe9"
+      }
+    }
+  },
+  "files": {
+    "characters/一之濑明日奈.json": {
+      "bytes": 21671,
+      "sha256": "a0bc52f4ba6d1b07280ff920aedcd292a4807242dbc734561ae27897295501bb"
+    },
+    "characters/下仓惠.json": {
+      "bytes": 26210,
+      "sha256": "82c92393a3a632e74db1c5240850bf47f066a980b42a789b75f75a836b8ef89e"
+    },
+    "characters/下江小春.json": {
+      "bytes": 28851,
+      "sha256": "cd6371e11577fe21c76e6743a581f2c10756363e70c7000c4aa09dbc3e25ae63"
+    },
+    "characters/丹花伊吹 .json": {
+      "bytes": 26871,
+      "sha256": "df6fb4a8205275bfa7c57fcfdce0a788e05267429859f974f4004b1dac48476f"
+    },
+    "characters/丹花伊吹.json": {
+      "bytes": 23086,
+      "sha256": "14cafa0236b30826f796bf1623140948c2ebd47f195a8174aed6bf81045b75fc"
+    },
+    "characters/久田泉奈.json": {
+      "bytes": 26868,
+      "sha256": "99f8db83d95b550ceb07ff16d27676e8e66e5876d9b10b836b184521a780aafc"
+    },
+    "characters/乙花堇.json": {
+      "bytes": 23109,
+      "sha256": "bc18e0acaec45bd40ba413250bcb5d02ecc3256a8ee17f2dabf40cebaa5d9e67"
+    },
+    "characters/仲正一花.json": {
+      "bytes": 29339,
+      "sha256": "2a7724d6174ee561d8167c9d6b35dfaf9f008c03a89d356784e808c776d6d5dd"
+    },
+    "characters/伊草遥香.json": {
+      "bytes": 26953,
+      "sha256": "084038d73033f14cb65a417d93578c9785810c2d05b91bfaff4545c25f2ee1ef"
+    },
+    "characters/伊落玛丽.json": {
+      "bytes": 25041,
+      "sha256": "0cf3d319581a73ae30d889cced38a56c25e5cf15cf32d590db858908de30fe76"
+    },
+    "characters/冰室濑名.json": {
+      "bytes": 26134,
+      "sha256": "24f2696fceee24d2445bcd442c599c70ea417a4f742a5ad73b0995e85eb4ff56"
+    },
+    "characters/剑先鹤城.json": {
+      "bytes": 27905,
+      "sha256": "6a2cf2ed0c9bb608f3e0465f9a753f13b1ff4ea4cba3bc4e8833b3dde53344a1"
+    },
+    "characters/勘解由小路紫.json": {
+      "bytes": 14049,
+      "sha256": "e2386df959e6ac7f015e95173edcc0b85a1dbdedf0a82bb86fea5ebf4c1a8a95"
+    },
+    "characters/十六夜野宫.json": {
+      "bytes": 27271,
+      "sha256": "b4762f3a433662a7920b019952bdde04f6d2da9a0332f0726af07c1b178b61a8"
+    },
+    "characters/古关忧.json": {
+      "bytes": 30028,
+      "sha256": "072b638c8960e200746b9b44d1d3a8db9e8039fee0ac882a9451b37f06b81066"
+    },
+    "characters/各务千寻.json": {
+      "bytes": 28279,
+      "sha256": "8bf2132200042301cf2c23b821447265a462f4cb1ad219e10252524357ee6df7"
+    },
+    "characters/合欢垣吹雪.json": {
+      "bytes": 25361,
+      "sha256": "178c9d26b4a1052d59a29d9ead256d3994267acab36068209057520a7e91dc43"
+    },
+    "characters/和乐知世.json": {
+      "bytes": 26247,
+      "sha256": "7fee80a2056f8c4c0269c29379d6acd76df3620bd1663864bb6ca579586986f4"
+    },
+    "characters/和泉元英美.json": {
+      "bytes": 30914,
+      "sha256": "658b6b6d296c423201404d5194852e93e91c28dc8c7a352e6b517eb7a5f618b3"
+    },
+    "characters/圣园未花.json": {
+      "bytes": 25549,
+      "sha256": "c94f480d53f2c484f43162d5d79e53ea7c4f6a200e3dfed2d770ade305a0f00f"
+    },
+    "characters/天童凯伊.json": {
+      "bytes": 32622,
+      "sha256": "996274317388be27eff86543ae3fbeb495a55aed2f960cc5e2ff1b66d9b18039"
+    },
+    "characters/天童爱丽丝.json": {
+      "bytes": 26044,
+      "sha256": "014f0866b518eed61239890ceacefc00f7bdc323a0fdb5c7408e9cee9ed2013c"
+    },
+    "characters/天见和香.json": {
+      "bytes": 29157,
+      "sha256": "180fb9428002f9e088cb30edeabee6df5ccb11389f73ca8201cd8a97ce1defe1"
+    },
+    "characters/天雨亚子.json": {
+      "bytes": 28494,
+      "sha256": "25f7b0be95fdb06869a1266589c323f4094a61cbb024b2f8e9a120a9ae5d4a3b"
+    },
+    "characters/奥空绫音.json": {
+      "bytes": 30386,
+      "sha256": "cb7f16413097610e289f892fbdfe8e3b8959b786822d257bd7bf59a452d661a4"
+    },
+    "characters/宇泽澪纱.json": {
+      "bytes": 32861,
+      "sha256": "c61070057576d77a7229e0739eeeb070341743d9217431ccfaaf5ff994b82433"
+    },
+    "characters/安守实里.json": {
+      "bytes": 31907,
+      "sha256": "7a2bf8d70f06e148a0439d9b07e20f872994cf6d3e6651d3cc7dec5adce9f7a1"
+    },
+    "characters/室笠朱音.json": {
+      "bytes": 26656,
+      "sha256": "06d0a8985859c53c9cffc8b70b57a898d4175c730ea4a3e1acd88d65efd76b00"
+    },
+    "characters/小涂真纪.json": {
+      "bytes": 32799,
+      "sha256": "fc8679d591cae01fce60c76d77be6a71e112a425ae46fe313062952973835660"
+    },
+    "characters/小钩晴.json": {
+      "bytes": 30694,
+      "sha256": "df2ed488cac48619bd80b0354756075d5cd0153cd9bf1d867bd4beeb7d403402"
+    },
+    "characters/小鸟游星野.json": {
+      "bytes": 29702,
+      "sha256": "57215ae990896aad587370fce65377f91432a8a89ab7f746d1cea7f78d8d1312"
+    },
+    "characters/尾刃环奈.json": {
+      "bytes": 31114,
+      "sha256": "9d096eee780d6696e34fee2a3508c912154b473669aa459f69330abe8df01647"
+    },
+    "characters/戒野美咲.json": {
+      "bytes": 29054,
+      "sha256": "0e0ab4f1fadf89e19880debb5237c4a39bc9057ef2a0c5698fe8a2ac2c59e5d2"
+    },
+    "characters/才羽桃井.json": {
+      "bytes": 25563,
+      "sha256": "a3da90919db334a7c2ca7b8d9d6313aeef1e2a151ba4325add703387529e5ca9"
+    },
+    "characters/才羽绿.json": {
+      "bytes": 30953,
+      "sha256": "e1110f927d5d1793c82856c7f9c237503dbcaeb7d20a8298e5ed0a49992fc43d"
+    },
+    "characters/早濑优香.json": {
+      "bytes": 27158,
+      "sha256": "1772d721fb5f261a526d9a42f1812e1899861219dd72023aaa4317f18a50b492"
+    },
+    "characters/明星日鞠.json": {
+      "bytes": 29534,
+      "sha256": "41a062b215ea3625342e7b4f7ee2680df4f9c911754a0d060b0cc86eb03c430f"
+    },
+    "characters/春原心菜.json": {
+      "bytes": 14848,
+      "sha256": "30f4519ad13cb7b253580430957443f2cb5e21b9cfe1840e23f426d36af7eccc"
+    },
+    "characters/春原瞬.json": {
+      "bytes": 48465,
+      "sha256": "bba631defc81d86e79c8712a927f25a91bdf60998165d15d1da12a1f2b346234"
+    },
+    "characters/春日椿.json": {
+      "bytes": 26174,
+      "sha256": "18bd1df0ecbdf1a852d4b36de0dbb695c09e620653ae5cf7b563dc7cf173c1ac"
+    },
+    "characters/普拉娜.json": {
+      "bytes": 31514,
+      "sha256": "3a1bfcad15c0c8676d26633da7f25e50db5e6f2ebf561ad9378237bd30ebc39f"
+    },
+    "characters/月雪宫子.json": {
+      "bytes": 28810,
+      "sha256": "7b4f583f2dc7f0859a2073d13178f23590807cdb11525377d92a38ab40cd0a58"
+    },
+    "characters/朝颜花江.json": {
+      "bytes": 27084,
+      "sha256": "233ced3a1ed1ab743e0a3080d6210f93ff76de210f49e18e96f327876bb9d3d1"
+    },
+    "characters/杏山和纱.json": {
+      "bytes": 26995,
+      "sha256": "3a5d03dbc64cdf1523277f8143550d8cb810f7c9bc2764fc44ebc954884ceb38"
+    },
+    "characters/枣伊吕波.json": {
+      "bytes": 31295,
+      "sha256": "e9b17938d3a4f4f9c4b9a72889c08f8855fc4293175b9b053cc29e9fbcfbe01e"
+    },
+    "characters/柚鸟夏.json": {
+      "bytes": 28835,
+      "sha256": "137c3cae529da12b2c925f1241570c606dc13675d48c482db6b676149074915f"
+    },
+    "characters/桐生桔梗.json": {
+      "bytes": 34476,
+      "sha256": "b58d2c3629165b6e29e0a17f347a63353d4de2838c7c7519cca3cb45b71ac8a5"
+    },
+    "characters/桐藤渚.json": {
+      "bytes": 15885,
+      "sha256": "e68f8473a1e3a64ce5b0dc0e26dc91d1954e9102f5f7d9e3f7b09337f2b26f4d"
+    },
+    "characters/桑上佳穗.json": {
+      "bytes": 29122,
+      "sha256": "d735c437b884f7af884626c4d0bf9c7206b916a8ab3eeeb3ceaa285c265ec70b"
+    },
+    "characters/槌永日和.json": {
+      "bytes": 30764,
+      "sha256": "e0529509c2c2bfbd33778b8c74ba4c6b05984e0ddaca1159327971a0f3d648d5"
+    },
+    "characters/橘光.json": {
+      "bytes": 21140,
+      "sha256": "4cb4bdceb7b110ee2204275bcfaeb740eef2081fdaf660899e73651fc514df5e"
+    },
+    "characters/橘望.json": {
+      "bytes": 22766,
+      "sha256": "ee6d2c3559a52bb943f49e1659dd90068a3cbf4e3d72505ffe5ac9fa87a0fb7d"
+    },
+    "characters/歌住樱子.json": {
+      "bytes": 31861,
+      "sha256": "2261ba3198b25c1d81568e9657d9f304780cefe41e32f845581d98fb55b6f175"
+    },
+    "characters/水羽三森.json": {
+      "bytes": 29794,
+      "sha256": "5240ffc2eb24cda6890ce221ce835b479a543b8e1946663a685a11961665864d"
+    },
+    "characters/池仓玛丽娜.json": {
+      "bytes": 31602,
+      "sha256": "a87536d3ebaf1f4a1ffffbb2426377ea1ceec41791db5fb0cf3d96eab8f694df"
+    },
+    "characters/河和静子.json": {
+      "bytes": 27433,
+      "sha256": "7f2aee682d0652125cd3fadd9dc71095fdc84ae4fca7025eee4a48034a73ff2f"
+    },
+    "characters/浅黄睦月.json": {
+      "bytes": 25977,
+      "sha256": "5513bbcd505596caec52fdb64553ee4883b07d7f73fb9d034db5d29d37a0b6e0"
+    },
+    "characters/浦和花子.json": {
+      "bytes": 29073,
+      "sha256": "a88f9bf342983c3f02701e7238f5d7aac550cf2320827f2ef2caf0c9dc87d1f1"
+    },
+    "characters/火宫千夏.json": {
+      "bytes": 14311,
+      "sha256": "211a9422f84b314f8453eaecd8bf4c71c958eb386d675e5d1c9382fbba571887"
+    },
+    "characters/爱清风华.json": {
+      "bytes": 28420,
+      "sha256": "a348966c37f852b63b6106abff4815bd983b3627e2bf9634bf3cf4bbd67fd6d2"
+    },
+    "characters/牛牧茱莉.json": {
+      "bytes": 13508,
+      "sha256": "8d21464624fc8c2225fe8094ae02590b16183d6f87880f42f80230176cf5f824"
+    },
+    "characters/狐坂若藻.json": {
+      "bytes": 29349,
+      "sha256": "b669ef8c5c8dd572f175b5a8bf2dc1c30891c582f294811106045508a7950a09"
+    },
+    "characters/猫冢响.json": {
+      "bytes": 28102,
+      "sha256": "bcf5df133e163caa0181d2d9b455a9dab9c1464e5b9d866562e0575ed5aab8db"
+    },
+    "characters/生盐诺亚.json": {
+      "bytes": 27896,
+      "sha256": "38ebcd01d458d3584660d28a8a18247c69d11d82ba7c9cf1c7d10e2de5c57c57"
+    },
+    "characters/白洲梓.json": {
+      "bytes": 28437,
+      "sha256": "c51696e7d492eaf0f447308768d05e1961cf1e5c448702946817e6de861085d2"
+    },
+    "characters/白石詠葉.json": {
+      "bytes": 27472,
+      "sha256": "136c7c2b9fbb5c7391b5ecd2d031fe6f45dad45d136686296ec8fd7f2c8bc1d7"
+    },
+    "characters/百合园圣娅.json": {
+      "bytes": 26633,
+      "sha256": "5caa1a1d8511322d2c4b4b9c0b8014d2c7024f4ed9c1724bd2d75f28e867a3f2"
+    },
+    "characters/砂狼白子.json": {
+      "bytes": 26163,
+      "sha256": "f6ecf4d8bd631ff85cddbacaa9c63152cd8aa539ddbb87144c90a81ca12fccdc"
+    },
+    "characters/砂狼白子_恐怖.json": {
+      "bytes": 26184,
+      "sha256": "99c0fac7fe01c15e6ae0acef4fa198377b2337c8d1d919ffa92a42a6f9446f0c"
+    },
+    "characters/秤亚津子.json": {
+      "bytes": 27049,
+      "sha256": "f322625f38fdb155d095f7424e0dd923904f3f12d88be2b7e4f4fdc2ade9c458"
+    },
+    "characters/空井咲.json": {
+      "bytes": 31201,
+      "sha256": "7213c08033476a0689dc499a9be01fee8a073ad99fdb8d7d114f528bd0d3b8ce"
+    },
+    "characters/空崎日奈.json": {
+      "bytes": 30189,
+      "sha256": "45d374768c6c843e01678e2cfc6f05a836ace2b0b2ec0a8e08f95f012931d8ff"
+    },
+    "characters/美甘宁瑠.json": {
+      "bytes": 20413,
+      "sha256": "4dd8431303c8b463e73ed9f948efa31e8781993bab4a89585f5340737c5c0ca5"
+    },
+    "characters/羽川莲实.json": {
+      "bytes": 28640,
+      "sha256": "4ff09f01d29934ddcba46ccbe1117612459d483f86336c88ac423c754ef460cc"
+    },
+    "characters/羽沼真琴.json": {
+      "bytes": 25565,
+      "sha256": "41ecbde21c19db2e82e17809b79a732a56c9d022142060e49e13a863505d276e"
+    },
+    "characters/花岗柚子.json": {
+      "bytes": 26590,
+      "sha256": "47bef3e7eb04a63ff410772a63ff11f87e71e63a8416a75bbaf114e5a7ea254a"
+    },
+    "characters/苍森美祢.json": {
+      "bytes": 14637,
+      "sha256": "28d75b614e4dc683f3e62522b68695e75aa12868f05aeed1d961a1c91504a880"
+    },
+    "characters/若叶日向.json": {
+      "bytes": 30190,
+      "sha256": "52bd78fcce462562535f7ab2c32678212d663ec71d859c34358f3c57176da0f3"
+    },
+    "characters/药子沙耶.json": {
+      "bytes": 36747,
+      "sha256": "53b0d7953dfa898218f016d01f66ecad07821413cd921c4a8c4afec3e98d9d9a"
+    },
+    "characters/角楯花凛.json": {
+      "bytes": 22476,
+      "sha256": "7b2df2f2d25f5b38f1036f700091bea2dfb227151363d462f59518be0fb83198"
+    },
+    "characters/调月莉音.json": {
+      "bytes": 30328,
+      "sha256": "60e7f57b45799bb430cccd3ace26ec276069fa3d08b4729e43d9924c2e7ff93f"
+    },
+    "characters/赤司纯子.json": {
+      "bytes": 24192,
+      "sha256": "e81746d24c7d3c16b2fbfadb6c75a64be021de16e14c0ce16470833963c0cfd1"
+    },
+    "characters/近卫美奈.json": {
+      "bytes": 27512,
+      "sha256": "99a5637e6b9d66a1408bfdc9e8cceec18cb513bcb8e881b0ab12ed0e0c971345"
+    },
+    "characters/连河切里诺.json": {
+      "bytes": 28774,
+      "sha256": "acae64dbbc7becce8d6f7916632568fb8c14fb24a10a80220ec6350e3b388e08"
+    },
+    "characters/银镜伊织.json": {
+      "bytes": 26093,
+      "sha256": "97d59c98a18226c4dd8387d08a36d29fc05ae103a51d9ee7dbf1ff99be1ffa08"
+    },
+    "characters/锭前纱织.json": {
+      "bytes": 28330,
+      "sha256": "02c14037c730cc21676c5ac95d11954fac9c7e4a5205c78d287d475f51186a95"
+    },
+    "characters/间宵时雨.json": {
+      "bytes": 30111,
+      "sha256": "2186b94bd7323dc8f75ef1ed7e7e448c4c174fe92aa830b98d4d717ee77de4ce"
+    },
+    "characters/阿慈谷日富美.json": {
+      "bytes": 29194,
+      "sha256": "a4566cdfe0754cc3d4e018622727cb06903d6d57aaf72bcae54f8dec8dda38e5"
+    },
+    "characters/阿罗娜.json": {
+      "bytes": 26979,
+      "sha256": "c61e7c65ecec3e8149908f149bf7ca99d6b0fa78cf3728e5546da97a59e693ba"
+    },
+    "characters/陆八魔爱露.json": {
+      "bytes": 30085,
+      "sha256": "ea6ae4c0d4bb368b5fa578f7e38d3c9ccc366b9308c5a8377a7d77d611f6bb56"
+    },
+    "characters/霞泽美游.json": {
+      "bytes": 26046,
+      "sha256": "d8c139b6b157e0f2737933d088e0944734e2be599e816d3402155ccbb19b6356"
+    },
+    "characters/静山麻白.json": {
+      "bytes": 23770,
+      "sha256": "bdf569d6b4bfa5f0cedfa94827b0ee2fd5edc19e88a10de7e54122ef676fa441"
+    },
+    "characters/音濑小玉.json": {
+      "bytes": 32371,
+      "sha256": "17a7b2bcf4cadeeaed86ef02e6c454bc8b16fdad4af6ef9394ec9d2aee8debbb"
+    },
+    "characters/风仓萌.json": {
+      "bytes": 23951,
+      "sha256": "5dbfa87bc536d3cb2cb53adad516934f338e6779205acfc18ffc7095fe44de99"
+    },
+    "characters/飞鸟马时.json": {
+      "bytes": 28400,
+      "sha256": "fd043e216e6e8c50316607807784213b6410f36334397691b80693d0a19cd349"
+    },
+    "characters/鬼怒川佳澄.json": {
+      "bytes": 34529,
+      "sha256": "4e0337c735e7491c85b34ca1174495d16d64fa1f87d26f296b63e42cda56251e"
+    },
+    "characters/鬼方佳代子.json": {
+      "bytes": 24147,
+      "sha256": "a56891b977ceb9ffe1ed6b9566260ec2514f7da8b57ecf65c8075dc274b82d58"
+    },
+    "characters/鹫见芹奈.json": {
+      "bytes": 14111,
+      "sha256": "72f2118fd64c9fc0cd3401dda896e364586c6e8d258c1c31241344cccd2a3a2b"
+    },
+    "characters/黑崎小雪.json": {
+      "bytes": 28627,
+      "sha256": "e4d5a3b742eb66d108cd1693f0cb8e757541fb91f18181753aef4085f62fb8f7"
+    },
+    "characters/黑见芹香.json": {
+      "bytes": 28209,
+      "sha256": "abc6f715b44f4ed526ec70512aa6c871ee3896387dd37d5557fcfea27ffa932c"
+    },
+    "characters/黑馆羽留奈.json": {
+      "bytes": 26190,
+      "sha256": "b6ced1320896b6d65985c6f21836c13d13c85ec690f91dd810eb3773808d6406"
+    },
+    "characters/龙华妃咲.json": {
+      "bytes": 32705,
+      "sha256": "015e386471b9a072c2c0bf82c9e626e3a029bb083e4aad4acaf0315f4aed69b2"
+    },
+    "official-staging/records/scenario_0.jsonl.gz": {
+      "bytes": 34558674,
+      "sha256": "2a6d9cbe51d9230ee841e587866fa589485192031c93db1cbae0b83fc0653f65",
+      "uncompressed_bytes": 432826332,
+      "uncompressed_sha256": "c3b8dfe42ac6b276d4832b521694a112cdb5409ac6d3d7cdfb2f0f103a47d7db"
+    },
+    "official-staging/records/scenario_1.jsonl.gz": {
+      "bytes": 32500077,
+      "sha256": "decf2de23106b0846e98b36a346bc8c8c201aa11db9fca74b54cfad3b4cde8f1",
+      "uncompressed_bytes": 439057349,
+      "uncompressed_sha256": "615db6b98f4eb2f96ed2bac60244e98c25da685960f6badd71634f5167caff87"
+    },
+    "official-staging/records/scenario_2.jsonl.gz": {
+      "bytes": 21505764,
+      "sha256": "654d0b2ac86e4bfcdce22f8158dcac64782d702b45b06504ce015c99a5511a70",
+      "uncompressed_bytes": 278461048,
+      "uncompressed_sha256": "73450441154642428816247c38b35c180de297da002645debca51b10d501d7c8"
+    },
+    "official-staging/indexes/command_catalog.json.gz": {
+      "bytes": 378,
+      "sha256": "6957308dd3c332011769748c92534866593d37383367d1d096728b572514cf59",
+      "uncompressed_bytes": 614,
+      "uncompressed_sha256": "ed22f4cd0f5803c2b2820c8d44611650300d99e3a680387d4eb180f8987a3bf0"
+    },
+    "official-staging/indexes/resource_catalog.json.gz": {
+      "bytes": 104000,
+      "sha256": "d6fc04e8a46c7b1b6092699fdd2957159e35f7c75d9b0b8b26dfd8204726b321",
+      "uncompressed_bytes": 1431492,
+      "uncompressed_sha256": "f320e9a1a5b0d073e96ff8ab6c76b8e2b2b98dceee528e187cbdefce48cd3e35"
+    },
+    "official-staging/indexes/story_units.jsonl.gz": {
+      "bytes": 1082814,
+      "sha256": "4c34894d63b510f2cd9ff01e9c0e112d0b09a42549424d80286beacd68223716",
+      "uncompressed_bytes": 8001853,
+      "uncompressed_sha256": "d792d5bb1f2e66db4d94b069a67a4b0bac3f691c1bf2201f90ccbcad1814f7d7"
+    },
+    "official-staging/audit/extraction_report.json.gz": {
+      "bytes": 154,
+      "sha256": "7224eed069c3ac664cc380f07decc356e1fd9d56c7065cbaaffd7149a5811a5d",
+      "uncompressed_bytes": 195,
+      "uncompressed_sha256": "448eebeefb6aa50ef6346a0ee1d25d03c2b9d6cd3a2123e7e82beed2fddbcc7c"
+    },
+    "official-staging/audit/unknown_commands.jsonl.gz": {
+      "bytes": 87,
+      "sha256": "8fecaf744b83b9bc153bddaa400153502259e071109ad6df08ef0e0902c9b47f",
+      "uncompressed_bytes": 79,
+      "uncompressed_sha256": "0cf62778b5a87144586a34eb17e54ecc40273d35d15030d1db23ab692a42b348"
+    },
+    "official-staging/audit/unmapped_groups.jsonl.gz": {
+      "bytes": 2603,
+      "sha256": "fa51c16bf15d2aaeaac1e96f581ab567590a35ac77736e435aea710226c7d673",
+      "uncompressed_bytes": 27391,
+      "uncompressed_sha256": "b3e100135433fcd1948306d19c1d9b941143ea92eb51879c98b0e369af8513cc"
+    },
+    "official-staging/audit/unresolved_resources.jsonl.gz": {
+      "bytes": 89987,
+      "sha256": "a17518f03f5a9335bac7fb2c2de2c9fc557c732749ef265a194c73c393b770f0",
+      "uncompressed_bytes": 713448,
+      "uncompressed_sha256": "d18a3d361f0e80106506714da53233c617d2f7db1485d11a1048b9352cdd05a8"
+    },
+    "official-staging/derived/face_text_examples.json.gz": {
+      "bytes": 5079811,
+      "sha256": "af1c494d51e530d1f364071ed227082a8ae5b1a0b5ee37002c0b6a4f97040880",
+      "uncompressed_bytes": 26390020,
+      "uncompressed_sha256": "11f06c8bceb42dcea76025f0ed08389959c71bbc0eb09a14a3b5836a705bcf0f"
+    }
+  },
+  "character_card_count": 102
+}

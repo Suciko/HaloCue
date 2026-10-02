@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Read-only adapter for the local Blue Archive reference corpus.
 
 The writing workspace owns only its imported excerpts.  The corpus remains an
@@ -7,7 +5,10 @@ external evidence source and is never modified or treated as a confirmed canon
 without a user decision.
 """
 
+from __future__ import annotations
+
 import json
+import gzip
 from pathlib import Path
 
 from .errors import DomainError
@@ -17,6 +18,17 @@ class OfficialReferenceCatalog:
     def __init__(self, corpus_dir: Path | None):
         self.corpus_dir = Path(corpus_dir).resolve() if corpus_dir else None
         self._recent: dict[str, dict] = {}
+
+    def _paths(self):
+        return sorted([*self.corpus_dir.glob("*.jsonl"), *self.corpus_dir.glob("*.jsonl.gz")])
+
+    @staticmethod
+    def _open(path):
+        return (
+            gzip.open(path, "rt", encoding="utf-8")
+            if path.suffix == ".gz"
+            else path.open("r", encoding="utf-8")
+        )
 
     @property
     def available(self) -> bool:
@@ -40,14 +52,18 @@ class OfficialReferenceCatalog:
     def search(self, query: str, limit: int = 12) -> list[dict]:
         needle = str(query or "").strip().casefold()
         if len(needle) < 2:
-            raise DomainError("validation_error", "请至少输入两个字符后检索原作资料。", details={"field": "q"})
+            raise DomainError(
+                "validation_error", "请至少输入两个字符后检索原作资料。", details={"field": "q"}
+            )
         if not self.available:
-            raise DomainError("official_corpus_unavailable", "未配置可读取的 BA 原作语料库。", status=503)
+            raise DomainError(
+                "official_corpus_unavailable", "未配置可读取的 BA 原作语料库。", status=503
+            )
 
         results: list[dict] = []
-        for path in sorted(self.corpus_dir.glob("*.jsonl")):
+        for path in self._paths():
             try:
-                with path.open("r", encoding="utf-8") as handle:
+                with self._open(path) as handle:
                     for line in handle:
                         try:
                             record = json.loads(line)
@@ -70,22 +86,31 @@ class OfficialReferenceCatalog:
                         results.append(item)
                         if len(results) >= limit:
                             return results
-            except OSError as exc:
-                raise DomainError("official_corpus_unavailable", "无法读取 BA 原作语料库。", status=503, details={"file": path.name}) from exc
+            except (OSError, EOFError) as exc:
+                raise DomainError(
+                    "official_corpus_unavailable",
+                    "无法读取 BA 原作语料库。",
+                    status=503,
+                    details={"file": path.name},
+                ) from exc
         return results
 
     def get(self, record_uid: str) -> dict:
         uid = str(record_uid or "").strip()
         if not uid:
-            raise DomainError("validation_error", "请选择一条原作资料。", details={"field": "record_uid"})
+            raise DomainError(
+                "validation_error", "请选择一条原作资料。", details={"field": "record_uid"}
+            )
         if uid in self._recent:
             return self._recent[uid]
         if not self.available:
-            raise DomainError("official_corpus_unavailable", "未配置可读取的 BA 原作语料库。", status=503)
+            raise DomainError(
+                "official_corpus_unavailable", "未配置可读取的 BA 原作语料库。", status=503
+            )
 
-        for path in sorted(self.corpus_dir.glob("*.jsonl")):
+        for path in self._paths():
             try:
-                with path.open("r", encoding="utf-8") as handle:
+                with self._open(path) as handle:
                     for line in handle:
                         try:
                             record = json.loads(line)
@@ -95,9 +120,19 @@ class OfficialReferenceCatalog:
                             item = self._summarize(record, path.name)
                             self._recent[uid] = item
                             return item
-            except OSError as exc:
-                raise DomainError("official_corpus_unavailable", "无法读取 BA 原作语料库。", status=503, details={"file": path.name}) from exc
-        raise DomainError("official_reference_not_found", "这条原作资料已不存在或不在当前语料库中。", status=404, details={"record_uid": uid})
+            except (OSError, EOFError) as exc:
+                raise DomainError(
+                    "official_corpus_unavailable",
+                    "无法读取 BA 原作语料库。",
+                    status=503,
+                    details={"file": path.name},
+                ) from exc
+        raise DomainError(
+            "official_reference_not_found",
+            "这条原作资料已不存在或不在当前语料库中。",
+            status=404,
+            details={"record_uid": uid},
+        )
 
     @staticmethod
     def _summarize(record: dict, record_file: str) -> dict:
@@ -136,5 +171,7 @@ class OfficialReferenceCatalog:
         if item["zh_cn"]:
             lines.extend(["", "## 中文摘录", "", item["zh_cn"]])
         else:
-            lines.extend(["", "## 中文摘录", "", "该记录未提供官方中文文本；保留索引信息，供继续核对来源。"])
+            lines.extend(
+                ["", "## 中文摘录", "", "该记录未提供官方中文文本；保留索引信息，供继续核对来源。"]
+            )
         return "\n".join(lines) + "\n"

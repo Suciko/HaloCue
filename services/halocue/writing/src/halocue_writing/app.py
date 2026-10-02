@@ -6,7 +6,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from .errors import DomainError
 from .service import WritingService
@@ -217,6 +217,11 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
             if parts == ["api", "v1", "official-references", "search"]:
                 query = parse_qs(urlparse(self.path).query)
                 return self._json({"ok": True, "data": self.service.search_official_references(query.get("q", [""])[0], query.get("limit", [12])[0])})
+            if parts == ["api", "v1", "reference-characters", "search"]:
+                query = parse_qs(urlparse(self.path).query)
+                return self._json({"ok": True, "data": self.service.search_bundled_characters(query.get("q", [""])[0])})
+            if len(parts) == 5 and parts[:3] == ["api", "v1", "reference-characters"] and parts[4] == "file":
+                return self._json({"ok": True, "data": self.service.bundled_character_payload(unquote(parts[3]))})
             if parts == ["api", "v1", "resources", "catalog"]:
                 return self._json({"ok": True, "data": self.service.resource_catalog_public()})
             if parts == ["api", "v1", "resources", "search"]:

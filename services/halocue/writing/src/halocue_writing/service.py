@@ -31,6 +31,7 @@ from .memory_store import (
     validate_provider_memory_bundle,
 )
 from .official_reference_catalog import OfficialReferenceCatalog
+from .bundled_character_catalog import BundledCharacterCatalog
 from .providers import FakeWritingProvider, make_writing_provider
 from .provider_usage import normalize_usage, merge_usage
 from .request_ledger import RequestLedger
@@ -125,9 +126,10 @@ class WritingService:
         if configured_corpus:
             corpus_dir = Path(configured_corpus)
         else:
-            from services.halocue.runtime_layout import service_root
-            corpus_dir = service_root("writing").parent / "05-官方演出语料库" / "records"
+            from services.halocue.runtime_layout import repository_root
+            corpus_dir = repository_root() / "data/reference-pack/official-staging/records"
         self.official_references = OfficialReferenceCatalog(corpus_dir)
+        self.bundled_characters = BundledCharacterCatalog()
         self.resource_catalog = ResourceCatalog(data_dir)
         self._provider_lock = threading.Lock()
         self._data_maintenance_lock = threading.Lock()
@@ -2012,6 +2014,14 @@ class WritingService:
         )
         result["retried_from_agent_run_id"] = run["id"]
         return result
+
+    @workspace_operation
+    def search_bundled_characters(self, query: str, limit: int = 18):
+        return self.bundled_characters.search(query, max(1, min(int(limit), 30)))
+
+    @workspace_operation
+    def bundled_character_payload(self, card_id: str):
+        return self.bundled_characters.import_payload(card_id)
 
     @workspace_operation
     def search_official_references(self, query: str, limit: int = 12):

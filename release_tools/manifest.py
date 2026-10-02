@@ -25,6 +25,7 @@ _PUBLIC_DIRECTORIES = {
     "services",
 }
 _PUBLIC_ROOT_FILES = {
+    ".gitattributes",
     ".gitignore",
     "CHANGELOG.md",
     "help.html",
@@ -153,7 +154,10 @@ def is_public_source_path(relative_path: str) -> bool:
             and path.suffix.casefold() in {".py", ".html", ".css", ".js", ".json", ".svg"}
         )
     if path.parts[0] == "data":
-        return normalized == "data/halocue_labels.db"
+        return normalized == "data/halocue_labels.db" or (
+            normalized.startswith("data/reference-pack/")
+            and path.suffix.casefold() in {".json", ".gz", ".md"}
+        )
     return True
 
 

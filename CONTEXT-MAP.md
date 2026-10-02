@@ -18,6 +18,11 @@ or implementing a cross-context change.
 - AI proposals never silently become formal revisions.
 - User assets, API keys, game data, reverse-engineering output, and generated
   artifacts stay outside the public source tree.
+- Maintainer exception confirmed on 2026-10-02: the curated character references
+  and extracted text/staging dataset in `data/reference-pack/` ship with 1.0.
+  Their manifest preserves provenance and original ownership; this does not
+  authorize shipping game media, user works or credentials. See
+  `docs/architecture/bundled-reference-pack.md`.
 - AA presentation compatibility is implemented as behavior/coordinate/resource
   role data. Observable logical keys and relative locations may be recorded in
   the resource contract; real BA/AA bytes are user-supplied or explicitly

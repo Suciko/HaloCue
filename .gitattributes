@@ -1,0 +1,2 @@
+# Reference provenance uses exact bytes on Windows and other checkouts.
+data/reference-pack/** -text whitespace=cr-at-eol
