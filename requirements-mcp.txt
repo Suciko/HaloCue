@@ -1,0 +1,2 @@
+# Optional stdio bridge; supported SDK maintenance line matches app dependencies.
+mcp>=1.30,<2

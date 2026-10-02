@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HaloCue external scene edit task 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "kind", "instruction", "scope", "source", "character_cards", "rules", "result_schema", "input_hash"],
+  "properties": {
+    "schema_version": {"const": "external-agent-task/1.0"},
+    "task_id": {"type": "string", "pattern": "^external-task-[0-9a-f]+$"},
+    "kind": {"const": "scene.text.edit"},
+    "instruction": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "input_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "scope": {
+      "type": "object", "additionalProperties": false,
+      "required": ["work_id", "scene_id", "scene_title", "base_revision_id"],
+      "properties": {
+        "work_id": {"type": "string"}, "scene_id": {"type": "string"},
+        "scene_title": {"type": "string"}, "base_revision_id": {"type": "string"}
+      }
+    },
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["base_revision_id", "blocks", "start", "total_blocks", "complete", "next_start", "estimated_tokens", "oversized_paragraph", "replace_proposal_id"],
+      "properties": {
+        "base_revision_id": {"type": "string"}, "start": {"type": "integer", "minimum": 1},
+        "total_blocks": {"type": "integer", "minimum": 1}, "complete": {"type": "boolean"},
+        "next_start": {"type": ["integer", "null"]}, "estimated_tokens": {"type": "integer"},
+        "oversized_paragraph": {"const": false}, "replace_proposal_id": {"const": null},
+        "blocks": {
+          "type": "array", "minItems": 1, "maxItems": 40,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["id", "type", "text", "paragraph_number", "text_sha256"],
+            "properties": {
+              "id": {"type": "string"}, "type": {"type": "string"}, "speaker": {"type": "string"},
+              "text": {"type": "string"}, "paragraph_number": {"type": "integer", "minimum": 1},
+              "text_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+            }
+          }
+        }
+      }
+    },
+    "character_cards": {"type": "array", "maxItems": 4, "items": {"type": "object"}},
+    "rules": {"type": "array", "items": {"type": "string"}},
+    "result_schema": {"type": "object"}
+  }
+}

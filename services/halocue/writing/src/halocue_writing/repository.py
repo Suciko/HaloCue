@@ -287,6 +287,24 @@ class Repository:
           kind TEXT NOT NULL, target_id TEXT NOT NULL, decision TEXT NOT NULL,
           note TEXT NOT NULL, created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS mcp_connections (
+            id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, work_ids_json TEXT NOT NULL,
+            status TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS mcp_scene_reads (
+            id TEXT PRIMARY KEY, connection_id TEXT NOT NULL, work_id TEXT NOT NULL,
+            scene_id TEXT NOT NULL, window_json TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS mcp_edit_receipts (
+            connection_id TEXT NOT NULL, input_hash TEXT NOT NULL, proposal_id TEXT NOT NULL,
+            PRIMARY KEY(connection_id, input_hash)
+        );
+        CREATE TABLE IF NOT EXISTS external_agent_tasks (
+            id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works(id),
+            scene_id TEXT NOT NULL REFERENCES scenes(id), package_json TEXT NOT NULL,
+            token_hash TEXT NOT NULL, status TEXT NOT NULL, result_hash TEXT,
+            proposal_id TEXT, created_at TEXT NOT NULL, expires_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS staged_imports (
           import_id TEXT PRIMARY KEY,
           kind TEXT NOT NULL CHECK(kind IN ('aap','story')),

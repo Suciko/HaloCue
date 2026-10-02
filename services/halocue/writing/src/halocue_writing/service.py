@@ -105,6 +105,10 @@ class WritingService:
 
     def _initialize(self, data_dir, production_url, official_corpus_dir):
         self.repo = Repository(data_dir)
+        from .external_agents import ExternalAgentExchange
+        self.external_agents = ExternalAgentExchange(self)
+        from .mcp_workspace import McpWorkspace
+        self.mcp_workspace = McpWorkspace(self)
         self.authoring = AuthoringWorkspace(self)
         self.request_ledger = RequestLedger(self.repo)
         self.request_ledger.recover_interrupted()
@@ -15472,6 +15476,7 @@ class WritingService:
             # Preserve repository identity: catalogs, projections and the dispatcher
             # must not retain a different repository after restoration.
             self.repo.initialize_after_restore()
+            self.mcp_workspace.invalidate_after_restore()
             self.ba_skill_pack = self.ba_skill.materialize(self.repo)
             self._commit_projection_reconciled = False
             if self.agent_dispatcher.descriptor()["running"]:
