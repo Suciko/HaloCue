@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -7,6 +8,17 @@ from pathlib import Path
 from halocue_writing.app import make_handler
 from halocue_writing.repository import canonical_json, new_id, now
 from halocue_writing.service import WritingService
+
+
+def _wait_for_intent_run(service, plan):
+    """Sequential intent tests must wait for their durable worker to finish."""
+    deadline = time.monotonic() + 15
+    while True:
+        run = service.get_agent_run(plan["work_id"], plan["result"]["agent_run_id"])
+        if run["status"] not in {"queued", "running"}:
+            return
+        assert time.monotonic() < deadline, run
+        time.sleep(0.01)
 
 
 def test_intent_plan_ui_distinguishes_read_only_discussion(tmp_path):
@@ -103,6 +115,7 @@ def test_intent_explicit_read_only_discussion_does_not_select_scene_rewrite(tmp_
 def test_intent_reuses_planned_scene_and_resolves_requested_act(tmp_path):
     service = WritingService(tmp_path)
     result = service.plan_intent({"message": "先建立第一章第一幕。", "idempotency_key": "intent-planned-base-1"})
+    _wait_for_intent_run(service, result)
     work = result["work"]
     chapter = work["chapters"][0]
     second_id = new_id("scene")
@@ -258,11 +271,13 @@ def test_intent_renames_previous_intent_scene_but_preserves_manual_title(tmp_pat
         "message": "第一章第二幕叫爱丽丝在废弃车站听见异常广播，先开始写第二幕。",
         "idempotency_key": "intent-title-rename-first",
     })
+    _wait_for_intent_run(service, first)
     renamed = service.plan_intent({
         "work_id": first["work_id"],
         "message": "第一章第二幕叫广播响起。",
         "idempotency_key": "intent-title-rename-second",
     })
+    _wait_for_intent_run(service, renamed)
     scene = renamed["work"]["chapters"][0]["scenes"][1]
     assert scene["title"] == "广播响起"
 
