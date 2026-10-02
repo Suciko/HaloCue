@@ -1,0 +1,14 @@
+<evaluation>
+  <!-- Stable synthetic fixture, before submission. Answers verified through
+       the official SDK by workspace_mcp_probe.py; no LLM evaluator ran. -->
+  <qa_pair><question>Find the scene in the night investigation chapter. Read its beginning and follow the paging cursor to the dialogue. How many paragraphs does the complete saved scene contain?</question><answer>2</answer></qa_pair>
+  <qa_pair><question>Locate the investigation scene and compare the narrator's beginning with the following character line. What exact weather description opens the scene?</question><answer>窗外下着一场雨。</answer></qa_pair>
+  <qa_pair><question>Discover the investigation scene, read its first paragraph and compare its speaker representation with the next paragraph. What type represents the opening weather description?</question><answer>narration</answer></qa_pair>
+  <qa_pair><question>Read the investigation scene past the weather paragraph, then search the work's character cards for the speaker. What canonical name identifies the person noticing the indicator?</question><answer>爱丽丝</answer></qa_pair>
+  <qa_pair><question>Find the investigation scene and follow its paragraph paging cursor. Match the character to her formal card. What exact line does that character say?</question><answer>提示灯亮了。</answer></qa_pair>
+  <qa_pair><question>Locate the scene, identify its speaking character from the prose, and consult formal character material. What exact name should a rewrite preserve?</question><answer>爱丽丝</answer></qa_pair>
+  <qa_pair><question>Read the investigation prose and identify who speaks after the rain description. Find that person's formal card. What first OOC constraint prevents inventing other people's intentions?</question><answer>不替别人猜测动机</answer></qa_pair>
+  <qa_pair><question>Locate the investigation scene, identify its speaker and consult her material before rewriting. What exact voice anchor emphasizes checking the situation first?</question><answer>先确认眼前的情况。</answer></qa_pair>
+  <qa_pair><question>Discover the scene and read it in windows of one paragraph. Match the speaking person with formal material. What paragraph number contains her indicator observation?</question><answer>2</answer></qa_pair>
+  <qa_pair><question>Find the investigation scene, read its opening and follow the returned cursor. Compare the source state to the prose and character material before edits. Which source state confirms these are saved formal paragraphs?</question><answer>saved_manuscript</answer></qa_pair>
+</evaluation>

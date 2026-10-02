@@ -6,7 +6,7 @@
   const importForm = dialog.querySelector('[data-external-import]');
   const taskPanel = dialog.querySelector('[data-external-task]');
   const message = dialog.querySelector('[data-external-message]');
-  let task = null, packageValue = null, scope = null, busy = false, config = null;
+  let task = null, packageValue = null, scope = null, busy = false;
   const request = (path, body) => api('/external-agent/' + path, body === undefined ? {} : {method:'POST', body:JSON.stringify(body)});
   function note(text, failed = false) { message.textContent = text; message.dataset.failed = String(failed); }
   function controls() {
@@ -25,9 +25,7 @@
     document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
   function showTask(value, exported = null) {
-    task = value; packageValue = exported; config = null; taskPanel.hidden = false;
-    dialog.querySelector('[data-external-config]').hidden = true;
-    dialog.querySelector('[data-external-config-text]').textContent = '';
+    task = value; packageValue = exported; taskPanel.hidden = false;
     const labels = {open:'等待外部 Agent 返回结果', submitted:'结果已提交，请在正文中审查候选',cancelled:'任务已撤销',expired:'任务已过期，请重新建立任务'};
     dialog.querySelector('[data-external-state]').textContent = labels[task.status] || '任务状态暂不可读';
     if (exported) dialog.querySelector('[data-external-state]').textContent += ` · 第 ${exported.source.start} 段起，共 ${exported.source.blocks.length} 段`;
@@ -55,7 +53,7 @@
     const scene = typeof selectedScene === 'function' ? selectedScene() : null;
     if (!scene || !state.work) { toast('请先选择场景。',true); return; }
     if (!scene.current_revision_id) { toast('请先保存本场正文。',true); return; }
-    scope = {workId:state.work.id, sceneId:scene.id}; task = packageValue = config = null;
+    scope = {workId:state.work.id, sceneId:scene.id}; task = packageValue = null;
     createForm.reset(); taskPanel.hidden = true; note('');
     dialog.querySelector('[data-external-scene]').textContent = scene.title;
     dialog.showModal(); run(history);
@@ -75,20 +73,13 @@
     run(async()=> {
       const result = await request('tasks',{work_id:scope.workId, scene_id:scope.sceneId, expected_version:state.work.version,
         instruction:createForm.elements.instruction.value, start:Number(createForm.elements.start.value), limit:Number(createForm.elements.limit.value)});
-      showTask(result.task,result.package); await history(); note('任务已建立。导出给外部工具，或使用 MCP 连接。');
+      showTask(result.task,result.package); await history(); note('任务已建立，可导出给不支持 MCP 的外部工具。');
     });
   });
   dialog.querySelector('[data-external-download]').addEventListener('click',()=>run(async()=> {
     packageValue ||= await request(`tasks/${task.id}/package`);
     download(packageValue,`HaloCue-${task.id}.json`); note('已导出任务包；它包含当前选中的正文和人物资料。');
   }));
-  dialog.querySelector('[data-external-mcp]').addEventListener('click',()=>run(async()=> {
-    config = await request(`tasks/${task.id}/mcp-config?endpoint=${encodeURIComponent(location.origin)}`);
-    dialog.querySelector('[data-external-config-text]').textContent = JSON.stringify(config,null,2);
-    const details = dialog.querySelector('[data-external-config]'); details.hidden = false; details.open = true;
-    note('配置仅供本机使用。外部 Agent 的费用与额度请在该服务中确认。');
-  }));
-  dialog.querySelector('[data-external-config-download]').addEventListener('click',()=> {if(config)download(config,'HaloCue-MCP.json');});
   dialog.querySelector('[data-external-revoke]').addEventListener('click',()=>run(async()=> {
     showTask(await request(`tasks/${task.id}/revoke`,{})); await history(); note('任务已撤销，旧连接和结果不能再提交。');
   }));

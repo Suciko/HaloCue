@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HaloCue external workspace MCP connection 1.0",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "connected", "connection_id", "allowed_work_ids", "works", "capabilities"],
+  "properties": {
+    "schema_version": {"const": "halocue-mcp-connection/1.0"},
+    "connected": {"type": "boolean"},
+    "connection_id": {"type": ["string", "null"], "pattern": "^mcp-connection-[0-9a-f]+$"},
+    "allowed_work_ids": {"type": "array", "uniqueItems": true, "maxItems": 200, "items": {"type": "string"}},
+    "works": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "title"], "properties": {"id": {"type": "string"}, "title": {"type": "string"}}}},
+    "capabilities": {"const": ["read_materials", "read_scene", "propose_scene_edit"]}
+  }
+}

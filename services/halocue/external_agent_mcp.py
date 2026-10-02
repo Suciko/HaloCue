@@ -1,4 +1,4 @@
-"""Task-scoped stdio MCP bridge. No model calls, filesystem tools or apply route."""
+"""Local stdio MCP bridge. No model calls, filesystem tools or apply route."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 class TaskClient:
-    def __init__(self, endpoint: str, connection_file: Path):
+    def __init__(self, endpoint: str, connection_file: Path, *, workspace: bool = False):
         parsed = urlparse(endpoint)
         if (
             parsed.scheme != "http"
@@ -34,15 +34,19 @@ class TaskClient:
         if connection_file.stat().st_size > 16000:
             raise ValueError("Invalid task connection file.")
         config = json.loads(connection_file.read_text(encoding="utf-8"))
+        id_key = "connection_id" if workspace else "task_id"
+        prefix = "mcp-connection" if workspace else "external-task"
         if (
-            set(config) != {"task_id", "token"}
-            or not isinstance(config["task_id"], str)
-            or not re.fullmatch(r"external-task-[0-9a-f]+", config["task_id"])
+            set(config) != {id_key, "token"}
+            or not isinstance(config[id_key], str)
+            or not re.fullmatch(prefix + r"-[0-9a-f]+", config[id_key])
             or not isinstance(config["token"], str)
             or not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", config["token"])
         ):
             raise ValueError("Invalid task connection file.")
-        self.base = f"{endpoint.rstrip('/')}/api/v1/external-agent/bridge/{config['task_id']}"
+        path = "mcp" if workspace else "external-agent"
+        self.endpoint = endpoint.rstrip("/")
+        self.base = f"{endpoint.rstrip('/')}/api/v1/{path}/bridge/{config[id_key]}"
         self.token = config["token"]
         self.opener = build_opener(ProxyHandler({}), NoRedirect())
 
@@ -77,7 +81,7 @@ class TaskClient:
             raise ValueError(message) from None
         except (URLError, TimeoutError):
             raise ValueError(
-                "HaloCue is unavailable. Open the application and reconnect the task."
+                "HaloCue is unavailable. Open the application and check the MCP connection."
             ) from None
 
 
@@ -134,11 +138,23 @@ def create_server(client: TaskClient):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="HaloCue task-scoped MCP bridge")
+    parser = argparse.ArgumentParser(description="HaloCue local MCP bridge")
     parser.add_argument("--connection", type=Path, required=True)
     parser.add_argument("--endpoint", required=True)
+    parser.add_argument(
+        "--workspace",
+        action="store_true",
+        help="Operate authorized works directly, without task packages",
+    )
     args = parser.parse_args()
-    create_server(TaskClient(args.endpoint, args.connection)).run(transport="stdio")
+    client = TaskClient(args.endpoint, args.connection, workspace=args.workspace)
+    if args.workspace:
+        from workspace_mcp import create_workspace_server
+
+        server = create_workspace_server(client)
+    else:
+        server = create_server(client)
+    server.run(transport="stdio")
 
 
 if __name__ == "__main__":

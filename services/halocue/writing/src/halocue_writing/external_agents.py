@@ -400,9 +400,37 @@ class ExternalAgentExchange:
         return {"proposal_id": proposal_id, "duplicate": False}
 
     def mcp_config(self, task_id, endpoint):
-        from services.halocue.runtime_layout import integrated_data_root, repository_root
+        from services.halocue.runtime_layout import integrated_data_root
 
         self.package(task_id)
+        runtime, script = self.mcp_runtime(endpoint)
+        config_file = integrated_data_root() / "external-agent-connections" / f"{task_id}.json"
+        if not config_file.is_file():
+            raise DomainError(
+                "external_connection_missing",
+                "本机任务连接文件不可用，请重新建立任务。",
+                status=409,
+            )
+        return {
+            "mcpServers": {
+                "halocue_task": {
+                    "command": str(runtime),
+                    "env": {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+                    "args": [
+                        str(script),
+                        "--connection",
+                        str(config_file),
+                        "--endpoint",
+                        endpoint.rstrip("/"),
+                    ],
+                }
+            }
+        }
+
+    @staticmethod
+    def mcp_runtime(endpoint):
+        from services.halocue.runtime_layout import repository_root
+
         parsed = urlparse(endpoint)
         if (
             parsed.scheme != "http"
@@ -454,25 +482,4 @@ class ExternalAgentExchange:
                 "MCP 运行环境不可用，请按接入指南安装；仍可使用任务包导入结果。",
                 status=409,
             )
-        config_file = integrated_data_root() / "external-agent-connections" / f"{task_id}.json"
-        if not config_file.is_file():
-            raise DomainError(
-                "external_connection_missing",
-                "本机任务连接文件不可用，请重新建立任务。",
-                status=409,
-            )
-        return {
-            "mcpServers": {
-                "halocue_task": {
-                    "command": str(runtime),
-                    "env": {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
-                    "args": [
-                        str(script),
-                        "--connection",
-                        str(config_file),
-                        "--endpoint",
-                        endpoint.rstrip("/"),
-                    ],
-                }
-            }
-        }
+        return runtime, script

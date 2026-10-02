@@ -168,6 +168,8 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _external_agent_route(self, method, parts, payload=None):
+        if parts[:3] == ["api", "v1", "mcp"]:
+            return self._mcp_route(method, parts[3:], payload)
         if parts[:3] != ["api", "v1", "external-agent"]:
             return None
         origin = self.headers.get("Origin")
@@ -222,6 +224,26 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
                     endpoint = query.get("endpoint", [f"http://127.0.0.1:{self.server.server_port}"])[0]
                     return exchange.mcp_config(task_id, endpoint)
         raise DomainError("route_not_found", "外部任务接口不存在。", status=404)
+
+    def _mcp_route(self, method, tail, payload):
+        origin = self.headers.get("Origin")
+        if origin:
+            parsed = urlparse(origin)
+            if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+                raise DomainError("mcp_origin_denied", "MCP 设置只接受本机应用请求。", status=403)
+        workspace = self.service.mcp_workspace
+        if method == "GET" and tail == ["settings"]:
+            return workspace.status()
+        if method == "POST" and tail == ["connect"]:
+            return workspace.connect(payload)
+        if method == "POST" and tail == ["disconnect"]:
+            return workspace.disconnect()
+        if method == "GET" and tail == ["config"]:
+            query = parse_qs(urlparse(self.path).query)
+            return workspace.config(query.get("endpoint", [f"http://127.0.0.1:{self.server.server_port}"])[0])
+        if method == "POST" and len(tail) == 3 and tail[0] == "bridge" and tail[2] == "call":
+            return workspace.call(tail[1], self.headers.get("X-HaloCue-External-Token", ""), payload)
+        raise DomainError("route_not_found", "MCP 接口不存在。", status=404)
 
     def _body(self, max_bytes: int = 8_000_000):
         lengths = self.headers.get_all("Content-Length", [])
@@ -436,7 +458,7 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
     def _dispatch_POST(self):
         try:
             parts = self._parts()
-            if parts[:3] == ["api", "v1", "external-agent"]:
+            if len(parts) >= 3 and parts[:2] == ["api", "v1"] and parts[2] in {"external-agent", "mcp"}:
                 external = self._external_agent_route("POST", parts, self._body(max_bytes=1_000_000))
                 if external is not None:
                     return self._json({"ok": True, "data": external})

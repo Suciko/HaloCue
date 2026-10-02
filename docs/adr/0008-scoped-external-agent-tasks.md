@@ -47,3 +47,31 @@ code ignores the additive table; rollback leaves task history intact. Revocation
 or expiry stops further submission, not an already-created pending proposal.
 Exact retry is idempotent. Optional MCP installation failure leaves file exchange
 available and is reported truthfully in the UI.
+
+## 2026-10-03 amendment: direct conversational MCP
+
+Maintainer correction: MCP hosts must operate HaloCue from their own normal
+conversation without asking the author to create/export/import a task. File
+exchange is a fallback for hosts without MCP. The prior single-task protocol
+remains compatible, but is no longer the default setup UI or tool catalog.
+
+The settings page authorizes selected works once and produces one local stdio
+configuration. The direct server exposes four tools: find scenes, read a scene,
+search its work's material, and propose numbered paragraph changes. Finding a
+scene combines work/chapter/scene discovery. The server captures exact revision,
+pending candidate and paragraph hashes behind a read ID; the host passes only
+that ID plus paragraph numbers and replacement prose. Reading automatically
+selects the latest pending candidate, so normal refinement needs no candidate ID.
+Scope and stale-content checks remain at the final atomic proposal commit.
+
+The additive `mcp_connections`, `mcp_scene_reads`, and `mcp_edit_receipts` tables
+persist authorization, exact read snapshots and idempotent submissions. Only
+capability hashes enter the database; private files remain outside backups.
+The connection lasts until disconnect or reauthorization, survives restart,
+and is revoked after backup restoration so revoked capabilities cannot reappear.
+The four-tool surface has no accept/apply, model, shell or arbitrary-file tool.
+Results include inline diff, proposal status and a local review link.
+
+This is a 1.0 source-preview change on Issue #46 / stacked PR #47, pending review.
+The published Beta artifact is not rebuilt. SDK/client evidence is distinct from
+compatibility evidence for any named third-party Agent host.
