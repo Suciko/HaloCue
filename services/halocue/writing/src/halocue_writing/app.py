@@ -240,7 +240,7 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
             return workspace.disconnect()
         if method == "GET" and tail == ["config"]:
             query = parse_qs(urlparse(self.path).query)
-            return workspace.config(query.get("endpoint", [f"http://127.0.0.1:{self.server.server_port}"])[0])
+            return workspace.config(query.get("endpoint", [f"http://127.0.0.1:{self.server.server_port}"])[0], query.get("client", [None])[0])
         if method == "POST" and len(tail) == 3 and tail[0] == "bridge" and tail[2] == "call":
             return workspace.call(tail[1], self.headers.get("X-HaloCue-External-Token", ""), payload)
         raise DomainError("route_not_found", "MCP 接口不存在。", status=404)
