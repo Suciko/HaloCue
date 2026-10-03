@@ -1,5 +1,7 @@
 import json
 import tomllib
+import subprocess
+import sys
 from http.server import ThreadingHTTPServer
 from threading import Thread
 from urllib.error import HTTPError
@@ -10,9 +12,35 @@ import pytest
 
 from halocue_writing.app import make_handler
 from halocue_writing.mcp_client_config import client_profile
+from halocue_writing.errors import DomainError
 from test_external_agents import ROOT, exchange as external_exchange
 
 exchange = external_exchange
+
+
+def test_packaged_profile_launches_console_worker_without_python(exchange, tmp_path, monkeypatch):
+    service, payload, _ = exchange
+    service.mcp_workspace.connect({"work_ids": [payload["work_id"]]})
+    executable = tmp_path / "HaloCue.exe"
+    worker = tmp_path / "HaloCueMCP.exe"
+    worker.write_bytes(b"synthetic worker")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(executable))
+
+    def probe(arguments, **kwargs):
+        assert arguments == [str(worker), "--check-runtime"]
+        assert kwargs["stdin"] == subprocess.DEVNULL
+        return subprocess.CompletedProcess(arguments, 0)
+
+    monkeypatch.setattr("halocue_writing.external_agents.subprocess.run", probe)
+    config = service.mcp_workspace.config("http://127.0.0.1:2983")
+    server = config["mcpServers"]["halocue"]
+    assert server["command"] == str(worker)
+    assert server["args"][0] == "--workspace"
+    assert not any(arg.endswith(".py") for arg in server["args"])
+    worker.unlink()
+    with pytest.raises(DomainError, match="完整解压"):
+        service.mcp_workspace.config("http://127.0.0.1:2983")
 
 
 def test_native_configs_preserve_windows_unicode_and_argument_boundaries():

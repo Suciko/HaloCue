@@ -330,7 +330,14 @@ def _remove_environment_payloads(bundle_dir: Path) -> None:
             path.suffix.casefold() == ".gif" or path.name.casefold() == "direct_url.json"
         ):
             path.unlink()
-    for relative in ("_tcl_data", "_tk_data", "tcl8", "tcl86t.dll", "tk86t.dll"):
+    for relative in (
+        "_tcl_data",
+        "_tk_data",
+        "tcl8",
+        "tcl86t.dll",
+        "tk86t.dll",
+        "jsonschema/benchmarks",
+    ):
         candidate = internal / relative
         if candidate.is_dir() and not candidate.is_symlink():
             shutil.rmtree(candidate)
@@ -475,6 +482,10 @@ def build_public_release(
     built_bundle = work_root / "dist" / _BUNDLE_NAME
     if not (built_bundle / "HaloCue.exe").is_file():
         raise ValueError("PyInstaller did not produce HaloCue/HaloCue.exe")
+    if (source_root / "mcp_launcher.py").is_file() and not (
+        built_bundle / "HaloCueMCP.exe"
+    ).is_file():
+        raise ValueError("PyInstaller did not produce the required HaloCueMCP.exe")
     shutil.move(str(built_bundle), str(bundle_dir))
     updater_bundle = work_root / "dist" / "HaloCueUpdater"
     if updater_bundle.is_dir() and (updater_bundle / "HaloCueUpdater.exe").is_file():
@@ -516,11 +527,14 @@ def finalize_existing_bundle(
         raise ValueError("existing bundle must be the HaloCue directory below output root")
     _require_clean_public_source(source_root)
     required = ["HaloCue.exe", *_PUBLIC_RESOURCES]
+    if (source_root / "mcp_launcher.py").is_file():
+        required.append("HaloCueMCP.exe")
     missing = [relative for relative in required if not (bundle_dir / relative).exists()]
     if missing:
         raise ValueError("existing bundle is missing required files: " + ", ".join(missing))
     source_notice = source_root / "THIRD_PARTY_NOTICES.md"
     shutil.copy2(source_notice, bundle_dir / "THIRD_PARTY_NOTICES.md")
+    _remove_environment_payloads(bundle_dir)
     _load_source_manifest(source_root)
     audit_third_party_notices(bundle_dir)
     findings = scan_tree(bundle_dir, mode="public")

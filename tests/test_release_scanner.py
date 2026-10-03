@@ -197,6 +197,10 @@ def test_scanner_refuses_symlinks_that_escape_root(tmp_path):
 def test_scanner_rejects_unexpected_public_executables_and_all_public_spine(tmp_path):
     (tmp_path / "HaloCue.exe").write_bytes(b"expected launcher")
     (tmp_path / "HaloCueUpdater.exe").write_bytes(b"expected updater")
+    (tmp_path / "HaloCueMCP.exe").write_bytes(b"expected MCP worker")
+    nested_worker = tmp_path / "nested" / "HaloCueMCP.exe"
+    nested_worker.parent.mkdir()
+    nested_worker.write_bytes(b"unexpected nested executable")
     (tmp_path / "helper.exe").write_bytes(b"unexpected")
     spine = tmp_path / "vendor" / "Spine.com"
     spine.parent.mkdir()
@@ -208,8 +212,12 @@ def test_scanner_rejects_unexpected_public_executables_and_all_public_spine(tmp_
     assert "unexpected-executable" in _codes(findings)
     assert [finding.code for finding in findings].count("spine-runtime") == 2
     assert not any(
-        finding.relative_path in {"HaloCue.exe", "HaloCueUpdater.exe"}
+        finding.relative_path in {"HaloCue.exe", "HaloCueUpdater.exe", "HaloCueMCP.exe"}
         and finding.code == "unexpected-executable"
+        for finding in findings
+    )
+    assert any(
+        finding.relative_path == "nested/HaloCueMCP.exe" and finding.code == "unexpected-executable"
         for finding in findings
     )
 
