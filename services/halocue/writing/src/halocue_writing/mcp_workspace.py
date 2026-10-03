@@ -112,7 +112,7 @@ class McpWorkspace:
         with self.repo.transaction() as db:
             db.execute("UPDATE mcp_connections SET status='revoked'")
 
-    def config(self, endpoint):
+    def config(self, endpoint, client=None):
         snapshot = self.status()
         if not snapshot["connected"]:
             raise DomainError("mcp_not_connected", "请先选择作品并启用 MCP 连接。", status=409)
@@ -124,7 +124,7 @@ class McpWorkspace:
             raise DomainError(
                 "mcp_connection_unavailable", "本机连接文件不可用，请重新启用连接。", status=409
             )
-        return {
+        config = {
             "mcpServers": {
                 "halocue": {
                     "command": str(runtime),
@@ -140,6 +140,11 @@ class McpWorkspace:
                 }
             }
         }
+        if client is not None:
+            from .mcp_client_config import client_profile
+
+            return client_profile(config, client)
+        return config
 
     def _authorize(self, db, connection_id, token):
         row = db.execute("SELECT * FROM mcp_connections WHERE id=?", (connection_id,)).fetchone()

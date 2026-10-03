@@ -8,9 +8,9 @@
   const request = (path, body) => api('/mcp/'+path, body === undefined ? {} : {method:'POST',body:JSON.stringify(body)});
   function note(text, failed=false) {message.textContent=text;message.dataset.failed=String(failed);}
   async function run(action) {
-    if(busy)return;busy=true;panel.querySelectorAll('button,input').forEach(el=>{el.disabled=true;});
+    if(busy)return;busy=true;panel.querySelectorAll('button,input,select').forEach(el=>{el.disabled=true;});
     try {await action();}catch(error){note(error.message,true);}
-    finally {busy=false;panel.querySelectorAll('button,input').forEach(el=>{el.disabled=false;});}
+    finally {busy=false;panel.querySelectorAll('button,input,select').forEach(el=>{el.disabled=false;});}
   }
   function render(value) {
     config=null;panel.querySelector('[data-mcp-config]').hidden=true;panel.querySelector('[data-mcp-config-text]').textContent='';
@@ -33,10 +33,17 @@
     if(!value.connected){config=null;panel.querySelector('[data-mcp-config]').hidden=true;panel.querySelector('[data-mcp-config-text]').textContent='';}
   }
   async function readConfig(open=false){
-    config=await request('config?endpoint='+encodeURIComponent(location.origin));
-    panel.querySelector('[data-mcp-config-text]').textContent=JSON.stringify(config,null,2);
+    config=null;
+    panel.querySelector('[data-mcp-config-text]').textContent='';
+    panel.querySelector('[data-mcp-instructions]').textContent='正在生成配置…';
+    const profile=await request('config?endpoint='+encodeURIComponent(location.origin)+'&client='+encodeURIComponent(panel.querySelector('[data-mcp-client]').value));
+    config=profile;
+    panel.querySelector('[data-mcp-config-text]').textContent=profile.text;
+    panel.querySelector('[data-mcp-instructions]').textContent=profile.instructions;
     const details=panel.querySelector('[data-mcp-config]');details.hidden=false;details.open=open;
+    note('配置已生成；按上方说明添加后，重新打开 Agent 会话。');
   }
+  panel.querySelector('[data-mcp-client]').addEventListener('change',()=>run(()=>readConfig(true)));
   async function refresh(){
     const value=await request('settings');render(value);if(value.connected)await readConfig();
     note(value.connected?'在 Agent 软件中添加配置后，直接描述要操作的作品与场景。':'选择作品或 AA 制作任务后启用，配置一次即可使用。');
@@ -56,10 +63,10 @@
       if(action==='refresh')return refresh();
       if(action==='disconnect'){render(await request('disconnect',{}));note('连接已断开，旧配置不能继续操作。');return;}
       if(!config)throw new Error('先启用连接并生成配置。');
-      const text=JSON.stringify(config,null,2);
+      const text=config.text;
       if(action==='copy'){await navigator.clipboard.writeText(text);note('已复制 MCP 配置。');return;}
-      const url=URL.createObjectURL(new Blob([text],{type:'application/json'}));
-      const link=document.createElement('a');link.href=url;link.download='HaloCue-MCP.json';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);note('配置已导出。');
+      const url=URL.createObjectURL(new Blob([text],{type:config.content_type}));
+      const link=document.createElement('a');link.href=url;link.download=config.filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);note('配置已导出。');
     });
   });
   const settings=document.getElementById('settingsDialog');

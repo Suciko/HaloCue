@@ -36,4 +36,15 @@ Agent 可以定位任务、分段读卡、查看冻结表情与动作选项，�
 
 Agent 返回后打开任务链接，或在逐卡审查中点击「刷新建议」。先看前后对比，再选「采用演出建议」或「拒绝建议」。采用后修改进入逐卡审查及草稿预览，仍需确认卡片后才能编译；原始发布剧本不变。拒绝不改草稿。草稿变化后，旧建议需重新读取再提交。
 
-当前是 1.0 源码预览功能。官方 MCP 客户端与本机工作区已验证；各外部软件的配置导入方式和订阅权限需按实际软件验证。HC 不获取外部账号的账单，也不代替外部 Agent 调用其模型。草稿预览不代表 AA 原生动画、声音与节奏已经验证。
+当前是 1.0 源码预览功能。Codex CLI 已完成真实模型调用与 AA 候选提交；Claude Code 已确认 MCP 连接，但本机官方 OAuth 过期，模型调用仍待重新登录后验证。HC 不获取外部账号的账单，也不代替外部 Agent 调用其模型。草稿预览不代表 AA 原生动画、声音与节奏已经验证。
+
+## 添加到 Codex 和 Claude Code
+
+启用连接后，在「添加到 Agent 的 MCP 配置」中选择 Agent 软件，复制或保存对应格式。两种配置连接同一个 HC 工作区，开放相同的八个工具。配置只引用本机私有连接文件，不包含其令牌；不要把个人配置或连接文件提交到 Git。
+
+- **Codex（桌面 / CLI / IDE）**：把 TOML 合并到用户目录的 `.codex/config.toml`；已有 `mcp_servers.halocue` 时替换该节，保留其他内容。重新打开 Agent 会话，在 CLI 用 `codex mcp get halocue` 检查配置。当前已打开的对话不保证会热加载新工具。
+- **Claude Code**：把 JSON 中的 `mcpServers.halocue` 合并到使用项目的 `.mcp.json`；重新打开会话并批准连接，用 `/mcp` 检查。也可保存 JSON 后用 `claude --mcp-config <文件路径>` 只在本次会话加载。
+
+HC 必须保持运行，配置中的端口要对应当前工作区。断开连接会撤销旧授权；重新启用后要更新客户端中的连接文件路径。MCP 显示已连接只证明工具通道可用，账号登录过期、模型不可用等问题仍需在外部软件解决。
+
+配置格式依据 [Codex MCP 文档](https://learn.chatgpt.com/docs/extend/mcp?surface=cli) 与 [Claude Code MCP 文档](https://code.claude.com/docs/en/mcp)。
