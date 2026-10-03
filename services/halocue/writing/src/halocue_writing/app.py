@@ -722,7 +722,13 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
     def _static(self, path: str):
         relative = "index.html" if path in ("", "/") else path.lstrip("/")
         target = (self.static_dir / relative).resolve()
-        if self.static_dir not in target.parents or not target.is_file():
+        if relative == "halocue-favicon.png" and not target.is_file():
+            # Public exports keep bitmap branding in one allowlisted location.
+            from services.halocue.runtime_layout import repository_root
+            target = repository_root() / "branding/halocue-favicon.png"
+        elif self.static_dir not in target.parents:
+            raise DomainError("not_found", "页面不存在。", status=404)
+        if not target.is_file():
             raise DomainError("not_found", "页面不存在。", status=404)
         body = target.read_bytes()
         content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"

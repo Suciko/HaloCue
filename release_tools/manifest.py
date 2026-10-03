@@ -23,6 +23,7 @@ _PUBLIC_DIRECTORIES = {
     "tests",
     "tools",
     "services",
+    "apps",
 }
 _PUBLIC_ROOT_FILES = {
     ".gitattributes",
@@ -67,6 +68,7 @@ _EXCLUDED_PREFIXES = {
     "scripts",
     "staging",
     "voices",
+    "node_modules",
 }
 _EXCLUDED_DOCS = {
     "docs/custom-assets-test-report.md",
@@ -134,6 +136,8 @@ def is_public_source_path(relative_path: str) -> bool:
         return path.suffix.casefold() == ".py" or path.name in _PUBLIC_ROOT_FILES
     if path.parts[0] not in _PUBLIC_DIRECTORIES:
         return False
+    if path.parts[0] == "apps":
+        return normalized.startswith("apps/desktop-client/electron/") and path.suffix.casefold() in {".cjs", ".js", ".json", ".html", ".svg", ".md"}
     if path.parts[0] == "services":
         if normalized in {
             "services/halocue/writing/web/vendor/echarts/LICENSE",

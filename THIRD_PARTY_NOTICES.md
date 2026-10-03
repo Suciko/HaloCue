@@ -106,6 +106,12 @@ named upstream projects.
 AzureArchive and Blue Archive names, software, game data and assets belong to
 their respective owners. They are not relicensed by HaloCue's MIT License.
 
+The 1.0 Electron desktop host includes `Electron` (MIT), `Chromium` (BSD and
+third-party licenses) and `Node.js` (MIT and third-party licenses). The portable
+bundle preserves the official runtime's `LICENSE.electron.txt` and
+`LICENSES.chromium.html`; these documents include the runtime dependency notices.
+Build-only `@electron/packager` and npm dependencies are not shipped in the app.
+
 No Spine Editor executable, Spine Runtime, game asset, personal skeleton, raw
 local database, local configuration, generated output, cache or secret is
 included in the public HaloCue bundle. Spine software and user-provided Spine

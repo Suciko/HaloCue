@@ -15,7 +15,14 @@ rendering, local project selection, and user-visible errors.
 - Preview and offline export start from the same deterministic `SceneDescriptor`.
 - AI results are visibly marked as proposals until the user accepts them.
 
-## Planned implementation
+## 1.0 integrated preview
+
+The maintainer selected Electron for the 1.0 integrated desktop entry. The host
+under `apps/desktop-client/electron` owns the native window and one frozen local
+service process. It presents the existing writing/AA web app and preserves its
+data and MCP boundary. See [ADR-0009](../../docs/adr/0009-1.0-electron-host.md).
+
+### Future client
 
 The Tauri/React client will be introduced under `apps/desktop-client`. The first
 vertical slice is a local AA playback screen with a switch to the MMT phone view.

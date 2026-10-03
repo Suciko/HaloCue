@@ -1419,6 +1419,8 @@ html[data-theme="dark"] #app.hc-redesign[data-surface="writing"] .scene-context-
   min-height:32px; padding:4px 6px; border-radius:6px; letter-spacing:-.3px; line-height:1;
 }
 #app#app#app.hc-redesign .hc-topbar .brand:hover { background:var(--hc-hover); }
+#app#app#app.hc-redesign .hc-topbar .brand { gap:8px; }
+#app#app#app.hc-redesign .hc-brand-icon { width:24px; height:24px; flex:0 0 24px; }
 #app#app#app.hc-redesign .hc-topbar .save-indicator {
   border:0; background:transparent; padding:0; max-width:140px;
 }

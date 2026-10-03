@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <script src="/theme.js?v=20260916-appearance-2"></script>
   <title>HaloCue 写作工作台</title>
-  <link rel="icon" type="image/png" href="/halocue-favicon.png?v=20260927-mark2">
+  <link rel="icon" type="image/png" href="/halocue-favicon.png?v=20261003-original">
   <link rel="stylesheet" href="/styles.css?v=20260930-reference-fallback1">
   <link rel="stylesheet" href="/tokens.css?v=20260817-1">
   <!-- shell.css?v=20260820-37 and shell.css?v=20260824-44 retained for contract compatibility; the resource version below is current. -->
@@ -21,19 +21,20 @@
   <link rel="stylesheet" href="/agent-workspace.css?v=20260928-composer-action1">
   <link rel="stylesheet" href="/agent-model-picker.css?v=20260919-registered2">
   <link rel="stylesheet" href="/change-review.css?v=20260924-edge-scroll1">
-  <link rel="stylesheet" href="/authoring-ui.css?v=20261002-beta-brand1">
+  <link rel="stylesheet" href="/authoring-ui.css?v=20261003-electron-brand1">
   <link rel="stylesheet" href="/authoring-workspace-ui.css?v=20260927-chapter-plan2">
   <link rel="stylesheet" href="/chapter-authoring-ui.css?v=20261002-compact-chat1">
   <link rel="stylesheet" href="/knowledge-graph-ui.css?v=20260930-graph-fix1">
+  <link rel="stylesheet" href="/startup.css?v=20261004-unified1">
 </head>
 <body class="app-loading">
   <div class="boot-screen" id="bootScreen" role="status" aria-live="polite">
-    <span aria-hidden="true">HC</span>
-    <div><b>正在恢复工作台</b><small>读取作品、当前对话与待决定修改</small></div>
+    <header class="boot-header"><img src="/halocue-icon.svg?v=20261003-original" alt="">HaloCue</header>
+    <main><img src="/halocue-icon.svg?v=20261003-original" alt=""><div><h1>正在打开工作台</h1><p>恢复作品与创作进度</p><progress aria-label="正在启动"></progress></div></main>
   </div>
   <div id="app" class="app-shell hc-redesign" data-surface="works">
     <header class="topbar hc-topbar">
-      <button class="brand" type="button" data-action="home" title="返回作品" aria-label="HaloCue · 返回作品">HaloCue</button>
+      <button class="brand" type="button" data-action="home" title="返回作品" aria-label="HaloCue · 返回作品"><img class="hc-brand-icon" src="/halocue-favicon.png?v=20261003-original" alt="">HaloCue</button>
       <button class="hc-work-switch" type="button" data-open-work-switch aria-haspopup="dialog" aria-controls="workSwitchDialog"><span id="currentWorkName">选择作品</span><span class="hc-switch-chevron" aria-hidden="true"></span></button>
       <span class="hc-topbar-divider" aria-hidden="true"></span>
       <nav class="crumb" id="crumb" aria-label="当前位置">构思 / 创作讨论</nav>
@@ -709,7 +710,7 @@
           </section>
 
           <section id="pane-about" class="settings-pane" role="tabpanel" aria-labelledby="settingsTab-about" tabindex="0" hidden>
-            <div class="about-identity"><img class="about-logo" src="/halocue-favicon.png?v=20260927-mark2" alt=""><div><p class="settings-kicker">STORY / DIRECTION / PRODUCTION</p><h3>HaloCue <small>1.0</small></h3><p>从故事构思，到可审查的 AA 制作工程。</p></div></div>
+            <div class="about-identity"><img class="about-logo" src="/halocue-favicon.png?v=20261003-original" alt=""><div><p class="settings-kicker">STORY / DIRECTION / PRODUCTION</p><h3>HaloCue <small>1.0</small></h3><p>从故事构思，到可审查的 AA 制作工程。</p></div></div>
             <div class="about-help-card"><div><b>让创作顺手一点</b><p>从第一场开始，查看写作、素材绑定与制作检查的操作说明。</p></div><button type="button" class="primary" data-action="help">打开使用手册</button></div>
             <h4 class="settings-section-title">环境与更多设置</h4>
             <div class="settings-shortcut-grid">

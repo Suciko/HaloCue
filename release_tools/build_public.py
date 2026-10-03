@@ -416,6 +416,12 @@ def audit_third_party_notices(bundle_dir: Path) -> tuple[str, ...]:
             components[_normalized_component(name)] = name
     if (bundle_dir / "HaloCue.exe").is_file():
         components[_normalized_component("PyInstaller")] = "PyInstaller"
+    if (bundle_dir / "resources/app.asar").is_file():
+        for component in ("Electron", "Chromium", "Node.js"):
+            components[_normalized_component(component)] = component
+        for filename in ("LICENSE.electron.txt", "LICENSES.chromium.html"):
+            if not (bundle_dir / filename).is_file():
+                raise ValueError(f"Electron missing {filename}")
     missing = sorted(
         (name for key, name in components.items() if key not in declared),
         key=str.casefold,
@@ -459,6 +465,7 @@ def build_public_release(
     output_root: Path,
     *,
     python_executable: Path,
+    node_executable: Path | None = None,
 ) -> PublicBuildResult:
     """Build one deterministic public archive from an audited source export."""
 
@@ -486,12 +493,16 @@ def build_public_release(
         built_bundle / "HaloCueMCP.exe"
     ).is_file():
         raise ValueError("PyInstaller did not produce the required HaloCueMCP.exe")
-    shutil.move(str(built_bundle), str(bundle_dir))
     updater_bundle = work_root / "dist" / "HaloCueUpdater"
     if updater_bundle.is_dir() and (updater_bundle / "HaloCueUpdater.exe").is_file():
-        shutil.copy2(updater_bundle / "HaloCueUpdater.exe", bundle_dir / "HaloCueUpdater.exe")
-    _copy_public_resources(source_root, bundle_dir)
-    _remove_environment_payloads(bundle_dir)
+        shutil.copy2(updater_bundle / "HaloCueUpdater.exe", built_bundle / "HaloCueUpdater.exe")
+    _copy_public_resources(source_root, built_bundle)
+    _remove_environment_payloads(built_bundle)
+    host = source_root / "apps/desktop-client/electron"
+    if (host / "main.cjs").is_file():
+        _package_electron(source_root, built_bundle, output_root, node_executable)
+    else:
+        shutil.move(str(built_bundle), str(bundle_dir))
     audit_third_party_notices(bundle_dir)
     findings = scan_tree(bundle_dir, mode="public")
     if findings:
@@ -513,6 +524,26 @@ def build_public_release(
     )
 
 
+def _package_electron(source_root, backend_bundle, output_root, node_executable):
+    node = str(node_executable) if node_executable else shutil.which("node")
+    if not node or not Path(node).is_file():
+        raise ValueError("Electron packaging requires Node.js 22.12 or later; provide --node-executable")
+    node_path = Path(node).resolve()
+    npm = node_path.parent / "node_modules/npm/bin/npm-cli.js"
+    if not npm.is_file():
+        raise ValueError("Electron packaging requires npm beside the selected Node.js")
+    tools_root = _contained_target(output_root / "build/electron-tools", output_root)
+    stage = _contained_target(output_root / "electron-source", output_root)
+    for target in (tools_root, stage):
+        _remove_generated(target, output_root)
+    shutil.copytree(source_root / "apps/desktop-client/electron", tools_root)
+    subprocess.run([str(node_path), str(npm), "ci", "--include=dev", "--no-audit", "--no-fund"],
+                   cwd=tools_root, check=True)
+    subprocess.run([str(node_path), str(tools_root / "pack.cjs"), str(source_root),
+                    str(backend_bundle), str(output_root)], cwd=tools_root, check=True)
+    _load_source_manifest(source_root)
+
+
 def finalize_existing_bundle(
     source_root: Path,
     bundle_dir: Path,
@@ -529,6 +560,8 @@ def finalize_existing_bundle(
     required = ["HaloCue.exe", *_PUBLIC_RESOURCES]
     if (source_root / "mcp_launcher.py").is_file():
         required.append("HaloCueMCP.exe")
+    if (bundle_dir / "resources/app.asar").is_file():
+        required.append("HaloCueBackend.exe")
     missing = [relative for relative in required if not (bundle_dir / relative).exists()]
     if missing:
         raise ValueError("existing bundle is missing required files: " + ", ".join(missing))

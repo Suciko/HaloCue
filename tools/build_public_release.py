@@ -32,6 +32,9 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=Path(sys.executable),
     )
+    parser.add_argument(
+        "--node-executable", type=Path, help="Node.js runtime for the Electron host"
+    )
     args = parser.parse_args(argv)
     try:
         if args.finalize_existing:
@@ -45,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.source,
                 args.output,
                 python_executable=args.python_executable,
+                node_executable=args.node_executable,
             )
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         print(f"public build failed: {exc}", file=sys.stderr)

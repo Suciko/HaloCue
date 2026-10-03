@@ -1,6 +1,6 @@
 # HaloCue｜AA 剧本自动演出工具
 
-**HaloCue 1.0.0 Beta 3 本地预览** 是一款面向
+**HaloCue 1.0.0 Beta 4 本地预览** 是一款面向
 [AzureArchive](https://github.com/foxxlight/AzureArchive) 的 AA 剧本自动演出工具。它读取用户已经写好的中文剧本，安排表情、动作、站位、镜头、背景与声音，经过人工审查后编译为 AA 工程，同时帮助管理演员和素材。
 
 集成写作界面的 AI 可以提出新正文和改编候选；只有用户采纳才会写入正式修订。AA 制作中的 AI 用于演出标注，用户可以在编译前审查和修改结果。
@@ -12,17 +12,17 @@ Esoteric Software 均无隶属关系。HaloCue 不提供游戏图像、音频或
 
 ## 下载与开始
 
-当前本地候选为 **`1.0.0-beta.3` 预览版**，不是正式稳定版。
+当前本地候选为 **`1.0.0-beta.4` 预览版**，不是正式稳定版。
 下载入口见 [GitHub Releases](https://github.com/Suciko/HaloCue/releases)。
-完整代码、依赖、启动方式与已验证范围见 [Beta 3 预览包说明](docs/releases/1.0.0-beta.3.md)。
+完整代码、依赖、启动方式与已验证范围见 [Beta 4 预览包说明](docs/releases/1.0.0-beta.4.md)。
 
-本地预览包名为 `HaloCue-1.0.0-beta.3-windows-x64.zip`：
+本地预览包名为 `HaloCue-1.0.0-beta.4-windows-x64.zip`：
 
 如确有逐文件书面授权，私发覆盖包固定命名为
-`HaloCue-1.0.0-beta.3-private-windows-x64.zip`，不上传 GitHub。
+`HaloCue-1.0.0-beta.4-private-windows-x64.zip`，不上传 GitHub。
 
 1. 完整解压 ZIP，不要直接在压缩包里运行。
-2. 双击 `HaloCue.exe`，程序会直接打开独立应用窗口，不会启动系统浏览器。
+2. 双击 `HaloCue.exe`，程序会打开 Electron 独立应用窗口；上栏右侧提供原生最小化、最大化和关闭按钮。
 3. 首次使用时，在应用内选择你自己的 `AzureArchive.exe`；HaloCue 会读取 AA 设置并自动识别项目和存档位置。
 4. 在写作工作台创建作品，或进入“AA 制作”按“导入剧本 → 确认演员 → 审查 → 编译”完成一章。
 5. 旧制作界面可通过 `HaloCue.exe --legacy-ui` 打开。
