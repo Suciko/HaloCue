@@ -63,6 +63,7 @@ manifest for provenance and the 2026-10-02 maintainer inclusion authorization.
 | `sse-starlette` | BSD-3-Clause |
 | `starlette` | BSD-3-Clause |
 | `uvicorn` | BSD-3-Clause |
+| `websockets` | BSD-3-Clause |
 | `jsonschema` | MIT |
 | `jsonschema-specifications` | MIT |
 | `referencing` | MIT |
