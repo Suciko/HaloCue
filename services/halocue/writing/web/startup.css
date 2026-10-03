@@ -1,0 +1,42 @@
+/* The service-restoration phase uses the same visual as the Electron boot page. */
+.boot-screen {
+  display:block;
+  background:var(--hc-boot-background,#fff) !important;
+  color:var(--hc-boot-text,#30343b);
+  font:15px 'Segoe UI','Microsoft YaHei',sans-serif;
+}
+/* The shared theme rule groups #toast with the boot screen, so match its ID specificity. */
+html[data-theme] #bootScreen.boot-screen { background:var(--hc-boot-background,#fff) !important; }
+html[data-theme="dark"] .boot-screen {
+  --hc-boot-background:#191e27; --hc-boot-header:#222a35;
+  --hc-boot-text:#e1e7ee; --hc-boot-muted:#a1adbc;
+  --hc-boot-line:#343e4c; --hc-boot-accent:#85afea;
+}
+.boot-screen .boot-header {
+  box-sizing:border-box; height:56px; margin:0;
+  border-bottom:1px solid var(--hc-boot-line,#e7eaf0);
+  padding:0 156px 0 24px; display:flex; align-items:center; gap:8px;
+  background:var(--hc-boot-header,#fff); color:var(--hc-boot-text,#30343b);
+  font:600 15px 'Segoe UI','Microsoft YaHei',sans-serif;
+  -webkit-app-region:drag; app-region:drag;
+}
+.boot-screen .boot-header img { width:24px; height:24px; }
+.boot-screen main {
+  box-sizing:border-box; height:calc(100vh - 56px); margin:0; padding:0;
+  display:flex; align-items:center; justify-content:center; gap:22px;
+}
+.boot-screen main > img { width:72px; height:72px; flex:0 0 72px; }
+.boot-screen main > div { display:block; }
+.boot-screen h1 {
+  margin:0 0 10px; letter-spacing:normal;
+  font:700 21px 'Segoe UI','Microsoft YaHei',sans-serif;
+  color:var(--hc-boot-text,#30343b) !important;
+}
+.boot-screen p {
+  margin:0; font:15px 'Segoe UI','Microsoft YaHei',sans-serif;
+  color:var(--hc-boot-muted,#7b818b) !important;
+}
+.boot-screen progress {
+  width:180px; height:3px; margin-top:18px;
+  accent-color:var(--hc-boot-accent,#2361de);
+}

@@ -30,6 +30,9 @@ def test_generated_boot_icon_matches_brand_master():
     assert (root / "branding/halocue-icon.svg").read_bytes() == (
         root / "apps/desktop-client/electron/icon.svg"
     ).read_bytes()
+    assert (root / "branding/halocue-icon.svg").read_bytes() == (
+        root / "services/halocue/writing/web/halocue-icon.svg"
+    ).read_bytes()
 
 
 def test_writing_favicon_uses_canonical_branding_when_export_has_no_bitmap_copy(tmp_path):

@@ -22,7 +22,7 @@ let window, child, receipt, quitting = false, failure = false, origin, ownedRead
 const abort = new AbortController();
 const metrics = {version, host: 'electron', electron: process.versions.electron};
 const stateDir = app.getPath('userData');
-let bootURL, bootEvidence, currentAppearance;
+let bootURL, bootEvidence, currentAppearance, restorationCapture;
 const appearanceFile = path.join(stateDir, 'appearance.json');
 
 function record(stage, extra = {}) {
@@ -38,6 +38,7 @@ async function fail(error) {
   if (quitting || failure) return;
   failure = true;
   try {record('failed_ms', {error: error.message});} catch {}
+  if (selfTest) {app.quit(); return;}
   if (window && !window.isDestroyed()) {
     await dialog.showMessageBox(window, {type: 'error', title: 'HaloCue 启动失败',
       message: '工作台服务未能启动。', detail: '请保留用户数据并重新启动。启动记录在用户目录的 electron/startup.json。'});
@@ -86,7 +87,8 @@ if (diagnostic) {
     await stopOwnedService(child, receipt);
     if (ownedReadyFile) fs.rmSync(ownedReadyFile, {force: true});
     if (receipt) fs.rmSync(path.join(stateDir, `ready-${child.pid}.json`), {force: true});
-    app.quit();
+    if (selfTest && failure) app.exit(1);
+    else app.quit();
   }
   app.whenReady().then(async () => {
     record('electron_ready_ms');
@@ -159,6 +161,32 @@ if (diagnostic) {
         if (selfTest) runWindowSelfTest().catch(fail);
       }
     });
+    ipcMain.on('halocue:workbench-loading', event => {
+      if (!selfTest || restorationCapture || !window || event.sender !== window.webContents ||
+          event.senderFrame !== window.webContents.mainFrame || !origin || !sameOrigin(event.senderFrame.url, origin)) return;
+      restorationCapture = (async () => {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        const result = await window.webContents.executeJavaScript(`(() => {
+          const boot=document.querySelector('#bootScreen'), header=boot.querySelector('.boot-header');
+          const icon=boot.querySelector('main > img');
+          return {loading:document.body.classList.contains('app-loading'), visible:!boot.hidden,
+            theme:document.documentElement.dataset.theme, title:boot.querySelector('h1').textContent,
+            icon:icon.getAttribute('src'), iconLoaded:icon.complete && icon.naturalWidth>0,
+            iconWidth:icon.getBoundingClientRect().width, titleSize:getComputedStyle(boot.querySelector('h1')).fontSize,
+            background:getComputedStyle(boot).backgroundColor,
+            header:getComputedStyle(header).backgroundColor, headerHeight:header.getBoundingClientRect().height};
+        })()`);
+        fs.writeFileSync(path.join(stateDir, 'restoration-self-test.json'), JSON.stringify(result, null, 2));
+        fs.writeFileSync(path.join(stateDir, 'restoring.png'), (await window.webContents.capturePage()).toPNG());
+        if (!result.loading || !result.visible || result.title !== '正在打开工作台' || !result.icon.startsWith('/halocue-icon.svg') ||
+            !result.iconLoaded || result.iconWidth !== 72 || result.titleSize !== '21px' || result.headerHeight !== 56 ||
+            result.theme !== bootEvidence.theme || result.background !== bootEvidence.background || result.header !== bootEvidence.header) {
+          throw new Error('Restoration screen is not the unified startup view');
+        }
+        return result;
+      })();
+      restorationCapture.catch(fail);
+    });
     window.once('ready-to-show', () => {
       if (window && !quitting) {window.show(); if (saved.maximized) window.maximize(); record('window_shown_ms');}
     });
@@ -189,13 +217,20 @@ if (diagnostic) {
       fs.writeFileSync(path.join(stateDir, 'port.txt'), String(receipt.port));
       origin = receipt.url; record('backend_ready_ms');
       await bootLoaded;
+      if (selfTest) {
+        // Isolated QA holds works loading so the intermediate UI cannot escape review.
+        window.webContents.session.webRequest.onBeforeRequest({urls: [origin+'/api/v1/works']}, (_details, callback) => {
+          setTimeout(() => callback({}), 1000);
+        });
+      }
       if (!quitting && window) {await window.loadURL(origin); record('page_loaded_ms');}
     } finally {fs.rmSync(readyFile, {force: true});}
   }).catch(fail);
 
   async function runWindowSelfTest() {
     // Optional isolated release acceptance: real native APIs, never user documents.
-    const result = {boot: bootEvidence, nativeHandle: window.getNativeWindowHandle().length > 0,
+    if (!restorationCapture) throw new Error('Restoration phase was not captured');
+    const result = {boot: bootEvidence, restoration: await restorationCapture, nativeHandle: window.getNativeWindowHandle().length > 0,
       packaged: app.isPackaged, title: window.getTitle(), preferences: window.webContents.getLastWebPreferences()};
     const changed = (name, action) => new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error(`Window self-test: ${name} timeout`)), 3000);

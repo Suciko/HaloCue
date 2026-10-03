@@ -34,6 +34,7 @@ test('startup restores manual theme and follows current system instead of stale 
   assert.equal(startupAppearance({preference: 'light'}, true).effective, 'light');
   assert.equal(startupAppearance({preference: 'system', effective: 'dark', background: '#112233'}, false).background, '#ffffff');
   assert.equal(startupAppearance({preference: 'system'}, true).effective, 'dark');
+  assert.equal(startupAppearance({preference: 'light', effective: 'light', background: '#fbfaf6'}, false).background, '#ffffff');
   const saved = {preference: 'dark', effective: 'dark', color: '#123456', background: 'url(file:private)', appearance: {palette: 'sakura', contrast: true, scale: 'large'}};
   const restored = startupAppearance(saved, false);
   assert.equal(restored.color, '#123456'); assert.equal(restored.background, '#191e27');

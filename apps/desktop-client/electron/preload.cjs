@@ -18,6 +18,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.documentElement.dataset.windowChrome = 'overlay';
   const topbar = document.querySelector('.hc-topbar');
   if (!topbar) return;
+  if (document.body.classList.contains('app-loading')) ipcRenderer.send('halocue:workbench-loading');
   function hex(value, fallback) {
     if (/^#[0-9a-f]{6}$/i.test(value.trim())) return value.trim();
     const values = value.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/);
@@ -29,7 +30,7 @@ window.addEventListener('DOMContentLoaded', () => {
     ipcRenderer.send('halocue:chrome', {color: hex(style.backgroundColor, '#ffffff'),
       symbolColor: hex(style.color, '#30343b'), height: Math.max(40, Math.min(100, Math.round(topbar.getBoundingClientRect().height)-1)),
       preference: root.dataset.themePreference, effective: root.dataset.theme,
-      background: hex(getComputedStyle(document.body).backgroundColor, '#ffffff'),
+      background: hex(getComputedStyle(document.getElementById('bootScreen') || document.body).backgroundColor, '#ffffff'),
       muted: hex(palette.getPropertyValue('--hc-muted'), '#7b818b'),
       line: hex(palette.getPropertyValue('--hc-line'), '#e7eaf0'),
       accent: hex(palette.getPropertyValue('--hc-accent'), '#2361de'),

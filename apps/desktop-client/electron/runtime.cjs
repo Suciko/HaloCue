@@ -102,7 +102,9 @@ function startupAppearance(saved, systemDark) {
     ? {background: '#191e27', color: '#222a35', symbolColor: '#e1e7ee', muted: '#a1adbc', line: '#343e4c', accent: '#85afea'}
     : {background: '#ffffff', color: '#ffffff', symbolColor: '#30343b', muted: '#7b818b', line: '#e7eaf0', accent: '#2361de'};
   if (saved?.effective === effective) {
-    for (const key of Object.keys(colors)) if (/^#[0-9a-f]{6}$/i.test(saved[key])) colors[key] = saved[key];
+    // The legacy body can be cream behind the full-size workbench. It is not
+    // the startup canvas; both boot phases use the canonical light/dark canvas.
+    for (const key of Object.keys(colors)) if (key !== 'background' && /^#[0-9a-f]{6}$/i.test(saved[key])) colors[key] = saved[key];
   }
   const appearance = {palette: ['azure', 'sakura', 'forest', 'amber'].includes(saved?.appearance?.palette) ? saved.appearance.palette : 'azure',
     contrast: saved?.appearance?.contrast === true,
