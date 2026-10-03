@@ -206,6 +206,22 @@ def test_public_builder_revalidates_source_manifest_after_build(tmp_path, monkey
         )
 
 
+def test_builder_removes_sdk_benchmarks_but_preserves_schema_runtime(tmp_path):
+    bundle = tmp_path / "HaloCue"
+    benchmark = bundle / "_internal/jsonschema/benchmarks/issue232/issue.json"
+    benchmark.parent.mkdir(parents=True)
+    benchmark.write_text('{"password": "benchmark-only-fixture"}', encoding="utf-8")
+    schema = bundle / "_internal/jsonschema_specifications/schemas/draft202012/schema.json"
+    schema.parent.mkdir(parents=True)
+    schema.write_text('{"type": "object"}', encoding="utf-8")
+
+    assert public_builder.scan_tree(bundle, mode="public")
+    public_builder._remove_environment_payloads(bundle)
+    assert not benchmark.exists()
+    assert schema.read_text(encoding="utf-8") == '{"type": "object"}'
+    assert public_builder.scan_tree(bundle, mode="public") == ()
+
+
 def test_dependency_notice_audit_requires_shipped_metadata_and_native_components(
     tmp_path,
 ):

@@ -330,7 +330,14 @@ def _remove_environment_payloads(bundle_dir: Path) -> None:
             path.suffix.casefold() == ".gif" or path.name.casefold() == "direct_url.json"
         ):
             path.unlink()
-    for relative in ("_tcl_data", "_tk_data", "tcl8", "tcl86t.dll", "tk86t.dll"):
+    for relative in (
+        "_tcl_data",
+        "_tk_data",
+        "tcl8",
+        "tcl86t.dll",
+        "tk86t.dll",
+        "jsonschema/benchmarks",
+    ):
         candidate = internal / relative
         if candidate.is_dir() and not candidate.is_symlink():
             shutil.rmtree(candidate)
@@ -527,6 +534,7 @@ def finalize_existing_bundle(
         raise ValueError("existing bundle is missing required files: " + ", ".join(missing))
     source_notice = source_root / "THIRD_PARTY_NOTICES.md"
     shutil.copy2(source_notice, bundle_dir / "THIRD_PARTY_NOTICES.md")
+    _remove_environment_payloads(bundle_dir)
     _load_source_manifest(source_root)
     audit_third_party_notices(bundle_dir)
     findings = scan_tree(bundle_dir, mode="public")
