@@ -417,7 +417,7 @@ class ExternalAgentExchange:
                     "command": str(runtime),
                     "env": {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
                     "args": [
-                        str(script),
+                        *([str(script)] if script is not None else []),
                         "--connection",
                         str(config_file),
                         "--endpoint",
@@ -443,6 +443,31 @@ class ExternalAgentExchange:
             or parsed.fragment
         ):
             raise DomainError("external_endpoint_invalid", "MCP 只能连接本机 HaloCue 服务。")
+        if getattr(sys, "frozen", False):
+            worker = Path(sys.executable).with_name("HaloCueMCP.exe")
+            try:
+                available = (
+                    worker.is_file()
+                    and subprocess.run(
+                        [str(worker), "--check-runtime"],
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=15,
+                        check=False,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                    ).returncode
+                    == 0
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                available = False
+            if not available:
+                raise DomainError(
+                    "external_mcp_unavailable",
+                    "包内 MCP 桥接程序不可用，请完整解压新版 HaloCue。",
+                    status=409,
+                )
+            return worker, None
         root = repository_root()
         native = (
             root
@@ -453,7 +478,7 @@ class ExternalAgentExchange:
         if not native.is_file():
             from importlib.util import find_spec
 
-            if getattr(sys, "frozen", False) or find_spec("mcp") is None:
+            if find_spec("mcp") is None:
                 raise DomainError(
                     "external_mcp_unavailable",
                     "MCP 运行环境尚未安装，请按接入指南安装；仍可使用任务包导入结果。",

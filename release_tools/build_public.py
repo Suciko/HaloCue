@@ -475,6 +475,10 @@ def build_public_release(
     built_bundle = work_root / "dist" / _BUNDLE_NAME
     if not (built_bundle / "HaloCue.exe").is_file():
         raise ValueError("PyInstaller did not produce HaloCue/HaloCue.exe")
+    if (source_root / "mcp_launcher.py").is_file() and not (
+        built_bundle / "HaloCueMCP.exe"
+    ).is_file():
+        raise ValueError("PyInstaller did not produce the required HaloCueMCP.exe")
     shutil.move(str(built_bundle), str(bundle_dir))
     updater_bundle = work_root / "dist" / "HaloCueUpdater"
     if updater_bundle.is_dir() and (updater_bundle / "HaloCueUpdater.exe").is_file():
@@ -516,6 +520,8 @@ def finalize_existing_bundle(
         raise ValueError("existing bundle must be the HaloCue directory below output root")
     _require_clean_public_source(source_root)
     required = ["HaloCue.exe", *_PUBLIC_RESOURCES]
+    if (source_root / "mcp_launcher.py").is_file():
+        required.append("HaloCueMCP.exe")
     missing = [relative for relative in required if not (bundle_dir / relative).exists()]
     if missing:
         raise ValueError("existing bundle is missing required files: " + ", ".join(missing))

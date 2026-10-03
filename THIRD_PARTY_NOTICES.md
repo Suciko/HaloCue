@@ -55,6 +55,19 @@ manifest for provenance and the 2026-10-02 maintainer inclusion authorization.
 | `defusedxml` | PSF-2.0 |
 | `zstandard` | BSD-3-Clause |
 | `pywin32` | PSF-2.0 |
+| `mcp` | MIT |
+| `httpx-sse` | MIT |
+| `pydantic-settings` | MIT |
+| `PyJWT` | MIT |
+| `python-multipart` | Apache-2.0 |
+| `sse-starlette` | BSD-3-Clause |
+| `starlette` | BSD-3-Clause |
+| `uvicorn` | BSD-3-Clause |
+| `jsonschema` | MIT |
+| `jsonschema-specifications` | MIT |
+| `referencing` | MIT |
+| `rpds-py` | MIT |
+| `python-dotenv` | BSD-3-Clause |
 
 Authoritative package license texts and project links are available in their
 shipped `.dist-info` metadata and upstream distributions. PyInstaller's

@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
+import os
 
 ROOT = Path(SPECPATH).resolve()
 
@@ -33,6 +34,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version=os.environ.get("HALOCUE_VERSION_FILE"),
 )
 coll = COLLECT(
     exe,

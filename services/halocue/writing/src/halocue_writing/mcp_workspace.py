@@ -129,7 +129,7 @@ class McpWorkspace:
                 "halocue": {
                     "command": str(runtime),
                     "args": [
-                        str(script),
+                        *([str(script)] if script is not None else []),
                         "--workspace",
                         "--connection",
                         str(path),

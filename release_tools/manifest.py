@@ -42,6 +42,7 @@ _PUBLIC_ROOT_FILES = {
     "pytest.ini",
     "requirements-dev.txt",
     "requirements-desktop-build.txt",
+    "requirements-mcp.txt",
     "requirements.txt",
     "ui.html",
     "使用说明-从这里开始.md",
@@ -143,6 +144,9 @@ def is_public_source_path(relative_path: str) -> bool:
             "services/halocue/runtime_layout.py",
             "services/halocue/http_server.py",
             "services/halocue/_test_support.py",
+            "services/halocue/codex_agent.py",
+            "services/halocue/external_agent_mcp.py",
+            "services/halocue/workspace_mcp.py",
         }:
             return True
         if normalized.startswith("services/halocue/writing/skill/ba-writing/"):

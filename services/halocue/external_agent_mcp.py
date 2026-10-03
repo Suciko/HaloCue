@@ -149,7 +149,10 @@ def main():
     args = parser.parse_args()
     client = TaskClient(args.endpoint, args.connection, workspace=args.workspace)
     if args.workspace:
-        from workspace_mcp import create_workspace_server
+        if __package__:
+            from .workspace_mcp import create_workspace_server
+        else:
+            from workspace_mcp import create_workspace_server
 
         server = create_workspace_server(client)
     else:
