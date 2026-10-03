@@ -26,6 +26,7 @@ def main() -> None:
     )
     icon.save(BRANDING / "halocue.ico", format="ICO", sizes=[(size, size) for size in SIZES])
     copyfile(BRANDING / "halocue-favicon.png", ROOT / "services/halocue/writing/web/halocue-favicon.png")
+    copyfile(MASTER, ROOT / "apps/desktop-client/electron/icon.svg")
 
 
 if __name__ == "__main__":

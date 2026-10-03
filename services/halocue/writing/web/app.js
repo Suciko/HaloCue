@@ -2187,9 +2187,9 @@ async function loadWork(id,{resume=true,renderNow=true}={}){
 }
 async function boot(){
   try{
-    state.capabilities=await api('/capabilities');
-    try{await api('/settings/feedback/sync',{method:'POST',body:'{}'});}catch(_){/* Feedback is not a prerequisite for opening the editor. */}
-    state.works=hcArray(await api('/works'));
+    const [capabilities,works]=await Promise.all([api('/capabilities'),api('/works')]);
+    state.capabilities=capabilities;
+    state.works=hcArray(works);
     const requested=state.works.find(work=>work.id===hcInitialParams.get('work_id'))||state.works[0];
     if(requested)await loadWork(requested.id,{resume:false,renderNow:false});
     hcHistoryReady=true;
@@ -2199,6 +2199,8 @@ async function boot(){
     hcHistoryReady=true;render();toast(error.message,true);
   }finally{
     document.body.classList.remove('app-loading');document.getElementById('bootScreen')?.setAttribute('hidden','');
+    // Pending feedback may wait on an offline remote endpoint; never hold the editor behind it.
+    void api('/settings/feedback/sync',{method:'POST',body:'{}'}).catch(()=>{});
   }
 }
 function isCompactViewport(){return window.matchMedia('(max-width: 640px)').matches}

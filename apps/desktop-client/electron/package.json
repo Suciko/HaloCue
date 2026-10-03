@@ -1,0 +1,11 @@
+{
+  "name": "halocue-desktop",
+  "version": "1.0.0-beta.4",
+  "private": true,
+  "description": "HaloCue desktop window for the integrated local runtime",
+  "author": "HaloCue contributors",
+  "license": "MIT",
+  "main": "main.cjs",
+  "scripts": {"start": "electron .", "test": "node --test test/*.test.cjs"},
+  "devDependencies": {"electron": "44.5.1", "@electron/packager": "20.3.0"}
+}

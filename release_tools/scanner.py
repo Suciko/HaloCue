@@ -93,6 +93,12 @@ _FORBIDDEN_EXTENSIONS = {
     ".webp",
 }
 _EXECUTABLE_EXTENSIONS = {".com", ".dll", ".dylib", ".exe", ".pyd", ".so"}
+# Exact official Windows Electron runtime names, never arbitrary root/nested binaries.
+_ELECTRON_EXECUTABLES = {
+    "HaloCueBackend.exe", "chrome_elf.dll", "d3dcompiler_47.dll", "dxcompiler.dll",
+    "dxil.dll", "ffmpeg.dll", "libEGL.dll", "libGLESv2.dll", "vk_swiftshader.dll",
+    "vulkan-1.dll",
+}
 _ARCHIVE_EXTENSIONS = {".whl", ".zip"}
 _FORBIDDEN_NONEMPTY_TABLES = set(_EMPTY_TABLES)
 _SQLITE_MAGIC = b"SQLite format 3\x00"
@@ -111,6 +117,7 @@ _ARCHIVE_CHUNK_BYTES = 64 * 1024
 _TEXT_EXTENSIONS = {
     "",
     ".cfg",
+    ".cjs",
     ".cmd",
     ".css",
     ".gitignore",
@@ -279,12 +286,13 @@ def _path_findings(relative: str, *, mode: ScanMode) -> list[ScanFinding]:
         if mode == "public":
             allowed = relative in {"HaloCue.exe", "HaloCueUpdater.exe", "HaloCueMCP.exe"} or (
                 relative.startswith("_internal/") and suffix in {".dll", ".pyd"}
-            )
+            ) or relative in _ELECTRON_EXECUTABLES
         elif mode == "private":
             allowed = (
                 relative in {"HaloCue.exe", "HaloCueUpdater.exe", "HaloCueMCP.exe"}
                 or (relative.startswith("_internal/") and suffix in {".dll", ".pyd"})
                 or private_spine
+                or relative in _ELECTRON_EXECUTABLES
             )
         if not allowed:
             findings.append(
