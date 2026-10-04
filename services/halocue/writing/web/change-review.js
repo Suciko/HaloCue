@@ -7,7 +7,7 @@
     direction: '剧情走向', constraints: '创作约束', characters: '登场人物',
     character_card_ids: '关联人物卡', mode: '写作模式', story_modes: '故事模式',
     target_length: '目标篇幅', has_sensei: '老师是否登场', sensei_decision: '老师登场安排',
-    chapter_goal: '本章目标', goal: '目标', summary: '摘要', beats: '情节节拍',
+    chapter_goal: '本章目标', goal: '目标', summary: '摘要', beats: '情节节拍', continuity_notes: '承接与限制',
     scenes: '场景', ending: '结尾', ending_payoff: '结尾落点', emotional_arc: '情绪变化',
     name: '名称', text: '内容', role: '故事职责', relationships: '人物关系',
     voice_anchors: '口吻锚点', knowledge_boundary: '知情边界', ooc_constraints: '人物红线',

@@ -145,6 +145,19 @@ html[data-theme="dark"] :is(dialog,.boot-screen,.toast,#toast) {
   background: var(--surface) !important; color: var(--ink); border-color: var(--line) !important;
 }
 html[data-theme="dark"] dialog::backdrop { background: #080d16a6; }
+#workSwitchDialog { border-radius: 14px; }
+#workSwitchDialog .dialog-head h2 { font: 650 24px/1.3 var(--hc-font-ui); }
+#workSwitchDialog .work-switch-row {
+  border-color: var(--hc-line); background: var(--hc-surface); color: var(--hc-ink);
+  border-radius: 9px;
+}
+#workSwitchDialog .work-switch-row:hover,
+#workSwitchDialog .work-switch-row.active {
+  border-color: var(--hc-accent); background: var(--hc-selected);
+}
+#workSwitchDialog .work-switch-row b { font-family: var(--hc-font-ui); color: var(--hc-ink); }
+#workSwitchDialog .work-switch-row small { color: var(--hc-muted); }
+#workSwitchDialog .dialog-actions { background: var(--hc-surface); }
 html[data-theme="dark"] :is(#app.hc-redesign,dialog) :is(input,textarea,select) {
   background: var(--hc-bg) !important; color: var(--ink) !important; border-color: var(--line-strong) !important;
   caret-color: var(--hc-accent); accent-color: var(--hc-accent);

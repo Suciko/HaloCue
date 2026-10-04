@@ -69,6 +69,33 @@ class QuietProvider(FakeWritingProvider):
         return {"text": "我们按这个方向继续。", "questions": [], "ready_for_proposal": False}
 
 
+class ChapterOrganizer(QuietProvider):
+    def __init__(self, chapter_id):
+        self.chapter_id = chapter_id
+
+    def discuss_work(self, messages, context):
+        if context.get("tool_followup"):
+            return {"text": "章节安排会在当前构思对话中交给你核对。", "questions": []}
+        return {
+            "text": "我来整理本章细纲。",
+            "questions": [],
+            "tool_calls": [
+                {"tool": "organize_current_plan", "arguments": {"chapter_id": self.chapter_id}}
+            ],
+        }
+
+    def generate_chapter_plan(self, messages, context):
+        self.chapter_messages = messages
+        self.chapter_context = context
+        return {
+            "schema_version": "chapter-plan/1.0",
+            "title": "夜间活动室细纲",
+            "chapter_goal": "找到提示灯的回应规律。",
+            "beats": ["两人核对夜间活动室的记录。", "提示灯第一次回应，两人停下观察。"],
+            "continuity_notes": ["结尾只保留第一次回应，不添加反派。"],
+        }
+
+
 def make_catalog(root):
     root.mkdir()
     for name, aliases in [
@@ -375,3 +402,98 @@ def test_scene_inherits_selected_ideation_and_can_retrieve_originals_after_resta
     )
     assert not result["work"]["chapters"][0]["scenes"][0]["current_revision_id"]
     restored.close()
+
+
+def test_ideation_can_organize_chapter_and_outline_syncs_without_overwriting_edits(tmp_path):
+    from test_scene_conversation_harness import create_ready_scene
+
+    service = WritingService(tmp_path)
+    work_id, scene_id, work = create_ready_scene(service, title="夜间活动室")
+    chapter_id = work["chapters"][0]["id"]
+    service.provider = QuietProvider()
+    work = send(service, work, "结尾只保留第一次回应，不添加反派。")
+    service.provider = ChapterOrganizer(chapter_id)
+    result = service.post_conversation_message(
+        work_id,
+        work["conversation_threads"][0]["id"],
+        {
+            "expected_thread_version": work["conversation_threads"][0]["version"],
+            "task_scope": {"surface": "work"},
+            "text": "把夜间调查这一章整理成细纲。",
+        },
+    )
+    pending = result["work"]
+    proposal = next(
+        item for item in pending["proposals"] if item["id"] == result["auto_proposal_id"]
+    )
+    assert proposal["kind"] == "chapter_plan" and proposal["scope_id"] == chapter_id
+    assert proposal["candidate"]["source_thread_id"] == work["conversation_threads"][0]["id"]
+    assert any("不添加反派" in item["text"] for item in service.provider.chapter_messages)
+    assert not any(item["kind"] == "chapter_plan" for item in pending["artifacts"])
+    accepted = service.accept_proposal(
+        work_id, proposal["id"], {"expected_version": pending["version"]}
+    )["work"]
+    outline = service.authoring.get_outline(work_id)
+    doc = next(item for item in outline["documents"] if item["scope_id"] == chapter_id)
+    assert "找到提示灯的回应规律" in doc["text"]
+    assert "不添加反派" in doc["adopted_text"]
+    saved = service.authoring.save_outline(
+        work_id,
+        {
+            "expected_version": accepted["version"],
+            "scope_type": "chapter",
+            "scope_id": chapter_id,
+            "expected_base_revision_id": None,
+            "text": "手写精修：保持短促对白。",
+        },
+    )["work"]
+    service.provider = ChapterOrganizer(chapter_id)
+    second = send(service, saved, "再整理这章的承接。")
+    next_proposal = next(
+        item
+        for item in second["proposals"]
+        if item["kind"] == "chapter_plan" and item["status"] == "pending"
+    )
+    service.accept_proposal(work_id, next_proposal["id"], {"expected_version": second["version"]})
+    doc = next(
+        item
+        for item in service.authoring.get_outline(work_id)["documents"]
+        if item["scope_id"] == chapter_id
+    )
+    assert doc["text"] == "手写精修：保持短促对白。"
+    assert doc["source_changed"]
+    assert service.get_work(work_id)["chapters"][0]["scenes"][0]["id"] == scene_id
+    assert not service.get_work(work_id)["chapters"][0]["scenes"][0]["current_revision_id"]
+    service.close()
+
+
+def test_organize_chapter_tool_rejects_foreign_and_other_chapter_targets(tmp_path):
+    from halocue_writing.agent_tools import ToolExecutionContext
+    from test_scene_conversation_harness import create_ready_scene
+
+    service = WritingService(tmp_path)
+    work_id, _scene_id, work = create_ready_scene(service)
+    foreign = service.create_work({"title": "其他作品"})
+    with service.repo.connect() as connection:
+        context = ToolExecutionContext(
+            connection=connection,
+            service=service,
+            work_id=work_id,
+            thread_id=work["conversation_threads"][0]["id"],
+            scope_type="work",
+            scope_id=work_id,
+            permission_mode="review",
+        )
+        result = service.agent_tools.execute(
+            context, "organize_current_plan", {"chapter_id": foreign["chapters"][0]["id"]}
+        )
+        assert result.status == "failed"
+        assert "不属于当前作品" in result.error["message"]
+        context.scope_type = "chapter"
+        context.scope_id = "another-chapter"
+        result = service.agent_tools.execute(
+            context, "organize_current_plan", {"chapter_id": work["chapters"][0]["id"]}
+        )
+        assert result.status == "failed"
+        assert "不能整理其他章节" in result.error["message"]
+    service.close()

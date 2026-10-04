@@ -4384,7 +4384,7 @@ function workConversationThread(){
   return thread;
 }
 function workPlanProposal(){
-  return state.work?.proposals?.find(item=>['brief_blueprint','story_structure'].includes(item.kind)&&item.status==='pending');
+  return state.work?.proposals?.find(item=>['brief_blueprint','story_structure','chapter_plan'].includes(item.kind)&&item.status==='pending');
 }
 function messageText(message){return message?.content?.text||''}
 
@@ -5637,6 +5637,7 @@ function agentToolLabel(name){
   return ({
     load_workflow_template:'加载 BA 写作工作流',
     read_work_context:'读取作品上下文',
+    organize_current_plan:'整理创作候选',
     read_conversation_history:'读取当前对话',
     search_character_cards:'检索人物卡',
     search_world_bible:'检索世界观资料',
@@ -6098,6 +6099,10 @@ function proposalChangeReviewMarkup(proposal){
 function workAgentProposalMarkup(proposal){
   if(!proposal)return'';
   const candidate=proposal.candidate||{},plan=candidate.story_blueprint||{},briefCandidate=candidate.brief||{};
+  if(proposal.kind==='chapter_plan'){
+    const chapterPlan=candidate.chapter_plan||{};
+    return `<article class="conversation-message assistant proposal-message"><div class="message-avatar" aria-hidden="true">HC</div><div class="message-column"><div class="message-role">HaloCue 创作导演<span>需要你决定</span></div><div class="message-bubble"><p>《${esc(candidate.chapter_title||chapterPlan.title||'当前章节')}》细纲已整理好，采纳后会同步到章节大纲。</p><details class="agent-inline-artifact proposal" open><summary><span class="artifact-kind">章节细纲</span><div><b>${esc(chapterPlan.title||candidate.chapter_title||'本章细纲')}</b><small>待采纳</small></div><span class="artifact-open-label">展开</span></summary><div class="agent-inline-artifact-body">${proposalChangeReviewMarkup(proposal)}<details class="proposal-overview"><summary>查看完整章节细纲</summary><p>${esc(chapterPlan.chapter_goal||'')}</p><ol>${(chapterPlan.beats||[]).map(beat=>`<li>${esc(beat)}</li>`).join('')}</ol>${chapterPlan.continuity_notes?.length?`<ul>${chapterPlan.continuity_notes.map(note=>`<li>${esc(note)}</li>`).join('')}</ul>`:''}</details><div class="artifact-decision-actions"><button class="primary" type="button" data-accept-director-proposal="${esc(proposal.id)}">采纳章节细纲</button><button class="quiet" type="button" data-reject-director-proposal="${esc(proposal.id)}">退回继续讨论</button></div></div></details></div></div></article>`;
+  }
   if(proposal.kind==='story_structure'){
     const structure=candidate.plan||{},volumes=Array.isArray(structure.volumes)?structure.volumes:[];
     const chapters=volumes.flatMap(volume=>Array.isArray(volume.chapters)?volume.chapters:[]);
@@ -8065,7 +8070,7 @@ function workAgentNextAction(){
   // A freshly organized candidate takes precedence over cached guidance from
   // the discussion that produced it.
   const proposal=workPlanProposal();
-  if(proposal)return {kicker:'等待你的决定',title:proposal.kind==='story_structure'?'审查作品结构候选':'审查故事方向候选',detail:proposal.kind==='story_structure'?'卷、章和场景尚未建立；采纳后才会一次性写入。':'Agent 已整理出方案；采纳前不会改变正式资料。',reason:'存在待审 Proposal，正式资料在你决定前不会改变。',label:'查看候选',action:'data-agent-review-current'};
+  if(proposal)return {kicker:'等待你的决定',title:proposal.kind==='story_structure'?'审查作品结构候选':proposal.kind==='chapter_plan'?'审查章节细纲候选':'审查故事方向候选',detail:proposal.kind==='story_structure'?'卷、章和场景尚未建立；采纳后才会一次性写入。':proposal.kind==='chapter_plan'?'采纳后会同步到章节大纲。':'Agent 已整理出方案；采纳前不会改变正式资料。',reason:'存在待审 Proposal，正式资料在你决定前不会改变。',label:'查看候选',action:'data-agent-review-current'};
   if(primary){
     if(primary.id==='agent.retry'&&primary.target_id&&agentRunHasRecoveryPresentation(primary.target_id)){
       return {kicker:'需要继续',title:'本轮没有完成',detail:'失败输入已保存，可以从对话中的恢复卡继续。',reason:'恢复卡是本轮唯一的重试入口，其他位置只负责带你回到失败详情。',label:'查看恢复卡',action:'data-agent-focus-recovery'};
@@ -8175,7 +8180,7 @@ function activeWorkDecision({includeDismissed=false}={}){
   }
   const proposal=workPlanProposal();
   if(proposal){
-    const label=proposal.kind==='story_structure'?'作品结构候选':'故事方向候选';
+    const label=proposal.kind==='story_structure'?'作品结构候选':proposal.kind==='chapter_plan'?'章节细纲候选':'故事方向候选';
     const decision={key:`proposal:${proposal.id}`,kind:'proposal',kicker:'需要你决定',title:`要采用这份${label}吗？`,body:'候选仍保留在上方对话中，采纳后才会建立正式版本。',note:'正式产物只会在你采纳后建立。',pendingProposal:proposal};
     if(!isDismissed(decision.key))return decision;
   }

@@ -1013,7 +1013,7 @@ def test_work_agent_renders_structure_proposals_before_entering_scene_writing():
     script = (web_root / "app.js").read_text(encoding="utf-8")
     styles = (web_root / "shell.css").read_text(encoding="utf-8")
 
-    assert "['brief_blueprint','story_structure'].includes(item.kind)" in script
+    assert "['brief_blueprint','story_structure','chapter_plan'].includes(item.kind)" in script
     assert "hasBlueprint&&!sceneCount" in script
     assert "继续讨论作品结构" in script
     # An optional inline organize action is allowed; the standalone wizard stays removed.

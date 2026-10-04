@@ -5593,10 +5593,10 @@ class WritingService:
                 scene_edit_requests = [{**first_edit, "edits": edits, "batched": True}]
         scene_edit_proposal_id = None
         auto_propose_kind = None
-        auto_organize_requested = any(
-            item.status == "succeeded" and item.tool == "organize_current_plan"
-            for item in tool_results
-        )
+        auto_organize_request = next((
+            item.output for item in tool_results
+            if item.status == "succeeded" and item.tool == "organize_current_plan"
+        ), None)
         if not provider_failure and not tool_failure and thread_snapshot["permission_mode"] == "managed" and isinstance(reply.get("artifact_preview"), dict):
             preview_kind = reply["artifact_preview"].get("kind")
             if preview_kind in {"character_card", "world_card", "world_rule", "canon_fact"}:
@@ -5690,7 +5690,7 @@ class WritingService:
                 "agent_run_id": run_id, "simulation": provider.is_simulation,
                 "auto_proposal_id": proposed["proposal_id"], "work": proposed["work"],
             }
-        if auto_organize_requested:
+        if auto_organize_request:
             current = self.get_work(work_id)
             current_thread = next(item for item in current["conversation_threads"] if item["id"] == thread_id)
             try:
@@ -5699,7 +5699,7 @@ class WritingService:
                     {
                         "expected_version": current["version"],
                         "expected_thread_version": current_thread["version"],
-                        "task_scope": task_contract.get("task_scope") or {},
+                        "task_scope": auto_organize_request.get("task_scope") or task_contract.get("task_scope") or {},
                         "preview_message_id": assistant_message_id,
                         "agent_run_id": run_id,
                     },
@@ -8315,7 +8315,7 @@ class WritingService:
             )
             self._append_conversation_message(
                 connection, thread_id, "assistant", "proposal",
-                {"text": f"我已整理《{chapter['title']}》的章内细纲候选。它不会替换全作方向，先由你审查。", "proposal_id": proposal_id},
+                {"text": f"我已整理《{chapter['title']}》的章内细纲候选，采纳后会同步到章节大纲。", "proposal_id": proposal_id, "next_step": "review"},
                 provider=provider.descriptor(), proposal_id=proposal_id,
             )
             connection.execute(

@@ -12,7 +12,7 @@ from halocue_writing.app import make_handler
 from halocue_writing.service import WritingService
 from services.halocue.http_server import LocalHTTPServer
 from test_choice_ui_browser import assert_visible_box, open_page, screenshot
-from test_discussion_guidance import REPLY, QuietProvider, make_catalog, send
+from test_discussion_guidance import REPLY, ChapterOrganizer, QuietProvider, make_catalog, send
 from test_scene_conversation_harness import create_ready_scene
 
 
@@ -203,6 +203,77 @@ def test_author_can_organize_then_review_without_writing_formal_direction(flow_s
         page.locator("[data-accept-director-proposal]").filter(visible=True).first
     ).to_be_in_viewport()
     screenshot(page, "discussion-organize-review-dark")
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_work_switch_is_legible_in_both_themes(flow_server, browser, theme):
+    from playwright.sync_api import expect
+
+    _service, _provider, work, url = flow_server
+    page = open_page(browser, f"{url}/?section=works&work_id={work['id']}", theme, (1600, 900))
+    page.locator(".hc-work-switch").click()
+    dialog = page.locator("#workSwitchDialog")
+    expect(dialog).to_be_visible()
+    row = dialog.locator(".work-switch-row.active")
+    expect(row).to_contain_text(work["title"])
+    assert_visible_box(page, dialog)
+    colors = row.evaluate(
+        "el=>({bg:getComputedStyle(el).backgroundColor,fg:getComputedStyle(el.querySelector('b')).color})"
+    )
+
+    def luminance(color):
+        rgb = [
+            float(item) / 255 for item in color.removeprefix("rgb(").removesuffix(")").split(",")
+        ]
+        values = [
+            value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4 for value in rgb
+        ]
+        return sum(value * weight for value, weight in zip(values, (0.2126, 0.7152, 0.0722)))
+
+    bg, fg = luminance(colors["bg"]), luminance(colors["fg"])
+    assert (max(bg, fg) + 0.05) / (min(bg, fg) + 0.05) >= 4.5
+    if theme == "dark":
+        assert bg < 0.2
+    screenshot(page, f"discussion-work-switch-{theme}-1600x900")
+    row.click()
+    expect(dialog).not_to_be_visible()
+    page.close()
+
+
+def test_chapter_plan_can_be_completed_in_ideation_and_synced_to_outline(flow_server, browser):
+    from playwright.sync_api import expect
+
+    service, _provider, _work, url = flow_server
+    work_id, scene_id, work = create_ready_scene(service, title="夜间活动室")
+    chapter_id = work["chapters"][0]["id"]
+    service.provider = QuietProvider()
+    work = send(service, work, "结尾只保留第一次回应，不添加反派。")
+    service.provider = ChapterOrganizer(chapter_id)
+    page = open_page(browser, f"{url}/?section=works&work_id={work_id}", "dark", (1600, 900))
+    page.locator("#workConversationForm textarea").fill("把夜间调查这一章整理成细纲。")
+    page.locator('#workConversationForm [type="submit"]').click()
+    accept = page.get_by_role("button", name="采纳章节细纲", exact=True)
+    expect(accept).to_be_visible(timeout=15000)
+    expect(page.locator(".proposal-message").last).to_contain_text("同步到章节大纲")
+    assert not any(
+        item["kind"] == "chapter_plan" for item in service.get_work(work_id)["artifacts"]
+    )
+    accept.click()
+    expect(accept).to_have_count(0)
+    page.locator('.creation-navigation [data-creation-view="structure"]').click()
+    expect(page.locator(".outline-plan-accepted")).to_contain_text("找到提示灯的回应规律")
+    expect(page.locator("#outlineText")).to_contain_text("不添加反派")
+    expect(page.locator(".authoring-chapter-plan")).not_to_contain_text("还没有正式细纲")
+    screenshot(page, "discussion-chapter-outline-synced-dark-1600x900")
+    page.reload()
+    expect(page.locator(".outline-plan-accepted")).to_contain_text("找到提示灯的回应规律")
+    page.locator("[data-outline-discuss]").click()
+    page.wait_for_url("**section=works**")
+    expect(page.locator(".work-agent-thread")).to_contain_text("把夜间调查这一章整理成细纲")
+    expect(page.locator("#workConversationForm textarea")).to_be_focused()
+    assert not service.get_work(work_id)["chapters"][0]["scenes"][0]["current_revision_id"]
+    assert service.get_work(work_id)["chapters"][0]["scenes"][0]["id"] == scene_id
+    page.close()
     page.close()
 
 

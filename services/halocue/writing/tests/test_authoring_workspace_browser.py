@@ -76,8 +76,9 @@ def test_chapter_outline_shows_adopted_plan_and_opens_scoped_discussion(local_au
     expect(page.locator(".outline-plan-accepted")).to_contain_text(plan["chapter_goal"])
     expect(page.locator(".outline-plan-accepted li")).to_have_count(len(plan["beats"]) + len(plan["continuity_notes"]))
     page.locator("[data-outline-discuss]").click()
+    page.wait_for_url("**section=works**")
     expect(page.locator("#workConversationForm textarea")).to_be_focused()
-    expect(page.locator(".director-task-contract")).to_contain_text("规划本章细纲")
+    expect(page.locator(".work-agent-thread")).to_contain_text("本章先核对记录，再发现矛盾。")
     page.close()
 
 
