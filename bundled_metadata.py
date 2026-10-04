@@ -44,6 +44,7 @@ def materialize_bundled_metadata(resources: Path, cache: Path) -> Path:
     try:
         shutil.copyfile(base, temporary)
         with closing(sqlite3.connect(temporary)) as connection:
+            connection.execute("PRAGMA cache_size=-32768")
             tables = {
                 row[0]
                 for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -52,16 +53,28 @@ def materialize_bundled_metadata(resources: Path, cache: Path) -> Path:
                 table: [row[1] for row in connection.execute(f'PRAGMA table_info("{table}")')]
                 for table in tables
             }
+            statements = {
+                table: f'INSERT OR REPLACE INTO "{table}" VALUES({",".join("?" for _ in names)})'
+                for table, names in columns.items()
+            }
+            pending_table = None
+            pending_values = []
             with gzip.open(payload, "rt", encoding="utf-8") as stream:
                 for line in stream:
                     record = json.loads(line)
                     table, values = record["table"], record["values"]
                     if table not in tables or len(values) != len(columns[table]):
                         raise ValueError("invalid bundled research row")
-                    placeholders = ",".join("?" for _ in values)
-                    connection.execute(
-                        f'INSERT OR REPLACE INTO "{table}" VALUES({placeholders})', values
-                    )
+                    if pending_values and table != pending_table:
+                        connection.executemany(statements[pending_table], pending_values)
+                        pending_values = []
+                    pending_table = table
+                    pending_values.append(values)
+                    if len(pending_values) == 512:
+                        connection.executemany(statements[pending_table], pending_values)
+                        pending_values = []
+            if pending_values:
+                connection.executemany(statements[pending_table], pending_values)
             for table, expected in receipt["counts"].items():
                 if (
                     table not in tables
@@ -76,6 +89,24 @@ def materialize_bundled_metadata(resources: Path, cache: Path) -> Path:
     finally:
         temporary.unlink(missing_ok=True)
     return target
+
+
+def copy_research_metadata(seed: Path, destination: Path) -> None:
+    """Publish a fresh user database with its completed research marker."""
+    fd, name = tempfile.mkstemp(prefix="research-user-", suffix=".db", dir=destination.parent)
+    os.close(fd)
+    temporary = Path(name)
+    try:
+        shutil.copyfile(seed, temporary)
+        with closing(sqlite3.connect(temporary)) as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO meta(key,value) VALUES('bundled_research_sha256',?)",
+                (file_digest(seed),),
+            )
+            connection.commit()
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def merge_research_metadata(seed: Path, destination: Path) -> None:

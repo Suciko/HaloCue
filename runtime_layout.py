@@ -93,7 +93,12 @@ def prepare_user_state(layout: RuntimeLayout) -> None:
 
         seed_db = materialize_bundled_metadata(layout.resource_root, layout.user_data_root / ".halocue" / "reference-cache")
     if not layout.database_path.exists() and seed_db.is_file():
-        shutil.copy2(seed_db, layout.database_path)
+        if (layout.resource_root / "data/reference-pack/research-seed.json").is_file():
+            from bundled_metadata import copy_research_metadata
+
+            copy_research_metadata(seed_db, layout.database_path)
+        else:
+            shutil.copy2(seed_db, layout.database_path)
     elif seed_db.is_file() and (layout.resource_root / "data/reference-pack/research-seed.json").is_file():
         from bundled_metadata import merge_research_metadata
 

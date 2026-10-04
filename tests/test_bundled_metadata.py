@@ -55,6 +55,37 @@ def test_invalid_payload_does_not_publish_cache(tmp_path):
     assert not list((tmp_path / "cache").rglob("*.db"))
 
 
+def test_new_user_seed_is_not_reimported_or_backed_up_on_second_preparation(tmp_path):
+    from runtime_layout import prepare_user_state, resolve_runtime_layout
+
+    resources = research_fixture(tmp_path)
+    layout = resolve_runtime_layout(
+        frozen_root=resources,
+        environ={"HALOCUE_USER_DATA_DIR": str(tmp_path / "user")},
+    )
+    prepare_user_state(layout)
+    first = file_digest(layout.database_path)
+    prepare_user_state(layout)
+    assert file_digest(layout.database_path) == first
+    assert not layout.database_path.with_name("aa_assets.db.before-research.db").exists()
+
+
+def test_invalid_row_after_full_batches_cannot_publish_partial_research(tmp_path):
+    resources = research_fixture(tmp_path)
+    pack = resources / "data/reference-pack"
+    payload = pack / "research/metadata.jsonl.gz"
+    with gzip.open(payload, "wt", encoding="utf-8") as stream:
+        for index in range(1100):
+            stream.write(json.dumps({"table": "bg", "values": [str(index), "背景标注"]}) + "\n")
+        stream.write(json.dumps({"table": "missing_table", "values": ["invalid"]}) + "\n")
+    receipt = json.loads((pack / "research-seed.json").read_text(encoding="utf-8"))
+    receipt["payload_sha256"] = file_digest(payload)
+    (pack / "research-seed.json").write_text(json.dumps(receipt), encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid bundled research row"):
+        materialize_bundled_metadata(resources, tmp_path / "cache")
+    assert not list((tmp_path / "cache").rglob("*.db"))
+
+
 def test_legacy_upgrade_retains_existing_user_labels_and_adds_research_once(tmp_path):
     resources = research_fixture(tmp_path)
     seed = materialize_bundled_metadata(resources, tmp_path / "cache")
