@@ -32,35 +32,140 @@ _TABLE_COLUMNS = {
     "face": ("ident", "face_id", "raw", "label", "label_cn", "source"),
     "character_variant": ("ident", "spine_signature", "outfit_key", "spine"),
     "face_evidence": (
-        "ident", "spine_signature", "outfit_key", "face_id", "source", "raw",
-        "label", "label_cn", "observed_count",
+        "ident",
+        "spine_signature",
+        "outfit_key",
+        "face_id",
+        "source",
+        "raw",
+        "label",
+        "label_cn",
+        "observed_count",
     ),
     "face_visual_label": (
-        "ident", "spine_signature", "outfit_key", "face_id", "model",
-        "primary_emotion", "secondary_json", "valence", "arousal", "eyes",
-        "brows", "mouth", "blush", "tears", "confidence", "description_cn",
-        "semantic_json", "head_path", "reviewed", "manual_json", "version",
+        "ident",
+        "spine_signature",
+        "outfit_key",
+        "face_id",
+        "model",
+        "primary_emotion",
+        "secondary_json",
+        "valence",
+        "arousal",
+        "eyes",
+        "brows",
+        "mouth",
+        "blush",
+        "tears",
+        "confidence",
+        "description_cn",
+        "semantic_json",
+        "head_path",
+        "reviewed",
+        "manual_json",
+        "version",
         "updated_at",
+        "observation_json",
+        "backend_json",
     ),
     "expression_part": (
-        "ident", "spine_signature", "outfit_key", "kind", "raw_name",
-        "labels_json", "source",
+        "ident",
+        "spine_signature",
+        "outfit_key",
+        "kind",
+        "raw_name",
+        "labels_json",
+        "source",
     ),
     "enum": ("kind", "value", "verb", "label_cn"),
     "meta": ("key", "value"),
     "name_alias": ("script_name", "ident", "kind", "uses"),
     "asset_install": (
-        "kind", "aa_key", "display_name", "source_path", "sha256", "scope",
-        "install_path", "status", "error", "metadata_json", "registered_at",
+        "kind",
+        "aa_key",
+        "display_name",
+        "source_path",
+        "sha256",
+        "scope",
+        "install_path",
+        "status",
+        "error",
+        "metadata_json",
+        "registered_at",
     ),
     "asset_library_profile": (
-        "kind", "aa_key", "sha256", "asset_role", "series_name",
+        "kind",
+        "aa_key",
+        "sha256",
+        "asset_role",
+        "series_name",
+    ),
+    "scene_visual_label": (
+        "resource_channel",
+        "asset_key",
+        "content_sha256",
+        "source_kind",
+        "model",
+        "visual_kind",
+        "label_json",
+        "evidence_json",
+        "confidence",
+        "status",
+        "manual_json",
+        "updated_at",
+    ),
+    "face_official_usage": (
+        "ident",
+        "spine_signature",
+        "outfit_key",
+        "face_id",
+        "record_uid",
+        "text_cn",
+        "silent",
+        "emoticons_json",
+        "actions_json",
+        "closeup",
+        "source",
     ),
 }
 
+_RESEARCH_SCHEMA = """
+CREATE TABLE scene_visual_label (
+ resource_channel TEXT NOT NULL, asset_key TEXT NOT NULL,
+ content_sha256 TEXT NOT NULL DEFAULT '', source_kind TEXT NOT NULL DEFAULT '',
+ model TEXT NOT NULL, visual_kind TEXT NOT NULL DEFAULT 'unknown',
+ label_json TEXT NOT NULL DEFAULT '{}', evidence_json TEXT NOT NULL DEFAULT '{}',
+ confidence REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending',
+ manual_json TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL DEFAULT '',
+ PRIMARY KEY(resource_channel,asset_key,content_sha256,model)
+);
+CREATE TABLE face_official_usage (
+ ident TEXT NOT NULL, spine_signature TEXT NOT NULL DEFAULT '',
+ outfit_key TEXT NOT NULL DEFAULT '', face_id TEXT NOT NULL, record_uid TEXT NOT NULL,
+ text_cn TEXT NOT NULL DEFAULT '', silent INTEGER NOT NULL DEFAULT 0,
+ emoticons_json TEXT NOT NULL DEFAULT '[]', actions_json TEXT NOT NULL DEFAULT '[]',
+ closeup INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT 'official_corpus',
+ PRIMARY KEY(ident,spine_signature,outfit_key,face_id,record_uid)
+);
+ALTER TABLE face_visual_label ADD COLUMN observation_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE face_visual_label ADD COLUMN backend_json TEXT NOT NULL DEFAULT '{}';
+"""
+_OPTIONAL_RESEARCH_TABLES = {"scene_visual_label", "face_official_usage"}
+
 _COPIED_TABLES = (
-    "bg", "popup", "sound", "character", "face", "character_variant",
-    "face_evidence", "face_visual_label", "expression_part", "enum", "meta",
+    "bg",
+    "popup",
+    "sound",
+    "character",
+    "face",
+    "character_variant",
+    "face_evidence",
+    "face_visual_label",
+    "expression_part",
+    "enum",
+    "meta",
+    "scene_visual_label",
+    "face_official_usage",
 )
 _EMPTY_TABLES = ("asset_install", "asset_library_profile", "name_alias")
 _META_KEYS = ("asset_schema_version", "assetdb_schema_version", "schema_version")
@@ -69,6 +174,13 @@ _JSON_DEFAULTS = {
     ("face_visual_label", "semantic_json"): {},
     ("face_visual_label", "manual_json"): {},
     ("expression_part", "labels_json"): [],
+    ("face_visual_label", "observation_json"): {},
+    ("face_visual_label", "backend_json"): {},
+    ("scene_visual_label", "label_json"): {},
+    ("scene_visual_label", "evidence_json"): {},
+    ("scene_visual_label", "manual_json"): {},
+    ("face_official_usage", "emoticons_json"): [],
+    ("face_official_usage", "actions_json"): [],
 }
 _OPPORTUNISTIC_JSON = {("face", "raw"), ("face_evidence", "raw")}
 _FORBIDDEN_KEY_CONCEPTS = {
@@ -189,11 +301,18 @@ def _table_count(con: sqlite3.Connection, table: str) -> int:
 
 
 def _source_rows(con: sqlite3.Connection) -> dict[str, int]:
-    return {table: _table_count(con, table) for table in _TABLE_COLUMNS}
+    tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    return {table: _table_count(con, table) if table in tables else 0 for table in _TABLE_COLUMNS}
 
 
 def _copy_table(source: sqlite3.Connection, output: sqlite3.Connection, table: str) -> None:
     columns = _TABLE_COLUMNS[table]
+    present = {row[1] for row in source.execute(f'PRAGMA table_info("{table}")')}
+    if not present and table in _OPTIONAL_RESEARCH_TABLES:
+        return
+    missing = set(columns) - present
+    if missing - {"observation_json", "backend_json"}:
+        raise ValueError(f"source database columns missing: {table}")
     if table == "meta":
         placeholders = ",".join("?" for _ in _META_KEYS)
         where = f" WHERE key IN ({placeholders})"
@@ -205,9 +324,10 @@ def _copy_table(source: sqlite3.Connection, output: sqlite3.Connection, table: s
         primary_key = _primary_key_columns(output, table)
         order = " ORDER BY " + ",".join(f'"{name}"' for name in primary_key)
     column_sql = ",".join(f'"{name}"' for name in columns)
-    rows = source.execute(
-        f'SELECT {column_sql} FROM "{table}"{where}{order}', parameters
-    )
+    select_sql = ",".join(f'"{name}"' if name in present else "'{}'" for name in columns)
+    if table == "scene_visual_label":
+        where = " WHERE source_kind IN ('official_base','extra_pack')"
+    rows = source.execute(f'SELECT {select_sql} FROM "{table}"{where}{order}', parameters)
     records = []
     for row in rows:
         values = []
@@ -224,15 +344,13 @@ def _copy_table(source: sqlite3.Connection, output: sqlite3.Connection, table: s
                 value = ""
             elif table == "face_visual_label" and column == "head_path":
                 value = None
-            elif table == "face_visual_label" and column == "updated_at":
+            elif table in {"face_visual_label", "scene_visual_label"} and column == "updated_at":
                 value = ""
             values.append(value)
         records.append(tuple(values))
     if records:
         placeholders = ",".join("?" for _ in columns)
-        output.executemany(
-            f'INSERT INTO "{table}" ({column_sql}) VALUES ({placeholders})', records
-        )
+        output.executemany(f'INSERT INTO "{table}" ({column_sql}) VALUES ({placeholders})', records)
 
 
 def _sha256(path: Path) -> str:
@@ -307,6 +425,7 @@ def build_public_database(source: Path, destination: Path) -> PublicDatabaseRepo
         output_con.execute("PRAGMA foreign_keys=ON")
         output_con.executescript(assetdb.SCHEMA)
         output_con.executescript(asset_catalog.ASSET_SCHEMA)
+        output_con.executescript(_RESEARCH_SCHEMA)
         output_con.execute("BEGIN IMMEDIATE")
         for table in _COPIED_TABLES:
             _copy_table(source_con, output_con, table)
@@ -316,9 +435,7 @@ def build_public_database(source: Path, destination: Path) -> PublicDatabaseRepo
             raise ValueError("public database integrity check failed")
         if output_con.execute("PRAGMA foreign_key_check").fetchall():
             raise ValueError("public database foreign key check failed")
-        output_counts = {
-            table: _table_count(output_con, table) for table in _TABLE_COLUMNS
-        }
+        output_counts = {table: _table_count(output_con, table) for table in _TABLE_COLUMNS}
         for table in _EMPTY_TABLES:
             if output_counts[table]:
                 raise ValueError(f"public database policy violation in {table}")

@@ -641,3 +641,23 @@ html[data-theme="dark"] #app .production-more-actions > div button:focus-visible
   background: var(--hc-selected) !important;
   color: var(--ink) !important;
 }
+
+.library-reference-access {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 20px;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+.library-reference-access p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.library-reference-access button { flex-shrink: 0; }
+@media (max-width: 640px) {
+  .library-reference-access { align-items: flex-start; flex-direction: column; }
+}

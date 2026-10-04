@@ -24,6 +24,8 @@ PUBLIC_TABLES = {
     "name_alias",
     "popup",
     "sound",
+    "scene_visual_label",
+    "face_official_usage",
 }
 
 
@@ -113,6 +115,71 @@ def _logical_dump(path):
         return "\n".join(con.iterdump())
     finally:
         con.close()
+
+
+def test_complete_research_export_preserves_semantics_and_excludes_private_sources(tmp_path):
+    from release_tools.public_db import _RESEARCH_SCHEMA
+
+    source, destination = tmp_path / "private.db", tmp_path / "public.db"
+    _synthetic_private_database(source)
+    secret_path = "C:" + chr(92) + "Users" + chr(92) + "Researcher" + chr(92) + "head.png"
+    with sqlite3.connect(source) as con:
+        con.executescript(_RESEARCH_SCHEMA)
+        con.execute(
+            "UPDATE face_visual_label SET observation_json=?,backend_json=?",
+            (
+                json.dumps({"eyes": "微闭", "source_path": secret_path}),
+                json.dumps({"usage_hint_cn": "短暂惊讶后恢复平静", "intensity": 2}),
+            ),
+        )
+        for key, kind in [
+            ("BG_Research", "official_base"),
+            ("BG_Extra", "extra_pack"),
+            ("PrivateScene", "current_story_custom"),
+        ]:
+            con.execute(
+                "INSERT INTO scene_visual_label(resource_channel,asset_key,model,source_kind,label_json,evidence_json) VALUES('background',?,'vision',?,?,?)",
+                (
+                    key,
+                    kind,
+                    json.dumps(
+                        {
+                            "place": "车站",
+                            "time": "night",
+                            "usage_hint_cn": "等车",
+                            "image_path": secret_path,
+                        }
+                    ),
+                    json.dumps({"confidence": 0.95, "cache_file": secret_path}),
+                ),
+            )
+        con.execute(
+            "INSERT INTO face_official_usage(ident,face_id,record_uid,text_cn) VALUES('1001','03','official-test','先确认情况。')"
+        )
+    build_public_database(source, destination)
+    with sqlite3.connect(destination) as con:
+        assert con.execute("SELECT COUNT(*) FROM scene_visual_label").fetchone()[0] == 2
+        assert json.loads(
+            con.execute("SELECT observation_json FROM face_visual_label").fetchone()[0]
+        ) == {"eyes": "微闭"}
+        assert (
+            json.loads(con.execute("SELECT backend_json FROM face_visual_label").fetchone()[0])[
+                "intensity"
+            ]
+            == 2
+        )
+        assert (
+            json.loads(
+                con.execute("SELECT label_json FROM scene_visual_label LIMIT 1").fetchone()[0]
+            )["usage_hint_cn"]
+            == "等车"
+        )
+        assert con.execute("SELECT record_uid,text_cn FROM face_official_usage").fetchone() == (
+            "official-test",
+            "先确认情况。",
+        )
+    assert secret_path.encode() not in destination.read_bytes()
+    assert b"PrivateScene" not in destination.read_bytes()
 
 
 def test_build_public_database_keeps_annotations_and_removes_private_state(tmp_path):

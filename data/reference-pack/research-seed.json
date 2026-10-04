@@ -1,0 +1,30 @@
+{
+  "schema_version": "halocue-research-seed/1.0",
+  "authorization_date": "2026-10-05",
+  "source": "maintainer-authorized background and expression research, with previous public identities retained",
+  "source_sha256": "db8dfd4afe1da5b6d64900e556b4b49f7d88be514028604ccf2cc7d3104ed2fd",
+  "database_sha256": "03e37c7bf41ff1be9e82d2ca82630b3c120fc1e3e1efcc319bbb2c7b5d0227ce",
+  "counts": {
+    "bg": 2773,
+    "popup": 465,
+    "sound": 310,
+    "character": 1484,
+    "face": 5571,
+    "character_variant": 2482,
+    "face_evidence": 37379,
+    "face_visual_label": 27649,
+    "expression_part": 27,
+    "enum": 40,
+    "meta": 3,
+    "name_alias": 0,
+    "asset_install": 0,
+    "asset_library_profile": 0,
+    "scene_visual_label": 6850,
+    "face_official_usage": 163998
+  },
+  "binary_assets": false,
+  "private_state": false,
+  "base_sha256": "6f2b0e9bf8d50fb21f9d6e27acab0ef361e16ab5ac2bb17a4f6bac50943f1e21",
+  "payload_sha256": "be7cfdf06daae49a0556d01da00d1b8e21fd329be08af65ecbcc7e7a37c5ff50",
+  "payload_bytes": 18970755
+}

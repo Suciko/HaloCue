@@ -163,6 +163,18 @@ def test_mentions_import_before_model_context_once_and_survive_restart(prepared)
         fresh.close()
 
 
+def test_continue_backfills_original_author_mentions_from_an_older_work(prepared, tmp_path):
+    service, work = prepared
+    catalog = service.bundled_characters
+    service.bundled_characters = BundledCharacterCatalog(tmp_path / "unavailable-old-pack")
+    old = send(service, work, "日奈和亚子在办公室。")
+    assert not cards(old)
+    service.bundled_characters = catalog
+    updated = send(service, old, "继续")
+    assert {card["current_revision"]["content"]["name"] for card in cards(updated)} == {"空崎日奈", "天雨亚子"}
+    assert len(service.provider.context["character_resolution"]["added"]) == 2
+
+
 def test_existing_custom_and_archived_cards_are_not_overwritten(prepared):
     service, work = prepared
     work = service.save_character_card(

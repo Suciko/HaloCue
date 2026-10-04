@@ -3901,7 +3901,7 @@ function storySubnavMarkup(view){
 function renderCharacterLibraryBody(visibleCards,allCards){
   const editing=Boolean(state.editCardId||state.characterCardDraft||state.libraryEditorOpen);
   const card=state.editCard||{};
-  return `<section class="library-page-head"><div><h3>人物</h3><p>${allCards.filter(item=>item.status!=='archived').length} 张人物卡 · 先选一张查看，或建立新人物。</p><p class="library-bundled-note">随软件提供的 BA 原作索引已可检索：人物、背景、服装和表情差分的元数据只作参考；只有你确认的内容才会进入本作人物卡。</p></div><div class="library-head-actions"><button type="button" class="${editing?'quiet':'primary'}" data-library-new-card>新建人物</button><button type="button" class="quiet" data-import-character>导入</button><details><summary>更多来源</summary><button type="button" data-reuse-character>从其他作品选取</button><button type="button" data-library-view="official">检索原作资料</button></details></div></section>
+  return `<section class="library-page-head"><div><h3>人物</h3><p>本作品已采用 ${allCards.filter(item=>item.status!=='archived').length} 张人物卡。</p><p class="library-bundled-note">构思中提到角色时，会从随包人物参考中自动加入；也可以在这里挑选完整人物卡。</p></div><div class="library-head-actions"><button type="button" class="primary" data-browse-reference-characters>随包人物参考</button><button type="button" class="quiet" data-library-new-card>新建人物</button><button type="button" class="quiet" data-import-character>导入</button><details><summary>更多来源</summary><button type="button" data-reuse-character>从其他作品选取</button></details></div></section>
     ${libraryToolbar({query:state.libraryQuery,queryName:'character_query',placeholder:'搜索人物名称或内容',filters:[{label:'来源',key:'librarySourceFilter',value:state.librarySourceFilter,options:[{value:'all',label:'全部来源'},{value:'official_reference',label:'原作参考'},{value:'custom',label:'自定义'}]},{label:'状态',key:'libraryStatusFilter',value:state.libraryStatusFilter,options:[{value:'all',label:'全部状态'},{value:'confirmed',label:'已确认'},{value:'pending',label:'待核对'}]},{label:'范围',key:'libraryCharacterFilter',value:state.libraryCharacterFilter,options:[{value:'active',label:'当前使用'},{value:'all',label:'含已归档'}]}]})}
     <div class="character-library"><section class="character-list" aria-label="已存人物">${visibleCards.length?visibleCards.map(item=>`<button type="button" class="character-record ${item.id===state.editCardId?'active':''}" data-edit-card="${esc(item.id)}"><span class="avatar-token">${esc(item.name.slice(0,1))}</span><span><b>${esc(item.name)}</b><small>${libraryKindLabel(item.source_type)} · ${trustLabel(item.trust_status)}</small></span><em>${esc(item.role||(item.voice_anchors||[])[0]||'尚未补充核心内容')}</em></button>`).join(''):'<div class="library-empty">没有符合条件的人物。可以调整筛选或新建。</div>'}</section>
     <section class="library-editor ${editing?'':'library-editor-collapsed'}"><h3>${state.editCardId?`编辑 ${esc(card.name||'人物')}`:'新建人物'}</h3><form id="libraryCharacterForm"><input type="hidden" name="card_id" value="${esc(state.editCardId||'')}"><label>名称<input name="name" required value="${esc(card.name||state.prefillCharacter||'')}" placeholder="人物名称"></label><label>类别<select name="source_type"><option value="custom" ${card.source_type!=='official_reference'?'selected':''}>自定义设定</option><option value="official_reference" ${card.source_type==='official_reference'?'selected':''}>原作参考</option></select></label><label>核心内容<textarea name="role" placeholder="这个人物在本作中是谁，要推动什么？">${esc(card.role||'')}</textarea></label><label>说话方式<textarea name="voice" placeholder="她常用的语气和表达方式">${esc((card.voice_anchors||[]).join('\n'))}</textarea></label><label>标准名称或别名<input name="canonical_name" value="${esc(card.canonical_name||'')}"></label><label>采用状态<select name="trust_status"><option value="confirmed" ${card.trust_status==='confirmed'?'selected':''}>已确认，可用于写作</option><option value="open" ${card.trust_status!=='confirmed'?'selected':''}>待核对</option></select></label><label>知情边界<textarea name="boundary">${esc(card.knowledge_boundary||'')}</textarea></label><label>不符合人物的写法<textarea name="ooc">${esc((card.ooc_constraints||[]).join('\n'))}</textarea></label><label>关系（每行：对象 | 关系 | 说明）<textarea name="relationships">${esc((card.relationships||[]).map(item=>`${item.target} | ${item.kind} | ${item.summary}`).join('\n'))}</textarea></label><label>来源或证据<input name="source" value="${esc(characterSourceText(card))}" ${hcArray(card.source_refs).some(item=>item&&typeof item==='object')?'':'required'} placeholder="用户确认 / 原作资料"></label><div class="actions"><button type="submit" class="primary">保存人物卡</button><button type="button" class="quiet" data-library-new-card>取消</button>${state.editCardId&&card.source_type==='official_reference'?'<button type="button" class="quiet" data-duplicate-card>复制为自定义</button>':''}</div></form></section></div>`;
@@ -3967,6 +3967,8 @@ function renderReferences(el){
   if(['world','rules'].includes(view))body=worldSubnav+body;
   if(['canon','timeline'].includes(view))body=storySubnavMarkup(view)+body;
   if(['files','official'].includes(view))body=sourceSubnav+body;
+  const referencePack=state.capabilities?.bundled_references;
+  if(view==='overview'&&referencePack?.available)body+=`<section class="library-reference-access"><p>上面统计的是本作品已采用的资料。软件另附 ${Number(referencePack.character_cards)||0} 份完整人物参考，构思中提到角色时会自动加入。</p><button type="button" class="quiet" data-browse-reference-characters>浏览随包人物参考</button></section>`;
   el.innerHTML=`<div class="library-workbench"><header class="library-header"><div><h2>资料</h2><p>人物、世界观、剧情记录和文件属于当前作品；保存的修改保留历史。</p></div>${view==='overview'?'':'<button class="quiet" data-library-view="overview">资料总览</button>'}</header><div class="library-layout"><main class="library-main">${body}</main></div></div>`;
   if(view==='relations'&&graphRenderPayload){window.HaloCueKnowledgeGraph?.upgrade(el,{nodes:graphRenderPayload.nodes,edges:graphRenderPayload.edges,filter:'all',focusId:graphRenderPayload.focusId,unresolved:graphUnresolved,ready:projectionReady,scopeKey:`${state.work?.id||''}:${graphRenderPayload.complexity}`});}
 }
@@ -3981,6 +3983,18 @@ function storeWorldMutation({entity,rule,event,replaceEntity,replaceRule,replace
 
 registerAppClick(event=>{
   const button=event.target.closest('button');if(!button)return;
+  if(button.hasAttribute('data-browse-reference-characters')){
+    event.preventDefault();claimAppEvent(event);
+    void (async()=>{
+      const result=await api('/reference-characters/search?q=');
+      state.referenceCharacterResults=result.items||[];
+      state.libraryView='official';state.officialReferenceQuery='';
+      state.officialReferenceResults=[];state.bundledReferenceResults={characters:[],backgrounds:[]};
+      state.officialReferenceUnavailable=false;state.officialReferenceSearched=true;
+      render();
+    })().catch(error=>toast(error.message,true));
+    return;
+  }
   if(button.dataset.libraryAssist){
     event.preventDefault();claimAppEvent(event);
     const form=button.closest('form'),kind=form?.dataset.libraryEditorKind||button.dataset.libraryAssist;

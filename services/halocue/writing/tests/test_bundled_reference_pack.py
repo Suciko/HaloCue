@@ -73,8 +73,12 @@ def test_reference_card_browser_import_requires_explicit_confirmation(tmp_path):
             browser = driver.chromium.launch()
             page = browser.new_page()
             page.goto(
-                f"http://127.0.0.1:{server.server_port}/?section=references&work_id={work['id']}&view=official"
+                f"http://127.0.0.1:{server.server_port}/?section=references&work_id={work['id']}&view=overview"
             )
+            playwright.expect(page.locator(".library-reference-access")).to_contain_text("102")
+            page.get_by_role("button", name="浏览随包人物参考", exact=True).click()
+            playwright.expect(page.locator("[data-reference-character]")).to_have_count(18)
+            assert service.get_work(work["id"])["version"] == work["version"]
             page.locator("#officialReferenceSearchForm input").fill("白子")
             page.locator("#officialReferenceSearchForm button").click()
             button = page.locator('[data-reference-character="砂狼白子"]')

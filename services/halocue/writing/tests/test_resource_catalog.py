@@ -65,6 +65,39 @@ def test_new_catalog_includes_shipped_ba_metadata_without_binary_assets(tmp_path
     assert descriptor["counts"]["expression_parts"] > 0
 
 
+def test_bundled_projection_refresh_preserves_user_overrides_and_explicit_imports(
+    tmp_path, monkeypatch
+):
+    import shutil
+
+    seed = tmp_path / "seed.db"
+    shutil.copyfile(resource_catalog_module._bundled_metadata_database(), seed)
+    monkeypatch.setattr(resource_catalog_module, "_bundled_metadata_database", lambda: seed)
+    root = tmp_path / "workspace"
+    catalog = ResourceCatalog(root)
+    key = catalog.search("backgrounds")["items"][0]["technical"]["key"]
+    catalog.save_override("background", key, {"display_name": "作者背景名称"})
+    with sqlite3.connect(seed) as con:
+        con.execute("UPDATE bg SET label='新版教室标注' WHERE name=?", (key,))
+    refreshed = ResourceCatalog(root)
+    assert refreshed.descriptor()["bundled_seed"]["status"] == "ready"
+    assert refreshed.lookup("backgrounds", [key])["items"][0]["display_name"] == "作者背景名称"
+    assert ResourceCatalog(root).descriptor()["bundled_seed"]["status"] == "already_initialized"
+    with sqlite3.connect(refreshed.path) as con:
+        con.execute(
+            "UPDATE catalog_meta SET value=? WHERE key='source_manifest'",
+            (json.dumps({"source": "作者明确导入"}),),
+        )
+    with sqlite3.connect(seed) as con:
+        con.execute("UPDATE bg SET label='第三版标注' WHERE name=?", (key,))
+    explicit = ResourceCatalog(root)
+    with sqlite3.connect(explicit.path) as con:
+        assert (
+            con.execute("SELECT label FROM backgrounds WHERE key=?", (key,)).fetchone()[0]
+            == "新版教室标注"
+        )
+
+
 def test_public_background_projection_hides_export_identifiers(tmp_path):
     source = tmp_path / "legacy-095.db"
     with sqlite3.connect(source) as connection:

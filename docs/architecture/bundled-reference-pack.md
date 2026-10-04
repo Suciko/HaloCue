@@ -49,3 +49,29 @@ compares scenario shards to their original extraction manifest, and counts all
 records and cards. Release scanning inspects decompressed JSON/JSONL as well as
 plain cards. Compressed streams have finite per-line and total-byte limits;
 only the three named reference shards receive a 64 MiB ZIP-member allowance.
+
+## Complete research seed (2026-10-05)
+
+The maintainer requested the later background/expression research be included.
+`research/metadata.jsonl.gz` losslessly serializes the sanitized public metadata
+database; `research-seed.json` records source/base/payload digests and row counts.
+It includes 27649 face visual annotations (semantic/observation/backend/manual),
+6850 scene visual annotations and 163998 official face usage records, preserving
+resource, skeleton and outfit identity. Scene research is restricted to
+`official_base` and `extra_pack` provenance. Installation/project tables remain
+empty; physical paths, head images and private JSON fields are removed.
+
+`bundled_metadata.materialize_bundled_metadata` verifies the base and compressed
+payload hashes, reconstructs a transactional user-cache database, checks every
+table count, and publishes the cache atomically. Subsequent launches reuse it.
+The immutable application directory is never written. Legacy catalogs receive
+missing rows after a local SQLite backup, without replacing existing user rows.
+Writing's bundled-only projection refreshes when the seed digest changes;
+explicitly imported catalogs and user override records remain authoritative.
+Background lookup now prioritizes explicit author corrections over differently
+cased research entries for the same logical key.
+
+The work library identifies its counts as adopted work data and exposes bundled
+character browsing directly. Capability data supplies the actual installed card
+count. A simple author continuation can reuse recent original author mentions
+from older conversations; assistant suggestions/attachments remain excluded.
