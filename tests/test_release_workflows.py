@@ -63,6 +63,23 @@ def test_ci_package_job_installs_browser_before_release_verification():
     assert package_job.index(browser_install) < package_job.index(release_verification)
 
 
+@pytest.mark.parametrize("workflow_name,job", [("ci.yml", "package"), ("release.yml", "release")])
+def test_windows_package_jobs_gate_shallow_portability(workflow_name, job):
+    workflow = _job_block(_workflow(workflow_name), job)
+    assert "actions/setup-node@v4" in workflow
+    assert "node-version: '22.19.0'" in workflow
+    assert workflow.index("actions/setup-node@v4") < workflow.index(
+        "python tools/build_public_release.py"
+    )
+    assert "python tools/verify_portable_release.py" in workflow
+    assert "$env:SystemDrive" in workflow
+    assert "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }" in workflow
+    if workflow_name == "release.yml":
+        assert workflow.index("python tools/verify_portable_release.py") < workflow.index(
+            "gh @args"
+        )
+
+
 def test_release_workflow_is_manual_and_public_only():
     workflow = _workflow("release.yml")
     combined = workflow + "\n" + _workflow("ci.yml")
