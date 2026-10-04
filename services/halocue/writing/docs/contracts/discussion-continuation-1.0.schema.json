@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://halocue.local/contracts/discussion-continuation-1.0.schema.json",
+  "title": "Explicit ideation continuation in fixed scene conversation input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "thread_id", "title", "thread_version", "summary", "recent_messages", "trust_boundary"],
+  "properties": {
+    "schema_version": {"const": "discussion-continuation/1.0"},
+    "thread_id": {"type": "string"},
+    "title": {"type": "string"},
+    "thread_version": {"type": "integer", "minimum": 1},
+    "summary": {"type": "object"},
+    "recent_messages": {"type": "array", "maxItems": 12, "items": {"type": "object", "required": ["id", "role", "text"], "properties": {"id": {"type": "string"}, "role": {"type": "string"}, "text": {"type": "string"}}}},
+    "trust_boundary": {"type": "string"}
+  },
+  "$defs": {
+    "source_link": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "thread_id", "title"],
+      "properties": {"schema_version": {"const": "discussion-source-link/1.0"}, "thread_id": {"type": "string"}, "title": {"type": "string"}}
+    }
+  }
+}

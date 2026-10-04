@@ -158,8 +158,9 @@
     const acceptedPlan = chapter ? work.artifacts?.find(item => item.kind === 'chapter_plan' && item.scope_id === chapter.id)?.current_revision?.content : null;
     const pendingPlan = chapter ? work.proposals?.find(item => item.kind === 'chapter_plan' && item.scope_id === chapter.id && item.status === 'pending') : null;
     const planCard = (plan, label) => `<div class="outline-plan-copy"><p class="eyebrow">${label}</p><h3>${esc(plan.title || `${chapter.title}细纲`)}</h3><p class="outline-plan-goal">${esc(plan.chapter_goal || '')}</p>${plan.beats?.length ? `<div class="outline-plan-group"><b>情节推进</b><ol>${plan.beats.map(beat => `<li>${esc(beat)}</li>`).join('')}</ol></div>` : ''}${plan.continuity_notes?.length ? `<div class="outline-plan-group"><b>承接与限制</b><ul>${plan.continuity_notes.map(note => `<li>${esc(note)}</li>`).join('')}</ul></div>` : ''}</div>`;
-    const chapterPlan = chapter ? `<section class="authoring-chapter-plan"><div class="authoring-chapter-plan-head"><div><p class="eyebrow">本章细纲</p><h2>先讨论，再决定写入</h2><p>讨论围绕《${esc(chapter.title)}》进行；整理出的候选由你确认，正文不会跟着改动。</p></div><button type="button" class="primary" data-outline-discuss="${esc(chapter.id)}">讨论本章细纲</button></div>${pendingPlan ? `<div class="outline-plan-pending">${planCard(pendingPlan.candidate?.chapter_plan || {}, '待确认的细纲候选')}<div class="outline-plan-actions"><button type="button" class="primary" data-accept-director-proposal="${esc(pendingPlan.id)}">采纳细纲</button><button type="button" class="quiet" data-reject-director-proposal="${esc(pendingPlan.id)}">继续讨论</button></div></div>` : ''}${acceptedPlan ? `<div class="outline-plan-accepted">${planCard(acceptedPlan, '已采用的细纲')}</div>` : `<p class="outline-plan-empty">还没有正式细纲。可以先讨论情节推进，也可以直接手写下方章纲。</p>`}</section>` : '';
-    host.innerHTML = `<div class="authoring-outline"><header class="authoring-page-head"><div><p class="eyebrow">大纲</p><h1>${esc(work.title)}</h1><p>总纲、卷纲与章纲分别保存。构思成果会显示为参考，手写内容不会被自动覆盖。</p></div><span class="authoring-outline-state" role="status">${status==='saving'?'保存中…':dirty?'未保存':status==='saved'?'已保存':'可编辑'}</span></header>
+    const hasArrangement = Boolean(chapter?.scenes?.length && doc.adopted_text);
+    const chapterPlan = chapter ? `<section class="authoring-chapter-plan"><div class="authoring-chapter-plan-head"><div><p class="eyebrow">本章大纲</p><h2>${pendingPlan?'本章细纲待确认':acceptedPlan?'本章细纲已同步':hasArrangement?'章节安排已同步':'继续完善本章'}</h2><p>可在构思讨论中整理章节，采纳后这里同步更新。</p></div><button type="button" class="quiet" data-outline-discuss="${esc(chapter.id)}">回到构思讨论</button></div>${pendingPlan ? `<div class="outline-plan-pending">${planCard(pendingPlan.candidate?.chapter_plan || {}, '待确认的细纲候选')}<div class="outline-plan-actions"><button type="button" class="primary" data-accept-director-proposal="${esc(pendingPlan.id)}">采纳细纲</button><button type="button" class="quiet" data-reject-director-proposal="${esc(pendingPlan.id)}">继续讨论</button></div></div>` : ''}${acceptedPlan ? `<div class="outline-plan-accepted">${planCard(acceptedPlan, '已采用的细纲')}</div>` : pendingPlan?'':`<p class="outline-plan-empty">${hasArrangement?`已有 ${chapter.scenes.length} 个场景安排，完整内容见下方章纲。`:'可以在构思讨论中描述本章目标和情节推进，也可以直接编辑下方章纲。'}</p>`}</section>` : '';
+    host.innerHTML = `<div class="authoring-outline"><header class="authoring-page-head"><div><p class="eyebrow">大纲</p><h1>${esc(work.title)}</h1><p>构思讨论中采纳的章节安排会同步到这里，也可以直接编辑和保存。</p></div><span class="authoring-outline-state" role="status">${status==='saving'?'保存中…':dirty?'未保存':status==='saved'?'已保存':'可编辑'}</span></header>
       <div class="authoring-outline-grid"><nav class="authoring-outline-scopes" aria-label="大纲范围">${documents.map(item=>`<button type="button" class="${scope===`${item.scope_type}:${item.scope_id}`?'active':''}" data-outline-scope="${esc(item.scope_type)}:${esc(item.scope_id)}"><span>${item.scope_type==='work'?'总纲':item.scope_type==='volume'?'卷纲':'章纲'}</span><b>${esc(item.title)}</b></button>`).join('')}</nav>
       <section class="authoring-outline-main">${chapterPlan}<form id="outlineDocumentForm"><input type="hidden" name="scope_type" value="${esc(doc.scope_type)}"><input type="hidden" name="scope_id" value="${esc(doc.scope_id)}"><h2>${esc(doc.title)} · ${doc.scope_type==='work'?'总纲':doc.scope_type==='volume'?'卷纲':'章纲'}</h2>${chapter?'<p class="outline-editor-hint">可编辑文本版 · 适合补充细节和自由记录，与上方确认的细纲分别保存。</p>':''}<label class="sr-only" for="outlineText">大纲正文</label><textarea id="outlineText" name="text" rows="18" maxlength="500000" placeholder="写下这一层的大纲。可以先从一句话开始。">${esc(text)}</textarea>
         ${doc.source_changed?'<p class="authoring-notice">构思有更新；下方可对比，是否合并由你决定。</p>':''}
@@ -212,11 +213,15 @@
     if (button.dataset.outlineDiscuss) {
       const chapter=state.work?.chapters?.find(item=>item.id===button.dataset.outlineDiscuss);
       if(!chapter)return;
-      state.inspector='agent';
-      navigateRoute({section:'writing',stage:'structure',chapterId:chapter.id,sceneId:chapter.scenes?.[0]?.id||null,pane:isCompactViewport()?'agent':'writing'});
-      if(!isCompactViewport())window.HaloCuePanels?.open('inspector');
+      const plan=state.work.artifacts?.find(item=>item.kind==='chapter_plan'&&item.scope_id===chapter.id);
+      const pending=state.work.proposals?.find(item=>item.kind==='chapter_plan'&&item.scope_id===chapter.id&&item.status==='pending');
+      const sourceId=pending?.candidate?.source_thread_id||plan?.current_revision?.provenance?.thread_id;
+      const threads=state.work.conversation_threads||[];
+      const source=threads.find(item=>item.id===sourceId&&item.status==='active'&&item.scope_type==='work')||threads.find(item=>item.id===state.conversationThreadId&&item.status==='active'&&item.scope_type==='work')||threads.find(item=>item.scope_type==='work'&&item.status==='active');
+      if(!source){toast('构思对话暂不可用，请重新加载作品。',true);return;}
+      state.conversationThreadId=source.id;state.agentPresentation=null;state.inspector='agent';
+      navigateRoute({section:'works'});
       document.querySelector('#workConversationForm textarea, #mobileWorkConversationForm textarea')?.focus();
-      void persistWritingTarget(chapter.id,chapter.scenes?.[0]?.id||null).catch(error=>toast(`章节位置未保存：${error.message}`,true));
       return;
     }
     if (button.hasAttribute('data-outline-retry')) { void loadOutline(state.work.id,true); return; }

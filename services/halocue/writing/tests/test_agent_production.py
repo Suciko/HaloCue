@@ -323,7 +323,7 @@ def test_provider_tool_call_is_dispatched_then_followed_up_in_one_agent_run(tmp_
         "id": "provider-call-1",
         "tool": "read_work_context",
         "status": "succeeded",
-        "output": {"artifacts": []},
+        "output": {"artifacts": [], "chapters": [{"id": work["chapters"][0]["id"], "title": "第一章"}]},
         "error": None,
     }]
 

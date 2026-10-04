@@ -302,7 +302,7 @@ class AgentToolRegistry:
         }
         self.register(ToolSpec("load_workflow_template", "加载当前阶段任务契约", read_schema), lambda c, a: {"scope": c.scope_type})
         self.register(ToolSpec("read_work_context", "读取当前作品正式上下文", read_schema), self._read_work_context)
-        self.register(ToolSpec("read_conversation_history", "读取当前对话历史；摘要标记不完整时，用其中的 message_id 分段回查原始消息。", {
+        self.register(ToolSpec("read_conversation_history", "读取当前对话历史；也可用 message_id 分段回查本场主动承接的构思原始消息，不读取其他对话。", {
             "type": "object", "properties": {"message_id": {"type": "string"},
                 "offset": {"type": "integer", "minimum": 0},
                 "length": {"type": "integer", "minimum": 1, "maximum": 6000}},
@@ -359,7 +359,7 @@ class AgentToolRegistry:
         self.register(ToolSpec("check_knowledge_conflicts", "检查资料重复与冲突", {"type": "object", "properties": {"kind": {"type": "string", "enum": ["character_card", "world_card", "world_rule", "canon_fact"]}, "content": {"type": "object"}}, "required": ["kind", "content"], "additionalProperties": False}), self._check_conflicts)
         self.register(ToolSpec("organize_current_plan", "当本轮信息已经足够时自动整理当前阶段候选；只创建待审 Proposal，不写入正式资料", {
             "type": "object",
-            "properties": {"reason": {"type": "string", "maxLength": 500}},
+            "properties": {"reason": {"type": "string", "maxLength": 500}, "chapter_id": {"type": "string", "minLength": 1}},
             "additionalProperties": False,
         }, allowed_scopes=frozenset({"work", "chapter"}), risk="medium", required_action="discuss"), self._organize_current_plan)
         self.register(ToolSpec("create_knowledge_proposal", "整理资料候选 Proposal", {"type": "object", "properties": {"kind": {"type": "string", "enum": ["character_card", "world_card", "world_rule", "canon_fact"]}}, "required": ["kind"], "additionalProperties": False}, risk="medium", requires_user_confirmation=True, required_action="discuss"), lambda c, a: {"next": "user_confirmation"})
@@ -409,10 +409,21 @@ class AgentToolRegistry:
         scope = contract.get("task_scope") if isinstance(contract.get("task_scope"), dict) else {}
         if scope.get("import_mode") or contract.get("creation_intent") == "novel_to_script_adaptation":
             raise ValueError("小说改编使用独立改编工作流；请先导入来源，再由 Agent 检查并整理剧本候选。")
+        chapter_id = arguments.get("chapter_id")
+        if chapter_id:
+            if context.scope_type == "chapter" and chapter_id != context.scope_id:
+                raise ValueError("章节对话不能整理其他章节。")
+            chapter = context.connection.execute(
+                "SELECT id FROM chapters WHERE id=? AND work_id=?", (chapter_id, context.work_id)
+            ).fetchone()
+            if not chapter:
+                raise ValueError("要整理的章节不属于当前作品。")
+            scope = {"surface": "chapter", "chapter_id": chapter_id}
         return {
             "next": "create_proposal",
             "scope": context.scope_type,
-            "task_id": context.task_contract_id,
+            "task_id": "chapter.plan" if chapter_id else context.task_contract_id,
+            "task_scope": scope,
             "reason": str(arguments.get("reason") or "信息已足够，整理当前阶段候选。")[:500],
             "write_boundary": "proposal_only",
         }
@@ -422,9 +433,16 @@ class AgentToolRegistry:
         message_id = arguments.get("message_id")
         if not message_id:
             return context.history[-12:]
-        row = context.connection.execute("SELECT role,content_json FROM conversation_messages WHERE thread_id=? AND id=?", (context.thread_id, message_id)).fetchone()
-        if not row:
-            raise ValueError("原始消息不属于当前对话。")
+        allowed_threads = {context.thread_id}
+        if context.scope_type == "scene":
+            from .discussion_continuation import source_link
+
+            linked = source_link(context.connection, context.thread_id)
+            if linked:
+                allowed_threads.add(linked["thread_id"])
+        row = context.connection.execute("SELECT message.thread_id,message.role,message.content_json FROM conversation_messages AS message JOIN conversation_threads AS thread ON thread.id=message.thread_id WHERE thread.work_id=? AND message.id=?", (context.work_id, message_id)).fetchone()
+        if not row or row["thread_id"] not in allowed_threads:
+            raise ValueError("原始消息不属于当前对话或主动承接的构思对话。")
         text = str(__import__("json").loads(row["content_json"] or "{}").get("text") or "")
         start = int(arguments.get("offset", 0))
         end = start + min(6000, int(arguments.get("length", 6000)))
@@ -443,7 +461,10 @@ class AgentToolRegistry:
                 if revision:
                     item["content"] = __import__("json").loads(context.service.repo.read_text(revision["content_uri"]))
             result.append(item)
-        return {"artifacts": result}
+        chapters = [dict(row) for row in context.connection.execute(
+            "SELECT id,title FROM chapters WHERE work_id=? ORDER BY volume_id,stable_order_key,id", (context.work_id,)
+        ).fetchall()]
+        return {"artifacts": result, "chapters": chapters}
 
     def _search_artifact(self, kind: str) -> Handler:
         def handler(context: ToolExecutionContext, arguments: dict[str, Any]) -> list[dict[str, Any]]:

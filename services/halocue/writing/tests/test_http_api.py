@@ -993,7 +993,8 @@ def test_agent_ui_keeps_next_action_and_mobile_navigation_compact():
     html = (web_root / "index.html").read_text(encoding="utf-8")
 
     assert "function workAgentPendingOrganization" in script
-    assert "data-organize-conversation" not in script
+    # The maintainer now requests one Agent-selected inline next-step button.
+    # Presence/absence and actual clicks are covered by the discussion browser suite.
     assert "正在整理本轮讨论" in script
     assert "信息足够时 Agent 会自动整理候选" in script
     assert 'content: "切换作品";' in styles
@@ -1012,10 +1013,10 @@ def test_work_agent_renders_structure_proposals_before_entering_scene_writing():
     script = (web_root / "app.js").read_text(encoding="utf-8")
     styles = (web_root / "shell.css").read_text(encoding="utf-8")
 
-    assert "['brief_blueprint','story_structure'].includes(item.kind)" in script
+    assert "['brief_blueprint','story_structure','chapter_plan'].includes(item.kind)" in script
     assert "hasBlueprint&&!sceneCount" in script
     assert "继续讨论作品结构" in script
-    assert "data-organize-conversation" not in script
+    # An optional inline organize action is allowed; the standalone wizard stays removed.
     assert "proposal.kind==='story_structure'" in script
     assert "待采纳" in script
     assert "采纳后才会写入" in script

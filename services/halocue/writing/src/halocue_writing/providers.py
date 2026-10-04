@@ -576,6 +576,7 @@ class FakeWritingProvider(WritingProvider):
         res = {
             "text": text,
             "questions": questions,
+            "next_step": next(iter(work_context.get("available_next_steps") or []), None) if ready else None,
             "ready_for_proposal": ready,
             "ready_to_organize": ready,
             "reasoning_summary": (
@@ -865,7 +866,14 @@ class LLMWritingProvider(WritingProvider):
         for JSON. Preserve that answer for the author, but keep the formal
         proposal gate closed until a structured response is available.
         """
+        from .discussion_response import recover_discussion_text
+
+        recovered = recover_discussion_text(text)
+        if recovered is not None:
+            return recovered
         visible_text = str(text or "").strip()
+        if re.search(r'"text"\s*:', visible_text) and re.search(r'"(?:questions|decision_card|ready_for_proposal|ready_to_organize|next_step)"\s*:', visible_text):
+            raise DomainError("provider_output_invalid", "模型回复的结构化内容未能完整解析，请重试本轮。", status=502)
         return {
             "text": visible_text,
             "questions": [],
@@ -1729,15 +1737,29 @@ class LLMWritingProvider(WritingProvider):
                 '  "decision_card": null,\n'
                 '  "reasoning_summary": "一句面向作者的判断依据摘要，不输出隐藏推理过程",\n'
                 '  "ready_for_proposal": true/false,\n'
-                '  "ready_to_organize": true/false\n'
+                '  "ready_to_organize": true/false,\n'
+                '  "next_step": null\n'
                 "}\n"
                 "只有当作者需要在 2-6 个明确互斥或可比较的选项中作选择时，才返回 decision_card；"
                 "普通选项卡的 kind 必须严格写成 choose（不要使用 choice/options/select 等别名）；"
                 "确认卡或 Proposal 卡才分别使用 confirm 或 proposal。它必须包含 kind、title、options（每项含 id、label、description）、submit_label 和 allow_custom。"
                 "开放式问题继续放在 questions，不要为了显示卡片而把普通追问改成选项。"
-                "不要要求作者点击‘形成方案’或‘整理细纲’；当信息足够、且当前不是改编任务时，直接调用 organize_current_plan。"
+                "信息足够且作者明确要求整理时，可以直接调用 organize_current_plan。"
                 "该工具只会在服务端创建待审 Proposal，随后由作者采纳或退回；工具没有调用成功前不要声称候选已经生成。"
-                "如果仍缺一个会改变方向的关键条件，只问一个最重要的问题，不要展示额外的流程按钮。"
+                "构思讨论可以完成章节大纲，不要要求作者切到章节页重新讲一遍。"
+                "作者明确要求整理某一章时，先从 read_work_context 的 chapters 读取真实章节 ID，"
+                "给 organize_current_plan 传 chapter_id，在当前对话生成本章细纲候选；目标不明确时只问清哪一章。"
+                "不要把已采纳的章节安排说成空白；章节大纲页会同步显示采纳成果，并支持精修。"
+                "如果仍缺一个会改变方向的关键条件，只问一个最重要的问题。"
+                "由你决定什么时候给出下一步按钮：仍在讨论关键条件时 next_step=null；"
+                "方向已足够、作者说差不多或想进入某阶段时，从 available_next_steps 选择一个 next_step。"
+                "organize 表示整理当前讨论，review 表示查看待审候选，structure 表示进入章节大纲，draft 表示进入正文写作。"
+                "只给最相关的一个入口，不必每轮显示；不要输出按钮 HTML、链接、内部路径或大段流程说明。"
+                "scene_conversation_context.discussion_continuation 是作者主动承接的整体构思对话，"
+                "请继承其中未被否定的写作要求；本场新要求优先。它不是已确认事实，不能把讨论推断当作官方人物设定。"
+                "character_resolution 是本轮引用随包人物资料的实际结果；added/reused 中的人物已经在作品中，"
+                "不要再次要求作者手动导入，不得把 ambiguous/blocked 的人物说成已经准备好。"
+                "已有参考人物卡是写作依据，不能把作者这轮的临时情节要求擅自写成人物长期设定。"
             )
             creation_intent = str(task_contract.get("creation_intent") or "guided_ideation")
             system_prompt += (
