@@ -1477,13 +1477,18 @@ def test_official_catalog_permission_error_is_reported_as_unavailable(tmp_path, 
     corpus.mkdir()
     service = WritingService(tmp_path / "data", official_corpus_dir=corpus)
 
-    def denied(_path):
-        raise PermissionError("corpus access changed")
+    is_dir = type(corpus).is_dir
+
+    def denied(path):
+        if path == corpus:
+            raise PermissionError("corpus access changed")
+        return is_dir(path)
 
     monkeypatch.setattr(type(corpus), "is_dir", denied)
 
     capabilities = service.capabilities()
     assert capabilities["official_references"]["available"] is False
+    assert capabilities["bundled_references"]["available"] is True
 
 
 def test_blocking_scene_review_prevents_release(tmp_path):

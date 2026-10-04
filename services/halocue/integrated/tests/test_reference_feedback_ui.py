@@ -37,8 +37,10 @@ def test_locked_writing_step_and_unavailable_corpus_have_inline_guidance(runtime
                     if "/resources/search?" in request.url else None)
             page.locator("#officialReferenceSearchForm input").fill("白子")
             page.locator("#officialReferenceSearchForm button").click()
-            expect(page.locator(".search-summary")).to_contain_text("随包 BA 资料索引")
-            expect(page.locator(".bundled-reference-record").filter(has_text="白子").first).to_be_visible()
+            expect(page.locator(".search-summary")).to_contain_text("完整人物参考")
+            card = page.locator(".bundled-reference-results .official-record").filter(has_text="砂狼白子").first
+            expect(card).to_be_visible()
+            expect(card.get_by_role("button", name="查看并导入完整人物卡")).to_be_visible()
             assert any("kind=characters" in url for url in searches)
             assert any("kind=backgrounds" in url for url in searches)
             assert not page.locator("#toast").first.evaluate("el => el.classList.contains('show')")

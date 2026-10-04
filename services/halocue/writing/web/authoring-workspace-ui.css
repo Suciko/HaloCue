@@ -74,10 +74,12 @@
 #app.hc-redesign .outline-plan-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
 #app.hc-redesign .outline-editor-hint { margin:0 0 10px; }
 /* Size the chapter director against its actual header, including font scaling. */
-#app#app.hc-redesign[data-surface="writing"] #inspector:has(.director-panel) {
-  display:flex!important;
-  flex-direction:column;
-  overflow:hidden!important;
+@media (min-width:761px) {
+  #app#app.hc-redesign[data-surface="writing"]:not(.inspector-collapsed) #inspector:not([hidden]):has(.director-panel) {
+    display:flex!important;
+    flex-direction:column;
+    overflow:hidden!important;
+  }
 }
 #app#app.hc-redesign[data-surface="writing"] #inspector:has(.director-panel) > .inspector-tabs { flex:none; }
 #app#app.hc-redesign[data-surface="writing"] #inspectorContent:has(.director-panel) {

@@ -11,6 +11,7 @@ NOTICE='新的讨论已经建立。我会读取当前作品的正式上下文，
 def test_scene_detail_states(mode,width,theme):
     pw=pytest.importorskip('playwright.sync_api')
     source=(WEB/'app.js').read_text(encoding='utf8')
+    projection=source[source.index('function discussionMessageView('):source.index('function discussionQuestionsMarkup(')]
     helpers=source[source.index('function sceneConversationMessageMarkup('):source.index('function latestFailedSceneAgentRun(')]
     action=source[source.index('function sceneDraftActionMarkup('):source.index('function renderDraft(el){\n',source.index('function sceneDraftActionMarkup('))]
     renderer=source[source.index('function renderSceneAgentInspector('):source.index('const renderSceneAgentInspectorWithSelection=')]
@@ -18,6 +19,8 @@ def test_scene_detail_states(mode,width,theme):
         browser=driver.chromium.launch()
         try:
             page=browser.new_page(viewport={'width':width,'height':844})
+            errors=[]
+            page.on('pageerror',lambda error:errors.append(str(error)))
             page.set_content(f'<html data-theme="{theme}"><div id="app" class="hc-redesign writing-workbench-stage" data-surface="writing"><main id="primary"></main><aside id="inspectorContent"></aside></div>')
             for name in ['styles.css','tokens.css','shell.css','writing-workbench.css','redesign.css','theme.css','authoring-ui.css','chapter-authoring-ui.css']:
                 page.add_style_tag(content=(WEB/name).read_text(encoding='utf8'))
@@ -35,10 +38,11 @@ def test_scene_detail_states(mode,width,theme):
               const sceneConversationThread=()=>thread,workAgentActiveRun=()=>null,sceneAgentRecoveryMarkup=()=>'',renderPermissionMenu=()=>'',libraryCards=()=>[];
               const messageText=m=>m.content.text,agentProseMarkup=text=>'<p>'+esc(text)+'</p>',sceneUserMessageMarkup=agentProseMarkup;
               const sceneAgentComposerDrafts=new Map();
-            '''+helpers+action+renderer+'''
+            '''+projection+helpers+action+renderer+'''
               document.querySelector('#primary').innerHTML=sceneDraftActionMarkup(scene,proposal);
               renderSceneAgentInspector();
             ''')
+            assert not errors,errors
             labels={'empty':'与助手讨论','ready':'与助手讨论','existing':'修改本场正文','pending':'查看待审修改','preparing':'与助手讨论'}
             expect(page.locator('#primary button')).to_have_text(labels[mode])
             if mode=='pending':assert page.locator('#primary button').get_attribute('data-focus-scene-diff') is not None

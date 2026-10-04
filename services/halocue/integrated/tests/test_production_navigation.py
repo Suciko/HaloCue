@@ -504,6 +504,7 @@ def test_topbar_named_panel_controls_and_focus_restore(runtime, width):
                 tree.click()
             if agent.get_attribute('aria-expanded') == 'true':
                 agent.click()
+            assert not page.locator('#inspector').is_visible()
             assert page.locator('#treePanel').is_visible()
             focus.click()
             assert focus.get_attribute('aria-pressed') == 'true'
@@ -521,7 +522,8 @@ def test_topbar_named_panel_controls_and_focus_restore(runtime, width):
             assert not toolbar.is_visible()
             assert page.locator('.hc-work-switch').is_visible()
             assert page.locator('#saveStatus').is_visible()
-            assert page.locator('#workspace').bounding_box()['width'] >= 388
+            assert not page.locator('#inspector').is_visible()
+            assert page.locator('#workspace').bounding_box()['width'] >= 388, page.locator('#app').evaluate("node=>({class:node.className,columns:getComputedStyle(node).gridTemplateColumns,areas:getComputedStyle(node).gridTemplateAreas,style:node.getAttribute('style'),workspace:getComputedStyle(document.querySelector('#workspace')).gridArea})")
         finally:
             browser.close()
 @pytest.mark.parametrize("width", [820, 1280])
@@ -751,7 +753,7 @@ def test_creation_views_share_project_scope_without_global_duplicate_navigation(
                 expect(page.locator(f'[data-creation-view="{view}"]')).to_have_attribute("aria-current", "page")
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
                 header = page.locator("#creationNavigation").bounding_box()
-                assert header["width"] >= 100 and header["x"] + header["width"] <= width
+                assert header["width"] >= 100 and header["x"] + header["width"] <= width, (width,view,header)
             root = ".primary-nav" if width > 760 else ".mobile-nav"
             page.locator(root + ' [data-section="projects"], ' + root + ' [data-mobile="projects"]').click()
             expect(page.locator("#creationNavigation")).to_be_hidden()
