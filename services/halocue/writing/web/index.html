@@ -16,9 +16,9 @@
   <link rel="stylesheet" href="/settings-center.css?v=20261003-codex-unified1">
   <link rel="stylesheet" href="/external-agents.css?v=20261003-exchange1">
   <link rel="stylesheet" href="/adaptation-workbench.css?v=20260927-targets1">
-  <link rel="stylesheet" href="/redesign.css?v=20260926-modal3">
+  <link rel="stylesheet" href="/redesign.css?v=20261004-modal4">
   <link rel="stylesheet" href="/theme.css?v=20260929-scene-memory-dark1">
-  <link rel="stylesheet" href="/agent-workspace.css?v=20260928-composer-action1">
+  <link rel="stylesheet" href="/agent-workspace.css?v=20261004-choice-dock2">
   <link rel="stylesheet" href="/agent-model-picker.css?v=20260919-registered2">
   <link rel="stylesheet" href="/change-review.css?v=20260924-edge-scroll1">
   <link rel="stylesheet" href="/authoring-ui.css?v=20261003-electron-brand1">
@@ -140,6 +140,7 @@
   <div id="workDialog" role="dialog" aria-modal="true" aria-labelledby="workDialogTitle" hidden>
     <form id="workForm">
       <div class="dialog-head"><div><p>NEW WORK</p><h2 id="workDialogTitle">开始一个新故事</h2></div><button type="button" data-close-work-dialog class="icon-button" title="关闭">×</button></div>
+      <div class="work-dialog-fields">
       <label>作品名称（可选）<input name="title" maxlength="80" placeholder="留空使用“未命名作品”"></label>
       <label class="new-work-idea">起步想法（可选）<textarea name="idea" maxlength="600" placeholder="说说你想做什么：短篇、长篇、续写、改编，或先做大纲 / 场景。"></textarea><small>先说目标就好，Agent 会按类型引导；想法不会自动变成正式设定。</small></label>
       <fieldset class="world-seed-picker">
@@ -150,6 +151,7 @@
       <label class="work-world-draft-select">或复制已有世界底稿<select name="world_draft_id"><option value="">不使用已有底稿</option></select><small>创建作品时复制当前版本，之后各自独立修改。</small></label>
       <fieldset class="work-start-picker"><legend>接下来先做</legend><label><input type="radio" name="start_at" value="ideation" checked> 构思</label><label><input type="radio" name="start_at" value="outline"> 大纲</label><label><input type="radio" name="start_at" value="world"> 世界观</label></fieldset>
       <p class="form-note">作品、默认卷、第一章和创作主对话会一起保存到本机。BA 底稿不是自动确认的官方设定；Agent 默认采用“审核协作”，不会静默覆盖正式产物。</p>
+      </div>
       <div class="dialog-actions"><button type="button" data-close-work-dialog class="quiet">取消</button><button type="submit" data-submit="work" class="primary">建立作品</button></div>
     </form>
   </div>
@@ -934,7 +936,7 @@
   <script src="/chapter-authoring-ui.js?v=20260930-inline-rewrite4" defer></script>
   <script src="/vendor/echarts/echarts-6.0.0.min.js" defer></script>
   <script src="/knowledge-graph-ui.js?v=20260930-graph-fix1" defer></script>
-  <script src="/app.js?v=20261003-codex-unified1" defer></script>
+  <script src="/app.js?v=20261004-choice-dock2" defer></script>
   <script src="/codex-connection.js?v=20261003-subscription1" defer></script>
   <script src="/external-agents.js?v=20261003-exchange1" defer></script>
   <script src="/mcp-workspace.js?v=20261003-clients1" defer></script>

@@ -459,7 +459,7 @@ body{margin:0;background:var(--hc-bg);color:var(--hc-text);font-family:Inter,"Se
 #workDialog {
   width: min(620px, calc(100vw - 40px));
   max-width: calc(100vw - 40px);
-  max-height: min(720px, calc(100dvh - 40px));
+  max-height: min(760px, calc(100dvh - 48px));
   border: 1px solid var(--hc-line, #dfe5ed);
   border-radius: 18px;
   background: var(--hc-surface, #fff);
@@ -473,12 +473,25 @@ body.work-dialog-open::before {
 }
 
 #workDialog form {
-  gap: 14px;
-  padding: 24px 26px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  max-height: inherit;
+  overflow: hidden;
   background: var(--hc-surface, #fff);
   color: var(--hc-ink, #253247);
+}
+
+#workDialog .work-dialog-fields {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  padding: 0 26px 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: #c9d4e1 transparent;
+  scrollbar-color: var(--hc-line) transparent;
 }
 
 #workDialog .dialog-head {
@@ -486,7 +499,9 @@ body.work-dialog-open::before {
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
-  margin: 0 0 2px;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 24px 26px 20px;
 }
 
 #workDialog .dialog-head > div { min-width: 0; }
@@ -509,7 +524,7 @@ body.work-dialog-open::before {
   padding: 0;
   border: 1px solid var(--hc-line, #dfe5ed);
   border-radius: 10px;
-  background: #fff;
+  background: var(--hc-surface-soft, #f8fafc);
   color: var(--hc-muted, #64748b);
   font: 22px/1 var(--hc-font-ui, var(--font-ui));
   display: grid;
@@ -533,12 +548,16 @@ body.work-dialog-open::before {
   width: 100%;
   min-height: 40px;
   padding: 9px 11px;
-  border: 1px solid #cfd8e5;
+  border: 1px solid var(--hc-line, #cfd8e5);
   border-radius: 8px;
-  background: #fff;
+  background: var(--hc-canvas, #fff);
   color: var(--hc-ink, #253247);
   font: 450 13px/1.5 var(--hc-font-ui, var(--font-ui));
   box-shadow: none;
+}
+#workDialog :is(input, textarea)::placeholder {
+  color: var(--hc-muted, #64748b);
+  opacity: 1;
 }
 #workDialog :is(input:not([type="radio"]):not([type="checkbox"]), select, textarea):focus {
   outline: none;
@@ -546,7 +565,7 @@ body.work-dialog-open::before {
   box-shadow: 0 0 0 3px var(--hc-action-soft, #edf2fa);
 }
 #workDialog .new-work-idea textarea {
-  min-height: 104px;
+  min-height: 88px;
   resize: vertical;
   line-height: 1.6;
 }
@@ -611,13 +630,14 @@ body.work-dialog-open::before {
 }
 #workDialog .work-start-picker label {
   display: inline-flex;
+  flex-direction: row;
   align-items: center;
   gap: 7px;
   min-height: 34px;
   padding: 7px 10px;
   border: 1px solid var(--hc-line, #dfe5ed);
   border-radius: 8px;
-  background: #fff;
+  background: var(--hc-surface, #fff);
   color: var(--hc-muted, #64748b);
   font: 550 12px/1.3 var(--hc-font-ui, var(--font-ui));
   cursor: pointer;
@@ -631,16 +651,16 @@ body.work-dialog-open::before {
   display: none;
 }
 #workDialog .dialog-actions {
-  position: sticky;
-  bottom: -18px;
+  position: static;
+  flex-shrink: 0;
   z-index: 2;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin: 0 -26px -18px;
-  padding: 13px 26px 18px;
+  margin: 0;
+  padding: 16px 26px 20px;
   border-top: 1px solid var(--hc-line, #dfe5ed);
-  background: rgb(255 255 255 / 96%);
+  background: var(--hc-surface, #fff);
 }
 #workDialog .dialog-actions button {
   min-height: 36px;
@@ -648,6 +668,11 @@ body.work-dialog-open::before {
   font: 600 12px/1.3 var(--hc-font-ui, var(--font-ui));
 }
 #workDialog .dialog-actions .quiet { min-width: 82px; }
+#workDialog .dialog-actions .quiet {
+  border-color: var(--hc-line);
+  background: var(--hc-surface-soft);
+  color: var(--hc-ink);
+}
 #workDialog .dialog-actions .primary {
   min-width: 112px;
   border-color: var(--hc-action, #2f65a5);
@@ -666,7 +691,9 @@ body.work-dialog-open::before {
     max-height: calc(100dvh - 20px);
     border-radius: 14px;
   }
-  #workDialog form { padding: 19px 16px 14px; gap: 12px; }
+  #workDialog form { padding: 0; gap: 0; }
+  #workDialog .dialog-head { padding: 19px 16px 16px; }
+  #workDialog .work-dialog-fields { padding: 0 16px 16px; gap: 12px; }
   #workDialog .dialog-head h2 { font-size: 21px; }
-  #workDialog .dialog-actions { bottom: -14px; margin: 0 -16px -14px; padding: 11px 16px 14px; }
+  #workDialog .dialog-actions { margin: 0; padding: 12px 16px 18px; }
 }

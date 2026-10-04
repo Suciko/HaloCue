@@ -915,7 +915,7 @@ def test_agent_ui_keeps_tools_and_usage_out_of_the_primary_message_flow():
     assert 'overscroll-behavior: contain;' in styles
 
 
-def test_agent_decision_card_covers_composer_and_preserves_choice_contract():
+def test_agent_decision_card_preserves_audited_choice_contract():
     web_root = Path(__file__).resolve().parents[1] / "web"
     script = (web_root / "app.js").read_text(encoding="utf-8")
     styles = (web_root / "shell.css").read_text(encoding="utf-8")
@@ -927,10 +927,8 @@ def test_agent_decision_card_covers_composer_and_preserves_choice_contract():
     assert "data-decision-dismiss" in script
     assert "data-decision-reopen" in script
     assert "const DECISION_CUSTOM_OPTION_ID='__custom__';" in script
-    assert 'class="decision-custom-option ' in script
-    assert "data-decision-custom-wrap" in script
-    assert 'class="decision-custom-field"' in script
-    assert 'placeholder="写下你的想法，然后按 Enter 提交"' in script
+    assert 'class="decision-reply-field"' in script
+    assert 'placeholder="也可以直接输入其他想法"' in script
     assert "decisionCardCustomDrafts:{}" in script
     assert "state.decisionCardCustomDrafts[key]=customInput.value;" in script
     assert "delete state.decisionCardCustomDrafts[decision.key];" in script
