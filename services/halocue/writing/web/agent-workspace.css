@@ -477,3 +477,129 @@ html[data-theme="dark"] #app#app[data-surface="works"] #workConversationForm {
     font-size: 11px;
   }
 }
+
+/* Choices belong to the composer, outside the independently scrolling history.
+   Only the option list scrolls; the shared reply and send action stay visible. */
+#app#app.hc-redesign[data-surface="works"] .work-agent-bottom > .decision-choice-dock {
+  position: absolute !important;
+  inset: auto max(var(--agent-edge-space), calc((100% - var(--agent-reading-width)) / 2)) calc(100% + 10px) !important;
+  transform: none !important;
+  display: flex !important;
+  flex-direction: column;
+  gap: 0;
+  width: auto !important;
+  max-height: min(500px, calc(100dvh - 280px)) !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  z-index: 20 !important;
+  box-shadow: 0 12px 36px rgb(0 0 0 / 18%) !important;
+}
+#app#app.hc-redesign .decision-choice-dock .decision-card-head {
+  flex-shrink: 0;
+  padding: 14px 16px !important;
+}
+#app#app.hc-redesign .decision-choice-dock .decision-card-head h3 {
+  font-size: 15px !important;
+  line-height: 1.5;
+  color: var(--hc-text) !important;
+}
+#app#app.hc-redesign .decision-choice-dock .decision-options {
+  flex: 1 1 auto;
+  min-height: 0 !important;
+  grid-auto-rows: max-content;
+  overflow: hidden auto !important;
+  padding: 10px !important;
+  gap: 5px;
+  scrollbar-width: thin;
+}
+#app#app.hc-redesign .decision-choice-dock .decision-option {
+  display: grid !important;
+  min-height: 48px !important;
+  padding: 9px 10px !important;
+  grid-template-columns: 24px minmax(0, 1fr) 20px;
+}
+#app#app.hc-redesign .decision-choice-dock .decision-option-index {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px !important;
+}
+#app#app.hc-redesign .decision-choice-dock .decision-option-arrow {
+  font-size: 0;
+  color: var(--hc-accent) !important;
+}
+#app#app.hc-redesign .decision-choice-dock .decision-option[aria-checked="true"] .decision-option-arrow::after {
+  content: "✓";
+  font-size: 18px;
+}
+#app#app.hc-redesign .decision-choice-dock .decision-choice-footer {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr);
+  justify-content: stretch;
+  align-items: stretch;
+  flex-shrink: 0;
+  gap: 8px;
+  margin: 0 !important;
+  padding: 10px 14px 14px !important;
+  border-top: 1px solid var(--hc-line) !important;
+}
+#app#app.hc-redesign .decision-choice-dock .decision-selection-status {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--hc-muted) !important;
+}
+#app#app.hc-redesign .decision-choice-dock .decision-send-error {
+  margin: 0;
+  color: var(--hc-danger) !important;
+  font-size: 12px;
+}
+#app#app.hc-redesign .decision-choice-dock .decision-reply-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+#app#app.hc-redesign .decision-choice-dock .decision-reply-field {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0 10px;
+  border: 1px solid var(--hc-line);
+  border-radius: 9px;
+  background: var(--hc-bg);
+}
+#app#app.hc-redesign .has-floating-choice .agent-jump-latest { display: none !important; }
+#app#app.hc-redesign .decision-choice-dock .decision-reply-field:focus-within {
+  border-color: var(--hc-accent);
+}
+#app#app.hc-redesign .decision-choice-dock .decision-reply-pencil { color: var(--hc-muted); }
+#app#app.hc-redesign .decision-choice-dock .decision-reply-field input {
+  min-width: 0;
+  width: 100%;
+  height: 38px;
+  padding: 8px 0;
+  border: 0 !important;
+  outline: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 13px;
+  color: var(--hc-text) !important;
+}
+#app#app.hc-redesign .decision-choice-dock .decision-submit {
+  flex-shrink: 0;
+  min-height: 38px;
+  margin-left: auto;
+  padding: 8px 14px;
+  border-radius: 9px;
+}
+@media (max-width: 640px) {
+  #app#app.hc-redesign[data-surface="works"] .work-agent-bottom > .decision-choice-dock {
+    max-height: min(480px, calc(100dvh - 300px)) !important;
+  }
+}

@@ -2,7 +2,7 @@ const DECISION_CUSTOM_OPTION_ID='__custom__';
 // Compatibility marker: activation is performed by requestProduction('/activate'),
 // after the candidate test has completed; the old two-call flow is intentionally absent.
 // await requestProduction('/test')
-const state={works:[],work:null,userStatus:null,userStatusVersion:null,userStatusLoading:false,agentPresentation:null,currentProjection:null,currentProjectionVersion:null,currentProjectionLoading:false,releaseDetails:{},releaseDetailLoading:{},releaseDetailErrors:{},capabilities:null,stage:'overview',surface:'works',sceneId:null,context:null,inspector:'agent',mobileView:'writing',writingChapterId:'',libraryView:'overview',libraryEditorOpen:false,showGlobalSurfaces:true,editCardId:'',editCard:null,characterCardDraft:null,characterImportProfile:null,characterImportFileName:'',worldImportProfile:null,worldImportFileName:'',highlightCardId:'',libraryCharacterFilter:'active',libraryQuery:'',librarySourceFilter:'all',libraryStatusFilter:'all',historyCardId:'',editCanonFactId:'',canonHistoryOpen:false,officialReferenceQuery:'',officialReferenceResults:[],referenceCharacterResults:[],officialReferenceSearched:false,officialReferenceUnavailable:false,officialReferenceLimit:6,bundledReferenceResults:{characters:[],backgrounds:[]},worldQuery:'',worldKindFilter:'all',worldSourceFilter:'all',worldStatusFilter:'all',graphFocus:'',graphTypeFilter:'all',graphLens:'characters',graphExpanded:false,editWorldEntry:null,worldCardDraft:null,worldHistoryOpen:false,sceneContextEditorOpen:false,sceneContractOpen:false,manuscriptDirty:false,manuscriptSceneId:'',manuscriptDraftBlocks:null,manuscriptDirtyUrl:'',manuscriptBlockCounter:0,sceneTextSelection:null,sceneDiffSelections:{},structureDraft:null,structureDirty:false,conversationThreadId:'',renamingThreadId:'',workAgentExpanded:false,mobileThreadOpen:false,composerAttachmentIds:[],composerPrefill:'',composerImportMode:'',composerImportId:'',composerImportPreview:null,composerImportStatus:'',composerImportError:'',threadRailQuery:'',threadRailSearchOpen:false,assetSurfaceOpen:false,assetUpload:null,assetCatalog:{scope:'custom',kind:'characters',query:'',items:[],total:0,offset:0,limit:36,hasMore:false,loading:false,error:null,requestId:0},decisionCardDismissedFor:'',decisionCardDockClosed:false,decisionCardWaitingForAgent:false,decisionCardSelections:{},decisionCardCustomDrafts:{},decisionCardSubmitting:false,staleProposalIds:new Set(),firstUseOpen:false,firstUseDismissed:false,lastError:null,feedbackError:null,sceneRecovery:null};
+const state={works:[],work:null,userStatus:null,userStatusVersion:null,userStatusLoading:false,agentPresentation:null,currentProjection:null,currentProjectionVersion:null,currentProjectionLoading:false,releaseDetails:{},releaseDetailLoading:{},releaseDetailErrors:{},capabilities:null,stage:'overview',surface:'works',sceneId:null,context:null,inspector:'agent',mobileView:'writing',writingChapterId:'',libraryView:'overview',libraryEditorOpen:false,showGlobalSurfaces:true,editCardId:'',editCard:null,characterCardDraft:null,characterImportProfile:null,characterImportFileName:'',worldImportProfile:null,worldImportFileName:'',highlightCardId:'',libraryCharacterFilter:'active',libraryQuery:'',librarySourceFilter:'all',libraryStatusFilter:'all',historyCardId:'',editCanonFactId:'',canonHistoryOpen:false,officialReferenceQuery:'',officialReferenceResults:[],referenceCharacterResults:[],officialReferenceSearched:false,officialReferenceUnavailable:false,officialReferenceLimit:6,bundledReferenceResults:{characters:[],backgrounds:[]},worldQuery:'',worldKindFilter:'all',worldSourceFilter:'all',worldStatusFilter:'all',graphFocus:'',graphTypeFilter:'all',graphLens:'characters',graphExpanded:false,editWorldEntry:null,worldCardDraft:null,worldHistoryOpen:false,sceneContextEditorOpen:false,sceneContractOpen:false,manuscriptDirty:false,manuscriptSceneId:'',manuscriptDraftBlocks:null,manuscriptDirtyUrl:'',manuscriptBlockCounter:0,sceneTextSelection:null,sceneDiffSelections:{},structureDraft:null,structureDirty:false,conversationThreadId:'',renamingThreadId:'',workAgentExpanded:false,mobileThreadOpen:false,composerAttachmentIds:[],composerPrefill:'',composerImportMode:'',composerImportId:'',composerImportPreview:null,composerImportStatus:'',composerImportError:'',threadRailQuery:'',threadRailSearchOpen:false,assetSurfaceOpen:false,assetUpload:null,assetCatalog:{scope:'custom',kind:'characters',query:'',items:[],total:0,offset:0,limit:36,hasMore:false,loading:false,error:null,requestId:0},decisionCardDismissedFor:'',decisionCardDockClosed:false,decisionCardWaitingForAgent:false,decisionCardSelections:{},decisionCardCustomDrafts:{},decisionCardSubmitting:false,decisionCardError:null,staleProposalIds:new Set(),firstUseOpen:false,firstUseDismissed:false,lastError:null,feedbackError:null,sceneRecovery:null};
 /* Phase 1: one route, one root renderer, one application click dispatcher.
    Domain requests below this section keep their existing API contracts. */
 const HC_SECTIONS = new Set(['projects','worlds','works','writing','references','tasks','assets','production']);
@@ -1284,8 +1284,8 @@ document.addEventListener('keydown',event=>{
   form?.requestSubmit();
 },true);
 
-// Decision cards behave like a compact radio group while the Composer is
-// covered. Keyboard movement never rebuilds the page, so focus remains stable.
+// Decisions float above the Composer. Keyboard movement never rebuilds the
+// page, so focus remains stable.
 document.addEventListener('keydown',event=>{
   const dock=event.target.closest('.work-decision-dock');
   if(!dock)return;
@@ -1328,9 +1328,11 @@ document.addEventListener('input',event=>{
   const dock=customInput.closest('.work-decision-dock');
   const key=dock?.dataset.decisionKey||'';
   if(key)state.decisionCardCustomDrafts[key]=customInput.value;
-  const customSelected=dock?.querySelector(`[data-option-id="${DECISION_CUSTOM_OPTION_ID}"]`)?.getAttribute('aria-checked')==='true';
-  const submit=dock?.querySelector('[data-submit-decision]');
-  if(submit&&customSelected&&!state.decisionCardSubmitting)submit.disabled=!customInput.value.trim();
+  if(state.decisionCardSubmitting)return;
+  const decision=activeWorkDecision();
+  if(!decision||decision.key!==key)return;
+  const optionId=customInput.value.trim()?DECISION_CUSTOM_OPTION_ID:decision.card.options[0]?.id||'';
+  updateWorkDecisionSelection(dock,decision,optionId);
 },true);
 
 const renderStructureBeforeCompactGuidance=renderStructure;
@@ -8116,9 +8118,11 @@ function workDecisionDockMarkup(){
     const selected=state.decisionCardSelections[decision.key]||decision.card.options[0]?.id||'';
     const options=decision.card.options.map((option,index)=>`<button type="button" class="decision-option ${selected===option.id?'selected':''}" role="radio" aria-checked="${selected===option.id}" tabindex="${selected===option.id?'0':'-1'}" data-decision-option="${esc(decision.key)}" data-option-id="${esc(option.id)}" data-option-label="${esc(option.label)}"><span class="decision-option-index">${index+1}</span><span class="decision-option-copy"><b>${esc(option.label)}</b>${option.description?`<small>${esc(option.description)}</small>`:''}</span><span class="decision-option-arrow" aria-hidden="true">→</span></button>`).join('');
     const customSelected=selected===DECISION_CUSTOM_OPTION_ID;
-    const customDraft=state.decisionCardCustomDrafts[decision.key]||'';
-    const custom=decision.card.allow_custom?`<div class="decision-custom-option ${customSelected?'selected':''}" data-decision-custom-wrap><button type="button" class="decision-option decision-custom-trigger ${customSelected?'selected':''}" role="radio" aria-checked="${customSelected}" aria-expanded="${customSelected}" tabindex="${customSelected?'0':'-1'}" data-decision-option="${esc(decision.key)}" data-option-id="${DECISION_CUSTOM_OPTION_ID}" data-option-label="其他想法"><span class="decision-option-index decision-option-pencil" aria-hidden="true">&#9998;</span><span class="decision-option-copy"><b>其他想法</b><small>直接告诉 Agent 你想怎样推进</small></span><span class="decision-option-arrow" aria-hidden="true">→</span></button><div class="decision-custom-field" ${customSelected?'':'hidden'}><input type="text" data-decision-custom maxlength="1000" value="${esc(customDraft)}" aria-label="输入其他想法" placeholder="写下你的想法，然后按 Enter 提交" autocomplete="off"></div></div>`:'';
-    return `<section class="work-decision-dock decision-choice-dock" role="region" aria-label="${esc(decision.title)}" data-decision-key="${esc(decision.key)}"><header class="decision-card-head"><h3>${esc(decision.title)}</h3>${close}</header><div class="decision-options" role="radiogroup" aria-label="可选项">${options}${custom}</div><footer class="decision-card-footer decision-choice-footer"><button type="button" class="primary decision-submit" data-submit-decision="${esc(decision.key)}" ${customSelected&&!customDraft.trim()?'disabled':''}>${esc(decision.card.submit_label||'提交')}</button></footer></section>`;
+    const customDraft=customSelected?state.decisionCardCustomDrafts[decision.key]||'':'';
+    const custom=decision.card.allow_custom?`<label class="decision-reply-field"><span class="sr-only">输入其他想法</span><span class="decision-reply-pencil" aria-hidden="true">&#9998;</span><input type="text" data-decision-custom maxlength="1000" value="${esc(customDraft)}" aria-label="输入其他想法" placeholder="也可以直接输入其他想法" autocomplete="off"></label>`:'';
+    const label=customSelected?'将发送你的想法':`已选择：${decision.card.options.find(option=>option.id===selected)?.label||''}`;
+    const error=state.decisionCardError?.key===decision.key?state.decisionCardError.message:'';
+    return `<section class="work-decision-dock decision-choice-dock" role="region" aria-label="${esc(decision.title)}" data-decision-key="${esc(decision.key)}"><header class="decision-card-head"><h3>${esc(decision.title)}</h3>${close}</header><div class="decision-options" role="radiogroup" aria-label="可选项">${options}</div><footer class="decision-card-footer decision-choice-footer"><p class="decision-selection-status" data-decision-selection-status role="status">${esc(label)}</p><p class="decision-send-error" role="alert" ${error?'':'hidden'}>${esc(error)}</p><div class="decision-reply-row">${custom}<button type="button" class="primary decision-submit" data-submit-decision="${esc(decision.key)}" ${customSelected&&!customDraft.trim()?'disabled':''}>发送</button></div></footer></section>`;
   }
   const action=decision.kind==='confirm'?`<button type="button" class="primary" data-confirm-intent="${esc(decision.pendingIntent.id)}">确认继续</button>`:decision.stale?`<button type="button" class="primary" data-reject-director-proposal="${esc(decision.pendingProposal.id)}">退回并重新整理</button>`:`<button type="button" class="primary" data-accept-director-proposal="${esc(decision.pendingProposal.id)}" ${decision.digest?`data-impact-digest="${esc(decision.digest)}"`:''}>采纳</button><button type="button" class="quiet" data-reject-director-proposal="${esc(decision.pendingProposal.id)}">退回</button>`;
   return `<section class="work-decision-dock ${decision.kind==='confirm'?'intent-decision-dock':''}${decision.stale?' is-stale':''}" role="region" aria-label="${esc(decision.title)}" data-decision-key="${esc(decision.key)}"><header class="decision-card-head"><div><span class="work-decision-kicker">${esc(decision.kicker)}</span><h3>${esc(decision.title)}</h3></div>${close}</header><p class="work-decision-body">${esc(decision.body)}</p>${decision.pendingProposal?proposalChangeReviewMarkup(decision.pendingProposal):''}<footer class="decision-card-footer"><small>${esc(decision.note)}</small><div class="work-decision-actions">${action}</div></footer></section>`;
@@ -8126,6 +8130,7 @@ function workDecisionDockMarkup(){
 
 function focusWorkDecision(dock=document.querySelector('.work-decision-dock')){
   const target=dock?.querySelector('.decision-option[aria-checked="true"]')
+    ||dock?.querySelector('[data-decision-custom]')
     ||dock?.querySelector('[data-confirm-intent], [data-accept-director-proposal], [data-reject-director-proposal]')
     ||dock?.querySelector('[data-decision-dismiss]');
   target?.focus({preventScroll:true});
@@ -8294,12 +8299,14 @@ function renderFinalWorkAgentSurface(){
   const hasConversation=messages.some(message=>message.role==='user'||message.kind!=='notice')||Boolean(proposal||pendingDecision||workAgentActiveRun(thread));
   const shownInProposal=pendingDecision?.kind==='proposal'&&pendingDecision.pendingProposal?.id===proposal?.id;
   const decision=shownInProposal?'':workDecisionDockMarkup(),reopen=shownInProposal?'':workDecisionReopenMarkup();
+  const floatingDecision=pendingDecision?.kind==='choose'?decision:'';
+  const threadDecision=floatingDecision?'':decision;
   const hasPending=Boolean(activeWorkDecision({includeDismissed:true}));
   const statusMarkup=workUserStatusMarkup();
   const runtimeMarkup=agentRuntimeBarMarkup(thread);
   const legacyFormatNotice=messages.some(message=>isDefaultScriptFormatQuestion(message,thread))?'<p class="agent-format-note">默认按剧本推进，无需回答历史消息中的文体选择。</p>':'';
   const starters=`<div class="hc-starters" aria-label="开始讨论"><button type="button" data-agent-continue-draft="我有一个故事想法，请先和我讨论核心冲突，不要直接写章节正文。">聊聊故事想法<span aria-hidden="true">↗</span></button><button type="button" data-agent-continue-draft="和我讨论主要人物的愿望、矛盾和关系变化。">从人物开始<span aria-hidden="true">↗</span></button><button type="button" data-agent-continue-draft="和我一起设计这个世界的规则、限制与日常细节。">搭建世界观<span aria-hidden="true">↗</span></button></div>`;
-  return `<section class="work-agent-canvas hc-idea-canvas ${hasConversation?'has-conversation':'is-empty-thread'}" aria-label="全作创作讨论" data-agent-thread="${esc(thread?.id||'')}"><header class="hc-canvas-header"><div class="agent-session-heading"><button type="button" class="agent-sidebar-toggle" data-panel-toggle="tree" aria-controls="worksPanel" title="展开或收起对话栏">对话栏</button><h1>${esc(hasConversation?(thread?.title||'剧本讨论'):'剧本助手')}</h1><span>全作讨论</span></div><div class="hc-discussion-tools">${hasConversation?'<button type="button" class="quiet" data-section="tasks" title="查看完整任务与运行记录">运行记录</button>':''}<button type="button" class="quiet ${hasPending?'has-pending':''}" data-work-todos>${hasPending?'待处理':'待办'}</button><button type="button" class="quiet hc-mobile-threads" data-mobile-thread-toggle>对话列表</button></div></header><section class="work-agent-thread" data-work-discussion-scroll aria-label="创作对话记录" tabindex="0">${hasConversation?conversationHistoryMarkup(messages):'<div class="hc-idea-empty hc-idea-empty-compact"><h2>新的构思对话</h2><p>写下想讨论的人物、冲突或下一步；已有正文不会因为讨论而改变。</p></div>'}<div class="agent-runtime-bar">${runtimeMarkup}</div>${statusMarkup}${activeAgentRunMarkup(thread)}${workAgentProposalMarkup(proposal)}${decision}${legacyFormatNotice}${intentPlansMarkup()}</section><button type="button" class="agent-jump-latest quiet" data-agent-jump-latest hidden>回到最新 ↓</button><div class="work-agent-bottom">${reopen}${thread?renderWorkAgentComposer(thread,task,proposal):'<div class="notice">当前作品没有可用的创作对话。<button type="button" class="quiet" data-thread-create>新建对话</button></div>'}<p class="hc-composer-hint" id="agentComposerHint">${hasConversation?'采纳前不改动作品':'默认创作剧本 · 采纳前不改动作品'}<span>Enter 发送 · Shift + Enter 换行</span></p>${hasConversation||scenes().some(scene=>scene.current_revision_id)?'':starters}</div></section>`;
+  return `<section class="work-agent-canvas hc-idea-canvas ${floatingDecision?'has-floating-choice':''} ${hasConversation?'has-conversation':'is-empty-thread'}" aria-label="全作创作讨论" data-agent-thread="${esc(thread?.id||'')}"><header class="hc-canvas-header"><div class="agent-session-heading"><button type="button" class="agent-sidebar-toggle" data-panel-toggle="tree" aria-controls="worksPanel" title="展开或收起对话栏">对话栏</button><h1>${esc(hasConversation?(thread?.title||'剧本讨论'):'剧本助手')}</h1><span>全作讨论</span></div><div class="hc-discussion-tools">${hasConversation?'<button type="button" class="quiet" data-section="tasks" title="查看完整任务与运行记录">运行记录</button>':''}<button type="button" class="quiet ${hasPending?'has-pending':''}" data-work-todos>${hasPending?'待处理':'待办'}</button><button type="button" class="quiet hc-mobile-threads" data-mobile-thread-toggle>对话列表</button></div></header><section class="work-agent-thread" data-work-discussion-scroll aria-label="创作对话记录" tabindex="0">${hasConversation?conversationHistoryMarkup(messages):'<div class="hc-idea-empty hc-idea-empty-compact"><h2>新的构思对话</h2><p>写下想讨论的人物、冲突或下一步；已有正文不会因为讨论而改变。</p></div>'}<div class="agent-runtime-bar">${runtimeMarkup}</div>${statusMarkup}${activeAgentRunMarkup(thread)}${workAgentProposalMarkup(proposal)}${threadDecision}${legacyFormatNotice}${intentPlansMarkup()}</section><button type="button" class="agent-jump-latest quiet" data-agent-jump-latest hidden>回到最新 ↓</button><div class="work-agent-bottom">${floatingDecision}${reopen}${thread?renderWorkAgentComposer(thread,task,proposal):'<div class="notice">当前作品没有可用的创作对话。<button type="button" class="quiet" data-thread-create>新建对话</button></div>'}<p class="hc-composer-hint" id="agentComposerHint">${hasConversation?'采纳前不改动作品':'默认创作剧本 · 采纳前不改动作品'}<span>Enter 发送 · Shift + Enter 换行</span></p>${hasConversation||scenes().some(scene=>scene.current_revision_id)?'':starters}</div></section>`;
 }
 
 function renderFinalWorkAgentRail(){const rail=document.getElementById('worksThreadList');if(rail)rail.innerHTML=renderWorkAgentThreadList();}
@@ -8415,6 +8422,26 @@ function decorateSceneMemoryAction(){
 
 /* Root rendering is owned by the phase-1 dispatcher. */
 
+function updateWorkDecisionSelection(dock,decision,optionId){
+  state.decisionCardSelections[decision.key]=optionId;
+  dock?.querySelectorAll('[data-decision-option]').forEach(item=>{
+    const selected=item.dataset.optionId===optionId;
+    item.classList.toggle('selected',selected);
+    item.setAttribute('aria-checked',String(selected));
+    item.tabIndex=selected?0:-1;
+  });
+  // Keep the radio group reachable while the shared reply field is active.
+  if(optionId===DECISION_CUSTOM_OPTION_ID){
+    const first=dock?.querySelector('[data-decision-option]');
+    if(first)first.tabIndex=0;
+  }
+  const status=dock?.querySelector('[data-decision-selection-status]');
+  const customSelected=optionId===DECISION_CUSTOM_OPTION_ID;
+  if(status)status.textContent=customSelected?'将发送你的想法':`已选择：${decision.card.options.find(option=>option.id===optionId)?.label||''}`;
+  const submit=dock?.querySelector('[data-submit-decision]');
+  if(submit)submit.disabled=customSelected&&!dock?.querySelector('[data-decision-custom]')?.value.trim();
+}
+
 async function submitWorkDecision(button){
   const decision=activeWorkDecision();
   if(!decision||decision.kind!=='choose'||state.decisionCardSubmitting)return;
@@ -8432,6 +8459,11 @@ async function submitWorkDecision(button){
   const thread=workConversationThread();
   if(!thread||!state.work)return;
   state.decisionCardSubmitting=true;
+  state.decisionCardError=null;
+  const dock=button.closest('.work-decision-dock');
+  dock?.setAttribute('aria-busy','true');
+  if(customInput)customInput.readOnly=true;
+  button.textContent='正在发送…';
   button.disabled=true;
   document.querySelectorAll(`[data-decision-key="${CSS.escape(decision.key)}"] button`).forEach(item=>item.disabled=true);
   try{
@@ -8451,10 +8483,16 @@ async function submitWorkDecision(button){
     scheduleAgentRunPoll(result.agent_run_id,0);
   }catch(error){
     state.decisionCardSubmitting=false;
+    state.decisionCardError={key:decision.key,message:error.message};
     state.decisionCardWaitingForAgent=false;
     setBusy('选择尚未提交');
     toast(error.message,true);
     render();
+    requestAnimationFrame(()=>{
+      const dock=document.querySelector('.decision-choice-dock');
+      if(customSelected)dock?.querySelector('[data-decision-custom]')?.focus({preventScroll:true});
+      else focusWorkDecision(dock);
+    });
   }
 }
 
@@ -8512,26 +8550,15 @@ registerAppClick(event=>{
   const decisionOption=event.target.closest('[data-decision-option]');
   if(decisionOption&&state.work){
     event.preventDefault();claimAppEvent(event);
+    if(state.decisionCardSubmitting)return;
     const key=decisionOption.dataset.decisionOption||'',optionId=decisionOption.dataset.optionId||'';
-    state.decisionCardSelections[key]=optionId;
+    const decision=activeWorkDecision();
+    if(!decision||decision.key!==key)return;
     const dock=decisionOption.closest('.work-decision-dock');
-    dock?.querySelectorAll(`[data-decision-option="${CSS.escape(key)}"]`).forEach(item=>{
-      const selected=item.dataset.optionId===optionId;
-      item.classList.toggle('selected',selected);
-      item.setAttribute('aria-checked',String(selected));
-      item.tabIndex=selected?0:-1;
-    });
-    const customSelected=optionId===DECISION_CUSTOM_OPTION_ID;
-    const customWrap=dock?.querySelector('[data-decision-custom-wrap]');
-    const customField=customWrap?.querySelector('.decision-custom-field');
-    const customInput=customWrap?.querySelector('[data-decision-custom]');
-    customWrap?.classList.toggle('selected',customSelected);
-    customWrap?.querySelector('[data-decision-option]')?.setAttribute('aria-expanded',String(customSelected));
-    if(customField)customField.hidden=!customSelected;
-    const submit=dock?.querySelector('[data-submit-decision]');
-    if(submit)submit.disabled=customSelected&&!customInput?.value.trim();
-    if(customSelected)requestAnimationFrame(()=>customInput?.focus({preventScroll:true}));
-    else decisionOption.focus({preventScroll:true});
+    const customInput=dock?.querySelector('[data-decision-custom]');
+    if(customInput)customInput.value='';
+    updateWorkDecisionSelection(dock,decision,optionId);
+    decisionOption.focus({preventScroll:true});
     return;
   }
   const decisionSubmit=event.target.closest('[data-submit-decision]');

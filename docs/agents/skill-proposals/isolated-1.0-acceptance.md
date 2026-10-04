@@ -71,3 +71,13 @@ AA/MCP acceptance. This covers controlled local conditions, not a collaborator's
 ACLs, antivirus or Windows version. Keep actual receiving-machine retest and
 remote CI status explicit. No new third-party reference, asset or active Skill
 is introduced; this candidate remains proposed and inactive for owner review.
+
+The [R4 UI handoff](../../handoffs/2026-10-04-1.0-choice-ui.md) adds evidence
+for the same proposed acceptance workflow: ordinary choice clicks, keyboard
+selection, freeform reply, API failure/retry and dismissal must be exercised
+through real HTTP/browser input, including long descriptions at a short window
+height. Static presence checks did not catch a legacy important overflow rule
+that let option content intercept the send button. Check element geometry,
+unforced pointer delivery and persisted responses, alongside theme screenshots
+and the existing shallow portable-package gate. This is additional evidence for
+the inactive proposal, not installation of a new active Skill.
