@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import json
+import pytest
 
 from halocue_writing import resource_catalog as resource_catalog_module
 from halocue_writing.resource_catalog import ResourceCatalog, SCHEMA_VERSION
@@ -54,7 +55,12 @@ def test_empty_1_0_catalog_does_not_claim_ready(tmp_path, monkeypatch):
     assert descriptor["bundled_seed"]["status"] == "unavailable"
 
 
+@pytest.mark.bundled_research
 def test_new_catalog_includes_shipped_ba_metadata_without_binary_assets(tmp_path):
+    with sqlite3.connect(resource_catalog_module._bundled_metadata_database()) as seed:
+        assert seed.execute("SELECT COUNT(*) FROM face_visual_label").fetchone()[0] == 27649
+        assert seed.execute("SELECT COUNT(*) FROM scene_visual_label").fetchone()[0] == 6850
+        assert seed.execute("SELECT COUNT(*) FROM face_official_usage").fetchone()[0] == 163998
     descriptor = ResourceCatalog(tmp_path).descriptor()
     assert descriptor["ready"] is True
     assert descriptor["bundled_seed"]["status"] == "ready"
@@ -63,6 +69,48 @@ def test_new_catalog_includes_shipped_ba_metadata_without_binary_assets(tmp_path
     assert descriptor["counts"]["backgrounds"] > 0
     assert descriptor["counts"]["faces"] > 0
     assert descriptor["counts"]["expression_parts"] > 0
+
+
+def test_ordinary_catalog_uses_a_small_independent_seed(tmp_path, small_bundled_metadata):
+    assert small_bundled_metadata.stat().st_size < 100_000
+    first = ResourceCatalog(tmp_path / "first")
+    second = ResourceCatalog(tmp_path / "second")
+    assert first.descriptor()["counts"]["characters"] == 1
+    first.save_override("background", "BG_TestRoom", {"display_name": "本作手改"})
+    assert second.lookup("backgrounds", ["BG_TestRoom"])["items"][0]["display_name"] == "测试教室"
+
+
+def test_bundled_projection_refresh_preserves_user_overrides_and_explicit_imports(
+    tmp_path, monkeypatch
+):
+    import shutil
+
+    seed = tmp_path / "seed.db"
+    shutil.copyfile(resource_catalog_module._bundled_metadata_database(), seed)
+    monkeypatch.setattr(resource_catalog_module, "_bundled_metadata_database", lambda: seed)
+    root = tmp_path / "workspace"
+    catalog = ResourceCatalog(root)
+    key = catalog.search("backgrounds")["items"][0]["technical"]["key"]
+    catalog.save_override("background", key, {"display_name": "作者背景名称"})
+    with sqlite3.connect(seed) as con:
+        con.execute("UPDATE bg SET label='新版教室标注' WHERE name=?", (key,))
+    refreshed = ResourceCatalog(root)
+    assert refreshed.descriptor()["bundled_seed"]["status"] == "ready"
+    assert refreshed.lookup("backgrounds", [key])["items"][0]["display_name"] == "作者背景名称"
+    assert ResourceCatalog(root).descriptor()["bundled_seed"]["status"] == "already_initialized"
+    with sqlite3.connect(refreshed.path) as con:
+        con.execute(
+            "UPDATE catalog_meta SET value=? WHERE key='source_manifest'",
+            (json.dumps({"source": "作者明确导入"}),),
+        )
+    with sqlite3.connect(seed) as con:
+        con.execute("UPDATE bg SET label='第三版标注' WHERE name=?", (key,))
+    explicit = ResourceCatalog(root)
+    with sqlite3.connect(explicit.path) as con:
+        assert (
+            con.execute("SELECT label FROM backgrounds WHERE key=?", (key,)).fetchone()[0]
+            == "新版教室标注"
+        )
 
 
 def test_public_background_projection_hides_export_identifiers(tmp_path):

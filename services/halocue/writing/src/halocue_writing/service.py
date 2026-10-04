@@ -258,6 +258,7 @@ class WritingService:
     def capabilities(self):
         return {
             "api_version": "1.0",
+            "bundled_references": self.bundled_characters.descriptor(),
             "capabilities": [
                 "works",
                 "brief_revisions",
@@ -5163,7 +5164,7 @@ class WritingService:
                 scope = self._effective_conversation_scope(thread, payload.get("task_scope"))
                 if scope.get("surface") in {"work", "chapter"}:
                     reference_text = text
-                    if re.search(r"(?:开始|直接|继续|进入|起草|生成|写).{0,8}(?:正文|这一场|这场|剧本)", text):
+                    if re.search(r"(?:开始|直接|继续|进入|起草|生成|写).{0,8}(?:正文|这一场|这场|剧本)", text) or re.fullmatch(r"\s*(?:好[的]?|嗯|那)?[，,\s]*(?:继续(?:吧|写)?|接着写|可以开始了)[。！!，,\s]*", text):
                         prior = recent_conversation_history(connection, thread_id)
                         reference_text = "\n".join([str(item.get("text", "")) for item in prior[-12:] if item.get("role") == "user"] + [text])
                     character_resolution = self._prepare_discussion_characters(connection, work_id, reference_text)

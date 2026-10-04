@@ -18,14 +18,14 @@ from halocue_writing.service import WritingService
 class CharacterProposalProvider(FakeWritingProvider):
     def discuss_work(self, messages: list[dict], work_context: dict) -> dict:
         return {
-            "text": "我整理了一份凯伊的人物卡候选。",
+            "text": "我整理了一份测试原创人物的人物卡候选。",
             "ready_for_proposal": True,
             "artifact_preview": {
                 "kind": "character_card",
-                "title": "凯伊",
+                "title": "测试原创人物",
                 "status": "discussion_draft",
                 "content": {
-                    "name": "凯伊",
+                    "name": "测试原创人物",
                     "role": "负责核对终端留下的访问记录。",
                     "ooc_constraints": ["证据不足时不会直接归因于敌对行为。"],
                 },
@@ -36,14 +36,14 @@ class CharacterProposalProvider(FakeWritingProvider):
 class CharacterUpdateProvider(FakeWritingProvider):
     def discuss_work(self, messages: list[dict], work_context: dict) -> dict:
         return {
-            "text": "我整理了凯伊的现场职责更新。",
+            "text": "我整理了测试原创人物的现场职责更新。",
             "ready_for_proposal": True,
             "artifact_preview": {
                 "kind": "character_card",
-                "title": "凯伊",
+                "title": "测试原创人物",
                 "status": "discussion_draft",
                 "content": {
-                    "name": "凯伊",
+                    "name": "测试原创人物",
                     "role": "负责核对现场留下的访问记录。",
                 },
             },
@@ -59,7 +59,7 @@ def create_character_proposal(service: WritingService) -> tuple[dict, dict]:
         thread["id"],
         {
             "expected_thread_version": thread["version"],
-            "text": "把凯伊目前确定的职责和行为边界整理为人物卡。",
+            "text": "把测试原创人物目前确定的职责和行为边界整理为人物卡。",
         },
     )
     proposed = service.propose_conversation_knowledge(
@@ -94,7 +94,7 @@ def test_knowledge_proposal_persists_deterministic_domain_impact(tmp_path):
     assert impact["operation"] == "create"
     assert impact["target"]["artifact_kind"] == "character_card"
     assert impact["target"]["scope_id"] == proposal["candidate"]["scope_id"]
-    assert impact["target"]["title"] == "凯伊"
+    assert impact["target"]["title"] == "测试原创人物"
     assert impact["conflict_summary"] == {
         "status": "clear",
         "count": 0,
@@ -165,7 +165,7 @@ def test_character_proposal_rechecks_cross_card_name_conflicts_at_decision_time(
         {
             "expected_version": proposed["work"]["version"],
             "card_id": "character-kei-concurrent",
-            "name": "凯伊",
+            "name": "测试原创人物",
             "source_type": "custom",
             "source_refs": ["用户并发建立"],
             "trust_status": "confirmed",
@@ -197,9 +197,9 @@ def test_knowledge_impact_lists_scene_refs_and_rejects_changed_scope(tmp_path):
         work["id"],
         {
             "expected_version": work["version"],
-            "idea": "凯伊调查温室门禁记录。",
+            "idea": "测试原创人物调查温室门禁记录。",
             "mode": "bond_short",
-            "characters": ["凯伊"],
+            "characters": ["测试原创人物"],
         },
     )
     blueprint = service.generate_blueprint(
@@ -221,7 +221,7 @@ def test_knowledge_impact_lists_scene_refs_and_rejects_changed_scope(tmp_path):
         {
             "expected_version": scene["work"]["version"],
             "card_id": "character-kei",
-            "name": "凯伊",
+            "name": "测试原创人物",
             "role": "负责核对记录。",
             "source_type": "custom",
             "source_refs": ["用户确认"],
@@ -243,7 +243,7 @@ def test_knowledge_impact_lists_scene_refs_and_rejects_changed_scope(tmp_path):
     discussed = service.post_conversation_message(
         work["id"],
         thread["id"],
-        {"expected_thread_version": thread["version"], "text": "更新凯伊的现场职责。"},
+        {"expected_thread_version": thread["version"], "text": "更新测试原创人物的现场职责。"},
     )
     proposed = service.propose_conversation_knowledge(
         work["id"],

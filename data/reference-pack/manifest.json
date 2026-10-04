@@ -563,6 +563,12 @@
       "sha256": "af1c494d51e530d1f364071ed227082a8ae5b1a0b5ee37002c0b6a4f97040880",
       "uncompressed_bytes": 26390020,
       "uncompressed_sha256": "11f06c8bceb42dcea76025f0ed08389959c71bbc0eb09a14a3b5836a705bcf0f"
+    },
+    "research/metadata.jsonl.gz": {
+      "bytes": 18970755,
+      "sha256": "be7cfdf06daae49a0556d01da00d1b8e21fd329be08af65ecbcc7e7a37c5ff50",
+      "uncompressed_bytes": 157990125,
+      "uncompressed_sha256": "df3ea86510b3d673b6cfe480ab429bdec026ad8dcb8c88b8ddaa022ae062990d"
     }
   },
   "character_card_count": 102

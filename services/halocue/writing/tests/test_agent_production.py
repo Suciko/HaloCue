@@ -1350,7 +1350,7 @@ def test_bundled_character_metadata_is_reference_only(tmp_path):
             scope_id=work["id"], permission_mode="managed",
         )
         result = service.agent_tools.execute(
-            context, "search_bundled_character_metadata", {"query": "白子", "limit": 4}
+            context, "search_bundled_character_metadata", {"query": "测试人物", "limit": 4}
         )
     assert result.status == "succeeded"
     assert result.output["source"] == "bundled_metadata_only"

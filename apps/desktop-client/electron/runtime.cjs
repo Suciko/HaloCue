@@ -112,5 +112,18 @@ function startupAppearance(saved, systemDark) {
   return {preference, effective, ...colors, appearance};
 }
 
+async function captureTestPage(contents, wait = delay) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      return await contents.capturePage(undefined, {stayAwake: true});
+    } catch (error) {
+      // A newly navigated/occluded Windows compositor can briefly lack a surface.
+      // Only retry that sampling error; real renderer failures remain visible.
+      if (error.message !== 'UnknownVizError' || attempt === 4) throw error;
+      await wait(120);
+    }
+  }
+}
+
 module.exports = {validateReady, waitForReady, requestStop, stopOwnedService, sameOrigin, validBounds,
-  availablePort, resolveUserRoot, allowPermission, startupAppearance};
+  availablePort, resolveUserRoot, allowPermission, startupAppearance, captureTestPage};

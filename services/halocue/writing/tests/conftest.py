@@ -8,6 +8,11 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from services.halocue._test_support import (  # noqa: E402, F401
+    isolated_bundled_metadata,
+    small_bundled_metadata,
+)
+
 from halocue_writing.workflow_pack import (  # noqa: E402
     ENGINE_RULE_SOURCE,
     MODE_SOURCES,

@@ -16,6 +16,12 @@ class BundledCharacterCatalog:
     def __init__(self, root: Path | None = None):
         self.root = root or repository_root() / "data/reference-pack/characters"
 
+    def descriptor(self) -> dict:
+        return {
+            "available": self.root.is_dir(),
+            "character_cards": len(list(self.root.glob("*.json"))),
+        }
+
     def search(self, query: str, limit: int = 18) -> dict:
         needle = str(query).strip().casefold()
         items = []

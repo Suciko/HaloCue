@@ -4,6 +4,7 @@ import threading
 import time
 import json
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -61,20 +62,23 @@ def test_enqueued_agent_run_returns_after_input_is_durable(tmp_path):
     provider = BlockingProvider()
     service.provider = provider
 
-    started_at = time.monotonic()
-    queued = service.enqueue_conversation_message(
-        work["id"], thread["id"],
-        {"expected_thread_version": thread["version"], "text": "先分析，不要阻塞页面。"},
-    )
-
-    assert time.monotonic() - started_at < 1
-    assert provider.started.wait(timeout=1)
-    run = service.get_agent_run(work["id"], queued["agent_run_id"])
-    assert run["status"] == "running"
-    assert run["policy"]["thread_id"] == thread["id"]
-    assert service.repo.read_text(run["input_snapshot_uri"])
-
-    provider.release.set()
+    # Allow initial disk work to vary; the enqueue response must arrive while
+    # the Provider is still blocked, before its output can be persisted.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pending = executor.submit(
+            service.enqueue_conversation_message,
+            work["id"], thread["id"],
+            {"expected_thread_version": thread["version"], "text": "先分析，不要阻塞页面。"},
+        )
+        try:
+            assert provider.started.wait(timeout=5)
+            queued = pending.result(timeout=1)
+            run = service.get_agent_run(work["id"], queued["agent_run_id"])
+            assert run["status"] == "running"
+            assert run["policy"]["thread_id"] == thread["id"]
+            assert service.repo.read_text(run["input_snapshot_uri"])
+        finally:
+            provider.release.set()
     completed = wait_for_terminal(service, work["id"], run["id"])
     assert completed["status"] == "completed"
     restored = service.get_work(work["id"])

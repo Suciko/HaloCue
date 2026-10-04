@@ -11,6 +11,7 @@ import json
 import re
 import sqlite3
 import copy
+import hashlib
 from contextlib import ExitStack, closing
 from pathlib import Path
 from typing import Any
@@ -323,8 +324,10 @@ def _bundled_metadata_database() -> Path | None:
     candidates: list[Path] = []
     try:
         from services.halocue.runtime_layout import repository_root
+        from bundled_metadata import materialize_bundled_metadata
+        from runtime_layout import LAYOUT
 
-        candidates.append(repository_root() / "data" / "halocue_labels.db")
+        candidates.append(materialize_bundled_metadata(repository_root(), LAYOUT.user_data_root / ".halocue" / "reference-cache"))
     except (ImportError, OSError):
         pass
     for candidate in candidates:
@@ -352,18 +355,16 @@ class ResourceCatalog:
             self._bundled_seed_status = "disabled"
 
     def _seed_bundled_metadata(self) -> None:
-        """Populate a new catalog from the shipped metadata-only seed once.
-
-        The seed contains searchable character/background/variant/face metadata,
-        not copyrighted image, audio, Spine, or story bytes. User imports and
-        overrides always win: a non-empty local catalog is never replaced.
-        """
+        """Refresh only bundled projections; preserve explicit imports/overrides."""
         with closing(self._connect()) as connection:
             existing = sum(
                 int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
                 for table in ("backgrounds", "characters", "character_variants", "faces", "expression_parts")
             )
-        if existing:
+            manifest_row = connection.execute("SELECT value FROM catalog_meta WHERE key='source_manifest'").fetchone()
+            digest_row = connection.execute("SELECT value FROM catalog_meta WHERE key='bundled_seed_sha256'").fetchone()
+        manifest = _json_object(manifest_row[0] if manifest_row else "")
+        if existing and manifest.get("source") != "HaloCue 1.0 bundled metadata":
             self._bundled_seed_status = "already_initialized"
             return
         source = _bundled_metadata_database()
@@ -371,7 +372,18 @@ class ResourceCatalog:
             self._bundled_seed_status = "unavailable"
             return
         try:
+            with source.open("rb") as stream:
+                seed_digest = hashlib.sha256()
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    seed_digest.update(chunk)
+                digest = seed_digest.hexdigest()
+            if existing and digest_row and digest_row[0] == digest:
+                self._bundled_seed_status = "already_initialized"
+                return
             self.import_legacy(source, "HaloCue 1.0 bundled metadata")
+            with closing(self._connect()) as connection:
+                connection.execute("INSERT OR REPLACE INTO catalog_meta(key,value) VALUES('bundled_seed_sha256',?)", (digest,))
+                connection.commit()
         except (OSError, ValueError, sqlite3.DatabaseError) as exc:
             # Resource browsing is optional evidence; do not make the writer
             # unusable when a frozen distribution is missing its optional seed.
@@ -628,7 +640,7 @@ class ResourceCatalog:
         if not requested:
             return {"schema_version": SCHEMA_VERSION, "kind": normalized_kind, "items": []}
 
-        def score(item: dict, requested_key: str) -> tuple[int, int, int, int, int, str]:
+        def score(item: dict, requested_key: str) -> tuple:
             text = " ".join(
                 _text(item.get(field))
                 for field in ("display_name", "label", "place", "main_category", "category_path", "description")
@@ -638,7 +650,7 @@ class ResourceCatalog:
             readable_name = int(_text(item.get("display_name")).casefold() not in {"", requested_key.casefold()})
             annotation = item.get("annotation")
             annotation_score = int(bool(annotation)) if isinstance(annotation, (dict, list, str)) else 0
-            return (chinese, semantic, readable_name, int(bool(_text(item.get("label")))), annotation_score, str(item.get("technical", {}).get("key") or ""))
+            return (int(bool(item.get("user_corrected"))), chinese, semantic, readable_name, int(bool(_text(item.get("label")))), annotation_score, str(item.get("technical", {}).get("key") or ""))
 
         lowered = {key.casefold(): key for key in requested}
         with closing(self._connect()) as connection:

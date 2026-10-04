@@ -31,9 +31,18 @@ def test_blocked_structure_scene_actions_do_not_enter_draft_or_assemble_context(
 
     # A scene row remains visible for orientation, but both entry points must
     # use the same writing gate while the work direction is unconfirmed.
-    assert 'class="writing-scene ${scene.id === state.sceneId && state.stage === \'draft\' ? \'active\' : \'\'} ${readiness.blocked ? \'writing-gate-locked\' : \'\'}"' in script
-    assert 'data-writing-gate="${esc(sceneReason)}" aria-label="进入本场未开放，点击查看原因"' in script
-    assert 'class="${scene.current_revision_id ? \'quiet\' : \'primary\'} ${readiness.blocked ? \'writing-gate-locked\' : \'\'}"' in script
+    assert (
+        "class=\"writing-scene ${scene.id === state.sceneId && state.stage === 'draft' ? 'active' : ''} ${readiness.blocked ? 'writing-gate-locked' : ''}\""
+        in script
+    )
+    assert (
+        'data-writing-gate="${esc(sceneReason)}" aria-label="进入本场未开放，点击查看原因"'
+        in script
+    )
+    assert (
+        "class=\"${scene.current_revision_id ? 'quiet' : 'primary'} ${readiness.blocked ? 'writing-gate-locked' : ''}\""
+        in script
+    )
 
 
 def test_scene_contract_keeps_advanced_ba_controls_collapsed_by_default():
@@ -70,12 +79,17 @@ def test_scene_context_selection_failure_leaves_preparing_state_and_offers_retry
     assert "context:assemble" not in bridge
 
 
-def test_work_agent_organizes_from_conversation_without_duplicate_buttons():
+def test_work_agent_guidance_requires_an_agent_selected_next_step():
     script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
 
-    assert "data-organize-conversation" not in script
-    assert "data-focus-work-composer" in script
-    assert "信息足够时 Agent 会自动整理候选" in script
+    guidance = script.split("function conversationGuidanceMarkup(message){", 1)[1].split(
+        "function publicMessageText", 1
+    )[0]
+    assert "const requested=message.content?.next_step" in guidance
+    assert "latest?.id!==message.id" in guidance
+    assert "if(!['organize','review','structure','draft'].includes(requested))return ''" in guidance
+    assert "requested==='organize'&&!pending&&!sceneList.length" in guidance
+    assert "agent-reply-next-step" in guidance
     assert "function userFacingConversationTask" in script
     assert "${esc(contract?.id||'writing')}" not in script
 
@@ -83,6 +97,8 @@ def test_work_agent_organizes_from_conversation_without_duplicate_buttons():
 def test_character_library_explains_bundled_ba_metadata_boundary():
     script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
 
-    assert "随软件提供的 BA 原作索引已可检索" in script
-    assert "背景、服装和表情差分的元数据只作参考" in script
-    assert "只有你确认的内容才会进入本作人物卡" in script
+    assert "本作品已采用" in script
+    assert "浏览随包人物参考" in script
+    assert "构思中提到角色时会自动加入" in script
+    assert "它不会自动成为人物卡、世界规则或作品事实" in script
+    assert "结果只作为参考；要进入人物卡、世界规则或作品事实，仍需你确认" in script
