@@ -1,5 +1,8 @@
 import json
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 import subprocess
 import sys
 from http.server import ThreadingHTTPServer

@@ -6,7 +6,10 @@ import sys
 
 
 def repository_root() -> Path:
-    return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])).resolve()
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root is not None:
+        return Path(frozen_root).resolve()
+    return Path(__file__).resolve().parents[2]
 
 
 def service_root(name: str) -> Path:

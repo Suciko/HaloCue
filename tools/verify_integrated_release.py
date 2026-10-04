@@ -23,18 +23,47 @@ def request(base, path, body=None):
         return response.read()
 
 
-def verify(exe, screenshots=None):
+def verify(exe, screenshots=None, *, fresh_profile=False, working_directory=None):
     exe = Path(exe).resolve()
     before = tree_digests(exe.parent)
     with tempfile.TemporaryDirectory(prefix="HaloCue 发布验收 ") as temporary:
         root = Path(temporary)
-        env = {key: value for key, value in os.environ.items() if not key.startswith("HALOCUE_")}
-        env.update(HALOCUE_USER_DATA_DIR=str(root / "用户数据"), PATH=python_free_path())
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("HALOCUE_")
+            and key
+            not in {
+                "PYTHONPATH",
+                "PYTHONHOME",
+                "VIRTUAL_ENV",
+                "ELECTRON_RUN_AS_NODE",
+            }
+        }
+        env["PATH"] = python_free_path()
+        if fresh_profile:
+            profile = root / "另一位用户"
+            local = profile / "AppData" / "Local"
+            state = local / "HaloCue"
+            env.update(
+                USERPROFILE=str(profile),
+                HOME=str(profile),
+                LOCALAPPDATA=str(local),
+                APPDATA=str(profile / "AppData" / "Roaming"),
+            )
+        else:
+            state = root / "用户数据"
+            env["HALOCUE_USER_DATA_DIR"] = str(state)
+        cwd = Path(working_directory).resolve() if working_directory else root / "无关工作目录"
+        cwd.mkdir(parents=True, exist_ok=True)
         work_id = None
         for iteration in range(2):
             ready = root / f"ready-{iteration}.json"
             process = _start(
-                exe, ["--no-update", "--no-browser", "--port", "0", "--ready-file", str(ready)], env
+                exe,
+                ["--no-update", "--no-browser", "--port", "0", "--ready-file", str(ready)],
+                env,
+                cwd=cwd,
             )
             try:
                 payload = _wait_ready(process, ready)
@@ -61,6 +90,14 @@ def verify(exe, screenshots=None):
                 require(
                     health["ba_writing_skill"]["status"] == "ready",
                     "bundled writing rules are unavailable",
+                )
+                require(
+                    (state / "integrated" / "writing").is_dir(),
+                    "writing state is outside the selected profile",
+                )
+                require(
+                    (state / "integrated" / "production").is_dir(),
+                    "production state is outside the selected profile",
                 )
                 if iteration == 0:
                     created = json.loads(request(base, "/api/v1/works", {"title": "发布重启验收"}))
@@ -111,12 +148,35 @@ def verify(exe, screenshots=None):
                     process.kill()
                     process.communicate(timeout=15)
         require(tree_digests(exe.parent) == before, "EXE wrote into its program directory")
-    return {"ok": True, "interface": "integrated", "launches": 2, "work_persisted": True}
+    return {
+        "ok": True,
+        "interface": "integrated",
+        "launches": 2,
+        "work_persisted": True,
+        "fresh_profile": fresh_profile,
+        "unrelated_working_directory": cwd != exe.parent,
+    }
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("exe", type=Path)
     parser.add_argument("--screenshots", type=Path)
+    parser.add_argument(
+        "--fresh-profile",
+        action="store_true",
+        help="use isolated LocalAppData without a HaloCue data override",
+    )
+    parser.add_argument("--working-directory", type=Path)
     args = parser.parse_args()
-    print(json.dumps(verify(args.exe, args.screenshots), ensure_ascii=True))
+    print(
+        json.dumps(
+            verify(
+                args.exe,
+                args.screenshots,
+                fresh_profile=args.fresh_profile,
+                working_directory=args.working_directory,
+            ),
+            ensure_ascii=True,
+        )
+    )

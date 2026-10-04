@@ -47,3 +47,27 @@ The review/export handoff records a two-scene run: one isolated face edit, 46 ca
 ## Activation
 
 Approval PR, active Skill path and activation commit: unset. This proposal does not install or modify an active Skill.
+
+
+## Additional portability evidence (2026-10-04)
+
+Issue [#56](https://github.com/Suciko/HaloCue/issues/56) and
+[PR #57](https://github.com/Suciko/HaloCue/pull/57) expose a missed release
+invariant: deep-directory extraction on the author machine did not exercise
+fixed-parent path assumptions. Compare the
+[Electron handoff](../../handoffs/2026-10-03-1.0-electron-icon.md) and
+[R3 receipt](../../handoffs/2026-10-04-1.0-portable-startup.md).
+
+Proposed addition for packaged-preview acceptance: validate the final ZIP at a
+physical shallow drive-root path, rename the owned copy to include Chinese and
+spaces, use an unrelated current directory, remove developer Python variables
+and PATH, and exercise normal isolated LocalAppData without a HaloCue override.
+Require restart persistence, bundled-resource health, immutable program bytes,
+owned-process cleanup and CRC/per-file manifest hashes. Refuse existing QA roots
+and verify containment before relocation or recursive cleanup. The reusable
+first-party command is `tools/verify_portable_release.py`; R3's C/E-drive dry run
+passes eight headless starts, alongside four native window starts and frozen
+AA/MCP acceptance. This covers controlled local conditions, not a collaborator's
+ACLs, antivirus or Windows version. Keep actual receiving-machine retest and
+remote CI status explicit. No new third-party reference, asset or active Skill
+is introduced; this candidate remains proposed and inactive for owner review.

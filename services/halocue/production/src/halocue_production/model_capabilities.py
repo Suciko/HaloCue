@@ -3,12 +3,12 @@
 from __future__ import annotations
 import importlib.util
 import sys
-from pathlib import Path
+from services.halocue.runtime_layout import repository_root
 from .errors import ProductionError
 
 _name = "_halocue_shared_model_capabilities"
 if _name not in sys.modules:
-    _root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[5]))
+    _root = repository_root()
     _spec = importlib.util.spec_from_file_location(_name, _root / "model_capabilities.py")
     _module = importlib.util.module_from_spec(_spec)
     sys.modules[_name] = _module

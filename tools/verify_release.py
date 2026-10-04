@@ -210,11 +210,11 @@ def _check_command(exe: Path, selection_flag: str, selection: Path, env: dict) -
     return payload
 
 
-def _start(exe: Path, args: list[str], env: dict) -> subprocess.Popen:
+def _start(exe: Path, args: list[str], env: dict, *, cwd: Path | None = None) -> subprocess.Popen:
     flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     return subprocess.Popen(
         [str(exe), *args],
-        cwd=exe.parent,
+        cwd=exe.parent if cwd is None else cwd,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
