@@ -6,3 +6,4 @@ jsonschema>=4,<5
 PyInstaller>=6,<7
 pywebview==6.2.1; sys_platform == "win32"
 ruff>=0.12,<1
+tomli>=2,<3; python_version < "3.11"
