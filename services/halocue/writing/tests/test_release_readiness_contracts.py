@@ -13,7 +13,9 @@ def _slice(text, start, end):
 def test_release_ui_primary_surfaces_have_one_user_facing_status_path():
     app = (ROOT / "app.js").read_text(encoding="utf-8")
     surface = _slice(app, "function renderFinalWorkAgentSurface()", "function renderFinalWorkAgentRail")
-    assert "const statusMarkup=workUserStatusMarkup();" in surface
+    # Once the Agent has replied, its compact next action owns the guidance path.
+    assert "const guideMessage=[...messages].reverse().find(message=>message.role==='assistant');" in surface
+    assert "const statusMarkup=guideMessage?'':workUserStatusMarkup();" in surface
     assert "const runtimeMarkup=agentRuntimeBarMarkup(thread);" in surface
     assert "${statusMarkup}" in surface
     assert "${runtimeMarkup}" in surface
