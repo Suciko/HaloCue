@@ -658,6 +658,35 @@ html[data-theme="dark"] #app .production-more-actions > div button:focus-visible
   line-height: 1.6;
 }
 .library-reference-access button { flex-shrink: 0; }
+
+/* Character and world imports share these controls outside the app surface. */
+html[data-theme="dark"] dialog:is(#characterImportDialog,#worldImportDialog) .character-import-dropzone {
+  background: var(--surface-soft);
+  border-color: var(--line-strong);
+}
+html[data-theme="dark"] dialog:is(#characterImportDialog,#worldImportDialog) .character-import-dropzone.dragging {
+  background: var(--hc-selected);
+  border-color: var(--accent);
+}
+html[data-theme="dark"] dialog:is(#characterImportDialog,#worldImportDialog) .character-import-file-mark {
+  border-color: var(--line-strong);
+}
+html[data-theme="dark"] dialog:is(#characterImportDialog,#worldImportDialog) .character-import-status.pass {
+  background: var(--success-soft);
+  border-color: var(--success);
+  color: var(--success) !important;
+}
+html[data-theme="dark"] dialog:is(#characterImportDialog,#worldImportDialog) :is(.character-import-status.fail,.character-import-error,.character-import-issues) {
+  background: var(--hc-danger-soft);
+  border-color: var(--red);
+  color: var(--red) !important;
+}
+html[data-theme="dark"] dialog:is(#characterImportDialog,#worldImportDialog) :is(.character-import-readiness .ready b,.character-import-status.pass b) {
+  color: var(--success) !important;
+}
+html[data-theme="dark"] dialog:is(#characterImportDialog,#worldImportDialog) .character-import-issues > b {
+  color: var(--red) !important;
+}
 @media (max-width: 640px) {
   .library-reference-access { align-items: flex-start; flex-direction: column; }
 }

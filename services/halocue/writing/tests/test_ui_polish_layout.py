@@ -142,6 +142,43 @@ def test_dark_next_action_has_dark_surface_and_readable_text(viewport):
         finally:
             browser.close()
 
+@pytest.mark.parametrize("dialog_id", ["characterImportDialog", "worldImportDialog"])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_import_controls_remain_readable_in_both_themes(dialog_id, theme):
+    pw = pytest.importorskip("playwright.sync_api")
+    web = Path(__file__).resolve().parents[1] / "web"
+    source = (web / "index.html").read_text(encoding="utf-8")
+    styles = "\n".join(
+        (web / name.split("?")[0].lstrip("/")).read_text(encoding="utf-8")
+        for name in re.findall(r'<link rel="stylesheet" href="([^"]+)"', source)
+    )
+    with pw.sync_playwright() as driver:
+        browser = driver.chromium.launch(headless=True)
+        try:
+            page = browser.new_page(viewport={"width": 1600, "height": 900})
+            page.set_content(f'''<html data-theme="{theme}"><body><dialog id="{dialog_id}" open>
+              <label class="character-import-dropzone"><b>选择资料文件</b><small>完整人物资料</small></label>
+              <div class="character-import-preview"><header><strong class="character-import-status pass">验证通过</strong>
+              <strong class="character-import-status fail">验证失败</strong></header></div></dialog></body></html>''')
+            page.add_style_tag(content=styles)
+            colors = page.locator(".character-import-dropzone,.character-import-status").evaluate_all('''nodes => nodes.map(node => {
+              const rgb = value => value.match(/[\\d.]+/g).slice(0,3).map(Number);
+              return {background:rgb(getComputedStyle(node).backgroundColor),
+                foreground:rgb(getComputedStyle(node.querySelector('b') || node).color)};
+            })''')
+            def luminance(rgb):
+                values = [v / 255 for v in rgb]
+                values = [v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in values]
+                return sum(v * weight for v, weight in zip(values, (0.2126, 0.7152, 0.0722)))
+            for item in colors:
+                background, foreground = map(luminance, (item["background"], item["foreground"]))
+                if theme == "dark":
+                    assert background < 0.15, item
+                assert (max(foreground, background) + 0.05) / (min(foreground, background) + 0.05) >= 4.5, item
+        finally:
+            browser.close()
+
+
 def test_project_home_typography_uses_one_ui_font():
     """The redesigned project home must not leak legacy mono/serif UI typography."""
     pw = pytest.importorskip("playwright.sync_api")
