@@ -327,8 +327,6 @@ def _bundled_metadata_database() -> Path | None:
         candidates.append(repository_root() / "data" / "halocue_labels.db")
     except (ImportError, OSError):
         pass
-    # Source-tree fallback for direct module execution and test runners.
-    candidates.append(Path(__file__).resolve().parents[5] / "data" / "halocue_labels.db")
     for candidate in candidates:
         try:
             if candidate.is_file():
