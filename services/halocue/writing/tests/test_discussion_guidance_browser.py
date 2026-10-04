@@ -17,10 +17,14 @@ from test_scene_conversation_harness import create_ready_scene
 
 
 class WrappedProvider(QuietProvider):
+    next_step = "structure"
+
     def discuss_work(self, messages, context):
         self.calls = getattr(self, "calls", 0) + 1
         return {
-            "text": "对白保持简短。\n```json\n" + json.dumps(REPLY, ensure_ascii=False) + "\n```",
+            "text": "对白保持简短。\n```json\n"
+            + json.dumps({**REPLY, "next_step": self.next_step}, ensure_ascii=False)
+            + "\n```",
             "questions": [],
         }
 
@@ -95,7 +99,9 @@ def test_legacy_json_projects_without_rewriting_history_and_open_draft(flow_serv
     message = work["conversation_threads"][0]["messages"][-1]
     legacy = {
         **message["content"],
-        "text": "对白保持简短。\n```json\n" + json.dumps(REPLY, ensure_ascii=False) + "\n```",
+        "text": "对白保持简短。\n```json\n"
+        + json.dumps({**REPLY, "next_step": "draft"}, ensure_ascii=False)
+        + "\n```",
         "questions": [],
     }
     with service.repo.transaction() as connection:
@@ -117,9 +123,13 @@ def test_legacy_json_projects_without_rewriting_history_and_open_draft(flow_serv
     ).click()
     page.wait_for_url(f"**stage=draft**scene_id={scene_id}**")
     expect(page.locator(f'[data-chapter-scene="{scene_id}"]')).to_be_visible()
+    expect(page.get_by_role("button", name="回看构思", exact=True)).to_be_visible()
     assert provider.calls == calls
     assert not service.get_work(work_id)["chapters"][0]["scenes"][0]["current_revision_id"]
     screenshot(page, f"discussion-open-draft-{theme}")
+    page.get_by_role("button", name="回看构思", exact=True).click()
+    page.wait_for_url("**section=works**")
+    expect(page.locator(".conversation-message.user").last).to_contain_text("直接开始写正文")
     page.close()
 
 
@@ -165,7 +175,9 @@ def test_recovered_choice_sends_and_is_not_repeated(flow_server, browser):
 def test_author_can_organize_then_review_without_writing_formal_direction(flow_server, browser):
     from playwright.sync_api import expect
 
-    service, _provider, work, url = flow_server
+    service, provider, work, url = flow_server
+    provider.next_step = "organize"
+    work = send(service, work, "方向差不多了，整理一下。")
     page = open_page(browser, f"{url}/?section=works&work_id={work['id']}", "dark", (1440, 900))
     page.locator(".agent-reply-next-step").last.get_by_role(
         "button", name="整理当前构思", exact=True
@@ -191,4 +203,26 @@ def test_author_can_organize_then_review_without_writing_formal_direction(flow_s
         page.locator("[data-accept-director-proposal]").filter(visible=True).first
     ).to_be_in_viewport()
     screenshot(page, "discussion-organize-review-dark")
+    page.close()
+
+
+@pytest.mark.parametrize("size", [(1280, 720), (1920, 1080)])
+def test_agent_controls_single_small_button_at_16_by_9(flow_server, browser, size):
+    from playwright.sync_api import expect
+
+    service, provider, work, url = flow_server
+    provider.next_step = None
+    work = send(service, work, "人物还有哪些可能？")
+    page = open_page(browser, f"{url}/?section=works&work_id={work['id']}", "dark", size)
+    expect(page.locator(".agent-reply-next-step")).to_have_count(0)
+    provider.next_step = "organize"
+    send(service, work, "方向已经清楚，可以继续。")
+    page.reload()
+    button = page.locator(".agent-reply-next-step").last
+    expect(button.locator("button")).to_have_count(1)
+    expect(button.locator("p,b,section")).to_have_count(0)
+    height = button.evaluate("element => element.getBoundingClientRect().height")
+    assert height <= 44
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    screenshot(page, f"discussion-single-button-dark-{size[0]}x{size[1]}")
     page.close()

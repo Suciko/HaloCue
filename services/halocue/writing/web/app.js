@@ -793,6 +793,17 @@ async function openIntentTarget(button){
   const chapter=state.work.chapters.find(item=>item.id===scene.chapter_id);
   try{
     button.disabled=true;
+    const sourceId=button.dataset.discussionSource;
+    if(sourceId){
+      const targetThread=(state.work.conversation_threads||[]).find(item=>item.scope_type==='scene'&&item.scope_id===scene.id&&item.status==='active');
+      const linked=[...(targetThread?.messages||[])].reverse().find(item=>item.kind==='discussion_link')?.content?.discussion_source;
+      if(linked?.thread_id!==sourceId){
+        const path=targetThread?`/works/${state.work.id}/threads/${targetThread.id}`:`/works/${state.work.id}/threads`;
+        const body=targetThread?{expected_thread_version:targetThread.version}:{expected_version:state.work.version,scope_type:'scene',scope_id:scene.id,title:`${scene.title} · 写作讨论`,permission_mode:'review'};
+        const result=await api(path,{method:targetThread?'PATCH':'POST',body:JSON.stringify({...body,discussion_source_thread_id:sourceId})});
+        state.work=result.work;
+      }
+    }
     if(chapter)await persistWritingTarget(chapter.id,scene.id);
     state.writingChapterId=chapter?.id||scene.chapter_id;
     state.sceneId=scene.id;state.context=null;state.inspector='agent';state.surface='writing';state.mobileView='writing';
@@ -4400,7 +4411,7 @@ function discussionMessageView(message){
       if(depth!==0)continue;
       try{
         const value=JSON.parse(source.slice(start,i+1));
-        const fields=['questions','decision_card','reasoning_summary','ready_for_proposal','ready_to_organize'];
+        const fields=['questions','decision_card','reasoning_summary','ready_for_proposal','ready_to_organize','next_step'];
         if(typeof value.text==='string'&&fields.some(key=>Object.hasOwn(value,key))){
           let left=source.slice(0,start),right=source.slice(i+1);
           if(/```(?:json)?\s*$/i.test(left)&&/^\s*```/.test(right)){left=left.replace(/```(?:json)?\s*$/i,'');right=right.replace(/^\s*```/,'');}
@@ -4418,7 +4429,7 @@ function discussionMessageView(message){
     }
   }
   if(found.length===1)return found[0];
-  if(/"text"\s*:/.test(source)&&/"(?:questions|decision_card|ready_for_proposal|ready_to_organize)"\s*:/.test(source)){
+  if(/"text"\s*:/.test(source)&&/"(?:questions|decision_card|ready_for_proposal|ready_to_organize|next_step)"\s*:/.test(source)){
     return {...message,content:{...message.content,text:'这条回复的格式未能完整解析，请重新发送本轮要求。',questions:[],decision_card:null}};
   }
   return message;
@@ -4445,25 +4456,20 @@ function conversationGuidanceMarkup(message){
   if(latest?.id!==message.id||message.content?.decision_card)return '';
   const run=agentRunForMessage(message);
   if(run?.status==='failed'&&!agentFailureNeedsRecovery(run))return '';
-  const next=workAgentNextAction();
+  const requested=message.content?.next_step;
+  if(!['organize','review','structure','draft'].includes(requested))return '';
   const sceneList=scenes(),scene=nextWritingScene(state.work.chapters||[],writingTarget().anchor_scene_id);
   const pending=(state.work.proposals||[]).some(item=>item.status==='pending');
   const receipt=message.content?.character_resolution;
   const blocked=receipt?.blocked?.length||receipt?.ambiguous?.length||receipt?.available===false;
-  const canOrganize=(thread.messages||[]).some(item=>item.role==='user')&&!state.composerImportMode&&!message.content?.import_review&&!message.content?.task_contract?.task_scope?.import_mode;
-  const main=blocked
-    ? {title:'先准备人物资料',detail:'已有卡需要检查或人物身份需要选择，处理后可继续起草。',label:'检查人物资料',action:'data-agent-open-library="characters"'}
-    : pending?next
-    : scene&&stageGate('draft').allowed
-      ? {title:'可以进入正文写作',detail:`${scene.chapterTitle} · ${scene.title}。打开后可以让 Agent 起草，也可以直接手写。`,label:'进入正文写作',action:`data-intent-open-scene="${esc(scene.id)}"`}
-      : canOrganize&&!sceneList.length
-        ? {title:blueprintIsConfirmed()?'接下来安排章节与场景':'构思差不多后，可以继续',detail:'把当前讨论整理成候选，检查并采纳后再进入下一步。',label:blueprintIsConfirmed()?'整理章节安排':'整理当前构思',action:'data-organize-conversation'}
-      : next;
+  if(blocked||state.composerImportMode||message.content?.import_review||message.content?.task_contract?.task_scope?.import_mode)return '';
+  let main=null;
+  if(pending&&['review','organize'].includes(requested))main=workAgentNextAction();
+  else if(requested==='draft'&&scene&&stageGate('draft').allowed)main={label:'进入正文写作',action:`data-intent-open-scene="${esc(scene.id)}" data-discussion-source="${esc(thread.id)}"`};
+  else if(requested==='organize'&&!pending&&!sceneList.length)main={label:blueprintIsConfirmed()?'整理章节安排':'整理当前构思',action:'data-organize-conversation'};
+  else if(requested==='structure')main={label:'进入章节大纲',action:'data-stage-jump="structure"'};
   if(!main)return '';
-  const secondary=sceneList.length&&!blocked&&pending?'<button type="button" class="quiet" data-stage-jump="draft">查看正文写作</button>':'';
-  const outline=!sceneList.length?'<button type="button" class="quiet" data-stage-jump="structure">进入章节大纲</button>':'';
-  const model=state.capabilities?.providers?.[0]?.is_simulation?'<p class="agent-next-model">当前为本地模拟，AI 起草前请先选择真实模型。<button type="button" class="quiet" data-agent-model-picker>选择写作模型</button></p>':'';
-  return `<section class="agent-reply-next-step" aria-label="下一步"><div><b>${esc(main.title)}</b><p>${esc(main.detail)}</p></div><div class="agent-next-actions"><button type="button" class="primary" ${main.action}>${esc(main.label)}</button>${secondary}${outline}</div>${model}</section>`;
+  return `<div class="agent-reply-next-step"><button type="button" class="quiet" ${main.action}>${esc(main.label)} <span aria-hidden="true">↗</span></button></div>`;
 }
 
 function publicMessageText(message){
@@ -4695,6 +4701,8 @@ function sceneUserMessageMarkup(body){
 }
 
 function sceneConversationMessageMarkup(message,expandedIds=new Set()){
+  message=discussionMessageView(message);
+  if(message.kind==='discussion_link')return `<p class="scene-discussion-link">已承接构思对话 <button type="button" class="quiet" data-open-source-discussion="${esc(message.content?.discussion_source?.thread_id||'')}">回看构思</button></p>`;
   const assistant=message.role==='assistant',content=message.content||{},tools=content.tool_activity||[],thinking=content.reasoning_summary||'',rawBody=String(messageText(message)||'');
   // Preserve the stored response, but keep historical implementation prefaces
   // out of the manuscript conversation's primary reading surface.
@@ -8388,7 +8396,7 @@ function renderFinalWorkAgentSurface(){
   const threadDecision=floatingDecision?'':decision;
   const hasPending=Boolean(activeWorkDecision({includeDismissed:true}));
   const guideMessage=[...messages].reverse().find(message=>message.role==='assistant');
-  const statusMarkup=guideMessage&&conversationGuidanceMarkup(discussionMessageView(guideMessage))?'':workUserStatusMarkup();
+  const statusMarkup=guideMessage?'':workUserStatusMarkup();
   const runtimeMarkup=agentRuntimeBarMarkup(thread);
   const legacyFormatNotice=messages.some(message=>isDefaultScriptFormatQuestion(message,thread))?'<p class="agent-format-note">默认按剧本推进，无需回答历史消息中的文体选择。</p>':'';
   const starters=`<div class="hc-starters" aria-label="开始讨论"><button type="button" data-agent-continue-draft="我有一个故事想法，请先和我讨论核心冲突，不要直接写章节正文。">聊聊故事想法<span aria-hidden="true">↗</span></button><button type="button" data-agent-continue-draft="和我讨论主要人物的愿望、矛盾和关系变化。">从人物开始<span aria-hidden="true">↗</span></button><button type="button" data-agent-continue-draft="和我一起设计这个世界的规则、限制与日常细节。">搭建世界观<span aria-hidden="true">↗</span></button></div>`;
@@ -8615,6 +8623,15 @@ registerAppClick(event=>{
   }
   const intentTarget=event.target.closest('[data-intent-open-scene]');
   if(intentTarget&&intentTarget.tagName==='BUTTON'&&state.work){event.preventDefault();claimAppEvent(event);void openIntentTarget(intentTarget);return;}
+  const sourceDiscussion=event.target.closest('[data-open-source-discussion]');
+  if(sourceDiscussion&&state.work){
+    event.preventDefault();claimAppEvent(event);
+    const source=(state.work.conversation_threads||[]).find(item=>item.id===sourceDiscussion.dataset.openSourceDiscussion);
+    if(!source){toast('构思对话暂不可用，请重新加载作品。',true);return;}
+    state.conversationThreadId=source.id;state.agentPresentation=null;state.surface='works';state.stage='overview';
+    history.pushState({halocue:true},'',`?section=works&work_id=${encodeURIComponent(state.work.id)}`);
+    render();return;
+  }
   const decisionDismiss=event.target.closest('[data-decision-dismiss]');
   if(decisionDismiss&&state.work){
     event.preventDefault();claimAppEvent(event);

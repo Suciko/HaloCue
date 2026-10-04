@@ -21,6 +21,7 @@ REPLY = {
     "reasoning_summary": "人物与结束边界已明确。",
     "ready_for_proposal": True,
     "ready_to_organize": False,
+    "next_step": "structure",
 }
 
 
@@ -220,3 +221,157 @@ def test_automatically_imported_profiles_satisfy_runtime_character_readiness(pre
     assert not context["readiness"]["missing_runtime_character_cards"]
     assert {card["name"] for card in context["runtime_character_cards"]} == {"空崎日奈", "天雨亚子"}
     assert context["readiness"]["real_ba_writing"] == "ready_for_provider"
+
+
+def test_next_step_is_optional_and_only_known_actions_are_accepted():
+    from halocue_writing.errors import DomainError
+
+    assert (
+        WritingService._validate_discussion_reply({"text": "继续讨论", "next_step": None})[
+            "next_step"
+        ]
+        is None
+    )
+    for action in ("organize", "review", "structure", "draft"):
+        assert (
+            WritingService._validate_discussion_reply({"text": "可以继续", "next_step": action})[
+                "next_step"
+            ]
+            == action
+        )
+    for invalid in ("http://example.invalid", "delete", {}, True):
+        with pytest.raises(DomainError, match="下一步"):
+            WritingService._validate_discussion_reply({"text": "可以继续", "next_step": invalid})
+
+
+def test_scene_inherits_selected_ideation_and_can_retrieve_originals_after_restart(tmp_path):
+    from halocue_writing.agent_tools import ToolExecutionContext
+    from halocue_writing.errors import DomainError
+    from test_scene_conversation_harness import create_ready_scene
+
+    service = WritingService(tmp_path / "data")
+    service.provider = QuietProvider()
+    work_id, scene_id, work = create_ready_scene(service)
+    work = send(service, work, "结尾停在提示灯第一次回应，不要添加反派。")
+    source = next(item for item in work["conversation_threads"] if item["scope_type"] == "work")
+    source_message = next(item for item in source["messages"] if item["role"] == "user")
+    foreign = service.create_work({"title": "其他作品"})
+    foreign = send(service, foreign, "这是另一作品，不能带入。")
+    with pytest.raises(DomainError, match="承接"):
+        service.create_conversation_thread(
+            work_id,
+            {
+                "expected_version": work["version"],
+                "scope_type": "scene",
+                "scope_id": scene_id,
+                "discussion_source_thread_id": foreign["conversation_threads"][0]["id"],
+            },
+        )
+    created = service.create_conversation_thread(
+        work_id,
+        {
+            "expected_version": work["version"],
+            "scope_type": "scene",
+            "scope_id": scene_id,
+            "discussion_source_thread_id": source["id"],
+        },
+    )
+    target = next(
+        item
+        for item in created["work"]["conversation_threads"]
+        if item["id"] == created["thread_id"]
+    )
+    service.post_conversation_message(
+        work_id,
+        target["id"],
+        {
+            "expected_thread_version": target["version"],
+            "text": "沿用前面的要求，先讨论本场节奏，不要写正文。",
+        },
+    )
+    continuation = service.provider.context["scene_conversation_context"]["discussion_continuation"]
+    import jsonschema
+
+    schema = json.loads(
+        (
+            Path(__file__).resolve().parents[1]
+            / "docs/contracts/discussion-continuation-1.0.schema.json"
+        ).read_text(encoding="utf-8")
+    )
+    jsonschema.validate(continuation, schema)
+    jsonschema.validate(
+        target["messages"][-1]["content"]["discussion_source"], schema["$defs"]["source_link"]
+    )
+    assert continuation["thread_id"] == source["id"]
+    assert source_message["content"]["text"] in [
+        item["text"] for item in continuation["recent_messages"]
+    ]
+    assert all(
+        item["id"] != foreign["conversation_threads"][0]["messages"][0]["id"]
+        for item in continuation["recent_messages"]
+    )
+    with service.repo.transaction() as connection:
+        tool_context = ToolExecutionContext(
+            connection, service, work_id, target["id"], "scene", scene_id, "review"
+        )
+        result = service.agent_tools.execute(
+            tool_context,
+            "read_conversation_history",
+            {"message_id": source_message["id"], "length": 8},
+        )
+        assert result.status == "succeeded"
+        assert result.output["text"] == source_message["content"]["text"][:8]
+        foreign_result = service.agent_tools.execute(
+            tool_context,
+            "read_conversation_history",
+            {"message_id": foreign["conversation_threads"][0]["messages"][0]["id"]},
+        )
+        assert foreign_result.status == "failed"
+    service.close()
+    restored = WritingService(tmp_path / "data")
+
+    class DraftCapturingProvider(QuietProvider):
+        def generate_scene(self, context):
+            self.draft_context = context
+            return super().generate_scene(context)
+
+    restored.provider = DraftCapturingProvider()
+    target = next(
+        item
+        for item in restored.get_work(work_id)["conversation_threads"]
+        if item["id"] == target["id"]
+    )
+    restored.post_conversation_message(
+        work_id,
+        target["id"],
+        {"expected_thread_version": target["version"], "text": "仍然先讨论节奏，不要写正文。"},
+    )
+    assert (
+        restored.provider.context["scene_conversation_context"]["discussion_continuation"][
+            "thread_id"
+        ]
+        == source["id"]
+    )
+    current = restored.get_work(work_id)
+    target = next(item for item in current["conversation_threads"] if item["id"] == target["id"])
+    result = restored.generate_scene_proposal_from_conversation(
+        work_id,
+        target["id"],
+        {
+            "expected_version": current["version"],
+            "expected_thread_version": target["version"],
+            "instruction": "现在按构思里保留的边界起草这一场。",
+        },
+    )
+    assert (
+        restored.provider.draft_context["scene_conversation_context"]["discussion_continuation"][
+            "thread_id"
+        ]
+        == source["id"]
+    )
+    assert any(
+        item["id"] == result["proposal_id"] and item["status"] == "pending"
+        for item in result["work"]["proposals"]
+    )
+    assert not result["work"]["chapters"][0]["scenes"][0]["current_revision_id"]
+    restored.close()

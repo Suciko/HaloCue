@@ -302,7 +302,7 @@ class AgentToolRegistry:
         }
         self.register(ToolSpec("load_workflow_template", "加载当前阶段任务契约", read_schema), lambda c, a: {"scope": c.scope_type})
         self.register(ToolSpec("read_work_context", "读取当前作品正式上下文", read_schema), self._read_work_context)
-        self.register(ToolSpec("read_conversation_history", "读取当前对话历史；摘要标记不完整时，用其中的 message_id 分段回查原始消息。", {
+        self.register(ToolSpec("read_conversation_history", "读取当前对话历史；也可用 message_id 分段回查本场主动承接的构思原始消息，不读取其他对话。", {
             "type": "object", "properties": {"message_id": {"type": "string"},
                 "offset": {"type": "integer", "minimum": 0},
                 "length": {"type": "integer", "minimum": 1, "maximum": 6000}},
@@ -422,9 +422,16 @@ class AgentToolRegistry:
         message_id = arguments.get("message_id")
         if not message_id:
             return context.history[-12:]
-        row = context.connection.execute("SELECT role,content_json FROM conversation_messages WHERE thread_id=? AND id=?", (context.thread_id, message_id)).fetchone()
-        if not row:
-            raise ValueError("原始消息不属于当前对话。")
+        allowed_threads = {context.thread_id}
+        if context.scope_type == "scene":
+            from .discussion_continuation import source_link
+
+            linked = source_link(context.connection, context.thread_id)
+            if linked:
+                allowed_threads.add(linked["thread_id"])
+        row = context.connection.execute("SELECT message.thread_id,message.role,message.content_json FROM conversation_messages AS message JOIN conversation_threads AS thread ON thread.id=message.thread_id WHERE thread.work_id=? AND message.id=?", (context.work_id, message_id)).fetchone()
+        if not row or row["thread_id"] not in allowed_threads:
+            raise ValueError("原始消息不属于当前对话或主动承接的构思对话。")
         text = str(__import__("json").loads(row["content_json"] or "{}").get("text") or "")
         start = int(arguments.get("offset", 0))
         end = start + min(6000, int(arguments.get("length", 6000)))

@@ -3588,7 +3588,7 @@ class WritingService:
         )
         return contract
 
-    def _scene_conversation_context(self, connection, work_id: str, task_contract: dict) -> dict | None:
+    def _scene_conversation_context(self, connection, work_id: str, task_contract: dict, *, discussion_thread_id: str | None = None) -> dict | None:
         scope = task_contract.get("task_scope") if isinstance(task_contract.get("task_scope"), dict) else {}
         if scope.get("surface") != "scene":
             return None
@@ -3731,8 +3731,12 @@ class WritingService:
             pending_text_edit = {"id": pending_row["id"], "base_revision_id": pending_row["base_revision_id"],
                                  "content": {"blocks": self._scene_blocks_from_text(pending_text, pending_row["id"])}}
 
+        from .discussion_continuation import read_continuation
+
+        continuation = read_continuation(self, connection, work_id, discussion_thread_id) if discussion_thread_id else None
         return {
             "schema_version": "scene-conversation-context/1.0",
+            **({"discussion_continuation": continuation} if continuation else {}),
             "scene": {
                 "id": scene["id"],
                 "title": scene["title"],
@@ -4929,6 +4933,10 @@ class WritingService:
                 connection, thread_id, "assistant", "notice",
                 {"text": "新的讨论已经建立。我会读取当前作品的正式上下文，但不会把其他对话当作已经确认的事实。"},
             )
+            if payload.get("discussion_source_thread_id"):
+                from .discussion_continuation import link_source
+
+                link_source(self, connection, work_id, thread_id, str(payload["discussion_source_thread_id"]))
             self._bump_work(connection, work_id, version)
         return {"thread_id": thread_id, "work": self.get_work(work_id)}
 
@@ -4943,6 +4951,11 @@ class WritingService:
                 raise DomainError("validation_error", "对话名称不能超过 80 个字符。", details={"field": "title"})
             if status not in {"active", "archived"}:
                 raise DomainError("validation_error", "对话状态无效。", details={"field": "status"})
+            if payload.get("discussion_source_thread_id"):
+                from .discussion_continuation import link_source
+
+                self._conversation_policy(connection, thread, retry=True)
+                link_source(self, connection, work_id, thread_id, str(payload["discussion_source_thread_id"]))
             timestamp = now()
             connection.execute(
                 "UPDATE conversation_threads SET title=?,status=?,version=version+1,updated_at=? WHERE id=?",
@@ -5232,7 +5245,7 @@ class WritingService:
                     task_contract, text, first_idea=first_idea, history=history, attachments=attachments
                 )
                 scene_memory_context = self._scene_memory_context(connection, work_id, task_contract)
-                scene_conversation_context = self._scene_conversation_context(connection, work_id, task_contract)
+                scene_conversation_context = self._scene_conversation_context(connection, work_id, task_contract, discussion_thread_id=thread_id)
                 document_context = retrieve_context(
                     self.repo, connection, work_id, thread_id, text, attachment_ids
                 )
@@ -5245,6 +5258,9 @@ class WritingService:
                 "attachments": attachments,
                 "document_context": document_context,
             }
+            from .discussion_response import available_next_steps
+
+            provider_context["available_next_steps"] = available_next_steps(task_contract)
             if card_assistance:
                 provider_context["card_assistance"] = card_assistance
             if scene_memory_context:
@@ -5737,7 +5753,7 @@ class WritingService:
                 self._effective_conversation_scope(thread, None),
             )
             scene_context = self._scene_conversation_context(
-                connection, work_id, task_contract
+                connection, work_id, task_contract, discussion_thread_id=thread_id
             )
             if direct_instruction:
                 self._append_conversation_message(
@@ -6164,6 +6180,11 @@ class WritingService:
         decision_card = result.get("decision_card")
         if decision_card is not None:
             result["decision_card"] = WritingService._validate_decision_card(decision_card)
+        from .discussion_response import NEXT_STEPS
+
+        next_step = result.get("next_step")
+        if next_step is not None and (not isinstance(next_step, str) or next_step not in NEXT_STEPS):
+            raise DomainError("provider_output_invalid", "作品讨论回复的下一步入口无效。", status=502, details={"field": "next_step"})
         if "ready_for_proposal" in result and not isinstance(result["ready_for_proposal"], bool):
             raise DomainError(
                 "provider_output_invalid",
@@ -7706,7 +7727,7 @@ class WritingService:
             )
             self._append_conversation_message(
                 connection, thread_id, "assistant", "proposal",
-                {"text": "我已整理成可审查的写作想法与故事方向，采纳前不会写入正式产物。", "proposal_id": proposal_id},
+                {"text": "我已整理成可审查的写作想法与故事方向，采纳前不会写入正式产物。", "proposal_id": proposal_id, "next_step": "review"},
                 provider=provider.descriptor(), proposal_id=proposal_id,
             )
             connection.execute(
@@ -8155,7 +8176,7 @@ class WritingService:
                 )
                 self._append_conversation_message(
                     connection, thread_id, "assistant", "proposal",
-                    {"text": "我已把讨论整理成卷、章与场景结构候选。稳定 ID 已由系统固定，采纳前不会建立任何场景。", "proposal_id": proposal_id},
+                    {"text": "我已把讨论整理成卷、章与场景结构候选。稳定 ID 已由系统固定，采纳前不会建立任何场景。", "proposal_id": proposal_id, "next_step": "review"},
                     provider=provider.descriptor(), proposal_id=proposal_id, usage=usage,
                 )
                 connection.execute("UPDATE conversation_threads SET phase='execute',version=version+1,updated_at=? WHERE id=?", (now(), current_thread["id"]))

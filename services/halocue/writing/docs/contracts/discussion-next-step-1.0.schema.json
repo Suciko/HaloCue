@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://halocue.local/contracts/discussion-next-step-1.0.schema.json",
+  "title": "Optional discussion reply next_step field",
+  "enum": [null, "organize", "review", "structure", "draft"]
+}

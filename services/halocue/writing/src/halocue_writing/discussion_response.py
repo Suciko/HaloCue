@@ -12,8 +12,20 @@ PUBLIC_FIELDS = {
     "reasoning_summary",
     "ready_for_proposal",
     "ready_to_organize",
+    "next_step",
 }
 SIGNALS = PUBLIC_FIELDS - {"text"}
+NEXT_STEPS = {"organize", "review", "structure", "draft"}
+
+
+def available_next_steps(task_contract: dict) -> list[str]:
+    scope = task_contract.get("task_scope") or {}
+    if scope.get("surface") not in {"work", "chapter", "auto"} or scope.get("import_mode"):
+        return []
+    workflow = task_contract.get("workflow_state") or {}
+    if workflow.get("pending_proposal_count"):
+        return ["review"]
+    return ["draft"] if workflow.get("scene_count") else ["organize", "structure"]
 
 
 def extract_discussion_envelope(text: str) -> tuple[dict, str] | None:
