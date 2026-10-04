@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {randomUUID} = require('node:crypto');
 const {pathToFileURL} = require('node:url');
-const {waitForReady, stopOwnedService, sameOrigin, validBounds, availablePort, resolveUserRoot, allowPermission, startupAppearance} = require('./runtime.cjs');
+const {waitForReady, stopOwnedService, sameOrigin, validBounds, availablePort, resolveUserRoot, allowPermission, startupAppearance, captureTestPage} = require('./runtime.cjs');
 const {version} = require('./package.json');
 
 const started = performance.now();
@@ -112,7 +112,8 @@ if (diagnostic) {
       titleBarStyle: 'hidden', titleBarOverlay: {color: currentAppearance.color, symbolColor: currentAppearance.symbolColor, height: 55},
       webPreferences: {preload: path.join(__dirname, 'preload.cjs'),
         additionalArguments: ['--halocue-appearance='+encodeURIComponent(JSON.stringify(currentAppearance))],
-        nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true},
+        nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true,
+        backgroundThrottling: !selfTest},
     });
     window.on('close', () => {
       if (!window.isDestroyed()) {
@@ -177,7 +178,7 @@ if (diagnostic) {
             header:getComputedStyle(header).backgroundColor, headerHeight:header.getBoundingClientRect().height};
         })()`);
         fs.writeFileSync(path.join(stateDir, 'restoration-self-test.json'), JSON.stringify(result, null, 2));
-        fs.writeFileSync(path.join(stateDir, 'restoring.png'), (await window.webContents.capturePage()).toPNG());
+        fs.writeFileSync(path.join(stateDir, 'restoring.png'), (await captureTestPage(window.webContents)).toPNG());
         if (!result.loading || !result.visible || result.title !== '正在打开工作台' || !result.icon.startsWith('/halocue-icon.svg') ||
             !result.iconLoaded || result.iconWidth !== 72 || result.titleSize !== '21px' || result.headerHeight !== 56 ||
             result.theme !== bootEvidence.theme || result.background !== bootEvidence.background || result.header !== bootEvidence.header) {
@@ -196,7 +197,7 @@ if (diagnostic) {
         // Capture only after the visible boot page has reached the compositor.
         await new Promise(resolve => setTimeout(resolve, 200));
         bootEvidence = await window.webContents.executeJavaScript("({theme:document.documentElement.dataset.theme, background:getComputedStyle(document.body).backgroundColor, header:getComputedStyle(document.querySelector('header')).backgroundColor})");
-        fs.writeFileSync(path.join(stateDir, 'boot.png'), (await window.webContents.capturePage()).toPNG());
+        fs.writeFileSync(path.join(stateDir, 'boot.png'), (await captureTestPage(window.webContents)).toPNG());
       }
     });
     const readyFile = path.join(stateDir, `ready-${randomUUID()}.json`);
@@ -236,6 +237,9 @@ if (diagnostic) {
       const timeout = setTimeout(() => reject(new Error(`Window self-test: ${name} timeout`)), 3000);
       window.once(name, () => {clearTimeout(timeout); resolve();}); action();
     });
+    if (window.isMinimized()) await changed('restore', () => window.restore());
+    window.show();
+    window.focus();
     if (window.isMaximized()) await changed('unmaximize', () => window.unmaximize());
     await changed('minimize', () => window.minimize()); result.minimized = window.isMinimized();
     await changed('restore', () => window.restore()); result.restored = !window.isMinimized();
@@ -247,7 +251,7 @@ if (diagnostic) {
       "navigator.permissions.query({name:'clipboard-write'}).then(result=>result.state)");
     if (result.clipboardWritePermission !== 'granted') throw new Error('MCP configuration copy permission is unavailable');
     // Renderer snapshot excludes the operating system's overlay caption controls.
-    const snapshot = await window.webContents.capturePage();
+    const snapshot = await captureTestPage(window.webContents);
     fs.writeFileSync(path.join(stateDir, 'workbench.png'), snapshot.toPNG());
     const layout = () => window.webContents.executeJavaScript(`(() => {
       const root=document.documentElement, bar=document.querySelector('.hc-topbar');
@@ -263,7 +267,7 @@ if (diagnostic) {
     window.setSize(960, 640);
     await new Promise(resolve => setTimeout(resolve, 150));
     result.narrow = await layout();
-    fs.writeFileSync(path.join(stateDir, 'workbench-narrow.png'), (await window.webContents.capturePage()).toPNG());
+    fs.writeFileSync(path.join(stateDir, 'workbench-narrow.png'), (await captureTestPage(window.webContents)).toPNG());
     window.setBounds(originalBounds);
     fs.writeFileSync(path.join(stateDir, 'window-self-test.json'), JSON.stringify(result, null, 2));
     app.quit();

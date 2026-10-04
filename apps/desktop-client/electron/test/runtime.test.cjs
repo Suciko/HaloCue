@@ -8,7 +8,32 @@ const http = require('node:http');
 const {spawn} = require('node:child_process');
 const {once} = require('node:events');
 const vm = require('node:vm');
-const {validateReady, waitForReady, stopOwnedService, sameOrigin, availablePort, resolveUserRoot, allowPermission, startupAppearance} = require('../runtime.cjs');
+const {validateReady, waitForReady, stopOwnedService, sameOrigin, availablePort, resolveUserRoot, allowPermission, startupAppearance, captureTestPage} = require('../runtime.cjs');
+
+test('Windows compositor sampling retries are bounded and other failures propagate', async () => {
+  let calls = 0;
+  const image = {};
+  const wait = async milliseconds => assert.equal(milliseconds, 120);
+  const contents = {capturePage: async (_rect, options) => {
+    assert.equal(options.stayAwake, true);
+    if (++calls < 3) throw new Error('UnknownVizError');
+    return image;
+  }};
+  assert.equal(await captureTestPage(contents, wait), image);
+  assert.equal(calls, 3);
+  calls = 0;
+  await assert.rejects(captureTestPage({capturePage: async () => {
+    calls++;
+    throw new Error('UnknownVizError');
+  }}, wait), /UnknownVizError/);
+  assert.equal(calls, 5);
+  calls = 0;
+  await assert.rejects(captureTestPage({capturePage: async () => {
+    calls++;
+    throw new Error('Renderer destroyed');
+  }}, wait), /Renderer destroyed/);
+  assert.equal(calls, 1);
+});
 const receipt = {app_id: 'halocue-local-server-v1', version: '1.0.0-test', pid: 123,
   host: '127.0.0.1', port: 12345, url: 'http://127.0.0.1:12345', shutdown_token: 'test-'.repeat(8), interface: 'integrated'};
 
