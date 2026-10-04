@@ -23,6 +23,7 @@ dependencies = [
 norecursedirs = ["backup-*", ".worktrees"]
 markers = [
     "browser: requires Playwright and a locally installed Chromium browser",
+    "bundled_research: validates the complete shipped research database rather than the small test seed",
 ]
 
 [tool.ruff]

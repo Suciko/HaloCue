@@ -4,6 +4,7 @@ import json
 import zipfile
 
 import pytest
+from halocue_meta import VERSION
 
 from tools import build_review_bundle as bundle
 from tools.review_start import reviewer_environment
@@ -89,7 +90,7 @@ def test_export_reads_current_and_untracked_bytes_not_git_index(monkeypatch, tmp
         manifest = json.loads(archive.read(name + "/REVIEW_MANIFEST.json"))
     assert manifest["source_state"] == "working_tree_snapshot_not_pushed"
     assert manifest["product"] == "HaloCue"
-    assert manifest["product_version"] == "1.0.0-beta.2"
+    assert manifest["product_version"] == VERSION
     assert manifest["package_kind"] == "collaborator_source_review"
     assert manifest["entrypoint"] == "开始验收.cmd"
     assert manifest["scan_findings"] == []

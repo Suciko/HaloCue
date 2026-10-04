@@ -8,6 +8,11 @@ from pathlib import Path
 
 import pytest
 
+from services.halocue._test_support import (  # noqa: F401
+    isolated_bundled_metadata,
+    small_bundled_metadata,
+)
+
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _TEST_USER_DATA = Path(tempfile.mkdtemp(prefix="halocue-pytest-user-data-"))
@@ -82,10 +87,7 @@ def synthetic_cast_path(tmp_path):
 def annotated_script_path(tmp_path):
     path = tmp_path / "sample.annotated.txt"
     path.write_text(
-        "## 夜晚的活动室\n"
-        "@bg BG_GameDevRoom\n"
-        "凯伊: 已经准备好了。\n"
-        "旁白: 灯光慢慢亮起。\n",
+        "## 夜晚的活动室\n@bg BG_GameDevRoom\n凯伊: 已经准备好了。\n旁白: 灯光慢慢亮起。\n",
         encoding="utf-8",
     )
     return path

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import json
+import pytest
 
 from halocue_writing import resource_catalog as resource_catalog_module
 from halocue_writing.resource_catalog import ResourceCatalog, SCHEMA_VERSION
@@ -54,7 +55,12 @@ def test_empty_1_0_catalog_does_not_claim_ready(tmp_path, monkeypatch):
     assert descriptor["bundled_seed"]["status"] == "unavailable"
 
 
+@pytest.mark.bundled_research
 def test_new_catalog_includes_shipped_ba_metadata_without_binary_assets(tmp_path):
+    with sqlite3.connect(resource_catalog_module._bundled_metadata_database()) as seed:
+        assert seed.execute("SELECT COUNT(*) FROM face_visual_label").fetchone()[0] == 27649
+        assert seed.execute("SELECT COUNT(*) FROM scene_visual_label").fetchone()[0] == 6850
+        assert seed.execute("SELECT COUNT(*) FROM face_official_usage").fetchone()[0] == 163998
     descriptor = ResourceCatalog(tmp_path).descriptor()
     assert descriptor["ready"] is True
     assert descriptor["bundled_seed"]["status"] == "ready"
@@ -63,6 +69,15 @@ def test_new_catalog_includes_shipped_ba_metadata_without_binary_assets(tmp_path
     assert descriptor["counts"]["backgrounds"] > 0
     assert descriptor["counts"]["faces"] > 0
     assert descriptor["counts"]["expression_parts"] > 0
+
+
+def test_ordinary_catalog_uses_a_small_independent_seed(tmp_path, small_bundled_metadata):
+    assert small_bundled_metadata.stat().st_size < 100_000
+    first = ResourceCatalog(tmp_path / "first")
+    second = ResourceCatalog(tmp_path / "second")
+    assert first.descriptor()["counts"]["characters"] == 1
+    first.save_override("background", "BG_TestRoom", {"display_name": "本作手改"})
+    assert second.lookup("backgrounds", ["BG_TestRoom"])["items"][0]["display_name"] == "测试教室"
 
 
 def test_bundled_projection_refresh_preserves_user_overrides_and_explicit_imports(
