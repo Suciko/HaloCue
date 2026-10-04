@@ -865,7 +865,14 @@ class LLMWritingProvider(WritingProvider):
         for JSON. Preserve that answer for the author, but keep the formal
         proposal gate closed until a structured response is available.
         """
+        from .discussion_response import recover_discussion_text
+
+        recovered = recover_discussion_text(text)
+        if recovered is not None:
+            return recovered
         visible_text = str(text or "").strip()
+        if re.search(r'"text"\s*:', visible_text) and re.search(r'"(?:questions|decision_card|ready_for_proposal|ready_to_organize)"\s*:', visible_text):
+            raise DomainError("provider_output_invalid", "模型回复的结构化内容未能完整解析，请重试本轮。", status=502)
         return {
             "text": visible_text,
             "questions": [],
@@ -1737,7 +1744,11 @@ class LLMWritingProvider(WritingProvider):
                 "开放式问题继续放在 questions，不要为了显示卡片而把普通追问改成选项。"
                 "不要要求作者点击‘形成方案’或‘整理细纲’；当信息足够、且当前不是改编任务时，直接调用 organize_current_plan。"
                 "该工具只会在服务端创建待审 Proposal，随后由作者采纳或退回；工具没有调用成功前不要声称候选已经生成。"
-                "如果仍缺一个会改变方向的关键条件，只问一个最重要的问题，不要展示额外的流程按钮。"
+                "如果仍缺一个会改变方向的关键条件，只问一个最重要的问题。"
+                "作者说方向差不多、想进入正文或某个阶段时，简短说明可走的下一步；阶段跳转入口由界面按真实作品状态提供。"
+                "character_resolution 是本轮引用随包人物资料的实际结果；added/reused 中的人物已经在作品中，"
+                "不要再次要求作者手动导入，不得把 ambiguous/blocked 的人物说成已经准备好。"
+                "已有参考人物卡是写作依据，不能把作者这轮的临时情节要求擅自写成人物长期设定。"
             )
             creation_intent = str(task_contract.get("creation_intent") or "guided_ideation")
             system_prompt += (

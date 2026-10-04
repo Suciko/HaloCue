@@ -5145,6 +5145,15 @@ class WritingService:
                 self, connection, work_id,
                 retry_snapshot.get("card_assistance") if retry_snapshot else payload.get("card_assistance"),
             )
+            character_resolution = retry_snapshot.get("character_resolution") if retry_snapshot else None
+            if not retry_snapshot and not card_assistance:
+                scope = self._effective_conversation_scope(thread, payload.get("task_scope"))
+                if scope.get("surface") in {"work", "chapter"}:
+                    reference_text = text
+                    if re.search(r"(?:开始|直接|继续|进入|起草|生成|写).{0,8}(?:正文|这一场|这场|剧本)", text):
+                        prior = recent_conversation_history(connection, thread_id)
+                        reference_text = "\n".join([str(item.get("text", "")) for item in prior[-12:] if item.get("role") == "user"] + [text])
+                    character_resolution = self._prepare_discussion_characters(connection, work_id, reference_text)
             if retry_snapshot:
                 history = retry_snapshot.get("history") if isinstance(retry_snapshot.get("history"), list) else []
                 task_contract = retry_snapshot.get("task_contract") if isinstance(retry_snapshot.get("task_contract"), dict) else None
@@ -5232,6 +5241,7 @@ class WritingService:
                 "idea": first_idea,
                 "task_contract": task_contract,
                 "conversation_summary": conversation_summary,
+                "character_resolution": character_resolution,
                 "attachments": attachments,
                 "document_context": document_context,
             }
@@ -5253,6 +5263,7 @@ class WritingService:
                 "task_contract": task_contract,
                 "history": history,
                 "conversation_summary": conversation_summary,
+                "character_resolution": character_resolution,
                 "attachments": attachments,
                 "document_context": document_context,
                 "document_skill": DOCUMENT_SKILL if document_context else None,
@@ -5289,6 +5300,9 @@ class WritingService:
             )
             thread_snapshot = dict(thread)
             policy_snapshot = dict(policy)
+
+        for item in (character_resolution or {}).get("added", []):
+            self._schedule_commit_projection(work_id, item["revision_id"])
 
         on_started = payload.get("_run_started_callback")
         if callable(on_started):
@@ -5510,6 +5524,8 @@ class WritingService:
                 "output": f"{len(citations)} 个片段 · {document_context.get('selected_characters', 0)} 字符",
             })
 
+        if character_resolution:
+            reply["character_resolution"] = character_resolution
         reply = self._finalize_agent_reply(task_contract, reply, provider)
         failed_tools = [item for item in tool_results if item.status == "failed"]
         denied_tools = [item for item in tool_results if item.status == "denied"]
@@ -6116,6 +6132,12 @@ class WritingService:
                 status=502,
             )
         result = dict(value)
+        if isinstance(result.get("text"), str):
+            from .discussion_response import recover_discussion_text
+
+            recovered = recover_discussion_text(result["text"])
+            if recovered is not None:
+                result.update(recovered)
         text = result.get("text")
         tool_calls = result.get("tool_calls")
         if text is not None and not isinstance(text, str):
@@ -9191,61 +9213,99 @@ class WritingService:
         if parsed.report["status"] != "PASS":
             raise validation_failure(parsed)
         source_label = str(payload.get("source_label", "用户导入的 BA 正式人物卡")).strip() or "用户导入的 BA 正式人物卡"
-        import_id = new_id("character-import")
-        import_mode = "created"
         with self.repo.transaction() as connection:
             version = self._check_work_version(connection, work_id, expected)
-            matches = self._matching_character_cards(connection, work_id, parsed.cleaned)
-            if len(matches) > 1:
-                raise DomainError(
-                    "character_card_identity_conflict",
-                    "人物卡名称或别名同时命中多张现有卡，请先在人物库处理重复身份。",
-                    status=409,
-                    details={"character": parsed.report["character"], "matches": matches},
-                )
-            if matches:
-                card_id = matches[0]["card_id"]
-                import_mode = "updated"
-            else:
-                card_id = new_id("character")
-            prefix = f"imports/character-cards/{work_id}/{card_id}/{import_id}"
-            raw_uri, raw_hash = self.repo.atomic_write_bytes(f"{prefix}/original.json", parsed.raw_bytes)
-            cleaned_uri, cleaned_hash = self.repo.atomic_write_bytes(f"{prefix}/cleaned.json", parsed.cleaned_bytes)
-            card_payload = build_character_card_payload(parsed, source_label)
-            card_payload.update({
-                "import_id": import_id,
-                "import_source_label": source_label,
-                "raw_import_uri": raw_uri,
-                "cleaned_import_uri": cleaned_uri,
-                "raw_import_hash": raw_hash,
-                "cleaned_import_hash": cleaned_hash,
-            })
-            card = self._normalize_character_card_payload(card_payload)
-            revision_id = self._save_character_card_revision(
-                connection,
-                work_id,
-                card_id,
-                card,
-                created_by="user",
-                provenance={
-                    "workflow": "character.prepare",
-                    "operation": "ba_character_card_import",
-                    "pack": PACK_VERSION,
-                    "import_id": import_id,
-                    "source_hash": parsed.source_hash,
-                    "validation_schema": parsed.report["schema_version"],
-                },
-            )
+            result = self._import_character_card_revision(connection, work_id, parsed, source_label)
             self._bump_work(connection, work_id, version)
-        self._schedule_commit_projection(work_id, revision_id)
+        self._schedule_commit_projection(work_id, result["revision_id"])
+        return {**result, "work": self.get_work(work_id)}
+
+    def _import_character_card_revision(self, connection, work_id, parsed, source_label):
+        import_id = new_id("character-import")
+        import_mode = "created"
+        matches = self._matching_character_cards(connection, work_id, parsed.cleaned)
+        if len(matches) > 1:
+            raise DomainError(
+                "character_card_identity_conflict",
+                "人物卡名称或别名同时命中多张现有卡，请先在人物库处理重复身份。",
+                status=409,
+                details={"character": parsed.report["character"], "matches": matches},
+            )
+        if matches:
+            card_id = matches[0]["card_id"]
+            import_mode = "updated"
+        else:
+            card_id = new_id("character")
+        prefix = f"imports/character-cards/{work_id}/{card_id}/{import_id}"
+        raw_uri, raw_hash = self.repo.atomic_write_bytes(f"{prefix}/original.json", parsed.raw_bytes)
+        cleaned_uri, cleaned_hash = self.repo.atomic_write_bytes(f"{prefix}/cleaned.json", parsed.cleaned_bytes)
+        card_payload = build_character_card_payload(parsed, source_label)
+        card_payload.update({
+            "import_id": import_id,
+            "import_source_label": source_label,
+            "raw_import_uri": raw_uri,
+            "cleaned_import_uri": cleaned_uri,
+            "raw_import_hash": raw_hash,
+            "cleaned_import_hash": cleaned_hash,
+        })
+        card = self._normalize_character_card_payload(card_payload)
+        revision_id = self._save_character_card_revision(
+            connection,
+            work_id,
+            card_id,
+            card,
+            created_by="user",
+            provenance={
+                "workflow": "character.prepare",
+                "operation": "ba_character_card_import",
+                "pack": PACK_VERSION,
+                "import_id": import_id,
+                "source_hash": parsed.source_hash,
+                "validation_schema": parsed.report["schema_version"],
+            },
+        )
         return {
-            "card_id": card_id,
-            "revision_id": revision_id,
-            "validation_report": parsed.report,
-            "import_mode": import_mode,
+            "card_id": card_id, "revision_id": revision_id,
+            "validation_report": parsed.report, "import_mode": import_mode,
             "source_hash": parsed.source_hash,
-            "work": self.get_work(work_id),
         }
+
+    def _prepare_discussion_characters(self, connection, work_id, text):
+        resolved = self.bundled_characters.resolve_mentions(text)
+        receipt = {
+            "schema_version": "character-reference-resolution/1.0",
+            "available": resolved["available"], "added": [], "reused": [],
+            "ambiguous": resolved["ambiguous"], "blocked": [],
+        }
+        for item in resolved["matches"]:
+            parsed = parse_import_payload(self.bundled_characters.import_payload(item["id"]))
+            matches = self._matching_character_cards(connection, work_id, parsed.cleaned)
+            if matches:
+                if len(matches) > 1:
+                    receipt["blocked"].append({"name": item["name"], "reason": "作品中存在重复人物身份，请先选择要用的卡。"})
+                    continue
+                match = matches[0]
+                content = self._revision_content(connection, match["revision_id"])
+                if content.get("status") == "archived" or content.get("trust_status", "confirmed") != "confirmed":
+                    receipt["blocked"].append({"name": match["name"], "reason": "已有卡已归档或待确认，请在作品资料中检查。"})
+                else:
+                    receipt["reused"].append(match)
+                continue
+            if parsed.report["status"] != "PASS":
+                receipt["blocked"].append({"name": item["name"], "reason": "随包资料未通过人物卡校验，请检查资料包。"})
+                continue
+            imported = self._import_character_card_revision(
+                connection, work_id, parsed, "构思自动引用 · 随包人物参考 · 维护者整理",
+            )
+            receipt["added"].append({
+                "name": item["name"], "reference_id": item["id"],
+                "card_id": imported["card_id"], "revision_id": imported["revision_id"],
+                "source_hash": imported["source_hash"],
+            })
+        if receipt["added"]:
+            version = connection.execute("SELECT version FROM works WHERE id=?", (work_id,)).fetchone()["version"]
+            self._bump_work(connection, work_id, version)
+        return receipt
 
     @workspace_operation
     def reuse_character_card(self, work_id: str, payload: dict) -> dict:
@@ -11750,7 +11810,7 @@ class WritingService:
             brief_characters = values["brief"].get("characters", [])
             card_rows = connection.execute("SELECT * FROM artifacts WHERE work_id=? AND kind='character_card'", (work_id,)).fetchall()
             cards = {}
-            cards_by_name = {}
+            card_name_owners = {}
             unverified_cards = {}
             for card_artifact in card_rows:
                 if card_artifact["current_revision_id"]:
@@ -11761,7 +11821,9 @@ class WritingService:
                         if card_content.get("trust_status", "confirmed") == "confirmed":
                             card = {"revision_id": card_revision["id"], "content": card_content}
                             cards[card_artifact["scope_id"]] = card
-                            cards_by_name[card_name] = card
+                            for name in [card_name, card_content.get("canonical_name"), *card_content.get("aliases", [])]:
+                                if name:
+                                    card_name_owners.setdefault(self._knowledge_key(name), set()).add(card_artifact["scope_id"])
                         else:
                             unverified_cards[card_name] = card_content.get("trust_status", "open")
             selected_card_ids = selection.get("character_card_ids", []) if explicit_selection else []
@@ -11772,20 +11834,26 @@ class WritingService:
                     if selected:
                         selected_cards.append((card_id, selected))
             else:
+                resolved_card_ids = {
+                    next(iter(owners))
+                    for name in brief_characters
+                    if len(owners := card_name_owners.get(self._knowledge_key(name), set())) == 1
+                }
                 selected_cards = [
                     (card_id, card)
                     for card_id, card in cards.items()
-                    if card["content"].get("name") in brief_characters
+                    if card_id in resolved_card_ids
                 ]
             missing_cards = []
             if explicit_selection:
                 missing_cards = [card_id for card_id in selected_card_ids if card_id not in cards]
             else:
-                missing_cards = [name for name in brief_characters if name not in cards_by_name]
+                missing_cards = [name for name in brief_characters if len(card_name_owners.get(self._knowledge_key(name), set())) != 1]
             active_names = [
-                card["content"].get("name")
+                name
                 for _, card in selected_cards
-                if card["content"].get("name")
+                for name in [card["content"].get("name"), card["content"].get("canonical_name"), *card["content"].get("aliases", [])]
+                if name
             ]
             runtime_cards = []
             for _, card in selected_cards:
