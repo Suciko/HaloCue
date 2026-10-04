@@ -105,11 +105,7 @@ def _find_ffprobe(explicit: str | Path | None) -> str | None:
     if explicit:
         p = Path(explicit)
         return str(p) if p.is_file() else None
-    found = shutil.which("ffprobe")
-    if found:
-        return found
-    bundled = Path(r"E:\ffmpeg\bin\ffprobe.exe")
-    return str(bundled) if bundled.is_file() else None
+    return shutil.which("ffprobe")
 
 
 def validate_sound(
