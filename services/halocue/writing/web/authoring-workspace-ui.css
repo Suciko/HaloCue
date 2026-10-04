@@ -73,6 +73,22 @@
 #app.hc-redesign .outline-plan-group li { padding-left:4px; margin:4px 0; }
 #app.hc-redesign .outline-plan-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
 #app.hc-redesign .outline-editor-hint { margin:0 0 10px; }
+/* Size the chapter director against its actual header, including font scaling. */
+#app#app.hc-redesign[data-surface="writing"] #inspector:has(.director-panel) {
+  display:flex!important;
+  flex-direction:column;
+  overflow:hidden!important;
+}
+#app#app.hc-redesign[data-surface="writing"] #inspector:has(.director-panel) > .inspector-tabs { flex:none; }
+#app#app.hc-redesign[data-surface="writing"] #inspectorContent:has(.director-panel) {
+  flex:1;
+  height:auto!important;
+  min-height:0;
+  overflow:hidden;
+}
+#app#app.hc-redesign[data-surface="writing"] .director-panel { min-height:0; }
+#app#app.hc-redesign[data-surface="writing"] .director-panel > .conversation-scroll { min-height:0; flex:1 1 0; }
+#app#app.hc-redesign[data-surface="writing"] .director-panel > :is(.director-task-contract,.conversation-composer) { flex:none; }
 html[data-theme="dark"] #app.hc-redesign .director-panel .director-task-contract { background:var(--hc-panel)!important; border-color:var(--hc-line)!important; color:var(--hc-text)!important; }
 html[data-theme="dark"] #app.hc-redesign .director-panel .director-task-contract em { background:var(--hc-bg)!important; color:var(--hc-muted)!important; }
 #app.hc-redesign .mobile-outline-back { margin:0 0 14px; font-size:12px; }

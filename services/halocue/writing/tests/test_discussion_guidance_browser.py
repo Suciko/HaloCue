@@ -297,3 +297,39 @@ def test_agent_controls_single_small_button_at_16_by_9(flow_server, browser, siz
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     screenshot(page, f"discussion-single-button-dark-{size[0]}x{size[1]}")
     page.close()
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("size", [(1280, 720), (1600, 900)])
+def test_outline_director_keeps_send_visible_below_long_history(flow_server, browser, theme, size):
+    from playwright.sync_api import expect
+
+    service, _provider, _work, url = flow_server
+    work_id, scene_id, work = create_ready_scene(service, title="夜间活动室")
+    service.provider = QuietProvider()
+    for _ in range(4):
+        work = send(service, work, "保留活动室的细节，结尾不要添加反派。" * 12)
+    chapter_id = work["chapters"][0]["id"]
+    page = open_page(
+        browser,
+        f"{url}/?section=writing&work_id={work_id}&stage=structure"
+        f"&chapter_id={chapter_id}&scene_id={scene_id}",
+        theme,
+        size,
+    )
+    inspector = page.locator("#inspector")
+    composer = inspector.locator("#workConversationForm")
+    expect(composer).to_be_visible()
+    button = composer.get_by_role("button", name="发送", exact=True)
+    box = assert_visible_box(page, button, inspector)
+    bounds = inspector.bounding_box()
+    assert bounds["y"] + bounds["height"] - box["y"] - box["height"] >= 12
+    assert inspector.evaluate("el => el.scrollHeight <= el.clientHeight + 1")
+    transcript = inspector.locator(".conversation-scroll")
+    assert transcript.evaluate("el => el.scrollHeight > el.clientHeight")
+    composer.locator("textarea").fill("沿用前面的结尾，继续核对本章节奏。")
+    button.click()
+    expect(inspector.locator(".conversation-message.user").last).to_contain_text("继续核对本章节奏")
+    assert_visible_box(page, composer.get_by_role("button", name="发送", exact=True), inspector)
+    screenshot(page, f"outline-director-footer-{theme}-{size[0]}x{size[1]}")
+    page.close()
