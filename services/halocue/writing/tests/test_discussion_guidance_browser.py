@@ -90,6 +90,77 @@ def test_public_reply_questions_receipt_and_outline_navigation(flow_server, brow
 
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
+def test_on_demand_activity_shows_real_results_and_no_default_tools(flow_server, browser, theme):
+    from playwright.sync_api import expect
+    from test_agent_on_demand import LookupThenDraft
+
+    service, _provider, work, url = flow_server
+    page = open_page(browser, f"{url}/?section=works&work_id={work['id']}", theme, (1600, 900))
+    reply = page.locator(".conversation-message.assistant").last
+    assert reply.locator('.agent-tool-step[data-origin="agent"]').count() == 0
+    preparation = reply.locator('.agent-character-resolution')
+    expect(preparation).to_have_count(1)
+    preparation.locator("summary").click()
+    expect(preparation).to_contain_text("系统按对话中的人物准备资料")
+    expect(preparation).to_contain_text("已加入本作品：")
+    expect(preparation).to_contain_text("空崎日奈")
+    expect(preparation).to_contain_text("天雨亚子")
+    assert reply.locator(".agent-tool-step .agent-tool-category").inner_text() == "人物资料"
+    assert "工具完成不代表" not in reply.inner_text()
+    service.provider = LookupThenDraft(service)
+    current = service.get_work(work["id"])
+    send(service, current, "查下本作人物，再整理一个原创人物卡草稿。")
+    page.reload()
+    reply = page.locator(".conversation-message.assistant").last
+    tool = reply.locator('.agent-tool-step[data-origin="agent"]').first
+    tool.locator("summary").click()
+    expect(tool).to_contain_text("找到 2 张人物卡")
+    expect(tool).to_contain_text("空崎日奈")
+    expect(tool.locator(".agent-tool-category")).to_have_text("人物资料")
+    assert "load_workflow_template" not in reply.text_content()
+    assert "read_work_context" not in reply.text_content()
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    screenshot(page, f"agent-on-demand-{theme}-1600x900")
+    page.close()
+
+
+def test_actual_lookup_is_visible_while_model_followup_is_pending(flow_server, browser):
+    from playwright.sync_api import expect
+
+    service, _provider, work, url = flow_server
+    started, release = threading.Event(), threading.Event()
+
+    class WaitingLookup(QuietProvider):
+        is_simulation = False
+
+        def discuss_work(self, messages, context):
+            if context.get("tool_followup"):
+                started.set()
+                release.wait(timeout=15)
+                return {"text": "检索完成，可以继续写这段误会。", "questions": []}
+            return {"text": "查看人物。", "questions": [], "tool_calls": [{
+                "id": "visible-lookup", "tool": "search_character_cards", "arguments": {"query": ""},
+            }]}
+
+    service.provider = WaitingLookup()
+    service.start()
+    page = open_page(browser, f"{url}/?section=works&work_id={work['id']}", "dark", (1600, 900))
+    try:
+        page.get_by_role("textbox", name="给创作导演发送消息").fill("查一下当前人物卡。")
+        page.get_by_role("button", name="发送消息", exact=True).click()
+        assert started.wait(timeout=5)
+        running = page.locator(".agent-running-message")
+        expect(running).to_contain_text("查找本作人物卡")
+        running.locator(".agent-tool-step summary").click()
+        expect(running).to_contain_text("找到 2 张人物卡")
+        screenshot(page, "agent-live-tool-dark-1600x900")
+    finally:
+        release.set()
+    expect(page.locator(".conversation-message.assistant").last).to_contain_text("检索完成")
+    page.close()
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
 def test_legacy_json_projects_without_rewriting_history_and_open_draft(flow_server, browser, theme):
     from playwright.sync_api import expect
 
@@ -327,9 +398,14 @@ def test_outline_director_keeps_send_visible_below_long_history(flow_server, bro
     assert inspector.evaluate("el => el.scrollHeight <= el.clientHeight + 1")
     transcript = inspector.locator(".conversation-scroll")
     assert transcript.evaluate("el => el.scrollHeight > el.clientHeight")
+    reply_count = inspector.locator(".conversation-message.assistant").count()
     composer.locator("textarea").fill("沿用前面的结尾，继续核对本章节奏。")
     button.click()
     expect(inspector.locator(".conversation-message.user").last).to_contain_text("继续核对本章节奏")
+    # The queued input can appear before the running composer replaces Send.
+    # Measure the restored footer only after the new assistant reply arrives.
+    expect(inspector.locator(".conversation-message.assistant")).to_have_count(reply_count + 1)
+    expect(composer.get_by_role("button", name="发送", exact=True)).to_be_visible()
     assert_visible_box(page, composer.get_by_role("button", name="发送", exact=True), inspector)
     screenshot(page, f"outline-director-footer-{theme}-{size[0]}x{size[1]}")
     page.close()

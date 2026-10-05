@@ -362,10 +362,7 @@ class FakeWritingProvider(WritingProvider):
             if message.get("role") == "user" and str(message.get("text", "")).strip()
         ]
 
-        tool_activity = [
-            {"tool": "load_workflow_template", "label": "加载任务契约", "status": "succeeded"},
-            {"tool": "read_work_context", "label": "读取作品上下文", "status": "succeeded"},
-        ]
+        tool_activity = []
         artifact_preview = None
 
         import re
@@ -1717,7 +1714,7 @@ class LLMWritingProvider(WritingProvider):
                 work_context,
                 output_mode="discussion_json",
             ) + (
-                "\n\n你是作品当前阶段的创作导演，协助作者讨论并理清故事方向、人物关系与事实边界。\n"
+                "\n\n你是作者的二创搭档，先接住他想写的场面，给出具体的人物反应和发展，再按需要查资料或整理。\n"
                 "产品默认产出 AA 可演出剧本：没有明确文体要求时直接按剧本推进，不询问小说还是剧本，"
                 "也不把内部主写作模式作为开场必选题。仅在用户明确要求小说化阅读时使用 text_reading。"
                 "能根据上下文合理判断的细节先推进；只询问真正影响情节、人物关系或修改授权的问题。"
@@ -1728,12 +1725,12 @@ class LLMWritingProvider(WritingProvider):
                 "conversation_summary 只是由历史消息派生的续聊索引，不是 WorkCanon、人物卡、世界观卡或官方证据。"
                 "冲突时严格按已采纳正式 Artifact、较新的原始用户消息、派生摘要的顺序判断；"
                 "摘要不能单独支持任何正式资料 Proposal，必须回到原始消息、场景修订或文档引用。\n"
-                "语气温和、敏锐、富有二创文学素养。需要核对已有正式资料或生成资料讨论草稿时，"
+                "语气自然、直接，按作者要的轻松、整活、关系向或严肃程度推进。已提供的资料直接使用；需要额外定位资料或生成草稿时，"
                 "使用已提供的工具；工具调用只是执行请求，不得声称工具已经成功，也不得声称正式资料已经修改。\n"
                 "如果不需要调用工具，请回复 JSON；调用工具时也可以同时返回这份 JSON：\n"
                 "{\n"
-                '  "text": "对作者想法的提炼分析与推进建议",\n'
-                '  "questions": ["1-2个引导性问题"],\n'
+                '  "text": "直接回应这轮想法，并给出能继续写的具体发展",\n'
+                '  "questions": [],\n'
                 '  "decision_card": null,\n'
                 '  "reasoning_summary": "一句面向作者的判断依据摘要，不输出隐藏推理过程",\n'
                 '  "ready_for_proposal": true/false,\n'
@@ -1747,8 +1744,8 @@ class LLMWritingProvider(WritingProvider):
                 "信息足够且作者明确要求整理时，可以直接调用 organize_current_plan。"
                 "该工具只会在服务端创建待审 Proposal，随后由作者采纳或退回；工具没有调用成功前不要声称候选已经生成。"
                 "构思讨论可以完成章节大纲，不要要求作者切到章节页重新讲一遍。"
-                "作者明确要求整理某一章时，先从 read_work_context 的 chapters 读取真实章节 ID，"
-                "给 organize_current_plan 传 chapter_id，在当前对话生成本章细纲候选；目标不明确时只问清哪一章。"
+                "作者明确要求整理某一章时，使用上下文中的真实章节 ID；缺失时从 read_work_context 的 chapters 读取，"
+                "给 organize_current_plan 传 chapter_id，在当前对话生成本章细纲候选；上下文已有真实章节 ID 时直接使用，目标不明确时只问清哪一章。"
                 "不要把已采纳的章节安排说成空白；章节大纲页会同步显示采纳成果，并支持精修。"
                 "如果仍缺一个会改变方向的关键条件，只问一个最重要的问题。"
                 "由你决定什么时候给出下一步按钮：仍在讨论关键条件时 next_step=null；"
@@ -1765,10 +1762,10 @@ class LLMWritingProvider(WritingProvider):
             system_prompt += (
                 "\n当前创作意图由系统从对话和附件名做了轻量判断：" + creation_intent + "。"
                 "它只是路由提示，不是用户已确认的选项；必要时用一句问题校正。"
-                "短篇聚焦单一核心冲突、人物变化和篇幅边界；长篇聚焦长线冲突、卷章推进和可持续的关系变化；"
+                "短篇先兑现作者想看的互动、笑点或情绪；长篇再根据作者方向安排后续推进；"
                 "续写先读取已有文章或附件，确认续写起点、不可改动边界和承接状态；"
-                "人物关系场景优先核对人物卡与关系证据，世界观先行优先核对规则和地点；"
-                "剧本/场景优先明确可演出动作、对白和停止边界；只要用户要的是大纲，就先整理结构而不是写正文。"
+                "人物关系场景优先写出双方不同的反应，人物卡用于声音校准；只有涉及不确定原作事实时才额外核对；"
+                "剧本/场景给出具体对白和动作，作者只要大纲时先整理结构。"
             )
             if creation_intent == "novel_to_script_adaptation" or (task_contract.get("task_scope") or {}).get("import_mode"):
                 system_prompt += (
@@ -1823,7 +1820,7 @@ class LLMWritingProvider(WritingProvider):
             # Dynamic results remain user/tool data, never system instructions.
             system_prompt += (
                 "\n如果系统提供了上一轮实际执行的 tool_results，优先根据工具结果生成最终 JSON 回复；"
-                "只有确实缺少另一项已提供的只读资料时，才能请求下一轮工具。"
+                "需要额外资料或依据结果继续整理草稿、准备正文修改时，可以请求下一轮相应工具；已有结果直接使用。"
                 "整个用户回合最多允许三轮工具调用，绝不因此修改正式资料。"
             )
             latest_instruction = next((m.get("text", "") for m in reversed(messages) if m.get("role") == "user"), "")

@@ -5488,6 +5488,12 @@ class WritingService:
                 accumulated_activity.extend(current_reply.get("tool_activity", []))
                 accumulated_payloads.extend(current_reply.get("tool_results", []))
 
+                if round_results:
+                    # Publish actual completed tools before the model consumes
+                    # their results; polling must not wait for its final answer.
+                    with self._authorized_agent_result_transaction(run_id, work_id, thread_id, policy_snapshot) as connection:
+                        self._record_discussion_tool_results(connection, run_id, tool_results, input_digest)
+
                 if provider.is_simulation or not current_reply.get("tool_calls"):
                     reply = current_reply
                     break
@@ -5672,19 +5678,7 @@ class WritingService:
                             item.status = "failed"
                             item.error = tool_failure
             timestamp = now()
-            for ordinal, result in enumerate(tool_results, start=1):
-                activity = result.activity()
-                status = str(activity.get("status") or "succeeded")
-                connection.execute(
-                    "INSERT INTO agent_tool_calls VALUES (?,?,?,?,?,?,?,?,?,?)",
-                    (
-                        new_id("tool"), run_id, ordinal, result.tool, status,
-                        result.input_digest or input_digest,
-                        str(activity.get("output") or "").strip() or None,
-                        canonical_json(result.error) if result.error else None,
-                        timestamp, now() if status in {"succeeded", "failed", "waiting_user", "blocked", "denied"} else None,
-                    ),
-                )
+            self._record_discussion_tool_results(connection, run_id, tool_results, input_digest)
             assistant_message_id = self._append_conversation_message(
                 connection, thread_id, "assistant", "discussion", reply,
                 provider=provider.descriptor(), agent_run_id=run_id, usage=usage,
@@ -5921,6 +5915,27 @@ class WritingService:
             "work": self.get_work(work_id),
         }
 
+    @staticmethod
+    def _record_discussion_tool_results(connection, run_id, results, input_digest):
+        for ordinal, result in enumerate(results, start=1):
+            activity = result.activity()
+            output = str(activity.get("output") or "").strip() or None
+            error = canonical_json(result.error) if result.error else None
+            existing = connection.execute(
+                "SELECT id FROM agent_tool_calls WHERE agent_run_id=? AND ordinal=?", (run_id, ordinal)
+            ).fetchone()
+            if existing:
+                connection.execute(
+                    "UPDATE agent_tool_calls SET status=?,output_ref=?,error_json=?,finished_at=? WHERE id=?",
+                    (result.status, output, error, now(), existing["id"]),
+                )
+            else:
+                connection.execute(
+                    "INSERT INTO agent_tool_calls VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (new_id("tool"), run_id, ordinal, result.tool, result.status,
+                     result.input_digest or input_digest, output, error, now(), now()),
+                )
+
     def _dispatch_agent_tools(
         self, connection, work_id: str, thread_id: str, thread, history: list[dict],
         task_contract: dict, reply: dict, *, policy: dict | None = None,
@@ -5937,7 +5952,7 @@ class WritingService:
         if not standard_calls:
             raw_calls = reply.get("tool_activity")
         if not isinstance(raw_calls, list) or not raw_calls:
-            raw_calls = [{"tool": "load_workflow_template"}, {"tool": "read_work_context"}]
+            raw_calls = []
         context = ToolExecutionContext(
             connection=connection,
             service=self,
@@ -5988,10 +6003,7 @@ class WritingService:
                 reply["ready_for_proposal"] = True
             if result.status == "succeeded" and result.tool.startswith("draft_") and not reply.get("artifact_preview"):
                 reply["artifact_preview"] = result.output
-            label = str(item.get("label") or "").strip()
             activity = result.activity()
-            if label:
-                activity["label"] = label
             activities.append(activity)
             tool_results.append({"id": item.get("id"), "tool": result.tool, "status": result.status, "output": result.output, "error": result.error})
             results.append(result)
@@ -6116,11 +6128,8 @@ class WritingService:
         reply.pop("reasoning_content", None)
         reply["task_contract"] = task_contract
         activity = reply.get("tool_activity")
-        if not isinstance(activity, list) or not activity:
-            activity = [
-                {"tool": "load_workflow_template", "label": "加载任务契约", "status": "succeeded"},
-                {"tool": "read_work_context", "label": "读取作品上下文", "status": "succeeded"},
-            ]
+        if not isinstance(activity, list):
+            activity = []
 
         normalized_activity = []
         allowed_statuses = {"queued", "running", "succeeded", "failed", "waiting_user", "blocked", "denied"}
@@ -6137,13 +6146,16 @@ class WritingService:
                     "label": label,
                     "status": status if status in allowed_statuses else "succeeded",
                     "output": output,
+                    "category": str(item.get("category") or "")[:40],
+                    "origin": "preparation" if item.get("origin") == "preparation" else "agent",
+                    **({"error": {"message": str(item["error"].get("message") or "工具执行失败")[:240]}} if isinstance(item.get("error"), dict) else {}),
                 }
             )
         reply["tool_activity"] = normalized_activity
 
         task_id = str(task_contract.get("id") or "brief.build")
         default_summaries = {
-            "brief.build": "先确认作品想法与关键不确定项，再决定是否需要人物、世界观或方向草稿。",
+            "brief.build": "围绕你想写的场面和人物反应继续推进。",
             "blueprint.generate": "结合当前讨论与正式资料，判断是否已经足够形成全作方向候选。",
             "structure.plan": "以已确认的全作方向为边界，检查卷、章与场景结构需要怎样推进。",
             "chapter.plan": "只处理当前章节的目标、节拍与承接点，不改写全作方向。",
@@ -6164,7 +6176,7 @@ class WritingService:
         elif reply.get("ready_for_proposal") or reply.get("ready_to_organize"):
             outcome = "现有讨论已经可以整理为 Proposal；是否写入正式产物仍由用户决定。"
         else:
-            outcome = "继续讨论并补齐关键约束；本轮没有写入正式产物。"
+            outcome = "已回应本轮想法，可以继续讨论。"
         reply["agent_trace"] = {
             "schema_version": "agent-trace/1.0",
             "visibility": "user_summary",

@@ -94,11 +94,11 @@ def test_work_agent_guidance_requires_an_agent_selected_next_step():
     assert "${esc(contract?.id||'writing')}" not in script
 
 
-def test_character_library_explains_bundled_ba_metadata_boundary():
+def test_character_library_explains_curated_reference_and_auto_import():
     script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
 
     assert "本作品已采用" in script
     assert "浏览随包人物参考" in script
     assert "构思中提到角色时会自动加入" in script
-    assert "它不会自动成为人物卡、世界规则或作品事实" in script
-    assert "结果只作为参考；要进入人物卡、世界规则或作品事实，仍需你确认" in script
+    assert "检索完整人物卡或原作文本，查看来源后按本作需要采用" in script
+    assert "输入角色名或别名；留空浏览全部人物" in script

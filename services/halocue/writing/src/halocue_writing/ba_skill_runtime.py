@@ -8,6 +8,7 @@ from services.halocue.runtime_layout import repository_root as application_root
 
 from .workflow_pack import (
     COMMON_RULES,
+    DISCUSSION_RULE_SOURCE,
     ENGINE_RULE_SOURCE,
     MODE_SOURCES,
     PACK_VERSION,
@@ -74,6 +75,11 @@ class BaWritingSkillRegistry:
         output_mode: str | None = None,
     ) -> list[str]:
         paths = list(WORKFLOW_RULE_SOURCES.get(task_id, ["SKILL.md", *COMMON_RULES]))
+        if output_mode == "discussion_json" and task_id in {
+            "brief.build", "blueprint.generate", "structure.plan", "chapter.plan", "scene.draft.generate",
+        }:
+            # Discussion is not a manuscript-generation or blind-test SOP.
+            return ["SKILL.md", DISCUSSION_RULE_SOURCE]
         if task_id == "scene.draft.rewrite" and output_mode == "edit_patch":
             # Editing an existing passage needs prose/voice constraints, not
             # the startup SOP or instructions for assembling a whole new story.
@@ -352,12 +358,19 @@ class BaWritingPromptAssembler:
             f"输出载体：{output_mode}。\n"
             f"本阶段检查项：{json.dumps(contract['checks'], ensure_ascii=False)}。"
         )
-        if task_id in {"scene.draft.generate", "scene.draft.rewrite"} and output_mode != "edit_patch":
+        if task_id in {"scene.draft.generate", "scene.draft.rewrite"} and output_mode not in {"edit_patch", "discussion_json"}:
             header += (
                 "\n只生成一个候选，不自评、不输出第二版。"
                 "official_script 只允许 `角色: 内容` 或 `旁白: 内容` 行。"
             )
         stage_guidance = self._stage_guidance(task_id)
+        if output_mode == "discussion_json":
+            header = (
+                "你在与作者讨论当前作品，按所附创作讨论规则回应这轮要求。"
+                "已提供的资料直接使用，额外工具按需调用。"
+                "正式资料或正文的改变交给作者核对后采用，执行结果以工具回执为准。"
+            )
+            stage_guidance = []
         if stage_guidance:
             header += "\n\n本阶段额外边界：\n" + "\n".join(
                 f"- {item}" for item in stage_guidance

@@ -653,7 +653,7 @@ def test_attachment_tool_activity_reports_server_fixed_input_count(tmp_path):
     content = sent["work"]["conversation_threads"][0]["messages"][-1]["content"]
     activity = next(item for item in content["tool_activity"] if item["tool"] == "store_conversation_attachments")
     result = next(item for item in content["tool_results"] if item["tool"] == "store_conversation_attachments")
-    assert activity["output"] == "已处理 1 项"
+    assert activity["output"] == "已保存 1 个附件"
     assert result["output"] == {"count": 1}
     presentation = service.get_agent_presentation(work["id"], thread["id"], limit=200)
     attachment_event = next(
@@ -661,8 +661,8 @@ def test_attachment_tool_activity_reports_server_fixed_input_count(tmp_path):
         if item["event_type"] == "tool.summary"
         and item["details"].get("tool_name") == "store_conversation_attachments"
     )
-    assert attachment_event["summary"] == "保存对话附件 · 已处理 1 项"
-    assert attachment_event["details"]["output_summary"] == "已处理 1 项"
+    assert attachment_event["summary"] == "保存对话附件 · 已保存 1 个附件"
+    assert attachment_event["details"]["output_summary"] == "已保存 1 个附件"
 
 
 def test_document_attachment_rejects_spoofed_or_textless_files(tmp_path):
@@ -744,10 +744,7 @@ def test_conversation_turns_and_permission_changes_are_version_checked(tmp_path)
     reply = updated_thread["messages"][-1]["content"]
     assert "不要把留言解释成反派阴谋" in reply["text"]
     assert reply["ready_to_organize"] is True
-    assert [item["tool"] for item in reply["tool_activity"]] == [
-        "load_workflow_template",
-        "read_work_context",
-    ]
+    assert reply["tool_activity"] == []
     trace = reply["agent_trace"]
     assert trace["schema_version"] == "agent-trace/1.0"
     assert trace["visibility"] == "user_summary"
@@ -756,10 +753,7 @@ def test_conversation_turns_and_permission_changes_are_version_checked(tmp_path)
     assert trace["reasoning"]["available"] is True
     assert trace["reasoning"]["source"] == "provider"
     assert trace["reasoning"]["is_simulation"] is True
-    assert [item["tool"] for item in trace["steps"]] == [
-        "load_workflow_template",
-        "read_work_context",
-    ]
+    assert trace["steps"] == []
     assert "正式产物" in trace["outcome"]
 
     restored_reply = WritingService(tmp_path).get_work(work["id"])["conversation_threads"][0]["messages"][-1]["content"]
@@ -1598,10 +1592,7 @@ def test_conversation_turn_persists_agent_run_tool_calls_and_message_link(tmp_pa
     assert run["scope_type"] == "work"
     assert run["policy"]["write_boundary"] == "proposal_only"
     assert run["policy"]["task_id"] == "brief.build"
-    assert [call["tool_name"] for call in run["tool_calls"]] == [
-        "load_workflow_template",
-        "read_work_context",
-    ]
+    assert run["tool_calls"] == []
     assistant = result["work"]["conversation_threads"][0]["messages"][-1]
     assert assistant["agent_run_id"] == run["id"]
     snapshot = service.repo.read_text(run["input_snapshot_uri"])
@@ -1750,7 +1741,7 @@ def test_initial_work_message_has_agent_run_and_tool_trace(tmp_path):
     assert assistant["role"] == "assistant"
     assert assistant["agent_run_id"]
     run = next(item for item in work["agent_runs"] if item["id"] == assistant["agent_run_id"])
-    assert run["tool_calls"]
+    assert run["tool_calls"] == []
     assert run["policy"]["write_boundary"] == "proposal_only"
     assert service.repo.read_text(run["input_snapshot_uri"])
 

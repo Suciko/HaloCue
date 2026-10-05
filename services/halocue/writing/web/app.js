@@ -4583,6 +4583,18 @@ function characterResolutionMarkup(receipt){
   return `<section class="agent-character-resolution" aria-label="人物资料准备结果"><b>人物资料</b>${added.length?`<p>已加入本作品：${names(added)}</p>`:''}${reused.length?`<p>沿用作品已有卡：${names(reused)}</p>`:''}${ambiguous.length?`<p>需要选择人物：${ambiguous.map(item=>`${esc(item.alias)}（${names(item.candidates||[])}）`).join('；')}</p>`:''}${blocked.map(item=>`<p>${esc(item.name)}：${esc(item.reason)}</p>`).join('')}${!receipt.available?'<p>随包人物资料未找到，请检查资料包。</p>':''}<button type="button" class="quiet" data-agent-open-library="characters">查看人物资料</button></section>`;
 }
 
+function characterPreparationActivity(receipt){
+  if(!receipt||receipt.schema_version!=='character-reference-resolution/1.0')return [];
+  const rows=[],names=items=>items.map(item=>String(item.name||'')).join('、');
+  const add=(label,output,status='succeeded')=>rows.push({label,output,status,category:'人物资料',origin:'preparation'});
+  if(receipt.added?.length)add(`加入人物参考 · ${names(receipt.added)}`,`已加入本作品：${names(receipt.added)}`);
+  if(receipt.reused?.length)add(`沿用人物卡 · ${names(receipt.reused)}`,`沿用作品已有卡：${names(receipt.reused)}`);
+  for(const item of receipt.ambiguous||[])add('确认人物指代',`${item.alias}（${names(item.candidates||[])}）需要选择人物`, 'waiting_user');
+  for(const item of receipt.blocked||[])add('人物资料需要处理',`${item.name}：${item.reason}`,'blocked');
+  if(!receipt.available)add('人物参考未就绪','随包人物资料未找到，请检查资料包。','blocked');
+  return rows;
+}
+
 function conversationGuidanceMarkup(message){
   const thread=workConversationThread();
   if(state.route?.section!=='works'||!thread||workAgentActiveRun(thread))return '';
@@ -5769,11 +5781,16 @@ async function recoverFailedAgentTurn(error){
 
 function agentToolLabel(name){
   return ({
-    load_workflow_template:'加载 BA 写作工作流',
-    read_work_context:'读取作品上下文',
-    organize_current_plan:'整理创作候选',
-    read_conversation_history:'读取当前对话',
-    search_character_cards:'检索人物卡',
+    load_workflow_template:'查看当前写作指引',
+    read_work_context:'查看作品资料与章节',
+    organize_current_plan:'整理当前构思',
+    read_conversation_history:'回看对话',
+    search_character_cards:'查找本作人物卡',
+    search_bundled_character_metadata:'查找随包人物参考',
+    read_scene_text_window:'读取目标正文段落',
+    propose_scene_text_edit:'准备正文修改对比',
+    check_knowledge_conflicts:'检查资料重复与冲突',
+    'document.retrieve':'检索相关文档片段',
     search_world_bible:'检索世界观资料',
     search_work_canon:'检索作品事实',
     draft_character_card:'生成人物卡讨论草稿',
@@ -5783,6 +5800,15 @@ function agentToolLabel(name){
     create_knowledge_proposal:'整理资料候选',
     store_conversation_attachments:'保存对话附件',
   })[name]||name||'Agent 工具';
+}
+
+function agentToolCategory(name){
+  if(/character/.test(name||''))return '人物资料';
+  if(/scene_text/.test(name||''))return '正文';
+  if(/world|canon|work_context/.test(name||''))return '作品资料';
+  if(/conversation_history/.test(name||''))return '对话';
+  if(/attachments/.test(name||''))return '附件';
+  return ({load_workflow_template:'写作指引',organize_current_plan:'创作整理',create_knowledge_proposal:'创作整理',check_knowledge_conflicts:'资料检查','document.retrieve':'文档检索',provider_call:'模型'})[name]||'其他工具';
 }
 
 function compactTokenCount(value){
@@ -5873,17 +5899,22 @@ function agentRunHasRecoveryPresentation(runId){
 }
 
 // Read-only projection: keep tool activity attached to its original reply.
-function workAgentInlineToolsMarkup(rows,message,run,publicSummary=''){
+function agentActivityEntriesMarkup(rows,message={},run=null){
   const scope=String(message.id||run?.id||'reply');
   const labels={succeeded:'已完成',completed:'已完成',running:'执行中',queued:'等待中',failed:'失败',blocked:'需处理',denied:'未获授权',waiting_user:'待确认',cancelled:'已停止'};
   const entries=rows.map((item,index)=>{
     const status=item.status||'unknown',label=item.label||agentToolLabel(item.tool)||'处理任务';
     const error=typeof item.error==='object'?(item.error?.message||item.error?.code):item.error;
-    return `<details class="agent-tool-step" data-status="${esc(status)}" data-agent-disclosure="tool:${esc(scope)}:${index}"><summary><span class="agent-tool-symbol" aria-hidden="true">${['failed','blocked','denied'].includes(status)?'!':'◇'}</span><span class="agent-tool-name" title="${esc(label)}">${esc(label)}</span><small>${esc(labels[status]||'已记录')}</small><span class="agent-tool-chevron" aria-hidden="true">›</span></summary><div class="agent-tool-detail"><span>工具：<code>${esc(item.tool||'未提供标识')}</code></span>${error?`<p role="status">${esc(String(error))}</p>`:'<p>这条记录属于本轮回复，工具完成不代表候选已被采纳。</p>'}</div></details>`;
+    const preparation=item.origin==='preparation',category=item.category||agentToolCategory(item.tool),output=String(item.output||'').trim();
+    return `<details class="agent-tool-step ${preparation?'agent-character-resolution':''}" data-status="${esc(status)}" data-origin="${preparation?'preparation':'agent'}" data-agent-disclosure="tool:${esc(scope)}:${index}"><summary><span class="agent-tool-symbol" aria-hidden="true">${['failed','blocked','denied'].includes(status)?'!':'◇'}</span><span class="agent-tool-category">${esc(category)}</span><span class="agent-tool-name" title="${esc(output||label)}">${esc(label)}</span><small>${esc(labels[status]||'已记录')}</small><span class="agent-tool-chevron" aria-hidden="true">›</span></summary><div class="agent-tool-detail">${output?`<p>${esc(output)}</p>`:''}${error?`<p role="status">${esc(String(error))}</p>`:''}${preparation?'<small>系统按对话中的人物准备资料</small><button type="button" class="quiet" data-agent-open-library="characters">查看人物资料</button>':item.tool?`<small>工具标识：<code>${esc(item.tool)}</code></small>`:''}</div></details>`;
   }).join('');
-  const elapsed=agentRunElapsedLabel(run);
+  return entries?`<div class="agent-tool-steps" aria-label="本轮工具与资料活动">${entries}</div>`:'';
+}
+
+function workAgentInlineToolsMarkup(rows,message,run,publicSummary=''){
+  const scope=String(message.id||run?.id||'reply'),entries=agentActivityEntriesMarkup(rows,message,run),elapsed=agentRunElapsedLabel(run);
   const note=publicSummary||'本轮未提供判断摘要。';
-  return `${entries?`<div class="agent-tool-steps" aria-label="本轮工具活动">${entries}</div>`:''}<details class="agent-turn-info" data-agent-disclosure="run:${esc(scope)}"><summary>${esc(elapsed?`本轮用时 ${elapsed}`:'本轮记录')}<span aria-hidden="true">›</span></summary><div class="agent-tool-detail"><p>${esc(note)}</p>${run?`<div class="agent-usage">${agentUsageMarkup(agentObservedUsage(run,message))}${agentRequestUsageMarkup(run)}</div>`:''}</div></details>`;
+  return `${entries}<details class="agent-turn-info" data-agent-disclosure="run:${esc(scope)}"><summary>${esc(elapsed?`本轮用时 ${elapsed}`:'本轮记录')}<span aria-hidden="true">›</span></summary><div class="agent-tool-detail"><p>${esc(note)}</p>${run?`<div class="agent-usage">${agentUsageMarkup(agentObservedUsage(run,message))}${agentRequestUsageMarkup(run)}</div>`:''}</div></details>`;
 }
 
 // Deliberately small, escaped prose renderer; never interprets model HTML.
@@ -5915,8 +5946,9 @@ function workAgentToolMarkup(content={},message={}){
     output:call.output_ref,
     error:call.error,
   })):[];
-  const activity=persistedCalls.length?persistedCalls:(Array.isArray(trace.steps)?trace.steps:(Array.isArray(content.tool_activity)?content.tool_activity:[]));
-  const rows=[...activity];
+  const recorded=Array.isArray(trace.steps)?trace.steps:(Array.isArray(content.tool_activity)?content.tool_activity:[]);
+  const activity=persistedCalls.length?[...persistedCalls,...recorded.filter(item=>!persistedCalls.some(call=>call.tool===item.tool))]:recorded;
+  const rows=[...characterPreparationActivity(content.character_resolution),...activity];
   const traceSummary=String(trace.summary||'').trim();
   const reasoning=trace.reasoning||{};
   if(!rows.length&&!run?.id&&!traceSummary&&!reasoning.summary)return'';
@@ -6161,7 +6193,7 @@ renderConversationMessage=function(message){
     return `<article class="conversation-message assistant agent-history-message ${grouped?'is-grouped':''}"><div class="message-avatar" aria-hidden="true">HC</div><div class="message-column"><details class="agent-history-note"><summary>较早一次未完成的模型调用 · ${resumed}</summary><p>这次输入与运行记录仍已保留，正式资料没有改变。</p></details></div></article>`;
   }
   const extracted=extractOfficialScript(publicMessageText(message));
-  return `<article class="conversation-message ${assistant?'assistant':'user'} ${grouped?'is-grouped':''} ${sceneMemoryRequest?'scene-memory-request':''}"><div class="message-avatar" aria-hidden="true">${assistant?'HC':sceneMemoryRequest?'场':'你'}</div><div class="message-column"><div class="message-role">${assistant?'HaloCue 创作导演':sceneMemoryRequest?'场景资料检查':'你'}</div><div class="message-bubble">${messageAttachmentsMarkup(message)}${assistant?workAgentToolMarkup(content,message):''}${extracted.prose?(assistant&&state.route?.section==='works'?agentProseMarkup(extracted.prose):`<p>${conversationTextMarkup(extracted.prose)}</p>`):''}${assistant?discussionQuestionsMarkup(content)+characterResolutionMarkup(content.character_resolution):''}${assistant?importReviewMarkup(content.import_review):''}${assistant?officialScriptCandidateMarkup(message):''}${workAgentDraftMarkup(content,message)}${assistant?conversationGuidanceMarkup(message):''}${assistant&&extracted.prose&&state.route?.section==='works'?'<div class="agent-message-actions"><button type="button" class="quiet" data-agent-copy-reply aria-label="复制这条回复">复制回复</button><span data-agent-copy-status role="status"></span></div>':''}</div></div></article>`;
+  return `<article class="conversation-message ${assistant?'assistant':'user'} ${grouped?'is-grouped':''} ${sceneMemoryRequest?'scene-memory-request':''}"><div class="message-avatar" aria-hidden="true">${assistant?'HC':sceneMemoryRequest?'场':'你'}</div><div class="message-column"><div class="message-role">${assistant?'HaloCue 创作导演':sceneMemoryRequest?'场景资料检查':'你'}</div><div class="message-bubble">${messageAttachmentsMarkup(message)}${assistant?workAgentToolMarkup(content,message):''}${extracted.prose?(assistant&&state.route?.section==='works'?agentProseMarkup(extracted.prose):`<p>${conversationTextMarkup(extracted.prose)}</p>`):''}${assistant?discussionQuestionsMarkup(content)+(state.route?.section==='works'?'':characterResolutionMarkup(content.character_resolution)):''}${assistant?importReviewMarkup(content.import_review):''}${assistant?officialScriptCandidateMarkup(message):''}${workAgentDraftMarkup(content,message)}${assistant?conversationGuidanceMarkup(message):''}${assistant&&extracted.prose&&state.route?.section==='works'?'<div class="agent-message-actions"><button type="button" class="quiet" data-agent-copy-reply aria-label="复制这条回复">复制回复</button><span data-agent-copy-status role="status"></span></div>':''}</div></div></article>`;
 };
 
 function currentWorkArtifactMarkup(){
@@ -8481,7 +8513,8 @@ function workAgentActiveRun(thread=workConversationThread()){
 function activeAgentRunMarkup(thread){
   const run=workAgentActiveRun(thread);
   if(!run)return'';
-  return `<article class="conversation-message assistant agent-running-message" aria-live="polite"><div class="message-avatar" aria-hidden="true">HC</div><div class="message-column"><div class="message-role">HaloCue 创作导演</div><div class="agent-running-line"><span class="agent-thinking-indicator" aria-hidden="true"></span><b>${run.status==='queued'?'等待开始':'正在整理回应'}</b><small>输入已保存 · 可随时停止</small></div></div></article>`;
+  const rows=(run.tool_calls||[]).map(call=>({tool:call.tool_name,label:agentToolLabel(call.tool_name),status:call.status,output:call.output_ref,error:call.error}));
+  return `<article class="conversation-message assistant agent-running-message" aria-live="polite"><div class="message-avatar" aria-hidden="true">HC</div><div class="message-column"><div class="message-role">HaloCue 创作导演</div>${agentActivityEntriesMarkup(rows,{},run)}<div class="agent-running-line"><span class="agent-thinking-indicator" aria-hidden="true"></span><b>${run.status==='queued'?'等待开始':'正在整理回应'}</b><small>输入已保存 · 可随时停止</small></div></div></article>`;
 }
 
 async function refreshAfterAgentRun(run,workId=state.work?.id,session=hcWorkLoadEpoch){
@@ -8509,7 +8542,21 @@ function scheduleAgentRunPoll(runId,delay=500){
     try{
       const run=await api(`/works/${workId}/agent-runs/${runId}`);
       if(!current())return;
-      if(['queued','running'].includes(run.status)){scheduleAgentRunPoll(runId,600);return;}
+      if(['queued','running'].includes(run.status)){
+        const previous=(state.work.agent_runs||[]).find(item=>item.id===runId);
+        state.work.agent_runs=[run,...(state.work.agent_runs||[]).filter(item=>item.id!==runId)];
+        if(previous?.status!==run.status||JSON.stringify(previous?.tool_calls||[])!==JSON.stringify(run.tool_calls||[])){
+          // Update only the progress row; preserve the author's composer text,
+          // focus, scroll position and the rest of the conversation.
+          const pending=$('.agent-running-message');
+          if(pending){
+            const opened=new Set([...pending.querySelectorAll('details[open]')].map(item=>item.dataset.agentDisclosure));
+            pending.outerHTML=activeAgentRunMarkup(workConversationThread());
+            $$('.agent-running-message details').forEach(item=>{if(opened.has(item.dataset.agentDisclosure))item.open=true;});
+          }
+        }
+        scheduleAgentRunPoll(runId,600);return;
+      }
       await refreshAfterAgentRun(run,workId,session);
     }catch(error){
       if(!current())return;

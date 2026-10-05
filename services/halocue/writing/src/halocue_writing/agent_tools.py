@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from .repository import canonical_json, sha256_text
+from .tool_activity import PUBLIC_TOOL_LABELS, tool_category, tool_summary
 
 
 @dataclass(frozen=True)
@@ -63,31 +64,17 @@ class ToolExecutionResult:
         value = self._summary()
         return {
             "tool": self.tool,
-            "label": self.label,
+            "label": PUBLIC_TOOL_LABELS.get(self.tool, self.label),
+            "category": tool_category(self.tool),
+            "origin": "agent",
             "status": self.status,
             "output": str(value or "")[:240],
             "requires_user_confirmation": self.requires_user_confirmation,
+            **({"error": self.error} if self.error else {}),
         }
 
     def _summary(self) -> str:
-        value = self.output
-        if isinstance(value, list):
-            return f"找到 {len(value)} 项结果"
-        if not isinstance(value, dict):
-            return str(value or "")[:240]
-        if "artifacts" in value and isinstance(value["artifacts"], list):
-            return f"已读取 {len(value['artifacts'])} 项正式资料"
-        if value.get("status") == "discussion_draft":
-            return f"已生成「{value.get('title') or '资料'}」讨论草稿"
-        if value.get("next") == "user_confirmation":
-            return "等待用户确认后创建 Proposal"
-        if "conflicts" in value and isinstance(value["conflicts"], list):
-            return "未发现重复资料" if not value["conflicts"] else f"发现 {len(value['conflicts'])} 项重复或冲突"
-        if "scope" in value:
-            return {"work": "作品全局", "chapter": "当前章节", "scene": "当前场景"}.get(str(value["scope"]), str(value["scope"]))
-        if "count" in value:
-            return f"已处理 {value['count']} 项"
-        return canonical_json(value)[:240]
+        return tool_summary(self.tool, self.output)
 
 
 Handler = Callable[[ToolExecutionContext, dict[str, Any]], Any]

@@ -159,12 +159,10 @@ def test_planning_prompts_keep_brief_and_blueprint_out_of_formal_writing(tmp_pat
     brief = assembler.assemble("brief.build", mode_key="bond_short", output_mode="discussion_json")
     blueprint = assembler.assemble("blueprint.generate", mode_key="bond_short", output_mode="story_blueprint_json")
 
-    assert "不写正文" in brief["system_prompt"]
-    assert "一次最多提出两个" in brief["system_prompt"]
-    assert "只选择一个主写作模式" in brief["system_prompt"]
-    assert "默认面向 AA 可演出剧本" in brief["system_prompt"]
-    assert "不要要求用户先选择小说还是剧本" in brief["system_prompt"]
-    assert "仅在用户明确要求小说化阅读时" in brief["system_prompt"]
+    assert brief["source_files"] == ["SKILL.md", "knowledge/创作讨论.md"]
+    assert brief["stage_guidance"] == []
+    assert "按需调用" in brief["system_prompt"]
+    assert "agents/writer.md" not in brief["system_prompt"]
     assert brief["output_mode"] == "discussion_json"
     assert "只整理 StoryBlueprint 候选" in blueprint["system_prompt"]
     assert "不得把推断升格为事实" in blueprint["system_prompt"]

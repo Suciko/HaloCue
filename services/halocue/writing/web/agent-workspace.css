@@ -95,6 +95,9 @@
 #app#app.hc-redesign[data-surface="works"] .agent-tool-step>summary { display:flex;align-items:center;gap:9px;padding:7px 0;list-style:none;cursor:pointer;font-size:12px;line-height:1.5;color:var(--hc-muted)!important; }
 #app#app.hc-redesign[data-surface="works"] .agent-tool-step>summary::-webkit-details-marker,#app#app.hc-redesign[data-surface="works"] .agent-turn-info>summary::-webkit-details-marker { display:none; }
 #app#app.hc-redesign[data-surface="works"] .agent-tool-name { min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:65%; }
+#app#app.hc-redesign[data-surface="works"] .agent-tool-category { flex:none;padding:1px 6px;border-radius:5px;background:var(--hc-rail);color:var(--hc-muted);font-size:10px; }
+#app#app.hc-redesign[data-surface="works"] .agent-tool-step.agent-character-resolution { padding:0;margin:0;overflow:visible; }
+#app#app.hc-redesign[data-surface="works"] .agent-tool-detail button { display:block;margin-top:8px; }
 #app#app.hc-redesign[data-surface="works"] .agent-tool-step small { font-size:10px;color:var(--hc-muted);white-space:nowrap;padding:0!important;margin:0!important;border:0!important;background:transparent!important;line-height:1.5; }
 #app#app.hc-redesign[data-surface="works"] .agent-tool-symbol { width:16px;text-align:center;font-size:14px;flex:none; }
 #app#app.hc-redesign[data-surface="works"] .agent-tool-chevron { display:inline-block;font-size:16px; }
