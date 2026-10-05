@@ -1466,7 +1466,7 @@
       "/production/workspace-migration.css",
       "/production/direction-profile.css",
       "/production/confirm-dialog.css",
-      "/production-embed.css?v=20260929-overview-origin-dark2",
+      "/production-embed.css?v=20261006-host-scroll1",
       "/production-theme.css?v=20260929-resource-empty-dark1",
       "/production/clarity.css?v=20260927-compact4",
     ];
