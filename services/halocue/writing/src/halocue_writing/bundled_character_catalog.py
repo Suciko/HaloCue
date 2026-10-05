@@ -36,7 +36,7 @@ class BundledCharacterCatalog:
                     "id": path.stem,
                     "name": names[0],
                     "aliases": names[1:],
-                    "summary": str(card.get("core", "")),
+                    "summary": self._core_summary(card.get("core")),
                     "source_kind": "maintainer_curated_reference",
                 }
             )
@@ -47,6 +47,16 @@ class BundledCharacterCatalog:
             "matched_cards": len(items),
             "has_more": len(items) > limit,
         }
+
+    @staticmethod
+    def _core_summary(core) -> str:
+        if isinstance(core, str):
+            return core
+        if isinstance(core, dict):
+            for key in ("central_tension", "summary", "identity"):
+                if isinstance(core.get(key), str) and core[key].strip():
+                    return core[key]
+        return ""
 
     def import_payload(self, card_id: str) -> dict:
         path = next((p for p in self.root.glob("*.json") if p.stem == card_id), None)

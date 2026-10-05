@@ -175,6 +175,10 @@ def test_real_prompt_keeps_author_genre_and_allows_lookup_then_writing(monkeypat
     assert "OC、IF" in prompt
     assert '"questions": []' in prompt
     assert "同一轮可以先检索" in prompt
+    assert "新作品的范围引导" in prompt
+    assert "还没想好先试写" in prompt
+    assert "已说清的范围直接沿用，不重复询问" in prompt
+    assert "用户要直接写或试写时先推进，不强制回答长度选择" in prompt
     assert "准备正文修改时，可以请求下一轮相应工具" in prompt
     assert "缺一项不得写正文" not in prompt
     assert "第一优先：主线" not in prompt

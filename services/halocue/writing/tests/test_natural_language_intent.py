@@ -55,6 +55,8 @@ def test_empty_workspace_intent_creates_unnamed_work_and_scene(tmp_path):
     assert result["target"]["scene_title"] == result["work"]["chapters"][0]["scenes"][0]["title"]
     assert "work_canon" in result["read_refs"]
     assert [action["status"] for action in result["actions"]] == ["completed", "completed", "completed"]
+    assert result["actions"][1]["label"] == "准备本轮创作上下文"
+    assert not any(call["tool_name"] == "read_work_context" for run in result["work"]["agent_runs"] for call in run["tool_calls"])
     assert result["result"]["run_status"] == "waiting_user"
     service.close()
 
@@ -198,6 +200,15 @@ def test_intent_projection_counts_scoped_context_search_as_context_read(tmp_path
     assert projected["actions"][0]["status"] == "completed"
     assert projected["actions"][1]["status"] == "completed"
     service.close()
+
+
+def test_context_step_needs_a_real_snapshot_or_tool_receipt():
+    projected = WritingService._project_intent_plan_execution(
+        {"status": "running", "actions": [{"id": "context.read", "status": "planned"}],
+         "result": {"agent_run_id": "without-input"}},
+        {"agent_runs": [{"id": "without-input", "status": "completed", "tool_calls": []}]},
+    )
+    assert projected["actions"][0]["status"] == "planned"
 
 
 def test_stale_intent_target_offers_structure_recovery_action():
