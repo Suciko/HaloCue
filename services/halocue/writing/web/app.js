@@ -2,7 +2,7 @@ const DECISION_CUSTOM_OPTION_ID='__custom__';
 // Compatibility marker: activation is performed by requestProduction('/activate'),
 // after the candidate test has completed; the old two-call flow is intentionally absent.
 // await requestProduction('/test')
-const state={works:[],work:null,userStatus:null,userStatusVersion:null,userStatusLoading:false,agentPresentation:null,currentProjection:null,currentProjectionVersion:null,currentProjectionLoading:false,releaseDetails:{},releaseDetailLoading:{},releaseDetailErrors:{},capabilities:null,stage:'overview',surface:'works',sceneId:null,context:null,inspector:'agent',mobileView:'writing',writingChapterId:'',libraryView:'overview',libraryEditorOpen:false,showGlobalSurfaces:true,editCardId:'',editCard:null,characterCardDraft:null,characterImportProfile:null,characterImportFileName:'',worldImportProfile:null,worldImportFileName:'',highlightCardId:'',libraryCharacterFilter:'active',libraryQuery:'',librarySourceFilter:'all',libraryStatusFilter:'all',historyCardId:'',editCanonFactId:'',canonHistoryOpen:false,officialReferenceQuery:'',officialReferenceResults:[],referenceCharacterResults:[],officialReferenceSearched:false,officialReferenceUnavailable:false,officialReferenceLimit:6,bundledReferenceResults:{characters:[],backgrounds:[]},worldQuery:'',worldKindFilter:'all',worldSourceFilter:'all',worldStatusFilter:'all',graphFocus:'',graphTypeFilter:'all',graphLens:'characters',graphExpanded:false,editWorldEntry:null,worldCardDraft:null,worldHistoryOpen:false,sceneContextEditorOpen:false,sceneContractOpen:false,manuscriptDirty:false,manuscriptSceneId:'',manuscriptDraftBlocks:null,manuscriptDirtyUrl:'',manuscriptBlockCounter:0,sceneTextSelection:null,sceneDiffSelections:{},structureDraft:null,structureDirty:false,conversationThreadId:'',renamingThreadId:'',workAgentExpanded:false,mobileThreadOpen:false,composerAttachmentIds:[],composerPrefill:'',composerImportMode:'',composerImportId:'',composerImportPreview:null,composerImportStatus:'',composerImportError:'',threadRailQuery:'',threadRailSearchOpen:false,assetSurfaceOpen:false,assetUpload:null,assetCatalog:{scope:'custom',kind:'characters',query:'',items:[],total:0,offset:0,limit:36,hasMore:false,loading:false,error:null,requestId:0},decisionCardDismissedFor:'',decisionCardDockClosed:false,decisionCardWaitingForAgent:false,decisionCardSelections:{},decisionCardCustomDrafts:{},decisionCardSubmitting:false,decisionCardError:null,staleProposalIds:new Set(),firstUseOpen:false,firstUseDismissed:false,lastError:null,feedbackError:null,sceneRecovery:null};
+const state={deletedWorks:[],projectsTrashOpen:false,workMutation:false,deleteWorkTarget:null,officialReferenceScope:'characters',referenceCharacterCatalog:null,officialReferenceLoading:false,officialReferenceError:'',officialReferenceRequest:0,works:[],work:null,userStatus:null,userStatusVersion:null,userStatusLoading:false,agentPresentation:null,currentProjection:null,currentProjectionVersion:null,currentProjectionLoading:false,releaseDetails:{},releaseDetailLoading:{},releaseDetailErrors:{},capabilities:null,stage:'overview',surface:'works',sceneId:null,context:null,inspector:'agent',mobileView:'writing',writingChapterId:'',libraryView:'overview',libraryEditorOpen:false,showGlobalSurfaces:true,editCardId:'',editCard:null,characterCardDraft:null,characterImportProfile:null,characterImportFileName:'',worldImportProfile:null,worldImportFileName:'',highlightCardId:'',libraryCharacterFilter:'active',libraryQuery:'',librarySourceFilter:'all',libraryStatusFilter:'all',historyCardId:'',editCanonFactId:'',canonHistoryOpen:false,officialReferenceQuery:'',officialReferenceResults:[],referenceCharacterResults:[],officialReferenceSearched:false,officialReferenceUnavailable:false,officialReferenceLimit:6,worldQuery:'',worldKindFilter:'all',worldSourceFilter:'all',worldStatusFilter:'all',graphFocus:'',graphTypeFilter:'all',graphLens:'characters',graphExpanded:false,editWorldEntry:null,worldCardDraft:null,worldHistoryOpen:false,sceneContextEditorOpen:false,sceneContractOpen:false,manuscriptDirty:false,manuscriptSceneId:'',manuscriptDraftBlocks:null,manuscriptDirtyUrl:'',manuscriptBlockCounter:0,sceneTextSelection:null,sceneDiffSelections:{},structureDraft:null,structureDirty:false,conversationThreadId:'',renamingThreadId:'',workAgentExpanded:false,mobileThreadOpen:false,composerAttachmentIds:[],composerPrefill:'',composerImportMode:'',composerImportId:'',composerImportPreview:null,composerImportStatus:'',composerImportError:'',threadRailQuery:'',threadRailSearchOpen:false,assetSurfaceOpen:false,assetUpload:null,assetCatalog:{scope:'custom',kind:'characters',query:'',items:[],total:0,offset:0,limit:36,hasMore:false,loading:false,error:null,requestId:0},decisionCardDismissedFor:'',decisionCardDockClosed:false,decisionCardWaitingForAgent:false,decisionCardSelections:{},decisionCardCustomDrafts:{},decisionCardSubmitting:false,decisionCardError:null,staleProposalIds:new Set(),firstUseOpen:false,firstUseDismissed:false,lastError:null,feedbackError:null,sceneRecovery:null};
 /* Phase 1: one route, one root renderer, one application click dispatcher.
    Domain requests below this section keep their existing API contracts. */
 const HC_SECTIONS = new Set(['projects','worlds','works','writing','references','tasks','assets','production']);
@@ -1946,18 +1946,96 @@ function projectUpdatedLabel(value){
 }
 function renderProjects(el){
   if(!state.work&&state.firstUseOpen){el.innerHTML=firstUseFormMarkup();bindFirstUseForm(el);return;}
-  const rows=projectRows();
+  const rows=state.projectsTrashOpen ? state.deletedWorks : projectRows();
   el.innerHTML=`<section class="project-home" aria-labelledby="projectHomeTitle">
-    <header class="project-home-heading"><div><p class="eyebrow">创作空间</p><h1 id="projectHomeTitle">我的作品</h1><p>每个故事都有自己的构思、正文和设定。也可以先独立整理世界底稿。</p></div><div class="project-home-entries"><button type="button" class="quiet" data-section="worlds">世界底稿</button><button type="button" class="quiet" data-open-adaptation="new">用小说创建作品</button><button type="button" class="primary" data-action="new-work">新建作品</button></div></header>
-    <div class="project-home-toolbar"><h2>作品 <span>${rows.length}</span></h2><button type="button" class="quiet" data-projects-refresh ${state.projectsLoading?'disabled':''}>${state.projectsLoading?'正在刷新…':'刷新列表'}</button></div>
+    <header class="project-home-heading"><div><p class="eyebrow">创作空间</p><h1 id="projectHomeTitle">${state.projectsTrashOpen ? '回收站' : '我的作品'}</h1><p>${state.projectsTrashOpen ? '删除的作品保留正文、资料和版本记录，可在这里恢复。' : '每个故事都有自己的构思、正文和设定。也可以先独立整理世界底稿。'}</p></div><div class="project-home-entries" ${state.projectsTrashOpen ? 'hidden' : ''}><button type="button" class="quiet" data-section="worlds">世界底稿</button><button type="button" class="quiet" data-open-adaptation="new">用小说创建作品</button><button type="button" class="primary" data-action="new-work">新建作品</button></div></header>
+    <div class="project-home-toolbar"><h2>${state.projectsTrashOpen ? '已删除作品' : '作品'} <span>${rows.length}</span></h2><button type="button" class="quiet" data-project-trash-toggle>${state.projectsTrashOpen ? '返回作品' : '回收站'}</button><button type="button" class="quiet" data-projects-refresh ${state.projectsLoading?'disabled':''}>${state.projectsLoading?'正在刷新…':'刷新列表'}</button></div>
     ${state.projectsError?`<p class="project-home-error" role="alert">${esc(state.projectsError)}</p>`:''}
     <div class="project-list">${rows.map(item=>`<article class="project-card ${item.id===state.work?.id?'is-current':''}">
-      <div class="project-card-heading"><span class="project-card-mark" aria-hidden="true">文</span><div><h3>${esc(item.title||'未命名作品')}</h3><p>${item.id===state.work?.id?'当前作品 · ':''}更新于 ${esc(projectUpdatedLabel(item.updated_at))}</p></div></div>
-      <nav class="project-card-actions" aria-label="${esc(item.title||'未命名作品')}的创作入口"><button type="button" class="project-open" data-select-work="${esc(item.id)}">打开构思<span aria-hidden="true"> →</span></button><button type="button" class="quiet" data-select-work="${esc(item.id)}" data-project-destination="structure">大纲</button><button type="button" class="quiet" data-select-work="${esc(item.id)}" data-project-destination="draft">正文</button><button type="button" class="quiet" data-select-work="${esc(item.id)}" data-project-destination="references">资料</button></nav>
-    </article>`).join('')||'<div class="project-home-empty"><h2>从你的第一个故事开始</h2><p>可以先导入已有小说，或建立空白作品直接写大纲。不必先配置模型。</p><button type="button" class="primary" data-action="new-work">建立第一部作品</button><button type="button" class="quiet" data-open-adaptation="new">用小说创建作品</button><button type="button" class="quiet" data-section="worlds">先整理世界底稿</button></div>'}</div>
-    <aside class="project-home-note"><b>已有文稿？</b><p>选择「用小说创建作品」，先预览章节与范围，再逐章生成候选。采纳后才会写入正式正文。</p></aside>
+      <div class="project-card-heading"><span class="project-card-mark" aria-hidden="true">文</span><div><h3>${esc(item.title||'未命名作品')}</h3><p>${item.id===state.work?.id?'当前作品 · ':''}更新于 ${esc(projectUpdatedLabel(item.updated_at))}</p></div>${state.projectsTrashOpen ? `<button type="button" class="quiet" data-restore-work="${esc(item.id)}" ${state.workMutation ? 'disabled' : ''}>恢复作品</button>` : `<button type="button" class="quiet project-delete" data-delete-work="${esc(item.id)}" aria-label="删除作品：${esc(item.title || '未命名作品')}">删除</button>`}</div>
+      <nav class="project-card-actions" ${state.projectsTrashOpen ? 'hidden' : ''} aria-label="${esc(item.title||'未命名作品')}的创作入口"><button type="button" class="project-open" data-select-work="${esc(item.id)}">打开构思<span aria-hidden="true"> →</span></button><button type="button" class="quiet" data-select-work="${esc(item.id)}" data-project-destination="structure">大纲</button><button type="button" class="quiet" data-select-work="${esc(item.id)}" data-project-destination="draft">正文</button><button type="button" class="quiet" data-select-work="${esc(item.id)}" data-project-destination="references">资料</button></nav>
+    </article>`).join('')||(state.projectsTrashOpen ? '<div class="project-home-empty"><h2>回收站为空</h2><p>已删除的作品会保留在这里，随时可以恢复。</p></div>' : '<div class="project-home-empty"><h2>从你的第一个故事开始</h2><p>可以先导入已有小说，或建立空白作品直接写大纲。不必先配置模型。</p><button type="button" class="primary" data-action="new-work">建立第一部作品</button><button type="button" class="quiet" data-open-adaptation="new">用小说创建作品</button><button type="button" class="quiet" data-section="worlds">先整理世界底稿</button></div>')}</div>
+    <aside class="project-home-note" ${state.projectsTrashOpen ? 'hidden' : ''}><b>已有文稿？</b><p>选择「用小说创建作品」，先预览章节与范围，再逐章生成候选。采纳后才会写入正式正文。</p></aside>
   </section>`;
 }
+registerAppClick(event => {
+  const button = event.target.closest?.('button');
+  if (!button || state.workMutation) return;
+  if (button.hasAttribute('data-project-trash-toggle') || (state.projectsTrashOpen && button.hasAttribute('data-projects-refresh'))) {
+    event.preventDefault(); claimAppEvent(event);
+    void (async () => {
+      state.deletedWorks = await api('/deleted-works');
+      if (button.hasAttribute('data-project-trash-toggle')) state.projectsTrashOpen = !state.projectsTrashOpen;
+      render();
+    })().catch(error => toast(error.message, true));
+  } else if (button.dataset.deleteWork) {
+    event.preventDefault(); claimAppEvent(event);
+    void (async () => {
+      const target = await api('/works/' + button.dataset.deleteWork);
+      state.deleteWorkTarget = target;
+      document.getElementById('deleteWorkName').textContent = target.title;
+      document.getElementById('deleteWorkUnsaved').hidden = target.id !== state.work?.id || !(state.manuscriptDirty || state.structureDirty);
+      document.getElementById('deleteWorkError').hidden = true;
+      document.getElementById('deleteWorkDialog').showModal();
+    })().catch(error => toast(error.message, true));
+  } else if (button.hasAttribute('data-close-delete-work')) {
+    event.preventDefault(); claimAppEvent(event);
+    document.getElementById('deleteWorkDialog').close();
+    state.deleteWorkTarget = null;
+  } else if (button.dataset.restoreWork) {
+    event.preventDefault(); claimAppEvent(event);
+    const target = state.deletedWorks.find(work => work.id === button.dataset.restoreWork);
+    if (!target) return;
+    void (async () => {
+      state.workMutation = true; render();
+      try {
+        await api(`/works/${target.id}/restore`, {method:'POST', body:JSON.stringify({expected_version:target.version})});
+        state.works = await api('/works'); state.deletedWorks = await api('/deleted-works');
+        if (!state.work) await loadWork(target.id, {resume:false, renderNow:false});
+        toast(`已恢复《${target.title}》`);
+      } catch(error) { toast(error.message, true); }
+      finally { state.workMutation = false; render(); }
+    })();
+  }
+}, 5);
+document.getElementById('deleteWorkDialog')?.addEventListener('cancel', event => {
+  if (state.workMutation) event.preventDefault();
+});
+document.getElementById('deleteWorkForm')?.addEventListener('submit', async event => {
+  event.preventDefault(); claimAppEvent(event);
+  const target = state.deleteWorkTarget;
+  if (!target || state.workMutation) return;
+  state.workMutation = true;
+  const controls = [...event.target.querySelectorAll('button')];
+  controls.forEach(button => button.disabled = true);
+  try {
+    await api(`/works/${target.id}/trash`, {method:'POST', body:JSON.stringify({expected_version:target.version})});
+    state.works = await api('/works');
+    if (state.work?.id === target.id) {
+      clearTimeout(agentRunPollTimer); ++hcWorkLoadEpoch; ++hcNavigationEpoch;
+      ++hcProjectionRequest; ++hcStatusRequest;
+      state.work = null; state.sceneId = null; state.writingChapterId = '';
+      state.context = null; state.agentPresentation = null; state.userStatus = null; state.currentProjection = null;
+      state.manuscriptDirty = false; state.manuscriptDraftBlocks = null;
+      state.structureDirty = false; state.structureDraft = null;
+      state.conversationThreadId = ''; state.activeAgentRunId = '';
+      state.composerAttachmentIds = []; state.composerPrefill = '';
+      clearLibraryEditor();
+      if (state.works[0]) await loadWork(state.works[0].id, {resume:false, renderNow:false});
+    }
+    state.projectsTrashOpen = false;
+    document.getElementById('deleteWorkDialog').close();
+    document.getElementById('workSwitchDialog')?.close();
+    state.deleteWorkTarget = null;
+    navigateRoute({section:'projects'}, {skipGuard:true});
+    toast(`已将《${target.title}》移入回收站`);
+  } catch(error) {
+    const notice = document.getElementById('deleteWorkError');
+    notice.textContent = error.message; notice.hidden = false;
+  } finally {
+    state.workMutation = false; controls.forEach(button => button.disabled = false);
+  }
+});
 function openProject(id,destination='works'){
   if(!state.works.some(item=>item.id===id))return;
   const switchWork=id!==state.work?.id;
@@ -2070,7 +2148,40 @@ function captureClientError(error,meta={}){state.feedbackError={message:String(e
 async function api(path,options={}){try{const response=await fetch('/api/v1'+path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});let result;try{result=await response.json()}catch(_){const error=new Error(`服务器返回了无法解析的响应（${response.status}）`);error.code='invalid_server_response';error.status=response.status;throw error}if(!response.ok||result.ok===false){const error=new Error(result.error?.message||'请求失败');error.code=result.error?.code;error.details=result.error?.details||{};error.status=response.status;throw error}return Object.prototype.hasOwnProperty.call(result,'data')?result.data:result}catch(error){captureClientError(error,{path});throw error}}
 async function officialReferenceSearch(query){return api(`/official-references/search?q=${encodeURIComponent(query)}&limit=18`)}
 async function searchOptionalOfficialReferences(query){try{const result=await officialReferenceSearch(query);return{result:{items:result.items||[]},unavailable:false}}catch(error){if(error.code==='official_corpus_unavailable')return{result:{items:[]},unavailable:true};throw error}}
-async function bundledReferenceSearch(query){const [characters,backgrounds]=await Promise.all([api(`/resources/search?kind=characters&q=${encodeURIComponent(query)}&limit=8`),api(`/resources/search?kind=backgrounds&q=${encodeURIComponent(query)}&limit=8`)]);return {characters:characters.items||[],backgrounds:backgrounds.items||[]}}
+async function loadReferenceSearch(query) {
+  const scope = state.officialReferenceScope;
+  const request = ++state.officialReferenceRequest;
+  state.officialReferenceQuery = query;
+  state.officialReferenceLoading = true;
+  state.officialReferenceError = '';
+  state.officialReferenceSearched = false;
+  state.officialReferenceResults = [];
+  state.referenceCharacterResults = [];
+  state.officialReferenceUnavailable = false;
+  render();
+  try {
+    const result = scope === 'characters'
+      ? await api(`/reference-characters/search?q=${encodeURIComponent(query)}&limit=200`)
+      : await searchOptionalOfficialReferences(query);
+    if (request !== state.officialReferenceRequest) return;
+    if (scope === 'characters') {
+      state.referenceCharacterResults = result.items || [];
+      state.referenceCharacterCatalog = result;
+    } else {
+      state.officialReferenceResults = result.result.items || [];
+      state.officialReferenceUnavailable = result.unavailable;
+    }
+    state.officialReferenceSearched = true;
+    state.officialReferenceLimit = 6;
+  } catch (error) {
+    if (request === state.officialReferenceRequest) state.officialReferenceError = error.message;
+  } finally {
+    if (request === state.officialReferenceRequest) {
+      state.officialReferenceLoading = false;
+      render();
+    }
+  }
+}
 function toast(message,bad=false){
   const el=$('#toast');if(!el)return;
   // A body's z-index cannot escape a modal's top layer (and stays inert).
@@ -3954,15 +4065,17 @@ function renderReferences(el){
   if(view==='timeline')body=`<section class="library-page-head"><div><h3>时间线</h3><p>时间线只读取当前 WorldBible 修订，供连续性审查和场景上下文引用；来源损坏时不会回退旧版本。</p></div><span class="source-pill">${worldTimeline.length} 个当前事件</span></section><div class="timeline-layout"><section class="timeline-list">${worldTimeline.length?worldTimeline.map((item,index)=>`<div class="timeline-event"><span>${String(index+1).padStart(2,'0')}</span><div><b>${esc(item.text)}</b><small>${esc(item.category)} · ${esc(item.source||'当前世界观修订')} · ${confidenceLabel(item.confidence_status)}${item.participants?.length?` · 关联：${esc(item.participants.join('、'))}`:''}</small></div></div>`).join(''):'<div class="library-empty">没有可验证的当前时间线事件。可以在这里添加过去事件、当前剧情或未来伏笔。</div>'}</section><section class="library-editor"><p class="eyebrow">TIMELINE EVENT</p><h3>添加事件</h3><form id="timelineForm"><label>事件内容<textarea name="event_text" placeholder="例如：零点后，旧游戏机第一次向爱丽丝发出提示。" required></textarea></label><label>事件类型<input name="event_category" placeholder="过去事件 / 当前剧情 / 未来伏笔"></label><label>来源<input name="event_source" required placeholder="用户确认 / 原作剧情索引 / 已登记资料"></label><label>可信状态<select name="event_status"><option value="confirmed">已确认</option><option value="inferred">推断</option><option value="open">待决定</option></select></label><label>关联角色<input name="event_participants" placeholder="爱丽丝、凯伊；会显示在关系图"></label><div class="actions"><button class="primary" type="submit">加入时间线</button><button class="quiet" type="button" data-library-cancel-editor>取消</button></div></form></section></div>`;
   if(view==='files')body=`<section class="library-page-head"><div><h3>证据资料</h3><p>资料文件是证据或创作依据，不会自动变成世界观事实。核对后再从人物库、世界库或作品事实中明确采用。</p></div><span class="source-pill">${files.length} 个文件 · ${officialFiles.length} 个原作摘录</span></section><div class="world-layout"><section class="world-rules">${files.length?files.map(file=>`<div class="world-rule"><span class="confidence ${esc(file.trust_status)}">${referenceTrustLabel(file.trust_status)}</span><div><b>${esc(file.title)}</b><small>${esc(file.kind)} · ${esc(file.source_label)} · v${file.version}</small></div></div>`).join(''):'<div class="library-empty">还没有资料文件。可以手动登记，也可以检索 BA 原作资料并导入摘录。</div>'}</section><section class="library-editor"><p class="eyebrow">REFERENCE FILE</p><h3>登记资料</h3><form id="libraryReferenceForm"><label>资料名称<input name="title" required placeholder="例如：游戏开发部设定摘录"></label><label>来源标签<input name="source_label" required placeholder="官方剧情索引 / 用户导入"></label><label>资料内容<textarea name="content" required placeholder="粘贴可追溯的摘录、作者设定或参考摘要。"></textarea></label><div class="actions"><button class="primary" type="submit">保存资料文件</button><button class="quiet" type="button" data-library-cancel-editor>取消</button></div></form></section></div>`;
   if(view==='official'){
-    const bundledVariantLabel=(item,faceCount)=>{const display=String(item?.display_name||'').trim(),key=String(item?.technical?.key||'').trim(),prefix=`${display}（`;if(key.startsWith(prefix)&&key.endsWith('）'))return key.slice(prefix.length,-1).replace(/[-_]+/g,' · ');return key&&key!==display?`差分资料 · ${faceCount} 个表情`:''};
-    const officialResults=state.officialReferenceResults||[],bundled=state.bundledReferenceResults||{characters:[],backgrounds:[]},bundledRows=[...(bundled.characters||[]).map(item=>({kind:'character',item})),...(bundled.backgrounds||[]).map(item=>({kind:'background',item}))];
-    const bundledMarkup=bundledRows.length?`<section class="bundled-reference-results" aria-label="随软件提供的 BA 资料索引"><header><div><p class="eyebrow">BA METADATA</p><h4>随软件提供的 BA 资料索引</h4><p>用于确认人物、背景和外观资料。它不会自动成为人物卡、世界规则或作品事实。</p></div><span class="source-pill">${bundledRows.length} 条</span></header><div class="bundled-reference-list">${bundledRows.map(row=>{const item=row.item;if(row.kind==='character'){const outfits=item.outfits||[],faceCount=outfits.reduce((sum,outfit)=>sum+Number(outfit.face_count||0),0),variant=bundledVariantLabel(item,faceCount),variantText=variant?` · ${variant}`:'';return `<article class="bundled-reference-record"><div><strong>${esc(item.display_name||'未命名人物')}</strong><span>人物资料${esc(variantText)}</span><small>${esc(item.club||'未标注社团')} · ${outfits.length} 套外观 · ${faceCount} 个表情</small></div><small>仅作参考</small></article>`}return `<article class="bundled-reference-record"><div><strong>${esc(item.display_name||'未命名背景')}</strong><span>背景资料</span><small>${esc([item.label,item.place,item.time,item.weather].filter(Boolean).join(' · ')||'未标注背景信息')}</small></div><small>仅作参考</small></article>`}).join('')}</div></section>`:'';
-    const referenceCardsMarkup=(state.referenceCharacterResults||[]).length?`<section class="bundled-reference-results"><header><h4>人物参考卡 · 维护者整理</h4><span>${state.referenceCharacterResults.length} 份</span></header>${state.referenceCharacterResults.map(item=>`<article class="official-record"><div><h4>${esc(item.name)}</h4><p class="record-meta">${esc(item.aliases.join('、'))}</p><p class="record-excerpt">${esc(item.summary)}</p></div><button class="quiet" type="button" data-reference-character="${esc(item.id)}">查看并导入完整人物卡</button></article>`).join('')}</section>`:'';
-    const officialMarkup=officialResults.length?officialResults.map(item=>`<article class="official-record"><div><p class="eyebrow">${esc(item.record_uid)}</p><h4>${esc(item.character_name||'未标注角色')} <span>/${esc(item.story_title||'未标注故事')}</span></h4><p class="record-meta">${esc(item.story_category||'未标注类别')} · ${esc((item.speakers||[]).join('、')||'未标注说话者')} · ${esc(item.source_file||item.record_file)}</p><p class="record-excerpt">${esc(item.zh_cn||'该记录未提供官方中文文本；可先导入索引信息，再人工核对。')}</p></div><div class="official-record-actions"><button class="quiet" type="button" data-official-to-character="${esc(item.record_uid)}">建立人物卡草稿</button><button class="quiet" type="button" data-official-to-world="${esc(item.record_uid)}">建立世界观卡草稿</button><button class="quiet" type="button" data-import-official="${esc(item.record_uid)}">导入为资料</button></div></article>`).join(''):'';
-    const corpusUnavailable=state.officialReferenceUnavailable?'原作摘录库当前未配置或不可读取；仍可使用下面的随包 BA 资料索引。':'';
-    const searchSummary=officialResults.length?`找到 ${officialResults.length} 条原作摘录。先检查故事归属、说话者和中文摘录，再决定是否建立资料草稿。${corpusUnavailable}`:referenceCardsMarkup?`当前显示 ${state.referenceCharacterResults.length} 份完整人物参考。可按角色名检索，再查看并导入本作品。`:bundledRows.length?`没有找到可用的原作摘录。${corpusUnavailable||'可以先用下面的随包资料索引确认人物或背景，再由 Agent 继续讨论。'}`:'没有找到匹配资料。可以尝试角色名、故事标题、说话者或地点关键词。';
-    const unavailableNotice=state.officialReferenceUnavailable?`<div class="notice catalog-availability-warning" role="status">原作摘录库暂不可用；随软件提供的 BA 人物和背景索引仍可检索。</div>`:'';
-    body=`<section class="library-page-head"><div><h3>BA 原作资料</h3><p>检索原作摘录或随软件提供的 BA 人物、背景索引。结果只作为参考；要进入人物卡、世界规则或作品事实，仍需你确认。</p></div><span class="source-pill">只读资料 · ${officialFiles.length} 个已导入</span></section><section class="official-reference-workbench"><form id="officialReferenceSearchForm" class="official-search"><label>检索资料<input name="query" value="${esc(state.officialReferenceQuery)}" required minlength="2" placeholder="例如：白子、爱丽丝、基沃托斯、夏莱"></label><button class="primary" type="submit">检索</button></form>${unavailableNotice}${state.officialReferenceSearched?`<p class="search-summary">${searchSummary}</p>${referenceCardsMarkup}${officialMarkup}${bundledMarkup}`:'<div class="library-empty">输入关键词开始检索。原作摘录不可用时，也会显示随软件提供的 BA 资料索引。</div>'}</section>`;
+    const characterScope = state.officialReferenceScope === 'characters';
+    const catalog = state.referenceCharacterCatalog || {};
+    const cards = state.referenceCharacterResults || [];
+    const results = state.officialReferenceResults || [];
+    const referenceCardsMarkup = cards.length ? `<section class="bundled-reference-results"><header><h4>人物参考卡 · 维护者整理</h4><span>资料库共 ${Number(catalog.total_cards || cards.length)} 份</span></header>${cards.map(item=>`<article class="official-record"><div><h4>${esc(item.name)}</h4><p class="record-meta">${esc((item.aliases || []).join('、'))}</p><p class="record-excerpt">${esc(item.summary)}</p></div><button class="quiet" type="button" data-reference-character="${esc(item.id)}">查看并导入完整人物卡</button></article>`).join('')}</section>` : '';
+    const officialMarkup = results.map(item=>`<article class="official-record"><div><h4>${esc(item.character_name || (item.speakers || []).join('、') || '原作摘录')} ${item.story_title ? `<span>/ ${esc(item.story_title)}</span>` : ''}</h4><p class="record-meta">${esc([item.story_category, (item.speakers || []).join('、')].filter(Boolean).join(' · '))}</p><p class="record-excerpt">${esc(item.zh_cn || '此记录未提供中文文本，可查看来源后核对。')}</p><details><summary>查看来源</summary><p class="record-meta">${esc(item.record_uid)} · ${esc(item.source_file || item.record_file)}</p></details></div><div class="official-record-actions"><button class="quiet" type="button" data-official-to-character="${esc(item.record_uid)}">建立人物卡草稿</button><button class="quiet" type="button" data-official-to-world="${esc(item.record_uid)}">建立世界观卡草稿</button><button class="quiet" type="button" data-import-official="${esc(item.record_uid)}">导入为资料</button></div></article>`).join('');
+    const searchSummary = characterScope
+      ? `资料库共 ${Number(catalog.total_cards || 0)} 份完整人物参考${state.officialReferenceQuery ? `，匹配 ${Number(catalog.matched_cards || 0)} 份` : '。可按角色名或别名检索'}。查看后可导入本作品。`
+      : state.officialReferenceUnavailable ? '原作摘录库暂不可用。可切换到人物参考，查看随包人物卡。'
+      : results.length ? `本次展示 ${results.length} 条匹配原作摘录。请核对说话者、故事和来源后采用。` : '没有找到匹配摘录。可尝试台词、故事标题或人物名。';
+    body = `<section class="library-page-head"><div><h3>写作参考资料</h3><p>检索完整人物卡或原作文本，查看来源后按本作需要采用。</p></div><span class="source-pill">${officialFiles.length} 条已导入摘录</span></section><section class="official-reference-workbench"><nav class="reference-source-tabs" aria-label="检索来源"><button type="button" class="quiet" data-reference-scope="characters" aria-pressed="${characterScope}">人物参考</button><button type="button" class="quiet" data-reference-scope="text" aria-pressed="${!characterScope}">原作摘录</button></nav><form id="officialReferenceSearchForm" class="official-search"><label>${characterScope ? '检索人物参考' : '检索原作文本'}<input name="query" value="${esc(state.officialReferenceQuery)}" ${characterScope ? '' : 'required minlength="2"'} placeholder="${characterScope ? '输入角色名或别名；留空浏览全部人物' : '输入台词、故事标题或人物名'}"></label><button class="primary" type="submit" ${state.officialReferenceLoading ? 'disabled' : ''}>${state.officialReferenceLoading ? '正在检索…' : '检索'}</button></form>${state.officialReferenceLoading ? '<p class="search-summary" role="status">正在检索资料…</p>' : state.officialReferenceError ? `<p class="notice" role="alert">${esc(state.officialReferenceError)}，请重试。</p>` : state.officialReferenceSearched ? `<p class="search-summary" role="status">${searchSummary}</p>${characterScope ? referenceCardsMarkup : officialMarkup}` : `<div class="library-empty">${characterScope ? '输入人物名检索，或留空查看全部人物参考。' : '输入台词、故事标题或人物名开始检索。支持基沃托斯等常用译名。'}</div>`}</section>`;
   }
   if(['world','rules'].includes(view))body=worldSubnav+body;
   if(['canon','timeline'].includes(view))body=storySubnavMarkup(view)+body;
@@ -3985,14 +4098,21 @@ registerAppClick(event=>{
   const button=event.target.closest('button');if(!button)return;
   if(button.hasAttribute('data-browse-reference-characters')){
     event.preventDefault();claimAppEvent(event);
-    void (async()=>{
-      const result=await api('/reference-characters/search?q=');
-      state.referenceCharacterResults=result.items||[];
-      state.libraryView='official';state.officialReferenceQuery='';
-      state.officialReferenceResults=[];state.bundledReferenceResults={characters:[],backgrounds:[]};
-      state.officialReferenceUnavailable=false;state.officialReferenceSearched=true;
-      render();
-    })().catch(error=>toast(error.message,true));
+    state.libraryView = 'official'; state.officialReferenceScope = 'characters';
+    void loadReferenceSearch('');
+    return;
+  }
+  if(button.dataset.referenceScope){
+    event.preventDefault();claimAppEvent(event);
+    if (state.officialReferenceScope === button.dataset.referenceScope) return;
+    ++state.officialReferenceRequest;
+    state.officialReferenceScope = button.dataset.referenceScope;
+    state.officialReferenceQuery = '';
+    state.referenceCharacterResults = []; state.officialReferenceResults = [];
+    state.officialReferenceSearched = false; state.officialReferenceLoading = false;
+    state.officialReferenceError = ''; state.officialReferenceUnavailable = false;
+    if (state.officialReferenceScope === 'characters') void loadReferenceSearch('');
+    else render();
     return;
   }
   if(button.dataset.libraryAssist){
@@ -4123,7 +4243,7 @@ document.addEventListener('submit',async event=>{
   if(!['workCanonForm','libraryCharacterForm','worldEntityForm','worldBibleForm','timelineForm','libraryReferenceForm','officialReferenceSearchForm'].includes(form.id))return;
   event.preventDefault();event.stopImmediatePropagation();const fields=new FormData(form);
   try{
-    if(form.id==='officialReferenceSearchForm'){const query=String(fields.get('query')||'').trim();const [official,bundled,cards]=await Promise.all([searchOptionalOfficialReferences(query),bundledReferenceSearch(query),api(`/reference-characters/search?q=${encodeURIComponent(query)}`)]);state.referenceCharacterResults=cards.items||[];state.officialReferenceQuery=query;state.officialReferenceResults=official.result.items||[];state.officialReferenceUnavailable=official.unavailable;state.bundledReferenceResults=bundled;state.officialReferenceSearched=true;state.officialReferenceLimit=6;render();return}
+    if(form.id==='officialReferenceSearchForm'){await loadReferenceSearch(String(fields.get('query')||'').trim());return}
     let path,payload,success,artifactId='';
     if(form.id==='workCanonForm'){
       const current=workCanon(),existing=(current.facts||[]).find(item=>item.id===state.editCanonFactId);const fact={...(existing||{}),id:existing?.id,text:String(fields.get('text')||'').trim(),source:String(fields.get('source')||'').trim(),confidence_status:fields.get('confidence_status'),scope:fields.get('scope'),status:existing?.status||'active'};const facts=existing?current.facts.map(item=>item.id===existing.id?fact:item):[...(current.facts||[]),fact];path=`/works/${state.work.id}/canon`;payload={expected_version:state.work.version,facts};artifactId=workCanonArtifact()?.id||'';success=existing?'作品事实已保存为新修订':'作品事实已登记';
@@ -6409,6 +6529,42 @@ const SettingsController = {
     }
     document.getElementById('settingsModelName')?.addEventListener('input', () => this.queueModelCapabilities({ reset: true }));
     document.getElementById('settingsModelName')?.addEventListener('change', () => this.queueModelCapabilities());
+    document.getElementById('settingsModelChoicesBtn')?.addEventListener('click', () => this.toggleModelOptions());
+    document.getElementById('settingsModelSearch')?.addEventListener('input', () => this.renderModelOptions());
+    document.getElementById('settingsModelList')?.addEventListener('click', event => {
+      const option = event.target.closest('[data-model-choice]');
+      if (!option) return;
+      const input = document.getElementById('settingsModelName');
+      input.value = option.dataset.modelChoice;
+      input.dispatchEvent(new Event('input', {bubbles: true}));
+      input.dispatchEvent(new Event('change', {bubbles: true}));
+      this.toggleModelOptions(false);
+      input.focus();
+    });
+    document.addEventListener('click', event => {
+      if (!event.target.closest('#settingsModelPicker')) this.toggleModelOptions(false);
+    });
+    document.getElementById('settingsModelPicker')?.addEventListener('keydown', event => {
+      const popup = document.getElementById('settingsModelOptions');
+      if (event.key === 'Enter' && event.target.id === 'settingsModelSearch') {
+        event.preventDefault();
+        document.querySelector('#settingsModelList [role="option"]')?.click();
+      } else if (event.key === 'Escape' && !popup.hidden) {
+        event.preventDefault(); event.stopPropagation();
+        this.toggleModelOptions(false);
+        document.getElementById('settingsModelName').focus();
+      } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+        if (popup.hidden && event.key !== 'ArrowDown') return;
+        event.preventDefault();
+        if (popup.hidden) this.toggleModelOptions(true);
+        const options = [...document.querySelectorAll('#settingsModelList [role="option"]')];
+        const index = options.indexOf(document.activeElement);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1
+          : event.key === 'ArrowUp' ? Math.max(0, index - 1) : Math.min(options.length - 1, index + 1);
+        options[next]?.focus();
+      }
+    });
+    this.dialog.addEventListener('close', () => this.toggleModelOptions(false));
     document.getElementById('manualModelParams')?.addEventListener('change', event => {
       this.setManualModelParams(event.target.checked);
       if (!event.target.checked) this.queueModelCapabilities();
@@ -6841,7 +6997,8 @@ const SettingsController = {
     if (baseUrlEl) baseUrlEl.value = model.base_url || '';
     this.syncModelEndpoint();
     if (modelNameEl) modelNameEl.value = model.model || '';
-    this.fillModelOptions(presets.find(item => item.id === this.activePresetId)?.models || []);
+    this.fillModelOptions(this.modelChoiceEndpoint === this.modelEndpointIdentity()
+      ? this.modelChoices || [] : presets.find(item => item.id === this.activePresetId)?.models || []);
     if (contextWindowEl) contextWindowEl.value = model.context_window || '';
     if (maxInputEl) maxInputEl.value = model.max_input_tokens || '';
     if (maxOutputEl) maxOutputEl.value = model.max_output_tokens || '';
@@ -6966,6 +7123,7 @@ const SettingsController = {
     if (this.modelDraftEndpoint !== undefined && endpoint !== this.modelDraftEndpoint) {
       this.clearTypedModelKey();
       this.invalidateModelResult();
+      this.fillModelOptions([]);
     }
     this.modelDraftEndpoint = endpoint;
     const preview = document.getElementById('modelEndpointPreview');
@@ -7277,7 +7435,6 @@ const SettingsController = {
     const providerEl = document.getElementById('settingsProvider');
     const baseUrlEl = document.getElementById('settingsBaseUrl');
     const modelNameEl = document.getElementById('settingsModelName');
-    const datalist = document.getElementById('settingsModelDatalist');
 
     if (providerEl) providerEl.value = preset.provider;
     if (baseUrlEl) baseUrlEl.value = preset.base_url;
@@ -7298,10 +7455,51 @@ const SettingsController = {
   },
 
   fillModelOptions(models) {
-    const datalist = document.getElementById('settingsModelDatalist');
-    if (!datalist) return;
-    datalist.replaceChildren(...[...new Set(models.filter(item => typeof item === 'string'))]
-      .map(model => new Option(model, model)));
+    this.modelChoices = [...new Set(models.filter(item => typeof item === 'string' && item.trim()).map(item => item.trim()))];
+    this.modelChoiceEndpoint = this.modelEndpointIdentity();
+    this.toggleModelOptions(false);
+    const button = document.getElementById('settingsModelChoicesBtn');
+    if (button) {
+      button.disabled = !this.modelChoices.length;
+      button.title = this.modelChoices.length ? `选择模型 · ${this.modelChoices.length} 个可用` : '先获取模型，也可以直接输入名称';
+      button.textContent = this.modelChoices.length ? `${this.modelChoices.length} 个 ⌄` : '⌄';
+    }
+    this.renderModelOptions();
+  },
+
+  renderModelOptions() {
+    const list = document.getElementById('settingsModelList');
+    if (!list) return;
+    const query = document.getElementById('settingsModelSearch').value.trim().toLowerCase();
+    const selected = document.getElementById('settingsModelName').value;
+    const models = (this.modelChoices || []).filter(model => model.toLowerCase().includes(query));
+    list.replaceChildren(...models.map(model => {
+      const option = document.createElement('button');
+      option.type = 'button'; option.role = 'option'; option.dataset.modelChoice = model;
+      option.setAttribute('aria-selected', String(model === selected));
+      option.textContent = model;
+      return option;
+    }));
+    document.getElementById('settingsModelEmpty').hidden = !!models.length;
+  },
+
+  toggleModelOptions(open) {
+    const popup = document.getElementById('settingsModelOptions');
+    if (!popup) return;
+    const visible = (open ?? popup.hidden) && !!this.modelChoices?.length;
+    popup.hidden = !visible;
+    for (const id of ['settingsModelName', 'settingsModelChoicesBtn']) {
+      document.getElementById(id)?.setAttribute('aria-expanded', String(visible));
+    }
+    if (visible) {
+      const search = document.getElementById('settingsModelSearch');
+      search.value = ''; this.renderModelOptions();
+      document.getElementById('settingsModelList').scrollTop = 0;
+      const bounds = document.getElementById('settingsModelPicker').getBoundingClientRect();
+      const content = document.querySelector('#settingsDialog .settings-content').getBoundingClientRect();
+      popup.classList.toggle('opens-above', content.bottom - bounds.bottom < 300 && bounds.top - content.top > 300);
+      search.focus();
+    }
   },
 
   async fetchModels() {
@@ -7310,6 +7508,8 @@ const SettingsController = {
     const credentials = this.modelCredentialFields();
     const provider = credentials.provider;
     const snapshot = this.modelRequestSnapshot();
+
+    this.fillModelOptions([]);
 
     if (btn) {
       btn.disabled = true;
@@ -7327,8 +7527,7 @@ const SettingsController = {
       const models = res.models || [];
       this.providerModelDetails = {endpoint: snapshot.endpoint,
         models: new Map((res.model_details || []).filter(item => item?.model).map(item => [item.model, item]))};
-      const datalist = document.getElementById('settingsModelDatalist');
-      if (datalist && models.length) {
+      if (models.length) {
         this.fillModelOptions(models);
         this.queueModelCapabilities();
         if (card) { card.className = 'diagnostics-card'; card.innerHTML = `<strong>模型列表已获取</strong><p>${provider === 'anthropic' ? 'Anthropic 推荐模型' : '接口可用模型'}：${models.length} 个。请在模型输入框中选择。</p>`; }

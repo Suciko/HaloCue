@@ -23,7 +23,8 @@ def test_model_settings_uses_searchable_provider_master_detail_ui():
     assert 'id="selectedProviderNotes"' in html
     assert 'id="selectedProviderProtocol"' in html
     assert 'role="tablist"' in html
-    assert 'id="settingsModelDatalist"' in html
+    assert 'id="settingsModelList" role="listbox"' in html
+    assert 'id="settingsModelChoicesBtn"' in html
     assert "renderProviderPresets()" in script
     assert "updateSelectedProviderSummary(preset)" in script
     assert "providerSearchQuery" in script

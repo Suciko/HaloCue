@@ -13,7 +13,7 @@
   <!-- writing-workbench.css?v=20260821-39 retained for contract compatibility; the resource version below is current. -->
   <link rel="stylesheet" href="/writing-workbench.css?v=20260929-chapter-toolbar4">
   <link rel="stylesheet" href="/production-embed.css?v=20260929-overview-origin-dark2">
-  <link rel="stylesheet" href="/settings-center.css?v=20261003-codex-unified1">
+  <link rel="stylesheet" href="/settings-center.css?v=20261005-full-models1">
   <link rel="stylesheet" href="/external-agents.css?v=20261003-exchange1">
   <link rel="stylesheet" href="/adaptation-workbench.css?v=20260927-targets1">
   <link rel="stylesheet" href="/redesign.css?v=20261004-modal4">
@@ -21,7 +21,7 @@
   <link rel="stylesheet" href="/agent-workspace.css?v=20261004-discussion-guide2">
   <link rel="stylesheet" href="/agent-model-picker.css?v=20260919-registered2">
   <link rel="stylesheet" href="/change-review.css?v=20260924-edge-scroll1">
-  <link rel="stylesheet" href="/authoring-ui.css?v=20261003-electron-brand1">
+  <link rel="stylesheet" href="/authoring-ui.css?v=20261005-reference-trash1">
   <link rel="stylesheet" href="/authoring-workspace-ui.css?v=20261005-director-mobile2">
   <link rel="stylesheet" href="/chapter-authoring-ui.css?v=20261002-compact-chat1">
   <link rel="stylesheet" href="/knowledge-graph-ui.css?v=20260930-graph-fix1">
@@ -180,6 +180,17 @@
       <p class="form-note">每部作品拥有独立的人物卡、世界观、正文、版本和发布记录。</p>
       <div id="workSwitchList" class="work-switch-list"></div>
       <div class="dialog-actions"><button value="cancel" class="quiet">关闭</button><button type="button" data-action="new-work" class="primary">新建作品</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="deleteWorkDialog" aria-labelledby="deleteWorkTitle">
+    <form id="deleteWorkForm">
+      <div class="dialog-head"><h2 id="deleteWorkTitle">删除作品</h2><button type="button" class="icon-button" data-close-delete-work aria-label="关闭删除确认">×</button></div>
+      <p>将《<strong id="deleteWorkName"></strong>》移入回收站？</p>
+      <p class="form-note">作品会从列表中移除。正文、人物卡、对话和版本记录保留，可从作品页的回收站恢复。</p>
+      <p id="deleteWorkUnsaved" class="notice" hidden>当前有未保存的输入，删除后这些输入将丢弃。</p>
+      <p id="deleteWorkError" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" class="quiet" data-close-delete-work>取消</button><button type="submit" class="danger">删除作品</button></div>
     </form>
   </dialog>
 
@@ -542,13 +553,20 @@
                   <small class="field-hint" id="apiKeyStatusHint">支持系统环境变量或 Windows 本地加密存储。</small>
                 </label>
 
-                <label>
+                <label for="settingsModelName">
                   <span>模型</span>
+                  <div class="settings-model-picker" id="settingsModelPicker">
                   <div class="model-input-group">
-                    <input id="settingsModelName" name="model" placeholder="例如：deepseek-chat" list="settingsModelDatalist" required autocomplete="off">
+                    <input id="settingsModelName" name="model" placeholder="例如：deepseek-chat" required autocomplete="off" role="combobox" aria-controls="settingsModelList" aria-expanded="false" aria-autocomplete="none">
+                    <button type="button" class="quiet model-choices-btn" id="settingsModelChoicesBtn" aria-label="选择模型" aria-controls="settingsModelOptions" aria-expanded="false" disabled>⌄</button>
                     <button type="button" class="quiet fetch-models-btn" id="fetchModelsBtn" title="从接口拉取可用模型列表">获取模型</button>
                   </div>
-                  <datalist id="settingsModelDatalist"></datalist>
+                  <div class="settings-model-options" id="settingsModelOptions" hidden>
+                    <input id="settingsModelSearch" type="search" placeholder="搜索可用模型" aria-label="搜索可用模型" autocomplete="off">
+                    <div id="settingsModelList" role="listbox" aria-label="可用模型"></div>
+                    <p id="settingsModelEmpty" hidden>没有匹配模型；也可以直接输入模型名称。</p>
+                  </div>
+                  </div>
                   <small id="settingsModelError" class="model-field-error" role="alert" hidden></small>
                 </label>
               </div>
@@ -936,7 +954,7 @@
   <script src="/chapter-authoring-ui.js?v=20260930-inline-rewrite4" defer></script>
   <script src="/vendor/echarts/echarts-6.0.0.min.js" defer></script>
   <script src="/knowledge-graph-ui.js?v=20260930-graph-fix1" defer></script>
-  <script src="/app.js?v=20261005-research-pack2" defer></script>
+  <script src="/app.js?v=20261005-reference-trash1" defer></script>
   <script src="/codex-connection.js?v=20261003-subscription1" defer></script>
   <script src="/external-agents.js?v=20261003-exchange1" defer></script>
   <script src="/mcp-workspace.js?v=20261003-clients1" defer></script>

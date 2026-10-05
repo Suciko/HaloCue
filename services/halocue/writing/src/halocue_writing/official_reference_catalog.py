@@ -49,7 +49,7 @@ class OfficialReferenceCatalog:
             "disclosure": "检索结果是原作语料索引，不会自动成为 WorkCanon、角色卡或世界规则。",
         }
 
-    def search(self, query: str, limit: int = 12) -> list[dict]:
+    def search(self, query: str, limit: int = 12, *, aliases: tuple[str, ...] = ()) -> list[dict]:
         needle = str(query or "").strip().casefold()
         if len(needle) < 2:
             raise DomainError(
@@ -59,6 +59,8 @@ class OfficialReferenceCatalog:
             raise DomainError(
                 "official_corpus_unavailable", "未配置可读取的 BA 原作语料库。", status=503
             )
+
+        needles = {needle, *(term.strip().casefold() for term in aliases if len(term.strip()) >= 2)}
 
         results: list[dict] = []
         for path in self._paths():
@@ -80,7 +82,7 @@ class OfficialReferenceCatalog:
                                 item["source_file"],
                             ]
                         ).casefold()
-                        if needle not in haystack:
+                        if not any(term in haystack for term in needles):
                             continue
                         self._recent[item["record_uid"]] = item
                         results.append(item)

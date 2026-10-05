@@ -147,6 +147,16 @@
 #settingsDialog .diagnostics-card .quiet { margin-top: 8px; }
 #settingsDialog .model-field-error { display: block; color: var(--hc-danger); font-size: 12px; }
 #settingsDialog #settingsModelName[aria-invalid="true"] { border-color: var(--hc-danger); }
+#settingsDialog .settings-model-picker { position: relative; min-width: 0; }
+#settingsDialog .model-input-group .model-choices-btn { flex: 0 0 auto; min-width: 54px; margin: 0; border: 0; border-left: 1px solid var(--hc-line); border-radius: 0; background: var(--hc-surface-soft); color: var(--hc-ink); }
+#settingsDialog .settings-model-options { position: absolute; z-index: 5; top: calc(100% + 6px); left: 0; right: 0; padding: 8px; border: 1px solid var(--hc-line); border-radius: 10px; background: var(--hc-surface); color: var(--hc-ink); box-shadow: 0 8px 24px #0003; }
+#settingsDialog .settings-model-options[hidden] { display: none; }
+#settingsDialog .settings-model-options.opens-above { top: auto; bottom: calc(100% + 6px); }
+#settingsDialog #settingsModelList { max-height: 230px; overflow: auto; overscroll-behavior: contain; margin-top: 6px; }
+#settingsDialog #settingsModelList button { display: block; width: 100%; padding: 9px 12px; border: 0; border-radius: 6px; text-align: left; background: transparent; color: var(--hc-ink); overflow-wrap: anywhere; font: 500 13px/1.4 var(--hc-font-ui); }
+#settingsDialog #settingsModelList button:hover, #settingsDialog #settingsModelList button:focus-visible { background: var(--hc-surface-soft); }
+#settingsDialog #settingsModelList button[aria-selected="true"] { background: var(--hc-action-soft); color: var(--hc-action); }
+#settingsDialog #settingsModelEmpty { margin: 10px; color: var(--hc-muted); font-size: 12px; }
 #settingsDialog .model-apply-status { margin: 12px 0; }
 #settingsDialog .apply-result { display: flex; align-items: baseline; gap: 12px; margin: 6px 0; padding: 11px 14px; border: 1px solid var(--hc-line); border-radius: 9px; background: #fff; font-size: 12px; }
 #settingsDialog .apply-result b { flex: 0 0 82px; }

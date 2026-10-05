@@ -271,6 +271,16 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
     def _parts(self):
         return [item for item in urlparse(self.path).path.split("/") if item]
 
+    def _check_work_route(self, parts):
+        if len(parts) < 4 or parts[:3] != ["api", "v1", "works"]:
+            return
+        if len(parts) == 5 and parts[4] in {"trash", "restore"}:
+            return
+        with self.service.repo.connect() as connection:
+            work = connection.execute("SELECT status FROM works WHERE id=?", (parts[3],)).fetchone()
+        if work and work["status"] == "deleted":
+            raise DomainError("work_deleted", "作品已移入回收站，请恢复后再打开。", status=404)
+
     def do_GET(self):
         try:
             with self.service.data_access.operation():
@@ -281,6 +291,7 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
     def _dispatch_GET(self):
         try:
             parts = self._parts()
+            self._check_work_route(parts)
             external = self._external_agent_route("GET", parts)
             if external is not None:
                 return self._json({"ok": True, "data": external})
@@ -301,7 +312,7 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "data": self.service.search_official_references(query.get("q", [""])[0], query.get("limit", [12])[0])})
             if parts == ["api", "v1", "reference-characters", "search"]:
                 query = parse_qs(urlparse(self.path).query)
-                return self._json({"ok": True, "data": self.service.search_bundled_characters(query.get("q", [""])[0])})
+                return self._json({"ok": True, "data": self.service.search_bundled_characters(query.get("q", [""])[0], query.get("limit", [18])[0])})
             if len(parts) == 5 and parts[:3] == ["api", "v1", "reference-characters"] and parts[4] == "file":
                 return self._json({"ok": True, "data": self.service.bundled_character_payload(unquote(parts[3]))})
             if parts == ["api", "v1", "resources", "catalog"]:
@@ -321,6 +332,8 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "data": self.service.search_resource_catalog(query.get("kind", ["backgrounds"])[0], query.get("q", [""])[0], query.get("limit", [24])[0])})
             if parts == ["api", "v1", "works"]:
                 return self._json({"ok": True, "data": self.service.list_works()})
+            if parts == ["api", "v1", "deleted-works"]:
+                return self._json({"ok": True, "data": self.service.list_deleted_works()})
             if len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] == "source":
                 query = parse_qs(urlparse(self.path).query)
                 return self._json({"ok": True, "data": self.service.sources.get(parts[3], query.get("version_id", [None])[0])})
@@ -477,6 +490,7 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
                 or (len(parts) == 7 and parts[:3] == ["api", "v1", "works"] and parts[4] == "threads" and parts[6] == "attachments")
             ) else 8_000_000
             payload = self._body(body_limit)
+            self._check_work_route(parts)
             handled, authoring_result = self.service.authoring.route("POST", parts, payload)
             if handled:
                 return self._json({"ok": True, "data": authoring_result})
@@ -538,6 +552,9 @@ class WritingRequestHandler(BaseHTTPRequestHandler):
             if parts == ["api", "v1", "works"]:
                 result = self.service.create_work(payload)
                 return self._json({"ok": True, "data": result}, 201)
+            if len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] in {"trash", "restore"}:
+                method = self.service.trash_work if parts[4] == "trash" else self.service.restore_work
+                return self._json({"ok": True, "data": method(parts[3], payload)})
             if len(parts) == 5 and parts[:3] == ["api", "v1", "works"] and parts[4] in {"source:preview", "source:update"}:
                 method = self.service.sources.preview if parts[4] == "source:preview" else self.service.sources.apply
                 return self._json({"ok": True, "data": method(parts[3], payload)})
