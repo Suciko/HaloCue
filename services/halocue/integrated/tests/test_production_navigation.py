@@ -13,6 +13,62 @@ for context in ("writing", "production", "integrated"):
 
     sys.path.insert(0, str(REPO / "services" / "halocue" / context / "src"))
 
+
+@pytest.mark.parametrize("size", [(1280, 720), (1600, 900), (2560, 1368)])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_aa_source_focus_keeps_workbench_at_window_bottom(runtime, size, theme):
+    pw = pytest.importorskip("playwright.sync_api")
+    with pw.sync_playwright() as driver:
+        browser = driver.chromium.launch(headless=True)
+        try:
+            page = browser.new_page(viewport={"width": size[0], "height": size[1]})
+            page.add_init_script(
+                f"localStorage.setItem('halocue.ui.theme', '{theme}')"
+            )
+            page.goto(
+                f"http://127.0.0.1:{runtime.port}/?section=references&view=characters",
+                wait_until="networkidle",
+            )
+            page.get_by_role("button", name="AA 制作", exact=True).click()
+            page.get_by_role("tab", name="粘贴文本", exact=True).click()
+            page.get_by_role("textbox", name="AA 工程名称", exact=True).fill("Scroll QA")
+            page.get_by_role("textbox", name="剧本文本", exact=True).fill(
+                "## 场景 01\n（旁白）午后，活动室。\n"
+                "爱丽丝: 今天想做点什么？\n老师: 先把场景准备好。\n爱丽丝: 明白了。"
+            )
+            page.get_by_role("button", name="识别并预览分场", exact=True).click()
+            page.get_by_role("button", name="确认分场，选择草稿方式", exact=True).click()
+            create = page.get_by_role("button", name="创建 AA 制作任务", exact=True)
+            # Keyboard focus and scrollIntoView may scroll overflow:hidden
+            # ancestors too. The page owns scrolling; its host must stay put.
+            create.focus()
+            create.evaluate("node => node.scrollIntoView({block: 'end'})")
+            # Some Chromium versions stop at the page while others also move
+            # the hidden-overflow host. Exercise that ancestor scroll request
+            # explicitly so either engine checks the same visual invariant.
+            page.locator("#productionModule").evaluate("node => node.scrollTop = 200")
+            pw.expect(create).to_be_in_viewport()
+            metrics = page.evaluate("""() => {
+                const host = document.querySelector('#productionModule');
+                const source = host.shadowRoot.querySelector('#page-source');
+                return {
+                    hostScroll: host.scrollTop,
+                    hostBottom: host.getBoundingClientRect().bottom,
+                    pageBottom: source.getBoundingClientRect().bottom,
+                    viewportBottom: innerHeight,
+                    pageScroll: source.scrollTop,
+                    canScroll: source.scrollHeight > source.clientHeight,
+                    fitsWidth: document.documentElement.scrollWidth <= innerWidth,
+                };
+            }""")
+            assert abs(metrics["hostScroll"]) < 1, metrics
+            assert abs(metrics["hostBottom"] - metrics["viewportBottom"]) < 2, metrics
+            assert abs(metrics["pageBottom"] - metrics["hostBottom"]) < 2, metrics
+            assert metrics["canScroll"] and metrics["pageScroll"] > 0, metrics
+            assert metrics["fitsWidth"], metrics
+        finally:
+            browser.close()
+
 @pytest.mark.parametrize("surface,panel", [("works", "#worksPanel"), ("writing", "#treePanel")])
 @pytest.mark.parametrize("with_work", [False, True])
 def test_sidebar_resize_collapse_and_restore(runtime, surface, panel, with_work):

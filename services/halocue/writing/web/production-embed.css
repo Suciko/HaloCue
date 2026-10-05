@@ -13,6 +13,14 @@
   outline: none;
 }
 
+@media (min-width: 761px) {
+  .production-module-host {
+    /* The inner page owns scrolling. Hidden overflow can still move this
+       host during focus/scrollIntoView and leave the workbench above a gap. */
+    overflow: clip;
+  }
+}
+
 .production-module-host[aria-busy="true"]::before {
   display: grid;
   height: 100%;
