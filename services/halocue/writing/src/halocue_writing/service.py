@@ -2899,6 +2899,11 @@ class WritingService:
                     action["status"] = "completed"
                 elif context_call and context_call.get("status") == "failed":
                     action["status"] = "failed"
+                elif terminal_success and run.get("input_snapshot_uri") and run.get("input_digest"):
+                    # The service already prepared this input snapshot. An
+                    # extra Agent read is optional, not a completion requirement.
+                    action["status"] = "completed"
+                    action["label"] = "准备本轮创作上下文"
                 elif run_status in {"queued", "running"}:
                     action["status"] = "running"
             elif action.get("id") == "agent.discuss":

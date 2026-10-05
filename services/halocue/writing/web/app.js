@@ -373,8 +373,11 @@ function renderNoWork(el,section){
 }
 function renderReferencesNavigation(){
   const nav=document.getElementById('referencesNav');if(!nav)return;
+  const heading=document.querySelector('#referencesPanel h2'),subtitle=document.querySelector('#referencesPanel .reference-rail-subtitle');
+  if(heading)heading.textContent=state.work?'作品资料':'人物参考';
+  if(subtitle)subtitle.textContent=state.work?'整理写作依据':'随包资料，可直接浏览';
   const view=state.libraryView||'overview';
-  const sections=[
+  const sections=state.work?[
     ['overview','总览','这部作品的资料概况',['overview']],
     ['characters','人物','角色卡与说话方式',['characters']],
     ['world','世界观','设定卡与规则',['world','rules']],
@@ -382,10 +385,10 @@ function renderReferencesNavigation(){
     ['relations','关系图','人物与设定的连接',['relations','graph']],
     ['files','导入文件','文件与原作检索',['files','official']],
     ['suggestions','待审建议',pendingKnowledgeProposals().length?`${pendingKnowledgeProposals().length} 项等待确认`:'确认后才会采用',['suggestions']],
-  ];
+  ]:[['characters','人物卡','全部随包人物参考',['overview','characters','official']]];
   const current=sections.find(([, , ,views])=>views.includes(view))?.[0]||'overview';
   const button=([id,label,detail])=>`<button type="button" data-library-view="${id}" aria-label="${label}" class="reference-nav-link ${current===id?'active':''}" ${current===id?'aria-current="page"':''}><span>${label}</span><small>${detail}</small></button>`;
-  nav.innerHTML=sections.slice(0,6).map(button).join('')+`<div class="reference-nav-review">${button(sections[6])}<button type="button" class="reference-nav-link" data-section="worlds"><span>世界底稿</span><small>独立于作品保存</small></button></div>`;
+  nav.innerHTML=sections.slice(0,6).map(button).join('')+`<div class="reference-nav-review">${state.work?button(sections[6]):''}<button type="button" class="reference-nav-link" data-section="worlds"><span>世界底稿</span><small>独立于作品保存</small></button></div>`;
   const library=document.querySelector('#workspace .library-workbench');
   if(library){
     let mobile=library.querySelector(':scope > .reference-mobile-navigation');
@@ -2556,7 +2559,7 @@ function renderWorkspace(){
     case 'tasks':renderMobileTasks(el);return;
     case 'references':
       renderReferencesNavigation();
-      if(state.work)renderReferences(el);else renderNoWork(el,'references');
+      if(state.work)renderReferences(el);else renderGlobalCharacterLibrary(el);
       return;
     case 'works':
       if(!state.work&&state.firstUseOpen){el.innerHTML=firstUseFormMarkup();bindFirstUseForm(el);return;}
@@ -3199,6 +3202,7 @@ function characterProfileValueMarkup(value){
   if(Array.isArray(value))return `<ol>${value.map(item=>`<li>${characterProfileValueMarkup(item)}</li>`).join('')}</ol>`;
   if(typeof value==='object'){
     const labels={desire:'愿望',defense:'防御方式',responsibility:'责任',gap:'反差',miswrite_risk:'容易误写之处',routine_work:'日常行事',intimacy:'亲近关系',conflict:'冲突',crisis_battle:'危机与战斗',self_reference:'自称',address_patterns:'称呼',lexical_preferences:'用词倾向',sentence_traits:'句式',voice_examples:'台词样本',voice_sequences:'连续对话',line:'台词',source_id:'来源编号',source_title:'来源标题',state:'状态',relation:'关系',function:'作用',context:'语境',turns:'对话',speaker:'说话者',evidence_status:'证据状态',source_aliases:'来源别名'};
+    Object.assign(labels,{identity:'身份',school:'学园',year:'年级',age:'年龄',height:'身高',birthday:'生日',hobbies:'爱好',public_image:'公开形象',private_reality:'私下状态',central_tension:'核心矛盾'});
     return `<dl>${Object.entries(value).map(([key,item])=>`<div><dt>${esc(labels[key]||key)}</dt><dd>${characterProfileValueMarkup(item)}</dd></div>`).join('')}</dl>`;
   }
   return `<p>${esc(String(value))}</p>`;
@@ -3214,7 +3218,7 @@ function characterReferenceDetailsMarkup(card){
   if(!card?.ba_profile)return '';
   const profile=card.ba_profile,report=card.validation_report||{};
   const sections=[['core','人物核心'],['personality','性格与边界'],['decision_patterns','行动与判断'],['speech','说话方式与原文样本'],['emotions','情绪表现'],['relations','关系'],['ooc','误写提醒']];
-  return `<section class="character-reference-details" aria-label="完整人物参考档案"><header><b>完整参考档案</b><p>以下内容来自导入文件。结构校验通过不等于已逐条核实原文；人物解读也不等同官方设定。</p></header><details><summary>来源与校验说明</summary>${characterProfileValueMarkup({来源:card.source_refs||[],复用来源:card.reuse_origin||'非跨作品复制',资料范围:profile.note||'导入文件未提供范围说明',结构校验:report.status||'未报告',未核验样本说明:'缺少本地证据状态的样本保留为 external_unverified，不作为逐条官方认证。'})}</details>${sections.filter(([key])=>profile[key]).map(([key,label])=>`<details><summary>${label}</summary>${characterProfileValueMarkup(profile[key])}</details>`).join('')}</section>`;
+  return `<section class="character-reference-details" aria-label="完整人物参考档案"><header><b>完整参考档案</b><p>以下内容来自人物参考文件。结构校验通过不等于已逐条核实原文；人物解读也不等同官方设定。</p></header><details><summary>来源与校验说明</summary>${characterProfileValueMarkup({来源:card.source_refs||[],复用来源:card.reuse_origin||'非跨作品复制',资料范围:profile.note||'参考文件未提供范围说明',结构校验:report.status||'未报告',未核验样本说明:'缺少本地证据状态的样本保留为 external_unverified，不作为逐条官方认证。'})}</details>${sections.filter(([key])=>profile[key]).map(([key,label])=>`<details><summary>${label}</summary>${characterProfileValueMarkup(profile[key])}</details>`).join('')}</section>`;
 }
 
 function libraryWorkflowGuideMarkup(kind){
@@ -4026,6 +4030,50 @@ function renderWorldLibraryBody(worldCards,visibleWorldCards,editCard,starterPre
     <div class="world-layout"><section class="world-rules" aria-label="已存世界观">${visibleWorldCards.length?visibleWorldCards.map(item=>`<article class="world-rule world-entity ${item.id===state.editWorldEntry?.id?'active':''}"><span class="confidence ${esc(item.confidence_status)}">${worldKindLabel(item.kind)}</span><div><b>${esc(item.name)}</b><p>${esc(item.summary||'尚未补充本作定义')}</p><small>${libraryKindLabel(item.source_type)} · ${confidenceLabel(item.confidence_status)}</small></div><div class="entry-actions"><button type="button" class="quiet" data-edit-world-entry="entity:${esc(item.id)}">编辑</button></div></article>`).join(''):'<div class="library-empty">没有符合条件的设定。可以调整筛选或新建。</div>'}</section>
     <section class="library-editor ${editing?'':'library-editor-collapsed'}"><h3>${editCard?`编辑 ${esc(editCard.name)}`:'新建设定'}</h3><form id="worldEntityForm"><label>名称<input name="name" required value="${esc(card.name||'')}" placeholder="地点、组织或物件名称"></label><label>类别<select name="kind">${[['place','地点'],['academy','学院'],['organization','组织'],['object','物件'],['technology','技术'],['custom','本作原创']].map(([value,label])=>`<option value="${value}" ${card.kind===value?'selected':''}>${label}</option>`).join('')}</select></label><label>核心内容 · 本作定义与限制<textarea name="summary" placeholder="它是什么，能做什么，有什么限制？">${esc(card.summary||'')}</textarea></label><label>来源类型<select name="source_type">${[['custom','自定义设定'],['official_reference','原作参考'],['mixed','两者混合'],['ba_starter','BA 起始架构']].map(([value,label])=>`<option value="${value}" ${card.source_type===value?'selected':''}>${label}</option>`).join('')}</select></label><label>别名<input name="aliases" value="${esc((card.aliases||[]).join('、'))}"></label><label>来源或证据<input name="source" required value="${esc(card.source||(!editCard && (!card.source_type || card.source_type==='custom')?'作者设定':''))}" placeholder="用户确认 / 原作资料"></label><label>用于写作<select name="confidence_status">${[['confirmed','已确认，可用于写作'],['inferred','推断'],['open','待核对']].map(([value,label])=>`<option value="${value}" ${(card.confidence_status||(!editCard && (!card.source_type || card.source_type==='custom')?'confirmed':'open'))===value?'selected':''}>${label}</option>`).join('')}</select></label><label>关联角色<input name="participants" value="${esc((card.participants||[]).join('、'))}"></label><div class="actions"><button type="submit" class="primary">保存设定</button><button type="button" class="quiet" data-new-world-card>取消</button>${editCard?`<button type="button" class="quiet" data-world-history>历史</button><button type="button" class="danger" data-archive-world-entry="entity:${esc(editCard.id)}">归档</button>`:''}</div></form></section></div>`;
 }
+function renderGlobalCharacterLibrary(el){
+  if(!['overview','characters','official'].includes(state.libraryView)){renderNoWork(el,'references');return;}
+  if(state.officialReferenceScope!=='characters'){
+    ++state.officialReferenceRequest;
+    state.officialReferenceScope='characters';state.officialReferenceSearched=false;
+    state.officialReferenceLoading=false;state.officialReferenceError='';state.officialReferenceQuery='';
+  }
+  const catalog=state.referenceCharacterCatalog||{},cards=state.referenceCharacterResults||[];
+  const head=`<header class="library-header"><div><h2>人物卡</h2><p>浏览随包人物参考。建立作品后，可以在构思中直接提到角色，或选择要采用的卡。</p></div><button type="button" class="primary" data-action="new-work">建立作品</button></header>`;
+  if(state.referencePreviewId){
+    const preview=state.referencePreview;
+    const content=state.referencePreviewLoading?'<p role="status">正在读取人物档案…</p>':state.referencePreviewError?`<p class="notice" role="alert">${esc(state.referencePreviewError)}</p><button type="button" class="quiet" data-preview-reference-character="${esc(state.referencePreviewId)}">重新读取</button>`:preview?`<h3>${esc(preview.name)}</h3><p class="record-meta">${esc((preview.aliases||[]).join('、'))}</p>${characterReferenceDetailsMarkup({ba_profile:preview,source_refs:['随包人物参考 · 维护者整理']})}`:'';
+    el.innerHTML=`<div class="library-workbench global-character-catalog">${head}<main class="global-character-profile"><button type="button" class="quiet" data-reference-preview-back aria-label="返回人物库">← 返回人物库</button>${content}</main></div>`;
+    return;
+  }
+  const count=Number(catalog.total_cards||0),matched=Number(catalog.matched_cards||0);
+  const status=state.officialReferenceLoading?'<p class="search-summary" role="status">正在读取人物库…</p>':state.officialReferenceError?`<p class="notice" role="alert">${esc(state.officialReferenceError)}，可以重新检索。</p>`:state.officialReferenceSearched?`<p class="search-summary" role="status">资料库共 ${count} 份完整人物参考${state.officialReferenceQuery?`，匹配 ${matched} 份`:'，全部人物如下'}。</p>`:'';
+  const results=!state.officialReferenceLoading&&!state.officialReferenceError&&state.officialReferenceSearched?`<section class="global-character-grid" aria-label="全部人物参考">${cards.map(item=>`<article class="global-character-card"><h3>${esc(item.name)}</h3><p class="record-meta">${esc((item.aliases||[]).join('、'))}</p><p class="global-character-summary">${esc(item.summary)}</p><button type="button" class="quiet" data-preview-reference-character="${esc(item.id)}">查看完整人物卡</button></article>`).join('')||'<p class="library-empty">没有匹配的人物，可以尝试角色别名。</p>'}</section>`:'';
+  el.innerHTML=`<div class="library-workbench global-character-catalog">${head}<form id="officialReferenceSearchForm" class="official-search"><label>检索人物卡<input name="query" value="${esc(state.officialReferenceQuery)}" placeholder="输入角色名或别名；留空浏览全部人物"></label><button type="submit" class="primary" ${state.officialReferenceLoading?'disabled':''}>${state.officialReferenceLoading?'正在读取…':'检索'}</button></form>${status}${results}</div>`;
+  if(!state.officialReferenceSearched&&!state.officialReferenceLoading&&!state.officialReferenceError){
+    queueMicrotask(()=>{if(!state.work&&state.route?.section==='references'&&!state.officialReferenceSearched&&!state.officialReferenceLoading)void loadReferenceSearch('');});
+  }
+}
+
+registerAppClick(event=>{
+  const button=event.target.closest('button');if(!button)return;
+  if(button.hasAttribute('data-reference-preview-back')){
+    event.preventDefault();claimAppEvent(event);state.referencePreviewId='';state.referencePreview=null;render();return;
+  }
+  if(!button.dataset.previewReferenceCharacter||state.work)return;
+  event.preventDefault();claimAppEvent(event);
+  const cardId=button.dataset.previewReferenceCharacter;
+  state.referencePreviewId=cardId;state.referencePreview=null;state.referencePreviewError='';state.referencePreviewLoading=true;render();
+  document.getElementById('workspace')?.scrollTo({top:0});
+  (async()=>{
+    try{
+      const payload=await api(`/reference-characters/${encodeURIComponent(cardId)}/file`);
+      const profile=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(payload.content_base64),char=>char.charCodeAt(0))));
+      if(state.referencePreviewId===cardId&&!state.work)state.referencePreview=profile;
+    }catch(error){if(state.referencePreviewId===cardId&&!state.work)state.referencePreviewError=error.message;}
+    finally{if(state.referencePreviewId===cardId&&!state.work){state.referencePreviewLoading=false;if(state.route?.section==='references')render();}}
+  })();
+},10);
+
 function renderReferences(el){
   ensureCurrentProjection();
   const projectionReady=currentProjectionReady(),projection=projectionReady?state.currentProjection:null,view=state.libraryView||'overview',allCards=libraryCards(),cards=allCards.filter(card=>state.libraryCharacterFilter==='all'||card.status!=='archived'),archived=allCards.filter(card=>card.status==='archived'),canon=workCanon(),allCanonFacts=canon.facts||[],canonFacts=allCanonFacts.filter(item=>item.status!=='archived'),archivedCanonFacts=allCanonFacts.filter(item=>item.status==='archived'),world=worldBible(),files=state.work.reference_files||[],relations=relationRows(cards),official=cards.filter(card=>card.source_type==='official_reference').length,custom=cards.filter(card=>card.source_type==='custom').length,legacy=cards.filter(card=>!['official_reference','custom'].includes(card.source_type)).length,officialFiles=files.filter(file=>file.trust_status==='official_reference'),worldCards=(world.entities||[]).filter(item=>item.status!=='archived'),worldRules=(world.rules||[]).filter(item=>item.status!=='archived'),worldTimeline=projection?(projection.timeline?.events||[]):[],graphNodes=graphRecords(),graphEdges=graphLinks(),graphUnresolved=projection?.knowledge_graph?.unresolved_relationships||[],projectedStructure=projection?.story_structure||null;

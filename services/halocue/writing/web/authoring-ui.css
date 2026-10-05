@@ -673,6 +673,17 @@
 #app#app.hc-redesign[data-surface="references"] .character-reference-details p { margin:4px 0 8px; }
 #app#app.hc-redesign[data-surface="references"] .character-reference-details ol { padding-left:20px; margin:8px 0; }
 
+#app#app.hc-redesign[data-surface="references"] .global-character-catalog .official-search { margin:24px 0 12px; }
+#app#app.hc-redesign[data-surface="references"] .global-character-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:20px; }
+#app#app.hc-redesign[data-surface="references"] .global-character-card { min-width:0;display:flex;flex-direction:column;align-items:flex-start;padding:20px;border:1px solid var(--hc-line);border-radius:12px;background:var(--hc-surface); }
+#app#app.hc-redesign[data-surface="references"] .global-character-card h3 { margin:0 0 8px;font-size:18px;line-height:1.4; }
+#app#app.hc-redesign[data-surface="references"] .global-character-card .record-meta { margin:0;color:var(--hc-muted);font-size:12px;overflow-wrap:anywhere; }
+#app#app.hc-redesign[data-surface="references"] .global-character-summary { display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;margin:12px 0 20px;font-size:14px;line-height:1.8; }
+#app#app.hc-redesign[data-surface="references"] .global-character-card button { margin-top:auto; }
+#app#app.hc-redesign[data-surface="references"] .global-character-profile { margin-top:24px; }
+#app#app.hc-redesign[data-surface="references"] .global-character-profile h3 { font-size:24px; }
+@media (max-width:760px) { #app#app.hc-redesign[data-surface="references"] .global-character-grid { grid-template-columns:minmax(0,1fr); } }
+
 /* Background activity is a utility, not a creative workflow step. */
 #app#app.hc-redesign[data-surface="tasks"] #workspace { font-family:var(--author-ui-font); }
 #app#app.hc-redesign[data-surface="tasks"] #workspace h2 { font:600 23px/1.5 var(--author-ui-font); }
