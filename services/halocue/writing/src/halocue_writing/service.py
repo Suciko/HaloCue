@@ -2027,7 +2027,7 @@ class WritingService:
 
     @workspace_operation
     def search_bundled_characters(self, query: str, limit: int = 18):
-        return self.bundled_characters.search(query, max(1, min(int(limit), 30)))
+        return self.bundled_characters.search(query, max(1, min(int(limit), 200)))
 
     @workspace_operation
     def bundled_character_payload(self, card_id: str):
@@ -2036,10 +2036,19 @@ class WritingService:
     @workspace_operation
     def search_official_references(self, query: str, limit: int = 12):
         bounded = max(1, min(int(limit or 12), 30))
+        needle = str(query).strip().casefold()
+        aliases = []
+        world_names = ("基沃托斯", "奇普托斯", "Kivotos")
+        if needle in {name.casefold() for name in world_names}:
+            aliases.extend(world_names)
+        candidates = self.bundled_characters.search(query, 1000)["items"]
+        exact = [item for item in candidates if needle in {name.casefold() for name in [item["name"], *item["aliases"]]}]
+        for item in exact or (candidates if len(candidates) == 1 else []):
+            aliases.extend([item["name"], *item["aliases"]])
         return {
             "catalog": self.official_references.descriptor(),
             "query": str(query).strip(),
-            "items": self.official_references.search(query, bounded),
+            "items": self.official_references.search(query, bounded, aliases=tuple(aliases)),
         }
 
     @workspace_operation
@@ -2424,7 +2433,44 @@ class WritingService:
     @workspace_operation
     def list_works(self):
         with self.repo.connect() as connection:
-            return self.repo.rows(connection.execute("SELECT * FROM works ORDER BY updated_at DESC"))
+            return self.repo.rows(connection.execute("SELECT * FROM works WHERE status!='deleted' ORDER BY updated_at DESC"))
+
+    @workspace_operation
+    def list_deleted_works(self):
+        with self.repo.connect() as connection:
+            return self.repo.rows(connection.execute("SELECT * FROM works WHERE status='deleted' ORDER BY updated_at DESC"))
+
+    def trash_work(self, work_id: str, payload: dict):
+        return self._set_work_deleted(work_id, payload, deleted=True)
+
+    def restore_work(self, work_id: str, payload: dict):
+        return self._set_work_deleted(work_id, payload, deleted=False)
+
+    @workspace_operation
+    def _set_work_deleted(self, work_id: str, payload: dict, *, deleted: bool):
+        with self.repo.transaction() as connection:
+            work = self.repo.row(connection.execute("SELECT * FROM works WHERE id=?", (work_id,)).fetchone())
+            if not work:
+                raise NotFound("work", work_id)
+            if payload.get("expected_version") != work["version"]:
+                raise DomainError("work_version_conflict", "作品已更新，请刷新列表后再操作。", status=409)
+            if (work["status"] == "deleted") == deleted:
+                raise DomainError("work_state_conflict", "作品状态已改变，请刷新列表。", status=409)
+            active = connection.execute(
+                "SELECT COUNT(*) FROM agent_runs WHERE work_id=? AND status IN ('queued','running')", (work_id,)
+            ).fetchone()[0]
+            dispatch = connection.execute(
+                "SELECT COUNT(*) FROM agent_dispatch_jobs WHERE status IN ('ready','running') "
+                "AND json_extract(payload_json, '$.work_id')=?", (work_id,)
+            ).fetchone()[0]
+            if active or dispatch:
+                raise DomainError("work_busy", "作品仍有任务正在执行，请结束任务后再删除。", status=409)
+            status = "deleted" if deleted else "active"
+            connection.execute(
+                "UPDATE works SET status=?,version=version+1,updated_at=? WHERE id=?",
+                (status, now(), work_id),
+            )
+            return {"id": work_id, "title": work["title"], "status": status, "version": work["version"] + 1}
 
     @staticmethod
     def _intent_chapter_number(text: str) -> int | None:
@@ -2605,8 +2651,8 @@ class WritingService:
     ) -> dict:
         """Create only reversible containers; formal writing still needs a Proposal."""
         with self.repo.transaction() as connection:
-            work = connection.execute("SELECT version FROM works WHERE id=?", (work_id,)).fetchone()
-            if not work:
+            work = connection.execute("SELECT version,status FROM works WHERE id=?", (work_id,)).fetchone()
+            if not work or work["status"] == "deleted":
                 raise NotFound("work", work_id)
             volume = connection.execute("SELECT id FROM volumes WHERE work_id=? ORDER BY stable_order_key LIMIT 1", (work_id,)).fetchone()
             if not volume:
@@ -3926,7 +3972,7 @@ class WritingService:
     def get_work(self, work_id: str):
         with self.repo.connect() as connection:
             work = self.repo.row(connection.execute("SELECT * FROM works WHERE id=?", (work_id,)).fetchone())
-            if not work:
+            if not work or work["status"] == "deleted":
                 raise NotFound("work", work_id)
             volumes = self.repo.rows(connection.execute("SELECT * FROM volumes WHERE work_id=? ORDER BY stable_order_key", (work_id,)))
             chapters = self.repo.rows(connection.execute(

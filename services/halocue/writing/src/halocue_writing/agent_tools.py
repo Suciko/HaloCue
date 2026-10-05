@@ -332,7 +332,7 @@ class AgentToolRegistry:
             }, "required": ["base_revision_id", "reason", "edits"], "additionalProperties": False,
         }, allowed_scopes=frozenset({"scene"}), required_action="discuss"), self._scene_text_edit)
         self.register(ToolSpec("search_character_cards", "检索当前作品人物卡", {"type": "object", "properties": {"query": {"type": "string"}}}), self._search_artifact("character_card"))
-        self.register(ToolSpec("search_bundled_character_metadata", "检索随软件提供的人物索引；仅作参考，不会自动成为人物卡或正式事实", {
+        self.register(ToolSpec("search_bundled_character_metadata", "检索随包完整人物参考卡；用于人物性格与写作依据，采用前需确认", {
             "type": "object",
             "properties": {"query": {"type": "string", "minLength": 1, "maxLength": 160}, "limit": {"type": "integer", "minimum": 1, "maximum": 12}},
             "required": ["query"],
@@ -375,10 +375,10 @@ class AgentToolRegistry:
 
     @staticmethod
     def _search_bundled_character_metadata(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
-        catalog = getattr(context.service, "resource_catalog", None)
+        catalog = getattr(context.service, "bundled_characters", None)
         if catalog is None:
             raise ValueError("随软件提供的人物索引尚未初始化。")
-        result = catalog.search("characters", str(arguments.get("query") or ""), int(arguments.get("limit") or 8))
+        result = catalog.search(str(arguments.get("query") or ""), int(arguments.get("limit") or 8))
         items = []
         for item in result.get("items", []):
             if not isinstance(item, dict):
@@ -386,21 +386,19 @@ class AgentToolRegistry:
             items.append({
                 key: item[key]
                 for key in (
-                    "display_name", "canonical_name", "preferred_name", "club",
-                    "aliases", "identity_aliases", "outfits", "avatar_available",
+                    "id", "name", "aliases", "summary", "source_kind",
                 )
                 if key in item
             } | {
-                "source": "bundled_metadata_only",
-                "formal_card_available": False,
-                "binary_assets_included": False,
+                "source": "maintainer_curated_reference",
+                "complete_reference_available": True,
             })
         return {
-            "source": "bundled_metadata_only",
+            "source": "maintainer_curated_reference",
             "write_boundary": "reference_only",
             "query": result.get("query", ""),
             "items": items,
-            "note": "这些是随软件提供的只读元数据；除非用户明确确认导入，否则不能当作正式人物卡或作品事实。",
+            "note": "这些是完整人物参考卡的摘要。采用前请查看完整卡片并按作品授权导入。",
         }
 
     @staticmethod

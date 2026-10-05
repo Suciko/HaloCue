@@ -773,7 +773,21 @@
 #app#app.hc-redesign .project-list { display:grid; gap:12px; }
 #app#app.hc-redesign .project-card { padding:22px 24px 14px; border:1px solid var(--hc-line); border-radius:12px; background:var(--hc-panel); }
 #app#app.hc-redesign .project-card-heading { display:flex; align-items:center; gap:16px; min-width:0; }
-#app#app.hc-redesign .project-card-heading > div { min-width:0; }
+#app#app.hc-redesign .project-card-heading > div { min-width:0; flex:1; }
+#app#app.hc-redesign .project-delete { flex:0 0 auto; color:var(--hc-danger); }
+#app#app.hc-redesign [data-project-trash-toggle] { margin-left:auto; }
+#app#app.hc-redesign .project-home-entries[hidden], #app#app.hc-redesign .project-home-note[hidden] { display:none; }
+#app#app.hc-redesign .project-card-actions[hidden] { display:none; }
+#app#app.hc-redesign .reference-source-tabs { display:flex; gap:8px; margin-bottom:20px; }
+#app#app.hc-redesign .reference-source-tabs button[aria-pressed="true"] { background:var(--hc-action-soft); color:var(--hc-action); border-color:var(--hc-action); }
+#deleteWorkDialog { width:min(480px,calc(100vw - 32px)); border:1px solid var(--hc-line); border-radius:16px; background:var(--hc-surface); color:var(--hc-ink); font-family:var(--hc-font-ui); }
+#deleteWorkDialog form { padding:24px; }
+#deleteWorkDialog p { line-height:1.7; overflow-wrap:anywhere; }
+#deleteWorkDialog .dialog-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+#deleteWorkDialog .dialog-head h2 { margin:0; font:600 20px/1.4 var(--hc-font-ui); }
+#deleteWorkDialog .icon-button { width:34px; height:34px; flex:0 0 auto; border:1px solid var(--hc-line); border-radius:8px; background:var(--hc-surface-soft); color:var(--hc-ink); font:20px/1 var(--hc-font-ui); }
+#deleteWorkDialog .dialog-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:24px; }
+#deleteWorkDialog .danger { background:var(--hc-danger); color:var(--hc-canvas); border-color:var(--hc-danger); }
 #app#app.hc-redesign .project-card-mark { display:grid; place-items:center; flex:none; width:42px; height:48px; border:1px solid var(--hc-line); border-radius:4px 8px 8px 4px; background:var(--hc-hover); color:var(--hc-muted); font:18px/1.5 serif; }
 #app#app.hc-redesign .project-card h3 { font-size:16px; font-weight:600; line-height:1.7; margin:0 0 4px; overflow-wrap:anywhere; }
 #app#app.hc-redesign .project-card p { margin:0; font-size:11px; line-height:1.8; color:var(--hc-muted); }

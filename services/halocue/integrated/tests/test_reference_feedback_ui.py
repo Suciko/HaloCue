@@ -28,8 +28,7 @@ def test_locked_writing_step_and_unavailable_corpus_have_inline_guidance(runtime
                 f"{origin}/?section=references&work_id={work['id']}&view=official",
                 wait_until="networkidle",
             )
-            expect(page.locator(".catalog-availability-warning")).to_be_visible()
-            expect(page.locator(".catalog-availability-warning")).to_contain_text("仍可检索")
+            page.get_by_role("button", name="原作摘录", exact=True).click()
             expect(page.locator("#officialReferenceSearchForm input")).to_be_enabled()
             expect(page.locator("#officialReferenceSearchForm button")).to_be_enabled()
             searches = []
@@ -37,12 +36,16 @@ def test_locked_writing_step_and_unavailable_corpus_have_inline_guidance(runtime
                     if "/resources/search?" in request.url else None)
             page.locator("#officialReferenceSearchForm input").fill("白子")
             page.locator("#officialReferenceSearchForm button").click()
+            expect(page.locator(".search-summary")).to_contain_text("原作摘录库暂不可用")
+            page.get_by_role("button", name="人物参考", exact=True).click()
+            expect(page.locator(".search-summary")).to_contain_text("102 份完整人物参考")
+            page.locator("#officialReferenceSearchForm input").fill("白子")
+            page.locator("#officialReferenceSearchForm button").click()
             expect(page.locator(".search-summary")).to_contain_text("完整人物参考")
             card = page.locator(".bundled-reference-results .official-record").filter(has_text="砂狼白子").first
             expect(card).to_be_visible()
             expect(card.get_by_role("button", name="查看并导入完整人物卡")).to_be_visible()
-            assert any("kind=characters" in url for url in searches)
-            assert any("kind=backgrounds" in url for url in searches)
+            assert not searches, "Writing search must never query AA asset metadata"
             assert not page.locator("#toast").first.evaluate("el => el.classList.contains('show')")
         finally:
             browser.close()

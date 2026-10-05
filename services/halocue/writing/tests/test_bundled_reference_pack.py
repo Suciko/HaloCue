@@ -30,6 +30,40 @@ def test_all_bundled_cards_validate_and_can_be_selected_by_alias():
         catalog.import_payload("../../llm")
 
 
+def test_character_search_counts_the_library_and_all_matches():
+    catalog = BundledCharacterCatalog()
+    first = catalog.search("", limit=18)
+    assert first["total_cards"] == first["matched_cards"] == 102
+    assert len(first["items"]) == 18 and first["has_more"]
+    complete = catalog.search("", limit=200)
+    assert len(complete["items"]) == 102 and not complete["has_more"]
+    matched = catalog.search("白子", limit=200)
+    assert matched["matched_cards"] == len(matched["items"]) < matched["total_cards"]
+
+
+def test_common_world_and_character_names_search_original_translations(tmp_path):
+    service = WritingService(tmp_path / "data")
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    original = [
+        {"record_uid": "world-translation", "text": {"zh_cn": "奇普托斯的故事。"}},
+        {
+            "record_uid": "character-translation",
+            "speakers": ["阳奈"],
+            "text": {"zh_cn": "阳奈：先完成文件。"},
+        },
+    ]
+    (corpus / "aliases.jsonl").write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in original), encoding="utf-8"
+    )
+    service.official_references = OfficialReferenceCatalog(corpus)
+    world = service.search_official_references("基沃托斯")
+    assert world["items"][0]["zh_cn"] == "奇普托斯的故事。"
+    character = service.search_official_references("空崎日奈")
+    assert character["items"][0]["record_uid"] == "character-translation"
+    service.close()
+
+
 def test_compressed_corpus_search_and_get_preserve_reference_identity(tmp_path):
     record = {
         "record_uid": "official-1",
@@ -77,8 +111,8 @@ def test_reference_card_browser_import_requires_explicit_confirmation(tmp_path):
             )
             playwright.expect(page.locator(".library-reference-access")).to_contain_text("102")
             page.get_by_role("button", name="浏览随包人物参考", exact=True).click()
-            playwright.expect(page.locator("[data-reference-character]")).to_have_count(18)
-            playwright.expect(page.locator(".search-summary")).to_contain_text("18 份完整人物参考")
+            playwright.expect(page.locator("[data-reference-character]")).to_have_count(102)
+            playwright.expect(page.locator(".search-summary")).to_contain_text("102 份完整人物参考")
             playwright.expect(page.get_by_text("没有找到匹配资料", exact=False)).to_have_count(0)
             assert service.get_work(work["id"])["version"] == work["version"]
             page.locator("#officialReferenceSearchForm input").fill("白子")

@@ -43,7 +43,7 @@ function harness(sourcePath) {
     fetchResult: async () => ({ok: true, environment: {workspace: {valid: false, path: null}, issues: []}})};
   const context = {
     console, URL, URLSearchParams, AbortController, CustomEvent: class { constructor(type, options) {this.type=type; this.detail=options.detail;} }, Option: class { constructor(text, value) {this.text = text; this.value = value;} }, clearTimeout() {}, window: {location: {search: ''}, dispatchEvent() {}},
-    document: {getElementById: element, addEventListener() {}},
+    document: {getElementById: element, addEventListener() {}, createElement(tag) {return element(`created-${tag}-${nodes.size}`);}},
     FormData: class {get(name) {return fields[name] ? element(fields[name]).value : null;}},
     api: async (route, options) => {
       const body = options?.body ? JSON.parse(options.body) : null;
@@ -476,10 +476,10 @@ const cases = {
     h.apiResult = () => new Promise(done => {resolve = done;});
     const pending = h.controller.fetchModels();
     h.controller.selectPreset('b');
-    h.element('settingsModelDatalist').innerHTML = 'new-endpoint-options';
+    h.controller.fillModelOptions(['new-endpoint-model']);
     resolve({models: ['old-endpoint-model']});
     await pending;
-    assert.equal(h.element('settingsModelDatalist').innerHTML, 'new-endpoint-options');
+    assert.deepEqual(Array.from(h.controller.modelChoices), ['new-endpoint-model']);
     assert.equal(h.element('fetchModelsBtn').disabled, false);
   },
   async stale_connection_test_does_not_validate_new_credentials(source) {

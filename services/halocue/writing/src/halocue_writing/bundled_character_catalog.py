@@ -25,7 +25,8 @@ class BundledCharacterCatalog:
     def search(self, query: str, limit: int = 18) -> dict:
         needle = str(query).strip().casefold()
         items = []
-        for path in sorted(self.root.glob("*.json")):
+        paths = sorted(self.root.glob("*.json"))
+        for path in paths:
             card = json.loads(path.read_text(encoding="utf-8"))
             names = [str(card.get("name", "")), *map(str, card.get("aliases", []))]
             if needle and not any(needle in name.casefold() for name in names):
@@ -39,9 +40,13 @@ class BundledCharacterCatalog:
                     "source_kind": "maintainer_curated_reference",
                 }
             )
-            if len(items) >= limit:
-                break
-        return {"items": items, "available": self.root.is_dir()}
+        return {
+            "items": items[:limit],
+            "available": self.root.is_dir(),
+            "total_cards": len(paths),
+            "matched_cards": len(items),
+            "has_more": len(items) > limit,
+        }
 
     def import_payload(self, card_id: str) -> dict:
         path = next((p for p in self.root.glob("*.json") if p.stem == card_id), None)
