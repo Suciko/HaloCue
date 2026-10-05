@@ -17,9 +17,10 @@ COMMON_RULES = [
 ]
 
 ENGINE_RULE_SOURCE = "knowledge/演出契约.md"
+DISCUSSION_RULE_SOURCE = "knowledge/创作讨论.md"
 
 WORKFLOW_RULE_SOURCES = {
-    "brief.build": ["SKILL.md"],
+    "brief.build": ["SKILL.md", DISCUSSION_RULE_SOURCE],
     "canon.assemble": ["SKILL.md", "agents/memory-keeper.md", "knowledge/记忆系统格式规范.md"],
     "character.prepare": ["SKILL.md", "agents/writer.md", "knowledge/连续对话样本规范.md"],
     "blueprint.generate": ["SKILL.md", "agents/chapter-planner.md", "knowledge/写作内核.md"],

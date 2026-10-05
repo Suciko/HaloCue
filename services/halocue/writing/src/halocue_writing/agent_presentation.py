@@ -15,26 +15,10 @@ from datetime import datetime, timezone
 from .errors import DomainError, NotFound
 from .repository import Repository, canonical_json, sha256_text
 from .provider_usage import normalize_usage
+from .tool_activity import PUBLIC_TOOL_LABELS, tool_category
 
 
 SCHEMA_VERSION = "agent-presentation/1.0"
-
-PUBLIC_TOOL_LABELS = {
-    "load_workflow_template": "读取当前任务边界",
-    "read_work_context": "读取作品正式资料",
-    "read_conversation_history": "读取当前对话",
-    "search_character_cards": "检索人物卡",
-    "search_world_bible": "检索世界规则",
-    "search_work_canon": "检索作品事实",
-    "draft_character_card": "整理人物卡草稿",
-    "draft_world_card": "整理世界观草稿",
-    "draft_world_rule": "整理世界规则草稿",
-    "draft_canon_fact": "整理作品事实草稿",
-    "check_knowledge_conflicts": "检查资料冲突",
-    "create_knowledge_proposal": "整理资料候选",
-    "store_conversation_attachments": "保存对话附件",
-}
-
 
 class AgentPresentationQuery:
     def __init__(self, repo: Repository):
@@ -425,7 +409,7 @@ class AgentPresentationQuery:
             for call in tools:
                 refs = {"thread_id": thread_id, "agent_run_id": call["agent_run_id"], "tool_call_id": call["id"]}
                 error = self._json(call.get("error_json"), {})
-                details = {"tool_name": call["tool_name"], "ordinal": call["ordinal"], "has_error": bool(error)}
+                details = {"tool_name": call["tool_name"], "category": tool_category(call["tool_name"]), "ordinal": call["ordinal"], "has_error": bool(error)}
                 output_summary = str(call.get("output_ref") or "").strip()
                 if output_summary:
                     details["output_summary"] = output_summary
