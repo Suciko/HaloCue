@@ -142,7 +142,7 @@ def test_scene_condition_sorting_and_conflict_cancel(profile_browser, ui_url, wi
 
 
 
-def test_background_picker_loads_unknown_preview_and_uses_chinese_scene_label(profile_browser, ui_url):
+def test_background_picker_loads_unknown_preview_without_inventing_asset_name(profile_browser, ui_url):
     result = run_reply()
     result["draft"]["cards"] = [
         {
@@ -190,7 +190,8 @@ def test_background_picker_loads_unknown_preview_and_uses_chinese_scene_label(pr
         tile = page.locator('[data-resource-key="BG_GameDevRoom"]')
         expect(tile.locator("img")).to_be_visible()
         expect(tile.locator("img")).to_have_js_property("naturalWidth", 1)
-        expect(tile.locator("strong")).to_have_text("游戏开发部社团室")
+        expect(tile.locator("strong")).to_have_text("Game Dev Room")
+        expect(tile.locator("strong")).not_to_have_text("游戏开发部社团室")
         expect(tile).not_to_contain_text("BG_GameDevRoom")
         details = page.locator(".background-gallery-details")
         expect(details.locator("code")).not_to_be_visible()

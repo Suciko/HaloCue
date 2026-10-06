@@ -1629,31 +1629,97 @@ body:has(.app-shell.production-mode) #saveStatus {
 }
 
 /* Background browser: visual-first thumbnails with a compact location index. */
+#assetLibraryDialog {
+  width: min(1320px, calc(100vw - 48px));
+  max-height: calc(100dvh - 128px);
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+}
+#assetLibraryDialog .asset-library-shell {
+  width: 100%;
+  height: min(818px, calc(100dvh - 130px));
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-areas: "head" "tabs" "search" "body";
+  gap: 0;
+}
+#assetLibraryDialog .asset-library-shell > header { grid-area: head; }
+#assetLibraryDialog .asset-tabs { grid-area: tabs; }
+#assetLibraryDialog .asset-workbench-controls { grid-area: search; padding-bottom: 12px; }
+#assetLibraryDialog .asset-workbench-layout {
+  grid-area: body;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr);
+  overflow: hidden;
+}
+#assetLibraryDialog .asset-workbench-catalog { min-width: 0; }
+#assetLibraryDialog .asset-workbench-catalog > #assetLibraryResults {
+  grid-area: auto;
+  display: block;
+  width: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  overscroll-behavior: contain;
+}
 #assetLibraryDialog.embedded-background-browser .asset-library-shell {
-  width: min(1120px, calc(100vw - 28px));
+  grid-template-columns: 150px minmax(0, 1fr);
+  grid-template-areas: "head head" "tabs tabs" "search search" "groups body";
+}
+#assetLibraryDialog .embedded-background-groups {
+  overflow: auto;
+  min-height: 0;
+  padding: 12px;
+  border-left: 0;
+  border-right: 1px solid var(--line);
+}
+#assetLibraryDialog .asset-library-item { width: 100%; min-width: 0; }
+#assetLibraryDialog .asset-detail-media { height: auto; }
+#assetLibraryDialog .asset-workbench-detail > header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 190px;
-  grid-template-areas:
-    "head head"
-    "tabs tabs"
-    "search groups"
-    "results groups"
-    "foot groups";
-  column-gap: 16px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  text-align: left;
 }
-
-#assetLibraryDialog.embedded-background-browser .asset-library-shell > header { grid-area: head; }
-#assetLibraryDialog.embedded-background-browser .asset-tabs { grid-area: tabs; }
-#assetLibraryDialog.embedded-background-browser .asset-search-label { grid-area: search; }
-#assetLibraryDialog.embedded-background-browser #assetLibraryResults {
-  grid-area: results;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-content: start;
-  max-height: min(56vh, 590px);
-  margin: 12px 0;
-  padding-right: 2px;
+#assetLibraryDialog .asset-workbench-detail > header small { grid-column: 1; grid-row: 1; }
+#assetLibraryDialog .asset-workbench-detail > header span {
+  position: static;
+  grid-column: 2;
+  grid-row: 1;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--ink);
 }
-#assetLibraryDialog.embedded-background-browser .dialog-footer { grid-area: foot; }
+#assetLibraryDialog .asset-workbench-detail > header h4 {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 18px;
+}
+#assetLibraryDialog .asset-detail-empty { min-height: 240px; }
+#assetLibraryDialog .asset-page-end { padding: 12px; text-align: center; color: var(--muted); }
+:host dialog button { -webkit-app-region: no-drag; }
+:host .mapping-current-summary .missing { background: var(--surface); color: var(--warn); border: 1px solid currentColor; }
+@media (max-width: 980px) {
+  #assetLibraryDialog.embedded-background-browser .asset-library-shell {
+    grid-template-columns: 120px minmax(0, 1fr);
+  }
+  #assetLibraryDialog .asset-workbench-layout { grid-template-columns: minmax(0, 1fr) minmax(230px, .85fr); }
+}
+@media (max-width: 660px) {
+  #assetLibraryDialog { width: calc(100vw - 24px); max-height: calc(100dvh - 128px); }
+  #assetLibraryDialog .asset-library-shell,
+  #assetLibraryDialog.embedded-background-browser .asset-library-shell {
+    height: calc(100dvh - 128px);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "head" "tabs" "search" "groups" "body";
+    grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  }
+  #assetLibraryDialog .asset-workbench-layout { display: flex; flex-direction: column; overflow: auto; }
+  #assetLibraryDialog .asset-workbench-catalog { min-height: 320px; }
+  #assetLibraryDialog .asset-workbench-detail { min-height: 260px; overflow: visible; }
+  #assetLibraryDialog .embedded-background-groups { max-height: 120px; }
+}
 
 .embedded-background-groups {
   grid-area: groups;
@@ -1781,14 +1847,6 @@ body:has(.app-shell.production-mode) #saveStatus {
 .embedded-background-item .asset-item-actions { display: none; }
 
 @media (max-width: 800px) {
-  #assetLibraryDialog.embedded-background-browser .asset-library-shell {
-    width: min(680px, calc(100vw - 20px));
-    display: block;
-  }
-  #assetLibraryDialog.embedded-background-browser #assetLibraryResults {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    max-height: 48vh;
-  }
   .embedded-background-groups {
     display: block;
     margin: 10px 0 8px;
@@ -3468,4 +3526,21 @@ body:has(.app-shell.production-mode) #saveStatus {
 :host .embedded-production-shell .layout-mode-fieldset .mode-choice input[type="radio"]:focus {
   outline: none;
   box-shadow: none;
+}
+
+/* CG annotations follow the host theme; the image preview keeps its own colors. */
+:host .embedded-production-shell .cg-badge {
+  background: var(--success-soft);
+  color: var(--ink) !important;
+  border: 1px solid var(--success);
+  border-radius: 4px;
+}
+:host .embedded-production-shell .cg-inspector {
+  background: var(--surface-soft);
+  color: var(--ink);
+  border-color: var(--line);
+  border-radius: 8px;
+}
+:host .embedded-production-shell .cg-inspector :is(strong, p, small) {
+  color: var(--ink);
 }

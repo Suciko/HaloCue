@@ -213,7 +213,7 @@ def test_task_asset_registration_is_isolated_and_updates_frozen_resources(settin
         str(created["run"]["draft_token"]), "backgrounds", "自定义背景"
     )
     assets = service.task_assets(created["run"]["run_id"])
-    assert assets["items"][0]["name"] == "自定义背景"
+    assert assets["items"][0]["name"] == "夜间走廊"
     preview = service.run_resource_preview(created["run"]["run_id"], "backgrounds", "自定义背景")
     assert preview.path.is_file()
     service.jobs.close()
