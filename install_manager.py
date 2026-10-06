@@ -251,10 +251,19 @@ def _bundle_custom_backgrounds(project_dir: Path) -> set[str]:
     # Semantic labels also describe native AA backgrounds. Only explicitly
     # identified base resources can use the runtime's own bytes; packs and
     # legacy/unclassified custom labels still require installed overrides.
+    # Research annotations can use lowercase keys beside native AA casing.
+    # Reuse their provenance while preserving the actual resource identity.
+    # Conflicting or unknown provenance must still require installed bytes.
+    kinds_by_key: Dict[str, set[str]] = {}
+    for key, metadata in labels.items():
+        kinds = kinds_by_key.setdefault(str(key).casefold(), set())
+        if isinstance(metadata, dict):
+            kind = str(metadata.get("source_kind") or "").strip().casefold()
+            if kind:
+                kinds.add(kind)
     return {
-        key for key, metadata in labels.items()
-        if not isinstance(metadata, dict)
-        or str(metadata.get("source_kind") or "").casefold() != "official_base"
+        key for key in labels
+        if kinds_by_key[str(key).casefold()] != {"official_base"}
     }
 
 

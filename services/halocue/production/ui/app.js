@@ -73,6 +73,10 @@
   let resourcePageObserver = null;
   let resourceSearchTimer = null;
   let resourceSearchController = null;
+  let assetLibraryController = null;
+  let assetPageObserver = null;
+  let assetSearchTimer = null;
+  let characterSearchEpoch = 0;
   let busyDepth = 0;
   const jobPolls = new Map();
 
@@ -107,13 +111,16 @@
       item?.label,
       item?.place,
       item?.display_name,
+      item?.name,
     ];
     const chinese = values.find(hasChinese);
     if (chinese) return String(chinese);
-    if (context.kind === "backgrounds" && item?.key === context.currentBackgroundKey && hasChinese(context.currentBackgroundLabel)) {
-      return context.currentBackgroundLabel;
-    }
     return String(item?.name || item?.key || "未命名素材");
+  }
+
+  function assignedBackgroundName(key) {
+    if (key === "BG_Black") return "黑屏";
+    return resourceDisplayName(state.currentDraft?.background_resources?.[key] || { key });
   }
 
   // A background directive is an assignment, not proof of readable local media.
@@ -694,6 +701,7 @@
       payload = {
         project: $("#projectName").value.trim(),
         source: sourcePayload(),
+        auto_match_resources: true,
         generation_mode: $('input[name="generationMode"]:checked')?.value || "format_only",
         direction_profile: $("#sourceDirectionProfile").value,
       };
@@ -1563,10 +1571,10 @@
       const sceneId = scene.card?.card_id || scene.cards[0]?.card_id || "";
       const backgroundKey = scene.background?.current?.arg || "";
       const backgroundPreview = backgroundKey && backgroundKey !== "BG_Black"
-        ? previewImage("backgrounds", backgroundKey, resourceDisplayName({ key: backgroundKey }, { kind: "backgrounds", currentBackgroundKey: backgroundKey, currentBackgroundLabel: sceneTitleLabel(scene.title) }), "mapping-scene-thumb-image", null)
+        ? previewImage("backgrounds", backgroundKey, assignedBackgroundName(backgroundKey), "mapping-scene-thumb-image", null)
         : `<span class="mapping-scene-thumb-empty">${backgroundKey === "BG_Black" ? "黑屏" : "缺背景"}</span>`;
       const backgroundName = backgroundKey
-        ? resourceDisplayName({ key: backgroundKey }, { kind: "backgrounds", currentBackgroundKey: backgroundKey, currentBackgroundLabel: sceneTitleLabel(scene.title) })
+        ? assignedBackgroundName(backgroundKey)
         : (aiScene?.background_need || "尚未确定背景");
       const stateLabel = scene.background ? "当前采用" : "待补充";
       return `<article class="mapping-scene-card ${scene.background?.current?.arg === "BG_Black" ? "ready" : "background-unverified"}">
@@ -1623,7 +1631,7 @@
       const previewState = mapping.kind === "portrait" && resource?.preview_available !== true ? "头像暂不可用" : "";
       const evidence = mappingEvidence(mapping);
       const source = resource ? resourceSourceLabel(resource) : mapping.kind === "portrait" ? "映射资源待核对" : "不使用角色资源";
-      const role = mapping.role === "teacher" ? "老师身份" : mapping.kind === "portrait" ? "AA 骨骼角色" : mapping.kind === "voice" ? "语音角色" : mapping.kind === "narrator" ? "旁白" : "待确认";
+      const role = mapping.match_source === 'automatic_local' ? '自动匹配 · 待核对' : mapping.role === "teacher" ? "老师身份" : mapping.kind === "portrait" ? "AA 骨骼角色" : mapping.kind === "voice" ? "语音角色" : mapping.kind === "narrator" ? "旁白" : "待确认";
       return `<article class="mapping-row ${mapping.kind === "unset" ? "is-missing" : "is-ready"}"><div class="mapping-speaker-cell">${mappingPreview(mapping)}<span><strong>${esc(speaker)}</strong><small>${esc(speakerDetail.count || 0)} 段台词${speakerDetail.sample ? ` · “${esc(speakerDetail.sample)}”` : ""}</small></span></div>
         <div class="mapping-value"><span class="mapping-role-chip">${esc(role)}</span><b>${esc(mappingLabel(mapping))}</b>${previewState ? `<small class="mapping-primary-status">${esc(previewState)}</small>` : ""}<details class="mapping-evidence-details"><summary>查看资源证据</summary><div><small>${esc(source)}${outfit ? ` · ${esc(outfit)}` : ""}</small><small>${esc(evidence.join(" · "))}</small>${resource?.face_count != null ? `<small>${esc(resource.face_count)} 个已登记表情</small>` : ""}</div></details></div>
         <button class="mapping-edit" data-speaker="${esc(speaker)}">${mapping.kind === "unset" ? "选择角色" : "修改"}</button></article>`;
@@ -1782,11 +1790,15 @@
   }
 
   async function searchCharacters(query) {
+    const epoch = ++characterSearchEpoch;
+    const runId = state.currentRun?.run_id;
+    $('#characterResults').innerHTML = '<p class="empty" role="status">正在检索角色…</p>';
     try {
       const path = state.currentRun
         ? `/production-runs/${encodeURIComponent(state.currentRun.run_id)}/resources/characters?q=${encodeURIComponent(query)}&limit=60`
         : `/resources/characters?q=${encodeURIComponent(query)}&limit=60`;
       const result = await api(path);
+      if (epoch !== characterSearchEpoch || runId !== state.currentRun?.run_id) return;
       const rows = (result.items || []).filter((item) => item.role !== "teacher"
         && item.source !== "halocue_teacher"
         && item.identifier !== state.currentDraft?.cast?.teacher_identity?.character_id);
@@ -1802,7 +1814,11 @@
         kind: "portrait", id: button.dataset.characterId, name: button.dataset.characterName,
         ...(state.characterCatalog.find((item) => item.identifier === button.dataset.characterId) || {})
       })));
-    } catch (error) { $("#mappingDialogStatus").textContent = error.message; }
+    } catch (error) {
+      if (epoch !== characterSearchEpoch || runId !== state.currentRun?.run_id) return;
+      $('#characterResults').innerHTML = '<p class="empty">角色检索未完成，请重新搜索。</p>';
+      $("#mappingDialogStatus").textContent = error.message;
+    }
   }
 
   function saveLocalCharacterAlias() {
@@ -2388,6 +2404,7 @@
   }
   function productionDirectiveArgument(current) {
     const arg = String(current.arg || "");
+    if (current.cmd === "bg") return assignedBackgroundName(arg);
     if (["camera", "camera_hold", "enter", "exit", "move"].includes(current.cmd)) {
       return arg.split(/([,，\s]+)/).map((part) => productionSpeakerName(part) === "未映射" ? part : productionSpeakerName(part)).join("");
     }
@@ -2395,7 +2412,7 @@
   }
   function previewFrameTitle(frame) {
     const card = (state.currentDraft?.cards || []).find((item) => item.card_id === frame.card_id);
-    return frame.card_kind === "line" && frame.presentation !== "cg"
+    return frame.card_kind === "line"
       ? productionSpeakerName(frame.speaker?.source_name || card?.current?.who || frame.title)
       : frame.title;
   }
@@ -2455,7 +2472,7 @@
       const preview = key === "BG_Black"
         ? '<span class="background-timeline-placeholder">黑屏</span>'
         : `<img src="${esc(previewResourceUrl("backgrounds", key))}" alt="" loading="lazy" decoding="async"><span class="background-timeline-placeholder" hidden>素材缺失</span>`;
-      return `<article class="background-timeline-node ${state.selectedCard?.card_id === card.card_id ? "selected" : ""}" data-background-card-id="${esc(card.card_id)}"><button type="button" class="background-timeline-jump" data-background-jump="${esc(card.card_id)}">${preview}<span class="background-timeline-copy"><strong>${esc(key)}</strong><small>${esc(backgroundTimelineSource(card))} · 第 ${esc(card.line_no || "-")} 张</small></span></button><div class="background-timeline-actions"><button type="button" data-background-replace="${esc(card.card_id)}">更换</button><button type="button" data-background-history="${esc(card.card_id)}">历史素材</button></div></article>${index < cards.length - 1 ? '<span class="background-timeline-arrow" aria-hidden="true">→</span>' : ""}`;
+      return `<article class="background-timeline-node ${state.selectedCard?.card_id === card.card_id ? "selected" : ""}" data-background-card-id="${esc(card.card_id)}"><button type="button" class="background-timeline-jump" data-background-jump="${esc(card.card_id)}">${preview}<span class="background-timeline-copy"><strong>${esc(assignedBackgroundName(key))}</strong><small>${esc(backgroundTimelineSource(card))} · 第 ${esc(card.line_no || "-")} 张</small></span></button><div class="background-timeline-actions"><button type="button" data-background-replace="${esc(card.card_id)}">更换</button><button type="button" data-background-history="${esc(card.card_id)}">历史素材</button></div></article>${index < cards.length - 1 ? '<span class="background-timeline-arrow" aria-hidden="true">→</span>' : ""}`;
     }).join("");
     track.querySelectorAll("img").forEach((image) => {
       image.addEventListener("error", () => {
@@ -3040,7 +3057,7 @@
       const primary = cmd === "bg" ? "chooseBackground" : "chooseSound";
       const primaryLabel = cmd === "bg" ? "为这张卡选择背景" : "为这张卡选择音效";
       const secondary = cmd === "bg" ? '<button id="blackBackground">改为黑屏</button>' : '<button id="removeSound">移除这条声音</button>';
-      return `<p class="field-summary">当前${resource.label}：<b>${esc(current.arg || "未设置")}</b></p><p class="inspector-note">${resource.hint}</p><div class="inspector-actions"><button class="primary" id="${primary}">${primaryLabel}</button>${secondary}<button id="approveCard">确认这张卡</button></div>`;
+      return `<p class="field-summary">当前${resource.label}：<b>${esc(cmd === "bg" ? assignedBackgroundName(current.arg || "未设置") : current.arg || "未设置")}</b></p><p class="inspector-note">${resource.hint}</p><div class="inspector-actions"><button class="primary" id="${primary}">${primaryLabel}</button>${secondary}<button id="approveCard">确认这张卡</button></div>`;
     }
     const help = directiveHelp[cmd] || { label: "演出指令", hint: "选择指令类型并填写参数。" };
     return `<section class="directive-editor"><label>演出类型<select id="editDirectiveCmd">${directiveOptionMarkup(cmd)}</select></label><label>参数<input id="editDirectiveArg" value="${esc(current.arg || "")}" placeholder="${esc(help.hint)}"></label><p id="directiveHelp" class="inspector-note"><b>${esc(help.label)}</b>：${esc(help.hint)} 保存后，这张以及后面的卡片都会回到待审。</p></section><div class="inspector-actions"><button class="primary" id="saveDirectiveEdit">保存演出指令</button><button id="approveCard">确认这张卡</button></div>`;
@@ -3152,7 +3169,7 @@
       const field = card.kind === "scene" || card.kind === "title" ? "title" : "text";
       const label = field === "title" ? "标题" : "文本备注";
       body += `<label>${label}<input id="editCardGeneric" value="${esc(current[field] || "")}"></label><div class="inspector-actions"><button class="primary" id="saveCardEdit">保存这张卡</button><button id="approveCard">确认这张卡</button></div>`;
-      if (card.kind === "scene") { const sceneBackground = sceneBackgroundCard(card); const backgroundText = sceneBackground ? `当前背景：${esc(sceneBackground.current?.arg || "未命名背景")}（修改将直接替换第 ${sceneBackground.line_no || "-"} 张背景卡）` : "当前场景还没有显式背景。选择后会紧接场景标题插入一张可审查的 @bg 卡。"; body += `<section class="scene-background-studio"><small>场景背景制作 · 第四步</small><h4>${sceneBackground ? "更换当前场景背景" : "为当前场景建立画面"}</h4><p>${backgroundText}</p><p class="inspector-note">AA 资源快照、本任务导入和历史素材都会保留来源；不会额外叠加同场景的重复背景切换。</p><div class="inspector-actions"><button class="primary" id="sceneChooseOfficialBackground">${sceneBackground ? "更换为AA / 本任务背景" : "AA / 本任务背景"}</button><button id="sceneChooseLibraryBackground">导入历史素材</button><button id="sceneImportBackground">添加自定义背景</button><button id="sceneUseBlackBackground">${sceneBackground ? "改为黑屏" : "保持黑屏"}</button></div></section>`; }
+      if (card.kind === "scene") { const sceneBackground = sceneBackgroundCard(card); const backgroundText = sceneBackground ? `当前背景：${esc(assignedBackgroundName(sceneBackground.current?.arg || "未命名背景"))}（修改将直接替换第 ${sceneBackground.line_no || "-"} 张背景卡）` : "当前场景还没有显式背景。选择后会紧接场景标题插入一张可审查的 @bg 卡。"; body += `<section class="scene-background-studio"><small>场景背景制作 · 第四步</small><h4>${sceneBackground ? "更换当前场景背景" : "为当前场景建立画面"}</h4><p>${backgroundText}</p><p class="inspector-note">AA 资源快照、本任务导入和历史素材都会保留来源；不会额外叠加同场景的重复背景切换。</p><div class="inspector-actions"><button class="primary" id="sceneChooseOfficialBackground">${sceneBackground ? "更换为AA / 本任务背景" : "AA / 本任务背景"}</button><button id="sceneChooseLibraryBackground">导入历史素材</button><button id="sceneImportBackground">添加自定义背景</button><button id="sceneUseBlackBackground">${sceneBackground ? "改为黑屏" : "保持黑屏"}</button></div></section>`; }
     }
     const mustResolve = card.kind === "background_request";
     body += `<div class="card-actions"><small>结构调整</small><button id="insertAfterCard">在这张卡后插入</button><button id="moveCardEarlier" ${card.line_no === 1 ? "disabled" : ""}>移到上一张前</button><button id="moveCardLater" ${card.line_no === (state.currentDraft.cards || []).length ? "disabled" : ""}>移到下一张后</button>${mustResolve ? '<p class="card-action-note">这是一项必处理的背景请求，不能删除；请先选择背景或改为黑屏。</p>' : '<button class="danger-button" id="deleteSelectedCard">删除这张卡</button>'}</div>`;
@@ -3203,6 +3220,9 @@
     $("#insertCardHint").textContent = `新卡片会插入到“第 ${card.line_no || "-"} 张 · ${card.kind}”之后，并标记为待审。`;
     $("#insertCardStatus").textContent = "先选择类型，再填写内容；插入后可以继续修改。";
     $("#insertCardKind").value = initialKind;
+    $("#insertCmd").innerHTML = directiveOptionMarkup("wait");
+    $("#insertArg").value = "";
+    updateInsertDirective();
     updateInsertFields();
     $("#insertCardDialog").showModal();
   }
@@ -3210,6 +3230,27 @@
   function updateInsertFields() {
     const kind = $("#insertCardKind").value;
     ["line", "dir", "scene", "meta"].forEach((name) => $("#insert" + name[0].toUpperCase() + name.slice(1) + "Fields")?.classList.toggle("hidden", name !== kind));
+  }
+
+  function updateInsertDirective() {
+    const cmd = $("#insertCmd").value;
+    const resource = resourceDirectiveHelp[cmd];
+    const hint = (resource || directiveHelp[cmd])?.hint || "填写这项演出的参数。";
+    $("#insertArg").value = "";
+    $("#insertArg").disabled = Boolean(resource);
+    $("#insertArg").placeholder = resource ? "请点击下面的选择素材" : hint;
+    $("#insertDirectiveHelp").textContent = hint;
+    $("#insertResourceButton").hidden = !resource;
+  }
+
+  function chooseInsertResource() {
+    const cmd = $("#insertCmd").value;
+    const resource = resourceDirectiveHelp[cmd];
+    if (!resource) return;
+    chooseResource(cmd === "bg" ? "backgrounds" : "sounds", resource.label, (item) => {
+      $("#insertArg").value = item.key;
+      $("#insertDirectiveHelp").textContent = `已选择：${resourceDisplayName(item)}`;
+    });
   }
 
   function sceneBackgroundCard(sceneCard) {
@@ -3272,14 +3313,19 @@
     if (kind === "dir") fields = { cmd: $("#insertCmd").value.trim(), arg: $("#insertArg").value.trim() };
     if (kind === "scene") fields = { title: $("#insertTitle").value.trim() };
     if (kind === "meta") fields = { text: $("#insertMetaText").value };
-    if (!fields || (kind === "line" && !fields.text.trim()) || (kind === "dir" && !fields.cmd) || (kind === "scene" && !fields.title.trim()) || (kind === "meta" && !fields.text.trim())) {
+    if (!fields || (kind === "line" && !fields.text.trim()) || (kind === "dir" && (!fields.cmd || (resourceDirectiveHelp[fields.cmd] && !fields.arg))) || (kind === "scene" && !fields.title.trim()) || (kind === "meta" && !fields.text.trim())) {
       $("#insertCardStatus").textContent = "请先填写这张卡片的必要内容。";
       return;
     }
+    setBusy(true);
     try {
+      const previousIds = new Set((state.currentDraft.cards || []).map((card) => card.card_id));
       const result = await api(`/production-runs/${encodeURIComponent(state.currentRun.run_id)}/cards`, { method: "POST", body: JSON.stringify({ after_card_id: state.insertAfterCardId, kind, fields, expected_draft_version: state.currentDraft.draft_version }) });
-      $("#insertCardDialog").close(); applyRun(result); toast("新卡片已插入，并标记为待审。", "normal");
-    } catch (error) { handleError(error); }
+      $("#insertCardDialog").close(); applyRun(result);
+      const inserted = (result.draft?.cards || []).find((card) => !previousIds.has(card.card_id));
+      if (inserted) selectCard(inserted.card_id);
+      toast("新卡片已插入，并标记为待审。", "normal");
+    } catch (error) { handleError(error); } finally { setBusy(false); }
   }
 
   async function moveSelectedCard(card, direction) {
@@ -3289,10 +3335,11 @@
       ? cards[index - 1]?.card_id || null
       : cards[index + 2]?.card_id || null;
     if (direction === "later" && index >= cards.length - 1) return;
+    setBusy(true);
     try {
       const result = await api(`/production-runs/${encodeURIComponent(state.currentRun.run_id)}/cards/move`, { method: "POST", body: JSON.stringify({ card_id: card.card_id, before_card_id: beforeCardId, expected_draft_version: state.currentDraft.draft_version }) });
       applyRun(result); toast(direction === "earlier" ? "卡片已移到上一张前面。" : "卡片已移到下一张后面。", "normal");
-    } catch (error) { handleError(error); }
+    } catch (error) { handleError(error); } finally { setBusy(false); }
   }
 
   async function deleteSelectedCard(card) {
@@ -3334,7 +3381,8 @@
   }
 
   function renderCgSelection() {
-    $("#cgSelectedMaterial").textContent = state.cgBackgroundKey || "尚未选择";
+    const selected = (state.cgItems || []).find((item) => item.key === state.cgBackgroundKey);
+    $("#cgSelectedMaterial").textContent = selected ? resourceDisplayName(selected) : state.cgBackgroundKey || "尚未选择";
     $("#createCgSegment").disabled = !state.cgBackgroundKey;
   }
 
@@ -3369,21 +3417,42 @@
     }
   }
 
-  async function searchCgResources(query) {
+  let cgLibraryObserver;
+  let cgSearchEpoch = 0;
+  async function searchCgResources(query, { append = false } = {}) {
     if (!state.currentRun) return;
+    if (append && (state.cgLoading || !state.cgHasMore)) return;
+    if (!append) { state.cgItems = []; cgSearchEpoch += 1; }
+    const epoch = cgSearchEpoch;
+    state.cgLoading = true;
     const status = $("#cgDialogStatus");
     try {
-      const result = await api(`/production-runs/${encodeURIComponent(state.currentRun.run_id)}/resources/cg-backgrounds?q=${encodeURIComponent(query)}&limit=120`);
-      const items = result.items || [];
+      const result = await api(`/production-runs/${encodeURIComponent(state.currentRun.run_id)}/resources/cg-backgrounds?q=${encodeURIComponent(query)}&offset=${state.cgItems.length}&limit=36`);
+      if (epoch !== cgSearchEpoch) return;
+      state.cgItems = [...state.cgItems, ...(result.items || [])];
+      state.cgHasMore = result.has_more === true;
+      const items = state.cgItems;
       $("#cgResults").innerHTML = items.length ? items.map((item) => `<button type="button" class="character-row resource-row cg-material-row ${item.key === state.cgBackgroundKey ? "selected" : ""}" data-cg-key="${esc(item.key)}" aria-pressed="${item.key === state.cgBackgroundKey}">
         ${previewImage("backgrounds", item.key, item.name || item.key, "resource-thumb cg-thumb", item.preview_available === true)}<span><strong>${esc(item.name || item.key)}</strong><small>${esc(item.key)} · ${item.cg_source === "official_cg" ? "官方 CG" : "自定义背景"}</small><small>进入所选范围时切换为这张图，并强制隐藏全部角色立绘。</small></span><b>${item.key === state.cgBackgroundKey ? "已选中" : "选择"}</b></button>`).join("") : '<p class="empty">没有匹配的自定义背景或官方 CG。</p>';
       $$("[data-cg-key]").forEach((button) => button.addEventListener("click", () => {
         state.cgBackgroundKey = button.dataset.cgKey;
         renderCgSelection();
-        searchCgResources($("#cgSearch").value);
+        $$('[data-cg-key]').forEach((row) => { row.classList.toggle("selected", row.dataset.cgKey === state.cgBackgroundKey); row.setAttribute("aria-pressed", String(row.dataset.cgKey === state.cgBackgroundKey)); });
       }));
-      status.textContent = items.length ? `找到 ${result.total} 个可用 CG 画面；普通场景背景已隐藏。` : "当前任务没有匹配的自定义背景或官方 CG。";
-    } catch (error) { status.textContent = error.message; }
+      cgLibraryObserver?.disconnect();
+      if (state.cgHasMore) {
+        $("#cgResults").insertAdjacentHTML("beforeend", '<button type="button" id="cgLoadMore">加载更多 CG 画面</button>');
+        const more = $("#cgLoadMore");
+        const next = () => { if ($("#cgDialog").open) searchCgResources($("#cgSearch").value, { append: true }); };
+        more.addEventListener("click", next);
+        if (typeof IntersectionObserver !== "undefined") {
+          cgLibraryObserver = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) next(); }, { root: $("#cgResults"), rootMargin: "160px" });
+          cgLibraryObserver.observe(more);
+        }
+      }
+      status.textContent = items.length ? `已读取 ${items.length} / ${result.total} 个 CG 画面；下滑继续加载。` : "当前任务没有匹配的自定义背景或官方 CG。";
+    } catch (error) { if (epoch === cgSearchEpoch) status.textContent = error.message; }
+    finally { if (epoch === cgSearchEpoch) state.cgLoading = false; }
   }
 
   async function createCgSegment() {
@@ -3417,18 +3486,20 @@
   }
 
   async function patchCard(card, patch) {
+    setBusy(true);
     try {
       const result = await api(`/production-runs/${state.currentRun.run_id}/cards/${card.card_id}`, { method: "PATCH", body: JSON.stringify({ patch, expected_draft_version: state.currentDraft.draft_version }) });
       applyRun(result); toast("卡片已保存。");
-    } catch (error) { handleError(error); }
+    } catch (error) { handleError(error); } finally { setBusy(false); }
   }
 
   async function resolveCard(action, payload, card = state.selectedCard) {
     if (!card) return;
+    setBusy(true);
     try {
       const result = await api(`/production-runs/${state.currentRun.run_id}/cards/${card.card_id}/${action}`, { method: "POST", body: JSON.stringify({ ...payload, expected_draft_version: state.currentDraft.draft_version }) });
       applyRun(result); toast("素材请求已处理。");
-    } catch (error) { handleError(error); }
+    } catch (error) { handleError(error); } finally { setBusy(false); }
   }
 
   function resourceSourceLabel(item) {
@@ -3735,14 +3806,41 @@
   }
 
   async function loadAssetLibrary({ reset = false } = {}) {
-    if (reset) { state.assetLibraryOffset = 0; state.assetLibraryItems = []; state.selectedAssetKey = null; renderAssetWorkbenchDetail(); }
+    if (state.assetLibraryLoading && !reset) return;
+    assetLibraryController?.abort();
+    const controller = new AbortController();
+    assetLibraryController = controller;
+    assetPageObserver?.disconnect();
+    $('#assetLibraryResults .asset-page-end')?.remove();
+    state.assetLibraryLoading = true;
+    if (reset) {
+      state.assetLibraryOffset = 0; state.assetLibraryItems = []; state.selectedAssetKey = null;
+      $('#assetLibraryResults').innerHTML = '<p class="empty">正在读取素材…</p>';
+      $('#assetLibraryResults').scrollTop = 0;
+      $('#assetWorkbenchReadState').textContent = '正在读取当前筛选的素材…';
+      $('#assetLibraryStatus').textContent = '正在读取素材索引。';
+      renderAssetWorkbenchDetail();
+    }
+    $('#assetLibraryMore').disabled = true;
     const query = $("#assetLibrarySearch").value.trim();
     const kind = state.assetLibraryKind;
+    const runId = state.currentRun?.run_id;
+    const controls = $('.embedded-background-groups');
+    const params = new URLSearchParams({q: query, offset: state.assetLibraryOffset, limit: 36});
+    if (kind === 'backgrounds') {
+      params.set('scope', 'library');
+      if (controls) {
+        params.set('group', controls.dataset.backgroundGroup || 'scene');
+        params.set('category', controls.dataset.backgroundCategory || '');
+      }
+    }
+    const isCurrent = () => assetLibraryController === controller && runId === state.currentRun?.run_id && kind === state.assetLibraryKind;
     try {
       const path = state.currentRun
-        ? `/production-runs/${encodeURIComponent(state.currentRun.run_id)}/resources/${kind}?q=${encodeURIComponent(query)}&offset=${state.assetLibraryOffset}&limit=36${kind === "backgrounds" ? "&scope=library" : ""}`
-        : `/resources/${kind}?q=${encodeURIComponent(query)}&offset=${state.assetLibraryOffset}&limit=36${kind === "backgrounds" ? "&scope=library" : ""}`;
-      const result = await api(path);
+        ? `/production-runs/${encodeURIComponent(runId)}/resources/${kind}?${params}`
+        : `/resources/${kind}?${params}`;
+      const result = await api(path, {signal: controller.signal});
+      if (!isCurrent()) return;
       const incoming = result.items || [];
       state.assetLibraryItems = reset || state.assetLibraryOffset === 0 ? incoming : [...state.assetLibraryItems, ...incoming];
       const sort = $("#assetLibrarySort")?.value || "recent";
@@ -3761,7 +3859,34 @@
         : `已读取 ${state.assetLibraryItems.length} / ${state.assetLibraryTotal} 个${label}；这里只管理本任务可见素材。`;
       $("#assetLibraryStatus").textContent = result.total ? `找到 ${result.total} 个${label}。选择左侧条目查看详情。` : "没有匹配的已登记素材。";
       $("#assetLibraryMore").disabled = !result.has_more;
-    } catch (error) { $("#assetLibraryStatus").textContent = error.message; }
+      state.assetLibraryHasMore = result.has_more;
+    } catch (error) {
+      if (!isCurrent() || controller.signal.aborted) return;
+      state.assetLibraryHasMore = false;
+      if (reset) $('#assetLibraryResults').innerHTML = '<p class="empty">素材读取未完成，请点击加载更多重试。</p>';
+      $('#assetLibraryStatus').textContent = error.message;
+      $('#assetLibraryMore').disabled = false;
+    } finally {
+      if (isCurrent()) { state.assetLibraryLoading = false; observeAssetPageEnd(); }
+    }
+  }
+
+  function observeAssetPageEnd() {
+    assetPageObserver?.disconnect();
+    const results = $('#assetLibraryResults');
+    if (!state.assetLibraryHasMore || !$('#assetLibraryDialog').open || typeof IntersectionObserver === 'undefined') return;
+    const sentinel = document.createElement('p');
+    sentinel.className = 'asset-page-end';
+    sentinel.textContent = '继续下滑加载更多';
+    sentinel.setAttribute('role', 'status');
+    results.append(sentinel);
+    assetPageObserver = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting) && !state.assetLibraryLoading && $('#assetLibraryDialog').open) {
+        assetPageObserver.disconnect();
+        loadAssetLibrary();
+      }
+    }, {root: results, rootMargin: '160px 0px'});
+    assetPageObserver.observe(sentinel);
   }
 
   function openAssetLibrary({ preserveContext = false } = {}) {
@@ -4653,6 +4778,8 @@
   $("#validateAssetImport").addEventListener("click", validateAssetImport);
   $("#recognizeAssetImport").addEventListener("click", recognizeAssetImport);
   $("#registerAssetImport").addEventListener("click", registerAssetImport);
+  $("#insertCmd").addEventListener("change", updateInsertDirective);
+  $("#insertResourceButton").addEventListener("click", chooseInsertResource);
   document.addEventListener("click", (event) => {
     const accept = event.target.closest("#acceptAssetRecognition");
     if (!accept || !state.assetImport?.recognition) return;
@@ -4662,7 +4789,10 @@
   });
   $("#copyBackgroundPrompt").addEventListener("click", copyBackgroundPrompt);
   $("#importGeneratedBackground").addEventListener("click", openGeneratedBackgroundImport);
-  $("#assetLibrarySearch").addEventListener("input", () => loadAssetLibrary({ reset: true }));
+  $("#assetLibrarySearch").addEventListener("input", () => {
+    clearTimeout(assetSearchTimer);
+    assetSearchTimer = setTimeout(() => loadAssetLibrary({ reset: true }), 160);
+  });
   $("#assetLibrarySort").addEventListener("change", () => loadAssetLibrary({ reset: true }));
   $("#assetLibraryMore").addEventListener("click", () => loadAssetLibrary());
   $$("[data-asset-kind]").forEach((button) => button.addEventListener("click", () => {
@@ -4697,6 +4827,7 @@
 
   const productionShell = $(".app-shell");
   productionShell.haloCueOpenRun = openRun;
+  productionShell.haloCueLoadAssetLibrary = loadAssetLibrary;
   productionShell.haloCueGetState = () => ({ run: state.currentRun, draft: state.currentDraft, stage: currentRunOpeningStage() });
   productionShell.haloCueShowStage = (stage) => showStage(stage || currentRunOpeningStage(), { force: true });
   productionShell.haloCueShowNewProduction = () => {

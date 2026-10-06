@@ -1173,9 +1173,8 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
             )
         if result.get("status") == "registered":
             self._mark_draft_changed(run)
-            result["run"] = self.run_detail(run_id)["run"]
-            result["draft"] = self.run_detail(run_id)["draft"]
-            result["gates"] = self.run_detail(run_id)["gates"]
+            detail = self.run_detail(run_id)
+            result.update({key: detail[key] for key in ("run", "draft", "gates")})
         return result
 
     def task_assets(self, run_id: str) -> dict[str, Any]:
@@ -1295,6 +1294,8 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
             speakers=summary["speakers"],
             cg_keys=self.resources.cg_keys(),
         )
+        if payload.get("auto_match_resources") is True:
+            self.adapter.match_missing_resources(draft["session"]["draft_token"])
         now = utc_now()
         run = ProductionRun(
             run_id=new_id("run"),

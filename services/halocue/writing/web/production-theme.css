@@ -75,7 +75,9 @@
 :host-context(html[data-theme="dark"]) .primary:hover:not(:disabled) { background: #436fa7 !important; }
 :host-context(html[data-theme="dark"]) :is(.draft-card.selected,.source-tab.active,.writing-release-card.selected,
   .filterbar button.active,.mode-choice:has(input:checked),.asset-library-item.is-selected,
-  .resource-item.selected,.settings-tabs button.active,.production-flow-strip .stage-list li.active) {
+  .resource-item.selected,.settings-tabs button.active,.production-flow-strip .stage-list li.active,
+  .asset-tabs button.active,.embedded-background-group-buttons button.active,
+  .embedded-background-category-list button.active,.cg-material-row.selected) {
   background: var(--accent-soft) !important; border-color: var(--accent) !important; color: var(--ink) !important;
 }
 :host-context(html[data-theme="dark"]) .mode-choice {

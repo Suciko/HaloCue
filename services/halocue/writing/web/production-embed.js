@@ -404,21 +404,6 @@
       .replaceAll("'", "&#39;");
   }
 
-  const backgroundGroupLabels = {
-    scene: { label: "场景背景", source: "普通场景背景" },
-    cg: { label: "官方 CG", source: "官方剧情画面" },
-    custom: { label: "自定义背景", source: "你的自定义画面" },
-  };
-
-  function backgroundKeyClass(key) {
-    const value = String(key || "").trim().toLowerCase();
-    if (/^bg_cs[_-]/i.test(value)) return "cg";
-    if (/^(chatgpt image|comfyui[_ -]|gemini_generated_image_|img[_-])/i.test(value)) return "custom";
-    if (/^\d{3,}(?:-\d+)?$/.test(value)) return "custom";
-    if (value.length >= 20 && /^[0-9a-f]+$/.test(value)) return "custom";
-    return "scene";
-  }
-
   function currentProductionRunId(root) {
     return activeContext?.runId || linkedContext().runId
       || root.querySelector("[data-run-id].active")?.dataset.runId
@@ -428,39 +413,6 @@
 
   function productionResourceUrl(runId, kind, key, suffix = "") {
     return `/production/api/v1/production-runs/${encodeURIComponent(runId)}/resources/${kind}/${encodeURIComponent(key)}${suffix}`;
-  }
-
-  async function fetchProductionResources(root, kind, query, offset = 0, limit = 24, options = {}) {
-    const runId = currentProductionRunId(root);
-    if (!runId) return { items: [], total: 0, has_more: false };
-    const cache = root.__haloCueResourceCache || (root.__haloCueResourceCache = new Map());
-    const pending = root.__haloCueResourcePending || (root.__haloCueResourcePending = new Map());
-    const cacheKey = `${runId}|${kind}|${query}|${offset}|${limit}|${options.group || ""}`;
-    if (cache.has(cacheKey)) return cache.get(cacheKey);
-    if (pending.has(cacheKey)) return pending.get(cacheKey);
-    const request = fetch(`/production/api/v1/production-runs/${encodeURIComponent(runId)}/resources/${kind}?q=${encodeURIComponent(query)}&offset=${offset}&limit=${limit}${kind === "backgrounds" ? `&scope=library&group=${encodeURIComponent(options.group || "")}` : ""}`, { signal: options.signal })
-      .then(response => {
-        if (!response.ok) throw new Error(`素材读取失败（${response.status}）`);
-        return response.json();
-      })
-      .then(payload => {
-        cache.set(cacheKey, payload);
-        return payload;
-      })
-      .finally(() => pending.delete(cacheKey));
-    pending.set(cacheKey, request);
-    return request;
-  }
-
-  async function fetchWritingBackgroundMetadata(root, keys = [], query = "") {
-    const params = new URLSearchParams({ kind: "backgrounds" });
-    if (keys.length) params.set("keys", keys.join(","));
-    if (query) params.set("q", query);
-    const response = await fetch(`/api/v1/resources/search?${params.toString()}`);
-    if (!response.ok) throw new Error(`背景标注读取失败（${response.status}）`);
-    const payload = await response.json();
-    const data = payload?.data || payload;
-    return Array.isArray(data?.items) ? data.items : [];
   }
 
   async function fetchBackgroundFacets(root) {
@@ -506,6 +458,11 @@
     });
     controls.dataset.backgroundGroup = group;
     controls.dataset.backgroundCategory = "";
+    controls.querySelectorAll('[data-background-category]').forEach(button => {
+      const active = !button.dataset.backgroundCategory;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
   }
 
   function ensureBackgroundGroupControls(root) {
@@ -523,7 +480,7 @@
       if (!list) return;
       list.innerHTML = `<button type="button" class="active" data-background-category="" aria-pressed="true">全部</button>` + categories.map(category => {
         const label = backgroundCategoryLabel(category.label);
-        return label === "其他地点" ? "" : `<button type="button" data-background-category="${escapeHtml(label)}" aria-pressed="false">${escapeHtml(label)}<small>${escapeHtml(category.count)}</small></button>`;
+        return label === "其他地点" ? "" : `<button type="button" data-background-category="${escapeHtml(label)}" aria-pressed="false">${escapeHtml(label)}</button>`;
       }).join("");
       list.hidden = false;
     }).catch(() => {});
@@ -541,7 +498,7 @@
       if (!intro.hidden) intro.hidden = true;
       if (intro.textContent) intro.textContent = "";
     }
-    const search = dialog.querySelector(".asset-search-label");
+    const search = dialog.querySelector(".asset-workbench-controls label");
     if (search) {
       const label = search.childNodes[0];
       if (label && label.textContent !== "搜索背景") label.textContent = "搜索背景";
@@ -561,7 +518,7 @@
     const selected = labels[kind] || labels.characters;
     const heading = dialog.querySelector("header h3");
     if (heading && heading.textContent !== selected.title) heading.textContent = selected.title;
-    const search = dialog.querySelector(".asset-search-label");
+    const search = dialog.querySelector(".asset-workbench-controls label");
     if (search) {
       const label = search.childNodes[0];
       if (label && label.textContent !== selected.search) label.textContent = selected.search;
@@ -570,140 +527,22 @@
     }
   }
 
-  function backgroundMetadataMap(items = []) {
-    return new Map(items.map(item => {
-      const key = String(item.requested_key || item.technical?.key || item.key || "");
-      return [key.toLowerCase(), item];
-    }));
-  }
-
-  function backgroundUserLabel(item, metadata, group) {
-    const configured = backgroundGroupLabels[group] || backgroundGroupLabels.scene;
-    const values = [metadata?.display_name_zh_cn, metadata?.place_cn, metadata?.label_cn, metadata?.display_name, metadata?.place, metadata?.category_path, metadata?.main_category, metadata?.label, item?.name];
-    const readable = values.find(value => /[\u3400-\u9fff]/.test(String(value || "")));
-    if (readable) return String(readable);
-    return item?.name || item?.key || configured.source;
-  }
-
-  function backgroundCategoryInfo(metadata, group) {
-    const configured = backgroundGroupLabels[group] || backgroundGroupLabels.scene;
-    const path = String(metadata?.category_path || "")
-      .split("/")
-      .map(value => value.trim())
-      .filter(Boolean);
-    const subcategory = metadata?.annotation?.subcategory || metadata?.annotation?.category || path.at(-1) || "";
-    const main = metadata?.main_category || path.at(-2) || "";
-    const visible = backgroundCategoryLabel(subcategory || main) === "其他地点"
-      ? (backgroundCategoryLabel(main) === "其他地点" ? configured.source : backgroundCategoryLabel(main))
-      : backgroundCategoryLabel(subcategory);
-    const filterValues = [...new Set([main, subcategory, ...path].map(backgroundCategoryLabel).filter(value => value !== "其他地点"))];
-    return { visible, filterValues };
-  }
-
-  function embeddedBackgroundItem(item, group, root, metadata, index = 0) {
-    const runId = currentProductionRunId(root);
-    const key = item.key || "";
-    const configured = backgroundGroupLabels[group] || backgroundGroupLabels.scene;
-    const name = backgroundUserLabel(item, metadata, group);
-    const categoryInfo = backgroundCategoryInfo(metadata, group);
-    const preview = runId && key && item.preview_available !== false
-      ? `<span class="resource-thumb background-thumb"><span class="background-preview-placeholder" aria-hidden="true">预览</span><img ${index < 6 ? `src="${productionResourceUrl(runId, "backgrounds", key, "/preview")}"` : `data-preview-src="${productionResourceUrl(runId, "backgrounds", key, "/preview")}"`} loading="lazy" decoding="async" alt=""></span>`
-      : `<span class="resource-thumb background-thumb preview-unavailable" aria-hidden="true">无预览</span>`;
-    return `<article class="asset-library-item embedded-background-item" data-embedded-background-key="${escapeHtml(key)}" data-background-category="${escapeHtml(categoryInfo.filterValues.join("|"))}"><div class="embedded-background-preview">${preview}</div><div><strong>${escapeHtml(name)}</strong><small>${escapeHtml(categoryInfo.visible)}</small></div></article>`;
-  }
-
-  function installBackgroundPreviewObserver(root) {
-    const results = root.querySelector("#assetLibraryResults");
-    if (!results) return;
-    root.__haloCueBackgroundPreviewObserver?.disconnect();
-    const load = image => {
-      const source = image.dataset.previewSrc;
-      if (!source || image.hasAttribute("src")) return;
-      image.src = source;
-      image.removeAttribute("data-preview-src");
-    };
-    const allImages = [...results.querySelectorAll("img")];
-    allImages.forEach(image => {
-      image.addEventListener("load", () => image.classList.add("is-loaded"), { once: true });
-      image.addEventListener("error", () => image.classList.add("is-failed"), { once: true });
-      if (image.complete && image.naturalWidth > 0) image.classList.add("is-loaded");
-    });
-    const images = allImages.filter(image => image.dataset.previewSrc);
-    if (!images.length) return;
-    if (typeof IntersectionObserver === "undefined") {
-      images.slice(0, 10).forEach(load);
-      return;
-    }
-    const observer = new IntersectionObserver(entries => entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        load(entry.target);
-        observer.unobserve(entry.target);
-      }
-    }), { root: results, rootMargin: "180px 0px" });
-    images.forEach(image => observer.observe(image));
-    root.__haloCueBackgroundPreviewObserver = observer;
-  }
-
-  async function loadEmbeddedBackgroundLibrary(root, { reset = true } = {}) {
-    const dialog = root.querySelector("#assetLibraryDialog");
-    const controls = backgroundGroupControls(root);
-    if (!dialog || !controls || dialog.hidden) return;
-    const group = controls.dataset.backgroundGroup || "scene";
-    const search = dialog.querySelector("#assetLibrarySearch")?.value?.trim() || "";
-    const offset = reset ? 0 : Number(controls.dataset.backgroundOffset || 0);
-    const status = dialog.querySelector("#assetLibraryStatus");
-    const results = dialog.querySelector("#assetLibraryResults");
-    const more = dialog.querySelector("#assetLibraryMore");
-    if (!results || !status) return;
-    status.textContent = "正在按用途整理背景…";
-    controls.dataset.backgroundLoading = "true";
-    root.__haloCueBackgroundRequest?.abort();
-    const request = new AbortController();
-    const requestId = String((Number(root.__haloCueBackgroundRequestId) || 0) + 1);
-    root.__haloCueBackgroundRequest = request;
-    root.__haloCueBackgroundRequestId = requestId;
-    try {
-      const endpoint = "backgrounds";
-      const payload = await fetchProductionResources(root, endpoint, search, offset, 24, { signal: request.signal, group });
-      if (root.__haloCueBackgroundRequestId !== requestId) return;
-      let items = Array.isArray(payload.items) ? payload.items : [];
-      // The server applies the group before pagination, so totals stay accurate.
-      const metadata = group === "scene"
-        ? backgroundMetadataMap(await fetchWritingBackgroundMetadata(root, items.map(item => item.key), search).catch(() => []))
-        : new Map();
-      if (root.__haloCueBackgroundRequestId !== requestId) return;
-      const html = items.map((item, index) => embeddedBackgroundItem(item, group, root, metadata.get(String(item.key || "").toLowerCase()), index)).join("");
-      results.innerHTML = reset || offset === 0 ? html : results.innerHTML + html;
-      controls.dataset.backgroundOffset = String(offset + (payload.items || []).length);
-      controls.dataset.backgroundRenderedGroup = group;
-      more.disabled = !payload.has_more;
-      status.textContent = items.length
-        ? `已显示 ${results.querySelectorAll(".embedded-background-item").length} 项`
-        : `没有匹配的${backgroundGroupLabels[group].label}。`;
-      applyBackgroundCategory(root);
-      installBackgroundPreviewObserver(root);
-    } catch (error) {
-      if (error?.name === "AbortError") return;
-      status.textContent = error.message || "背景素材暂时无法读取。";
-      results.replaceChildren();
-      more.disabled = true;
-    } finally {
-      if (root.__haloCueBackgroundRequestId === requestId) controls.dataset.backgroundLoading = "false";
-    }
+  function loadEmbeddedBackgroundLibrary(root, { reset = true } = {}) {
+    // The production app owns requests, selection, details and paging.
+    // The embedding layer only contributes category controls and presentation.
+    return root.querySelector('.embedded-production-shell')?.haloCueLoadAssetLibrary?.({ reset });
   }
 
   function applyBackgroundCategory(root) {
     const controls = backgroundGroupControls(root);
     if (!controls) return;
-    const category = controls.dataset.backgroundCategory || "";
-    controls.querySelectorAll(".embedded-background-category-list [data-background-category]").forEach(button => {
+    const category = controls.dataset.backgroundCategory || '';
+    controls.querySelectorAll('[data-background-category]').forEach(button => {
       const active = button.dataset.backgroundCategory === category;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-pressed", String(active));
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', String(active));
     });
-    root.querySelectorAll("#assetLibraryResults .embedded-background-item").forEach(item => {
-      item.hidden = Boolean(category && !(item.dataset.backgroundCategory || "").includes(category));
-    });
+    loadEmbeddedBackgroundLibrary(root);
   }
 
   function installBackgroundClassification(root) {
@@ -716,19 +555,7 @@
       if (kind === "backgrounds") simplifyBackgroundDialog(dialog);
       else restoreAssetDialogContext(dialog, kind);
       controls.hidden = !dialog?.open || kind !== "backgrounds";
-      if (dialog?.open && kind === "backgrounds" && !controls.dataset.backgroundLoaded) {
-        controls.dataset.backgroundLoaded = "true";
-        setBackgroundGroup(root, "scene");
-        loadEmbeddedBackgroundLibrary(root);
-      }
-      if (dialog?.open && kind === "backgrounds" && !controls.hidden && controls.dataset.backgroundLoading !== "true") {
-        const results = dialog.querySelector("#assetLibraryResults");
-        const replacedByOriginalLibrary = results?.querySelector(".asset-library-item:not(.embedded-background-item)");
-        if (replacedByOriginalLibrary) {
-          controls.dataset.backgroundRenderedGroup = "";
-          loadEmbeddedBackgroundLibrary(root);
-        }
-      }
+
     };
     const observer = new MutationObserver(() => {
       syncLibrary();
@@ -1466,7 +1293,7 @@
       "/production/workspace-migration.css",
       "/production/direction-profile.css",
       "/production/confirm-dialog.css",
-      "/production-embed.css?v=20261006-host-scroll1",
+      "/production-embed.css?v=20261006-aa-material2",
       "/production-theme.css?v=20260929-resource-empty-dark1",
       "/production/clarity.css?v=20260927-compact4",
     ];

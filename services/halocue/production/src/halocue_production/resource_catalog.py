@@ -7,7 +7,7 @@ from typing import Any
 
 from .errors import ProductionError
 from .background_names import background_name_metadata
-from .name_baseline import CharacterNameBaseline
+from .name_baseline import CharacterNameBaseline, character_query_priority
 from .resource_previews import ResourcePreview, ResourcePreviewCatalog
 from .background_library import BackgroundLibraryScope
 from .background_search import background_search_document, background_search_score
@@ -212,7 +212,8 @@ class ResourceCatalog:
                     }
                 )
 
-        items.sort(key=lambda item: (str(item.get("name") or "").casefold(), item["key"]))
+        items.sort(key=lambda item: (-character_query_priority(item, needle) if kind == "characters" else 0,
+                                    str(item.get("name") or "").casefold(), item["key"]))
         result = self._page(items, offset, limit)
         result["kind"] = kind
         result["query"] = query

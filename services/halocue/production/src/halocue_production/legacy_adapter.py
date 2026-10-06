@@ -20,7 +20,7 @@ from .background_names import background_name_metadata
 from .background_library import BackgroundLibraryScope
 from .background_search import background_search_document, background_search_score
 from .models import StagedDirectionResult, new_id, utc_now
-from .name_baseline import CharacterNameBaseline
+from .name_baseline import CharacterNameBaseline, character_query_priority
 from .resource_previews import ResourcePreview, ResourcePreviewCatalog
 
 
@@ -179,12 +179,15 @@ class Legacy093Adapter:
                 source_resources
             )
             visible = BackgroundLibraryScope(self.settings.aa_data, index_path).visible_keys(self._resource_snapshot)
+            visible_annotations = {str(key).casefold() for key in visible}
             for field in ("bg", "bg_label", "background_media"):
                 if isinstance(self._resource_snapshot.get(field), dict):
-                    self._resource_snapshot[field] = {key: value for key, value in self._resource_snapshot[field].items() if key in visible}
+                    self._resource_snapshot[field] = {key: value for key, value in self._resource_snapshot[field].items()
+                        if key in visible or (field == "bg_label" and str(key).casefold() in visible_annotations)}
             scene_labels = self._resource_snapshot.get("scene_labels") or {}
             if isinstance(scene_labels.get("background"), dict):
-                scene_labels["background"] = {key: value for key, value in scene_labels["background"].items() if key in visible}
+                scene_labels["background"] = {key: value for key, value in scene_labels["background"].items()
+                    if str(key).casefold() in visible_annotations}
             self._resource_snapshot_signature = signature
             self._resource_snapshot_scope = snapshot_scope
 
@@ -596,6 +599,29 @@ class Legacy093Adapter:
                 return {}
             return value if isinstance(value, dict) else {}
 
+    def match_missing_resources(self, token: str) -> dict[str, Any]:
+        from .automatic_resources import background_match, character_match
+
+        detail = self.draft_detail(token)
+        resources = self._draft_resources(token)
+        characters = [self.name_baseline.decorate(row) for row in resources.get("characters", []) if isinstance(row, dict)]
+        for speaker in detail["cast"].get("detected_speakers", []):
+            if detail["cast"].get("cast", {}).get(speaker, {}).get("kind", "unset") != "unset":
+                continue
+            match = character_match(speaker, characters)
+            if match:
+                detail = self.update_cast_binding(token=token, speaker=speaker,
+                    mapping={"kind": "portrait", "id": match["identifier"], "name": match["name"],
+                             "match_source": "automatic_local"},
+                    expected_draft_version=detail["draft_version"])
+        backgrounds = self._resource_items(resources, "backgrounds")
+        for scene in [card for card in detail["cards"] if card["kind"] == "scene"]:
+            match = background_match(detail["cards"], scene, backgrounds)
+            if match:
+                detail = self.insert_card(token=token, after_card_id=scene["card_id"], kind="dir",
+                    fields={"cmd": "bg", "arg": match["key"]}, expected_draft_version=detail["draft_version"])
+        return detail
+
     def _background_library(self) -> dict[str, Any]:
         path = self.settings.resource_index
         if not path or not path.is_file():
@@ -779,6 +805,13 @@ class Legacy093Adapter:
             labels = resources.get("bg_label") if isinstance(resources.get("bg_label"), dict) else {}
             scene_labels = resources.get("scene_labels") if isinstance(resources.get("scene_labels"), dict) else {}
             scene_backgrounds = scene_labels.get("background") if isinstance(scene_labels.get("background"), dict) else {}
+            # AA identities retain manifest casing; research annotations may use
+            # lowercase keys. Join evidence without renaming the actual AA key.
+            annotated = {}
+            for collection in (labels, scene_backgrounds):
+                for key, value in collection.items():
+                    if isinstance(value, dict):
+                        annotated.setdefault(str(key).casefold(), []).append(value)
             rows = []
             for key in raw:
                 token = str(key)
@@ -786,6 +819,13 @@ class Legacy093Adapter:
                 label_metadata = label_value if isinstance(label_value, dict) else {}
                 scene_metadata = scene_backgrounds.get(token) if isinstance(scene_backgrounds.get(token), dict) else {}
                 metadata = {**label_metadata, **{name: value for name, value in scene_metadata.items() if value is not None and value != ""}}
+                candidates = annotated.get(token.casefold(), [])
+                if candidates:
+                    evidence = max(candidates, key=lambda value: (
+                        bool(value.get("category_path_cn")), bool(value.get("place")),
+                        len(re.findall(r"[\u3400-\u9fff]", str(value.get("label") or ""))),
+                    ))
+                    metadata.update({name: value for name, value in evidence.items() if value not in (None, "")})
                 label = metadata.get("label") or metadata.get("description") or (label_value if isinstance(label_value, str) else None)
                 tags = metadata.get("tags")
                 if isinstance(tags, str):
@@ -796,6 +836,7 @@ class Legacy093Adapter:
                     tags = []
                 row = {
                     "key": token,
+                    "_aa_hash": str(raw[token]),
                     **background_name_metadata(token, {**metadata, "label": label or token}),
                 }
                 if tags:
@@ -997,6 +1038,8 @@ class Legacy093Adapter:
             searchable.extend(public.get("tags", []) if isinstance(public.get("tags"), list) else [public.get("tags")])
             if kind != "backgrounds" and needle and not any(needle in str(value or "").casefold() for value in searchable):
                 continue
+            if kind == "characters":
+                public["_search_score"] = character_query_priority(public, needle)
             if active_filters.get("source") and str(public.get("source") or "").casefold() != active_filters["source"]:
                 continue
             if active_filters.get("ready") in {"1", "true", "yes"} and public.get("preview_available") is not True:
@@ -1258,7 +1301,7 @@ class Legacy093Adapter:
 
         key = result["stem"] if kind in {"background", "sound", "cg"} else str(identifier).strip()
         metadata = result["metadata"]
-        default_name = labels.get("label") if kind == "cg" else ""
+        default_name = labels.get("label") if kind in {"background", "cg"} else ""
         # A library asset's nickname is a free-form note. Only an explicit club
         # label may become character organization; legacy task imports still use
         # nickname for that field.
@@ -1417,6 +1460,18 @@ class Legacy093Adapter:
                 item.get("severity") == "error" for item in diagnostics
             ),
         }
+        used_backgrounds = {
+            card["current"].get("arg") for card in cards
+            if card["kind"] == "dir" and card["current"].get("cmd") == "bg"
+        }
+        background_resources = {
+            item["key"]: {key: value for key, value in item.items() if not key.startswith("_")}
+            for item in self._resource_items({
+                **resources,
+                "bg": {key: value for key, value in (resources.get("bg") or {}).items()
+                       if key in used_backgrounds},
+            }, "backgrounds")
+        }
         return {
             "draft_token": token,
             "project": draft["session"].get("project"),
@@ -1427,6 +1482,7 @@ class Legacy093Adapter:
             "diagnostics": diagnostics,
             "counts": counts,
             "cast": cast_data,
+            "background_resources": background_resources,
             "cg_segments": segments,
             "review_ready": not any(
                 counts[key] for key in ("pending", "unresolved_issues", "blocking_errors")

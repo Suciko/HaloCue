@@ -1,8 +1,36 @@
 from __future__ import annotations
 
 import json
+import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from services.halocue.runtime_layout import repository_root
+
+
+def character_query_priority(character: dict[str, Any], query: str) -> int:
+    needle = query.strip().casefold()
+    names = [character.get("name"), *character.get("aliases", [])]
+    return int(bool(needle) and any(needle == str(name or "").strip().casefold() for name in names))
+
+
+@lru_cache(maxsize=1)
+def bundled_name_aliases() -> dict[str, list[str]]:
+    """Share curated spellings with AA search without inventing resource IDs."""
+    groups: dict[str, list[list[str]]] = {}
+    for path in sorted((repository_root() / "data/reference-pack/characters").glob("*.json")):
+        try:
+            card = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        names = list(dict.fromkeys([str(card.get("name") or "").strip(),
+            *CharacterNameBaseline._aliases(card.get("aliases"))]))
+        for name in names:
+            if name:
+                groups.setdefault(name.casefold(), []).append(names)
+    # A shared short alias must not join unrelated or alternative identities.
+    return {name: list(dict.fromkeys(names[0])) for name, names in groups.items()
+            if len({tuple(group) for group in names}) == 1}
 
 
 class CharacterNameBaseline:
@@ -88,6 +116,15 @@ class CharacterNameBaseline:
         aliases = self._aliases((entry or {}).get("aliases"))
         aliases.extend(self._aliases(character.get("aliases")))
         aliases.extend(name for name in (source_name, fandom_name, explicit_cn, baseline_cn) if name)
+        # Official AA skeletons keep the romanized first name even when the
+        # manifest uses a regional spelling (e.g. 陽奈). Use a unique curated
+        # alias group, never substring matching or a generated character ID.
+        spine = str(character.get("spine") or "").replace("\\", "/")
+        official = re.search(r"(?:^|/)CharacterSpine_([a-z]+)(?:_|$)", spine, re.I)
+        if official and not character.get("user_custom") and character.get("source") not in {"custom", "task_import"}:
+            aliases.extend(bundled_name_aliases().get(official[1].casefold(), []))
+        for name in list(aliases):
+            aliases.extend(bundled_name_aliases().get(name.casefold(), []))
         display_name = fandom_name or explicit_cn or baseline_cn or source_name
         return {
             "name": display_name,

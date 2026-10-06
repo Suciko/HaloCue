@@ -89,6 +89,64 @@ def test_corrupted_bundle_refuses_install(temp_environment):
         install_mgr.install_build(token=token, build_id=build_id)
 
 
+@pytest.mark.parametrize(
+    ("exact_kind", "annotation_kind", "can_install"),
+    [
+        (None, "official_base", True),
+        (None, "extra_pack", False),
+        ("official_base", "extra_pack", False),
+        (None, None, False),
+    ],
+)
+def test_install_joins_background_provenance_without_changing_aa_key(
+    temp_environment, tmp_path, exact_kind, annotation_kind, can_install
+):
+    env = temp_environment
+    env["bundle_mgr"].output_root = tmp_path / "compiler-output"
+    token = "background-case-join"
+    project = "背景来源大小写验收"
+    env["store"].create_draft(token=token, text="旁白: 测试\n", project=project)
+    build_id = env["bundle_mgr"].create_compile_snapshot(
+        token=token, expected_draft_version=1
+    )
+    bundle = env["bundle_mgr"].execute_build_worker(token=token, build_id=build_id)
+    bundle_dir = Path(bundle["bundle_dir"])
+    index_path = bundle_dir / "project" / "aa_resources.json"
+    resources = json.loads(index_path.read_text(encoding="utf-8"))
+    resources["bg"]["BG_Classroom"] = 123456789
+    resources["bg_label"] = {
+        "BG_Classroom": {"label": "Classroom", "source_kind": exact_kind},
+        "bg_classroom": {"label": "教室", "source_kind": annotation_kind},
+    }
+    index_path.write_text(json.dumps(resources, ensure_ascii=False), encoding="utf-8")
+    _rehash_bundle_file(bundle_dir, index_path)
+    aap_path = bundle_dir / f"{project}.aap"
+    aap = json.loads(aap_path.read_text(encoding="utf-8"))
+    script = next(
+        script for node in aap["nodes"]["$values"]
+        for script in node.get("Scripts", {}).get("$values", [])
+    )
+    script.update(bgFriendlyName="BG_Classroom", bgName=123456789)
+    aap_path.write_text(json.dumps(aap, ensure_ascii=False), encoding="utf-8")
+    _rehash_bundle_file(bundle_dir, aap_path)
+
+    if not can_install:
+        with pytest.raises(AACorruptBundleError, match="custom backgrounds"):
+            env["install_mgr"].install_build(token=token, build_id=build_id)
+        assert not (env["aa_data_dir"] / "projects" / f"{project}.aap").exists()
+        return
+
+    env["install_mgr"].install_build(token=token, build_id=build_id)
+    installed = json.loads(
+        (env["aa_data_dir"] / "projects" / f"{project}.aap").read_text(encoding="utf-8")
+    )
+    installed_script = next(
+        script for node in installed["nodes"]["$values"]
+        for script in node.get("Scripts", {}).get("$values", [])
+    )
+    assert installed_script["bgFriendlyName"] == "BG_Classroom"
+
+
 def test_aa_running_refuses_install(temp_environment):
     env = temp_environment
     store = env["store"]
