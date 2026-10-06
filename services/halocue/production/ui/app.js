@@ -1318,18 +1318,34 @@
     await loadCharacterCatalog();
   }
 
+  function cacheCharacterResources(rows, runId) {
+    if (state.currentRun?.run_id !== runId) return;
+    const cached = state.characterCatalogRunId === runId ? state.characterCatalog : [];
+    const resources = new Map(cached.map((item) => [String(item.identifier || item.key || ""), item]));
+    rows.forEach((item) => resources.set(String(item.identifier || item.key || ""), item));
+    state.characterCatalog = [...resources.values()];
+    state.characterCatalogRunId = runId;
+  }
+
   async function loadCharacterCatalog() {
-    if (!state.currentRun?.run_id || state.characterCatalogRunId === state.currentRun.run_id) return;
+    if (!state.currentRun?.run_id) return;
     const runId = state.currentRun.run_id;
-    try {
-      const result = await api(`/production-runs/${encodeURIComponent(runId)}/resources/characters?q=&limit=200`);
-      if (state.currentRun?.run_id !== runId) return;
-      state.characterCatalog = Array.isArray(result.items) ? result.items : [];
-      state.characterCatalogRunId = runId;
-      if (state.currentStage === "mapping") renderMapping();
-    } catch (_) {
-      // Mapping remains usable without previews; the picker can retry its own request.
-    }
+    const cached = state.characterCatalogRunId === runId ? state.characterCatalog : [];
+    const ids = [...new Set(Object.values(state.currentDraft?.cast?.cast || {})
+      .filter((mapping) => mapping.kind === "portrait" && mapping.id)
+      .map((mapping) => String(mapping.id)))];
+    const missing = ids.filter((id) => !cached.some((item) => String(item.identifier || item.key || "") === id));
+    if (!missing.length) return;
+    // Hydrate only this task's bound characters; catalog pagination must not hide them.
+    const rows = await Promise.all(missing.map(async (id) => {
+      try {
+        const result = await api(`/production-runs/${encodeURIComponent(runId)}/resources/characters/${encodeURIComponent(id)}`);
+        return result.character?.identifier === id ? result.character : null;
+      } catch (_) { return null; } // The picker or next refresh can retry without blocking mapping.
+    }));
+    if (state.currentRun?.run_id !== runId) return;
+    cacheCharacterResources(rows.filter(Boolean), runId);
+    if (state.currentStage === "mapping") renderMapping();
   }
 
   function renderAiPreflight() {
@@ -1802,8 +1818,7 @@
       const rows = (result.items || []).filter((item) => item.role !== "teacher"
         && item.source !== "halocue_teacher"
         && item.identifier !== state.currentDraft?.cast?.teacher_identity?.character_id);
-      state.characterCatalog = rows;
-      state.characterCatalogRunId = state.currentRun?.run_id || null;
+      cacheCharacterResources(rows, runId);
       const custom = rows.filter(isCustomCharacterResource);
       const official = rows.filter((item) => !isCustomCharacterResource(item));
       $("#characterResults").innerHTML = rows.length ? [
@@ -4207,6 +4222,23 @@
     if (preview) preview.textContent = installNamePreview();
   }
 
+  function renderInstalledResult(project, located) {
+    $("#installDialog h3").textContent = "已安装到 AA";
+    $(".install-name-grid").hidden = true;
+    $("#checkInstall").hidden = true;
+    $("#installRun").hidden = true;
+    $("#installRun").disabled = true;
+    $(".install-target-preview").classList.toggle("is-conflict", !located);
+    $("#installProjectPreview").textContent = project;
+    $("#installTargetStatus").textContent = located
+      ? "已在当前 AA 工作区找到这个工程。"
+      : "当前 AA 工作区未找到已安装工程，请检查工作区设置或工程是否被移动。";
+    $("#installAapPath").textContent = located ? `projects/${project}.aap` : "当前工作区未找到";
+    $("#installAssetPath").textContent = located ? `projects/${project}/` : "请检查原安装工作区";
+    $("#installSavePath").textContent = located ? `saves/${project}/` : "请检查原安装工作区";
+    $("#installDialogStatus").textContent = `安装记录：${project}。`;
+  }
+
   async function loadInstallOptions() {
     if (!state.currentRun?.last_build_id) return;
     $("#installBuildName").textContent = state.currentRun.last_build_id;
@@ -4214,6 +4246,18 @@
     $("#installDialogStatus").textContent = "正在读取安装选项。";
     const result = await api(`/production-runs/${encodeURIComponent(state.currentRun.run_id)}/install-options?build_id=${encodeURIComponent(state.currentRun.last_build_id)}`);
     state.installOptions = result;
+    if (state.currentRun.state === "installed") {
+      const project = state.currentRun.last_installed_project || result.existing_install?.project || state.currentRun.project;
+      renderInstalledResult(project, result.existing_install?.project === project);
+      return;
+    }
+    $("#installDialog h3").textContent = "确认最终工程名称与目标";
+    $(".install-name-grid").hidden = false;
+    $("#checkInstall").hidden = false;
+    $("#installRun").hidden = false;
+    $("#installAapPath").textContent = "由 AA 工作区自动确定";
+    $("#installAssetPath").textContent = "安装到同名工程素材目录";
+    $("#installSavePath").textContent = "安装时同步创建或更新";
     $("#installCategory").value = result.default_category || "";
     $("#installStoryName").value = result.default_story_name || state.currentRun.project || "";
     $("#installCategoryOptions").innerHTML = (result.categories || []).map((item) => `<option value="${esc(item)}"></option>`).join("");
@@ -4301,10 +4345,7 @@
       applyRun(result);
       const install = result.install || {};
       $("#installBuildState").textContent = "安装完成";
-      $("#installAapPath").textContent = install.aap_path || "已写入 AA projects";
-      $("#installAssetPath").textContent = install.project_dir || install.asset_path || "已同步工程素材";
-      $("#installSavePath").textContent = install.save_dir || install.save_path || "已同步存档镜像";
-      $("#installDialogStatus").textContent = `已安装到 ${install.project || checked.target.project}。`;
+      renderInstalledResult(install.project || checked.target.project, true);
       toast(`已安装到 ${install.project || checked.target.project}`);
     } catch (error) {
       $("#installDialogStatus").textContent = error.message;
