@@ -1293,8 +1293,8 @@
       "/production/workspace-migration.css",
       "/production/direction-profile.css",
       "/production/confirm-dialog.css",
-      "/production-embed.css?v=20261006-aa-material2",
-      "/production-theme.css?v=20260929-resource-empty-dark1",
+      "/production-embed.css?v=20261006-aa-install-review1",
+      "/production-theme.css?v=20261006-aa-install-review1",
       "/production/clarity.css?v=20260927-compact4",
     ];
     const styleLoads = styleUrls.map(stylesheet);

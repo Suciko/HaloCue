@@ -34,7 +34,7 @@
   .production-review-side,.production-live-preview,.sticky-actions,.buildbar,
   .run-row,.task-row,.production-settings-workbench,.dialog-shell,dialog,
   .asset-library-item,.asset-detail-media,.resource-item,.cg-material-row,
-  .asset-import-shell,.action-confirm-shell
+  .asset-import-shell,.action-confirm-shell,.proposal-generation,.proposal-item
 ) {
   background: var(--surface) !important; color: var(--ink) !important;
   border-color: var(--line) !important; box-shadow: none;
@@ -55,6 +55,8 @@
   .mapping-search-label,.teacher-identity-form,.teacher-presentation-control,
   .background-prompt-hint,.production-render-summary,.settings-summary,
   .settings-tabs,.settings-workspace-summary,.install-current-state,.install-target-summary,
+  .install-build-summary,.install-target-preview,.proposal-summary,
+  .proposal-generation > header,.proposal-change span,
   .dialog-footer,th,pre,code
 ) {
   background: var(--surface-soft) !important; color: var(--ink-2) !important;
@@ -119,6 +121,15 @@
 }
 :host-context(html[data-theme="dark"]) :is(.mapping-state.ready,.status-dot.online,.manuscript-state.saved,.asset-source) {
   background: var(--success-soft) !important; color: var(--success) !important; border-color: #4d7c66 !important;
+}
+:host-context(html[data-theme="dark"]) :is(.install-build-summary > span,.proposal-item > b) {
+  background: var(--success-soft) !important; color: var(--success) !important; border-color: #4d7c66 !important;
+}
+:host-context(html[data-theme="dark"]) .proposal-item.suggested > b {
+  background: var(--warn-soft) !important; color: var(--warn) !important; border-color: #927040 !important;
+}
+:host-context(html[data-theme="dark"]) .install-target-preview.is-conflict {
+  background: var(--danger-soft) !important; border-left-color: var(--danger) !important;
 }
 :host-context(html[data-theme="dark"]) :is(.mapping-scene-issues,.scene-plan-gap,.gate-card.block,.warning,.mapping-focus-hint) {
   background: var(--warn-soft) !important; color: var(--warn) !important; border-color: #927040 !important;

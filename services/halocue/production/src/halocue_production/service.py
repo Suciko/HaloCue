@@ -896,7 +896,14 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
 
     def run_character_resource(self, run_id: str, identifier: str) -> dict[str, Any]:
         run = self._run(run_id)
-        return self.adapter.draft_character_detail(str(run.draft_token), identifier)
+        detail = self.adapter.draft_character_detail(str(run.draft_token), identifier)
+        character = detail["character"]
+        character["face_count"] = len(character["faces"])
+        character["preview_available"] = (
+            self.adapter.task_asset_preview(str(run.draft_token), "characters", identifier)
+            or self.adapter.draft_resource_preview(str(run.draft_token), "characters", identifier)
+        ) is not None
+        return detail
 
     def upload_asset(self, *, filename: str, content: bytes) -> dict[str, Any]:
         return self.asset_staging.upload(filename=filename, content=content)

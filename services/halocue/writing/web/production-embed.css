@@ -2691,6 +2691,7 @@ body:has(.app-shell.production-mode) #saveStatus {
 :host :is(.buildbar,.sticky-actions,.dialog-footer) { background: #fff; border-color: var(--line); box-shadow: 0 -3px 10px #25324704; }
 :host dialog { max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line); border-radius: 15px; background: #fff; color: var(--ink); box-shadow: 0 22px 70px #20344d33; font-family: var(--font-ui); overflow: auto; }
 :host dialog:not([open]) { display: none !important; }
+:host #installDialog { inset-block: 72px 16px; max-height: calc(100dvh - 88px); }
 :host dialog::backdrop { background: rgb(26 39 58 / 38%); backdrop-filter: blur(3px); }
 :host :is(.dialog-shell,.task-dialog-shell,.cg-dialog-shell) { background: #fff; color: var(--ink); border-radius: 15px; }
 :host dialog > :is(header,form) { min-width: 0; }
