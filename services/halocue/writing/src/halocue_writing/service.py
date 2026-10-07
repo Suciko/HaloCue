@@ -2440,13 +2440,14 @@ class WritingService:
         with self.repo.connect() as connection:
             return self.repo.rows(connection.execute("SELECT * FROM works WHERE status='deleted' ORDER BY updated_at DESC"))
 
+    @workspace_operation
     def trash_work(self, work_id: str, payload: dict):
         return self._set_work_deleted(work_id, payload, deleted=True)
 
+    @workspace_operation
     def restore_work(self, work_id: str, payload: dict):
         return self._set_work_deleted(work_id, payload, deleted=False)
 
-    @workspace_operation
     def _set_work_deleted(self, work_id: str, payload: dict, *, deleted: bool):
         with self.repo.transaction() as connection:
             work = self.repo.row(connection.execute("SELECT * FROM works WHERE id=?", (work_id,)).fetchone())
@@ -3976,6 +3977,10 @@ class WritingService:
     @workspace_operation
     def get_work(self, work_id: str):
         with self.repo.connect() as connection:
+            # A completed Agent run, its proposals and the work version must
+            # belong to one committed snapshot, even if a worker writes while
+            # this multi-query response is being assembled.
+            connection.execute("BEGIN")
             work = self.repo.row(connection.execute("SELECT * FROM works WHERE id=?", (work_id,)).fetchone())
             if not work or work["status"] == "deleted":
                 raise NotFound("work", work_id)
@@ -4146,7 +4151,9 @@ class WritingService:
                 projected = self._project_intent_plan_execution(plan, work)
                 plan.clear()
                 plan.update(projected)
-            work["harness"] = self.get_harness_status(work_id)
+            work["harness"] = self.writing_harness.resolve(
+                work_id, provider=self.provider.descriptor(), connection=connection
+            )
             return work
 
     @workspace_operation
@@ -5689,6 +5696,10 @@ class WritingService:
                 provider=provider.descriptor(), agent_run_id=run_id, usage=usage,
                 proposal_id=scene_edit_proposal_id,
             )
+            # The requested tool has only described the follow-up here. Keep
+            # polling/cancellation active until its Proposal is committed.
+            if (auto_propose_kind or auto_organize_request) and not provider_failure and not tool_failure:
+                run_status = "running"
             connection.execute(
                 "UPDATE agent_runs SET status=?,policy_json=?,failure_json=?,finished_at=? WHERE id=?",
                 (
@@ -5702,7 +5713,7 @@ class WritingService:
                         "retry_of": retry_of, "usage": usage,
                     }),
                     canonical_json(provider_failure or tool_failure) if provider_failure or tool_failure else None,
-                    timestamp, run_id,
+                    None if run_status == "running" else timestamp, run_id,
                 ),
             )
             if scene_edit_proposal_id:
@@ -5718,49 +5729,56 @@ class WritingService:
                 "agent_tool_failed", "写作 Agent 的工具执行失败，失败记录已保存。", status=502,
                 details={"agent_run_id": run_id, "failure": tool_failure},
             )
-        if auto_propose_kind:
-            current = self.get_work(work_id)
-            current_thread = next(item for item in current["conversation_threads"] if item["id"] == thread_id)
-            proposed = self.propose_conversation_knowledge(
-                work_id, thread_id,
-                {
+        if (auto_propose_kind or auto_organize_request) and run_status == "running":
+            def result_guard(connection, proposal_id=None):
+                self._require_agent_run_committable(connection, run_id)
+                self._require_agent_policy_current(connection, work_id, thread_id, policy_snapshot)
+                if proposal_id:
+                    connection.execute(
+                        "UPDATE agent_runs SET status='waiting_user',proposal_id=?,finished_at=? WHERE id=?",
+                        (proposal_id, now(), run_id),
+                    )
+
+            try:
+                current = self.get_work(work_id)
+                current_thread = next(item for item in current["conversation_threads"] if item["id"] == thread_id)
+                proposal_request = {
                     "expected_version": current["version"],
                     "expected_thread_version": current_thread["version"],
-                    "kind": auto_propose_kind,
                     "preview_message_id": assistant_message_id,
                     "agent_run_id": run_id,
-                },
-            )
-            return {
-                "thread_id": thread_id, "assistant_message_id": assistant_message_id,
-                "agent_run_id": run_id, "simulation": provider.is_simulation,
-                "auto_proposal_id": proposed["proposal_id"], "work": proposed["work"],
-            }
-        if auto_organize_request:
-            current = self.get_work(work_id)
-            current_thread = next(item for item in current["conversation_threads"] if item["id"] == thread_id)
-            try:
-                proposed = self.organize_conversation_proposal(
-                    work_id, thread_id,
-                    {
-                        "expected_version": current["version"],
-                        "expected_thread_version": current_thread["version"],
-                        "task_scope": auto_organize_request.get("task_scope") or task_contract.get("task_scope") or {},
-                        "preview_message_id": assistant_message_id,
-                        "agent_run_id": run_id,
-                    },
-                )
-            except DomainError as exc:
-                # The assistant reply is already durable.  A race with another
-                # pending decision must not turn a useful conversation turn into
-                # a failed request; the user can keep discussing or decide the
-                # existing candidate.
-                return {
-                    "thread_id": thread_id, "assistant_message_id": assistant_message_id,
-                    "agent_run_id": run_id, "simulation": provider.is_simulation,
-                    "organization_error": {"code": exc.code, "message": exc.message},
-                    "work": self.get_work(work_id),
                 }
+                if auto_propose_kind:
+                    proposed = self.propose_conversation_knowledge(
+                        work_id, thread_id, {**proposal_request, "kind": auto_propose_kind},
+                        _result_guard=result_guard,
+                    )
+                else:
+                    proposed = self.organize_conversation_proposal(
+                        work_id, thread_id,
+                        {**proposal_request, "task_scope": auto_organize_request.get("task_scope") or task_contract.get("task_scope") or {}},
+                        _result_guard=result_guard,
+                    )
+            except Exception as exc:
+                if isinstance(exc, DomainError) and exc.code == "agent_authorization_changed":
+                    self._cancel_agent_for_authorization_change(run_id, exc)
+                failure = {
+                    "code": exc.code if isinstance(exc, DomainError) else "discussion_proposal_failed",
+                    "message": exc.message if isinstance(exc, DomainError) else "对话候选保存失败。",
+                }
+                with self.repo.transaction() as connection:
+                    connection.execute(
+                        "UPDATE agent_runs SET status='failed',failure_json=?,finished_at=? WHERE id=? AND status='running'",
+                        (canonical_json(failure), now(), run_id),
+                    )
+                # Keep the already-durable reply usable after a planning conflict.
+                if not auto_propose_kind and isinstance(exc, DomainError):
+                    return {
+                        "thread_id": thread_id, "assistant_message_id": assistant_message_id,
+                        "agent_run_id": run_id, "simulation": provider.is_simulation,
+                        "organization_error": failure, "work": self.get_work(work_id),
+                    }
+                raise
             return {
                 "thread_id": thread_id, "assistant_message_id": assistant_message_id,
                 "agent_run_id": run_id, "simulation": provider.is_simulation,
@@ -6785,7 +6803,7 @@ class WritingService:
         return refs
 
     @workspace_operation
-    def propose_conversation_knowledge(self, work_id: str, thread_id: str, payload: dict):
+    def propose_conversation_knowledge(self, work_id: str, thread_id: str, payload: dict, *, _result_guard=None):
         """Turn an Agent discussion draft into an auditable knowledge Proposal."""
         _fallback_provider, proposal_provider = self._capture_provider()
         expected_work = int(payload.get("expected_version", -1))
@@ -6796,6 +6814,8 @@ class WritingService:
         if requested_kind not in {"character_card", "world_card", "world_rule", "canon_fact"}:
             raise DomainError("validation_error", "资料候选类型无效。", details={"field": "kind"})
         with self.repo.transaction() as connection:
+            if _result_guard:
+                _result_guard(connection)
             version = self._check_work_version(connection, work_id, expected_work)
             thread = self._check_thread_version(connection, work_id, thread_id, expected_thread)
             self._conversation_policy(connection, thread, retry=True)
@@ -7230,6 +7250,8 @@ class WritingService:
                     canonical_json(proposal_provider), timestamp, None,
                 ),
             )
+            if _result_guard:
+                _result_guard(connection, proposal_id)
             if preview_row["agent_run_id"]:
                 connection.execute(
                     "UPDATE agent_runs SET proposal_id=? WHERE id=? AND work_id=? AND status='waiting_user'",
@@ -7669,7 +7691,7 @@ class WritingService:
         return superseded_ids
 
     @workspace_operation
-    def organize_conversation_proposal(self, work_id: str, thread_id: str, payload: dict):
+    def organize_conversation_proposal(self, work_id: str, thread_id: str, payload: dict, *, _result_guard=None):
         provider = self.provider
         with self.repo.connect() as connection:
             thread_scope = connection.execute(
@@ -7681,17 +7703,19 @@ class WritingService:
         requested_scope = self._effective_conversation_scope(thread_scope, payload.get("task_scope"))
         if requested_scope.get("surface") == "chapter":
             return self._organize_chapter_plan_proposal(
-                work_id, thread_id, payload, requested_scope, provider=provider
+                work_id, thread_id, payload, requested_scope, provider=provider, _result_guard=_result_guard
             )
         with self.repo.connect() as connection:
             task_contract = self._conversation_task_contract(connection, work_id, requested_scope)
         if task_contract["id"] == "structure.plan":
             return self._organize_structure_plan_proposal(
-                work_id, thread_id, payload, task_contract, provider=provider
+                work_id, thread_id, payload, task_contract, provider=provider, _result_guard=_result_guard
             )
         expected_work = int(payload.get("expected_version", -1))
         expected_thread = int(payload.get("expected_thread_version", -1))
         with self.repo.transaction() as connection:
+            if _result_guard:
+                _result_guard(connection)
             version = self._check_work_version(connection, work_id, expected_work)
             thread = self._check_thread_version(connection, work_id, thread_id, expected_thread)
             self._conversation_policy(connection, thread, retry=True)
@@ -7738,6 +7762,8 @@ class WritingService:
         with self._planning_usage_scope(work_id, "work", work_id, "blueprint.generate", provider, {"brief": brief, "analysis_context": analysis_context}):
             blueprint = self._validate_story_blueprint(provider.generate_blueprint(brief, analysis_context))
         with self.repo.transaction() as connection:
+            if _result_guard:
+                _result_guard(connection)
             version = self._check_work_version(connection, work_id, expected_work)
             thread = self._check_thread_version(connection, work_id, thread_id, expected_thread)
             self._conversation_policy(connection, thread, retry=True)
@@ -7799,6 +7825,8 @@ class WritingService:
                 (timestamp, thread_id),
             )
             self._bump_work(connection, work_id, version)
+            if _result_guard:
+                _result_guard(connection, proposal_id)
         return {"proposal_id": proposal_id, "simulation": provider.is_simulation, "work": self.get_work(work_id)}
 
     def _structure_snapshot(self, connection, work_id: str) -> dict:
@@ -7985,13 +8013,15 @@ class WritingService:
             raise
 
     def _organize_structure_plan_proposal(
-        self, work_id: str, thread_id: str, payload: dict, task_contract: dict, provider=None
+        self, work_id: str, thread_id: str, payload: dict, task_contract: dict, provider=None, *, _result_guard=None
     ):
         provider = provider if provider is not None else self.provider
         expected_work = int(payload.get("expected_version", -1))
         expected_thread = int(payload.get("expected_thread_version", -1))
         timestamp = now()
         with self.repo.transaction() as connection:
+            if _result_guard:
+                _result_guard(connection)
             version = self._check_work_version(connection, work_id, expected_work)
             thread = self._check_thread_version(connection, work_id, thread_id, expected_thread)
             self._conversation_policy(connection, thread, retry=True)
@@ -8198,6 +8228,8 @@ class WritingService:
         with self._structure_persist_transaction(
             work_item_id, attempt_id, run_id, agent_run_id
         ) as connection:
+            if _result_guard:
+                _result_guard(connection)
             self._require_agent_run_committable(connection, agent_run_id)
             current_version = self._check_work_version(connection, work_id, expected_work)
             current_thread = self._check_thread_version(connection, work_id, thread_id, expected_thread)
@@ -8272,6 +8304,8 @@ class WritingService:
                     ),
                 )
                 self._bump_work(connection, work_id, current_version)
+                if _result_guard:
+                    _result_guard(connection, proposal_id)
         if conflict_error:
             raise conflict_error
         return {
@@ -8283,13 +8317,15 @@ class WritingService:
         }
 
     def _organize_chapter_plan_proposal(
-        self, work_id: str, thread_id: str, payload: dict, scope: dict, provider=None
+        self, work_id: str, thread_id: str, payload: dict, scope: dict, provider=None, *, _result_guard=None
     ):
         provider = provider if provider is not None else self.provider
         expected_work = int(payload.get("expected_version", -1))
         expected_thread = int(payload.get("expected_thread_version", -1))
         chapter_id = str(scope.get("chapter_id", "")).strip()
         with self.repo.transaction() as connection:
+            if _result_guard:
+                _result_guard(connection)
             version = self._check_work_version(connection, work_id, expected_work)
             thread = self._check_thread_version(connection, work_id, thread_id, expected_thread)
             self._conversation_policy(connection, thread, retry=True)
@@ -8328,6 +8364,8 @@ class WritingService:
             candidate_plan = provider.generate_chapter_plan(messages, chapter_context)
             candidate_plan = self._validate_chapter_plan(candidate_plan)
         with self.repo.transaction() as connection:
+            if _result_guard:
+                _result_guard(connection)
             version = self._check_work_version(connection, work_id, expected_work)
             thread = self._check_thread_version(connection, work_id, thread_id, expected_thread)
             self._conversation_policy(connection, thread, retry=True)
@@ -8387,6 +8425,8 @@ class WritingService:
                 (timestamp, thread_id),
             )
             self._bump_work(connection, work_id, version)
+            if _result_guard:
+                _result_guard(connection, proposal_id)
         return {"proposal_id": proposal_id, "simulation": provider.is_simulation, "work": self.get_work(work_id)}
 
     @staticmethod
@@ -9920,6 +9960,7 @@ class WritingService:
 
     def _assemble_work_review_pack(self, work_id: str, workflow: str) -> dict:
         with self.repo.connect() as connection:
+            connection.execute("BEGIN")
             work = connection.execute("SELECT id,title,version FROM works WHERE id=?", (work_id,)).fetchone()
             if not work:
                 raise NotFound("work", work_id)
@@ -12932,7 +12973,7 @@ class WritingService:
                JOIN production_runs AS run ON run.id=item.run_id
                WHERE run.work_id=? AND item.type='memory.extract'
                  AND item.scope_type='scene' AND item.scope_id=?
-                 AND item.status IN ('ready','running','waiting_user','failed')
+                 AND item.status IN ('ready','running','waiting_user','failed','succeeded','skipped')
                ORDER BY item.created_at DESC""",
             (work_id, scene_id),
         ).fetchall()
@@ -12943,6 +12984,10 @@ class WritingService:
                 refs = {}
             if refs.get("scene_revision_id") == revision_id and current is None:
                 current = row
+                continue
+            # Delayed commit projections must reuse the author's completed
+            # checkpoint. Preserve completed history for older revisions too.
+            if row["status"] in {"succeeded", "skipped"}:
                 continue
             connection.execute(
                 "UPDATE work_items SET status='cancelled',error_json=?,updated_at=? WHERE id=?",

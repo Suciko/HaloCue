@@ -317,8 +317,12 @@ function captureTransientView(){
   const editor=document.activeElement;
   const row=editor?.closest?.('#sceneManuscriptForm [data-manuscript-block].is-editing');
   const manuscriptEdit=row?{sceneId:row.closest('form')?.dataset.sceneId,blockId:row.dataset.blockId,field:editor.name,start:editor.selectionStart,end:editor.selectionEnd}:null;
+  const chapterRow=editor?.closest?.('.chapter-authoring [data-chapter-block]');
+  const chapterField=['text','speaker','type'].find(field=>editor?.matches?.(`[data-chapter-${field}]`));
+  const chapterEdit=chapterRow&&chapterField?{sceneId:chapterRow.closest('[data-chapter-scene]')?.dataset.chapterScene,blockId:chapterRow.dataset.blockId,field:chapterField,start:editor.selectionStart,end:editor.selectionEnd}:null;
   hcTransientViews.set(hcLastViewKey,{
     manuscriptEdit,
+    chapterEdit,
     scroll:workspace?.scrollTop||0,
     conversationScroll:scroll?.scrollTop||0,
     stickToBottom:!!scroll&&scroll.scrollHeight-scroll.scrollTop-scroll.clientHeight<80,
@@ -344,6 +348,14 @@ function restoreTransientView(key){
         field.focus({preventScroll:true});
         if(typeof edit.start==='number'&&typeof field.setSelectionRange==='function')field.setSelectionRange(edit.start,edit.end);
       }
+    }
+  }
+  const chapterEdit=cached.chapterEdit;
+  if(chapterEdit){
+    const field=document.querySelector(`.chapter-authoring [data-chapter-scene="${CSS.escape(chapterEdit.sceneId)}"] [data-block-id="${CSS.escape(chapterEdit.blockId)}"] [data-chapter-${chapterEdit.field}]`);
+    if(field&&!field.disabled&&!field.readOnly&&!field.closest('[inert],[hidden]')&&field.getClientRects().length){
+      field.focus({preventScroll:true});
+      if(typeof chapterEdit.start==='number'&&typeof field.setSelectionRange==='function')field.setSelectionRange(chapterEdit.start,chapterEdit.end);
     }
   }
   if(workspace&&!state._pendingSceneReviewFocus)workspace.scrollTop=cached.scroll;

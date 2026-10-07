@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -53,13 +55,19 @@ class WritingHarness:
         scope_id: str | None = None,
         provider: dict | None = None,
         thread_id: str | None = None,
+        connection: sqlite3.Connection | None = None,
     ) -> dict[str, Any]:
         scope_type = str(scope_type or "work").strip()
         scope_id = str(scope_id or work_id).strip()
         if scope_type not in {"work", "chapter", "scene"}:
             raise ValueError("scope_type must be work, chapter, or scene")
 
-        with self.repository.connect() as connection:
+        owns_connection = connection is None
+        with (
+            self.repository.connect() if owns_connection else nullcontext(connection)
+        ) as connection:
+            if owns_connection:
+                connection.execute("BEGIN")
             work = connection.execute(
                 "SELECT * FROM works WHERE id=?", (work_id,)
             ).fetchone()
@@ -504,6 +512,7 @@ class WritingHarness:
 
         return {
             "artifacts": artifacts,
+            "blueprint_accepted": self._accepted_blueprint(connection, artifacts),
             "real_chapters": real_chapters,
             "scenes": scenes,
             "scoped_scene_ids": scoped_scene_ids,
@@ -592,7 +601,7 @@ class WritingHarness:
                 logical_step="direction",
             )
 
-        if not self._accepted_blueprint(state["artifacts"]):
+        if not state["blueprint_accepted"]:
             return self._result(
                 outcome="ready",
                 phase="blueprint",
@@ -702,15 +711,14 @@ class WritingHarness:
     def _has_revision(artifacts: dict, kind: str) -> bool:
         return bool(artifacts.get(kind, {}).get("current_revision_id"))
 
-    def _accepted_blueprint(self, artifacts: dict) -> bool:
+    def _accepted_blueprint(self, connection, artifacts: dict) -> bool:
         artifact = artifacts.get("story_blueprint") or {}
         revision_id = artifact.get("current_revision_id")
         if not revision_id:
             return False
-        with self.repository.connect() as connection:
-            revision = connection.execute(
-                "SELECT content_uri FROM revisions WHERE id=?", (revision_id,)
-            ).fetchone()
+        revision = connection.execute(
+            "SELECT content_uri FROM revisions WHERE id=?", (revision_id,)
+        ).fetchone()
         if not revision:
             return False
         try:

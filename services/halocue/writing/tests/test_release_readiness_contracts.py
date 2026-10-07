@@ -67,7 +67,11 @@ def test_release_conversation_rail_has_real_collapse_and_search_controls():
 def test_release_production_background_browser_uses_grouped_local_aa_resource_endpoints():
     embed = (ROOT / "production-embed.js").read_text(encoding="utf-8")
     production = (Path(__file__).resolve().parents[2] / "production" / "ui" / "app.js").read_text(encoding="utf-8")
-    assert "backgroundGroupLabels" in embed
+    assert 'data-background-group="scene"' in embed
+    assert 'data-background-group="cg"' in embed
+    assert 'data-background-group="custom"' in embed
+    assert "/api/v1/resources/search?kind=backgrounds&facets=1" in embed
+    assert "haloCueLoadAssetLibrary" in embed
     assert "backgrounds" in embed
     assert "chooseResource" in production
     assert "cg-backgrounds" in production

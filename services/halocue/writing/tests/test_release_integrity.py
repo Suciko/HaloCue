@@ -108,6 +108,25 @@ def _release_row(service, release_id):
         )
 
 
+def test_late_memory_followup_preserves_author_skip_and_current_release_gate(tmp_path):
+    service = WritingService(tmp_path)
+    work, _release = _build_release(service)
+    current = service.get_work(work["id"])
+    scene = current["chapters"][0]["scenes"][0]
+    before = service._assemble_work_review_pack(work["id"], "release.review")["memory_maintenance"]
+    assert before[0]["status"] == "skipped"
+    # A delayed background commit projection must not reopen this checkpoint.
+    service._postprocess_commit_projection("memory_followup", {
+        "work_id": work["id"], "scene_id": scene["id"],
+        "revision_id": scene["current_revision_id"],
+    }, {"content": {"required": True}})
+    after = service._assemble_work_review_pack(work["id"], "release.review")["memory_maintenance"]
+    assert after == before
+    frozen = service.freeze_release(work["id"], {"expected_version": current["version"]})
+    assert frozen["release_id"]
+    service.close()
+
+
 def _write_manifest(service, row, manifest):
     path = service.repo.data_dir / row["manifest_uri"]
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

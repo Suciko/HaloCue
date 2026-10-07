@@ -114,11 +114,17 @@ def test_live_failed_conversation_details_do_not_report_zero_consumption():
             "function compactParagraphNumber("
         )
     ]
+    preparation = source[
+        source.index("function characterPreparationActivity(") : source.index(
+            "function conversationGuidanceMarkup("
+        )
+    ]
     script = (
         """const esc=String;const agentRunForMessage=()=>({id:'run',status:'failed',tool_calls:[],policy:{usage:{usage_status:'not_reported',input_tokens:0,output_tokens:0}},failure:{}});
     const agentFailureView=()=>({title:'failed',message:'synthetic',action:'retry'});const agentFailureNeedsRecovery=()=>true;
     """
         + helpers
+        + preparation
         + renderer
         + "console.log(workAgentToolMarkup({},{}));"
     )

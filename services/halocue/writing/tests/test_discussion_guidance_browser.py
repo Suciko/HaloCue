@@ -11,6 +11,7 @@ import pytest
 from halocue_writing.app import make_handler
 from halocue_writing.service import WritingService
 from services.halocue.http_server import LocalHTTPServer
+from services.halocue._test_support import CHROMIUM_UNSAFE_PORTS
 from test_choice_ui_browser import assert_visible_box, open_page, screenshot
 from test_discussion_guidance import REPLY, ChapterOrganizer, QuietProvider, make_catalog, send
 from test_scene_conversation_harness import create_ready_scene
@@ -46,9 +47,15 @@ def flow_server(tmp_path):
     service.provider = provider
     work = service.create_work({"title": "创作引导演示"})
     work = send(service, work, "想写日奈和亚子的日常。")
-    server = LocalHTTPServer(
-        ("127.0.0.1", 0), make_handler(service, Path(__file__).resolve().parents[1] / "web")
-    )
+    for _ in range(100):
+        server = LocalHTTPServer(
+            ("127.0.0.1", 0), make_handler(service, Path(__file__).resolve().parents[1] / "web")
+        )
+        if server.server_port not in CHROMIUM_UNSAFE_PORTS:
+            break
+        server.server_close()
+    else:
+        raise RuntimeError("No available browser-safe test port")
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     yield service, provider, work, f"http://127.0.0.1:{server.server_port}"
@@ -346,6 +353,45 @@ def test_chapter_plan_can_be_completed_in_ideation_and_synced_to_outline(flow_se
     assert service.get_work(work_id)["chapters"][0]["scenes"][0]["id"] == scene_id
     page.close()
     page.close()
+
+
+def test_slow_chapter_organization_keeps_polling_until_candidate_is_committed(flow_server, browser):
+    from playwright.sync_api import expect
+
+    service, _provider, _work, url = flow_server
+    work_id, _scene_id, work = create_ready_scene(service, title="夜间活动室")
+    started, release = threading.Event(), threading.Event()
+
+    class SlowOrganizer(ChapterOrganizer):
+        def generate_chapter_plan(self, messages, context):
+            started.set()
+            assert release.wait(timeout=15)
+            return super().generate_chapter_plan(messages, context)
+
+    service.provider = SlowOrganizer(work["chapters"][0]["id"])
+    service.start()
+    page = open_page(browser, f"{url}/?section=works&work_id={work_id}", "dark", (1600, 900))
+    try:
+        page.locator("#workConversationForm textarea").fill("把夜间调查这一章整理成细纲。")
+        page.locator('#workConversationForm [type="submit"]').click()
+        assert started.wait(timeout=5)
+        current = service.get_work(work_id)
+        run_id = current["conversation_threads"][0]["messages"][-1]["agent_run_id"]
+        run = next(item for item in current["agent_runs"] if item["id"] == run_id)
+        # Let the browser observe the run while the second model call is held.
+        expect(page.locator(".conversation-message.assistant").last).to_contain_text("整理")
+        assert run["status"] == "running"
+        assert run["finished_at"] is None
+        assert not any(item["kind"] == "chapter_plan" for item in current["proposals"])
+        release.set()
+        accept = page.get_by_role("button", name="采纳章节细纲", exact=True)
+        expect(accept).to_be_visible(timeout=15000)
+        finished = service.get_agent_run(work_id, run["id"])
+        assert finished["status"] == "waiting_user"
+        assert finished["proposal_id"]
+    finally:
+        release.set()
+        page.close()
 
 
 @pytest.mark.parametrize("size", [(1280, 720), (1920, 1080)])

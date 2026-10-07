@@ -141,7 +141,7 @@ def test_reference_categories_keep_old_routes_and_mobile_access(page, view, sect
     ]
     page.set_content('<nav id="referencesNav"></nav><main id="workspace"><div class="library-workbench"></div></main>')
     page.add_script_tag(
-        content=f"const state={{libraryView:'{view}'}};const pendingKnowledgeProposals=()=>[];" + helper + "renderReferencesNavigation();"
+        content=f"const state={{work:{{id:'work-test'}},libraryView:'{view}'}};const pendingKnowledgeProposals=()=>[];" + helper + "renderReferencesNavigation();"
     )
     expect(page.locator("#referencesNav details")).to_have_count(0)
     expect(page.locator("#referencesNav [data-library-view]")).to_have_count(7)
@@ -151,6 +151,17 @@ def test_reference_categories_keep_old_routes_and_mobile_access(page, view, sect
     page.evaluate("renderReferencesNavigation()")
     expect(page.locator("#referencesNav [data-library-view]")).to_have_count(7)
     expect(page.locator("[data-reference-mobile-view]")).to_have_count(1)
+
+
+def test_reference_navigation_without_work_shows_global_character_library(page):
+    source = (WEB / "app.js").read_text(encoding="utf8")
+    start = source.index("function renderReferencesNavigation(")
+    helper = source[start : source.index("window.HaloCueRouter=", start)]
+    page.set_content('<nav id="referencesNav"></nav><main id="workspace"><div class="library-workbench"></div></main>')
+    page.add_script_tag(content="const state={work:null,libraryView:'characters'};" + helper + "renderReferencesNavigation();")
+    expect(page.locator("#referencesNav [data-library-view]")).to_have_count(1)
+    expect(page.locator('[aria-current="page"]')).to_have_attribute("data-library-view", "characters")
+    expect(page.locator("[data-reference-mobile-view]")).to_have_value("characters")
 
 
 def test_empty_library_offers_manual_creation_and_import(page):
@@ -216,11 +227,11 @@ def test_missing_official_corpus_warning_is_local_to_search(page, view, expected
         expect(page.get_by_role("button", name="BA 原作资料", exact=True)).to_be_enabled()
 
 
-def test_optional_official_corpus_fallback_preserves_bundled_metadata_search(page):
+def test_optional_official_corpus_fallback_returns_empty_originals(page):
     source = (WEB / "app.js").read_text(encoding="utf8")
     helper = source[
         source.index("async function searchOptionalOfficialReferences") : source.index(
-            "async function bundledReferenceSearch"
+            "async function loadReferenceSearch"
         )
     ]
     page.add_script_tag(
@@ -235,7 +246,7 @@ def test_optional_official_corpus_fallback_does_not_swallow_validation_errors(pa
     source = (WEB / "app.js").read_text(encoding="utf8")
     helper = source[
         source.index("async function searchOptionalOfficialReferences") : source.index(
-            "async function bundledReferenceSearch"
+            "async function loadReferenceSearch"
         )
     ]
     page.add_script_tag(

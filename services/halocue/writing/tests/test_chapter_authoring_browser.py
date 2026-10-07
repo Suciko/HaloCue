@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from test_authoring_workspace_browser import browser, local_authoring  # noqa: F401
+from test_authoring_workspace_browser import browser as browser, local_authoring as local_authoring
 from halocue_writing.providers import FakeWritingProvider
 
 
@@ -11,12 +11,13 @@ def test_continuous_chapter_edit_saves_two_scenes_atomically(local_authoring, br
     work = service.create_work({"title": "连续正文", "world_seed": "blank"})
     chapter = work["chapters"][0]["id"]
     first = service.create_scene(work["id"], chapter, {"expected_version": work["version"], "title": "第一场"})
-    second = service.create_scene(work["id"], chapter, {"expected_version": first["work"]["version"], "title": "第二场"})
+    service.create_scene(work["id"], chapter, {"expected_version": first["work"]["version"], "title": "第二场"})
     page = browser.new_page(viewport={"width": 1366, "height": 768})
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.goto(f"{url}/?section=writing&stage=draft&work_id={work['id']}")
     page.locator(".chapter-authoring-scene").first.wait_for()
+    page.wait_for_function("() => Boolean(sceneConversationThread(selectedScene()))")
     initial_version = service.get_work(work["id"])["version"]
     assert page.locator(".chapter-authoring-scene").count() == 2
     for index, text in enumerate(("第一场手写正文", "第二场手写正文")):
@@ -36,6 +37,43 @@ def test_continuous_chapter_edit_saves_two_scenes_atomically(local_authoring, br
     page.reload()
     expect(page.locator("[data-chapter-text]").first).to_have_value("第一场手写正文")
     expect(page.locator("[data-chapter-text]").nth(1)).to_have_value("第二场手写正文")
+    page.close()
+
+
+def test_background_scene_thread_response_preserves_typing_focus(local_authoring, browser):
+    from playwright.sync_api import expect
+
+    service, url = local_authoring
+    work = service.create_work({"title": "输入期间读取对话", "world_seed": "blank"})
+    made = service.create_scene(work["id"], work["chapters"][0]["id"], {
+        "expected_version": work["version"], "title": "正文",
+    })
+    page = browser.new_page()
+    held = []
+
+    def hold_thread(route):
+        if route.request.method != "POST":
+            route.continue_()
+            return
+        held.append((route, route.fetch()))
+
+    page.route("**/api/v1/works/*/threads", hold_thread)
+    page.goto(f"{url}/?section=writing&stage=draft&work_id={work['id']}")
+    page.locator("[data-chapter-add]").click()
+    field = page.locator("[data-chapter-text]")
+    field.fill("手写")
+    expect(field).to_be_focused()
+    assert held
+    held[0][0].fulfill(response=held[0][1])
+    page.wait_for_function("() => Boolean(sceneConversationThread(selectedScene()))")
+    expect(field).to_be_focused()
+    page.keyboard.type("正文")
+    expect(field).to_have_value("手写正文")
+    page.locator("[data-chapter-save]").click()
+    expect(page.locator("[data-chapter-save-state]")).to_have_text("整章已保存")
+    revision = next(a for a in service.get_work(work["id"])["artifacts"]
+                    if a["kind"] == "scene_script" and a["scope_id"] == made["scene_id"])
+    assert revision["current_revision"]["content"]["blocks"][0]["text"] == "手写正文"
     page.close()
 
 
