@@ -983,9 +983,13 @@ def test_reasoning_mode_does_not_change_chunk_capacity(tmp_path):
     ]
 
 
-def test_request_deadline_returns_checkpointed_partial_result(tmp_path):
+@pytest.mark.parametrize("codex_timeout", [False, True])
+def test_request_deadline_returns_checkpointed_partial_result(tmp_path, codex_timeout):
     class DeadlineProvider(RecordingProvider):
         def complete_json(self, static, volatile, user, schema):
+            if codex_timeout:
+                from services.halocue.production.src.halocue_production.errors import ProductionError
+                raise ProductionError("codex_timeout", "Codex 响应超时", status=502)
             raise llm.RequestDeadlineError("deadline")
 
     result = fixture(tmp_path, DeadlineProvider(), count=25)
@@ -1004,12 +1008,31 @@ def test_request_deadline_returns_checkpointed_partial_result(tmp_path):
     assert checkpoint["memory"]["progress"]["resume_target_limit"] == 12
 
 
-def test_resume_after_deadline_uses_smaller_target_batches(tmp_path):
+def test_fatal_codex_schema_error_keeps_provider_diagnostics(tmp_path):
+    from services.halocue.production.src.halocue_production.errors import ProductionError
+
+    class SchemaFailure(RecordingProvider):
+        def complete_json(self, static, volatile, user, schema):
+            raise ProductionError("codex_turn_failed", "HTTP 400 invalid_json_schema", status=502,
+                                  details={"http_status": 400, "error_type": "invalid_request_error", "error_code": "invalid_json_schema"})
+
+    with pytest.raises(AnnotationAgentError) as failure:
+        fixture(tmp_path, SchemaFailure(), count=2)
+    assert failure.value.details["http_status"] == 400
+    assert failure.value.details["error_code"] == "invalid_json_schema"
+    assert failure.value.details["provider_code"] == "codex_turn_failed"
+
+
+@pytest.mark.parametrize("codex_timeout", [False, True])
+def test_resume_after_deadline_uses_smaller_target_batches(tmp_path, codex_timeout):
     class DeadlineProvider(RecordingProvider):
         def complete_json(self, static, volatile, user, schema):
             self.requests.append({
                 "target_ids": re.findall(r"\[TARGET ([^\]]+)\]", user),
             })
+            if codex_timeout:
+                from services.halocue.production.src.halocue_production.errors import ProductionError
+                raise ProductionError("codex_timeout", "Codex 响应超时", status=502)
             raise llm.RequestDeadlineError("deadline")
 
     first_provider = DeadlineProvider()

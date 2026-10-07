@@ -2957,6 +2957,7 @@ class Legacy093Adapter:
                 f"AI 安排演出失败：{exc}",
                 status=502,
                 details={
+                    **(exception_details if isinstance(exception_details, dict) else {}),
                     "generation_id": generation_id,
                     "type": type(exc).__name__,
                     "result_file": str(attempt_dir / "result.json"),

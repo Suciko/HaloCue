@@ -7174,7 +7174,7 @@ const SettingsController = {
     const apiForm = document.getElementById('settingsModelForm');
     if (codexPanel) codexPanel.hidden = !codexSelected;
     if (apiForm) { apiForm.hidden = codexSelected; apiForm.inert = codexSelected || !!this.subscriptionOnly; }
-    window.dispatchEvent(new CustomEvent('halocue:connection-selected', {detail:{provider:codexSelected ? 'codex' : preset?.provider, model:this.savedModelConfig?.provider === 'codex' ? this.savedModelConfig.model : ''}}));
+    window.dispatchEvent(new CustomEvent('halocue:connection-selected', {detail:{provider:codexSelected ? 'codex' : preset?.provider, model:this.savedModelConfig?.provider === 'codex' ? this.savedModelConfig.model : '', timeout:this.savedModelConfig?.provider === 'codex' ? this.savedModelConfig.timeout : null}}));
     const name = document.getElementById('selectedProviderName');
     const notes = document.getElementById('selectedProviderNotes');
     const protocol = document.getElementById('selectedProviderProtocol');

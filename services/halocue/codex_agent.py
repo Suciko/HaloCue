@@ -15,7 +15,12 @@ import time
 import weakref
 from pathlib import Path
 
+import jsonschema
+
 from services.halocue.runtime_layout import integrated_data_root, repository_root
+from services.halocue.codex_proxy import apply_child_proxy
+from services.halocue.codex_diagnostics import provider_error
+from services.halocue.codex_schema import CodexOutputContract
 
 
 class CodexError(RuntimeError):
@@ -93,6 +98,7 @@ def child_environment(home: Path) -> dict[str, str]:
         )
     }
     env["CODEX_HOME"] = str(home)
+    apply_child_proxy(env, windows=os.name == "nt")
     return env
 
 
@@ -235,12 +241,17 @@ class AppServerClient:
             message = self.receive(limit, cancelled)
             if message.get("id") == request_id and "method" not in message:
                 if "error" in message:
+                    error = message["error"] or {}
+                    code, detail, fields = provider_error(
+                        error, fallback="Codex 拒绝了请求，请检查 CLI 版本。"
+                    )
                     raise CodexError(
-                        "codex_request_failed",
-                        "Codex 拒绝了请求，请检查登录状态和 CLI 版本。",
+                        "codex_request_failed" if code == "codex_turn_failed" else code,
+                        detail,
                         details={
+                            **fields,
                             "method": method,
-                            "rpc_code": (message["error"] or {}).get("code"),
+                            "rpc_code": error.get("code"),
                         },
                     )
                 return message.get("result") or {}
@@ -363,6 +374,11 @@ class CodexTurn:
         # imports would pollute the independently selected legacy code family.
         from model_capabilities import ModelCapabilityError, compact_request_context
 
+        try:
+            self.output_contract = CodexOutputContract(schema) if schema is not None else None
+        except (ValueError, jsonschema.SchemaError) as error:
+            raise CodexError("codex_schema_invalid", f"Codex 输出格式不兼容：{error}") from error
+        wire_schema = self.output_contract.wire if self.output_contract else None
         self.client = connection().new_client(
             timeout=float(config.get("timeout") or 120), cancelled=cancelled
         )
@@ -371,6 +387,7 @@ class CodexTurn:
         self.usage: dict = {}
         self._prior_usage: dict = {}
         self.text = ""
+        self.last_error: dict | None = None
         self._lease: threading.Timer | None = None
         self.deadline = time.monotonic() + float(
             config.get("wall_timeout") or config.get("timeout") or 120
@@ -387,7 +404,7 @@ class CodexTurn:
                             {"role": "user", "content": user},
                         ],
                         "tools": tools or [],
-                        "output_schema": schema,
+                        "output_schema": wire_schema,
                     },
                 )
             except ModelCapabilityError as error:
@@ -426,7 +443,7 @@ class CodexTurn:
             self.thread_id = thread["thread"]["id"]
             params = {"threadId": self.thread_id, "input": [{"type": "text", "text": user}]}
             if schema is not None:
-                params["outputSchema"] = schema
+                params["outputSchema"] = wire_schema
             effort = config.get("reasoning_effort")
             if effort and effort not in {"auto", "none"}:
                 params["effort"] = effort
@@ -474,7 +491,14 @@ class CodexTurn:
                     )
                 if params.get("threadId") not in {None, self.thread_id}:
                     continue
-                if method == "thread/tokenUsage/updated":
+                if method == "error" and params.get("turnId") in {None, self.turn_id}:
+                    self.last_error = params.get("error") or {}
+                    if params.get("willRetry") is False:
+                        code, detail, fields = provider_error(
+                            self.last_error, fallback="Codex 请求未完成。"
+                        )
+                        raise CodexError(code, detail, details=fields)
+                elif method == "thread/tokenUsage/updated":
                     self.usage = (params.get("tokenUsage") or {}).get("total") or {}
                 elif method == "item/agentMessage/delta":
                     if on_activity:
@@ -497,24 +521,29 @@ class CodexTurn:
                     if turn.get("id") != self.turn_id:
                         continue
                     if turn.get("status") != "completed":
-                        error = turn.get("error") or {}
-                        info = error.get("codexErrorInfo")
-                        code = (
-                            "codex_quota_exhausted"
-                            if info in ("usageLimitExceeded", "rateLimitExceeded")
-                            else "codex_cancelled"
-                            if turn.get("status") == "interrupted"
-                            else "codex_turn_failed"
+                        error = self.last_error or turn.get("error") or {}
+                        code, detail, fields = provider_error(
+                            error, fallback="Codex 任务未完成；已停止，没有转用 API。"
                         )
+                        if turn.get("status") == "interrupted":
+                            code = "codex_cancelled"
                         raise CodexError(
                             code,
-                            "Codex 任务未完成；已停止，没有转用 API。",
-                            details={"status": turn.get("status")},
+                            detail,
+                            details={**fields, "status": turn.get("status")},
                         )
                     if not self.text.strip():
                         raise CodexError(
                             "codex_output_empty", "Codex 未返回有效内容，没有生成候选。"
                         )
+                    if self.output_contract:
+                        try:
+                            self.text = self.output_contract.restore_text(self.text)
+                        except (ValueError, jsonschema.ValidationError) as error:
+                            raise CodexError(
+                                "codex_output_invalid",
+                                f"Codex 输出未通过本地校验：{error.message if isinstance(error, jsonschema.ValidationError) else error}",
+                            ) from error
                     result = {
                         "text": self.text,
                         "tool": None,
@@ -585,7 +614,8 @@ class CodexConnection:
         cli = discover_cli(self._path)
         if cli is None:
             raise CodexError(
-                "codex_not_installed", "未找到 Codex 运行程序；请重新完整解压新版 HaloCue，或安装官方 Codex CLI 后检查连接。"
+                "codex_not_installed",
+                "未找到 Codex 运行程序；请重新完整解压新版 HaloCue，或安装官方 Codex CLI 后检查连接。",
             )
         return AppServerClient(cli, codex_home(), timeout=timeout, cancelled=cancelled)
 

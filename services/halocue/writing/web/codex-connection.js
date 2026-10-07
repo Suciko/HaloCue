@@ -38,7 +38,7 @@
       model.append(option);
     }
     if (!model.options.length) model.add(new Option(value.installed ? '登录后读取模型' : '安装后读取模型', ''));
-    const labels = {ready:'已连接 ChatGPT · 使用 Codex 订阅额度', not_installed:'未找到 Codex 运行程序。请重新完整解压新版 HaloCue；也可安装官方 Codex CLI 后检查连接。', codex_login_required:'Codex 已就绪，请登录自己的 ChatGPT 账号。', codex_subscription_required:'当前认证方式不是 ChatGPT 订阅，无法启用。', quota_exhausted:'订阅额度已用完。等待恢复后再继续，不会转用 API。'};
+    const labels = {ready:'已登录 ChatGPT · 选择模型后测试真实请求', not_installed:'未找到 Codex 运行程序。请重新完整解压新版 HaloCue；也可安装官方 Codex CLI 后检查连接。', codex_login_required:'Codex 已就绪，请登录自己的 ChatGPT 账号。', codex_subscription_required:'当前认证方式不是 ChatGPT 订阅，无法启用。', quota_exhausted:'订阅额度已用完。等待恢复后再继续，不会转用 API。'};
     message(labels[value.state] || '暂时无法确认 Codex 连接状态。', value.state === 'quota_exhausted');
     panel.querySelector('[data-codex-action=login]').hidden = !!value.logged_in;
     panel.querySelector('[data-codex-action=logout]').hidden = !value.logged_in;
@@ -85,9 +85,9 @@
     event.preventDefault();
     if (!form.reportValidity()) return;
     run(async () => {
-      message('正在用订阅额度测试连接，成功后才启用…');
+      message('正在用订阅额度测试请求；AA 演出会校验实际输出格式，成功后才启用…');
       const scope = form.elements.scope.value;
-      const config = {provider:'codex', model:model.value, base_url:'', api_key:'', api_key_env:'', subscription_only_acknowledged:true};
+      const config = {provider:'codex', model:model.value, timeout:Number(form.elements.timeout.value), base_url:'', api_key:'', api_key_env:'', subscription_only_acknowledged:true};
       if (scope === 'direction') {
         await request('direction-model:activate', config, true);
         if (typeof SettingsController !== 'undefined') await SettingsController.loadAll();
@@ -119,6 +119,7 @@
   window.addEventListener('pagehide', () => { if (poll) clearInterval(poll); });
   window.addEventListener('halocue:connection-selected', event => {
     savedModel = event.detail.model || savedModel;
+    if (event.detail.timeout) form.elements.timeout.value = event.detail.timeout;
     if (event.detail.provider === 'codex' && !busy) run(refresh);
   });
 })();

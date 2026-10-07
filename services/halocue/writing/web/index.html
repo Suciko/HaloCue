@@ -523,6 +523,7 @@
               <p data-codex-install-link hidden><a href="https://developers.openai.com/codex/cli/" target="_blank" rel="noopener noreferrer">查看官方安装说明</a></p>
               <form data-codex-form>
                 <label>Codex 模型<select name="model" required disabled><option value="">先检查连接</option></select></label>
+                <label>单次请求超时（秒）<input name="timeout" type="number" min="5" max="600" step="1" value="180" required><small>长场景可设为 600 秒。演出超时会保存检查点，继续时缩小分块。</small></label>
                 <label class="codex-check"><input type="checkbox" name="subscription_only_acknowledged" required><span>我已关闭 ChatGPT 账号的额外付费用量；额度用完时停止。</span></label>
                 <fieldset class="codex-scope"><legend>模型用途</legend><label><input type="radio" name="scope" value="both" checked><span>写作与 AA 演出</span></label><label><input type="radio" name="scope" value="writing"><span>仅写作</span></label><label><input type="radio" name="scope" value="direction"><span>仅 AA 演出</span></label></fieldset>
                 <div class="codex-apply"><span data-codex-active>测试成功后启用</span><button type="submit" class="primary" disabled>测试并启用</button></div>

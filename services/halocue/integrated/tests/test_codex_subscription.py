@@ -170,12 +170,11 @@ def test_direction_gateway_keeps_schema_validation_and_usage(tmp_path, synthetic
 
 
 def test_bad_direction_output_fails_without_a_mock_success(tmp_path, synthetic_peer):
-    from llm import StructuredOutputError
-
     synthetic_peer("malformed")
     provider = DirectionModelGateway(DirectionModelSettings(tmp_path), tmp_path).provider(payload())
-    with pytest.raises(StructuredOutputError):
+    with pytest.raises(ProductionError) as error:
         provider.complete_json("Return JSON", "", "synthetic", {"type": "object"})
+    assert error.value.code == "codex_output_invalid"
 
 
 def test_failed_turn_preserves_actual_usage(tmp_path, synthetic_peer):
