@@ -73,19 +73,89 @@ def test_codex_runtime_and_login_states_are_actionable(
         page.close()
 
 
+def test_codex_scope_uses_saved_direction_timeout_without_losing_draft(local_authoring, browser):
+    _, url = local_authoring
+    page = browser.new_page(viewport={"width": 1600, "height": 900})
+    models = [
+        {"id": "fixture-writing", "name": "Writing"},
+        {"id": "fixture-direction", "name": "Direction"},
+    ]
+    state = {"installed": True, "logged_in": True, "state": "ready", "models": models}
+    writing = {"provider": "codex", "configured": True, "model": "fixture-writing", "timeout": 90}
+    direction = {
+        "provider": "codex",
+        "configured": True,
+        "model": "fixture-direction",
+        "timeout": 600,
+    }
+    page.route(
+        "**/api/v1/settings/codex",
+        lambda route: route.fulfill(json={"ok": True, "connection": state}),
+    )
+    page.route(
+        "**/api/v1/settings/writing-model",
+        lambda route: route.fulfill(json={"ok": True, "model": writing}),
+    )
+    page.route(
+        "**/production/api/v1/settings/direction-model",
+        lambda route: route.fulfill(json={"ok": True, "model": direction}),
+    )
+    try:
+        page.goto(url + "/?section=projects")
+        page.locator("#openSettingsButton").click()
+        page.get_by_role("tab", name="模型服务", exact=True).click()
+        expect(page.locator("#directionModelRoleName")).to_have_text("fixture-direction")
+        page.get_by_role("button", name=re.compile("^Codex 订阅")).click()
+        panel = page.locator("#codexConnection")
+        expect(panel.locator('[name="model"]')).to_have_value("fixture-writing")
+        expect(panel.get_by_label("单次请求超时（秒）", exact=False)).to_have_value("90")
+        panel.locator('[name="scope"][value="direction"]').check()
+        expect(panel.locator('[name="model"]')).to_have_value("fixture-direction")
+        expect(panel.get_by_label("单次请求超时（秒）", exact=False)).to_have_value("600")
+        panel.get_by_label("单次请求超时（秒）", exact=False).fill("540")
+        panel.get_by_role("button", name="检查连接").click()
+        expect(panel.get_by_label("单次请求超时（秒）", exact=False)).to_have_value("540")
+        panel.locator('[name="scope"][value="writing"]').check()
+        expect(panel.locator('[name="model"]')).to_have_value("fixture-writing")
+        expect(panel.get_by_label("单次请求超时（秒）", exact=False)).to_have_value("90")
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("theme", ["light", "dark"])
 @pytest.mark.parametrize("size", [(1280, 720), (1600, 900)])
-def test_codex_direction_timeout_and_schema_error_are_visible(local_authoring, browser, tmp_path, theme, size):
+def test_codex_direction_timeout_and_schema_error_are_visible(
+    local_authoring, browser, tmp_path, theme, size
+):
     _, url = local_authoring
     page = browser.new_page(viewport={"width": size[0], "height": size[1]})
     calls = []
-    state = {"schema_version": "codex-connection/1.0", "installed": True, "logged_in": True,
-             "billing": "chatgpt_subscription", "models": [{"id": "fixture-model", "name": "Fixture model", "default": True}], "state": "ready"}
-    page.route("**/api/v1/settings/codex", lambda route: route.fulfill(json={"ok": True, "connection": state}))
+    state = {
+        "schema_version": "codex-connection/1.0",
+        "installed": True,
+        "logged_in": True,
+        "billing": "chatgpt_subscription",
+        "models": [{"id": "fixture-model", "name": "Fixture model", "default": True}],
+        "state": "ready",
+    }
+    page.route(
+        "**/api/v1/settings/codex",
+        lambda route: route.fulfill(json={"ok": True, "connection": state}),
+    )
 
     def fail_activation(route):
         calls.append(json.loads(route.request.post_data))
-        route.fulfill(status=502, json={"ok": False, "error": {"code": "codex_turn_failed", "message": "Codex 请求失败：HTTP 400 invalid_request_error: invalid_json_schema at text.format.schema; Missing 'act'.", "details": {"http_status": 400}}})
+        route.fulfill(
+            status=502,
+            json={
+                "ok": False,
+                "error": {
+                    "code": "codex_turn_failed",
+                    "message": "Codex 请求失败：HTTP 400 invalid_request_error: invalid_json_schema at text.format.schema; Missing 'act'.",
+                    "details": {"http_status": 400},
+                },
+            },
+        )
 
     page.route("**/production/api/v1/settings/direction-model:activate", fail_activation)
     try:
@@ -104,7 +174,9 @@ def test_codex_direction_timeout_and_schema_error_are_visible(local_authoring, b
         panel.locator('[name="scope"][value="direction"]').check()
         panel.locator('[name="subscription_only_acknowledged"]').check()
         panel.get_by_role("button", name="测试并启用").click()
-        expect(panel.locator("[data-codex-status]")).to_contain_text("HTTP 400 invalid_request_error: invalid_json_schema")
+        expect(panel.locator("[data-codex-status]")).to_contain_text(
+            "HTTP 400 invalid_request_error: invalid_json_schema"
+        )
         expect(panel.locator("[data-codex-status]")).to_contain_text("Missing 'act'")
         expect(panel.get_by_role("button", name="测试并启用")).to_be_enabled()
         assert calls[0]["timeout"] == 600 and calls[0]["provider"] == "codex"

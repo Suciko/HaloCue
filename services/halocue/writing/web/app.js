@@ -6911,6 +6911,7 @@ const SettingsController = {
     }
     const notice = document.getElementById('modelScopeNotice');
     if (notice) notice.textContent = '写作与演出分别启用，在下方选择连接方式和用途。';
+    window.dispatchEvent(new CustomEvent('halocue:model-roles-loaded'));
   },
 
   renderArchivedConversations(errorMessage = '') {
