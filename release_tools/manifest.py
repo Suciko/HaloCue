@@ -149,6 +149,9 @@ def is_public_source_path(relative_path: str) -> bool:
             "services/halocue/http_server.py",
             "services/halocue/_test_support.py",
             "services/halocue/codex_agent.py",
+            "services/halocue/codex_schema.py",
+            "services/halocue/codex_proxy.py",
+            "services/halocue/codex_diagnostics.py",
             "services/halocue/external_agent_mcp.py",
             "services/halocue/workspace_mcp.py",
         }:

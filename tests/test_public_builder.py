@@ -37,6 +37,16 @@ def test_public_source_export_includes_pyinstaller_spec(tmp_path):
     assert "HaloCue.spec" in public_source_paths(source)
 
 
+def test_public_source_includes_codex_request_dependencies():
+    selected = set(public_source_paths(ROOT))
+    assert {
+        "services/halocue/codex_agent.py",
+        "services/halocue/codex_schema.py",
+        "services/halocue/codex_proxy.py",
+        "services/halocue/codex_diagnostics.py",
+    } <= selected
+
+
 def test_pyinstaller_policy_uses_minimal_hidden_imports_and_excludes_global_stacks():
     policy = public_builder.pyinstaller_policy()
 
