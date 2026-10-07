@@ -8,6 +8,7 @@ from services.halocue.runtime_layout import repository_root as application_root
 
 from .workflow_pack import (
     COMMON_RULES,
+    COMEDY_RULE_SOURCE,
     DISCUSSION_RULE_SOURCE,
     ENGINE_RULE_SOURCE,
     MODE_SOURCES,
@@ -79,11 +80,11 @@ class BaWritingSkillRegistry:
             "brief.build", "blueprint.generate", "structure.plan", "chapter.plan", "scene.draft.generate",
         }:
             # Discussion is not a manuscript-generation or blind-test SOP.
-            return ["SKILL.md", DISCUSSION_RULE_SOURCE]
+            return ["SKILL.md", DISCUSSION_RULE_SOURCE, COMEDY_RULE_SOURCE]
         if task_id == "scene.draft.rewrite" and output_mode == "edit_patch":
             # Editing an existing passage needs prose/voice constraints, not
             # the startup SOP or instructions for assembling a whole new story.
-            paths = ["knowledge/写作内核.md", "knowledge/人味对话机制.md"]
+            paths = ["knowledge/写作内核.md", "knowledge/人味对话机制.md", COMEDY_RULE_SOURCE]
         if mode_key in MODE_SOURCES:
             paths.append(MODE_SOURCES[mode_key])
         if has_sensei:

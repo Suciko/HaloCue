@@ -1868,6 +1868,8 @@ class LLMWritingProvider(WritingProvider):
                 output_mode="story_blueprint_json",
             ) + (
                 "\n\n你负责把已讨论的创意简报整理为结构化 StoryBlueprint，不写正文。\n"
+                "沿用讨论中作者选定的题材、梗、夸张尺度和收尾；喜剧在 direction 中写出具体反应、升级与回收，"
+                "不把整活整理成泛泛的温情成长。短篇喜剧也可使用 long_comedy，模式不决定篇幅。\n"
                 "必须返回纯 JSON，包含 title, premise, theme, central_conflict, direction (数组), characters (数组), mode。\n"
                 "mode 只能填写以下机器值之一：main_battle（主线、任务或调查）、long_comedy（长篇喜剧）、"
                 "bond_short（羁绊短场景）、text_reading（明确要求小说化阅读）。"
@@ -1935,6 +1937,8 @@ class LLMWritingProvider(WritingProvider):
                 "每条 finding 只允许 kind、severity、message、evidence 四个字段；"
                 "severity 只能是 blocking、warning、info。"
                 "重点检查 OOC、连续性、信息归属、BA 风格、第四面墙、禁止揭示和停止边界。"
+                "按作者题材检查看点兑现；有变化的梗回收与反高潮可成立，温馨或严肃场景不以笑点不足判错。"
+                "第四面墙按作者明确选择的元叙事或恶搞前提判断，不把所有游戏引用一律判成视角错误。"
                 "每条 finding 必须同时包含非空 kind、合法 severity、非空 message 和 evidence 对象；"
                 "证据没有额外字段时也必须写 evidence: {}，不能省略或写 null。"
                 "例如：{\"findings\":[{\"kind\":\"ooc\",\"severity\":\"warning\",\"message\":\"人物语气需要复核。\",\"evidence\":{\"source\":\"dialogue\"}}]}。"
