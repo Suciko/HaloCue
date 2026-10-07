@@ -21,6 +21,7 @@
   }
   function controls() {
     panel.querySelectorAll('button').forEach(button => { button.disabled = busy; });
+    panel.querySelector('[data-codex-action=login]').disabled = busy || snapshot?.installed === false;
     const ready = snapshot?.state === 'ready' && model.options.length > 0 && !!model.value;
     form.querySelector('[type=submit]').disabled = busy || !ready || !form.elements.subscription_only_acknowledged.checked;
     form.querySelectorAll('input').forEach(input => {input.disabled = busy;});
@@ -37,10 +38,11 @@
       model.append(option);
     }
     if (!model.options.length) model.add(new Option(value.installed ? '登录后读取模型' : '安装后读取模型', ''));
-    const labels = {ready:'已连接 ChatGPT · 使用 Codex 订阅额度', not_installed:'未找到 Codex。安装官方 Codex CLI 后检查，或在下方指定程序路径。', codex_login_required:'Codex 已安装，请登录 ChatGPT。', codex_subscription_required:'当前认证方式不是 ChatGPT 订阅，无法启用。', quota_exhausted:'订阅额度已用完。等待恢复后再继续，不会转用 API。'};
+    const labels = {ready:'已连接 ChatGPT · 使用 Codex 订阅额度', not_installed:'未找到 Codex 运行程序。请重新完整解压新版 HaloCue；也可安装官方 Codex CLI 后检查连接。', codex_login_required:'Codex 已就绪，请登录自己的 ChatGPT 账号。', codex_subscription_required:'当前认证方式不是 ChatGPT 订阅，无法启用。', quota_exhausted:'订阅额度已用完。等待恢复后再继续，不会转用 API。'};
     message(labels[value.state] || '暂时无法确认 Codex 连接状态。', value.state === 'quota_exhausted');
     panel.querySelector('[data-codex-action=login]').hidden = !!value.logged_in;
     panel.querySelector('[data-codex-action=logout]').hidden = !value.logged_in;
+    panel.querySelector('[data-codex-install-link]').hidden = value.installed !== false;
     const quota = panel.querySelector('[data-codex-quota]');
     const windows = Object.values(value.limits?.rate_limits || {}).flatMap(bucket => [bucket.primary, bucket.secondary]).filter(window => window && typeof window.usedPercent === 'number' && Number.isFinite(window.usedPercent));
     quota.hidden = !value.logged_in;

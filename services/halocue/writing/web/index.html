@@ -519,13 +519,14 @@
               <div class="codex-auth-row"><p data-codex-status role="status" aria-live="polite">检查本机安装和登录状态后，选择模型。</p>
               <div class="codex-actions"><button type="button" class="quiet" data-codex-action="login">登录 ChatGPT</button><button type="button" class="quiet" data-codex-action="logout" hidden>退出登录</button><a data-codex-login-link target="_blank" rel="noopener noreferrer" hidden>打开登录页面</a></div></div>
               <p data-codex-quota hidden></p>
+              <p data-codex-install-link hidden><a href="https://developers.openai.com/codex/cli/" target="_blank" rel="noopener noreferrer">查看官方安装说明</a></p>
               <form data-codex-form>
                 <label>Codex 模型<select name="model" required disabled><option value="">先检查连接</option></select></label>
                 <label class="codex-check"><input type="checkbox" name="subscription_only_acknowledged" required><span>我已关闭 ChatGPT 账号的额外付费用量；额度用完时停止。</span></label>
                 <fieldset class="codex-scope"><legend>模型用途</legend><label><input type="radio" name="scope" value="both" checked><span>写作与 AA 演出</span></label><label><input type="radio" name="scope" value="writing"><span>仅写作</span></label><label><input type="radio" name="scope" value="direction"><span>仅 AA 演出</span></label></fieldset>
                 <div class="codex-apply"><span data-codex-active>测试成功后启用</span><button type="submit" class="primary" disabled>测试并启用</button></div>
               </form>
-              <details><summary>安装位置</summary><form data-codex-path-form><label>Codex 原生程序路径<input name="cli_path" placeholder="自动检测；Windows 可手动指定 codex.exe" autocomplete="off"></label><button type="submit" class="quiet">保存并检查</button></form><p>登录由 Codex 管理。HaloCue 不接收 API Key，不会自动转用 API；本次连接支持文字写作与演出安排。</p></details>
+              <details><summary>安装位置</summary><form data-codex-path-form><label>Codex 原生程序路径<input name="cli_path" placeholder="自动使用随包程序；可手动指定 codex.exe" autocomplete="off"></label><button type="submit" class="quiet">保存并检查</button></form><p>新版 Windows 包自带 Codex 运行程序。登录由 Codex 管理。HaloCue 不接收 API Key，不会自动转用 API；本次连接支持文字写作与演出安排。</p></details>
             </section>
               <form id="settingsModelForm" class="settings-form model-provider-detail" hidden>
                 <header class="provider-detail-head">

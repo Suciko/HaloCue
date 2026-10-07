@@ -14,6 +14,7 @@ import subprocess
 import zipfile
 
 from halocue_meta import PUBLIC_ARCHIVE_NAME
+from release_tools.codex_runtime import audit_codex_runtime, bundle_codex_runtime
 from release_tools.scanner import scan_tree
 
 
@@ -422,6 +423,9 @@ def audit_third_party_notices(bundle_dir: Path) -> tuple[str, ...]:
         for filename in ("LICENSE.electron.txt", "LICENSES.chromium.html"):
             if not (bundle_dir / filename).is_file():
                 raise ValueError(f"Electron missing {filename}")
+    if (bundle_dir / "tools/codex").exists() or (bundle_dir / "resources/app.asar").is_file():
+        audit_codex_runtime(bundle_dir)
+        components[_normalized_component("OpenAI Codex")] = "OpenAI Codex"
     missing = sorted(
         (name for key, name in components.items() if key not in declared),
         key=str.casefold,
@@ -500,6 +504,7 @@ def build_public_release(
     _remove_environment_payloads(built_bundle)
     host = source_root / "apps/desktop-client/electron"
     if (host / "main.cjs").is_file():
+        bundle_codex_runtime(built_bundle, output_root / "build/codex-download")
         _package_electron(source_root, built_bundle, output_root, node_executable)
     else:
         shutil.move(str(built_bundle), str(bundle_dir))
@@ -562,6 +567,7 @@ def finalize_existing_bundle(
         required.append("HaloCueMCP.exe")
     if (bundle_dir / "resources/app.asar").is_file():
         required.append("HaloCueBackend.exe")
+        required.append("tools/codex/vendor/x86_64-pc-windows-msvc/bin/codex.exe")
     missing = [relative for relative in required if not (bundle_dir / relative).exists()]
     if missing:
         raise ValueError("existing bundle is missing required files: " + ", ".join(missing))

@@ -9,12 +9,13 @@ import platform
 import queue
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import weakref
 from pathlib import Path
 
-from services.halocue.runtime_layout import integrated_data_root
+from services.halocue.runtime_layout import integrated_data_root, repository_root
 
 
 class CodexError(RuntimeError):
@@ -52,6 +53,14 @@ def discover_cli(explicit: str = "") -> Path | None:
         if candidate.is_file() and (os.name != "nt" or candidate.suffix.lower() == ".exe"):
             return candidate
         raise CodexError("codex_cli_invalid", "请选择 Codex 原生程序；Windows 下需要 codex.exe。")
+    if os.name == "nt" and platform.machine().lower() not in {"arm64", "aarch64"}:
+        roots = [repository_root()]
+        if getattr(sys, "frozen", False):
+            roots.insert(0, Path(sys.executable).resolve().parent)
+        for root in roots:
+            candidate = root / "tools/codex/vendor/x86_64-pc-windows-msvc/bin/codex.exe"
+            if candidate.is_file():
+                return candidate.resolve()
     direct = shutil.which("codex.exe" if os.name == "nt" else "codex")
     if direct:
         return Path(direct).resolve()
@@ -576,7 +585,7 @@ class CodexConnection:
         cli = discover_cli(self._path)
         if cli is None:
             raise CodexError(
-                "codex_not_installed", "未找到 Codex CLI，请安装官方 Codex，或指定 codex.exe。"
+                "codex_not_installed", "未找到 Codex 运行程序；请重新完整解压新版 HaloCue，或安装官方 Codex CLI 后检查连接。"
             )
         return AppServerClient(cli, codex_home(), timeout=timeout, cancelled=cancelled)
 
