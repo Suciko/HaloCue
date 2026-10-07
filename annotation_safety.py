@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from background_requests import resolve_registered_background
+
 
 FX_PARTS = frozenset({"通讯", "黑屏剪影", "特写"})
 RESOURCE_FIELDS = ("face", "emo", "act", "fx", "se", "bg")
@@ -101,6 +103,12 @@ def filter_annotation_row(row, item, character, constraints, *, include_details=
         value = row.get(field)
         if not value:
             continue
+        if field == "bg":
+            try:
+                value = resolve_registered_background(value, dict.fromkeys(constraints["ok_bg"]))
+            except ValueError:
+                # Ambiguous spellings are rejected instead of binding another asset.
+                pass
         if value in constraints[f"ok_{field}"]:
             clean[field] = value
         else:
