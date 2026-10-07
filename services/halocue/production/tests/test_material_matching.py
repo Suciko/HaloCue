@@ -109,6 +109,24 @@ def test_automatic_match_does_not_infer_from_dialogue_or_conflicting_time():
     assert background_match([scene, dialogue], scene, candidates) is None
 
 
+def test_frozen_location_exact_match_keeps_time_conflict_guard():
+    scene = {"card_id": "s1", "kind": "scene", "current": {"title": "咖啡误会 · 教室"}}
+    candidate = {"key": "BG_Classroom", "name": "教室", "place": "教室", "time": "day"}
+    assert background_match([scene], scene, [candidate])["key"] == "BG_Classroom"
+    scene["current"]["title"] = "夜间的咖啡误会 · 教室"
+    assert background_match([scene], scene, [candidate]) is None
+
+
+def test_automatic_narrator_mapping_does_not_approve_cards(settings, tmp_path):
+    service = ProductionService(configured_resource_settings(settings, tmp_path))
+    created = service.create_run({"project": "narrator", "auto_match_resources": True,
+        "source": {"kind": "inline", "text": "## 开场\n旁白：门开了。"}})
+    draft = created["draft"]
+    assert draft["cast"]["cast"]["旁白"]["kind"] == "narrator"
+    assert all(card["review_state"] != "approved" for card in draft["cards"])
+    assert service.adapter.match_missing_resources(draft["draft_token"])["draft_version"] == draft["draft_version"]
+
+
 def test_plain_outfit_prefill_is_unique_and_never_confuses_shared_alias():
     rows = [
         {"identifier": "ako", "name": "亚子", "spine": "CharacterSpine_ako"},

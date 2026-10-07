@@ -195,7 +195,7 @@ def test_real_vertical_slice_persists_and_reloads(tmp_path):
     assert loaded_scene["id"] == scene_id
     assert loaded_scene["current_revision_id"] == accepted["revision_id"]
     frozen = restarted.get_release(release["release_id"])
-    assert frozen["text"] == "## 提示灯\n" + edited.rstrip() + "\n"
+    assert frozen["text"] == "## 提示灯 · 游戏开发部活动室\n" + edited.rstrip() + "\n"
     assert frozen["manifest"]["scenes"][0]["scene_id"] == scene_id
     assert frozen["content_hash"].startswith("sha256:")
 
@@ -329,7 +329,7 @@ def test_manual_scene_blocks_are_versioned_restart_safe_and_release_compatible(t
     release_review = review_for_release(restarted, memory_ready)
     release = restarted.freeze_release(work_id, {"expected_version": release_review["work"]["version"]})
     assert restarted.get_release(release["release_id"])["text"] == (
-        "## 提示灯\n"
+        "## 提示灯 · 游戏开发部活动室\n"
         "旁白: 灯光在桌面上缓慢移动。\n"
         "深夜的活动室里，旧显示器先亮了一格。\n"
         "爱丽丝: 先确认电源。\n"

@@ -1,11 +1,38 @@
 """Service test defaults must never discover a maintainer's AA/catalog data."""
 
 import json
+import re
 import sqlite3
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
+
+
+def browser_failure_diagnostics(page):
+    """Bounded transport evidence, without headers, query strings or payloads."""
+    records = []
+
+    def record(request, **details):
+        if len(records) < 100:
+            records.append(
+                {"method": request.method, "path": urlsplit(request.url).path, **details}
+            )
+
+    def failed(request):
+        codes = re.findall(r"net::ERR_[A-Z_]+", request.failure or "")
+        record(request, failure=codes[0] if codes else "transport_failure")
+
+    page.on("requestfailed", failed)
+    page.on(
+        "response",
+        lambda response: (
+            record(response.request, status=response.status) if response.status >= 400 else None
+        ),
+    )
+    return records
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 CHROMIUM_UNSAFE_PORTS = {
@@ -93,6 +120,33 @@ CHROMIUM_UNSAFE_PORTS = {
 # Compatibility modules remain shared code; data lookup uses a different root.
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
+
+
+@pytest.fixture(scope="session")
+def small_ba_writing_skill(tmp_path_factory):
+    """Complete synthetic rules, independent of inherited maintainer settings."""
+    from halocue_writing.workflow_pack import (
+        ENGINE_RULE_SOURCE,
+        MODE_SOURCES,
+        WORKFLOW_RULE_SOURCES,
+    )
+
+    root = tmp_path_factory.mktemp("synthetic-writing-skill")
+    paths = [path for group in WORKFLOW_RULE_SOURCES.values() for path in group]
+    paths.extend([*MODE_SOURCES.values(), ENGINE_RULE_SOURCE, "knowledge/老师在场规则.md"])
+    for logical_path in dict.fromkeys(paths):
+        target = root / logical_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            f"# Synthetic rule: {logical_path}\nOnly for deterministic contract tests.\n",
+            encoding="utf-8",
+        )
+    return root
+
+
+@pytest.fixture(autouse=True)
+def isolated_ba_writing_skill(monkeypatch, small_ba_writing_skill):
+    monkeypatch.setenv("HALOCUE_BA_WRITING_SKILL_DIR", str(small_ba_writing_skill))
 
 
 @pytest.fixture(scope="session")

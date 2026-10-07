@@ -79,6 +79,15 @@ def normalize_digest(value: str) -> str:
     return value if value.startswith("sha256:") else f"sha256:{value}"
 
 
+def compose_release_scene(ref: Mapping, text: str) -> str:
+    """Use frozen location data; older releases keep their exact original text."""
+    heading = ref["title"]
+    location = " ".join(str(ref.get("location") or "").split())
+    if location:
+        heading = f"{heading} · {location}"
+    return f"## {heading}\n{text.rstrip()}\n"
+
+
 def verify_script_release(repository, release_row: Mapping) -> dict:
     release = dict(release_row)
     release_id = str(release.get("id") or "")
@@ -183,6 +192,7 @@ def build_production_handoff(verified_release: Mapping, project_name: str) -> di
         "schema_version": PRODUCTION_HANDOFF_SCHEMA,
         "project": project_name,
         "generation_mode": "format_only",
+        "auto_match_resources": True,
         "source": {"kind": "inline", "text": text},
         "script_release": {
             "schema_version": "1.0",
@@ -236,7 +246,7 @@ def _verify_revision_references(repository, release_id: str, manifest: Mapping) 
                 raise _integrity_error(release_id, "scene_revision_material_invalid") from exc
             if not isinstance(ref.get("title"), str) or not isinstance(scene_text, str):
                 raise _integrity_error(release_id, "scene_revision_material_invalid")
-            chunks.append(f"## {ref['title']}\n{scene_text.rstrip()}\n")
+            chunks.append(compose_release_scene(ref, scene_text))
 
         for ref in manifest["dependency_refs"]:
             if not isinstance(ref, dict) or not ref.get("revision_id") or not _valid_digest(ref.get("content_hash")):
@@ -329,9 +339,10 @@ def _verify_manifest_shape(manifest: dict, release_id: str) -> None:
     for item in manifest["scenes"]:
         if (
             not isinstance(item, dict)
-            or set(item) != _SCENE_KEYS
+            or set(item) not in (_SCENE_KEYS, _SCENE_KEYS | {"location"})
             or any(not isinstance(item.get(key), str) or not item[key] for key in ("scene_id", "revision_id"))
             or not isinstance(item.get("title"), str)
+            or ("location" in item and not isinstance(item["location"], str))
             or not _valid_digest(item.get("content_hash"))
         ):
             raise _integrity_error(release_id, "manifest_shape_invalid")

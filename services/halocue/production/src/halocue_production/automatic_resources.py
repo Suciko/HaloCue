@@ -37,6 +37,9 @@ def background_match(cards: list[dict], scene: dict, backgrounds: list[dict]) ->
     if context["current_background"] or context["notes"]:
         return None
     title = normalize(context["title"])
+    # Writing releases append a frozen location as a separate heading segment.
+    # Only that explicit segment is eligible; dialogue remains excluded.
+    location = normalize(context["title"].rsplit(" · ", 1)[-1])
     candidates = []
     for row in backgrounds:
         if row.get("key", "").startswith("BG_CS_"):
@@ -44,7 +47,11 @@ def background_match(cards: list[dict], scene: dict, backgrounds: list[dict]) ->
         assessment = assess_background(row, context)
         if assessment["conflicts"]:
             continue
-        exact = any(title == normalize(row.get(key) or "") for key in ("name", "place"))
+        exact = any(
+            normalize(row.get(key) or "") in {title, location}
+            and bool(normalize(row.get(key) or ""))
+            for key in ("name", "place")
+        )
         if exact or (context["requirements"].get("place") and assessment["status"] == "match"):
             candidates.append((2 if exact else 1, row))
     if not candidates:

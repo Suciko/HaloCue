@@ -236,7 +236,10 @@ def test_unified_workbench_import_refreshes_and_keeps_layout_stable(browser, app
 
 @pytest.mark.parametrize("width", [1200, 390])
 def test_preflight_scene_chain_and_generation_prompt_fit_viewport(browser, app_url, tmp_path, width):
+    from services.halocue._test_support import browser_failure_diagnostics
+
     page = browser.new_page(viewport={"width": width, "height": 760})
+    network_failures = browser_failure_diagnostics(page)
     errors = []
     page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
     page.on("pageerror", lambda error: errors.append(str(error)))
@@ -286,7 +289,7 @@ def test_preflight_scene_chain_and_generation_prompt_fit_viewport(browser, app_u
         box = dialog.bounding_box()
         assert box["x"] >= 0 and box["x"] + box["width"] <= width
         assert "雨夜车站候车厅" in page.locator("#generationPromptText").input_value()
-        assert errors == []
+        assert errors == [], network_failures
     finally:
         page.close()
 

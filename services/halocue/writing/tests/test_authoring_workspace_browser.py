@@ -2,6 +2,7 @@
 
 import threading
 from services.halocue.http_server import LocalHTTPServer as ThreadingHTTPServer
+from services.halocue._test_support import CHROMIUM_UNSAFE_PORTS
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,14 @@ WEB = Path(__file__).resolve().parents[1] / "web"
 def local_authoring(tmp_path):
     service = WritingService(tmp_path)
     service.start()
-    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(service, WEB))
+    for _ in range(100):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(service, WEB))
+        if server.server_port not in CHROMIUM_UNSAFE_PORTS:
+            break
+        server.server_close()
+    else:
+        service.close()
+        raise RuntimeError("No available browser-safe test port")
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     yield service, f"http://127.0.0.1:{server.server_port}"

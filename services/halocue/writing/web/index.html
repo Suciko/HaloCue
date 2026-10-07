@@ -141,6 +141,7 @@
     <form id="workForm">
       <div class="dialog-head"><div><p>NEW WORK</p><h2 id="workDialogTitle">开始一个新故事</h2></div><button type="button" data-close-work-dialog class="icon-button" title="关闭">×</button></div>
       <div class="work-dialog-fields">
+      <p id="workDialogError" class="work-dialog-error" role="alert" hidden></p>
       <label>作品名称（可选）<input name="title" maxlength="80" placeholder="留空使用“未命名作品”"></label>
       <label class="new-work-idea">起步想法（可选）<textarea name="idea" maxlength="600" placeholder="说说你想做什么：短篇、长篇、续写、改编，或先做大纲 / 场景。"></textarea><small>先说目标就好，Agent 会按类型引导；想法不会自动变成正式设定。</small></label>
       <fieldset class="world-seed-picker">

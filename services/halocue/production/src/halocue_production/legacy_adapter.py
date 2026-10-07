@@ -608,6 +608,10 @@ class Legacy093Adapter:
         for speaker in detail["cast"].get("detected_speakers", []):
             if detail["cast"].get("cast", {}).get(speaker, {}).get("kind", "unset") != "unset":
                 continue
+            if speaker == "旁白":
+                detail = self.update_cast_binding(token=token, speaker=speaker,
+                    mapping={"kind": "narrator"}, expected_draft_version=detail["draft_version"])
+                continue
             match = character_match(speaker, characters)
             if match:
                 detail = self.update_cast_binding(token=token, speaker=speaker,

@@ -1,6 +1,7 @@
 """Real embedded AA list paging, selection and dialog hit areas at 16:9."""
 
 import json
+import re
 import pytest
 
 
@@ -50,10 +51,10 @@ def test_material_workbench_has_one_paged_list_and_clickable_header(runtime, tmp
                 f"http://127.0.0.1:{runtime.port}/?section=production&run_id={result['run']['run_id']}",
                 wait_until="networkidle",
             )
-            page.get_by_role("button", name="角色与素材，已完成，点击进入", exact=True).click()
+            page.get_by_role("button", name=re.compile("^角色与素材，")).click()
             pw.expect(page.locator("#mappingScenePlan")).to_contain_text("测试背景000")
             page.reload(wait_until="networkidle")
-            page.get_by_role("button", name="角色与素材，已完成，点击进入", exact=True).click()
+            page.get_by_role("button", name=re.compile("^角色与素材，")).click()
             pw.expect(page.locator("#mappingScenePlan")).to_contain_text("测试背景000")
             page.get_by_role("button", name="制作素材", exact=True).click()
             page.get_by_role("button", name="背景", exact=True).click()
@@ -99,6 +100,26 @@ def test_material_workbench_has_one_paged_list_and_clickable_header(runtime, tmp
             # The header action must open the actual importer, not the image behind it.
             page.get_by_role("button", name="导入素材", exact=True).click()
             pw.expect(page.locator("#assetImportDialog")).to_be_visible()
+            # Check the actual nested importer, not only the outer dialog color.
+            for selector in (
+                ".asset-import-shell > header", ".import-steps .active",
+                ".import-kind label", ".import-file-control", ".import-file-button",
+                ".asset-validation", ".asset-recognition",
+            ):
+                ratio = page.locator(selector).first.evaluate("""el => {
+                    const style = getComputedStyle(el);
+                    const linear = v => v <= .04045 ? v/12.92 : ((v+.055)/1.055)**2.4;
+                    const lum = c => c.match(/[\\d.]+/g).slice(0,3).map(Number)
+                        .map(v => linear(v/255)).reduce((s,v,i) => s+v*[.2126,.7152,.0722][i],0);
+                    const a=lum(style.color), b=lum(style.backgroundColor);
+                    return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
+                }""")
+                assert ratio >= 4.5, (theme, selector, ratio)
+            import os
+            if evidence := os.environ.get("HALOCUE_UI_EVIDENCE"):
+                from pathlib import Path
+                Path(evidence).mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=str(Path(evidence) / f"aa-import-{theme}-{size[0]}x{size[1]}.png"))
             page.locator("#assetImportDialog [data-close-dialog]").click()
             pw.expect(page.locator("#assetLibraryDialog")).to_be_visible()
             page.get_by_role("button", name="音效", exact=True).click()
