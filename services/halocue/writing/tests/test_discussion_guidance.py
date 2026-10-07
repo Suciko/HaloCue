@@ -96,6 +96,71 @@ class ChapterOrganizer(QuietProvider):
         }
 
 
+@pytest.mark.parametrize(
+    "outcome", ["cancel", "authorization_change", "invalid_output", "provider_error"]
+)
+def test_deferred_chapter_result_is_fenced_and_finishes_on_failure(tmp_path, outcome):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from test_scene_conversation_harness import create_ready_scene
+
+    service = WritingService(tmp_path / "data")
+    work_id, _scene_id, work = create_ready_scene(service)
+    started, release = Event(), Event()
+
+    class DelayedOrganizer(ChapterOrganizer):
+        def generate_chapter_plan(self, messages, context):
+            started.set()
+            assert release.wait(timeout=15)
+            if outcome == "invalid_output":
+                return {}
+            if outcome == "provider_error":
+                raise RuntimeError("synthetic planning failure")
+            return super().generate_chapter_plan(messages, context)
+
+    service.provider = DelayedOrganizer(work["chapters"][0]["id"])
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(send, service, work, "整理这一章的细纲。")
+            try:
+                assert started.wait(timeout=5)
+                current = service.get_work(work_id)
+                run_id = current["conversation_threads"][0]["messages"][-1]["agent_run_id"]
+                run = next(item for item in current["agent_runs"] if item["id"] == run_id)
+                assert run["status"] == "running"
+                if outcome == "cancel":
+                    service.cancel_agent_run(work_id, run["id"])
+                elif outcome == "authorization_change":
+                    thread = current["conversation_threads"][0]
+                    service.update_conversation_thread(
+                        work_id,
+                        thread["id"],
+                        {
+                            "expected_thread_version": thread["version"],
+                            "permission_mode": "managed",
+                        },
+                    )
+            finally:
+                release.set()
+            if outcome == "provider_error":
+                with pytest.raises(RuntimeError, match="synthetic planning failure"):
+                    future.result(timeout=10)
+            else:
+                future.result(timeout=10)
+        final = service.get_agent_run(work_id, run["id"])
+        assert final["status"] == (
+            "cancelled" if outcome in {"cancel", "authorization_change"} else "failed"
+        )
+        assert final["finished_at"]
+        assert not any(
+            item["kind"] == "chapter_plan" for item in service.get_work(work_id)["proposals"]
+        )
+    finally:
+        release.set()
+        service.close()
+
+
 def make_catalog(root):
     root.mkdir()
     for name, aliases in [

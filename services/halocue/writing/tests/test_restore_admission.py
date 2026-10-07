@@ -273,6 +273,8 @@ def test_secondary_instances_and_direct_catalog_operations_cannot_bypass_restore
             lambda: second.repo.atomic_write_text("artifacts/no.txt", "no"),
             lambda: Repository(tmp_path / "writing"),
             lambda: second.start(),
+            lambda: second.trash_work("unused-work", {"expected_version": 1}),
+            lambda: second.restore_work("unused-work", {"expected_version": 1}),
         ]
         for action in actions:
             with pytest.raises(DomainError) as captured:

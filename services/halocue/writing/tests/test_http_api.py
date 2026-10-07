@@ -1376,11 +1376,14 @@ def test_production_embed_background_browser_keeps_ordinary_surface_compact():
 
     assert 'heading.textContent = "选择背景"' in script
     assert 'input.placeholder = "输入地点、氛围或背景名称"' in script
-    assert "backgroundCategoryInfo" in script
-    assert "IntersectionObserver" in script
-    assert "background-preview-placeholder" in script
+    production = (web_root.parents[1] / "production" / "ui" / "app.js").read_text(encoding="utf-8")
+    assert "backgroundCategoryLabels" in script
+    assert "observeAssetPageEnd" in production
+    assert "IntersectionObserver" in production
+    assert "previewImage" in production
     assert "embedded-background-browser" in styles
-    assert "grid-template-columns: repeat(3, minmax(0, 1fr));" in styles
+    assert "#assetLibraryDialog .asset-workbench-layout" in styles
+    assert "#assetLibraryDialog .asset-workbench-catalog > #assetLibraryResults" in styles
     assert "embedded-background-category-list" in styles
     assert "当前任务可用素材" not in script
     assert "只读素材快照" not in script
@@ -1452,21 +1455,24 @@ def test_production_review_workbench_auto_selects_and_projects_read_only_preview
     assert "@media (prefers-reduced-motion: reduce)" in styles
 
 
-def test_production_asset_workbench_deduplicates_and_cancels_stale_background_queries():
+def test_production_asset_workbench_has_one_request_owner_and_cancels_stale_queries():
     web_root = Path(__file__).resolve().parents[1] / "web"
     script = (web_root / "production-embed.js").read_text(encoding="utf-8")
 
-    assert "root.__haloCueResourceCache" in script
-    assert "root.__haloCueResourcePending" in script
-    assert "if (cache.has(cacheKey)) return cache.get(cacheKey)" in script
-    assert "if (pending.has(cacheKey)) return pending.get(cacheKey)" in script
-    assert "root.__haloCueBackgroundRequest?.abort()" in script
-    assert "new AbortController()" in script
-    assert 'error?.name === "AbortError"' in script
-    assert "IntersectionObserver" in script
-    assert 'title.textContent = "素材工作台"' in script
-    assert "初始素材快照" in script
-    assert "source.hidden = true" in script
+    production = (web_root.parents[1] / "production" / "ui" / "app.js").read_text(encoding="utf-8")
+    # The embed contributes controls; the production app owns the only list.
+    assert "haloCueLoadAssetLibrary?.({ reset })" in script
+    assert "root.__haloCueResourceCache" not in script
+    assert "root.__haloCueResourcePending" not in script
+    assert "if (state.assetLibraryLoading && !reset) return" in production
+    assert "assetLibraryController?.abort()" in production
+    assert "new AbortController()" in production
+    assert "assetLibraryController === controller" in production
+    assert "runId === state.currentRun?.run_id" in production
+    assert "kind === state.assetLibraryKind" in production
+    assert "if (!isCurrent()) return" in production
+    assert "{signal: controller.signal}" in production
+    assert "IntersectionObserver" in production
 
 
 def test_production_settings_separates_workspace_model_and_render_status():
