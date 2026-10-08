@@ -32,7 +32,8 @@ class BlockingMemoryProvider(FakeWritingProvider):
 
     def extract_memory_bundle(self, memory_context: dict) -> dict:
         self.started.set()
-        self.release.wait(timeout=5)
+        if not self.release.wait(timeout=30):
+            raise RuntimeError("test memory provider was not released")
         return super().extract_memory_bundle(memory_context)
 
 
@@ -464,22 +465,28 @@ def test_cancelled_durable_memory_job_discards_late_proposal(tmp_path):
             "request": {"expected_version": work["version"]},
         },
     )
-    assert provider.started.wait(timeout=2)
-
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        job = service.get_agent_job(work["id"], queued["id"])
-        if job["agent_run_id"]:
-            break
-        time.sleep(0.01)
-    assert job["agent_run_id"]
-    cancelled = service.cancel_agent_job(work["id"], queued["id"])
-    assert cancelled["status"] == "cancelled"
-    provider.release.set()
-    time.sleep(0.1)
-
-    restored = service.get_work(work["id"])
-    assert not [item for item in restored["proposals"] if item["kind"] == "memory_bundle"]
-    run = next(item for item in restored["agent_runs"] if item["id"] == job["agent_run_id"])
-    assert run["status"] == "cancelled"
-    service.close()
+    try:
+        assert provider.started.wait(timeout=10), {
+            "job": service.get_agent_job(work["id"], queued["id"]),
+            "dispatcher": service.agent_dispatcher.descriptor(),
+        }
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            job = service.get_agent_job(work["id"], queued["id"])
+            if job["agent_run_id"]:
+                break
+            time.sleep(0.01)
+        assert job["agent_run_id"], job
+        cancelled = service.cancel_agent_job(work["id"], queued["id"])
+        assert cancelled["status"] == "cancelled"
+        provider.release.set()
+        # Join the actual worker before inspecting late writes; a sleep cannot
+        # prove the provider result has crossed the cancellation boundary.
+        assert service.close(timeout=10)["stopped"]
+        restored = service.get_work(work["id"])
+        assert not [item for item in restored["proposals"] if item["kind"] == "memory_bundle"]
+        run = next(item for item in restored["agent_runs"] if item["id"] == job["agent_run_id"])
+        assert run["status"] == "cancelled"
+    finally:
+        provider.release.set()
+        service.close(timeout=10)
