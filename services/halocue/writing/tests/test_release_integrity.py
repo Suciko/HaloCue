@@ -108,6 +108,49 @@ def _release_row(service, release_id):
         )
 
 
+def test_legacy_release_without_location_remains_verifiable(tmp_path, monkeypatch):
+    from halocue_writing import release_integrity
+
+    original = release_integrity.compose_release_scene
+
+    def legacy_compose(ref, text):
+        ref.pop("location", None)
+        return original(ref, text)
+
+    service = WritingService(tmp_path)
+    try:
+        # Generate the exact historical manifest/text shape, then read it with
+        # the current verifier after removing the legacy serialization shim.
+        with monkeypatch.context() as patch:
+            patch.setattr(release_integrity, "compose_release_scene", legacy_compose)
+            _work, result = _build_release(service)
+        frozen = service.get_release(result["release_id"])
+        assert "location" not in frozen["manifest"]["scenes"][0]
+        assert frozen["text"].startswith("## 提示灯\n")
+        assert verify_script_release(service.repo, _release_row(service, result["release_id"]))["text"] == frozen["text"]
+    finally:
+        service.close()
+
+
+def test_release_location_is_frozen_and_manifest_tampering_is_rejected(tmp_path):
+    service = WritingService(tmp_path)
+    try:
+        work, result = _build_release(service)
+        frozen = service.get_release(result["release_id"])
+        scene = service.get_work(work["id"])["chapters"][0]["scenes"][0]
+        service.update_scene_contract(work["id"], scene["id"], {
+            **scene["contract"], "title": scene["title"], "location": "另一处地点",
+            "expected_version": service.get_work(work["id"])["version"],
+        })
+        assert service.get_release(result["release_id"])["text"] == frozen["text"]
+        manifest = frozen["manifest"]
+        manifest["scenes"][0]["location"] = "被篡改的地点"
+        _write_manifest(service, _release_row(service, result["release_id"]), manifest)
+        _assert_integrity_failure(service, result["release_id"], "source_set_digest_mismatch")
+    finally:
+        service.close()
+
+
 def test_late_memory_followup_preserves_author_skip_and_current_release_gate(tmp_path):
     service = WritingService(tmp_path)
     work, _release = _build_release(service)

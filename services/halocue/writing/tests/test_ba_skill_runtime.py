@@ -4,6 +4,7 @@ from halocue_writing.ba_skill_runtime import BaWritingPromptAssembler, BaWriting
 from halocue_writing.repository import Repository
 from halocue_writing.workflow_pack import (
     COMMON_RULES,
+    COMEDY_RULE_SOURCE,
     ENGINE_RULE_SOURCE,
     MODE_SOURCES,
     WORKFLOW_RULE_SOURCES,
@@ -159,7 +160,7 @@ def test_planning_prompts_keep_brief_and_blueprint_out_of_formal_writing(tmp_pat
     brief = assembler.assemble("brief.build", mode_key="bond_short", output_mode="discussion_json")
     blueprint = assembler.assemble("blueprint.generate", mode_key="bond_short", output_mode="story_blueprint_json")
 
-    assert brief["source_files"] == ["SKILL.md", "knowledge/创作讨论.md"]
+    assert brief["source_files"] == ["SKILL.md", "knowledge/创作讨论.md", COMEDY_RULE_SOURCE]
     assert brief["stage_guidance"] == []
     assert "按需调用" in brief["system_prompt"]
     assert "agents/writer.md" not in brief["system_prompt"]
@@ -176,7 +177,7 @@ def test_edit_patch_has_scoped_rules_without_writer_startup_and_scene_generation
     registry.materialize(Repository(tmp_path / "data"))
     assembler = BaWritingPromptAssembler(registry)
     edit = assembler.assemble("scene.draft.rewrite", mode_key="bond_short", output_mode="edit_patch")
-    assert edit["source_files"] == ["knowledge/写作内核.md", "knowledge/人味对话机制.md", MODE_SOURCES["bond_short"]]
+    assert edit["source_files"] == ["knowledge/写作内核.md", "knowledge/人味对话机制.md", COMEDY_RULE_SOURCE, MODE_SOURCES["bond_short"]]
     assert "skills/提示词组装.md" not in edit["system_prompt"]
     assert "official_script 只允许" not in edit["system_prompt"]
     generated = assembler.assemble("scene.draft.generate", mode_key="bond_short")

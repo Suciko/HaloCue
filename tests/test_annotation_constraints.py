@@ -8,6 +8,14 @@ from annotate import (
 from llm import LLMError
 
 
+def test_model_background_case_is_restored_without_changing_authored_text():
+    constraints = annotation_constraints({"bg": {"BG_TestRoom_Night": 1}, "sounds": [], "enums": {"emoticon": {}, "action": {}}}, {})
+    item = {"who": "旁白", "kind": "line", "text": "unchanged"}
+    clean, rejected = filter_annotation_row({"bg": "bg_testroom_night"}, item, {"narrator": True, "portrait": False}, constraints)
+    assert clean["bg"] == "BG_TestRoom_Night" and not rejected
+    assert item["text"] == "unchanged"
+
+
 def test_filter_rejects_unknown_assets_and_portrait_effects_for_narrator():
     constraints = annotation_constraints(
         {

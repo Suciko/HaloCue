@@ -3,38 +3,30 @@
 
 import json
 import os
-import socket
 import subprocess
 import sys
 import time
-from contextlib import closing
 from pathlib import Path
 
+import assetdb
 import pytest
 
 sync_playwright = pytest.importorskip("playwright.sync_api").sync_playwright
-
-import assetdb
 
 
 HERE = Path(__file__).resolve().parents[1]
 
 
-def _free_port():
-    with closing(socket.socket()) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
 @pytest.fixture(scope="module")
 def app_url(tmp_path_factory):
-    port = _free_port()
-    sample = HERE.parent.parent / "story-picker-browser-sample.txt"
+    state = tmp_path_factory.mktemp("story-picker-state")
+    stories = state / "stories"
+    stories.mkdir()
+    sample = stories / "story-picker-browser-sample.txt"
     sample.write_text("凯伊：浏览器测试", encoding="utf-8")
     aa_data = tmp_path_factory.mktemp("story-picker-aa") / "data"
     for name in ("projects", "saves", "overrides", "settings"):
         (aa_data / name).mkdir(parents=True)
-    state = tmp_path_factory.mktemp("story-picker-state")
     assetdb.connect(state / "aa_assets.db").close()
     install = state / "AzureArchive" / "App"
     executable = install / "AzureArchive.exe"
@@ -54,35 +46,54 @@ def app_url(tmp_path_factory):
     )
     environment = os.environ.copy()
     environment["HALOCUE_USER_DATA_DIR"] = str(state)
-    process = subprocess.Popen(
-        [
-            sys.executable, "webui.py", "--no-browser", "--port", str(port),
-            "--aa-data", str(aa_data),
-        ],
-        cwd=HERE,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        env=environment,
-    )
-    deadline = time.time() + 20
-    while time.time() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError(process.stderr.read())
-        with closing(socket.socket()) as sock:
-            if sock.connect_ex(("127.0.0.1", port)) == 0:
-                break
-        time.sleep(0.1)
-    else:
-        process.terminate()
-        raise RuntimeError("webui.py did not start")
-    try:
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        process.terminate()
-        process.wait(timeout=10)
-        sample.unlink(missing_ok=True)
+    ready = state / "ready.json"
+    log_path = state / "server.log"
+    # Exercise the real server with an owned story root. Read its actual bound
+    # port instead of racing a closed free-port reservation against startup.
+    entry = "\n".join([
+        "import sys, webui",
+        "webui.STORY_ROOT = sys.argv[1]",
+        "for name in ('STORY_FILE_PICKER', 'SETTINGS_FILE_PICKER', 'ASSET_FILE_PICKER'):",
+        "    previous = getattr(webui, name)",
+        "    setattr(webui, name, webui.StoryFilePicker(",
+        "        roots=[sys.argv[1]], upload_dir=previous.upload_dir,",
+        "        allowed_suffixes=previous.allowed_suffixes))",
+        "webui.main(sys.argv[2:])",
+    ])
+    with log_path.open("wb") as log:
+        process = subprocess.Popen(
+            [
+                sys.executable, "-c", entry, str(stories), "--no-browser", "--port", "0",
+                "--ready-file", str(ready), "--aa-data", str(aa_data),
+            ],
+            cwd=HERE,
+            stdout=log,
+            stderr=log,
+            env=environment,
+        )
+        try:
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                if process.poll() is not None:
+                    raise RuntimeError(log_path.read_text(encoding="utf-8", errors="replace")[-4000:])
+                if ready.is_file():
+                    payload = json.loads(ready.read_text(encoding="utf-8"))
+                    assert payload["host"] == "127.0.0.1"
+                    assert 0 < payload["port"] < 65536
+                    break
+                time.sleep(0.1)
+            else:
+                detail = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
+                raise RuntimeError(f"webui.py did not publish readiness in 60s: {detail}")
+            yield f"http://127.0.0.1:{payload['port']}"
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=10)
 
 
 @pytest.fixture(scope="module")

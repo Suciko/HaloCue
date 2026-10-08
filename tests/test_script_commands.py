@@ -14,6 +14,28 @@ def test_background_command_trims_only_outer_whitespace():
     assert parse_bg_argument("  夜晚的 活动室  ") == "夜晚的 活动室"
 
 
+def test_background_wrong_case_resolves_to_canonical_name_before_aa_hash(tmp_path):
+    import tables
+
+    script = tmp_path / "background-case.txt"
+    script.write_text("@bg bg_testroom_night\nAlice: unchanged text\n", encoding="utf-8")
+    cast = {"Alice": {"id": "alice", "portrait": True}}
+    index = {"bg": {"BG_TestRoom_Night": tables.bg_id("BG_TestRoom_Night")}, "characters": [], "enums": {"emoticon": {}, "action": {}}}
+    row = build(parse_script(script, cast), {"camera": {"enabled": False}}, cast, index, "case")[0][1][0]
+    assert row["text"] == "unchanged text"
+    assert row["bgFriendlyName"] == "BG_TestRoom_Night"
+    assert row["bgName"] == tables.bg_id("BG_TestRoom_Night")
+    assert row["bgName"] != tables.bg_id("bg_testroom_night")
+
+
+def test_background_case_resolution_does_not_guess_ambiguous_names():
+    import pytest
+
+    with pytest.raises(ValueError, match="大小写"):
+        resolve_background_reference("bg_test", {"BG_Test": 1, "BG_TEST": 2})
+    assert resolve_background_reference("BG_Test", {"BG_Test": 1, "BG_TEST": 2}) == "BG_Test"
+
+
 def test_registered_numeric_background_key_resolves_to_its_resource_name():
     backgrounds = {
         "ChatGPT Image 2026年8月5日 18_28_00": 3040691084,

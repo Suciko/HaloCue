@@ -89,6 +89,8 @@ def test_card_assistance_draft_return_and_partial_acceptance(runtime, width):
 
 @pytest.mark.parametrize("width", [1280, 390])
 def test_world_assistance_scope_and_end_context(runtime, width):
+    from services.halocue._test_support import browser_failure_diagnostics
+
     service = runtime.writing_service
     service.provider = CardAssistanceProvider()
     work, context = make_card_work(service, "world_card")
@@ -96,6 +98,7 @@ def test_world_assistance_scope_and_end_context(runtime, width):
     with pytest.importorskip("playwright.sync_api").sync_playwright() as pw:
         browser = pw.chromium.launch()
         page = browser.new_page(viewport={"width": width, "height": 900})
+        network_failures = browser_failure_diagnostics(page)
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         try:
@@ -131,6 +134,9 @@ def test_world_assistance_scope_and_end_context(runtime, width):
             expect(page.locator("[data-card-assistance-banner]")).to_have_count(0)
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             assert not errors
+        except Exception:
+            print("WORLD ASSISTANCE NETWORK:", network_failures)
+            raise
         finally:
             browser.close()
 

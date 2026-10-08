@@ -42,7 +42,7 @@ function harness(sourcePath) {
   const h = {element, calls, toasts, timers, apiResult: async (route, body) => ({model: body?.model || 'model-a', models: ['model-a'], latency_ms: 1}),
     fetchResult: async () => ({ok: true, environment: {workspace: {valid: false, path: null}, issues: []}})};
   const context = {
-    console, URL, URLSearchParams, AbortController, CustomEvent: class { constructor(type, options) {this.type=type; this.detail=options.detail;} }, Option: class { constructor(text, value) {this.text = text; this.value = value;} }, clearTimeout() {}, window: {location: {search: ''}, dispatchEvent() {}},
+    console, URL, URLSearchParams, AbortController, CustomEvent: class { constructor(type, options = {}) {this.type=type; this.detail=options.detail ?? null;} }, Option: class { constructor(text, value) {this.text = text; this.value = value;} }, clearTimeout() {}, window: {location: {search: ''}, dispatchEvent() {}},
     document: {getElementById: element, addEventListener() {}, createElement(tag) {return element(`created-${tag}-${nodes.size}`);}},
     FormData: class {get(name) {return fields[name] ? element(fields[name]).value : null;}},
     api: async (route, options) => {

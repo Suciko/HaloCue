@@ -608,6 +608,10 @@ class Legacy093Adapter:
         for speaker in detail["cast"].get("detected_speakers", []):
             if detail["cast"].get("cast", {}).get(speaker, {}).get("kind", "unset") != "unset":
                 continue
+            if speaker == "旁白":
+                detail = self.update_cast_binding(token=token, speaker=speaker,
+                    mapping={"kind": "narrator"}, expected_draft_version=detail["draft_version"])
+                continue
             match = character_match(speaker, characters)
             if match:
                 detail = self.update_cast_binding(token=token, speaker=speaker,
@@ -2953,6 +2957,7 @@ class Legacy093Adapter:
                 f"AI 安排演出失败：{exc}",
                 status=502,
                 details={
+                    **(exception_details if isinstance(exception_details, dict) else {}),
                     "generation_id": generation_id,
                     "type": type(exc).__name__,
                     "result_file": str(attempt_dir / "result.json"),

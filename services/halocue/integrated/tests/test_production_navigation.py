@@ -1040,6 +1040,8 @@ def test_manual_manuscript_partial_proposal_review_and_production_journey(runtim
     with pw.sync_playwright() as driver:
         browser = driver.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        from services.halocue._test_support import browser_failure_diagnostics
+        network_failures = browser_failure_diagnostics(page)
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         try:
@@ -1112,6 +1114,7 @@ def test_manual_manuscript_partial_proposal_review_and_production_journey(runtim
             assert not errors
         except Exception:
             (tmp_path / "journey-failure.html").write_text(page.content(), encoding="utf-8")
+            print("JOURNEY NETWORK:", network_failures)
             print("JOURNEY DOM:", page.locator("body").inner_text()[-15000:])
             raise
         finally:

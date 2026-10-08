@@ -7,6 +7,22 @@ import re
 from pathlib import Path
 
 
+def resolve_registered_background(value, background_map):
+    """Return the catalog's exact spelling before AA's case-sensitive hash."""
+    selected = str(value or "").strip()
+    if not selected or selected in background_map:
+        return selected
+    matches = [str(name) for name in background_map if str(name).casefold() == selected.casefold()]
+    if len(matches) > 1:
+        raise ValueError(f"背景名大小写对应多个素材，请选择完整名称：{selected}")
+    if matches:
+        return matches[0]
+    if selected.isdigit():
+        matches = [str(name) for name, identifier in background_map.items() if str(identifier) == selected]
+        if len(matches) == 1:
+            return matches[0]
+    return selected
+
 _REQUEST = re.compile(
     r"^\s*#\s*待生成自定义背景\s*[：:]\s*(.+?)\s*$",
     re.MULTILINE,

@@ -815,7 +815,7 @@ async function openIntentTarget(button){
       if(linked?.thread_id!==sourceId){
         const path=targetThread?`/works/${state.work.id}/threads/${targetThread.id}`:`/works/${state.work.id}/threads`;
         const body=targetThread?{expected_thread_version:targetThread.version}:{expected_version:state.work.version,scope_type:'scene',scope_id:scene.id,title:`${scene.title} · 写作讨论`,permission_mode:'review'};
-        const result=await api(path,{method:targetThread?'PATCH':'POST',body:JSON.stringify({...body,discussion_source_thread_id:sourceId})});
+        const result=await api(path,{method:'POST',body:JSON.stringify({...body,discussion_source_thread_id:sourceId})});
         state.work=result.work;
       }
     }
@@ -908,6 +908,7 @@ function openWorkDialog(opener=document.activeElement){
   document.getElementById('app')?.setAttribute('inert','');
   document.body.classList.add('work-dialog-open');
   dialog.hidden=false;
+  document.getElementById('workDialogError').hidden=true;
   void window.HaloCueAuthoringWorkspace?.populateWorkForm(dialog.querySelector('form'));
   queueMicrotask(()=>dialog.querySelector('input[name="title"]')?.focus());
 }
@@ -928,6 +929,8 @@ async function submitWorkDialog(form){
   if(!form||form.dataset.submitting==='true')return;
   if(typeof form.reportValidity==='function'&&!form.reportValidity())return;
   const submit=form.querySelector('[data-submit="work"]');
+  const errorNotice=document.getElementById('workDialogError');
+  errorNotice.hidden=true;
   form.dataset.submitting='true';
   if(submit)submit.disabled=true;
   try{
@@ -942,7 +945,12 @@ async function submitWorkDialog(form){
     const target=destination==='world'?{section:'references',library:'world'}:destination==='ideation'?{section:'works'}:{section:'writing',stage:'structure',pane:'writing'};
     navigateRoute(target);
     toast('作品已建立，可以继续补充内容');
-  }catch(error){toast(error.message,true)}finally{delete form.dataset.submitting;if(submit)submit.disabled=false}
+  }catch(error){
+    errorNotice.textContent=error.message||'作品未能建立，请稍后重试。';
+    errorNotice.hidden=false;
+    errorNotice.scrollIntoView({block:'nearest'});
+    toast(errorNotice.textContent,true);
+  }finally{delete form.dataset.submitting;if(submit)submit.disabled=false}
 }
 
 document.querySelector('#workForm [data-submit="work"]')?.addEventListener('click',event=>{
@@ -5088,16 +5096,21 @@ registerAppClick(event=>{
 },10);
 
 async function ensureSceneConversation(sceneId){
-  if(!sceneId||!state.work||sceneConversationThread()||state._sceneThreadLoading===sceneId||state._sceneThreadErrorScene===sceneId)return;
+  if(state._sceneThreadLoading===sceneId)return state._sceneThreadPromise;
+  if(!sceneId||!state.work||sceneConversationThread()||state._sceneThreadErrorScene===sceneId)return;
   const workId=state.work.id,session=hcWorkLoadEpoch;
   state._sceneThreadLoading=sceneId;state._sceneThreadError='';
   const current=()=>state.work?.id===workId&&hcWorkLoadEpoch===session;
+  const request=(async()=>{
   try{
     const scene=scenes().find(item=>item.id===sceneId);
     const result=await api(`/works/${workId}/threads`,{method:'POST',body:JSON.stringify({expected_version:state.work.version,scope_type:'scene',scope_id:sceneId,title:`${scene?.title||'当前场景'} · 写作讨论`,permission_mode:'review'})});
-    if(current()){state.work=result.work;if(state.sceneId===sceneId)render();}
+    if(current()){if(result.work.version>=state.work.version)state.work=result.work;if(state.sceneId===sceneId)render();}
   }catch(error){if(current()&&state.sceneId===sceneId){state._sceneThreadErrorScene=sceneId;state._sceneThreadError=error.message;toast(error.message,true);render();}}
   finally{if(current()&&state._sceneThreadLoading===sceneId)state._sceneThreadLoading='';}
+  })();
+  state._sceneThreadPromise=request;
+  try{return await request;}finally{if(state._sceneThreadPromise===request)state._sceneThreadPromise=null;}
 }
 
 
@@ -6898,6 +6911,7 @@ const SettingsController = {
     }
     const notice = document.getElementById('modelScopeNotice');
     if (notice) notice.textContent = '写作与演出分别启用，在下方选择连接方式和用途。';
+    window.dispatchEvent(new CustomEvent('halocue:model-roles-loaded'));
   },
 
   renderArchivedConversations(errorMessage = '') {
@@ -7161,7 +7175,7 @@ const SettingsController = {
     const apiForm = document.getElementById('settingsModelForm');
     if (codexPanel) codexPanel.hidden = !codexSelected;
     if (apiForm) { apiForm.hidden = codexSelected; apiForm.inert = codexSelected || !!this.subscriptionOnly; }
-    window.dispatchEvent(new CustomEvent('halocue:connection-selected', {detail:{provider:codexSelected ? 'codex' : preset?.provider, model:this.savedModelConfig?.provider === 'codex' ? this.savedModelConfig.model : ''}}));
+    window.dispatchEvent(new CustomEvent('halocue:connection-selected', {detail:{provider:codexSelected ? 'codex' : preset?.provider, model:this.savedModelConfig?.provider === 'codex' ? this.savedModelConfig.model : '', timeout:this.savedModelConfig?.provider === 'codex' ? this.savedModelConfig.timeout : null}}));
     const name = document.getElementById('selectedProviderName');
     const notes = document.getElementById('selectedProviderNotes');
     const protocol = document.getElementById('selectedProviderProtocol');

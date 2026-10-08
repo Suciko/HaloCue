@@ -1211,7 +1211,9 @@ html[data-theme="dark"] #app.hc-redesign .work-smart-insights > summary small { 
 #app.hc-redesign[data-surface="references"] .library-workflow-explainer li { display: grid; gap: 2px; }
 #app.hc-redesign[data-surface="references"] .library-workflow-explainer li b { color: var(--hc-text,#20332d); font-size: 11px; }
 #app.hc-redesign[data-surface="references"] .library-workflow-explainer li span { color: var(--hc-muted,#697a73); font-size: 10px; line-height: 1.45; }
-#app.hc-redesign[data-surface="references"] .library-record-hint { display: block; margin-top: 3px; color: var(--hc-action,#2f65a5); font-size: 10px; opacity: .82; }
+#app.hc-redesign[data-surface="references"] .library-record-hint { display: block; grid-column: 2/-1; width: auto; max-width: none; margin-top: 3px; color: var(--hc-action,#2f65a5); font-size: 10px; opacity: .82; }
+
+#workDialog .work-dialog-error { margin: 0; padding: 10px 12px; border: 1px solid var(--hc-line,#d8e0da); border-left: 3px solid var(--hc-danger,#bb4c56); border-radius: 6px; background: var(--hc-panel,#fff); color: var(--hc-text,#20332d); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 #app.hc-redesign[data-surface="references"] .world-operation-steps { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin: 13px 0 0; padding: 10px 0 0; border-top: 1px solid var(--hc-line,#d8e0da); list-style: none; }
 #app.hc-redesign[data-surface="references"] .world-operation-steps li { display: grid; gap: 2px; }
 #app.hc-redesign[data-surface="references"] .world-operation-steps b { color: var(--hc-text,#20332d); font-size: 11px; }

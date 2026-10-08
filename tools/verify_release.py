@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+from collections import Counter
+import gzip
+import hashlib
 import json
 import os
 import shutil
@@ -46,6 +49,95 @@ class VerificationError(RuntimeError):
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise VerificationError(message)
+
+
+def _file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _row_digest(values) -> bytes:
+    return hashlib.sha256(json.dumps(list(values), separators=(",", ":")).encode()).digest()
+
+
+def _assert_first_run_database(bundle: Path, database: Path) -> dict:
+    """Check the actual fresh database against all bundled research rows."""
+    seed = bundle / "data/halocue_labels.db"
+    require(
+        seed.is_file() and database.is_file(), "sanitized database was not copied to user state"
+    )
+    resources = bundle / "_internal" if (bundle / "_internal").is_dir() else bundle
+    pack = resources / "data/reference-pack"
+    receipt_path = pack / "research-seed.json"
+    if not receipt_path.is_file():
+        require(
+            seed.read_bytes() == database.read_bytes(),
+            "first-run database copy differs from packaged seed",
+        )
+        return {"kind": "base_seed", "byte_identical": True}
+
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    base = resources / "data/halocue_labels.db"
+    payload = pack / "research/metadata.jsonl.gz"
+    require(_file_digest(base) == receipt["base_sha256"], "bundled base seed digest mismatch")
+    require(_file_digest(seed) == receipt["base_sha256"], "outer base seed digest mismatch")
+    require(
+        _file_digest(payload) == receipt["payload_sha256"],
+        "bundled research payload digest mismatch",
+    )
+    cache = (
+        database.parent
+        / ".halocue/reference-cache"
+        / receipt["payload_sha256"]
+        / "halocue_labels.db"
+    )
+    require(cache.is_file(), "first-run research cache was not published")
+    expected = {table: Counter() for table in receipt["counts"]}
+    with contextlib.closing(sqlite3.connect(f"{base.as_uri()}?mode=ro", uri=True)) as source:
+        schemas = {
+            row[0]: source.execute(f'PRAGMA table_info("{row[0]}")').fetchall()
+            for row in source.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+    require(set(schemas) == set(expected), "research receipt table policy mismatch")
+    with gzip.open(payload, "rt", encoding="utf-8") as stream:
+        for line in stream:
+            record = json.loads(line)
+            table, values = record["table"], record["values"]
+            require(
+                table in expected and len(values) == len(schemas[table]),
+                "invalid bundled research row",
+            )
+            expected[table][_row_digest(values)] += 1
+    require(
+        all(sum(rows.values()) == receipt["counts"][table] for table, rows in expected.items()),
+        "research payload row count mismatch",
+    )
+    marker = ("bundled_research_sha256", _file_digest(cache))
+    expected["meta"][_row_digest(marker)] += 1
+    with contextlib.closing(sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True)) as target:
+        require(
+            target.execute("PRAGMA quick_check").fetchone() == ("ok",), "invalid first-run database"
+        )
+        tables = {
+            row[0]
+            for row in target.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        require(tables == set(schemas), "first-run database table mismatch")
+        for table, rows in expected.items():
+            require(
+                target.execute(f'PRAGMA table_info("{table}")').fetchall() == schemas[table],
+                "first-run database column mismatch",
+            )
+            actual = Counter(_row_digest(row) for row in target.execute(f'SELECT * FROM "{table}"'))
+            require(actual == rows, f"first-run research rows differ: {table}")
+    return {"kind": "lossless_research", "all_rows_verified": True, "counts": receipt["counts"]}
 
 
 def json_request(
@@ -445,15 +537,8 @@ def verify(
         bundle_before = tree_digests(bundle)
         workspace_before = tree_digests(workspace.root)
         check = _check_command(exe, selection_flag, selection, env)
-        seed = bundle / "data" / "halocue_labels.db"
         database = user_root / "aa_assets.db"
-        require(
-            seed.is_file() and database.is_file(), "sanitized database was not copied to user state"
-        )
-        require(
-            seed.read_bytes() == database.read_bytes(),
-            "first-run database copy differs from packaged seed",
-        )
+        result["first_run_database"] = _assert_first_run_database(bundle, database)
         (user_root / "aa_resources.json").write_text(
             json.dumps(
                 {

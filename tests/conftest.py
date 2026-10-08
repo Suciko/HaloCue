@@ -9,8 +9,10 @@ from pathlib import Path
 import pytest
 
 from services.halocue._test_support import (  # noqa: F401
+    isolated_ba_writing_skill,
     isolated_bundled_metadata,
     small_bundled_metadata,
+    small_ba_writing_skill,
 )
 
 

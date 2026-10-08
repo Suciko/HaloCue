@@ -15138,11 +15138,20 @@ class WritingService:
             chunks = []
             manifest_scenes = []
             manifest_asset_references = []
+            from .release_integrity import compose_release_scene
+
             for scene in scenes:
                 revision = connection.execute("SELECT * FROM revisions WHERE id=?", (scene["current_revision_id"],)).fetchone()
                 content = json.loads(self.repo.read_text(revision["content_uri"]))
-                chunks.append(f"## {scene['title']}\n{content['text'].rstrip()}\n")
-                manifest_scenes.append({"scene_id": scene["id"], "revision_id": revision["id"], "title": scene["title"], "content_hash": revision["content_hash"]})
+                contract = json.loads(scene["contract_json"] or "{}")
+                scene_ref = {
+                    "scene_id": scene["id"], "revision_id": revision["id"],
+                    "title": scene["title"],
+                    "location": str(contract.get("location") or "").strip(),
+                    "content_hash": revision["content_hash"],
+                }
+                chunks.append(compose_release_scene(scene_ref, content["text"]))
+                manifest_scenes.append(scene_ref)
                 asset_references = self._scene_asset_reference_snapshot(
                     self._scene_asset_references(connection, work_id, scene["id"])
                 )

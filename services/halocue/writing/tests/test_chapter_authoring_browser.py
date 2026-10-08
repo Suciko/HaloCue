@@ -63,6 +63,10 @@ def test_background_scene_thread_response_preserves_typing_focus(local_authoring
     field = page.locator("[data-chapter-text]")
     field.fill("手写")
     expect(field).to_be_focused()
+    for _ in range(100):
+        if held:
+            break
+        page.wait_for_timeout(20)
     assert held
     held[0][0].fulfill(response=held[0][1])
     page.wait_for_function("() => Boolean(sceneConversationThread(selectedScene()))")
@@ -75,6 +79,93 @@ def test_background_scene_thread_response_preserves_typing_focus(local_authoring
                     if a["kind"] == "scene_script" and a["scope_id"] == made["scene_id"])
     assert revision["current_revision"]["content"]["blocks"][0]["text"] == "手写正文"
     page.close()
+
+
+def test_save_waits_for_pending_scene_thread_without_false_version_conflict(local_authoring, browser):
+    from playwright.sync_api import expect
+
+    service, url = local_authoring
+    work = service.create_work({"title": "保存与创建对话并发", "world_seed": "blank"})
+    made = service.create_scene(work["id"], work["chapters"][0]["id"], {
+        "expected_version": work["version"], "title": "正文",
+    })
+    page = browser.new_page()
+    held, saves = [], []
+
+    def hold_thread(route):
+        if route.request.method != "POST":
+            route.continue_()
+            return
+        response = route.fetch()
+        held.append((route, response))
+
+    page.route("**/api/v1/works/*/threads", hold_thread)
+    page.on("request", lambda request: saves.append(request.url)
+            if request.method == "POST" and request.url.endswith("/manuscript") else None)
+    page.goto(f"{url}/?section=writing&stage=draft&work_id={work['id']}")
+    page.locator("[data-chapter-add]").click()
+    page.locator("[data-chapter-text]").fill("对话创建过程中写下的正文")
+    for _ in range(100):
+        if held:
+            break
+        page.wait_for_timeout(20)
+    assert held
+    # The server has already bumped the work version, but the browser has not
+    # received its owned thread-creation response yet.
+    page.locator("[data-chapter-save]").click()
+    page.wait_for_timeout(100)
+    assert not saves
+    held[0][0].fulfill(response=held[0][1])
+    expect(page.locator("[data-chapter-save-state]")).to_have_text("整章已保存")
+    assert len(saves) == 1
+    revision = next(a for a in service.get_work(work["id"])["artifacts"]
+                    if a["kind"] == "scene_script" and a["scope_id"] == made["scene_id"])
+    assert revision["current_revision"]["content"]["blocks"][0]["text"] == "对话创建过程中写下的正文"
+    page.close()
+
+
+def test_typing_during_save_keeps_newer_draft_and_uses_own_saved_revision(local_authoring, browser):
+    from playwright.sync_api import expect
+
+    service, url = local_authoring
+    work = service.create_work({"title": "保存过程中继续写作", "world_seed": "blank"})
+    made = service.create_scene(work["id"], work["chapters"][0]["id"], {
+        "expected_version": work["version"], "title": "正文",
+    })
+    page = browser.new_page()
+    held = []
+
+    def hold_save(route):
+        if route.request.method == "POST" and not held:
+            held.append((route, route.fetch()))
+        else:
+            route.continue_()
+
+    try:
+        page.goto(f"{url}/?section=writing&stage=draft&work_id={work['id']}")
+        page.wait_for_function("() => Boolean(sceneConversationThread(selectedScene()))")
+        page.locator("[data-chapter-add]").click()
+        page.locator("[data-chapter-text]").fill("已提交的第一句话")
+        page.route("**/api/v1/works/*/chapters/*/manuscript", hold_save)
+        page.locator("[data-chapter-save]").click()
+        for _ in range(100):
+            if held:
+                break
+            page.wait_for_timeout(20)
+        assert held
+        page.locator("[data-chapter-text]").fill("已提交的第一句话，继续补写第二句话")
+        held[0][0].fulfill(response=held[0][1])
+        expect(page.locator("[data-chapter-text]")).to_have_value("已提交的第一句话，继续补写第二句话")
+        expect(page.locator("[data-chapter-save]")).to_be_enabled()
+        page.locator("[data-chapter-save]").click()
+        expect(page.locator("[data-chapter-save-state]")).to_have_text("整章已保存")
+        revision = next(a for a in service.get_work(work["id"])["artifacts"]
+                        if a["kind"] == "scene_script" and a["scope_id"] == made["scene_id"])
+        assert revision["current_revision"]["content"]["blocks"][0]["text"] == "已提交的第一句话，继续补写第二句话"
+        page.reload()
+        expect(page.locator("[data-chapter-text]")).to_have_value("已提交的第一句话，继续补写第二句话")
+    finally:
+        page.close()
 
 
 def test_reading_mode_preserves_draft_and_saves_from_preview(local_authoring, browser):

@@ -9,6 +9,21 @@
   let snapshot = null;
   let poll = null;
   let savedModel = '';
+  let scopeDirty = false;
+  function savedScopeConfig() {
+    if (typeof SettingsController === 'undefined') return null;
+    const value = form.elements.scope.value === 'direction'
+      ? SettingsController.directionModelStatus?.model
+      : SettingsController.writingModelStatus?.model;
+    return value?.provider === 'codex' && value.configured ? value : null;
+  }
+  function restoreSavedScope() {
+    const config = savedScopeConfig();
+    if (scopeDirty || !config) return;
+    savedModel = config.model;
+    if ([...model.options].some(item => item.value === savedModel)) model.value = savedModel;
+    if (config.timeout) form.elements.timeout.value = config.timeout;
+  }
   async function request(path, body, production = false) {
     const response = await fetch(`${production ? '/production' : ''}/api/v1/settings/${path}`, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     const result = await response.json();
@@ -21,6 +36,7 @@
   }
   function controls() {
     panel.querySelectorAll('button').forEach(button => { button.disabled = busy; });
+    panel.querySelector('[data-codex-action=login]').disabled = busy || snapshot?.installed === false;
     const ready = snapshot?.state === 'ready' && model.options.length > 0 && !!model.value;
     form.querySelector('[type=submit]').disabled = busy || !ready || !form.elements.subscription_only_acknowledged.checked;
     form.querySelectorAll('input').forEach(input => {input.disabled = busy;});
@@ -28,7 +44,7 @@
   }
   function render(value) {
     snapshot = value;
-    const selected = model.value || savedModel;
+    const selected = (!scopeDirty && savedScopeConfig()?.model) || model.value || savedModel;
     model.replaceChildren();
     for (const item of value.models || []) {
       const option = document.createElement('option');
@@ -37,10 +53,12 @@
       model.append(option);
     }
     if (!model.options.length) model.add(new Option(value.installed ? '登录后读取模型' : '安装后读取模型', ''));
-    const labels = {ready:'已连接 ChatGPT · 使用 Codex 订阅额度', not_installed:'未找到 Codex。安装官方 Codex CLI 后检查，或在下方指定程序路径。', codex_login_required:'Codex 已安装，请登录 ChatGPT。', codex_subscription_required:'当前认证方式不是 ChatGPT 订阅，无法启用。', quota_exhausted:'订阅额度已用完。等待恢复后再继续，不会转用 API。'};
+    restoreSavedScope();
+    const labels = {ready:'已登录 ChatGPT · 选择模型后测试真实请求', not_installed:'未找到 Codex 运行程序。请重新完整解压新版 HaloCue；也可安装官方 Codex CLI 后检查连接。', codex_login_required:'Codex 已就绪，请登录自己的 ChatGPT 账号。', codex_subscription_required:'当前认证方式不是 ChatGPT 订阅，无法启用。', quota_exhausted:'订阅额度已用完。等待恢复后再继续，不会转用 API。'};
     message(labels[value.state] || '暂时无法确认 Codex 连接状态。', value.state === 'quota_exhausted');
     panel.querySelector('[data-codex-action=login]').hidden = !!value.logged_in;
     panel.querySelector('[data-codex-action=logout]').hidden = !value.logged_in;
+    panel.querySelector('[data-codex-install-link]').hidden = value.installed !== false;
     const quota = panel.querySelector('[data-codex-quota]');
     const windows = Object.values(value.limits?.rate_limits || {}).flatMap(bucket => [bucket.primary, bucket.secondary]).filter(window => window && typeof window.usedPercent === 'number' && Number.isFinite(window.usedPercent));
     quota.hidden = !value.logged_in;
@@ -83,9 +101,9 @@
     event.preventDefault();
     if (!form.reportValidity()) return;
     run(async () => {
-      message('正在用订阅额度测试连接，成功后才启用…');
+      message('正在用订阅额度测试请求；AA 演出会校验实际输出格式，成功后才启用…');
       const scope = form.elements.scope.value;
-      const config = {provider:'codex', model:model.value, base_url:'', api_key:'', api_key_env:'', subscription_only_acknowledged:true};
+      const config = {provider:'codex', model:model.value, timeout:Number(form.elements.timeout.value), base_url:'', api_key:'', api_key_env:'', subscription_only_acknowledged:true};
       if (scope === 'direction') {
         await request('direction-model:activate', config, true);
         if (typeof SettingsController !== 'undefined') await SettingsController.loadAll();
@@ -104,19 +122,30 @@
       message(scope === 'both' ? 'Codex 已用于写作与 AA 演出。额度用完时停止。' : 'Codex 已用于写作。额度用完时停止。');
     });
   });
-  form.addEventListener('change', controls);
+  form.addEventListener('input', event => {
+    if (['model', 'timeout'].includes(event.target.name)) scopeDirty = true;
+  });
+  form.addEventListener('change', event => {
+    if (event.target.name === 'scope') { scopeDirty = false; restoreSavedScope(); }
+    controls();
+  });
   panel.querySelector('[data-codex-path-form]').addEventListener('submit', event => {
     event.preventDefault();
     run(async () => render((await request('codex/configure', {cli_path:event.target.elements.cli_path.value.trim()})).connection));
   });
   const dialog = document.getElementById('settingsDialog');
   if (dialog) new MutationObserver(() => {
-    if (dialog.open && !busy) run(refresh);
+    if (dialog.open && !busy) { scopeDirty = false; run(refresh); }
     else if (!dialog.open && poll) { clearInterval(poll); poll = null; }
   }).observe(dialog, {attributes:true, attributeFilter:['open']});
   window.addEventListener('pagehide', () => { if (poll) clearInterval(poll); });
   window.addEventListener('halocue:connection-selected', event => {
-    savedModel = event.detail.model || savedModel;
+    if (!scopeDirty && form.elements.scope.value !== 'direction') {
+      savedModel = event.detail.model || savedModel;
+      if (event.detail.timeout) form.elements.timeout.value = event.detail.timeout;
+    }
+    restoreSavedScope();
     if (event.detail.provider === 'codex' && !busy) run(refresh);
   });
+  window.addEventListener('halocue:model-roles-loaded', restoreSavedScope);
 })();

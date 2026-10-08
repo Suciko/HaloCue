@@ -210,3 +210,25 @@
 :host-context(html[data-theme="dark"]) .scene-evidence .has-background {
   background: var(--success-soft) !important; color: var(--success) !important; border-color: var(--success) !important;
 }
+
+/* Import controls are editor chrome, including their nested sticky header. */
+:host-context(html[data-theme="dark"]) :is(
+  .asset-import-shell > header,.asset-recognition,.asset-validation,
+  .import-steps,.import-kind label,.import-file-control,
+  .import-file-button,.asset-recognition dl div,.asset-recognition section li
+) {
+  background: var(--surface-soft) !important; color: var(--ink) !important;
+  border-color: var(--line) !important;
+}
+:host-context(html[data-theme="dark"]) :is(.import-steps .active,.import-kind label:has(input:checked)) {
+  background: var(--accent-soft) !important; border-color: var(--accent) !important;
+}
+:host-context(html[data-theme="dark"]) :is(.asset-validation.valid,.asset-recognition.accepted) {
+  background: var(--success-soft) !important; border-color: var(--success) !important;
+}
+:host-context(html[data-theme="dark"]) .asset-validation.invalid {
+  background: var(--danger-soft) !important; border-color: var(--danger) !important;
+}
+:host-context(html[data-theme="dark"]) .mapping-scene-issues ul {
+  color: var(--warn) !important;
+}

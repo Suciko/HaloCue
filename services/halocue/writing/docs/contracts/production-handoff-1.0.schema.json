@@ -9,6 +9,7 @@
     "schema_version": {"const": "production-handoff/1.0"},
     "project": {"type": "string", "minLength": 1},
     "generation_mode": {"const": "format_only"},
+    "auto_match_resources": {"type": "boolean", "description": "Prefill unique local character/background matches in the new editable AA draft. Never approves cards or rematches an existing idempotent handoff."},
     "source": {
       "type": "object",
       "additionalProperties": false,

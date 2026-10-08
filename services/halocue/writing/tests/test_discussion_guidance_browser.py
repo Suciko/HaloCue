@@ -168,7 +168,8 @@ def test_actual_lookup_is_visible_while_model_followup_is_pending(flow_server, b
 
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
-def test_legacy_json_projects_without_rewriting_history_and_open_draft(flow_server, browser, theme):
+@pytest.mark.parametrize("existing_scene_thread", [False, True])
+def test_legacy_json_projects_without_rewriting_history_and_open_draft(flow_server, browser, theme, existing_scene_thread):
     from playwright.sync_api import expect
 
     service, provider, _work, url = flow_server
@@ -187,13 +188,19 @@ def test_legacy_json_projects_without_rewriting_history_and_open_draft(flow_serv
             "UPDATE conversation_messages SET content_json=? WHERE id=?",
             (json.dumps(legacy, ensure_ascii=False), message["id"]),
         )
+    if existing_scene_thread:
+        service.create_conversation_thread(work_id, {
+            "expected_version": work["version"], "scope_type": "scene",
+            "scope_id": scene_id, "title": "已经开始的正文讨论",
+        })
     page = open_page(browser, f"{url}/?section=works&work_id={work_id}", theme, (1440, 900))
     reply = page.locator(".conversation-message.assistant").last
     expect(reply.locator(".agent-reply-questions")).to_contain_text(REPLY["questions"][0])
     assert '"reasoning_summary"' not in reply.inner_text()
     page.reload()
     expect(page.locator(".agent-reply-questions").last).to_contain_text(REPLY["questions"][0])
-    saved = service.get_work(work_id)["conversation_threads"][0]["messages"][-1]
+    saved = next(thread for thread in service.get_work(work_id)["conversation_threads"]
+        if thread["id"] == work["conversation_threads"][0]["id"])["messages"][-1]
     assert saved["content"] == legacy
     calls = provider.calls
     page.locator(".agent-reply-next-step").last.get_by_role(

@@ -10,10 +10,12 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from services.halocue._test_support import (  # noqa: E402,F401
+    isolated_ba_writing_skill,
     isolated_bundled_metadata,
     isolated_legacy_root,
     isolated_production_defaults,
     small_bundled_metadata,
+    small_ba_writing_skill,
 )
 from halocue_production.config import Settings  # noqa: E402
 

@@ -26,6 +26,7 @@ import aapaths, tables                                       # noqa: E402
 from background_requests import (                            # noqa: E402
     UnresolvedBackgroundError,
     collect_background_requests,
+    resolve_registered_background,
 )
 from aa_registry import (                                    # noqa: E402
     AssetRegistrationError,
@@ -264,17 +265,7 @@ def parse_bg_argument(arg):
 
 def resolve_background_reference(value, background_map):
     """Resolve either a registered name or its registered numeric AA key."""
-    selected = str(value or "").strip()
-    if not selected or selected in background_map:
-        return selected
-    if not selected.isdigit():
-        return selected
-    matches = [
-        str(name)
-        for name, background_id in background_map.items()
-        if str(background_id) == selected
-    ]
-    return matches[0] if len(matches) == 1 else selected
+    return resolve_registered_background(value, background_map)
 
 
 def merge_project_registered_assets(index, project_dir):
@@ -477,7 +468,7 @@ def build(events, cfg, cast, idx, project):
 
     out = []
     vseq = itertools.count()          # 全工程连续的配音槽编号
-    bg = cfg.get("default_bg", "BG_Black")
+    bg = resolve_background_reference(cfg.get("default_bg", "BG_Black"), bgmap)
     bgm = cfg.get("default_bgm", 999)
     scene_bg = cfg.get("scene_bg", {}) or {}
 
@@ -501,7 +492,7 @@ def build(events, cfg, cast, idx, project):
         held_camera = None
         appearance.reset_scene()
         if sc["title"] in scene_bg:
-            bg = scene_bg[sc["title"]]
+            bg = resolve_background_reference(scene_bg[sc["title"]], bgmap)
         # 先给整场算一份镜头计划：每一行画面上该显示谁。
         # 这是 galgame 的剪辑 —— 背景不变，画面里的人变。
         dlg = []
@@ -914,6 +905,7 @@ def chars_pos(chars, ident):
 
 
 def wrap_project(scenes, project, preview_bg, bgmap):
+    preview_bg = resolve_background_reference(preview_bg, bgmap)
     g_exit = str(uuid.uuid5(NS, project + "/exit"))
     guids = [str(uuid.uuid5(NS, f"{project}/scene/{i}")) for i in range(len(scenes))]
     nxt = guids[1:] + [g_exit]

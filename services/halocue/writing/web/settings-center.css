@@ -326,7 +326,7 @@
 #settingsDialog .codex-scope label { display:flex; flex-direction:row; align-items:center; gap:8px; padding:12px; border:1px solid var(--hc-line); border-radius:8px; cursor:pointer; }
 #settingsDialog .codex-scope input { width:15px; height:15px; flex:0 0 15px; margin:0; accent-color:var(--hc-action); }
 #settingsDialog .codex-scope label:has(input:checked) { background:var(--hc-action-soft); border-color:var(--hc-action); }
-#settingsDialog .codex-apply { display:flex; align-items:center; justify-content:space-between; gap:16px; padding-top:16px; border-top:1px solid var(--hc-line); }
+#settingsDialog .codex-apply { display:flex; align-items:center; justify-content:space-between; gap:16px; position:sticky; bottom:0; z-index:2; padding:16px 0; border-top:1px solid var(--hc-line); background:var(--hc-surface); }
 #settingsDialog .codex-apply > span { color:var(--hc-muted); font-size:12px; }
 #settingsDialog .codex-actions a { color:var(--hc-action); }
 #settingsDialog .codex-connection [data-codex-quota] { padding:10px 12px; border-radius:7px; background:var(--hc-surface-soft); font-size:12px; }

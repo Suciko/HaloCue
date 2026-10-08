@@ -80,7 +80,7 @@ def _transport_retry_delay(exc: Exception, attempt: int, provider: Any) -> float
 
 
 def _is_request_deadline(exc: Exception) -> bool:
-    return isinstance(exc, RequestDeadlineError)
+    return isinstance(exc, RequestDeadlineError) or getattr(exc, "code", None) == "codex_timeout"
 
 
 def _chunk_error_code(exc: Exception) -> str:
@@ -159,12 +159,13 @@ def _temporary_output_budget(provider: Any, maximum: int):
 
 
 class AnnotationAgentError(RuntimeError):
-    def __init__(self, stage: str, scene_id: str, chunk_id: str, detail: str):
+    def __init__(self, stage: str, scene_id: str, chunk_id: str, detail: str, *, details=None):
         super().__init__(f"{stage} {scene_id}/{chunk_id}: {detail}")
         self.stage = stage
         self.scene_id = scene_id
         self.chunk_id = chunk_id
         self.detail = detail
+        self.details = details if isinstance(details, dict) else {}
 
 
 def _emit(progress: Optional[Callable[..., None]], phase: str, current: int, total: int, detail: str) -> None:
@@ -1131,7 +1132,8 @@ def run_annotation_agent(
                     break
                 if isinstance(exc, EmptyModelResponseError) and empty_retry_attempted:
                     raise AnnotationAgentError(
-                        "model_call", str(chunk["scene_id"]), chunk_id, str(exc)
+                        "model_call", str(chunk["scene_id"]), chunk_id, str(exc),
+                        details={**(getattr(exc, "details", None) or {}), "provider_code": _chunk_error_code(exc)},
                     ) from exc
                 if isinstance(exc, EmptyModelResponseError):
                     observe_chunk({"success": False, "reason": "empty_response"}, scene_id=str(chunk["scene_id"]), chunk_id=chunk_id)
@@ -1173,7 +1175,8 @@ def run_annotation_agent(
                         f"{_chunk_error_code(exc)}: {_chunk_error_detail(exc)}",
                     ) from exc
                 raise AnnotationAgentError(
-                    "model_call", str(chunk["scene_id"]), chunk_id, str(exc)
+                    "model_call", str(chunk["scene_id"]), chunk_id, str(exc),
+                    details={**(getattr(exc, "details", None) or {}), "provider_code": _chunk_error_code(exc)},
                 ) from exc
             finally:
                 capture_request_records(

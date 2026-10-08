@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import json
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
@@ -75,6 +76,22 @@ class DirectionModelGateway:
             "required": ["ok"],
             "additionalProperties": False,
         }
+        expected = {"ok": True}
+        test_kind = "connection"
+        if getattr(provider, "name", "") == "codex":
+            # Compile the real nested production schema at the model service,
+            # rather than proving only a trivial ok:boolean response works.
+            from annotation_protocol import build_chunk_schema, ANNOTATION_FIELDS
+            from services.halocue.codex_schema import CodexOutputContract
+
+            schema = build_chunk_schema(["connection-target"])
+            line = {name: False if name == "shake" else 0 if name == "move" else "" for name in ANNOTATION_FIELDS}
+            line.update(source_id="connection-target", text_fingerprint="connection-fingerprint", direction=None)
+            wire_state = {key: None for key in schema["properties"]["state_delta"]["properties"]}
+            expected = {"lines": [line], "state_delta": wire_state, "memory_events": [], "beats": []}
+            # Confirm the exact test sample itself obeys both contracts.
+            expected = json.loads(CodexOutputContract(schema).restore_text(json.dumps(expected)))
+            test_kind = "direction_schema"
         started = time.monotonic()
         try:
             budget = min(int((candidate or {}).get("max_tokens") or 4096),
@@ -84,7 +101,7 @@ class DirectionModelGateway:
                 result = provider.complete_json(
                     "You are a connection test. Return JSON only.",
                     "",
-                    'Return exactly {"ok":true}.',
+                    'Return this connection-test JSON with no story edits. Follow outputSchema; optional omitted fields must be null, and dictionaries use key/value arrays: ' + json.dumps(expected, ensure_ascii=False),
                     schema,
                 )
         except Exception as exc:
@@ -92,9 +109,9 @@ class DirectionModelGateway:
                 str(getattr(exc, "code", "model_connection_failed")),
                 str(exc),
                 status=502,
-                details={"model": str(getattr(exc, "model", "") or "")},
+                details={**getattr(exc, "details", {}), "model": str(getattr(provider, "model", "") or ""), "test_kind": test_kind},
             ) from exc
-        if not isinstance(result, dict) or result.get("ok") is not True:
+        if not isinstance(result, dict) or result != expected:
             raise ProductionError("model_connection_failed", "模型未返回有效的连接测试结果。", status=502)
         return {
             "ok": True,
@@ -102,7 +119,8 @@ class DirectionModelGateway:
                 "provider": str(getattr(provider, "name", "")),
                 "model": str(getattr(provider, "model", "")),
                 "latency_ms": round((time.monotonic() - started) * 1000),
-                "valid": result.get("ok") is True,
+                "valid": True,
+                "test_kind": test_kind,
                 "usage": dict(getattr(provider, "stats", {}) or {}),
             },
         }

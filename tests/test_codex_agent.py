@@ -187,3 +187,54 @@ def test_missing_usage_is_not_reported_as_zero_cost():
     result = codex.usage_receipt(None)
     assert result["usage_status"] == "not_reported"
     assert result["cache_status"] == "unknown" and result["estimated_cost"] is None
+
+
+def test_direction_turn_sends_recursively_strict_schema(peer, monkeypatch):
+    from annotation_protocol import build_chunk_schema
+
+    peer()
+    original = codex.AppServerClient.request
+    sent = []
+
+    def checked(client, method, params=None, **kwargs):
+        if method == "turn/start":
+            sent.append(params["outputSchema"])
+
+            def walk(node):
+                if isinstance(node, dict):
+                    if "object" in (
+                        [node.get("type")]
+                        if isinstance(node.get("type"), str)
+                        else node.get("type", [])
+                    ):
+                        assert set(node.get("required", [])) == set(node.get("properties", {}))
+                        assert node.get("additionalProperties") is False
+                    assert "maxProperties" not in node
+                    for value in node.values():
+                        walk(value)
+                elif isinstance(node, list):
+                    for value in node:
+                        walk(value)
+
+            walk(params["outputSchema"])
+        return original(client, method, params, **kwargs)
+
+    monkeypatch.setattr(codex.AppServerClient, "request", checked)
+    schema = build_chunk_schema(["source-fixture"])
+    before = json.dumps(schema)
+    turn = codex.CodexTurn(config(), "system", "user", schema=schema)
+    turn.close()
+    assert sent and json.dumps(schema) == before
+
+
+def test_error_events_preserve_final_http_schema_failure(peer):
+    peer("schema-error")
+    turn = codex.CodexTurn(config(), "system", "user")
+    with pytest.raises(codex.CodexError) as error:
+        turn.step()
+    assert "Missing 'act'" in error.value.message
+    assert "invalid_json_schema" in error.value.message
+    assert error.value.details["http_status"] == 400
+    assert error.value.details["error_type"] == "invalid_request_error"
+    assert error.value.details["error_code"] == "invalid_json_schema"
+    assert turn.client.process.poll() is not None

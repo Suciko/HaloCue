@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-PACK_VERSION = "ba-writing.productized/1.1.0"
+PACK_VERSION = "ba-writing.productized/1.1.1"
 RULE_SOURCE = "ba-writing"
+COMEDY_RULE_SOURCE = "knowledge/二创喜剧与传播.md"
 
 MODE_SOURCES = {
     "main_battle": "knowledge/modes/主线与战斗.md",
@@ -14,25 +15,26 @@ COMMON_RULES = [
     "agents/writer.md",
     "knowledge/写作内核.md",
     "knowledge/人味对话机制.md",
+    COMEDY_RULE_SOURCE,
 ]
 
 ENGINE_RULE_SOURCE = "knowledge/演出契约.md"
 DISCUSSION_RULE_SOURCE = "knowledge/创作讨论.md"
 
 WORKFLOW_RULE_SOURCES = {
-    "brief.build": ["SKILL.md", DISCUSSION_RULE_SOURCE],
+    "brief.build": ["SKILL.md", DISCUSSION_RULE_SOURCE, COMEDY_RULE_SOURCE],
     "canon.assemble": ["SKILL.md", "agents/memory-keeper.md", "knowledge/记忆系统格式规范.md"],
     "character.prepare": ["SKILL.md", "agents/writer.md", "knowledge/连续对话样本规范.md"],
-    "blueprint.generate": ["SKILL.md", "agents/chapter-planner.md", "knowledge/写作内核.md"],
-    "structure.plan": ["SKILL.md", "agents/chapter-planner.md", "knowledge/写作内核.md"],
-    "chapter.plan": ["SKILL.md", "agents/chapter-planner.md", "knowledge/写作内核.md"],
+    "blueprint.generate": ["SKILL.md", "agents/chapter-planner.md", "knowledge/写作内核.md", COMEDY_RULE_SOURCE],
+    "structure.plan": ["SKILL.md", "agents/chapter-planner.md", "knowledge/写作内核.md", COMEDY_RULE_SOURCE],
+    "chapter.plan": ["SKILL.md", "agents/chapter-planner.md", "knowledge/写作内核.md", COMEDY_RULE_SOURCE],
     "scene.context.assemble": ["SKILL.md", *COMMON_RULES, "skills/提示词组装.md", "templates/场景prompt模板.md"],
     "scene.draft.generate": ["SKILL.md", *COMMON_RULES, "skills/提示词组装.md"],
     "scene.draft.rewrite": ["SKILL.md", *COMMON_RULES, "skills/提示词组装.md"],
-    "scene.review": ["SKILL.md", "agents/style-checker.md", "knowledge/写作内核.md", "knowledge/人味对话机制.md"],
+    "scene.review": ["SKILL.md", "agents/style-checker.md", "knowledge/写作内核.md", "knowledge/人味对话机制.md", COMEDY_RULE_SOURCE],
     "continuity.review": ["SKILL.md", "agents/memory-keeper.md", "knowledge/记忆系统格式规范.md"],
     "memory.sweep": ["SKILL.md", "agents/memory-keeper.md", "knowledge/记忆系统格式规范.md"],
-    "release.review": ["SKILL.md", "agents/style-checker.md", "knowledge/写作内核.md"],
+    "release.review": ["SKILL.md", "agents/style-checker.md", "knowledge/写作内核.md", COMEDY_RULE_SOURCE],
 }
 
 DOCUMENT_SKILL = {

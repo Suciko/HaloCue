@@ -99,6 +99,13 @@ _ELECTRON_EXECUTABLES = {
     "dxil.dll", "ffmpeg.dll", "libEGL.dll", "libGLESv2.dll", "vk_swiftshader.dll",
     "vulkan-1.dll",
 }
+_CODEX_EXECUTABLES = {
+    "tools/codex/vendor/x86_64-pc-windows-msvc/bin/codex.exe",
+    "tools/codex/vendor/x86_64-pc-windows-msvc/bin/codex-code-mode-host.exe",
+    "tools/codex/vendor/x86_64-pc-windows-msvc/codex-resources/codex-command-runner.exe",
+    "tools/codex/vendor/x86_64-pc-windows-msvc/codex-resources/codex-windows-sandbox-setup.exe",
+    "tools/codex/vendor/x86_64-pc-windows-msvc/codex-path/rg.exe",
+}
 _ARCHIVE_EXTENSIONS = {".whl", ".zip"}
 _FORBIDDEN_NONEMPTY_TABLES = set(_EMPTY_TABLES)
 _SQLITE_MAGIC = b"SQLite format 3\x00"
@@ -286,13 +293,13 @@ def _path_findings(relative: str, *, mode: ScanMode) -> list[ScanFinding]:
         if mode == "public":
             allowed = relative in {"HaloCue.exe", "HaloCueUpdater.exe", "HaloCueMCP.exe"} or (
                 relative.startswith("_internal/") and suffix in {".dll", ".pyd"}
-            ) or relative in _ELECTRON_EXECUTABLES
+            ) or relative in (_ELECTRON_EXECUTABLES | _CODEX_EXECUTABLES)
         elif mode == "private":
             allowed = (
                 relative in {"HaloCue.exe", "HaloCueUpdater.exe", "HaloCueMCP.exe"}
                 or (relative.startswith("_internal/") and suffix in {".dll", ".pyd"})
                 or private_spine
-                or relative in _ELECTRON_EXECUTABLES
+                or relative in (_ELECTRON_EXECUTABLES | _CODEX_EXECUTABLES)
             )
         if not allowed:
             findings.append(

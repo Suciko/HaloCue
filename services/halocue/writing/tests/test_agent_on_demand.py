@@ -131,12 +131,12 @@ def test_lookup_can_be_followed_by_draft_and_results_are_visible_mid_turn(tmp_pa
 
 def test_discussion_loads_creative_guidance_instead_of_generation_sop(tmp_path):
     service = WritingService(tmp_path)
-    from halocue_writing.workflow_pack import DISCUSSION_RULE_SOURCE
+    from halocue_writing.workflow_pack import COMEDY_RULE_SOURCE, DISCUSSION_RULE_SOURCE
 
     discussion = service.ba_skill.required_paths(
         "main_battle", True, task_id="scene.draft.generate", output_mode="discussion_json"
     )
-    assert discussion == ["SKILL.md", DISCUSSION_RULE_SOURCE]
+    assert discussion == ["SKILL.md", DISCUSSION_RULE_SOURCE, COMEDY_RULE_SOURCE]
     manuscript = service.ba_skill.required_paths(
         "main_battle", True, task_id="scene.draft.generate", output_mode="official_script"
     )

@@ -10,6 +10,11 @@ distribution or recognized native runtime component is missing from this file.
 
 ## Python packages and bundler
 
+The Windows desktop bundle also carries the unmodified official `OpenAI Codex`
+0.153.4 native runtime (Apache-2.0) under `tools/codex`, with its LICENSE,
+NOTICE, package metadata and pinned npm SHA-512 provenance. It contains no
+account or authentication state. Runtime login belongs to each user.
+
 The separately authorized `data/reference-pack` contains maintainer-curated
 character references and extracted Blue Archive scenario staging data. Original
 game text and characters remain the property of their respective rights holders;

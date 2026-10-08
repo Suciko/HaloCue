@@ -15,7 +15,7 @@ from halocue_writing.repository import Repository, canonical_json, sha256_text
 
 
 _PROMPT_DATA = tempfile.TemporaryDirectory()
-_PROMPT_REGISTRY = BaWritingSkillRegistry()
+_PROMPT_REGISTRY = BaWritingSkillRegistry(Path(__file__).resolve().parents[1] / "skill" / "ba-writing")
 _PROMPT_REGISTRY.materialize(Repository(Path(_PROMPT_DATA.name)))
 PROMPT_ASSEMBLER = BaWritingPromptAssembler(_PROMPT_REGISTRY)
 

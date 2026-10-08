@@ -156,6 +156,34 @@ def test_choice_floats_above_composer_and_preset_sends_once(choice_server, brows
     page.close()
 
 
+def test_new_work_failure_keeps_inline_error_and_fields_until_retry(choice_server, browser):
+    from playwright.sync_api import expect
+
+    service, work, url = choice_server
+    page = open_page(browser, f"{url}/?section=projects&work_id={work['id']}", "dark", (1280, 720))
+    page.locator('[data-action="new-work"]').filter(visible=True).first.click()
+    dialog = page.locator("#workDialog")
+    title = dialog.locator('[name="title"]')
+    title.fill("网络失败后保留的作品")
+    page.route("**/works", lambda route: route.fulfill(
+        status=503, content_type="application/json",
+        body='{"error":{"code":"unavailable","message":"暂时无法建立作品，请重试。"}}',
+    ), times=1)
+    dialog.locator('[data-submit="work"]').click()
+    notice = dialog.locator("#workDialogError")
+    expect(notice).to_contain_text("暂时无法建立作品，请重试。")
+    expect(title).to_have_value("网络失败后保留的作品")
+    expect(dialog.locator('[data-submit="work"]')).to_be_enabled()
+    # The persistent explanation outlives the toast.
+    expect(page.locator("#toast")).not_to_have_class("visible", timeout=10000)
+    expect(notice).to_be_visible()
+    assert_visible_box(page, dialog.locator('[data-submit="work"]'), dialog)
+    dialog.locator('[data-submit="work"]').click()
+    expect(dialog).to_be_hidden()
+    assert len(service.list_works()) == 2
+    page.close()
+
+
 @pytest.mark.parametrize("theme", ["light", "dark"])
 def test_custom_answer_is_direct_preserved_on_failure_and_retries(choice_server, browser, theme):
     from playwright.sync_api import expect
