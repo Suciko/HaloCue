@@ -111,6 +111,7 @@
     window.HaloCueWritingWorkbench?.refreshChrome?.();
     window.HaloCueKnowledgeImpact?.mount?.();
     window.HaloCueGuidance?.mount?.();
+    window.HaloCueFirstTask?.mount?.();
     const input=document.querySelector('#sceneConversationForm textarea[name="text"]');
     if(input&&composer){
       input.value=composer.value;

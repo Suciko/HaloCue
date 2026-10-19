@@ -34,7 +34,7 @@ test('saved and adopted prose stays an editing task rather than chapter completi
 });
 test('scope dismissal survives unrelated versions and new replies, and expires for changed results',()=>{
   const task=project(discussion);
-  const prefs={deferred:{[task.scope]:task.key}};
+  const prefs={mode:'suggest',deferred:{[task.scope]:task.key}};
   assert.equal(visible(project({...discussion,version:500,messageId:'new'}),prefs),false);
   assert.equal(visible(project({...discussion,workDependency:['draft','other',null]}),prefs),true);
   assert.equal(visible(project({...writing,proposalId:'new',proposalBase:null}),prefs),true);
@@ -46,7 +46,8 @@ test('pause/free mode do not resume on state changes; an explicit request does n
     assert.equal(visible(task,value,true),true);
   }
   assert.equal(visible(null,{},true),false);
-  assert.equal(preferences({mode:'broken',deferred:[]}).mode,'suggest');
+  assert.equal(preferences({mode:'broken',deferred:[]}).mode,'free');
+  assert.equal(visible(task,{}),false);
 });
 test('different work and scene identities cannot share a cached task',()=>{
   assert.notEqual(project(writing).key,project({...writing,workId:'other'}).key);

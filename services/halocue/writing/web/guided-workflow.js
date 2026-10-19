@@ -5,7 +5,7 @@
   const modes = ['suggest', 'guided', 'free'];
   function preferences(value) {
     return {
-      mode: modes.includes(value?.mode) ? value.mode : 'suggest',
+      mode: modes.includes(value?.mode) ? value.mode : 'free',
       paused: value?.paused === true,
       deferred: value?.deferred && typeof value.deferred === 'object' && !Array.isArray(value.deferred) ? value.deferred : {},
     };
@@ -94,6 +94,7 @@
   function toolbar() {
     let host = document.querySelector('.hc-discussion-tools, .chapter-authoring-save');
     if (!host) return;
+    if (prefs().mode === 'free') { host.querySelector('[data-guidance-controls]')?.remove(); return; }
     let node = host.querySelector('[data-guidance-controls]');
     if (!node) {
       node = document.createElement('div');
@@ -121,7 +122,8 @@
     const input = snapshot(), task = project(input), forced = task?.key === requestedKey;
     const show = visible(task, prefs(), forced);
     const original = legacyAction();
-    if (original) original.hidden = !show;
+    // The ordinary Agent action remains part of chat, even without teaching.
+    if (original) original.hidden = prefs().mode !== 'free' && !show;
     const work = section === 'works';
     const owner = work ? original?.closest('.message-bubble') : document.querySelector('.chapter-authoring');
     const scroller = work ? original?.closest('[data-work-discussion-scroll]') : null;
@@ -198,6 +200,12 @@
   document.addEventListener('input', event => {
     if (event.target.matches('[data-chapter-text],[data-chapter-speaker],#sceneManuscriptForm textarea')) queueMicrotask(mount);
   });
-  root.HaloCueGuidance = { ...exports, mount, canReveal: () => !interactionBlocked() };
+  function enable() { if (!state.work) { toast('打开作品后，可以按需开启创作陪跑。'); return; } prefs().mode = 'guided'; prefs().paused = false; persist(); mount(true); }
+  function stop() { if (!state.work) return; prefs().mode = 'free'; requestedKey = ''; persist(); mount(); }
+  document.addEventListener('click', event => {
+    if (!event.target.closest('[data-guidance-enable]')) return;
+    event.preventDefault(); document.getElementById('settingsDialog')?.close(); enable();
+  });
+  root.HaloCueGuidance = { ...exports, mount, enable, stop, canReveal: () => !interactionBlocked() };
   registerRenderHook('guided-authoring', mount);
 })(typeof window !== 'undefined' ? window : globalThis);

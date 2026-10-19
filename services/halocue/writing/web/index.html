@@ -26,7 +26,7 @@
   <link rel="stylesheet" href="/chapter-authoring-ui.css?v=20261002-compact-chat1">
   <link rel="stylesheet" href="/knowledge-graph-ui.css?v=20260930-graph-fix1">
   <link rel="stylesheet" href="/startup.css?v=20261004-unified1">
-  <link rel="stylesheet" href="/guided-workflow.css?v=20261019-g1">
+  <link rel="stylesheet" href="/guided-workflow.css?v=20261019-first-use">
 </head>
 <body class="app-loading">
   <div class="boot-screen" id="bootScreen" role="status" aria-live="polite">
@@ -738,6 +738,8 @@
             <div class="about-help-card"><div><b>让创作顺手一点</b><p>从第一场开始，查看写作、素材绑定与制作检查的操作说明。</p></div><button type="button" class="primary" data-action="help">打开使用手册</button></div>
             <h4 class="settings-section-title">环境与更多设置</h4>
             <div class="settings-shortcut-grid">
+              <button type="button" data-first-task-start><b>重看首次创作教学</b><small>跟着自己的作品学习，完成后退出教学</small></button>
+              <button type="button" data-guidance-enable><b>开启创作陪跑（可选）</b><small>熟悉软件后按需开启，默认不显示持续引导</small></button>
               <button type="button" data-settings-pane="system"><b>运行诊断 <span aria-hidden="true">↗</span></b><small>写作、制作服务与本地密钥保护状态</small></button>
               <button type="button" data-settings-pane="conversations"><b>已归档对话 <span aria-hidden="true">↗</span></b><small>检索并恢复归档的创作对话</small></button>
               <button type="button" data-settings-pane="corpus"><b>资料与素材索引 <span aria-hidden="true">↗</span></b><small>查看官方语料与素材索引状态</small></button>
@@ -929,7 +931,7 @@
 
   <dialog id="helpDialog" class="help-modal" aria-labelledby="helpDialogTitle">
     <div class="help-dialog-shell">
-      <header class="help-dialog-header"><div><p class="eyebrow">HALOCUE / 使用手册</p><h2 id="helpDialogTitle">帮助中心</h2></div><div class="help-dialog-actions"><a class="quiet" id="helpStandaloneLink" href="/help/" target="_blank" rel="noopener noreferrer">独立打开 ↗</a><button type="button" class="icon-button" data-close-help aria-label="关闭帮助中心" title="关闭 (Esc)">×</button></div></header>
+      <header class="help-dialog-header"><div><p class="eyebrow">HALOCUE / 使用手册</p><h2 id="helpDialogTitle">帮助中心</h2></div><div class="help-dialog-actions"><button type="button" class="quiet" data-first-task-start>重看新手教学</button><a class="quiet" id="helpStandaloneLink" href="/help/" target="_blank" rel="noopener noreferrer">独立打开 ↗</a><button type="button" class="icon-button" data-close-help aria-label="关闭帮助中心" title="关闭 (Esc)">×</button></div></header>
       <p id="helpLoadStatus" class="help-load-status" role="status" aria-live="polite">正在载入本机使用手册…</p>
       <div id="helpLoadError" class="help-load-error" role="alert" hidden><b>使用手册暂时无法载入</b><p>你可以先重新载入，或独立打开手册。仍无法读取时，请从「设置 → 关于」查看运行诊断；作品内容不受影响。</p><button type="button" class="quiet" data-help-retry>重新载入</button></div>
       <iframe id="helpFrame" title="HaloCue 使用手册" referrerpolicy="same-origin" hidden></iframe>
@@ -955,7 +957,7 @@
   <script src="/change-review.js?v=20261004-chapter-notes1" defer></script>
   <script src="/activity-refresh.js?v=20260925-activity1" defer></script>
   <script src="/authoring-workspace-ui.js?v=20261004-discussion-outline1" defer></script>
-  <script src="/chapter-authoring-ui.js?v=20261019-guidance-g1" defer></script>
+  <script src="/chapter-authoring-ui.js?v=20261019-first-use" defer></script>
   <script src="/vendor/echarts/echarts-6.0.0.min.js" defer></script>
   <script src="/knowledge-graph-ui.js?v=20260930-graph-fix1" defer></script>
   <script src="/app.js?v=20261019-guidance-g1" defer></script>
@@ -965,7 +967,8 @@
   <!-- writing-workbench.js?v=20260821-39, writing-workbench.js?v=20260822-65 retained for contract compatibility; the resource version below is current. -->
   <script src="/adaptation-workbench.js?v=20260927-adaptation4" defer></script>
   <script src="/writing-workbench.js?v=20261003-external-agent1" defer></script>
-  <script src="/guided-workflow.js?v=20261019-g1" defer></script>
+  <script src="/guided-workflow.js?v=20261019-first-use" defer></script>
+  <script src="/first-use-task.js?v=20261019-first-use" defer></script>
   <script src="/shell.js?v=20260924-navigation5" defer></script>
   <script src="/production-embed.js?v=20261006-aa-install-review1" defer></script>
   <script src="/app-chrome.js?v=20260925-global1" defer></script>

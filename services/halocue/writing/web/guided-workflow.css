@@ -15,3 +15,7 @@
 .hc-task-guidance button:focus-visible,.hc-guidance-controls :is(select,button):focus-visible{outline:2px solid var(--hc-accent,var(--action));outline-offset:2px}
 .chapter-authoring-save{flex-wrap:wrap}
 @media(max-width:760px){.hc-task-guidance{align-items:flex-start;flex-direction:column;gap:8px}.hc-guidance-controls{gap:4px}.hc-guidance-controls label>span{display:none}.hc-guidance-controls select{max-width:108px}.hc-canvas-header .hc-discussion-tools{flex-wrap:wrap;justify-content:flex-end}}
+.hc-first-task{display:flex;flex-shrink:0;align-items:center;justify-content:space-between;gap:18px;margin:12px 0 18px;padding:16px 18px;border:1px solid var(--hc-line,var(--line));border-radius:12px;background:var(--hc-panel,var(--surface));color:var(--hc-text,var(--ink))}
+.hc-first-task>div:first-child{min-width:0}.hc-first-task span{font-size:12px;color:var(--hc-accent,var(--action))}.hc-first-task h2{font:600 16px/1.6 var(--font-ui);margin:4px 0}.hc-first-task p{font:13px/1.8 var(--font-ui);color:var(--hc-muted,var(--muted));margin:0;text-wrap:pretty}
+.hc-first-task-actions{display:flex;flex-wrap:wrap;align-items:center;gap:7px;flex-shrink:0}.hc-first-task-actions button{min-height:34px;font-size:12px;white-space:nowrap}.hc-first-use-target{outline:2px solid var(--hc-accent,var(--action))!important;outline-offset:4px}
+@media(max-width:1100px){.hc-first-task{flex-direction:column;align-items:flex-start;gap:10px}.hc-first-task-actions{flex-shrink:1}}

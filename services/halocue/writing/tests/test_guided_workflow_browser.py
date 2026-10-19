@@ -14,12 +14,20 @@ browser = guidance_fixture.browser
 flow_server = guidance_fixture.flow_server
 
 
+def enable_optional_companion(page):
+    page.locator("#openSettingsButton").click()
+    page.locator("#settingsTab-about").click()
+    page.locator("[data-guidance-enable]").click()
+
+
 @pytest.mark.parametrize("theme,size", [("light", (1600, 900)), ("dark", (1280, 720))])
 def test_guided_reply_pause_and_dismiss_keep_input_and_persist(flow_server, browser, theme, size):
     service, provider, work, url = flow_server
     page = open_page(browser, f"{url}/?section=works&work_id={work['id']}", theme, size)
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
+    expect(page.locator("[data-guidance-controls]")).to_have_count(0)
+    enable_optional_companion(page)
     mode = page.get_by_label("用户引导模式")
     expect(mode).to_be_visible()
     mode.select_option("guided")
@@ -59,6 +67,7 @@ def test_guidance_carries_into_scene_and_never_sends_prepared_request(flow_serve
     provider.next_step = "draft"
     send(service, service.get_work(work_id), "先写活动室的开场。")
     page = open_page(browser, f"{url}/?section=works&work_id={work_id}", "light", (1600, 900))
+    enable_optional_companion(page)
     page.get_by_label("用户引导模式").select_option("guided")
     calls = provider.calls
     page.locator(".agent-reply-next-step").get_by_role("button", name="进入正文写作").click()
@@ -93,6 +102,7 @@ def test_manual_draft_pause_and_refresh_preserve_the_same_prose(flow_server, bro
         "dark",
         (1280, 720),
     )
+    enable_optional_companion(page)
     page.get_by_label("用户引导模式").select_option("guided")
     panel = page.get_by_role("region", name="当前任务引导")
     panel.get_by_role("button", name="自己写", exact=True).click()
@@ -132,6 +142,7 @@ def test_current_candidate_guides_review_but_only_explicit_apply_changes_prose(
         "() => state.context?.scene_id === state.sceneId && "
         "Boolean(sceneConversationThread(selectedScene())) && !state._contextLoadingScene"
     )
+    enable_optional_companion(page)
     panel = page.get_by_role("region", name="当前任务引导")
     expect(panel).to_contain_text("在原文位置核对这份修改")
     panel.get_by_role("button", name="查看第一处改动").click()
