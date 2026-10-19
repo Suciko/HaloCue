@@ -110,6 +110,7 @@
     if(typeof decorateSceneContext==='function')decorateSceneContext();
     window.HaloCueWritingWorkbench?.refreshChrome?.();
     window.HaloCueKnowledgeImpact?.mount?.();
+    window.HaloCueGuidance?.mount?.();
     const input=document.querySelector('#sceneConversationForm textarea[name="text"]');
     if(input&&composer){
       input.value=composer.value;
@@ -161,5 +162,5 @@
   async function runReview(){const {work,chapter}=current();if(!work||!chapter||reviewBusy||sceneThreadPending()||anyDirty(chapter)||!chapter.scenes?.some(scene=>original(scene).some(block=>block.text.trim())))return;reviewBusy=true;notice='正在检查整章…';refresh();try{await runDurableAgentJob('chapter.review',chapter.id,{expected_version:work.version});if(state.work?.id===work.id){reviewKey='';notice='整章检查已完成';refresh()}}catch(error){notice=`整章检查失败：${error.message}`;reviewKey='';refresh()}finally{reviewBusy=false;refresh()}}
   async function decideReview(decision){const {work,chapter}=current();if(!work||!chapter||!review?.id||reviewBusy||anyDirty(chapter))return;const selected=[...document.querySelectorAll('[data-chapter-review-item]:checked')].map(node=>node.value);if(decision==='accept'&&!selected.length){notice='请至少选择一项变化，或选择保持当前设定。';refresh();return}reviewBusy=true;try{const result=await api(`/works/${work.id}/chapters/${chapter.id}/review:decide`,{method:'POST',body:JSON.stringify({review_id:review.id,expected_version:work.version,decision,...(decision==='accept'?{selected_item_ids:selected}:{})})});if(state.work?.id===work.id){state.work=result.work;review=result.review;reviewKey=`${work.id}:${chapter.id}:${state.work.version}`;notice='已记录整章变化决定';refresh()}}catch(error){notice=`决定未保存：${error.message}`;refresh()}finally{reviewBusy=false;refresh()}}
   window.addEventListener('beforeunload',event=>{if(drafts.size){event.preventDefault();event.returnValue=''}});
-  window.HaloCueChapterAuthoring={render,get active(){return Boolean(document.querySelector('.chapter-authoring'))}};
+  window.HaloCueChapterAuthoring={render,get active(){return Boolean(document.querySelector('.chapter-authoring'))},get hasUnsavedDrafts(){return anyDirty(writingChapter())}};
 })();

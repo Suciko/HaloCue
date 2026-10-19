@@ -8600,7 +8600,7 @@ async function refreshAfterAgentRun(run,workId=state.work?.id,session=hcWorkLoad
   state.activeAgentRunId='';state.decisionCardWaitingForAgent=false;
   const terminal=run?.status||'failed';
   setBusy(terminal==='cancelled'?'本轮已取消':terminal==='failed'?'Agent 运行失败':'回应已保存');render();
-  if(terminal!=='failed'&&terminal!=='cancelled'&&run?.proposal_id&&pendingProposal()?.id===run.proposal_id&&run.policy?.thread_id===sceneConversationThread()?.id){
+  if(terminal!=='failed'&&terminal!=='cancelled'&&run?.proposal_id&&pendingProposal()?.id===run.proposal_id&&run.policy?.thread_id===sceneConversationThread()?.id&&window.HaloCueGuidance?.canReveal?.()!==false){
     window.HaloCueWritingWorkbench?.focusDiff();
   }
   if(terminal==='cancelled')toast('已停止本轮生成，正式资料没有改变');

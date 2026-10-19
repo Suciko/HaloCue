@@ -1,0 +1,17 @@
+.hc-guidance-controls{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12px;margin-left:auto;color:var(--hc-muted,var(--muted))}
+.hc-guidance-controls label{display:flex;flex-direction:row;align-items:center;gap:5px;margin:0;font-size:12px}
+.hc-guidance-controls select{width:auto;max-width:122px;min-height:30px;padding:3px 22px 3px 7px;border:1px solid var(--hc-line,var(--line));border-radius:7px;background:var(--hc-panel,var(--surface));color:var(--hc-text,var(--ink));font:inherit}
+.hc-guidance-controls button.quiet{min-height:30px;padding:4px 7px!important;font-size:12px!important;white-space:nowrap}
+.hc-guidance-controls button[hidden],.agent-reply-next-step[hidden]{display:none!important}
+.hc-task-guidance{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;margin:8px 0 12px;border:1px solid var(--hc-line,var(--line));border-radius:10px;background:var(--hc-panel,var(--surface));color:var(--hc-text,var(--ink));min-width:0}
+.hc-guidance-copy{min-width:0}
+.hc-guidance-copy>span{font-size:11px;color:var(--hc-muted,var(--muted))}
+.hc-guidance-copy p{margin:3px 0;font-size:13px;line-height:1.6;font-weight:600;overflow-wrap:anywhere}
+.hc-guidance-copy small{font-size:12px;line-height:1.65;color:var(--hc-muted,var(--muted))}
+.hc-guidance-actions{display:flex;align-items:center;flex-wrap:wrap;gap:6px;flex-shrink:0}
+.hc-guidance-actions .agent-reply-next-step{display:inline-flex;margin:0}
+.hc-guidance-actions button.quiet{font-size:12px;min-height:32px;padding:5px 9px;white-space:nowrap}
+.hc-guidance-actions [data-guidance-action]:first-child{color:var(--hc-accent,var(--action));border-color:var(--hc-line,var(--action-line))}
+.hc-task-guidance button:focus-visible,.hc-guidance-controls :is(select,button):focus-visible{outline:2px solid var(--hc-accent,var(--action));outline-offset:2px}
+.chapter-authoring-save{flex-wrap:wrap}
+@media(max-width:760px){.hc-task-guidance{align-items:flex-start;flex-direction:column;gap:8px}.hc-guidance-controls{gap:4px}.hc-guidance-controls label>span{display:none}.hc-guidance-controls select{max-width:108px}.hc-canvas-header .hc-discussion-tools{flex-wrap:wrap;justify-content:flex-end}}
