@@ -6238,9 +6238,9 @@ button:disabled {
   align-items: start;
   gap: 9px;
   margin-bottom: 10px;
-  border: 1px solid #ecd5d1;
+  border: 1px solid var(--hc-line, var(--line));
   border-radius: 7px;
-  background: #fff9f8;
+  background: var(--hc-panel, var(--surface));
   padding: 10px;
 }
 

@@ -5,10 +5,13 @@
   function lesson(input, record) {
     const item = (step, title, detail, action, label, target = '') => ({step, title, detail, action, label, target});
     if (record.status !== 'active') return null;
+    if (input.workMissing) return item(1, input.canRestoreTeaching ? '恢复原来的教学作品' : '教学作品已移出作品列表', input.canRestoreTeaching ? '点亮起的“恢复作品”，原有正文和版本会一起保留。恢复后可返回原教学继续，也可以重新选定自己的作品。' : '可以从作品页的回收站恢复它，再继续原来的教学；也可以重新选定自己的作品。', 'restart', input.workId ? '用当前作品继续' : '从新作品开始', '[data-project-trash-toggle],[data-section="projects"]');
     if (record.workId && input.workId !== record.workId) return item(1, '回到正在学习的作品', '这次教学跟着你选定的作品进行，切换作品不会重置学习记录。', 'return', '返回教学作品');
     if (!input.workId) return item(1, '先建立你自己的作品', '起一个名称就可以，人物、世界观和模型都不必现在填完。', 'create', '建立我的作品', '[data-action="new-work"]');
     if (input.targetMissing) return item(3, '重新选择要学习的场景', '之前的场景已经移除。打开章节大纲，选择或建立另一个场景后继续。', 'structure', '重新选择场景');
     if (input.saved) return item(5, '第一段正文已经保存', '你已走过建立作品、进入正文和保存的过程。后续创作不再默认显示教学；需要时可从帮助里重看。', 'finish', '完成教学');
+    if (input.atProjects) return input.inTrash ? item(1, '回到作品列表继续', '作品已经恢复。点亮起的“返回作品”，再打开这部作品继续教学。', 'projects', '返回作品列表', '[data-project-trash-toggle]') : item(1, '打开自己的作品继续', '点亮起的“打开构思”，回到这部作品。已有内容和教学进度都会保留。', 'open-work', '打开教学作品');
+    if (!record.manual && input.recovery) return item(input.sceneId ? 4 : 3, '这一步还没有完成', '先看亮起的失败说明，按提示重试或调整设置。之前的输入仍保留；也可以选择先自己写。', 'recover', '定位恢复操作');
     if (!record.manual && !input.hasIdea && !input.sceneId) return item(2, '说说你想写什么', '在构思输入框写一句人物、场景或看点。使用助手需要连接写作模型，也可以先自己写。', 'idea', '去写下想法', '#workConversationForm textarea');
     if (!input.sceneId) {
       if (input.busy) return item(3, '正在整理你的想法', '等这次操作结束后，再核对结果；教学不会代你确认。', '', '等待本轮结束');
@@ -17,11 +20,16 @@
       if (input.atStructure) return item(3, '添加故事的第一场', input.addSceneVisible === false ? '先点亮起的“目录”展开场景栏，再点“添加场景”。' : '点亮起的“添加场景”。先填名称，就能进入这一场的正文。', 'add-scene', '添加第一场', '[data-structure-add-scene]');
       return item(3, '先找到正文的位置', input.compactNav ? '在亮起的视图菜单里选择“章节大纲”，再添加第一场。' : '点顶部亮起的“章节大纲”，再为自己的故事添加第一场。', 'structure', '打开章节大纲', '[data-creation-view="structure"]');
     }
-    if (!input.atDraft) return item(3, '打开这一场的正文', '左边目录负责找到场景，中间正文负责写作。现在先进入你要写的这一场。', 'draft', '进入第一场正文');
+    if (!input.atDraft) return item(3, '打开这一场的正文', input.inDraftView ? input.draftSceneVisible ? '点左侧亮起的场景，选定这次要写的正文。' : '先点亮起的“目录”展开场景栏，再选择要写的那一场。' : input.compactNav ? '在亮起的视图菜单里选择“正文写作”，再选择要写的场景。' : '点顶部亮起的“正文写作”，再从左侧目录选择要写的场景。', 'draft', '进入第一场正文');
+    if (input.contextEditing) return item(4, '为这一场选好人物', '勾选本场实际出场的人物，再点“保存本场上下文”。世界设定和证据资料可以按需选择。', 'context', '固定本场读取范围', '#sceneContextForm');
+    if (!record.manual && input.preparingScene) return item(4, '正在准备本场资料', '系统正在读取本场资料并建立对话。准备好后会指出需要补齐的项目，或带你提出试写要求。', 'wait', '等待资料准备');
     if (input.reading && (input.dirty || !input.proposalId && (record.manual || !input.canPrepare))) return item(4, '先切到编辑，再动笔', '点亮起的“编辑”，再写下或修改正文。切换后会保留原有文字和未保存内容。', 'edit', '切到编辑模式', '[data-chapter-view="edit"]');
     if (input.dirty && input.emptyField) return item(4, '先在亮起的段落里写一句', '空白段落还不能保存。先写正文；选择“对白”时，也要填上说话人。', 'write', '写下第一句', '[data-chapter-text]');
     if (input.dirty) return item(4, '写好后，点这里保存', '输入仍然保留。点亮起的“保存整章”，才会建立可回看的正文版本。', 'save', '保存这段正文', '[data-chapter-save]');
+    if (!record.manual && input.sceneBusy) return item(4, '正在准备本场候选', '这一轮仍在处理，结束后再核对结果。需要中断时，可以点亮起区域中的“停止本轮”。', 'wait', '等待本轮结束');
     if (input.proposalId) return item(4, '先审查，再采用助手的文字', '在原文位置比较改前与改后，勾选想保留的变化，再点“应用”。教学不会自动替你采纳。', 'review', '查看本次改动', '[data-scene-change]');
+    if (!record.manual && input.proposalSuperseded) return item(4, '之前的候选已失效', input.canPrepare ? input.agentVisible ? '本场设定或正文已经变化，旧候选不能继续采用。在亮起的输入框按当前设定重新提出要求，也可以先自己写。' : '本场设定或正文已经变化，旧候选不能继续采用。先展开亮起的“Agent”，按当前设定重新提出要求，也可以先自己写。' : '本场设定或正文已经变化，旧候选不能继续采用。先按亮起区域的说明补齐写作依据，也可以选择先自己写。', input.canPrepare ? 'prepare' : 'setup', '准备新的试写要求');
+    if (!record.manual && input.preparationRequired) return item(4, '先补齐本场写作依据', input.agentVisible ? '亮起的区域列出了当前缺项。按其中的按钮补齐人物或资料，准备好后再告诉助手怎么写；也可以先自己写。' : '先点亮起的“Agent”展开助手，查看本场缺少的写作依据；也可以先自己写。', 'setup', '查看本场缺项');
     return item(4, input.revisionId ? '试着修改并保存一处正文' : '写下你自己的第一段', input.canPrepare && !record.manual ? input.agentVisible ? '在亮起的输入框告诉助手“起草本场”。发送后先审查候选；也可以选择自己写。' : '先点亮起的“Agent”展开助手，再告诉它“起草本场”。也可以选择自己写。' : input.revisionId ? '直接修改亮起的段落，再点“保存整章”。段落左上角可以选择旁白、动作或对白。' : '点亮起的“开始写作”，写一两句。段落左上角可以选择旁白、动作或对白。', input.canPrepare && !record.manual ? 'prepare' : 'manual', input.canPrepare && !record.manual ? '准备试写要求' : '自己写第一段', '[data-chapter-add],[data-chapter-text]');
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = {lesson};
@@ -42,12 +50,21 @@
     if (record?.status === 'active' && state.work?.id === record.workId && scene && !record.sceneId) { record.sceneId = scene.id; save(); }
     const revisionId = revisions()[scene?.id] || null;
     const thread = workConversationThread();
+    const proposal = (state.work?.proposals || []).find(item => item.kind === 'scene_script' && item.scope_id === scene?.id);
     return {
       workId: state.work?.id, sceneId: scene?.id, revisionId,
+      atProjects: state.route?.section === 'projects', inTrash: Boolean(state.projectsTrashOpen),
+      workMissing: Boolean(record?.workId && state.work?.id !== record.workId && !state.works?.some(item => item.id === record.workId)),
+      canRestoreTeaching: Boolean(record?.workId && pick(`[data-restore-work="${CSS.escape(record.workId)}"]`)),
       targetMissing: Boolean(record?.sceneId && state.work?.id === record.workId && !scene),
       saved: Boolean(scene && revisionId && revisionId !== record?.baseline?.[scene.id]),
       hasIdea: Boolean(brief()?.idea || (thread?.messages || []).some(item => item.role === 'user')),
       atDraft: state.route?.section === 'writing' && state.stage === 'draft' && state.sceneId === scene?.id,
+      inDraftView: state.route?.section === 'writing' && state.stage === 'draft',
+      draftSceneVisible: Boolean(scene && pick(`[data-scene="${CSS.escape(scene.id)}"],[data-scene-open="${CSS.escape(scene.id)}"]`)),
+      contextEditing: Boolean(pick('#sceneContextForm')),
+      preparingScene: Boolean(scene && blueprintIsConfirmed() && state.context?.scene_id !== scene.id && !state._contextBlocked && !state._contextError),
+      sceneBusy: Boolean(scene && sceneConversationThread(scene) && workAgentActiveRun(sceneConversationThread(scene))),
       reading: Boolean(document.querySelector('[data-chapter-view="read"][aria-pressed="true"]')),
       atStructure: state.route?.section === 'writing' && state.stage === 'structure',
       compactNav: Boolean(document.querySelector('[data-creation-select]')?.getClientRects().length),
@@ -55,10 +72,13 @@
       dirty: Boolean(state.manuscriptDirty || root.HaloCueChapterAuthoring?.hasUnsavedDrafts),
       emptyField: Boolean([...document.querySelectorAll('.chapter-authoring [data-chapter-block]')].some(node => !node.querySelector('[data-chapter-text]')?.value.trim() || node.dataset.blockType === 'dialogue' && !node.querySelector('[data-chapter-speaker]')?.value.trim())),
       proposalId: (state.work?.proposals || []).find(item => item.kind === 'scene_script' && item.scope_id === scene?.id && item.status === 'pending')?.id,
+      proposalSuperseded: proposal?.status === 'superseded',
+      recovery: Boolean(pick('.scene-agent-recovery-card:has(button),.agent-failure-card:has(button),.agent-recovery-card:has(button)')),
       planPending: Boolean(workPlanProposal()), hasNextAction: Boolean(document.querySelector('.agent-reply-next-step button')),
       nextLabel: document.querySelector('.agent-reply-next-step button')?.textContent.replace('↗', '').trim(),
       busy: Boolean(thread && workAgentActiveRun(thread)),
       canPrepare: Boolean(state.context?.scene_id === scene?.id && sceneReadinessView(state.context).canRun && sceneConversationThread(scene)),
+      preparationRequired: Boolean(blueprintIsConfirmed() && state.context?.scene_id === scene?.id && !sceneReadinessView(state.context).canRun),
       agentVisible: Boolean(document.querySelector('#sceneConversationForm')?.getClientRects().length),
     };
   }
@@ -77,7 +97,12 @@
     if (modal) return [modal];
     const scene = input.sceneId && document.querySelector(`[data-chapter-scene="${CSS.escape(input.sceneId)}"]`);
     if (task.action === 'idea') return [pick('#workConversationForm')];
-    if (task.action === 'prepare') return [pick('#sceneConversationForm') || pick('[data-panel-toggle="inspector"]')];
+    if (task.action === 'prepare') return [pick('#sceneConversationForm') || pick('[data-inspector="agent"]') || pick('[data-panel-toggle="inspector"]')];
+    if (task.action === 'setup') return [pick('#sceneConversationForm .scene-discussion-mode') || pick('#sceneConversationForm') || pick('[data-inspector="agent"]') || pick('[data-panel-toggle="inspector"]')];
+    if (task.action === 'wait') return [pick('[data-scene-conversation-scroll]'), pick('#sceneConversationForm')];
+    if (task.action === 'recover') return [pick('.scene-agent-recovery-card:has(button),.agent-failure-card:has(button),.agent-recovery-card:has(button)')];
+    if (task.action === 'restart') return [pick(`[data-restore-work="${CSS.escape(record.workId)}"]`) || pick('[data-project-trash-toggle]') || pick('[data-section="projects"]')];
+    if (task.action === 'open-work') return [pick(`.project-open[data-select-work="${CSS.escape(record.workId)}"]`)];
     if (task.action === 'plan') return [pick('[data-accept-director-proposal]')?.closest('.agent-inline-artifact,.work-decision-dock')];
     if (task.action === 'review') return [scene];
     if (!task.action) return [pick('[data-work-discussion-scroll]')];
@@ -172,7 +197,7 @@
     document.documentElement.classList.add('hc-first-use-active');
     const copy = `<span>${offered ? '第一次使用 HaloCue' : `首次创作 · ${task.step} / 4`}</span><h2>${escape(task.title)}</h2><p>${escape(task.detail)}</p>`;
     const body = layer.querySelector('[data-first-task-copy]'); if (body.innerHTML !== copy) body.innerHTML = copy;
-    const controls = `${offered ? '<button type="button" class="primary" data-first-task-action="start">带我开始</button><button type="button" class="quiet" data-first-task-action="dismiss">我已熟悉，跳过</button>' : `${task.step === 2 || task.action === 'prepare' ? '<button type="button" class="quiet" data-first-task-action="self-write">先自己写</button>' : ''}${task.step === 2 ? '<button type="button" class="quiet" data-first-task-action="model">连接写作模型</button>' : ''}${task.action === 'return' || input.targetMissing ? `<button type="button" class="primary" data-first-task-action="${task.action}">${escape(task.label)}</button>` : ''}<button type="button" class="quiet" data-first-task-action="pause">稍后继续</button>`}<button type="button" class="quiet" data-first-task-locate>定位当前操作</button>`;
+    const controls = `${offered ? '<button type="button" class="primary" data-first-task-action="start">带我开始</button><button type="button" class="quiet" data-first-task-action="dismiss">我已熟悉，跳过</button>' : `${task.step === 2 || ['prepare', 'setup', 'recover'].includes(task.action) ? '<button type="button" class="quiet" data-first-task-action="self-write">先自己写</button>' : ''}${task.step === 2 ? '<button type="button" class="quiet" data-first-task-action="model">连接写作模型</button>' : ''}${['return', 'restart'].includes(task.action) || input.targetMissing ? `<button type="button" class="primary" data-first-task-action="${task.action}">${escape(task.label)}</button>` : ''}<button type="button" class="quiet" data-first-task-action="pause">稍后继续</button>`}<button type="button" class="quiet" data-first-task-locate>定位当前操作</button>`;
     const actions = layer.querySelector('.hc-first-use-actions'); if (actions.innerHTML !== controls) actions.innerHTML = controls;
     targets = taskTargets(task, input).filter(Boolean); watchTargets(); schedulePosition();
   }
@@ -200,10 +225,11 @@
     if (action === 'dismiss' || action === 'pause') { record.status = action === 'dismiss' ? 'dismissed' : 'paused'; save(); clear(); mount(); if (action === 'pause') toast('教学已暂停，可从“帮助 → 继续首次创作教学”接着做。'); return; }
     if (record?.status !== 'active') return;
     const input = snapshot();
+    if (action === 'restart' && input.workMissing) { record = {status:'active', manual:false}; save(); bind(); mount(); return; }
     if (action === 'return') { void root.HaloCueRouter.openWork(record.workId); return; }
     if (input.workId !== record.workId) { mount(); return; }
     const current = lesson(input, record);
-    const secondary = (action === 'self-write' && (current?.step === 2 || current?.step === 4)) || (action === 'model' && current?.step === 2);
+    const secondary = (action === 'self-write' && (current?.step === 2 || current?.step === 4 || current?.action === 'recover')) || (action === 'model' && current?.step === 2);
     if (current?.action !== action && !secondary) { mount(); return; }
     if (action === 'self-write') { record.manual = true; save(); mount(); return; }
     if (action === 'model') { document.getElementById('openSettingsButton')?.click(); return; }

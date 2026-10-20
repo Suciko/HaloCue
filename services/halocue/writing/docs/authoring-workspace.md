@@ -55,6 +55,21 @@ Frontend main navigation and forms are owned by the Sol implementation agent. Ba
 
 The new APIs still require frontend integration and broader regression before the feature can be reported complete.
 
+## First scene drafting through the Agent
+
+An explicit first-draft request in a prepared, empty scene can call the internal
+`propose_scene_draft` tool. It takes `text` and `reason`; the scene identity comes
+from the bound conversation. The result is one `scene_script` Proposal with a
+null base revision, reviewed through the existing inline comparison and accept
+operation. Discussion-only conversations and existing manuscripts cannot use it.
+Existing manuscripts continue through `propose_scene_text_edit`.
+
+The final authorized Agent commit rechecks the empty manuscript, pending
+candidates, confirmed inputs, scene contract, rule readiness and speaker names.
+Changed inputs or cancellation cannot create a late candidate. Tool followups
+receive a short receipt without echoing the full draft. This adds no HTTP route
+or persisted schema migration; the registry's JSON schema defines the tool input.
+
 ## Verification
 
 `python -X utf8 -m pytest services/halocue/writing/tests/test_authoring_workspace.py -q`

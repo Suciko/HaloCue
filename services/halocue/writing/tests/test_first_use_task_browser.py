@@ -8,6 +8,8 @@ from playwright.sync_api import expect
 
 from test_choice_ui_browser import open_page, screenshot
 from test_scene_conversation_harness import create_ready_scene
+from test_discussion_guidance import make_catalog
+from first_use_fixture_support import DraftingProvider, assert_readable_surface
 
 browser = authoring_fixture.browser
 local_authoring = authoring_fixture.local_authoring
@@ -22,6 +24,68 @@ def assert_pointer_clear_of(page, target):
         or tip["y"] + tip["height"] <= box["y"]
         or tip["y"] >= box["y"] + box["height"]
     ), (tip, box)
+
+
+@pytest.mark.parametrize("theme,size", [("light", (1600, 900)), ("dark", (1280, 720))])
+def test_first_ai_work_follows_direction_structure_and_scene_review(
+    local_authoring, browser, tmp_path, theme, size
+):
+    service, url = local_authoring
+    service.bundled_characters = make_catalog(tmp_path / "cards")
+    service.provider = DraftingProvider()
+    page = open_page(browser, f"{url}/?section=projects", theme, size)
+    task = page.get_by_role("region", name="首次创作教学")
+    task.get_by_role("button", name="带我开始", exact=True).click()
+    page.locator('[data-action="new-work"]').filter(visible=True).first.click()
+    page.locator('#workDialog input[name="title"]').fill("自己的 AI 开场")
+    page.locator("#workDialog").get_by_role("button", name="建立作品", exact=True).click()
+    expect(task).to_contain_text("说说你想写什么")
+    composer = page.locator("#workConversationForm")
+    composer.locator("textarea").fill(
+        "我想写日奈和亚子夜里检查档案室的故事，老师不出场。两人核对记录，发现提示灯回应就结束。请整理故事方向。"
+    )
+    composer.locator('[type="submit"]').click()
+    expect(task).to_contain_text("顺着这条回复继续")
+    page.locator(".agent-reply-next-step button").click()
+    accept = page.get_by_role("button", name="采纳为正式方向", exact=True)
+    expect(accept).to_be_visible(timeout=15000)
+    expect(task).to_contain_text("先看懂这份方案候选")
+    work_id = parse_qs(urlsplit(page.url).query)["work_id"][0]
+    assert not any(
+        item["kind"] == "story_blueprint" for item in service.get_work(work_id)["artifacts"]
+    )
+    accept.click()
+    composer.locator("textarea").fill("请整理章节和场景结构，一章一场，结束在提示灯第一次回应。")
+    composer.locator('[type="submit"]').click()
+    page.get_by_role("button", name="整理章节安排", exact=True).click()
+    structure = page.get_by_role("button", name="采用并建立结构", exact=True)
+    expect(structure).to_be_visible(timeout=15000)
+    expect(task).to_contain_text("先看懂这份方案候选")
+    structure.click()
+    expect(task).to_contain_text("打开这一场的正文")
+    page.locator('[data-creation-view="draft"]').click()
+    first_scene = service.get_work(work_id)["chapters"][0]["scenes"][0]["id"]
+    page.locator(f'[data-scene="{first_scene}"]').filter(visible=True).click()
+    expect(task).to_contain_text("先补齐本场写作依据")
+    page.get_by_role("button", name="选择本场人物", exact=True).click()
+    expect(task).to_contain_text("为这一场选好人物")
+    assert_readable_surface(page, "#sceneContextForm", ".context-check b")
+    for choice in page.locator('#sceneContextForm input[name="character_card_ids"]').all():
+        choice.check()
+    page.get_by_role("button", name="保存本场上下文", exact=True).click()
+    page.locator('[data-inspector="agent"]').filter(visible=True).click()
+    expect(task).to_contain_text("在亮起的输入框告诉助手")
+    scene_composer = page.locator("#sceneConversationForm")
+    scene_composer.locator("textarea").fill("起草本场，保持刚才确认的结尾。")
+    scene_composer.get_by_role("button", name="发送", exact=True).click()
+    expect(page.locator("[data-scene-change]").first).to_be_visible(timeout=15000)
+    expect(task).to_contain_text("先审查，再采用助手的文字")
+    current = service.get_work(work_id)
+    assert not any(item["kind"] == "scene_script" for item in current["artifacts"])
+    page.locator("[data-apply-scene-changes]").first.click()
+    expect(task).to_have_count(0)
+    assert any(item["kind"] == "scene_script" for item in service.get_work(work_id)["artifacts"])
+    page.close()
 
 
 @pytest.mark.parametrize(

@@ -1122,7 +1122,11 @@
     if (state.stage === 'draft') {
       if(state.context?.scene_id!==scene.id){state.context=null;state._contextError='';state._contextBlocked='';}
       renderInspector();
-      ensureSceneContext(scene.id,renderInspector);
+      ensureSceneContext(scene.id,()=>{
+        renderInspector();
+        window.HaloCueGuidance?.mount?.();
+        window.HaloCueFirstTask?.mount?.();
+      });
       ensureSceneConversation(scene.id);
     }
     if (typeof syncRoute === 'function') syncRoute();

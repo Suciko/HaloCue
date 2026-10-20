@@ -42,3 +42,20 @@ test('switching works or deleting the teaching scene cannot silently complete/re
   assert.equal(lesson({workId:'other',saved:true},record).action,'return');
   assert.equal(lesson({workId:'w',targetMissing:true},record).action,'structure');
 });
+test('recovery, invalidated candidates and deleted works point to usable operations',()=>{
+  const record={status:'active',workId:'w'};
+  assert.equal(lesson({workMissing:true},record).action,'restart');
+  assert.match(lesson({workMissing:true,canRestoreTeaching:true},record).title,/恢复/);
+  assert.equal(lesson({workId:'w',atProjects:true},record).action,'open-work');
+  assert.equal(lesson({workId:'w',atProjects:true,inTrash:true},record).action,'projects');
+  assert.equal(lesson({workId:'w',recovery:true,hasIdea:true},record).action,'recover');
+  assert.equal(lesson({workId:'w',recovery:true},{...record,manual:true}).action,'structure');
+  const scene={workId:'w',sceneId:'s',atDraft:true};
+  assert.equal(lesson({...scene,preparationRequired:true},record).action,'setup');
+  assert.equal(lesson({...scene,contextEditing:true},record).action,'context');
+  assert.equal(lesson({...scene,preparingScene:true},record).action,'wait');
+  assert.equal(lesson({...scene,sceneBusy:true},record).action,'wait');
+  assert.equal(lesson({...scene,sceneBusy:true,dirty:true},record).action,'save');
+  assert.match(lesson({...scene,proposalSuperseded:true,canPrepare:true},record).title,/已失效/);
+  assert.equal(lesson({...scene,proposalSuperseded:true,canPrepare:true},{...record,manual:true}).action,'manual');
+});
