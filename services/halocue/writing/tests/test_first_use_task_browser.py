@@ -235,3 +235,98 @@ def test_ai_candidate_is_taught_as_review_and_only_adoption_completes(local_auth
     expect(task).to_contain_text("试着修改并保存一处正文")
     assert len(service.list_works()) == 1
     page.close()
+
+
+def test_spotlight_tracks_panel_resize_without_a_page_redraw(local_authoring, browser):
+    service, url = local_authoring
+    work_id, scene_id, work = create_ready_scene(service, title="调整面板时继续写")
+    page = open_page(
+        browser,
+        f"{url}/?section=writing&stage=draft&work_id={work_id}&scene_id={scene_id}",
+        "light",
+        (1600, 900),
+    )
+    page.wait_for_function(
+        "() => state.context?.scene_id === state.sceneId && Boolean(sceneConversationThread(selectedScene())) && !state._contextLoadingScene"
+    )
+    page.locator("#openHelpButton").click()
+    page.get_by_role("button", name="重看新手教学", exact=True).click()
+    task = page.get_by_role("region", name="首次创作教学")
+    expect(task).to_contain_text("在亮起的输入框告诉助手")
+    field = page.locator('#sceneConversationForm textarea[name="text"]')
+    field.fill("保留这句正在写的要求")
+    form = page.locator("#sceneConversationForm")
+    before = form.bounding_box()
+    resize = page.locator('[data-panel-resize="inspector"]')
+    resize.press("Home")
+    resize.press("ArrowLeft")
+    resize.press("ArrowLeft")
+    after = form.bounding_box()
+    assert abs(after["x"] - before["x"]) > 10
+    page.wait_for_function(
+        """() => {
+          const hole = document.querySelector('.hc-first-use-layer mask rect:nth-child(2)');
+          const form = document.querySelector('#sceneConversationForm').getBoundingClientRect();
+          return hole && Math.abs(Number(hole.getAttribute('x')) - (form.left - 5)) < 2;
+        }""",
+        timeout=2000,
+    )
+    expect(field).to_have_value("保留这句正在写的要求")
+    assert_pointer_clear_of(page, field)
+    screenshot(page, "first-use-spotlight-panel-resize-light-1600")
+    page.close()
+
+
+@pytest.mark.parametrize("has_prose", [False, True])
+def test_reading_mode_teaches_the_edit_entry_before_typing(local_authoring, browser, has_prose):
+    service, url = local_authoring
+    work = service.create_work({"title": "阅读时继续教学", "world_seed": "blank"})
+    made = service.create_scene(
+        work["id"],
+        work["chapters"][0]["id"],
+        {"expected_version": work["version"], "title": "自己的开场"},
+    )
+    if has_prose:
+        service.save_scene_manuscript(
+            work["id"],
+            made["scene_id"],
+            {
+                "expected_version": made["work"]["version"],
+                "base_revision_id": None,
+                "blocks": [
+                    {"id": "block-first-line", "type": "narration", "text": "保留原来这一句。"}
+                ],
+            },
+        )
+    page = open_page(
+        browser,
+        f"{url}/?section=writing&stage=draft&work_id={work['id']}&scene_id={made['scene_id']}",
+        "dark",
+        (1280, 720),
+    )
+    page.wait_for_function("() => Boolean(sceneConversationThread(selectedScene()))")
+    page.locator('[data-chapter-view="read"]').click()
+    page.locator("#openHelpButton").click()
+    page.get_by_role("button", name="重看新手教学", exact=True).click()
+    task = page.get_by_role("region", name="首次创作教学")
+    expect(task).to_contain_text("先切到编辑，再动笔")
+    edit = page.locator('[data-chapter-view="edit"]')
+    assert_pointer_clear_of(page, edit)
+    expect(page.locator(".hc-first-use-layer mask rect")).to_have_count(2)
+    edit.click()
+    expect(task).not_to_contain_text("先切到编辑")
+    if has_prose:
+        expect(page.locator("[data-chapter-text]").first).to_have_value("保留原来这一句。")
+    else:
+        page.get_by_role("button", name="开始写作", exact=True).click()
+    field = page.locator("[data-chapter-text]").first
+    field.fill("我在自己的作品里继续写。")
+    expect(task).to_contain_text("写好后，点这里保存")
+    page.locator('[data-chapter-view="read"]').click()
+    expect(task).to_contain_text("先切到编辑，再动笔")
+    page.locator('[data-chapter-view="edit"]').click()
+    expect(field).to_have_value("我在自己的作品里继续写。")
+    expect(task).to_contain_text("写好后，点这里保存")
+    page.locator("[data-chapter-save]").click()
+    expect(task).to_have_count(0)
+    page.close()

@@ -18,6 +18,7 @@
       return item(3, '先找到正文的位置', input.compactNav ? '在亮起的视图菜单里选择“章节大纲”，再添加第一场。' : '点顶部亮起的“章节大纲”，再为自己的故事添加第一场。', 'structure', '打开章节大纲', '[data-creation-view="structure"]');
     }
     if (!input.atDraft) return item(3, '打开这一场的正文', '左边目录负责找到场景，中间正文负责写作。现在先进入你要写的这一场。', 'draft', '进入第一场正文');
+    if (input.reading && (input.dirty || !input.proposalId && (record.manual || !input.canPrepare))) return item(4, '先切到编辑，再动笔', '点亮起的“编辑”，再写下或修改正文。切换后会保留原有文字和未保存内容。', 'edit', '切到编辑模式', '[data-chapter-view="edit"]');
     if (input.dirty && input.emptyField) return item(4, '先在亮起的段落里写一句', '空白段落还不能保存。先写正文；选择“对白”时，也要填上说话人。', 'write', '写下第一句', '[data-chapter-text]');
     if (input.dirty) return item(4, '写好后，点这里保存', '输入仍然保留。点亮起的“保存整章”，才会建立可回看的正文版本。', 'save', '保存这段正文', '[data-chapter-save]');
     if (input.proposalId) return item(4, '先审查，再采用助手的文字', '在原文位置比较改前与改后，勾选想保留的变化，再点“应用”。教学不会自动替你采纳。', 'review', '查看本次改动', '[data-scene-change]');
@@ -47,6 +48,7 @@
       saved: Boolean(scene && revisionId && revisionId !== record?.baseline?.[scene.id]),
       hasIdea: Boolean(brief()?.idea || (thread?.messages || []).some(item => item.role === 'user')),
       atDraft: state.route?.section === 'writing' && state.stage === 'draft' && state.sceneId === scene?.id,
+      reading: Boolean(document.querySelector('[data-chapter-view="read"][aria-pressed="true"]')),
       atStructure: state.route?.section === 'writing' && state.stage === 'structure',
       compactNav: Boolean(document.querySelector('[data-creation-select]')?.getClientRects().length),
       addSceneVisible: Boolean([...document.querySelectorAll('[data-structure-add-scene]')].some(node => node.getClientRects().length)),
@@ -61,7 +63,7 @@
     };
   }
   function clear() {
-    layer?.remove(); layer = null; targets = []; document.documentElement.classList.remove('hc-first-use-active');
+    geometryObserver.disconnect(); layer?.remove(); layer = null; targets = []; document.documentElement.classList.remove('hc-first-use-active');
   }
   const visibleNode = node => Boolean(node?.getClientRects().length && !node.closest('[hidden]'));
   const currentModal = () => [...document.querySelectorAll('dialog[open],#workDialog:not([hidden])')].filter(visibleNode).at(-1);
@@ -125,6 +127,15 @@
     layer.querySelector('[data-first-task-locate]').hidden = Boolean(rect) || !targets.length;
   }
   function schedulePosition() { if (!frame) frame = requestAnimationFrame(() => { frame = 0; position(); }); }
+  const geometryObserver = new ResizeObserver(schedulePosition);
+  function watchTargets() {
+    geometryObserver.disconnect();
+    const nodes = new Set();
+    for (const target of targets) {
+      for (let node = target; node; node = node.parentElement) nodes.add(node);
+    }
+    nodes.forEach(node => geometryObserver.observe(node));
+  }
   function mount() {
     if (!state.capabilities || state.projectsLoading) return;
     document.querySelectorAll('[data-first-task-start]').forEach(button => {
@@ -163,7 +174,7 @@
     const body = layer.querySelector('[data-first-task-copy]'); if (body.innerHTML !== copy) body.innerHTML = copy;
     const controls = `${offered ? '<button type="button" class="primary" data-first-task-action="start">带我开始</button><button type="button" class="quiet" data-first-task-action="dismiss">我已熟悉，跳过</button>' : `${task.step === 2 || task.action === 'prepare' ? '<button type="button" class="quiet" data-first-task-action="self-write">先自己写</button>' : ''}${task.step === 2 ? '<button type="button" class="quiet" data-first-task-action="model">连接写作模型</button>' : ''}${task.action === 'return' || input.targetMissing ? `<button type="button" class="primary" data-first-task-action="${task.action}">${escape(task.label)}</button>` : ''}<button type="button" class="quiet" data-first-task-action="pause">稍后继续</button>`}<button type="button" class="quiet" data-first-task-locate>定位当前操作</button>`;
     const actions = layer.querySelector('.hc-first-use-actions'); if (actions.innerHTML !== controls) actions.innerHTML = controls;
-    targets = taskTargets(task, input).filter(Boolean); schedulePosition();
+    targets = taskTargets(task, input).filter(Boolean); watchTargets(); schedulePosition();
   }
   function start() {
     document.getElementById('settingsDialog')?.close(); document.getElementById('helpDialog')?.close();
@@ -203,7 +214,6 @@
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && record?.status === 'active' && !currentModal()) { record.status = 'paused'; save(); clear(); mount(); } });
   document.addEventListener('scroll', schedulePosition, true); window.addEventListener('resize', schedulePosition);
   new MutationObserver(changes => { if (changes.some(change => !change.target.closest?.('[data-first-task]'))) queueMicrotask(mount); }).observe(document.body, {subtree:true, attributes:true, attributeFilter:['open','hidden']});
-  new ResizeObserver(schedulePosition).observe(document.body);
   root.HaloCueFirstTask = {mount, start};
   registerRenderHook('first-use-task', mount);
 })(typeof window !== 'undefined' ? window : globalThis);

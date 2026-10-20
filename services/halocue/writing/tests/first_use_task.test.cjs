@@ -28,6 +28,15 @@ test('a candidate is not lesson completion; only a new saved revision completes 
   assert.notEqual(lesson({workId:'w',sceneId:'s',atDraft:true,revisionId:'old'},record).step,5);
   assert.equal(lesson({workId:'w',sceneId:'s',saved:true},record).step,5);
 });
+test('reading mode directs typing to the real edit switch while candidate review stays available',()=>{
+  const input={workId:'w',sceneId:'s',atDraft:true,reading:true};
+  const record={status:'active',workId:'w'};
+  assert.equal(lesson(input,record).action,'edit');
+  assert.equal(lesson({...input,canPrepare:true},record).action,'prepare');
+  assert.equal(lesson({...input,canPrepare:true},{...record,manual:true}).action,'edit');
+  assert.equal(lesson({...input,proposalId:'p'},record).action,'review');
+  assert.equal(lesson({...input,proposalId:'p',dirty:true},record).action,'edit');
+});
 test('switching works or deleting the teaching scene cannot silently complete/rebind it',()=>{
   const record={status:'active',workId:'w'};
   assert.equal(lesson({workId:'other',saved:true},record).action,'return');
