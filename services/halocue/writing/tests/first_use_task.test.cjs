@@ -17,6 +17,10 @@ test('manual authors need no model and dirty prose teaches saving',()=>{
   assert.equal(lesson({workId:'w'},record).step,3);
   assert.equal(lesson({workId:'w',sceneId:'s',atDraft:true},record).action,'manual');
   assert.equal(lesson({workId:'w',sceneId:'s',atDraft:true,dirty:true},record).action,'save');
+  assert.equal(lesson({workId:'w',sceneId:'s',atDraft:true,dirty:true,emptyField:true},record).action,'write');
+  assert.equal(lesson({workId:'w',atStructure:true},record).action,'add-scene');
+  assert.match(lesson({workId:'w',compactNav:true},record).detail,/视图菜单/);
+  assert.match(lesson({workId:'w',atStructure:true,addSceneVisible:false},record).detail,/展开场景栏/);
 });
 test('a candidate is not lesson completion; only a new saved revision completes it',()=>{
   const record={status:'active',workId:'w'};
