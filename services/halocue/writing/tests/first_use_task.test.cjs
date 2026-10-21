@@ -28,6 +28,17 @@ test('a candidate is not lesson completion; only a new saved revision completes 
   assert.notEqual(lesson({workId:'w',sceneId:'s',atDraft:true,revisionId:'old'},record).step,5);
   assert.equal(lesson({workId:'w',sceneId:'s',saved:true},record).step,5);
 });
+
+test('a confirmed direction continues scene planning unless the author chooses manual structure',()=>{
+  const record={status:'active',workId:'w'};
+  const input={workId:'w',hasIdea:true,hasDirection:true,atDiscussion:true};
+  assert.equal(lesson(input,record).action,'arrange');
+  assert.equal(lesson({...input,atDiscussion:false},record).action,'arrange');
+  assert.equal(lesson({...input,hasNextAction:true},record).action,'next');
+  assert.equal(lesson({...input,planPending:true,planKind:'story_structure'},record).action,'plan');
+  assert.equal(lesson({...input,atStructure:true},record).action,'add-scene');
+  assert.equal(lesson(input,{...record,manual:true}).action,'structure');
+});
 test('reading mode directs typing to the real edit switch while candidate review stays available',()=>{
   const input={workId:'w',sceneId:'s',atDraft:true,reading:true};
   const record={status:'active',workId:'w'};

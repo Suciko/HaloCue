@@ -26,7 +26,9 @@ def assert_pointer_clear_of(page, target):
     ), (tip, box)
 
 
-@pytest.mark.parametrize("theme,size", [("light", (1600, 900)), ("dark", (1280, 720))])
+@pytest.mark.parametrize(
+    "theme,size", [("light", (1600, 900)), ("dark", (1280, 720)), ("dark", (960, 640))]
+)
 def test_first_ai_work_follows_direction_structure_and_scene_review(
     local_authoring, browser, tmp_path, theme, size
 ):
@@ -49,24 +51,45 @@ def test_first_ai_work_follows_direction_structure_and_scene_review(
     page.locator(".agent-reply-next-step button").click()
     accept = page.get_by_role("button", name="采纳为正式方向", exact=True)
     expect(accept).to_be_visible(timeout=15000)
-    expect(task).to_contain_text("先看懂这份方案候选")
+    expect(task).to_contain_text("确认故事方向")
+    expect(task).to_contain_text("还没有正文")
     work_id = parse_qs(urlsplit(page.url).query)["work_id"][0]
     assert not any(
         item["kind"] == "story_blueprint" for item in service.get_work(work_id)["artifacts"]
     )
     accept.click()
+    expect(task).to_contain_text("方向已确认，接着安排场景")
+    expect(task).to_contain_text("在亮起的输入框")
+    assert_pointer_clear_of(page, composer.locator("textarea"))
+    assert not service.get_work(work_id)["chapters"][0]["scenes"]
+    task.get_by_role("button", name="稍后继续", exact=True).click()
+    page.reload()
+    expect(task).to_have_count(0)
+    page.locator("#openHelpButton").click()
+    page.get_by_role("button", name="继续首次创作教学", exact=True).click()
+    expect(task).to_contain_text("方向已确认，接着安排场景")
     composer.locator("textarea").fill("请整理章节和场景结构，一章一场，结束在提示灯第一次回应。")
     composer.locator('[type="submit"]').click()
     page.get_by_role("button", name="整理章节安排", exact=True).click()
     structure = page.get_by_role("button", name="采用并建立结构", exact=True)
     expect(structure).to_be_visible(timeout=15000)
-    expect(task).to_contain_text("先看懂这份方案候选")
+    expect(task).to_contain_text("确认章节和场景安排")
+    expect(task).to_contain_text("建立目录和空白场景")
     structure.click()
     expect(task).to_contain_text("打开这一场的正文")
-    page.locator('[data-creation-view="draft"]').click()
+    draft_view = page.locator('[data-creation-view="draft"]')
+    if draft_view.is_visible():
+        draft_view.click()
+    else:
+        expect(task).to_contain_text("视图菜单")
+        page.locator("[data-creation-select]").select_option("draft")
     first_scene = service.get_work(work_id)["chapters"][0]["scenes"][0]["id"]
+    if not page.locator(f'[data-scene="{first_scene}"]').filter(visible=True).count():
+        page.locator('[data-panel-toggle="tree"]').filter(visible=True).first.click()
     page.locator(f'[data-scene="{first_scene}"]').filter(visible=True).click()
     expect(task).to_contain_text("先补齐本场写作依据")
+    if not page.locator("#sceneConversationForm").is_visible():
+        page.locator('[data-panel-toggle="inspector"]').filter(visible=True).first.click()
     page.get_by_role("button", name="选择本场人物", exact=True).click()
     expect(task).to_contain_text("为这一场选好人物")
     assert_readable_surface(page, "#sceneContextForm", ".context-check b")
@@ -80,8 +103,16 @@ def test_first_ai_work_follows_direction_structure_and_scene_review(
     scene_composer.get_by_role("button", name="发送", exact=True).click()
     expect(page.locator("[data-scene-change]").first).to_be_visible(timeout=15000)
     expect(task).to_contain_text("先审查，再采用助手的文字")
+    expect(task).to_contain_text("后即保存为正式正文")
     current = service.get_work(work_id)
     assert not any(item["kind"] == "scene_script" for item in current["artifacts"])
+    for choice in page.locator("[data-scene-change]").all():
+        choice.uncheck()
+    expect(task).to_contain_text("先勾选想留下的文字")
+    expect(page.locator("[data-apply-scene-changes]").first).to_be_disabled()
+    page.locator("[data-scene-change]").first.check()
+    expect(task).to_contain_text("只保存勾选的部分")
+    expect(task).to_be_in_viewport(ratio=1)
     page.locator("[data-apply-scene-changes]").first.click()
     expect(task).to_have_count(0)
     assert any(item["kind"] == "scene_script" for item in service.get_work(work_id)["artifacts"])

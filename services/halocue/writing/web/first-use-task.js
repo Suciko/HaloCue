@@ -15,19 +15,23 @@
     if (!record.manual && !input.hasIdea && !input.sceneId) return item(2, '说说你想写什么', '在构思输入框写一句人物、场景或看点。使用助手需要连接写作模型，也可以先自己写。', 'idea', '去写下想法', '#workConversationForm textarea');
     if (!input.sceneId) {
       if (input.busy) return item(3, '正在整理你的想法', '等这次操作结束后，再核对结果；教学不会代你确认。', '', '等待本轮结束');
-      if (input.planPending) return item(3, '先看懂这份方案候选', '这是助手给出的建议。读完后选择采用或继续修改；采用后才会建立正式方向或场景。', 'plan', '定位待确认方案', '[data-accept-director-proposal]');
+      if (input.planPending) {
+        const copy = input.planKind === 'brief_blueprint' ? ['确认故事方向', '核对人物、核心冲突和结尾，再点“采纳为正式方向”。这只保存故事方向，还没有正文；不满意可退回继续讨论。'] : input.planKind === 'story_structure' ? ['确认章节和场景安排', '这里安排每一场写什么。核对后点“采用并建立结构”，建立目录和空白场景；正文要进入场景后再写。'] : ['确认本章细纲', '核对本章目标和情节安排，再决定采纳或继续讨论。细纲用于安排写作，还没有正文。'];
+        return item(3, ...copy, 'plan', '定位待确认方案', '[data-accept-director-proposal]');
+      }
       if (input.hasNextAction) return item(3, '顺着这条回复继续', `点亮起的“${input.nextLabel || '下一步操作'}”。整理出的内容仍是候选，需要你核对后决定。`, 'next', '定位下一步操作', '.agent-reply-next-step button');
       if (input.atStructure) return item(3, '添加故事的第一场', input.addSceneVisible === false ? '先点亮起的“目录”展开场景栏，再点“添加场景”。' : '点亮起的“添加场景”。先填名称，就能进入这一场的正文。', 'add-scene', '添加第一场', '[data-structure-add-scene]');
+      if (!record.manual && input.hasDirection) return item(3, '方向已确认，接着安排场景', input.atDiscussion ? '刚才保存的是故事方向，还没有正文。在亮起的输入框描述第一场发生什么，请助手整理章节和场景；只写一场也可以。' : input.compactNav ? '故事方向已保存。在亮起的视图菜单选择“构思讨论”，再请助手安排第一场；也可以先自己写。' : '故事方向已保存。点亮起的“构思讨论”，再请助手安排第一场；也可以先自己写。', 'arrange', '安排自己的第一场');
       return item(3, '先找到正文的位置', input.compactNav ? '在亮起的视图菜单里选择“章节大纲”，再添加第一场。' : '点顶部亮起的“章节大纲”，再为自己的故事添加第一场。', 'structure', '打开章节大纲', '[data-creation-view="structure"]');
     }
     if (!input.atDraft) return item(3, '打开这一场的正文', input.inDraftView ? input.draftSceneVisible ? '点左侧亮起的场景，选定这次要写的正文。' : '先点亮起的“目录”展开场景栏，再选择要写的那一场。' : input.compactNav ? '在亮起的视图菜单里选择“正文写作”，再选择要写的场景。' : '点顶部亮起的“正文写作”，再从左侧目录选择要写的场景。', 'draft', '进入第一场正文');
-    if (input.contextEditing) return item(4, '为这一场选好人物', '勾选本场实际出场的人物，再点“保存本场上下文”。世界设定和证据资料可以按需选择。', 'context', '固定本场读取范围', '#sceneContextForm');
+    if (input.contextEditing) return item(4, '为这一场选好人物', '勾选本场实际出场的人物，让助手知道参考谁的设定。点“保存本场上下文”只保存资料选择，正文接下来再写。', 'context', '固定本场读取范围', '#sceneContextForm');
     if (!record.manual && input.preparingScene) return item(4, '正在准备本场资料', '系统正在读取本场资料并建立对话。准备好后会指出需要补齐的项目，或带你提出试写要求。', 'wait', '等待资料准备');
     if (input.reading && (input.dirty || !input.proposalId && (record.manual || !input.canPrepare))) return item(4, '先切到编辑，再动笔', '点亮起的“编辑”，再写下或修改正文。切换后会保留原有文字和未保存内容。', 'edit', '切到编辑模式', '[data-chapter-view="edit"]');
     if (input.dirty && input.emptyField) return item(4, '先在亮起的段落里写一句', '空白段落还不能保存。先写正文；选择“对白”时，也要填上说话人。', 'write', '写下第一句', '[data-chapter-text]');
-    if (input.dirty) return item(4, '写好后，点这里保存', '输入仍然保留。点亮起的“保存整章”，才会建立可回看的正文版本。', 'save', '保存这段正文', '[data-chapter-save]');
+    if (input.dirty) return item(4, '写好后，点这里保存', '这些文字还是未保存的草稿。点亮起的“保存整章”，把本章改动保存为正式正文版本；保存成功就完成教学。', 'save', '保存这段正文', '[data-chapter-save]');
     if (!record.manual && input.sceneBusy) return item(4, '正在准备本场候选', '这一轮仍在处理，结束后再核对结果。需要中断时，可以点亮起区域中的“停止本轮”。', 'wait', '等待本轮结束');
-    if (input.proposalId) return item(4, '先审查，再采用助手的文字', '在原文位置比较改前与改后，勾选想保留的变化，再点“应用”。教学不会自动替你采纳。', 'review', '查看本次改动', '[data-scene-change]');
+    if (input.proposalId) return item(4, input.reviewSelectionEmpty ? '先勾选想留下的文字' : '先审查，再采用助手的文字', input.reviewSelectionEmpty ? '当前没有勾选，暂时不能应用。勾选想保留的改动后，再点“应用”；也可以继续调整候选。' : '比较“改前”和“改后”，只保存勾选的部分。点“应用”后即保存为正式正文，无需再点“保存整章”；保存成功就完成教学。', 'review', '查看本次改动', '[data-scene-change]');
     if (!record.manual && input.proposalSuperseded) return item(4, '之前的候选已失效', input.canPrepare ? input.agentVisible ? '本场设定或正文已经变化，旧候选不能继续采用。在亮起的输入框按当前设定重新提出要求，也可以先自己写。' : '本场设定或正文已经变化，旧候选不能继续采用。先展开亮起的“Agent”，按当前设定重新提出要求，也可以先自己写。' : '本场设定或正文已经变化，旧候选不能继续采用。先按亮起区域的说明补齐写作依据，也可以选择先自己写。', input.canPrepare ? 'prepare' : 'setup', '准备新的试写要求');
     if (!record.manual && input.preparationRequired) return item(4, '先补齐本场写作依据', input.agentVisible ? '亮起的区域列出了当前缺项。按其中的按钮补齐人物或资料，准备好后再告诉助手怎么写；也可以先自己写。' : '先点亮起的“Agent”展开助手，查看本场缺少的写作依据；也可以先自己写。', 'setup', '查看本场缺项');
     return item(4, input.revisionId ? '试着修改并保存一处正文' : '写下你自己的第一段', input.canPrepare && !record.manual ? input.agentVisible ? '在亮起的输入框告诉助手“起草本场”。发送后先审查候选；也可以选择自己写。' : '先点亮起的“Agent”展开助手，再告诉它“起草本场”。也可以选择自己写。' : input.revisionId ? '直接修改亮起的段落，再点“保存整章”。段落左上角可以选择旁白、动作或对白。' : '点亮起的“开始写作”，写一两句。段落左上角可以选择旁白、动作或对白。', input.canPrepare && !record.manual ? 'prepare' : 'manual', input.canPrepare && !record.manual ? '准备试写要求' : '自己写第一段', '[data-chapter-add],[data-chapter-text]');
@@ -50,7 +54,9 @@
     if (record?.status === 'active' && state.work?.id === record.workId && scene && !record.sceneId) { record.sceneId = scene.id; save(); }
     const revisionId = revisions()[scene?.id] || null;
     const thread = workConversationThread();
+    const plan = workPlanProposal();
     const proposal = (state.work?.proposals || []).find(item => item.kind === 'scene_script' && item.scope_id === scene?.id);
+    const reviewChoices = scene ? [...document.querySelectorAll(`[data-chapter-scene="${CSS.escape(scene.id)}"] [data-scene-change]`)] : [];
     return {
       workId: state.work?.id, sceneId: scene?.id, revisionId,
       atProjects: state.route?.section === 'projects', inTrash: Boolean(state.projectsTrashOpen),
@@ -74,7 +80,10 @@
       proposalId: (state.work?.proposals || []).find(item => item.kind === 'scene_script' && item.scope_id === scene?.id && item.status === 'pending')?.id,
       proposalSuperseded: proposal?.status === 'superseded',
       recovery: Boolean(pick('.scene-agent-recovery-card:has(button),.agent-failure-card:has(button),.agent-recovery-card:has(button)')),
-      planPending: Boolean(workPlanProposal()), hasNextAction: Boolean(document.querySelector('.agent-reply-next-step button')),
+      planPending: Boolean(plan), planKind: plan?.kind,
+      hasDirection: blueprintIsConfirmed(), atDiscussion: state.route?.section === 'works',
+      reviewSelectionEmpty: Boolean(reviewChoices.length && reviewChoices.every(node => !node.checked)),
+      hasNextAction: Boolean(document.querySelector('.agent-reply-next-step button')),
       nextLabel: document.querySelector('.agent-reply-next-step button')?.textContent.replace('↗', '').trim(),
       busy: Boolean(thread && workAgentActiveRun(thread)),
       canPrepare: Boolean(state.context?.scene_id === scene?.id && sceneReadinessView(state.context).canRun && sceneConversationThread(scene)),
@@ -97,6 +106,7 @@
     if (modal) return [modal];
     const scene = input.sceneId && document.querySelector(`[data-chapter-scene="${CSS.escape(input.sceneId)}"]`);
     if (task.action === 'idea') return [pick('#workConversationForm')];
+    if (task.action === 'arrange') return [input.atDiscussion ? pick('#workConversationForm') : pick('[data-creation-view="works"]') || pick('[data-creation-select]')];
     if (task.action === 'prepare') return [pick('#sceneConversationForm') || pick('[data-inspector="agent"]') || pick('[data-panel-toggle="inspector"]')];
     if (task.action === 'setup') return [pick('#sceneConversationForm .scene-discussion-mode') || pick('#sceneConversationForm') || pick('[data-inspector="agent"]') || pick('[data-panel-toggle="inspector"]')];
     if (task.action === 'wait') return [pick('[data-scene-conversation-scroll]'), pick('#sceneConversationForm')];
@@ -197,7 +207,7 @@
     document.documentElement.classList.add('hc-first-use-active');
     const copy = `<span>${offered ? '第一次使用 HaloCue' : `首次创作 · ${task.step} / 4`}</span><h2>${escape(task.title)}</h2><p>${escape(task.detail)}</p>`;
     const body = layer.querySelector('[data-first-task-copy]'); if (body.innerHTML !== copy) body.innerHTML = copy;
-    const controls = `${offered ? '<button type="button" class="primary" data-first-task-action="start">带我开始</button><button type="button" class="quiet" data-first-task-action="dismiss">我已熟悉，跳过</button>' : `${task.step === 2 || ['prepare', 'setup', 'recover'].includes(task.action) ? '<button type="button" class="quiet" data-first-task-action="self-write">先自己写</button>' : ''}${task.step === 2 ? '<button type="button" class="quiet" data-first-task-action="model">连接写作模型</button>' : ''}${['return', 'restart'].includes(task.action) || input.targetMissing ? `<button type="button" class="primary" data-first-task-action="${task.action}">${escape(task.label)}</button>` : ''}<button type="button" class="quiet" data-first-task-action="pause">稍后继续</button>`}<button type="button" class="quiet" data-first-task-locate>定位当前操作</button>`;
+    const controls = `${offered ? '<button type="button" class="primary" data-first-task-action="start">带我开始</button><button type="button" class="quiet" data-first-task-action="dismiss">我已熟悉，跳过</button>' : `${task.step === 2 || ['arrange', 'prepare', 'setup', 'recover'].includes(task.action) ? '<button type="button" class="quiet" data-first-task-action="self-write">先自己写</button>' : ''}${task.step === 2 ? '<button type="button" class="quiet" data-first-task-action="model">连接写作模型</button>' : ''}${['return', 'restart'].includes(task.action) || input.targetMissing ? `<button type="button" class="primary" data-first-task-action="${task.action}">${escape(task.label)}</button>` : ''}<button type="button" class="quiet" data-first-task-action="pause">稍后继续</button>`}<button type="button" class="quiet" data-first-task-locate>定位当前操作</button>`;
     const actions = layer.querySelector('.hc-first-use-actions'); if (actions.innerHTML !== controls) actions.innerHTML = controls;
     targets = taskTargets(task, input).filter(Boolean); watchTargets(); schedulePosition();
   }
@@ -229,14 +239,14 @@
     if (action === 'return') { void root.HaloCueRouter.openWork(record.workId); return; }
     if (input.workId !== record.workId) { mount(); return; }
     const current = lesson(input, record);
-    const secondary = (action === 'self-write' && (current?.step === 2 || current?.step === 4 || current?.action === 'recover')) || (action === 'model' && current?.step === 2);
+    const secondary = (action === 'self-write' && (current?.step === 2 || current?.step === 4 || ['arrange', 'recover'].includes(current?.action))) || (action === 'model' && current?.step === 2);
     if (current?.action !== action && !secondary) { mount(); return; }
     if (action === 'self-write') { record.manual = true; save(); mount(); return; }
     if (action === 'model') { document.getElementById('openSettingsButton')?.click(); return; }
     if (action === 'structure') { if (input.targetMissing) { delete record.sceneId; save(); } root.HaloCueRouter.navigate({section:'writing',stage:'structure'}); reveal('[data-structure-add-scene]'); return; }
   }, true);
   document.addEventListener('input', event => { if (event.target.matches('[data-chapter-text],[data-chapter-speaker]')) queueMicrotask(mount); });
-  document.addEventListener('change', event => { if (event.target.matches('[data-chapter-type]')) queueMicrotask(mount); });
+  document.addEventListener('change', event => { if (event.target.matches('[data-chapter-type],[data-scene-change]')) queueMicrotask(mount); });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && record?.status === 'active' && !currentModal()) { record.status = 'paused'; save(); clear(); mount(); } });
   document.addEventListener('scroll', schedulePosition, true); window.addEventListener('resize', schedulePosition);
   new MutationObserver(changes => { if (changes.some(change => !change.target.closest?.('[data-first-task]'))) queueMicrotask(mount); }).observe(document.body, {subtree:true, attributes:true, attributeFilter:['open','hidden']});
