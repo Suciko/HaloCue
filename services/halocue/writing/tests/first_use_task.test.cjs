@@ -67,6 +67,6 @@ test('recovery, invalidated candidates and deleted works point to usable operati
   assert.equal(lesson({...scene,preparingScene:true},record).action,'wait');
   assert.equal(lesson({...scene,sceneBusy:true},record).action,'wait');
   assert.equal(lesson({...scene,sceneBusy:true,dirty:true},record).action,'save');
-  assert.match(lesson({...scene,proposalSuperseded:true,canPrepare:true},record).title,/已失效/);
+  assert.match(lesson({...scene,proposalSuperseded:true,canPrepare:true},record).title,/不能再用/);
   assert.equal(lesson({...scene,proposalSuperseded:true,canPrepare:true},{...record,manual:true}).action,'manual');
 });

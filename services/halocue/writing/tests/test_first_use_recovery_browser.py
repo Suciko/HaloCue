@@ -48,13 +48,13 @@ def test_failed_turn_highlights_the_real_recovery_and_can_retry(local_authoring,
     composer.locator('[type="submit"]').click()
     retry = page.locator("[data-agent-retry-run]").filter(visible=True).first
     expect(retry).to_be_visible(timeout=15000)
-    expect(task).to_contain_text("这一步还没有完成")
+    expect(task).to_contain_text("这次没有成功")
     expect(task).to_contain_text("重试")
     assert_readable_surface(page, ".agent-failure-card:has([data-agent-retry-run])")
     screenshot(page, "first-use-failed-turn-dark-1280")
     retry.click()
     expect(retry).to_have_count(0)
-    expect(task).not_to_contain_text("这一步还没有完成")
+    expect(task).not_to_contain_text("这次没有成功")
     assert not any(
         item["kind"] == "scene_script" for item in service.get_work(work["id"])["artifacts"]
     )
@@ -88,8 +88,8 @@ def test_superseded_candidate_teaches_using_the_current_scene_settings(local_aut
         "() => state.context?.scene_id === state.sceneId && Boolean(sceneConversationThread(selectedScene())) && !state._contextLoadingScene"
     )
     task = replay(page)
-    expect(task).to_contain_text("之前的候选已失效")
-    expect(task).not_to_contain_text("先审查，再采用")
+    expect(task).to_contain_text("这份候选不能再用了")
+    expect(task).not_to_contain_text("看看这段写得")
     expect(page.locator("[data-scene-change]")).to_have_count(0)
     assert not service.get_work(work_id)["chapters"][0]["scenes"][0]["current_revision_id"]
     task.get_by_role("button", name="先自己写", exact=True).click()
@@ -109,11 +109,11 @@ def test_trashed_teaching_work_can_be_replaced_deliberately(local_authoring, bro
     page.locator('[data-section="projects"]').click()
     page.locator(f'[data-delete-work="{work["id"]}"]').click()
     page.locator('#deleteWorkForm [type="submit"]').click()
-    expect(task).to_contain_text("教学作品已移出作品列表")
-    expect(task).not_to_contain_text("返回教学作品")
+    expect(task).to_contain_text("找不到刚才的作品")
+    expect(task).not_to_contain_text("回到刚才的作品")
     if restore:
         page.get_by_role("button", name="回收站", exact=True).click()
-        expect(task).to_contain_text("恢复原来的教学作品")
+        expect(task).to_contain_text("恢复刚才的作品")
         page.get_by_role("button", name="恢复作品", exact=True).click()
         expect(task).to_contain_text("回到作品列表继续")
         page.get_by_role("button", name="返回作品", exact=True).click()
@@ -162,13 +162,13 @@ def test_running_first_draft_waits_and_respects_stop(local_authoring, browser, c
     page.locator("#sceneConversationForm").get_by_role("button", name="发送", exact=True).click()
     try:
         assert started.wait(timeout=5)
-        expect(task).to_contain_text("正在准备本场候选")
+        expect(task).to_contain_text("助手正在回复")
         if cancel:
             page.get_by_role("button", name="停止本轮", exact=True).click()
-            expect(task).not_to_contain_text("正在准备本场候选")
+            expect(task).not_to_contain_text("助手正在回复")
         release.set()
         if not cancel:
-            expect(task).to_contain_text("先审查，再采用助手的文字")
+            expect(task).to_contain_text("看看这段写得怎么样")
         else:
             page.reload()
             expect(page.locator("[data-scene-change]")).to_have_count(0)

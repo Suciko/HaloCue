@@ -144,7 +144,7 @@
       <div class="work-dialog-fields">
       <p id="workDialogError" class="work-dialog-error" role="alert" hidden></p>
       <label>作品名称（可选）<input name="title" maxlength="80" placeholder="留空使用“未命名作品”"></label>
-      <label class="new-work-idea">起步想法（可选）<textarea name="idea" maxlength="600" placeholder="说说你想做什么：短篇、长篇、续写、改编，或先做大纲 / 场景。"></textarea><small>先说目标就好，Agent 会按类型引导；想法不会自动变成正式设定。</small></label>
+      <label class="new-work-idea">起步想法（可选）<textarea name="idea" maxlength="600" placeholder="想写谁的故事？从什么地方开始？先记一点想法。"></textarea><small>先写一点，之后慢慢补。助手整理出的内容，由你确认后采用。</small></label>
       <fieldset class="world-seed-picker">
         <legend>世界观底稿</legend>
         <label class="world-seed-option"><input type="radio" name="world_seed" value="blank" checked><span><b>空白世界</b><small>之后自行添加人物、地点、组织与规则。</small></span></label>
@@ -152,7 +152,7 @@
       </fieldset>
       <label class="work-world-draft-select">或复制已有世界底稿<select name="world_draft_id"><option value="">不使用已有底稿</option></select><small>创建作品时复制当前版本，之后各自独立修改。</small></label>
       <fieldset class="work-start-picker"><legend>接下来先做</legend><label><input type="radio" name="start_at" value="ideation" checked> 构思</label><label><input type="radio" name="start_at" value="outline"> 大纲</label><label><input type="radio" name="start_at" value="world"> 世界观</label></fieldset>
-      <p class="form-note">作品、默认卷、第一章和创作主对话会一起保存到本机。BA 底稿不是自动确认的官方设定；Agent 默认采用“审核协作”，不会静默覆盖正式产物。</p>
+      <p class="form-note">作品会保存在本机。助手给出的修改会先交给你确认，BA 底稿里的设定也需要你核对。</p>
       </div>
       <div class="dialog-actions"><button type="button" data-close-work-dialog class="quiet">取消</button><button type="submit" data-submit="work" class="primary">建立作品</button></div>
     </form>
@@ -960,7 +960,7 @@
   <script src="/chapter-authoring-ui.js?v=20261019-first-use" defer></script>
   <script src="/vendor/echarts/echarts-6.0.0.min.js" defer></script>
   <script src="/knowledge-graph-ui.js?v=20260930-graph-fix1" defer></script>
-  <script src="/app.js?v=20261019-guidance-g1" defer></script>
+  <script src="/app.js?v=20261022-plain-copy1" defer></script>
   <script src="/codex-connection.js?v=20261003-subscription1" defer></script>
   <script src="/external-agents.js?v=20261003-exchange1" defer></script>
   <script src="/mcp-workspace.js?v=20261003-clients1" defer></script>
@@ -968,7 +968,7 @@
   <script src="/adaptation-workbench.js?v=20260927-adaptation4" defer></script>
   <script src="/writing-workbench.js?v=20261020-first-ai1" defer></script>
   <script src="/guided-workflow.js?v=20261019-first-use" defer></script>
-  <script src="/first-use-task.js?v=20261021-first-use-meaning1" defer></script>
+  <script src="/first-use-task.js?v=20261022-plain-copy1" defer></script>
   <script src="/shell.js?v=20260924-navigation5" defer></script>
   <script src="/production-embed.js?v=20261006-aa-install-review1" defer></script>
   <script src="/app-chrome.js?v=20260925-global1" defer></script>

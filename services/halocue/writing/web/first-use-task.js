@@ -5,36 +5,36 @@
   function lesson(input, record) {
     const item = (step, title, detail, action, label, target = '') => ({step, title, detail, action, label, target});
     if (record.status !== 'active') return null;
-    if (input.workMissing) return item(1, input.canRestoreTeaching ? '恢复原来的教学作品' : '教学作品已移出作品列表', input.canRestoreTeaching ? '点亮起的“恢复作品”，原有正文和版本会一起保留。恢复后可返回原教学继续，也可以重新选定自己的作品。' : '可以从作品页的回收站恢复它，再继续原来的教学；也可以重新选定自己的作品。', 'restart', input.workId ? '用当前作品继续' : '从新作品开始', '[data-project-trash-toggle],[data-section="projects"]');
-    if (record.workId && input.workId !== record.workId) return item(1, '回到正在学习的作品', '这次教学跟着你选定的作品进行，切换作品不会重置学习记录。', 'return', '返回教学作品');
-    if (!input.workId) return item(1, '先建立你自己的作品', '起一个名称就可以，人物、世界观和模型都不必现在填完。', 'create', '建立我的作品', '[data-action="new-work"]');
-    if (input.targetMissing) return item(3, '重新选择要学习的场景', '之前的场景已经移除。打开章节大纲，选择或建立另一个场景后继续。', 'structure', '重新选择场景');
-    if (input.saved) return item(5, '第一段正文已经保存', '你已走过建立作品、进入正文和保存的过程。后续创作不再默认显示教学；需要时可从帮助里重看。', 'finish', '完成教学');
-    if (input.atProjects) return input.inTrash ? item(1, '回到作品列表继续', '作品已经恢复。点亮起的“返回作品”，再打开这部作品继续教学。', 'projects', '返回作品列表', '[data-project-trash-toggle]') : item(1, '打开自己的作品继续', '点亮起的“打开构思”，回到这部作品。已有内容和教学进度都会保留。', 'open-work', '打开教学作品');
-    if (!record.manual && input.recovery) return item(input.sceneId ? 4 : 3, '这一步还没有完成', '先看亮起的失败说明，按提示重试或调整设置。之前的输入仍保留；也可以选择先自己写。', 'recover', '定位恢复操作');
-    if (!record.manual && !input.hasIdea && !input.sceneId) return item(2, '说说你想写什么', '在构思输入框写一句人物、场景或看点。使用助手需要连接写作模型，也可以先自己写。', 'idea', '去写下想法', '#workConversationForm textarea');
+    if (input.workMissing) return item(1, input.canRestoreTeaching ? '恢复刚才的作品' : '找不到刚才的作品', input.canRestoreTeaching ? '点“恢复作品”就能找回来，正文和旧版本都还在。也可以换一部作品继续。' : '可以去回收站找找，恢复后接着做。也可以从新作品开始。', 'restart', input.workId ? '用当前作品继续' : '从新作品开始', '[data-project-trash-toggle],[data-section="projects"]');
+    if (record.workId && input.workId !== record.workId) return item(1, '回到刚才的作品', '刚才还没做完，先回到那部作品接着写。', 'return', '回到刚才的作品');
+    if (!input.workId) return item(1, '先建立你自己的作品', '想好名字就填上，暂时没想好也可以留空。其他内容以后再补。', 'create', '建立我的作品', '[data-action="new-work"]');
+    if (input.targetMissing) return item(3, '换一个场景继续', '刚才的场景已经删掉了。打开章节大纲，选一个场景，或新建一场。', 'structure', '重新选择场景');
+    if (input.saved) return item(5, '第一段正文已经保存', '接下来可以自己写了。想再看一遍操作，到“帮助”里打开新手教学。', 'finish', '完成教学');
+    if (input.atProjects) return input.inTrash ? item(1, '回到作品列表继续', '作品已经恢复了。点“返回作品”，再打开它接着写。', 'projects', '返回作品列表', '[data-project-trash-toggle]') : item(1, '打开自己的作品继续', '点“打开构思”，回到刚才的作品。', 'open-work', '打开刚才的作品');
+    if (!record.manual && input.recovery) return item(input.sceneId ? 4 : 3, '这次没有成功', '看看这里的原因，再重试或调整设置。刚才发的消息还在；想先动笔，也可以点“先自己写”。', 'recover', '查看重试方法');
+    if (!record.manual && !input.hasIdea && !input.sceneId) return item(2, '说说你想写什么', '想写谁？故事从哪里开始？写一点想法，发给助手聊聊。还没连接模型的话，也可以先自己写。', 'idea', '写下想法', '#workConversationForm textarea');
     if (!input.sceneId) {
-      if (input.busy) return item(3, '正在整理你的想法', '等这次操作结束后，再核对结果；教学不会代你确认。', '', '等待本轮结束');
+      if (input.busy) return item(3, '正在整理你的想法', '稍等，整理好后会放在这里，供你确认。', '', '等待回复');
       if (input.planPending) {
-        const copy = input.planKind === 'brief_blueprint' ? ['确认故事方向', '核对人物、核心冲突和结尾，再点“采纳为正式方向”。这只保存故事方向，还没有正文；不满意可退回继续讨论。'] : input.planKind === 'story_structure' ? ['确认章节和场景安排', '这里安排每一场写什么。核对后点“采用并建立结构”，建立目录和空白场景；正文要进入场景后再写。'] : ['确认本章细纲', '核对本章目标和情节安排，再决定采纳或继续讨论。细纲用于安排写作，还没有正文。'];
+        const copy = input.planKind === 'brief_blueprint' ? ['确认故事方向', '看看人物和情节是不是你想要的。合适就点“采纳为正式方向”，不合适可以退回再聊。这一步还没有正文。'] : input.planKind === 'story_structure' ? ['确认章节和场景安排', '看看每一场准备写什么。点“采用并建立结构”会建立目录和空白场景，接下来再写正文。'] : ['确认本章细纲', '看看这一章的情节安排。合适就采纳，还想改就继续聊；正文接下来再写。'];
         return item(3, ...copy, 'plan', '定位待确认方案', '[data-accept-director-proposal]');
       }
-      if (input.hasNextAction) return item(3, '顺着这条回复继续', `点亮起的“${input.nextLabel || '下一步操作'}”。整理出的内容仍是候选，需要你核对后决定。`, 'next', '定位下一步操作', '.agent-reply-next-step button');
-      if (input.atStructure) return item(3, '添加故事的第一场', input.addSceneVisible === false ? '先点亮起的“目录”展开场景栏，再点“添加场景”。' : '点亮起的“添加场景”。先填名称，就能进入这一场的正文。', 'add-scene', '添加第一场', '[data-structure-add-scene]');
-      if (!record.manual && input.hasDirection) return item(3, '方向已确认，接着安排场景', input.atDiscussion ? '刚才保存的是故事方向，还没有正文。在亮起的输入框描述第一场发生什么，请助手整理章节和场景；只写一场也可以。' : input.compactNav ? '故事方向已保存。在亮起的视图菜单选择“构思讨论”，再请助手安排第一场；也可以先自己写。' : '故事方向已保存。点亮起的“构思讨论”，再请助手安排第一场；也可以先自己写。', 'arrange', '安排自己的第一场');
-      return item(3, '先找到正文的位置', input.compactNav ? '在亮起的视图菜单里选择“章节大纲”，再添加第一场。' : '点顶部亮起的“章节大纲”，再为自己的故事添加第一场。', 'structure', '打开章节大纲', '[data-creation-view="structure"]');
+      if (input.hasNextAction) return item(3, '按这条回复继续', `点“${input.nextLabel || '下一步操作'}”看看整理结果。读过以后，再决定要不要采用。`, 'next', '找到下一步操作', '.agent-reply-next-step button');
+      if (input.atStructure) return item(3, '添加故事的第一场', input.addSceneVisible === false ? '点“目录”展开场景栏，再点“添加场景”。' : '点“添加场景”，给第一场起个名字，就能开始写了。', 'add-scene', '添加第一场', '[data-structure-add-scene]');
+      if (!record.manual && input.hasDirection) return item(3, '方向已确认，接着安排场景', input.atDiscussion ? '刚才保存了故事方向，还没有正文。在输入框里说说第一场发生什么，请助手安排章节和场景。只写一场也可以。' : input.compactNav ? '故事方向已经保存。在视图菜单里选“构思讨论”，请助手安排第一场。' : '故事方向已经保存。点“构思讨论”，请助手安排第一场。', 'arrange', '安排第一场');
+      return item(3, '先找到正文的位置', input.compactNav ? '在视图菜单里选“章节大纲”，再添加第一场。' : '点顶部的“章节大纲”，再添加第一场。', 'structure', '打开章节大纲', '[data-creation-view="structure"]');
     }
-    if (!input.atDraft) return item(3, '打开这一场的正文', input.inDraftView ? input.draftSceneVisible ? '点左侧亮起的场景，选定这次要写的正文。' : '先点亮起的“目录”展开场景栏，再选择要写的那一场。' : input.compactNav ? '在亮起的视图菜单里选择“正文写作”，再选择要写的场景。' : '点顶部亮起的“正文写作”，再从左侧目录选择要写的场景。', 'draft', '进入第一场正文');
-    if (input.contextEditing) return item(4, '为这一场选好人物', '勾选本场实际出场的人物，让助手知道参考谁的设定。点“保存本场上下文”只保存资料选择，正文接下来再写。', 'context', '固定本场读取范围', '#sceneContextForm');
-    if (!record.manual && input.preparingScene) return item(4, '正在准备本场资料', '系统正在读取本场资料并建立对话。准备好后会指出需要补齐的项目，或带你提出试写要求。', 'wait', '等待资料准备');
-    if (input.reading && (input.dirty || !input.proposalId && (record.manual || !input.canPrepare))) return item(4, '先切到编辑，再动笔', '点亮起的“编辑”，再写下或修改正文。切换后会保留原有文字和未保存内容。', 'edit', '切到编辑模式', '[data-chapter-view="edit"]');
-    if (input.dirty && input.emptyField) return item(4, '先在亮起的段落里写一句', '空白段落还不能保存。先写正文；选择“对白”时，也要填上说话人。', 'write', '写下第一句', '[data-chapter-text]');
-    if (input.dirty) return item(4, '写好后，点这里保存', '这些文字还是未保存的草稿。点亮起的“保存整章”，把本章改动保存为正式正文版本；保存成功就完成教学。', 'save', '保存这段正文', '[data-chapter-save]');
-    if (!record.manual && input.sceneBusy) return item(4, '正在准备本场候选', '这一轮仍在处理，结束后再核对结果。需要中断时，可以点亮起区域中的“停止本轮”。', 'wait', '等待本轮结束');
-    if (input.proposalId) return item(4, input.reviewSelectionEmpty ? '先勾选想留下的文字' : '先审查，再采用助手的文字', input.reviewSelectionEmpty ? '当前没有勾选，暂时不能应用。勾选想保留的改动后，再点“应用”；也可以继续调整候选。' : '比较“改前”和“改后”，只保存勾选的部分。点“应用”后即保存为正式正文，无需再点“保存整章”；保存成功就完成教学。', 'review', '查看本次改动', '[data-scene-change]');
-    if (!record.manual && input.proposalSuperseded) return item(4, '之前的候选已失效', input.canPrepare ? input.agentVisible ? '本场设定或正文已经变化，旧候选不能继续采用。在亮起的输入框按当前设定重新提出要求，也可以先自己写。' : '本场设定或正文已经变化，旧候选不能继续采用。先展开亮起的“Agent”，按当前设定重新提出要求，也可以先自己写。' : '本场设定或正文已经变化，旧候选不能继续采用。先按亮起区域的说明补齐写作依据，也可以选择先自己写。', input.canPrepare ? 'prepare' : 'setup', '准备新的试写要求');
-    if (!record.manual && input.preparationRequired) return item(4, '先补齐本场写作依据', input.agentVisible ? '亮起的区域列出了当前缺项。按其中的按钮补齐人物或资料，准备好后再告诉助手怎么写；也可以先自己写。' : '先点亮起的“Agent”展开助手，查看本场缺少的写作依据；也可以先自己写。', 'setup', '查看本场缺项');
-    return item(4, input.revisionId ? '试着修改并保存一处正文' : '写下你自己的第一段', input.canPrepare && !record.manual ? input.agentVisible ? '在亮起的输入框告诉助手“起草本场”。发送后先审查候选；也可以选择自己写。' : '先点亮起的“Agent”展开助手，再告诉它“起草本场”。也可以选择自己写。' : input.revisionId ? '直接修改亮起的段落，再点“保存整章”。段落左上角可以选择旁白、动作或对白。' : '点亮起的“开始写作”，写一两句。段落左上角可以选择旁白、动作或对白。', input.canPrepare && !record.manual ? 'prepare' : 'manual', input.canPrepare && !record.manual ? '准备试写要求' : '自己写第一段', '[data-chapter-add],[data-chapter-text]');
+    if (!input.atDraft) return item(3, '打开这一场的正文', input.inDraftView ? input.draftSceneVisible ? '点左侧高亮的场景，开始写这一场。' : '点“目录”展开场景栏，再选要写的那一场。' : input.compactNav ? '在视图菜单里选“正文写作”，再选场景。' : '点顶部的“正文写作”，再从左侧目录选场景。', 'draft', '进入第一场正文');
+    if (input.contextEditing) return item(4, '为这一场选好人物', '勾选这场戏里的人物，让助手参考他们的设定，再点“保存资料选择”。这里保存的是参考资料，正文还没开始写。', 'context', '选择参考资料', '#sceneContextForm');
+    if (!record.manual && input.preparingScene) return item(4, '正在准备本场资料', '正在读取这一场的参考资料，稍等一下。', 'wait', '等待资料准备');
+    if (input.reading && (input.dirty || !input.proposalId && (record.manual || !input.canPrepare))) return item(4, '先切到编辑，再动笔', '点“编辑”就能改正文，刚才写的内容会保留。', 'edit', '切到编辑模式', '[data-chapter-view="edit"]');
+    if (input.dirty && input.emptyField) return item(4, '先把这一段填好', '正文不能为空。如果选了“对白”，也要填上说话人。', 'write', '写下第一句', '[data-chapter-text]');
+    if (input.dirty) return item(4, '写好后，点这里保存', '点“保存整章”，保存这一章里刚才改过的正文。保存成功，这次教学就结束了。', 'save', '保存这段正文', '[data-chapter-save]');
+    if (!record.manual && input.sceneBusy) return item(4, '助手正在回复', '等回复出来再看。想中断的话，点“停止本轮”。', 'wait', '等待回复');
+    if (input.proposalId) return item(4, input.reviewSelectionEmpty ? '先勾选想留下的文字' : '看看这段写得怎么样', input.reviewSelectionEmpty ? '还没选中任何改动。勾选想留下的部分，就能点“应用”了；不满意也可以让助手继续改。' : '对照“改前”和“改后”，勾选想留下的部分，再点“应用”。这就保存为正式正文了，不用再点“保存整章”。', 'review', '查看改动', '[data-scene-change]');
+    if (!record.manual && input.proposalSuperseded) return item(4, '这份候选不能再用了', input.canPrepare ? input.agentVisible ? '正文或设定已经改过，需要让助手按现在的内容重新写。在这里说说你的要求。' : '正文或设定已经改过。点“Agent”打开助手，让它按现在的内容重新写。' : '正文或设定已经改过。先补上这里提示缺少的资料，再让助手重新写。', input.canPrepare ? 'prepare' : 'setup', '重新写下要求');
+    if (!record.manual && input.preparationRequired) return item(4, '先选人物和参考资料', input.agentVisible ? '这里列出了还缺什么，按提示选好人物或补充资料，就可以请助手写了。' : '点“Agent”打开助手，看看还缺哪些资料。', 'setup', '看看还缺什么');
+    return item(4, input.revisionId ? '试着修改并保存一处正文' : '写下你自己的第一段', input.canPrepare && !record.manual ? input.agentVisible ? '在这里告诉助手“起草本场”，也可以加上你自己的要求。写好后，由你决定留下哪些。' : '点“Agent”打开助手，再告诉它“起草本场”。' : input.revisionId ? '改一处正文，再点“保存整章”。左上角可以选旁白、动作或对白。' : '点“开始写作”，先写一两句。段落左上角可以选旁白、动作或对白。', input.canPrepare && !record.manual ? 'prepare' : 'manual', input.canPrepare && !record.manual ? '写下要求' : '自己写第一段', '[data-chapter-add],[data-chapter-text]');
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = {lesson};
   if (!root.document) return;
@@ -189,14 +189,14 @@
     let task = lesson(input, record);
     if (task?.step === 5) {
       record.status = 'complete'; save(); clear(); root.HaloCueGuidance?.stop();
-      toast('第一段正文已保存，首次创作教学已完成。以后可从帮助里重看。'); return;
+      toast('正文保存好了。接下来可以自己写了，想重看操作时去“帮助”就行。'); return;
     }
     const offered = record.status === 'offered';
-    if (offered) task = {step:1, title:'从你自己的作品开始', detail:'跟着亮起的按钮和小指针，学会写下并保存第一段。学会后就退出。', action:'create', target:'[data-action="new-work"]'};
+    if (offered) task = {step:1, title:'从你自己的作品开始', detail:'一起新建一部作品，写几句，再保存下来。跟着高亮的地方操作就行。', action:'create', target:'[data-action="new-work"]'};
     const modal = currentModal();
     if (modal && !['workDialog', 'structureDialog'].includes(modal.id)) { clear(); return; }
-    if (modal?.id === 'workDialog') task = {...task, title:'这是自己的作品', detail:'名称可留空，其他以后补。填好点“建立作品”。'};
-    if (modal?.id === 'structureDialog') task = {...task, title:'给第一场起名', detail:'名称必填，地点和目标可补。点“保存结构”后写正文。'};
+    if (modal?.id === 'workDialog') task = {...task, title:'先建一部作品', detail:'名字可以留空，其他以后再补。填好后点“建立作品”。'};
+    if (modal?.id === 'structureDialog') task = {...task, title:'给第一场起个名字', detail:'先填场景名称，地点和目标以后再补。点“保存结构”后就能写正文。'};
     const owner = modal || document.body;
     if (!layer) {
       layer = document.createElement('div'); layer.className = 'hc-first-use-layer'; layer.dataset.firstTask = ''; layer.setAttribute('popover', 'manual');
