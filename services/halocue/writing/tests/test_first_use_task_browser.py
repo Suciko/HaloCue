@@ -27,7 +27,14 @@ def assert_pointer_clear_of(page, target):
 
 
 @pytest.mark.parametrize(
-    "theme,size", [("light", (1600, 900)), ("dark", (1280, 720)), ("dark", (960, 640))]
+    "theme,size",
+    [
+        ("light", (1920, 1080)),
+        ("dark", (1920, 1080)),
+        ("light", (1600, 900)),
+        ("dark", (1280, 720)),
+        ("dark", (960, 640)),
+    ],
 )
 def test_first_ai_work_follows_direction_structure_and_scene_review(
     local_authoring, browser, tmp_path, theme, size
@@ -36,6 +43,16 @@ def test_first_ai_work_follows_direction_structure_and_scene_review(
     service.bundled_characters = make_catalog(tmp_path / "cards")
     service.provider = DraftingProvider()
     page = open_page(browser, f"{url}/?section=projects", theme, size)
+    # Verify the display conditions separately from screenshot pixel dimensions.
+    session = page.context.new_cdp_session(page)
+    metrics = session.send("Page.getLayoutMetrics")["cssVisualViewport"]
+    session.detach()
+    assert (metrics["clientWidth"], metrics["clientHeight"]) == size
+    assert metrics["zoom"] == pytest.approx(1)
+    assert metrics["scale"] == pytest.approx(1)
+    assert page.evaluate(
+        "[document.documentElement, document.body].every(node => getComputedStyle(node).zoom === '1')"
+    )
     task = page.get_by_role("region", name="首次创作教学")
     task.get_by_role("button", name="带我开始", exact=True).click()
     page.locator('[data-action="new-work"]').filter(visible=True).first.click()
