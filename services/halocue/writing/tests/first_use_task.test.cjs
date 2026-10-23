@@ -39,14 +39,14 @@ test('a confirmed direction continues scene planning unless the author chooses m
   assert.equal(lesson({...input,atStructure:true},record).action,'add-scene');
   assert.equal(lesson(input,{...record,manual:true}).action,'structure');
 });
-test('reading mode directs typing to the real edit switch while candidate review stays available',()=>{
+test('the document is directly editable while candidate review stays available',()=>{
   const input={workId:'w',sceneId:'s',atDraft:true,reading:true};
   const record={status:'active',workId:'w'};
-  assert.equal(lesson(input,record).action,'edit');
+  assert.equal(lesson(input,record).action,'manual');
   assert.equal(lesson({...input,canPrepare:true},record).action,'prepare');
-  assert.equal(lesson({...input,canPrepare:true},{...record,manual:true}).action,'edit');
+  assert.equal(lesson({...input,canPrepare:true},{...record,manual:true}).action,'manual');
   assert.equal(lesson({...input,proposalId:'p'},record).action,'review');
-  assert.equal(lesson({...input,proposalId:'p',dirty:true},record).action,'edit');
+  assert.equal(lesson({...input,proposalId:'p',dirty:true},record).action,'save');
 });
 test('switching works or deleting the teaching scene cannot silently complete/rebind it',()=>{
   const record={status:'active',workId:'w'};

@@ -1,5 +1,6 @@
 """Chapter editing uses one atomic save while retaining scene revisions."""
 
+from manuscript_document_test_support import replace_paragraph
 from pathlib import Path
 
 from test_authoring_workspace_browser import browser as browser, local_authoring as local_authoring
@@ -22,8 +23,8 @@ def test_continuous_chapter_edit_saves_two_scenes_atomically(local_authoring, br
     assert page.locator(".chapter-authoring-scene").count() == 2
     for index, text in enumerate(("第一场手写正文", "第二场手写正文")):
         scene = page.locator(".chapter-authoring-scene").nth(index)
-        scene.locator("[data-chapter-add]").click()
-        scene.locator("[data-chapter-text]").fill(text)
+        scene.locator("[data-chapter-text]").first.click()
+        replace_paragraph(page, scene.locator("[data-chapter-text]"), text)
     page.locator("[data-chapter-save]").click()
     from playwright.sync_api import expect
     expect(page.locator("[data-chapter-save-state]")).to_have_text("整章已保存")
@@ -35,8 +36,8 @@ def test_continuous_chapter_edit_saves_two_scenes_atomically(local_authoring, br
                 "第一场手写正文", "第二场手写正文"
             }
     page.reload()
-    expect(page.locator("[data-chapter-text]").first).to_have_value("第一场手写正文")
-    expect(page.locator("[data-chapter-text]").nth(1)).to_have_value("第二场手写正文")
+    expect(page.locator("[data-chapter-text]").first).to_have_text("第一场手写正文")
+    expect(page.locator("[data-chapter-text]").nth(1)).to_have_text("第二场手写正文")
     page.close()
 
 
@@ -59,10 +60,10 @@ def test_background_scene_thread_response_preserves_typing_focus(local_authoring
 
     page.route("**/api/v1/works/*/threads", hold_thread)
     page.goto(f"{url}/?section=writing&stage=draft&work_id={work['id']}")
-    page.locator("[data-chapter-add]").click()
+    page.locator("[data-chapter-text]").first.click()
     field = page.locator("[data-chapter-text]")
-    field.fill("手写")
-    expect(field).to_be_focused()
+    replace_paragraph(page, field, "手写")
+    assert field.evaluate("el=>el.closest('.chapter-document-content').contains(document.activeElement)&&el.contains(getSelection().anchorNode)")
     for _ in range(100):
         if held:
             break
@@ -70,9 +71,9 @@ def test_background_scene_thread_response_preserves_typing_focus(local_authoring
     assert held
     held[0][0].fulfill(response=held[0][1])
     page.wait_for_function("() => Boolean(sceneConversationThread(selectedScene()))")
-    expect(field).to_be_focused()
+    assert field.evaluate("el=>el.closest('.chapter-document-content').contains(document.activeElement)&&el.contains(getSelection().anchorNode)")
     page.keyboard.type("正文")
-    expect(field).to_have_value("手写正文")
+    expect(field).to_have_text("手写正文")
     page.locator("[data-chapter-save]").click()
     expect(page.locator("[data-chapter-save-state]")).to_have_text("整章已保存")
     revision = next(a for a in service.get_work(work["id"])["artifacts"]
@@ -103,8 +104,8 @@ def test_save_waits_for_pending_scene_thread_without_false_version_conflict(loca
     page.on("request", lambda request: saves.append(request.url)
             if request.method == "POST" and request.url.endswith("/manuscript") else None)
     page.goto(f"{url}/?section=writing&stage=draft&work_id={work['id']}")
-    page.locator("[data-chapter-add]").click()
-    page.locator("[data-chapter-text]").fill("对话创建过程中写下的正文")
+    page.locator("[data-chapter-text]").first.click()
+    replace_paragraph(page, page.locator("[data-chapter-text]"), "对话创建过程中写下的正文")
     for _ in range(100):
         if held:
             break
@@ -144,8 +145,8 @@ def test_typing_during_save_keeps_newer_draft_and_uses_own_saved_revision(local_
     try:
         page.goto(f"{url}/?section=writing&stage=draft&work_id={work['id']}")
         page.wait_for_function("() => Boolean(sceneConversationThread(selectedScene()))")
-        page.locator("[data-chapter-add]").click()
-        page.locator("[data-chapter-text]").fill("已提交的第一句话")
+        page.locator("[data-chapter-text]").first.click()
+        replace_paragraph(page, page.locator("[data-chapter-text]"), "已提交的第一句话")
         page.route("**/api/v1/works/*/chapters/*/manuscript", hold_save)
         page.locator("[data-chapter-save]").click()
         for _ in range(100):
@@ -153,9 +154,9 @@ def test_typing_during_save_keeps_newer_draft_and_uses_own_saved_revision(local_
                 break
             page.wait_for_timeout(20)
         assert held
-        page.locator("[data-chapter-text]").fill("已提交的第一句话，继续补写第二句话")
+        replace_paragraph(page, page.locator("[data-chapter-text]"), "已提交的第一句话，继续补写第二句话")
         held[0][0].fulfill(response=held[0][1])
-        expect(page.locator("[data-chapter-text]")).to_have_value("已提交的第一句话，继续补写第二句话")
+        expect(page.locator("[data-chapter-text]")).to_have_text("已提交的第一句话，继续补写第二句话")
         expect(page.locator("[data-chapter-save]")).to_be_enabled()
         page.locator("[data-chapter-save]").click()
         expect(page.locator("[data-chapter-save-state]")).to_have_text("整章已保存")
@@ -163,29 +164,24 @@ def test_typing_during_save_keeps_newer_draft_and_uses_own_saved_revision(local_
                         if a["kind"] == "scene_script" and a["scope_id"] == made["scene_id"])
         assert revision["current_revision"]["content"]["blocks"][0]["text"] == "已提交的第一句话，继续补写第二句话"
         page.reload()
-        expect(page.locator("[data-chapter-text]")).to_have_value("已提交的第一句话，继续补写第二句话")
+        expect(page.locator("[data-chapter-text]")).to_have_text("已提交的第一句话，继续补写第二句话")
     finally:
         page.close()
 
 
-def test_reading_mode_preserves_draft_and_saves_from_preview(local_authoring, browser):
+def test_readable_document_edits_directly_and_saves_without_switching(local_authoring, browser):
+    from playwright.sync_api import expect
     service, url = local_authoring
     work = service.create_work({"title": "阅读与编辑", "world_seed": "blank"})
     chapter = work["chapters"][0]["id"]
     created = service.create_scene(work["id"], chapter, {"expected_version": work["version"], "title": "第一场"})
     page = browser.new_page()
     page.goto(f"{url}/?section=writing&stage=draft&work_id={work['id']}&chapter_id={chapter}&scene_id={created['scene_id']}")
-    scene = page.locator(".chapter-authoring-scene").first
-    scene.locator("[data-chapter-add]").click()
-    scene.locator("[data-chapter-text]").fill("未保存的手写正文")
-    page.locator('[data-chapter-view="read"]').click()
-    from playwright.sync_api import expect
-    expect(scene.locator("[data-chapter-read-block]")).to_contain_text("未保存的手写正文")
+    field = page.locator("[data-chapter-text]").first
+    expect(page.locator('[data-chapter-view]')).to_have_count(0)
+    replace_paragraph(page, field, "未保存的手写正文")
+    expect(field).to_have_text("未保存的手写正文")
     expect(page.locator("[data-chapter-save]")).to_be_enabled()
-    scene.locator("[data-chapter-read-block]").click()
-    expect(scene.locator("[data-chapter-text]")).to_be_focused()
-    expect(scene.locator("[data-chapter-text]")).to_have_value("未保存的手写正文")
-    page.locator('[data-chapter-view="read"]').click()
     page.locator("[data-chapter-save]").click()
     expect(page.locator("[data-chapter-save-state]")).to_have_text("整章已保存")
     saved = service.get_work(work["id"])
@@ -201,7 +197,7 @@ def test_empty_chapter_starts_writing_without_ai(local_authoring, browser):
     page.locator("[data-chapter-start]").click()
     from playwright.sync_api import expect
     expect(page.locator("[data-chapter-text]")).to_have_count(1)
-    page.locator("[data-chapter-text]").fill("直接开始本章。")
+    replace_paragraph(page, page.locator("[data-chapter-text]"), "直接开始本章。")
     page.locator("[data-chapter-save]").click()
     expect(page.locator("[data-chapter-save-state]")).to_have_text("整章已保存")
     assert service.get_work(work["id"])["chapters"][0]["scenes"][0]["title"] == "正文"
@@ -216,8 +212,8 @@ def test_reload_with_new_server_revision_requires_explicit_rebase(local_authorin
     page = browser.new_page()
     page.on("dialog", lambda dialog: dialog.accept())
     page.goto(f"{url}/?section=writing&stage=draft&work_id={work['id']}")
-    page.locator("[data-chapter-add]").click()
-    page.locator("[data-chapter-text]").fill("本地写作草稿")
+    page.locator("[data-chapter-text]").first.click()
+    replace_paragraph(page, page.locator("[data-chapter-text]"), "本地写作草稿")
     current = service.get_work(work["id"])
     service.save_scene_manuscript(work["id"], made["scene_id"], {
         "expected_version": current["version"],
@@ -226,7 +222,7 @@ def test_reload_with_new_server_revision_requires_explicit_rebase(local_authorin
     page.reload()
     from playwright.sync_api import expect
     expect(page.locator(".chapter-authoring-conflict")).to_be_visible()
-    expect(page.locator("[data-chapter-text]")).to_have_value("本地写作草稿")
+    expect(page.locator("[data-chapter-text]")).to_have_text("本地写作草稿")
     expect(page.locator("[data-chapter-save]")).to_be_disabled()
     page.locator(".chapter-authoring-conflict summary").click()
     assert "另一窗口的正文" in page.locator(".chapter-authoring-conflict").inner_text()
@@ -253,10 +249,10 @@ def test_chapter_review_runs_once_and_records_author_decision(local_authoring, b
     from playwright.sync_api import expect
     expect(page.locator(".chapter-review-status")).to_have_text("待确认剧情记忆", timeout=20000)
     field = page.locator("[data-chapter-text]").first
-    original = field.input_value()
-    field.fill(original + "新增内容")
+    original = field.inner_text()
+    replace_paragraph(page, field, original + "新增内容")
     expect(page.locator('[data-chapter-review-decide="keep"]')).to_be_disabled()
-    field.fill(original)
+    replace_paragraph(page, field, original)
     page.locator('[data-chapter-review-decide="keep"]').click()
     expect(page.locator(".chapter-review-status")).to_have_text("检查完成")
     assert service.authoring.chapters.get(work["id"], chapter)["result"]["decision"] == "keep"
@@ -284,8 +280,8 @@ def test_chapter_prose_uses_main_width_and_has_no_inner_scroll(local_authoring, 
     page.goto(f"{url}/?section=writing&stage=draft&work_id={work['id']}")
     page.locator("[data-chapter-text]").first.wait_for()
     for _ in range(10):
-        metrics = page.locator(".chapter-authoring-block").first.evaluate("""node => {
-          const outer=node.getBoundingClientRect(), field=node.querySelector('textarea');
+        metrics = page.locator(".chapter-document-block").first.evaluate("""node => {
+          const outer=node.getBoundingClientRect(), field=node.querySelector('[data-chapter-text]');
           const text=field.getBoundingClientRect();
           return {outer:outer.width,text:text.width,innerScroll:field.scrollHeight > field.clientHeight+2};
         }""")
@@ -311,17 +307,17 @@ def test_empty_scene_has_clear_local_start_and_no_paid_review(local_authoring, b
     made = service.create_scene(work["id"], chapter, {"expected_version": work["version"], "title": "小瞬与点心"})
     page = browser.new_page(viewport={"width": 1280, "height": 820})
     page.goto(f"{url}/?section=writing&stage=draft&work_id={work['id']}&chapter_id={chapter}&scene_id={made['scene_id']}")
-    expect(page.locator(".chapter-authoring-empty-scene")).to_be_visible()
-    expect(page.get_by_role("button", name="开始写作", exact=True)).to_be_visible()
+    expect(page.locator("[data-chapter-text]")).to_be_visible()
+    expect(page.locator("[data-chapter-view]")).to_have_count(0)
     expect(page.locator("[data-chapter-review-run]")).to_be_disabled()
     expect(page.get_by_role("heading", name="检查正文与连贯性", exact=True)).to_have_count(1)
     for width in [1280, 820, 390]:
         page.set_viewport_size({"width": width, "height": 820})
         assert page.locator(".chapter-authoring").evaluate("el=>el.scrollWidth<=el.clientWidth+1")
-    page.get_by_role("button", name="开始写作", exact=True).click()
-    expect(page.locator("[data-chapter-text]")).to_be_focused()
+    page.locator("[data-chapter-text]").click()
+    assert page.locator("[data-chapter-text]").evaluate("el=>el.contains(getSelection().anchorNode)")
     expect(page.locator(".chapter-authoring-empty-scene")).to_have_count(0)
-    page.locator("[data-chapter-text]").fill("测试本地起笔，不调用模型。")
+    replace_paragraph(page, page.locator("[data-chapter-text]"), "测试本地起笔，不调用模型。")
     expect(page.locator("[data-chapter-review-run]")).to_be_disabled()
     saved = service.get_work(work["id"])
     assert not any(item["kind"] == "scene_script" for item in saved["artifacts"])
@@ -349,12 +345,16 @@ def test_inserted_paragraph_inherits_previous_type_and_speaker(local_authoring, 
     page.goto(f"{url}/?section=writing&stage=draft&work_id={work['id']}&chapter_id={chapter}&scene_id={made['scene_id']}")
     scene = page.locator(".chapter-authoring-scene").first
 
-    scene.locator('[data-chapter-add][data-chapter-after="block-dialogue"]').click()
+    scene.locator('[data-block-id="block-dialogue"] [data-chapter-text]').click()
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
     dialogue = scene.locator("[data-chapter-block]").nth(2)
     expect(dialogue.locator("[data-chapter-type]")).to_have_value("dialogue")
     expect(dialogue.locator("[data-chapter-speaker]")).to_have_value("安")
 
-    scene.locator('[data-chapter-add][data-chapter-after="block-narration"]').click()
+    scene.locator('[data-block-id="block-narration"] [data-chapter-text]').click()
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
     narration = scene.locator("[data-chapter-block]").nth(1)
     expect(narration.locator("[data-chapter-type]")).to_have_value("narration")
     expect(narration.locator("[data-chapter-speaker]")).to_have_value("")
@@ -453,14 +453,14 @@ def test_late_review_status_preserves_manuscript_input_focus(local_authoring, br
         assert entered.wait(5)
         page.wait_for_function('()=>Boolean(state._contextBlocked)')
         field = page.locator('[data-chapter-text]').first
-        field.fill('正在修改的正文。')
-        field.evaluate('el=>el.setSelectionRange(3,3)')
-        expect(field).to_be_focused()
+        replace_paragraph(page, field, '正在修改的正文。')
+        field.evaluate('el=>{const r=document.createRange();r.setStart(el.firstChild,3);r.collapse(true);getSelection().removeAllRanges();getSelection().addRange(r)}')
+        assert field.evaluate("el=>el.closest('.chapter-document-content').contains(document.activeElement)&&el.contains(getSelection().anchorNode)")
         release.set()
         expect(page.locator('.chapter-review-status')).to_have_text('尚未检查')
-        expect(field).to_be_focused()
-        expect(field).to_have_value('正在修改的正文。')
-        assert field.evaluate('el=>el.selectionStart') == 3
+        assert field.evaluate("el=>el.closest('.chapter-document-content').contains(document.activeElement)&&el.contains(getSelection().anchorNode)")
+        expect(field).to_have_text('正在修改的正文。')
+        assert field.evaluate('el=>getSelection().anchorOffset') == 3
     finally:
         release.set()
         page.close()

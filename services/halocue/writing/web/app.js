@@ -363,7 +363,7 @@ function restoreTransientView(key){
   if(scroll)scroll.scrollTop=cached.stickToBottom?scroll.scrollHeight:cached.conversationScroll;
 }
 document.addEventListener('compositionstart',()=>{hcComposing=true;});
-document.addEventListener('compositionend',()=>{hcComposing=false;if(hcRenderAgain){hcRenderAgain=false;render();}});
+document.addEventListener('compositionend',()=>{queueMicrotask(()=>{hcComposing=false;if(hcRenderAgain){hcRenderAgain=false;render();}});});
 
 function renderAppLayout(){
   const app=document.getElementById('app'),section=hcRoute.section;
@@ -964,6 +964,7 @@ document.addEventListener('keydown',event=>{
 },true);
 
 function syncTopManuscriptSave(){
+  window.HaloCueChapterAuthoring?.syncStatus?.();
   syncSceneManuscriptNotice();
   syncSceneComposerSize();
   const button=document.getElementById('topManuscriptSave');
@@ -994,10 +995,11 @@ function syncSceneManuscriptNotice(){
   const notice=document.querySelector('[data-scene-manuscript-notice]');
   if(!notice)return;
   const form=document.getElementById('sceneManuscriptForm');
-  const available=state.surface==='writing'&&state.stage==='draft'&&Boolean(form)&&state.manuscriptDirty
-    &&form.dataset.sceneId===state.manuscriptSceneId;
+  const chapter=window.HaloCueChapterAuthoring;
+  const available=state.surface==='writing'&&state.stage==='draft'&&(chapter?.active?chapter.hasUnsavedDrafts:Boolean(form)&&state.manuscriptDirty&&form.dataset.sceneId===state.manuscriptSceneId);
   notice.hidden=!available;
   const save=notice.querySelector('[data-save-for-agent]');
+  if(save&&chapter?.active)save.removeAttribute('form');
   if(save){
     save.disabled=!available||Boolean(state.manuscriptSaving);
     save.textContent=state.manuscriptSaving?'保存中…':'保存正文';
@@ -2251,7 +2253,7 @@ function dismissToast(){
   el.textContent='';el.classList.remove('show','error','actionable');
   if(el.parentElement!==document.body)document.body.appendChild(el);
 }
-function setBusy(message){const kind=/失败|未保存|未完成|未提交|尚未提交/.test(message)?'error':/正在|联系/.test(message)?'busy':'saved';state.uiStatus={message,kind,workId:state.work?.id||''};const el=document.getElementById('saveStatus');if(el){el.textContent=message;el.dataset.state=kind;el.title=message;}}
+function setBusy(message){const kind=/失败|未保存|未完成|未提交|尚未提交/.test(message)?'error':/正在|联系/.test(message)?'busy':'saved';state.uiStatus={message,kind,workId:state.work?.id||''};const el=document.getElementById('saveStatus');if(el){el.textContent=message;el.dataset.state=kind;el.title=message;}window.HaloCueChapterAuthoring?.syncStatus?.();}
 function brief(){return state.work?.artifacts.find(x=>x.kind==='brief')?.current_revision?.content}
 function blueprint(){return state.work?.artifacts.find(x=>x.kind==='story_blueprint')?.current_revision?.content}
 function scenes(){return hcArray(state.work?.chapters).flatMap(ch=>hcArray(ch.scenes).map(scene=>({...scene,chapter_id:scene.chapter_id||ch.id,chapterTitle:ch.title})));}
@@ -2361,6 +2363,7 @@ window.addEventListener('resize',()=>{
 function render(){
   if(state.manuscriptSaving){hcRenderAgain=true;return;}
   if(hcComposing||hcRendering){hcRenderAgain=true;return;}
+  const manuscriptFocus=hcViewKey()===hcLastViewKey?window.HaloCueManuscriptDocument?.preserveFocus():null;
   hcRendering=true;
   try{
     captureTransientView();
@@ -2395,6 +2398,7 @@ function render(){
     // Scope change is the only thing that resets the reading surface. Polling
     // and status refreshes preserve composer drafts and reading position.
     const key=hcViewKey();restoreTransientView(key);hcLastViewKey=key;
+    window.HaloCueManuscriptDocument?.restoreFocus(manuscriptFocus);
     window.HaloCuePanels?.apply?.();
     syncTopManuscriptSave();
     ensureUserStatus();
@@ -5125,7 +5129,7 @@ document.addEventListener('submit',event=>{
   const workId=state.work?.id,session=hcWorkLoadEpoch,viewKey=hcViewKey();
   const submittedText=String(new FormData(form).get('text')||'');
   const selection=state.sceneTextSelection?.sceneId===scene?.id?state.sceneTextSelection:null;
-  if(state.manuscriptDirty){toast('正文有未保存修改，请先保存再询问 Agent。',true);return;}
+  if(state.manuscriptDirty||window.HaloCueChapterAuthoring?.hasUnsavedDrafts){toast('正文有未保存修改，请先保存再询问 Agent。',true);return;}
   if(selection&&!sceneTextSelectionIsCurrent(selection,scene)){clearSceneTextSelection();toast('选段已变化，请在正文里重新选择。',true);return;}
   const reviewTarget=state.sceneReviewTarget?.sceneId===scene?.id?state.sceneReviewTarget:null;
   if(reviewTarget&&!currentSceneReviewChange()){state.sceneReviewTarget=null;syncSceneReviewLink();toast('这项候选已变化，请重新选择要讨论的改动。',true);return;}
@@ -5176,7 +5180,7 @@ registerAppClick(event=>{
   event.preventDefault();claimAppEvent(event);
   const thread=sceneConversationThread(),scene=selectedScene(),selection=state.sceneTextSelection?.sceneId===scene?.id?state.sceneTextSelection:null;
   if(!thread||!scene||workAgentActiveRun(thread)||pendingProposal())return;
-  if(state.manuscriptDirty){toast('先保存正文，助手才能读取你的最新修改。',true);return;}
+  if(state.manuscriptDirty||window.HaloCueChapterAuthoring?.hasUnsavedDrafts){toast('先保存正文，助手才能读取你的最新修改。',true);return;}
   if(selection&&!sceneTextSelectionIsCurrent(selection,scene)){clearSceneTextSelection();toast('选段已变化，请重新选择。',true);return;}
   const input=document.querySelector('#sceneConversationForm textarea[name="text"]'),instruction=input?.value.trim()||'';
   if(!instruction&&!thread.messages?.some(message=>message.role==='user')){toast('先输入这一场的写作要求。');input?.focus();return;}
@@ -5245,7 +5249,7 @@ renderInspector=function(){
 };
 
 function sceneTextSelectionIsCurrent(selection,scene){
-  if(!selection||!scene||state.manuscriptDirty||selection.revision_id!==scene.current_revision_id)return false;
+  if(!selection||!scene||state.manuscriptDirty||window.HaloCueChapterAuthoring?.hasUnsavedDrafts||selection.revision_id!==scene.current_revision_id)return false;
   const blocks=manuscriptBlocks(sceneScriptArtifact(scene)?.current_revision?.content);
   const block=blocks.find(item=>item.id===selection.block_id);
   return Boolean(block&&block.text?.slice(selection.local_start,selection.local_end)===selection.quote);
@@ -5307,7 +5311,7 @@ registerAppClick(event=>{
   else syncSceneAgentSelectionIndicator();
   const input=$('#sceneConversationForm textarea[name="text"]');
   if(input){
-    if(action.hasAttribute('data-suggest-scene-selection')&&!input.value.trim())input.value='请给这段文字提出更自然的改写，保留本场事实、人物口吻和停止边界。';
+    if(action.hasAttribute('data-suggest-scene-selection')&&!input.value.trim())input.value='帮我把这段改得自然些，保留原意和人物语气。';
     if(window.matchMedia('(max-width: 760px)').matches)requestAnimationFrame(()=>requestAnimationFrame(()=>input.focus()));
     else input.focus();
   }

@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 import test_authoring_workspace_browser as authoring_fixture
 from playwright.sync_api import expect
+from manuscript_document_test_support import replace_paragraph
 
 from test_choice_ui_browser import open_page, screenshot
 from test_scene_conversation_harness import create_ready_scene
@@ -178,17 +179,17 @@ def test_first_work_manual_task_completes_and_never_reappears(
     scene_dialog.locator('input[name="title"]').fill("我写的开场")
     scene_dialog.get_by_role("button", name="保存结构").click()
     expect(task).to_contain_text("4 / 4")
-    page.get_by_role("button", name="开始写作", exact=True).click()
-    expect(task).to_contain_text("先把这一段填好")
+    page.locator("[data-chapter-text]").first.click()
+    expect(task).to_contain_text("写下你自己的第一段")
     expect(task).not_to_contain_text("保存这段正文")
     field = page.locator("[data-chapter-text]").first
     page.locator("[data-chapter-type]").first.select_option("dialogue")
-    field.fill("这是我自己的第一段故事。")
+    replace_paragraph(page, field, "这是我自己的第一段故事。")
     expect(task).to_contain_text("先把这一段填好")
     page.locator("[data-chapter-speaker]").first.fill("爱丽丝")
     expect(task).to_contain_text("写好后，点这里保存")
-    field.focus()
-    expect(field).to_be_focused()
+    field.click()
+    assert field.evaluate("node=>node.contains(getSelection().anchorNode)")
     assert_pointer_clear_of(page, field)
     page.locator("[data-chapter-save]").click()
     expect(task).to_have_count(0)
@@ -289,6 +290,7 @@ def test_spotlight_follows_hidden_agent_and_yields_to_settings(local_authoring, 
     toggle.click()
     expect(task).to_contain_text("在这里告诉助手")
     field = page.locator('#sceneConversationForm textarea[name="text"]')
+    field.click()
     field.fill("请先讨论开场，不要直接生成正文。")
     page.set_viewport_size({"width": 1280, "height": 720})
     expect(field).to_have_value("请先讨论开场，不要直接生成正文。")
@@ -368,6 +370,7 @@ def test_spotlight_tracks_panel_resize_without_a_page_redraw(local_authoring, br
     task = page.get_by_role("region", name="首次创作教学")
     expect(task).to_contain_text("在这里告诉助手")
     field = page.locator('#sceneConversationForm textarea[name="text"]')
+    field.click()
     field.fill("保留这句正在写的要求")
     form = page.locator("#sceneConversationForm")
     before = form.bounding_box()
@@ -392,7 +395,7 @@ def test_spotlight_tracks_panel_resize_without_a_page_redraw(local_authoring, br
 
 
 @pytest.mark.parametrize("has_prose", [False, True])
-def test_reading_mode_teaches_the_edit_entry_before_typing(local_authoring, browser, has_prose):
+def test_direct_document_teaching_needs_no_mode_switch(local_authoring, browser, has_prose):
     service, url = local_authoring
     work = service.create_work({"title": "阅读时继续教学", "world_seed": "blank"})
     made = service.create_scene(
@@ -419,28 +422,18 @@ def test_reading_mode_teaches_the_edit_entry_before_typing(local_authoring, brow
         (1280, 720),
     )
     page.wait_for_function("() => Boolean(sceneConversationThread(selectedScene()))")
-    page.locator('[data-chapter-view="read"]').click()
     page.locator("#openHelpButton").click()
     page.get_by_role("button", name="重看新手教学", exact=True).click()
     task = page.get_by_role("region", name="首次创作教学")
-    expect(task).to_contain_text("先切到编辑，再动笔")
-    edit = page.locator('[data-chapter-view="edit"]')
-    assert_pointer_clear_of(page, edit)
-    expect(page.locator(".hc-first-use-layer mask rect")).to_have_count(2)
-    edit.click()
-    expect(task).not_to_contain_text("先切到编辑")
-    if has_prose:
-        expect(page.locator("[data-chapter-text]").first).to_have_value("保留原来这一句。")
-    else:
-        page.get_by_role("button", name="开始写作", exact=True).click()
+    expect(page.locator("[data-chapter-view]")).to_have_count(0)
+    expect(task).to_contain_text("直接")
     field = page.locator("[data-chapter-text]").first
-    field.fill("我在自己的作品里继续写。")
+    assert_pointer_clear_of(page, field)
+    if has_prose:
+        expect(field).to_have_text("保留原来这一句。")
+    replace_paragraph(page, field, "我在自己的作品里继续写。")
     expect(task).to_contain_text("写好后，点这里保存")
-    page.locator('[data-chapter-view="read"]').click()
-    expect(task).to_contain_text("先切到编辑，再动笔")
-    page.locator('[data-chapter-view="edit"]').click()
-    expect(field).to_have_value("我在自己的作品里继续写。")
-    expect(task).to_contain_text("写好后，点这里保存")
+    expect(field).to_have_text("我在自己的作品里继续写。")
     page.locator("[data-chapter-save]").click()
     expect(task).to_have_count(0)
     page.close()

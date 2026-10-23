@@ -81,6 +81,16 @@ bootloader terms are documented at <https://pyinstaller.org/en/stable/license.ht
 
 ## Web components
 
+The locally bundled manuscript editor uses ProseMirror (`prosemirror-model`,
+`prosemirror-state`, `prosemirror-view`, `prosemirror-commands`,
+`prosemirror-keymap`, `prosemirror-history`, `prosemirror-transform`) and its
+`orderedmap`, `rope-sequence` and `w3c-keyname` dependencies, all under MIT.
+Pinned versions and integrity receipts are in
+`services/halocue/writing/editor/package-lock.json`; original copyright/license
+texts accompany the browser bundle in
+`services/halocue/writing/web/vendor/manuscript-document/LICENSES.txt`.
+The build-only esbuild dependency is not part of the browser runtime.
+
 `Apache ECharts` 6.0.0 is licensed under Apache-2.0. Its license text and
 Apache Software Foundation NOTICE accompany the vendored JavaScript in
 `services/halocue/writing/web/vendor/echarts/` (under `_internal` in Windows bundles).

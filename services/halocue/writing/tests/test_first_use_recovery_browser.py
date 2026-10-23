@@ -4,6 +4,7 @@ import pytest
 import threading
 import test_authoring_workspace_browser as authoring_fixture
 from playwright.sync_api import expect
+from manuscript_document_test_support import replace_paragraph
 
 from halocue_writing.errors import DomainError
 from halocue_writing.providers import FakeWritingProvider
@@ -93,8 +94,9 @@ def test_superseded_candidate_teaches_using_the_current_scene_settings(local_aut
     expect(page.locator("[data-scene-change]")).to_have_count(0)
     assert not service.get_work(work_id)["chapters"][0]["scenes"][0]["current_revision_id"]
     task.get_by_role("button", name="先自己写", exact=True).click()
-    page.get_by_role("button", name="开始写作", exact=True).click()
-    page.locator("[data-chapter-text]").first.fill("按新设定，提示灯只回应了一次。")
+    replace_paragraph(
+        page, page.locator("[data-chapter-text]").first, "按新设定，提示灯只回应了一次。"
+    )
     page.locator("[data-chapter-save]").click()
     expect(task).to_have_count(0)
     page.close()
