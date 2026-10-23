@@ -101,9 +101,10 @@ def test_scanner_detects_credentials_without_exposing_values(tmp_path):
     assert bearer not in rendered
 
 
-def test_scanner_detects_generic_assignment_api_key_and_redacts_it(tmp_path):
+@pytest.mark.parametrize("filename", ["settings.py", "build.mjs", "worker.cjs", "app.js"])
+def test_scanner_detects_generic_assignment_api_key_and_redacts_it(tmp_path, filename):
     credential_value = "qwertyuiopasdfghjklzxcvbnm" + "123456"
-    (tmp_path / "settings.py").write_text(
+    (tmp_path / filename).write_text(
         "api_" + "key=" + repr(credential_value) + "\n", encoding="utf-8"
     )
 

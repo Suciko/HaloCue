@@ -134,6 +134,7 @@ _TEXT_EXTENSIONS = {
     ".json",
     ".jsonl",
     ".md",
+    ".mjs",
     ".ps1",
     ".py",
     ".spec",
