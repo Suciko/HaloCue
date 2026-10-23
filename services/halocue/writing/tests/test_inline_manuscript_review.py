@@ -1,11 +1,14 @@
 """Changed ranges replace paragraphs in the shipping chapter reading flow."""
 import pytest
+import test_authoring_workspace_browser as authoring_fixture
 from pathlib import Path
 from playwright.sync_api import expect
 
-from test_authoring_workspace_browser import browser, local_authoring  # noqa: F401
 from test_scene_conversation_harness import create_ready_scene, create_scene_thread
 from halocue_writing.providers import FakeWritingProvider
+
+browser = authoring_fixture.browser
+local_authoring = authoring_fixture.local_authoring
 
 
 class MultiEditProvider(FakeWritingProvider):
@@ -41,6 +44,8 @@ def test_inline_review_preserves_positions_and_partial_application(local_authori
     page.goto(f'{url}/?section=writing&stage=draft&work_id={work_id}&chapter_id={chapter_id}&scene_id={scene_id}')
     # Mobile starts in manuscript; both changes are visible without a disclosure.
     expect(page.locator('.chapter-inline-change')).to_have_count(2)
+    expect(page.locator('[data-apply-scene-changes]')).to_have_count(1)
+    expect(page.locator('.chapter-inline-change [data-apply-scene-changes]')).to_have_count(0)
     expect(page.locator('.chapter-authoring-related').filter(has_text='本场有待审')).to_have_count(0)
     order = page.locator('[data-chapter-blocks] > .chapter-inline-review').evaluate(
         "node=>[...node.children].filter(x=>x.matches('[data-chapter-block],.chapter-inline-change')).map(x=>x.getAttribute('aria-label'))")
@@ -57,6 +62,53 @@ def test_inline_review_preserves_positions_and_partial_application(local_authori
     actual = service.get_work(work_id)
     blocks = next(a for a in actual['artifacts'] if a['kind'] == 'scene_script' and a['scope_id'] == scene_id)['current_revision']['content']['blocks']
     assert [b['text'] for b in blocks] == ['原来的第1段。', '润色后的第2段。', '原来的第3段。', '原来的第4段。', '原来的第5段。']
+    page.close()
+
+
+@pytest.mark.parametrize('width', [1920, 390])
+def test_first_draft_has_one_batch_action_and_numbered_new_prose(local_authoring, browser, width):
+    service, url = local_authoring
+    work_id, scene_id, work = create_ready_scene(service)
+    candidate = service.generate_scene_candidate(work_id, scene_id, {'expected_version': work['version']})
+    proposal = next(p for p in service.get_work(work_id)['proposals'] if p['id'] == candidate['proposal_id'])
+    changes = proposal['block_changes']
+    assert len(changes) > 1 and all(c['base_start'] == c['base_end'] == 0 for c in changes)
+    page = browser.new_page(viewport={'width': width, 'height': 1080 if width == 1920 else 844})
+    page.goto(f'{url}/?section=writing&stage=draft&work_id={work_id}&scene_id={scene_id}')
+    review = page.locator('[data-scene-diff-root]')
+    expect(review.locator('[data-apply-scene-changes]')).to_have_count(1)
+    expect(review.locator('.chapter-inline-change [data-apply-scene-changes]')).to_have_count(0)
+    expect(review.locator('.chapter-inline-before')).to_have_count(0)
+    expect(review.locator('.chapter-inline-after .chapter-inline-copy')).to_have_count(len(changes))
+    assert review.locator('.chapter-inline-location').all_text_contents() == [
+        f'{i+1:02} · 新增段落' for i in range(len(changes))]
+    assert review.locator('[data-scene-change]').evaluate_all(
+        "nodes=>nodes.map(node=>node.getAttribute('aria-label'))") == [
+            f'采用第 {i+1} 段修改' for i in range(len(changes))]
+    expect(page.get_by_role('button', name='开始写作', exact=True)).to_have_count(0)
+    page.get_by_role('button', name='阅读', exact=True).click()
+    expect(page.locator('[data-chapter-save]')).to_be_disabled()
+    page.get_by_role('button', name='编辑', exact=True).click()
+    assert not service.get_work(work_id)['chapters'][0]['scenes'][0]['current_revision_id']
+    review.locator('[data-select-all-scene-changes]').click()
+    apply = review.locator('[data-apply-scene-changes]')
+    expect(apply).to_have_text('应用 0 项修改')
+    expect(apply).to_be_disabled()
+    review.locator('[data-scene-change]').first.check()
+    review.locator('[data-scene-change]').last.check()
+    expect(apply).to_have_text('应用 2 项修改')
+    expect(review.locator('[data-scene-diff-count]')).to_have_text(f'已选择 2 / {len(changes)} 项')
+    if width == 1920:
+        toolbar = review.locator('.chapter-inline-review-toolbar').bounding_box()
+        save = page.locator('.chapter-authoring-save').bounding_box()
+        assert toolbar['y'] >= save['y'] + save['height']
+        assert toolbar['y'] + toolbar['height'] <= 1080
+    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+    apply.click()
+    expect(review).to_have_count(0)
+    actual = service.get_work(work_id)
+    blocks = next(a for a in actual['artifacts'] if a['kind'] == 'scene_script' and a['scope_id'] == scene_id)['current_revision']['content']['blocks']
+    assert [b['text'] for b in blocks] == [b['text'] for c in (changes[0], changes[-1]) for b in c['new_blocks']]
     page.close()
 
 

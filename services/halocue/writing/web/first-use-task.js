@@ -31,7 +31,7 @@
     if (input.dirty && input.emptyField) return item(4, '先把这一段填好', '正文不能为空。如果选了“对白”，也要填上说话人。', 'write', '写下第一句', '[data-chapter-text]');
     if (input.dirty) return item(4, '写好后，点这里保存', '点“保存整章”，保存这一章里刚才改过的正文。保存成功，这次教学就结束了。', 'save', '保存这段正文', '[data-chapter-save]');
     if (!record.manual && input.sceneBusy) return item(4, '助手正在回复', '等回复出来再看。想中断的话，点“停止本轮”。', 'wait', '等待回复');
-    if (input.proposalId) return item(4, input.reviewSelectionEmpty ? '先勾选想留下的文字' : '看看这段写得怎么样', input.reviewSelectionEmpty ? '还没选中任何改动。勾选想留下的部分，就能点“应用”了；不满意也可以让助手继续改。' : '对照“改前”和“改后”，勾选想留下的部分，再点“应用”。这就保存为正式正文了，不用再点“保存整章”。', 'review', '查看改动', '[data-scene-change]');
+    if (input.proposalId) return item(4, input.reviewSelectionEmpty ? '先勾选想留下的文字' : '看看这段写得怎么样', input.reviewSelectionEmpty ? '还没选中任何改动。勾选想留下的部分，就能点“应用”了；不满意也可以让助手继续改。' : `${input.initialDraft ? '读一遍新稿' : '对照“改前”和“改后”'}，勾选想留下的部分，再点上方的“应用”。这就保存为正式正文了，不用再点“保存整章”。`, 'review', '查看改动', '[data-scene-change]');
     if (!record.manual && input.proposalSuperseded) return item(4, '这份候选不能再用了', input.canPrepare ? input.agentVisible ? '正文或设定已经改过，需要让助手按现在的内容重新写。在这里说说你的要求。' : '正文或设定已经改过。点“Agent”打开助手，让它按现在的内容重新写。' : '正文或设定已经改过。先补上这里提示缺少的资料，再让助手重新写。', input.canPrepare ? 'prepare' : 'setup', '重新写下要求');
     if (!record.manual && input.preparationRequired) return item(4, '先选人物和参考资料', input.agentVisible ? '这里列出了还缺什么，按提示选好人物或补充资料，就可以请助手写了。' : '点“Agent”打开助手，看看还缺哪些资料。', 'setup', '看看还缺什么');
     return item(4, input.revisionId ? '试着修改并保存一处正文' : '写下你自己的第一段', input.canPrepare && !record.manual ? input.agentVisible ? '在这里告诉助手“起草本场”，也可以加上你自己的要求。写好后，由你决定留下哪些。' : '点“Agent”打开助手，再告诉它“起草本场”。' : input.revisionId ? '改一处正文，再点“保存整章”。左上角可以选旁白、动作或对白。' : '点“开始写作”，先写一两句。段落左上角可以选旁白、动作或对白。', input.canPrepare && !record.manual ? 'prepare' : 'manual', input.canPrepare && !record.manual ? '写下要求' : '自己写第一段', '[data-chapter-add],[data-chapter-text]');
@@ -83,6 +83,7 @@
       planPending: Boolean(plan), planKind: plan?.kind,
       hasDirection: blueprintIsConfirmed(), atDiscussion: state.route?.section === 'works',
       reviewSelectionEmpty: Boolean(reviewChoices.length && reviewChoices.every(node => !node.checked)),
+      initialDraft: Boolean(scene && document.querySelector(`[data-chapter-scene="${CSS.escape(scene.id)}"] .chapter-inline-review.is-initial-draft`)),
       hasNextAction: Boolean(document.querySelector('.agent-reply-next-step button')),
       nextLabel: document.querySelector('.agent-reply-next-step button')?.textContent.replace('↗', '').trim(),
       busy: Boolean(thread && workAgentActiveRun(thread)),

@@ -325,6 +325,8 @@ def test_ai_candidate_is_taught_as_review_and_only_adoption_completes(local_auth
     page.get_by_role("button", name="重看新手教学", exact=True).click()
     task = page.get_by_role("region", name="首次创作教学")
     expect(task).to_contain_text("看看这段写得怎么样")
+    expect(task).to_contain_text("读一遍新稿")
+    expect(task).not_to_contain_text("改前")
     expect(task).to_be_in_viewport(ratio=1)
     screenshot(page, "first-use-review-light-1600")
     assert not service.get_work(work_id)["chapters"][0]["scenes"][0]["current_revision_id"]
