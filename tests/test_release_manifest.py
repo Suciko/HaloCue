@@ -106,6 +106,29 @@ def test_public_manifest_includes_runtime_frontend_tests_and_tools(tmp_path):
     } <= paths
 
 
+def test_manuscript_editor_build_sources_and_licenses_survive_export(tmp_path):
+    prefix = "services/halocue/writing/"
+    files = {
+        prefix + "editor/README.md": "# Build the editor\n",
+        prefix + "editor/build.mjs": "// synthetic build\n",
+        prefix + "editor/package.json": "{}\n",
+        prefix + "editor/package-lock.json": "{}\n",
+        prefix + "editor/src/manuscript-document.js": "// synthetic source\n",
+        prefix + "web/manuscript-document.js": "// synthetic bundle\n",
+        prefix + "web/vendor/manuscript-document/LICENSES.txt": "MIT fixture\n",
+    }
+    source = _tracked_source(tmp_path, files)
+    destination = tmp_path / "build" / "source"
+    manifest = export_public_source(source, destination, build_root=tmp_path / "build")
+    entries = {item["path"] for item in json.loads(manifest.read_text())["files"]}
+    assert entries == set(files)
+    for name, contents in files.items():
+        assert (destination / name).read_text() == contents
+    assert not is_public_source_path(prefix + "editor/node_modules/example/LICENSE")
+    assert not is_public_source_path(prefix + "editor/.env")
+    assert not is_public_source_path(prefix + "web/vendor/private-notes.txt")
+
+
 def test_public_manifest_excludes_private_paths_and_assets(tmp_path):
     files = {
         "safe.py": "# public\n",

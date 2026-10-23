@@ -387,6 +387,24 @@ def audit_third_party_notices(bundle_dir: Path) -> tuple[str, ...]:
             name = match.group(1).strip()
             components[_normalized_component(name)] = name
     internal = bundle_dir / "_internal"
+    writing_web = internal / "services/halocue/writing/web"
+    if (writing_web / "manuscript-document.js").is_file():
+        license_file = writing_web / "vendor/manuscript-document/LICENSES.txt"
+        if not license_file.is_file() or not license_file.read_text(encoding="utf-8").strip():
+            raise ValueError("manuscript editor missing LICENSES.txt")
+        for name in (
+            "prosemirror-model",
+            "prosemirror-state",
+            "prosemirror-view",
+            "prosemirror-commands",
+            "prosemirror-keymap",
+            "prosemirror-history",
+            "prosemirror-transform",
+            "orderedmap",
+            "rope-sequence",
+            "w3c-keyname",
+        ):
+            components[_normalized_component(name)] = name
     echarts = internal / "services/halocue/writing/web/vendor/echarts"
     if (echarts / "echarts-6.0.0.min.js").is_file():
         components[_normalized_component("Apache ECharts")] = "Apache ECharts"

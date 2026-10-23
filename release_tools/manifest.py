@@ -142,6 +142,12 @@ def is_public_source_path(relative_path: str) -> bool:
         if normalized in {
             "services/halocue/writing/web/vendor/echarts/LICENSE",
             "services/halocue/writing/web/vendor/echarts/NOTICE",
+            "services/halocue/writing/web/vendor/manuscript-document/LICENSES.txt",
+            "services/halocue/writing/editor/README.md",
+            "services/halocue/writing/editor/build.mjs",
+            "services/halocue/writing/editor/package.json",
+            "services/halocue/writing/editor/package-lock.json",
+            "services/halocue/writing/editor/src/manuscript-document.js",
         }:
             return True
         if normalized in {
