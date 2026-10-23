@@ -92,7 +92,7 @@
     return Boolean(composing || pointerDown || hcComposing || hcCommandDepth || state.manuscriptDirty || root.HaloCueChapterAuthoring?.hasUnsavedDrafts || document.querySelector('dialog[open]') || document.getSelection()?.type === 'Range' || active?.matches?.('textarea,input,select,[contenteditable="true"]'));
   }
   function toolbar() {
-    let host = document.querySelector('.hc-discussion-tools, .chapter-authoring-save');
+    let host = document.querySelector('.hc-discussion-tools, [data-chapter-menu-items]');
     if (!host) return;
     if (prefs().mode === 'free') { host.querySelector('[data-guidance-controls]')?.remove(); return; }
     let node = host.querySelector('[data-guidance-controls]');
@@ -142,7 +142,7 @@
       panel.className = 'hc-task-guidance';
       panel.dataset.guidancePanel = '';
       panel.setAttribute('aria-label', '当前任务引导');
-      if (work) owner.insertBefore(panel, original); else owner.querySelector('.chapter-authoring-save')?.after(panel);
+      if (work) owner.insertBefore(panel, original); else owner.querySelector('.chapter-continuous-head')?.after(panel);
     }
     const html = markup(task, work);
     const changed = panel.dataset.taskKey !== task.key;

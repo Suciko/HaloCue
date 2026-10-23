@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 import test_discussion_guidance_browser as guidance_fixture
 from playwright.sync_api import expect
+from manuscript_document_test_support import replace_paragraph
 
 from test_choice_ui_browser import open_page, screenshot
 from test_discussion_guidance import send
@@ -35,6 +36,7 @@ def test_guided_reply_pause_and_dismiss_keep_input_and_persist(flow_server, brow
     # A labelled section is a region. It sits beside the existing one-button action.
     expect(panel).to_contain_text("接下来安排章节与场景")
     field = page.locator("#workConversationForm textarea")
+    field.click()
     field.fill("先保留我的想法，还没有发送。")
     before = service.get_work(work["id"])["version"]
     calls = provider.calls
@@ -83,6 +85,7 @@ def test_guidance_carries_into_scene_and_never_sends_prepared_request(flow_serve
     expect(field).to_have_value(__import__("re").compile(".*陪跑开场.*"))
     assert provider.calls == calls
     assert not service.get_work(work_id)["chapters"][0]["scenes"][0]["current_revision_id"]
+    field.click()
     field.fill("我的修改要求，不能被替换")
     prepare.click()
     expect(field).to_have_value("我的修改要求，不能被替换")
@@ -103,17 +106,20 @@ def test_manual_draft_pause_and_refresh_preserve_the_same_prose(flow_server, bro
         (1280, 720),
     )
     enable_optional_companion(page)
+    page.get_by_label("章节操作", exact=True).click()
     page.get_by_label("用户引导模式").select_option("guided")
     panel = page.get_by_role("region", name="当前任务引导")
     panel.get_by_role("button", name="自己写", exact=True).click()
     field = page.locator("[data-chapter-text]").first
-    field.fill("这是我还没保存的正文。")
+    replace_paragraph(page, field, "这是我还没保存的正文。")
     expect(panel).to_contain_text("先保存正在修改的正文")
+    page.get_by_label("章节操作", exact=True).click()
     page.get_by_role("button", name="暂停", exact=True).click()
-    expect(field).to_have_value("这是我还没保存的正文。")
+    expect(field).to_have_text("这是我还没保存的正文。")
     assert not service.get_work(work_id)["chapters"][0]["scenes"][0]["current_revision_id"]
     page.reload()
-    expect(page.locator("[data-chapter-text]").first).to_have_value("这是我还没保存的正文。")
+    expect(page.locator("[data-chapter-text]").first).to_have_text("这是我还没保存的正文。")
+    page.get_by_label("章节操作", exact=True).click()
     expect(page.get_by_role("button", name="恢复引导")).to_be_visible()
     page.get_by_role("button", name="恢复引导").click()
     panel.get_by_role("button", name="保存正文", exact=True).click()
@@ -169,6 +175,7 @@ def test_guidance_updates_do_not_steal_composer_focus_or_ime_input(flow_server, 
     )
     field = page.locator('#sceneConversationForm textarea[name="text"]')
     expect(field).to_be_visible()
+    field.click()
     field.fill("继续写我正在输入的这一段")
     field.evaluate("element => element.setSelectionRange(3, 7)")
     field.dispatch_event("compositionstart")

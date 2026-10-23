@@ -1232,7 +1232,7 @@
       // single-page manuscript layout and remain available on narrow screens.
       const sceneHead = document.querySelector('.scene-head');
       const chapterHead = document.querySelector('.chapter-continuous-head');
-      const externalAnchor = sceneHead || chapterHead;
+      const externalAnchor = document.querySelector('[data-chapter-menu-items]') || sceneHead || chapterHead;
       if (externalAnchor && !externalAnchor.querySelector('[data-external-agent-open]')) {
         externalAnchor.insertAdjacentHTML('beforeend', '<button type="button" class="quiet" data-external-agent-open>任务包交换</button>');
       }
@@ -1481,8 +1481,6 @@
       event.preventDefault();claimAppEvent(event);
       let chapterEditor=document.querySelector('.chapter-authoring');
       if(chapterEditor){
-        const editButton=chapterEditor.querySelector('[data-chapter-view="edit"]');
-        if(editButton?.getAttribute('aria-pressed')!=='true')editButton?.click();
         chapterEditor=document.querySelector('.chapter-authoring');
         const sceneId=selectedScene()?.id||state.sceneId;
         const sceneSelector=sceneId?`[data-chapter-scene="${CSS.escape(sceneId)}"]`:'.chapter-authoring-scene.is-current';
@@ -1495,7 +1493,7 @@
           sceneEditor=chapterEditor?.querySelector(sceneSelector)||chapterEditor?.querySelector('.chapter-authoring-scene.is-current');
           field=sceneEditor?.querySelector('[data-chapter-text]');
         }
-        if(field){field.focus();field.setSelectionRange(field.value.length,field.value.length)}
+        if(field){const editor=sceneEditor.querySelector('.chapter-document-content');window.HaloCueManuscriptDocument?.get(editor?.dataset.documentKey)?.focus();}
         else toast('本场还没有可编辑的正文段落。',true);
         return;
       }

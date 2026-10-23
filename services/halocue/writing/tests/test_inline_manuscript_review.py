@@ -50,10 +50,9 @@ def test_inline_review_preserves_positions_and_partial_application(local_authori
     order = page.locator('[data-chapter-blocks] > .chapter-inline-review').evaluate(
         "node=>[...node.children].filter(x=>x.matches('[data-chapter-block],.chapter-inline-change')).map(x=>x.getAttribute('aria-label'))")
     assert order == ['第 1 段', '段落修改 · 第 2 段', '第 3 段', '段落修改 · 第 4 段', '第 5 段']
-    # Switching view captures the original text, never candidate text.
-    page.get_by_role('button', name='阅读', exact=True).click()
+    # Pending candidates never enter the local document or save path.
+    expect(page.locator('[data-chapter-view]')).to_have_count(0)
     expect(page.locator('[data-chapter-save]')).to_be_disabled()
-    page.get_by_role('button', name='编辑', exact=True).click()
     page.locator('[data-scene-change]').nth(1).uncheck()
     expect(page.locator('[data-apply-scene-changes]').first).to_have_text('应用 1 项修改')
     expect(page.locator('[data-apply-scene-changes]').last).to_have_text('应用 1 项修改')
@@ -86,9 +85,8 @@ def test_first_draft_has_one_batch_action_and_numbered_new_prose(local_authoring
         "nodes=>nodes.map(node=>node.getAttribute('aria-label'))") == [
             f'采用第 {i+1} 段修改' for i in range(len(changes))]
     expect(page.get_by_role('button', name='开始写作', exact=True)).to_have_count(0)
-    page.get_by_role('button', name='阅读', exact=True).click()
+    expect(page.locator('[data-chapter-view]')).to_have_count(0)
     expect(page.locator('[data-chapter-save]')).to_be_disabled()
-    page.get_by_role('button', name='编辑', exact=True).click()
     assert not service.get_work(work_id)['chapters'][0]['scenes'][0]['current_revision_id']
     review.locator('[data-select-all-scene-changes]').click()
     apply = review.locator('[data-apply-scene-changes]')
@@ -100,7 +98,7 @@ def test_first_draft_has_one_batch_action_and_numbered_new_prose(local_authoring
     expect(review.locator('[data-scene-diff-count]')).to_have_text(f'已选择 2 / {len(changes)} 项')
     if width == 1920:
         toolbar = review.locator('.chapter-inline-review-toolbar').bounding_box()
-        save = page.locator('.chapter-authoring-save').bounding_box()
+        save = page.locator('.chapter-continuous-head').bounding_box()
         assert toolbar['y'] >= save['y'] + save['height']
         assert toolbar['y'] + toolbar['height'] <= 1080
     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
@@ -128,7 +126,7 @@ def test_projection_handles_complete_multi_paragraph_ranges(browser, kind, start
     page.evaluate('''({kind,start,end})=>{
       const blocks=Array.from({length:4},(_,i)=>({id:'b'+i,type:'narration',text:'原文'+i}));
       const changes=[{id:'change',kind,base_start:start,base_end:end,old_blocks:blocks.slice(start,end),new_blocks:kind==='delete'?[]:[{type:'narration',text:'改后甲'},{type:'narration',text:'改后乙'}]}];
-      document.querySelector('#host').innerHTML=manuscriptRows({id:'scene'},blocks,false,{id:'proposal',base_revision_id:'rev',block_changes:changes});
+      document.querySelector('#host').innerHTML=manuscriptRows({id:'scene'},blocks,{id:'proposal',base_revision_id:'rev',block_changes:changes});
     }''', {'kind':kind,'start':start,'end':end})
     expect(page.locator('.chapter-inline-change')).to_have_count(1)
     expect(page.locator('.chapter-inline-before .chapter-inline-copy')).to_have_count(end-start)

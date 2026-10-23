@@ -271,6 +271,39 @@ def test_dependency_notice_audit_requires_vendored_echarts_license_and_notice(tm
     assert public_builder.audit_third_party_notices(bundle) == ("Apache ECharts",)
 
 
+def test_manuscript_bundle_requires_licenses_and_component_notices(tmp_path):
+    bundle = tmp_path / "HaloCue"
+    web = bundle / "_internal/services/halocue/writing/web"
+    web.mkdir(parents=True)
+    (web / "manuscript-document.js").write_text("// synthetic bundle\n", encoding="utf-8")
+    packages = (
+        "prosemirror-model",
+        "prosemirror-state",
+        "prosemirror-view",
+        "prosemirror-commands",
+        "prosemirror-keymap",
+        "prosemirror-history",
+        "prosemirror-transform",
+        "orderedmap",
+        "rope-sequence",
+        "w3c-keyname",
+    )
+    notice = bundle / "THIRD_PARTY_NOTICES.md"
+    notice.write_text("\n".join(f"`{name}`" for name in packages), encoding="utf-8")
+    with pytest.raises(ValueError, match="manuscript editor missing LICENSES.txt"):
+        public_builder.audit_third_party_notices(bundle)
+    license_file = web / "vendor/manuscript-document/LICENSES.txt"
+    license_file.parent.mkdir(parents=True)
+    license_file.write_text("", encoding="utf-8")
+    with pytest.raises(ValueError, match="manuscript editor missing LICENSES.txt"):
+        public_builder.audit_third_party_notices(bundle)
+    license_file.write_text("MIT fixture\n", encoding="utf-8")
+    assert set(public_builder.audit_third_party_notices(bundle)) == set(packages)
+    notice.write_text("# No components declared\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="missing shipped components"):
+        public_builder.audit_third_party_notices(bundle)
+
+
 def test_finalize_existing_bundle_replaces_only_notice_and_writes_artifacts(
     tmp_path,
 ):

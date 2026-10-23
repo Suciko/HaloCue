@@ -27,14 +27,13 @@
     if (!input.atDraft) return item(3, '打开这一场的正文', input.inDraftView ? input.draftSceneVisible ? '点左侧高亮的场景，开始写这一场。' : '点“目录”展开场景栏，再选要写的那一场。' : input.compactNav ? '在视图菜单里选“正文写作”，再选场景。' : '点顶部的“正文写作”，再从左侧目录选场景。', 'draft', '进入第一场正文');
     if (input.contextEditing) return item(4, '为这一场选好人物', '勾选这场戏里的人物，让助手参考他们的设定，再点“保存资料选择”。这里保存的是参考资料，正文还没开始写。', 'context', '选择参考资料', '#sceneContextForm');
     if (!record.manual && input.preparingScene) return item(4, '正在准备本场资料', '正在读取这一场的参考资料，稍等一下。', 'wait', '等待资料准备');
-    if (input.reading && (input.dirty || !input.proposalId && (record.manual || !input.canPrepare))) return item(4, '先切到编辑，再动笔', '点“编辑”就能改正文，刚才写的内容会保留。', 'edit', '切到编辑模式', '[data-chapter-view="edit"]');
     if (input.dirty && input.emptyField) return item(4, '先把这一段填好', '正文不能为空。如果选了“对白”，也要填上说话人。', 'write', '写下第一句', '[data-chapter-text]');
     if (input.dirty) return item(4, '写好后，点这里保存', '点“保存整章”，保存这一章里刚才改过的正文。保存成功，这次教学就结束了。', 'save', '保存这段正文', '[data-chapter-save]');
     if (!record.manual && input.sceneBusy) return item(4, '助手正在回复', '等回复出来再看。想中断的话，点“停止本轮”。', 'wait', '等待回复');
     if (input.proposalId) return item(4, input.reviewSelectionEmpty ? '先勾选想留下的文字' : '看看这段写得怎么样', input.reviewSelectionEmpty ? '还没选中任何改动。勾选想留下的部分，就能点“应用”了；不满意也可以让助手继续改。' : `${input.initialDraft ? '读一遍新稿' : '对照“改前”和“改后”'}，勾选想留下的部分，再点上方的“应用”。这就保存为正式正文了，不用再点“保存整章”。`, 'review', '查看改动', '[data-scene-change]');
     if (!record.manual && input.proposalSuperseded) return item(4, '这份候选不能再用了', input.canPrepare ? input.agentVisible ? '正文或设定已经改过，需要让助手按现在的内容重新写。在这里说说你的要求。' : '正文或设定已经改过。点“Agent”打开助手，让它按现在的内容重新写。' : '正文或设定已经改过。先补上这里提示缺少的资料，再让助手重新写。', input.canPrepare ? 'prepare' : 'setup', '重新写下要求');
     if (!record.manual && input.preparationRequired) return item(4, '先选人物和参考资料', input.agentVisible ? '这里列出了还缺什么，按提示选好人物或补充资料，就可以请助手写了。' : '点“Agent”打开助手，看看还缺哪些资料。', 'setup', '看看还缺什么');
-    return item(4, input.revisionId ? '试着修改并保存一处正文' : '写下你自己的第一段', input.canPrepare && !record.manual ? input.agentVisible ? '在这里告诉助手“起草本场”，也可以加上你自己的要求。写好后，由你决定留下哪些。' : '点“Agent”打开助手，再告诉它“起草本场”。' : input.revisionId ? '改一处正文，再点“保存整章”。左上角可以选旁白、动作或对白。' : '点“开始写作”，先写一两句。段落左上角可以选旁白、动作或对白。', input.canPrepare && !record.manual ? 'prepare' : 'manual', input.canPrepare && !record.manual ? '写下要求' : '自己写第一段', '[data-chapter-add],[data-chapter-text]');
+    return item(4, input.revisionId ? '试着修改并保存一处正文' : '写下你自己的第一段', input.canPrepare && !record.manual ? input.agentVisible ? '在这里告诉助手“起草本场”，也可以加上你自己的要求。写好后，由你决定留下哪些。' : '点“Agent”打开助手，再告诉它“起草本场”。' : input.revisionId ? '直接点击正文修改，再点“保存整章”。段落旁可以选旁白、动作或对白。' : '直接在正文里写一两句，按 Enter 就能分段。段落旁可以选旁白、动作或对白。', input.canPrepare && !record.manual ? 'prepare' : 'manual', input.canPrepare && !record.manual ? '写下要求' : '自己写第一段', '[data-chapter-add],[data-chapter-text]');
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = {lesson};
   if (!root.document) return;
@@ -71,12 +70,11 @@
       contextEditing: Boolean(pick('#sceneContextForm')),
       preparingScene: Boolean(scene && blueprintIsConfirmed() && state.context?.scene_id !== scene.id && !state._contextBlocked && !state._contextError),
       sceneBusy: Boolean(scene && sceneConversationThread(scene) && workAgentActiveRun(sceneConversationThread(scene))),
-      reading: Boolean(document.querySelector('[data-chapter-view="read"][aria-pressed="true"]')),
       atStructure: state.route?.section === 'writing' && state.stage === 'structure',
       compactNav: Boolean(document.querySelector('[data-creation-select]')?.getClientRects().length),
       addSceneVisible: Boolean([...document.querySelectorAll('[data-structure-add-scene]')].some(node => node.getClientRects().length)),
       dirty: Boolean(state.manuscriptDirty || root.HaloCueChapterAuthoring?.hasUnsavedDrafts),
-      emptyField: Boolean([...document.querySelectorAll('.chapter-authoring [data-chapter-block]')].some(node => !node.querySelector('[data-chapter-text]')?.value.trim() || node.dataset.blockType === 'dialogue' && !node.querySelector('[data-chapter-speaker]')?.value.trim())),
+      emptyField: Boolean([...document.querySelectorAll('.chapter-document [data-chapter-block]')].some(node => node.querySelector('[data-chapter-text]')?.textContent.trim() && node.dataset.blockType === 'dialogue' && !node.querySelector('[data-chapter-speaker]')?.value.trim())),
       proposalId: (state.work?.proposals || []).find(item => item.kind === 'scene_script' && item.scope_id === scene?.id && item.status === 'pending')?.id,
       proposalSuperseded: proposal?.status === 'superseded',
       recovery: Boolean(pick('.scene-agent-recovery-card:has(button),.agent-failure-card:has(button),.agent-recovery-card:has(button)')),
@@ -119,10 +117,10 @@
     if (!task.action) return [pick('[data-work-discussion-scroll]')];
     if (task.action === 'structure') return [pick(task.target) || pick('[data-creation-select]')];
     if (task.action === 'add-scene') return [pick(task.target) || pick('[data-panel-toggle="tree"]')];
-    if (task.action === 'manual') return [scene?.querySelector('[data-chapter-block]') || scene?.querySelector('[data-chapter-add]')];
+    if (task.action === 'manual') return [scene?.querySelector('[data-chapter-block]')];
     if (task.action === 'write') {
       const blocks = [...document.querySelectorAll('.chapter-authoring [data-chapter-block]')];
-      return [blocks.find(node => !node.querySelector('[data-chapter-text]')?.value.trim() || node.dataset.blockType === 'dialogue' && !node.querySelector('[data-chapter-speaker]')?.value.trim())];
+      return [blocks.find(node => !node.querySelector('[data-chapter-text]')?.textContent.trim() || node.dataset.blockType === 'dialogue' && !node.querySelector('[data-chapter-speaker]')?.value.trim())];
     }
     if (task.action === 'save') return [pick(task.target), scene];
     if (task.action === 'draft') return [pick(`[data-scene="${CSS.escape(input.sceneId)}"],[data-scene-open="${CSS.escape(input.sceneId)}"]`) || pick(state.route?.section === 'writing' ? '[data-panel-toggle="tree"]' : '[data-creation-view="draft"]') || pick('[data-creation-select]')];
