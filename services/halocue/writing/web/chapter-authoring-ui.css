@@ -490,16 +490,19 @@ html[data-theme="dark"] #app#app.hc-redesign[data-surface="writing"] #sceneConve
   container:chapter-authoring / inline-size;
 }
 #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-continuous-head{
-  display:block;
-  position:relative;
-  top:auto;
-  z-index:auto;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  position:sticky;
+  top:0;
+  z-index:8;
   width:100%;
   box-sizing:border-box;
-  margin:0;
-  padding:16px 24px 9px;
+  margin:0 0 12px;
+  padding:14px 24px;
   border-bottom:0;
-  background:transparent;
+  background:var(--hc-bg,#fff);
   backdrop-filter:none;
 }
 #app.hc-redesign[data-surface="writing"] .chapter-continuous-head>div:first-child{min-width:0}
@@ -524,51 +527,15 @@ html[data-theme="dark"] #app#app.hc-redesign[data-surface="writing"] #sceneConve
   font-size:clamp(24px,2vw,30px);
   line-height:1.28;
 }
-#app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-save{
-  display:flex;
-  position:sticky;
-  top:0;
-  z-index:4;
-  align-items:center;
-  justify-content:space-between;
-  flex-wrap:nowrap;
-  gap:12px;
-  width:100%;
-  box-sizing:border-box;
-  margin:0 0 16px;
-  padding:8px 24px 10px;
-  background:var(--hc-bg,#f7f8fa);
-  min-width:0;
-}
-#app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-save::after{
-  content:"";
-  position:absolute;
-  right:24px;
-  bottom:0;
-  left:24px;
-  height:1px;
-  background:var(--hc-line,#dce2eb);
-}
 #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-scene{
   scroll-margin-top:70px;
 }
 @container chapter-authoring (max-width:420px){
-  #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-save{padding-inline:16px}
-  #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-save::after{right:16px;left:16px}
+  #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-continuous-head{padding-inline:16px}
 }
 @media(max-width:760px){
   #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-continuous-head{
     padding:14px 16px 10px;
-  }
-  #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-save{
-    position:relative;
-    top:auto;
-    margin:0 0 10px;
-    padding:8px 16px 10px;
-  }
-  #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-save::after{
-    right:16px;
-    left:16px;
   }
   #app.hc-redesign[data-surface="writing"] .chapter-authoring .chapter-authoring-scene{scroll-margin-top:54px}
 }

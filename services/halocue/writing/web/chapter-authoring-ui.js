@@ -3,7 +3,7 @@
   'use strict';
   const drafts=new Map();
   const storageKey='halocue.chapter-drafts.v1';
-  let review=null,reviewKey='',reviewBusy=false,saveBusy=false,notice='',refreshAfterComposition=false,textSelection=null;
+  let review=null,reviewKey='',reviewBusy=false,saveBusy=false,notice='',refreshAfterComposition=false,textSelection=null,headerObserver=null;
   try{for(const [key,value] of Object.entries(JSON.parse(sessionStorage.getItem(storageKey)||'{}')))drafts.set(key,value)}catch(_){/* a damaged session cache must not block writing */}
   const escape=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const key=(work,scene)=>`${work}:${scene}`;
@@ -75,7 +75,12 @@
   function render(host){
     const {work,chapter}=current();if(!work||!chapter)return false;
     const focus=documentEditor().preserveFocus(),scenes=chapter.scenes||[],dirty=anyDirty(chapter),rkey=`${work.id}:${chapter.id}:${work.version}`;
-    host.innerHTML=`<div class="chapter-authoring chapter-continuous" data-chapter-id="${escape(chapter.id)}"><header class="chapter-continuous-head"><div><p class="eyebrow">章节正文 <span class="chapter-save-state" data-chapter-save-state aria-live="polite">${escape(statusText())}</span></p><h2>${escape(chapter.title)}</h2></div></header><div class="chapter-authoring-save" role="toolbar" aria-label="章节正文操作"><div class="chapter-document-history"><button type="button" class="quiet" data-chapter-undo title="Ctrl / ⌘ + Z">撤销</button><button type="button" class="quiet" data-chapter-redo title="Ctrl / ⌘ + Shift + Z">重做</button><span class="chapter-document-hint">直接点击正文修改 · Enter 分段</span></div><button type="button" class="primary" data-chapter-save ${dirty&&!saveBusy&&!hasConflict(chapter)?'':'disabled'}>${saveBusy?'保存中…':'保存整章'}</button></div>${scenes.length?`<div class="chapter-manuscript-flow">${scenes.map(section).join('')}</div>`:'<div class="chapter-authoring-empty"><p>这一章还没有正文。</p><button type="button" class="primary" data-chapter-start>开始写本章</button><button type="button" class="quiet" data-stage-jump="structure">先规划场景</button></div>'}<section class="chapter-review" data-chapter-review aria-label="整章检查">${scenes.length?reviewMarkup(chapter):'<p>先建立场景并保存正文。</p>'}</section></div>`;
+    host.innerHTML=`<div class="chapter-authoring chapter-continuous" data-chapter-id="${escape(chapter.id)}"><header class="chapter-continuous-head"><div><p class="eyebrow">章节正文 <span class="chapter-save-state" data-chapter-save-state aria-live="polite">${escape(statusText())}</span></p><h2>${escape(chapter.title)}</h2></div><div class="chapter-editor-tools"><button type="button" class="primary" data-chapter-save ${dirty||saveBusy?'':'hidden'} ${dirty&&!saveBusy&&!hasConflict(chapter)?'':'disabled'}>${saveBusy?'保存中…':'保存'}</button><details class="manuscript-menu chapter-editor-menu" data-manuscript-menu><summary aria-label="章节操作" title="章节操作">⋯</summary><div class="manuscript-menu-panel" data-chapter-menu-items><button type="button" data-chapter-undo>撤销<kbd>Ctrl Z</kbd></button><button type="button" data-chapter-redo>重做<kbd>Ctrl Shift Z</kbd></button></div></details></div></header>${scenes.length?`<div class="chapter-manuscript-flow">${scenes.map(section).join('')}</div>`:'<div class="chapter-authoring-empty"><p>这一章还没有正文。</p><button type="button" class="primary" data-chapter-start>开始写本章</button><button type="button" class="quiet" data-stage-jump="structure">先规划场景</button></div>'}<section class="chapter-review" data-chapter-review aria-label="整章检查">${scenes.length?reviewMarkup(chapter):'<p>先建立场景并保存正文。</p>'}</section></div>`;
+    headerObserver?.disconnect();
+    const pageRoot=host.querySelector('.chapter-authoring'),pageHead=pageRoot.querySelector('.chapter-continuous-head');
+    headerObserver=new ResizeObserver(()=>pageRoot.style.setProperty('--chapter-header-height',`${pageHead.getBoundingClientRect().height}px`));headerObserver.observe(pageHead);
+    const shortcuts=host.querySelectorAll('.chapter-editor-menu kbd');
+    if(/Mac|iPhone|iPad/.test(navigator.platform)){shortcuts[0].textContent='⌘ Z';shortcuts[1].textContent='⌘ Shift Z';}
     documentEditor().retain(new Set(scenes.map(scene=>key(work.id,scene.id))));
     for(const container of host.querySelectorAll('[data-chapter-editor]')){
       const scene=scenes.find(item=>item.id===container.dataset.chapterEditor);
@@ -90,7 +95,7 @@
     const {chapter}=current();if(!chapter||!document.querySelector('.chapter-authoring'))return;
     const dirty=anyDirty(chapter),label=document.querySelector('[data-chapter-save-state]'),button=document.querySelector('[data-chapter-save]');
     if(label)label.textContent=statusText();
-    if(button)button.disabled=!dirty||saveBusy||hasConflict(chapter);
+    if(button){button.disabled=!dirty||saveBusy||hasConflict(chapter);button.hidden=!dirty&&!saveBusy;button.textContent=saveBusy?'保存中…':'保存';}
     for(const action of ['undo','redo']){const control=document.querySelector(`[data-chapter-${action}]`);if(control)control.disabled=!documentEditor().can(action);}
     const top=document.getElementById('saveStatus');
     if(top){top.textContent=saveBusy?'正文保存中…':hasConflict(chapter)?'正文版本有冲突':dirty?'正文未保存':'已保存';if(/失败|冲突/.test(notice))top.textContent=notice;top.dataset.state=/失败|冲突/.test(notice)||hasConflict(chapter)?'error':saveBusy?'busy':dirty?'dirty':'saved';top.title=/失败|冲突/.test(notice)?notice:dirty?'手工正文修改尚未建立正式版本':'正文已保存到本地';}
@@ -151,6 +156,9 @@
   }
   document.addEventListener('compositionend',()=>queueMicrotask(()=>{if(refreshAfterComposition){refreshAfterComposition=false;refresh();}}));
   document.addEventListener('click',event=>{
+    for(const menu of document.querySelectorAll('[data-manuscript-menu][open]')){
+      if(!menu.contains(event.target)||event.target.closest('button')){menu.open=false;if(menu.contains(document.activeElement))menu.querySelector('summary').focus({preventScroll:true});}
+    }
     const button=event.target.closest('[data-chapter-start],[data-chapter-save],[data-chapter-review-run],[data-chapter-review-decide],[data-chapter-rebase],[data-chapter-undo],[data-chapter-redo],[data-save-for-agent],[data-chapter-selection]');
     if(!button||!button.closest('.chapter-authoring')&&!(button.hasAttribute('data-save-for-agent')&&document.querySelector('.chapter-authoring')))return;
     if(button.hasAttribute('data-chapter-selection')){
@@ -167,6 +175,15 @@
     const scene=writingChapter()?.scenes?.find(item=>item.id===button.dataset.chapterRebase),draft=scene&&entry(scene);
     if(draft){draft.base_revision_id=base(scene);saveCache();notice='已选择当前服务端版本作为保存基准；请核对本地正文后保存。';refresh();}
   },true);
+  document.addEventListener('change',event=>{
+    const menu=event.target.closest('[data-manuscript-menu]');
+    if(menu&&event.target.matches('select')){menu.open=false;menu.querySelector('summary').focus({preventScroll:true});}
+  });
+  document.addEventListener('keydown',event=>{
+    if(event.key!=='Escape')return;
+    const menu=document.querySelector('[data-manuscript-menu][open]');if(!menu)return;
+    event.preventDefault();event.stopPropagation();menu.open=false;menu.querySelector('summary').focus({preventScroll:true});
+  });
   document.addEventListener('keydown',event=>{
     if(event.defaultPrevented||event.isComposing||event.altKey||event.shiftKey||!(event.ctrlKey||event.metaKey)||event.key.toLowerCase()!=='s')return;
     const host=document.querySelector('.chapter-authoring');

@@ -98,7 +98,7 @@ def test_first_draft_has_one_batch_action_and_numbered_new_prose(local_authoring
     expect(review.locator('[data-scene-diff-count]')).to_have_text(f'已选择 2 / {len(changes)} 项')
     if width == 1920:
         toolbar = review.locator('.chapter-inline-review-toolbar').bounding_box()
-        save = page.locator('.chapter-authoring-save').bounding_box()
+        save = page.locator('.chapter-continuous-head').bounding_box()
         assert toolbar['y'] >= save['y'] + save['height']
         assert toolbar['y'] + toolbar['height'] <= 1080
     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')

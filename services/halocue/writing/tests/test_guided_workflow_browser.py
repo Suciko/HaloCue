@@ -106,17 +106,20 @@ def test_manual_draft_pause_and_refresh_preserve_the_same_prose(flow_server, bro
         (1280, 720),
     )
     enable_optional_companion(page)
+    page.get_by_label("章节操作", exact=True).click()
     page.get_by_label("用户引导模式").select_option("guided")
     panel = page.get_by_role("region", name="当前任务引导")
     panel.get_by_role("button", name="自己写", exact=True).click()
     field = page.locator("[data-chapter-text]").first
     replace_paragraph(page, field, "这是我还没保存的正文。")
     expect(panel).to_contain_text("先保存正在修改的正文")
+    page.get_by_label("章节操作", exact=True).click()
     page.get_by_role("button", name="暂停", exact=True).click()
     expect(field).to_have_text("这是我还没保存的正文。")
     assert not service.get_work(work_id)["chapters"][0]["scenes"][0]["current_revision_id"]
     page.reload()
     expect(page.locator("[data-chapter-text]").first).to_have_text("这是我还没保存的正文。")
+    page.get_by_label("章节操作", exact=True).click()
     expect(page.get_by_role("button", name="恢复引导")).to_be_visible()
     page.get_by_role("button", name="恢复引导").click()
     panel.get_by_role("button", name="保存正文", exact=True).click()

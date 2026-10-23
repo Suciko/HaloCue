@@ -11,9 +11,8 @@
 #app#app.hc-redesign .chapter-document [data-chapter-type]{width:58px;min-height:23px;margin:0;padding:2px 4px;border:0;background:transparent;color:var(--hc-muted,var(--muted));font:500 11px/1.5 var(--author-ui-font,inherit);opacity:0;cursor:pointer}
 #app#app.hc-redesign .chapter-document [data-chapter-speaker]{order:-1;width:150px;max-width:60%;min-height:23px;margin:0;padding:1px 0;border:0;border-radius:0;background:transparent;color:var(--hc-accent,var(--accent));font:600 12px/1.5 var(--author-ui-font,inherit);outline-offset:2px}
 #app.hc-redesign .chapter-document [data-chapter-speaker][hidden]{display:none!important}
-#app.hc-redesign .chapter-document-actions{position:absolute;top:-11px;right:0;display:flex;align-items:start;justify-content:flex-end;gap:1px;opacity:0;user-select:none;background:var(--hc-bg,var(--surface-soft));border-radius:4px}
+#app.hc-redesign .chapter-document .chapter-document-actions{position:absolute;top:-11px;right:0;opacity:0;user-select:none}
 #app.hc-redesign .chapter-document [data-block-type="dialogue"] .chapter-document-actions{top:9px}
-#app#app.hc-redesign .chapter-document-actions button{width:23px;min-width:23px;min-height:26px;margin:0;padding:1px;border:0;background:transparent;color:var(--hc-muted,var(--muted));font-size:14px;cursor:pointer}
 #app#app.hc-redesign .chapter-document-block:is(:hover,:focus-within) [data-chapter-type],#app.hc-redesign .chapter-document-block:is(:hover,:focus-within) .chapter-document-actions{opacity:1}
 #app#app.hc-redesign .chapter-document-content:focus-within .is-active [data-chapter-type],#app.hc-redesign .chapter-document-content:focus-within .is-active .chapter-document-actions{opacity:1}
 #app.hc-redesign .chapter-document-block:focus-within .chapter-document-number{opacity:1;color:var(--hc-accent,var(--accent))}
@@ -24,16 +23,36 @@
 #app.hc-redesign .chapter-document-static{display:block;margin:0 0 12px;padding:8px 0 8px 32px;border:0;background:transparent}
 #app.hc-redesign .chapter-document-static-kind{font-size:12px;color:var(--hc-muted,var(--muted));white-space:nowrap}
 #app.hc-redesign .chapter-document-static p{margin:4px 0 0;font-size:16px;line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere}
-#app.hc-redesign .chapter-document-hint{font-size:12px;color:var(--hc-muted,var(--muted))}
-#app.hc-redesign .chapter-document-history{display:flex;align-items:center;gap:4px}
-#app.hc-redesign .chapter-document-history button{min-height:30px;padding:4px 8px;font-size:12px}
+/* A quiet page header; document commands are disclosed deliberately. */
+#app#app.hc-redesign .chapter-authoring .chapter-continuous-head{margin-bottom:6px;padding-bottom:14px;background:var(--hc-panel,var(--panel))}
+#app.hc-redesign .chapter-editor-tools{display:flex;align-items:center;gap:8px;flex-shrink:0}
+#app#app.hc-redesign [data-chapter-save]{min-height:32px;padding:5px 14px;font-size:12px}
+#app#app.hc-redesign [data-chapter-save][hidden],#app.hc-redesign .manuscript-menu[hidden]{display:none!important}
+#app.hc-redesign .manuscript-menu{position:relative;flex-shrink:0;font:400 13px/1.5 var(--author-ui-font,inherit);color:var(--hc-text,var(--ink))}
+#app#app.hc-redesign .manuscript-menu>summary{display:flex;align-items:center;justify-content:center;list-style:none;width:34px;min-height:34px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--hc-muted,var(--muted));font-size:22px;line-height:1;cursor:pointer;user-select:none}
+#app.hc-redesign .manuscript-menu>summary::-webkit-details-marker{display:none}
+#app#app.hc-redesign .manuscript-menu>summary:is(:hover,:focus-visible),#app#app.hc-redesign .manuscript-menu[open]>summary{background:var(--hc-hover,var(--surface-soft));color:var(--hc-text,var(--ink))}
+#app.hc-redesign .manuscript-menu>summary:focus-visible{outline:2px solid var(--hc-accent,var(--accent));outline-offset:2px}
+#app.hc-redesign .chapter-document-actions[open]{opacity:1;z-index:7}
+#app.hc-redesign .manuscript-menu-panel{position:absolute;z-index:12;top:calc(100% + 6px);right:0;width:240px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:6px;border:1px solid var(--hc-line,var(--line));border-radius:8px;background:var(--hc-panel,var(--panel));box-shadow:0 6px 24px #0002}
+#app#app.hc-redesign .manuscript-menu-panel>button{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:34px;margin:0;padding:7px 10px;border:0;border-radius:4px;background:transparent;color:var(--hc-text,var(--ink));text-align:left;font-size:13px}
+#app#app.hc-redesign .manuscript-menu-panel>button:is(:hover,:focus-visible){background:var(--hc-hover,var(--surface-soft))}
+#app#app.hc-redesign .manuscript-menu-panel>button:disabled{opacity:.4;cursor:default}
+#app.hc-redesign .manuscript-menu-panel kbd{flex-shrink:0;border:0;padding:0;color:var(--hc-muted,var(--muted));background:transparent;font:400 10px/1.5 var(--author-ui-font,inherit)}
+#app.hc-redesign .manuscript-menu-panel .scene-memory-status{display:block;margin:0;padding:7px 10px}
+#app.hc-redesign .manuscript-menu-panel .hc-guidance-controls{display:grid;justify-content:stretch;margin:4px 0 0;padding:8px;border-top:1px solid var(--hc-line,var(--line))}
+#app.hc-redesign .chapter-authoring-scene>header>div:first-child{flex:1;min-width:0}
+#app#app.hc-redesign .chapter-authoring .chapter-authoring-scene{padding-top:18px}
+#app#app.hc-redesign .chapter-authoring-scene>header{gap:8px;margin-bottom:12px}
+#app.hc-redesign .chapter-authoring .chapter-inline-review-toolbar{top:var(--chapter-header-height,86px)}
 .chapter-document-content .ProseMirror-selectednode{outline:1px solid var(--hc-accent,var(--accent))}
 .chapter-document-content .ProseMirror-separator{display:inline!important;border:0!important;margin:0!important;width:0!important;height:0!important}
 .chapter-document-content .ProseMirror-gapcursor{display:none}
 @media(max-width:760px){
   #app.hc-redesign .chapter-document .chapter-document-block{grid-template-columns:18px minmax(0,1fr);gap:6px}
-  #app#app.hc-redesign .chapter-document-actions button{width:19px;min-width:19px}
-  #app.hc-redesign .chapter-document-hint{display:none}
+  #app#app.hc-redesign .manuscript-menu>summary{width:40px;min-height:40px}
+  #app#app.hc-redesign .chapter-editor-tools{gap:4px}
+  #app.hc-redesign.writing-workbench-stage:is([data-writing-mobile-view="agent"],[data-writing-mobile-view="review"]) .chapter-editor-tools{display:none}
 }
 @media(hover:none){
   #app#app.hc-redesign .chapter-document .is-active [data-chapter-type],#app.hc-redesign .chapter-document .is-active .chapter-document-actions{opacity:.85}

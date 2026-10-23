@@ -1232,7 +1232,7 @@
       // single-page manuscript layout and remain available on narrow screens.
       const sceneHead = document.querySelector('.scene-head');
       const chapterHead = document.querySelector('.chapter-continuous-head');
-      const externalAnchor = sceneHead || chapterHead;
+      const externalAnchor = document.querySelector('[data-chapter-menu-items]') || sceneHead || chapterHead;
       if (externalAnchor && !externalAnchor.querySelector('[data-external-agent-open]')) {
         externalAnchor.insertAdjacentHTML('beforeend', '<button type="button" class="quiet" data-external-agent-open>任务包交换</button>');
       }

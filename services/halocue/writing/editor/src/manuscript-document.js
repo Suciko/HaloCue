@@ -51,7 +51,7 @@ class ParagraphView {
   constructor(node, view, getPos) {
     this.view=view;this.getPos=getPos;
     this.dom=document.createElement('article');this.dom.className='chapter-document-block';this.dom.dataset.chapterBlock='';
-    this.dom.innerHTML='<span class="chapter-document-number" contenteditable="false" aria-hidden="true"></span><div class="chapter-document-body"><div class="chapter-document-meta" contenteditable="false" data-block-controls><select aria-label="段落类型" data-chapter-type><option value="narration">旁白</option><option value="action">动作</option><option value="dialogue">对白</option></select><input aria-label="说话人" data-chapter-speaker placeholder="说话人"></div><p data-chapter-text></p></div><div class="chapter-document-actions" contenteditable="false" data-block-controls><button type="button" data-document-move="up" aria-label="上移段落" title="上移段落">↑</button><button type="button" data-document-move="down" aria-label="下移段落" title="下移段落">↓</button><button type="button" data-document-remove aria-label="删除段落" title="删除段落">×</button></div>';
+    this.dom.innerHTML='<span class="chapter-document-number" contenteditable="false" aria-hidden="true"></span><div class="chapter-document-body"><div class="chapter-document-meta" contenteditable="false" data-block-controls><select aria-label="段落类型" data-chapter-type><option value="narration">旁白</option><option value="action">动作</option><option value="dialogue">对白</option></select><input aria-label="说话人" data-chapter-speaker placeholder="说话人"></div><p data-chapter-text></p></div><details class="chapter-document-actions manuscript-menu" contenteditable="false" data-block-controls data-manuscript-menu><summary title="段落操作">⋯</summary><div class="manuscript-menu-panel"><button type="button" data-document-move="up">上移段落</button><button type="button" data-document-move="down">下移段落</button><button type="button" data-document-remove>删除段落</button></div></details>';
     this.contentDOM=this.dom.querySelector('[data-chapter-text]');
     this.type=this.dom.querySelector('[data-chapter-type]');this.speaker=this.dom.querySelector('[data-chapter-speaker]');
     this.type.addEventListener('change',()=>this.setAttrs({type:this.type.value,...(this.type.value==='dialogue'?{}:{speaker:''})}));
@@ -121,6 +121,7 @@ class ManuscriptDocument {
       node.setAttribute('aria-label',`第 ${index+1} 段`);
       node.querySelector('.chapter-document-number').textContent=String(index+1).padStart(2,'0');
       node.querySelector('[data-chapter-text]').setAttribute('aria-label',`第 ${index+1} 段正文`);
+      node.querySelector('.chapter-document-actions>summary').setAttribute('aria-label',`第 ${index+1} 段操作`);
       node.classList.toggle('is-active',node.dataset.blockId===current);
       node.classList.toggle('is-empty',this.view.state.doc.child(index).content.size===0);
     });

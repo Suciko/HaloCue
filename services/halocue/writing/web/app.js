@@ -8817,8 +8817,18 @@ function decorateSceneMemoryAction(){
   // memory maintenance attached to the active scene header when the legacy
   // next-step bar is not present, so the release gate always points to a control.
   const sceneSurface=document.querySelector('.chapter-manuscript-scene.is-current, .scene-workbench');
-  const actions=sceneSurface?.querySelector('.command-actions')||sceneSurface?.querySelector('header');
+  let actions=sceneSurface?.querySelector('.command-actions')||sceneSurface?.querySelector('header');
   if(!scene?.current_revision_id||!actions)return;
+  const manuscriptScene=sceneSurface.matches('.chapter-manuscript-scene');
+  if(manuscriptScene){
+    let menu=sceneSurface.querySelector('[data-scene-options]');
+    if(!menu){
+      menu=document.createElement('details');menu.className='manuscript-menu scene-editor-menu';menu.dataset.manuscriptMenu='';menu.dataset.sceneOptions='';
+      menu.innerHTML='<summary aria-label="本场操作" title="本场操作">⋯</summary><div class="manuscript-menu-panel"></div>';
+      actions.append(menu);
+    }
+    actions=menu.querySelector('.manuscript-menu-panel');
+  }
   const pending=sceneMemoryProposal(scene),workItem=sceneMemoryWorkItem(scene);
   const existing=sceneSurface.querySelector('[data-scene-memory], .scene-memory-status');
   if(existing){
@@ -8829,6 +8839,7 @@ function decorateSceneMemoryAction(){
   }
   const finished=['succeeded','skipped'].includes(workItem?.status);
   const running=workItem?.status==='running';
+  if(manuscriptScene)actions.parentElement.hidden=Boolean(pending||running);
   if(finished){
     const status=document.createElement('span');
     status.className='scene-memory-status';
@@ -8842,12 +8853,17 @@ function decorateSceneMemoryAction(){
   button.textContent=pending?'审查记忆候选':running?'正在整理…':'记录本场进展';
   button.title=pending?'审查 Agent 从当前正式正文中提出的长期记忆':'整理这场的剧情进展，确认后供后续写作参考';
   if(running)button.disabled=true;
-  actions.append(button);
+  if(manuscriptScene&&(pending||running))sceneSurface.querySelector('header').insertBefore(button,actions.parentElement);
+  else actions.append(button);
   if(!pending&&!running&&!finished){
-    const more=document.createElement('details');
-    more.className='scene-memory-more';
-    more.innerHTML='<summary title="更多记忆操作" aria-label="更多记忆操作">更多</summary><div><b>本场没有新增信息？</b><p>如果这一场没有新进展，可以跳过。发布检查会保留这次决定。</p><button type="button" data-scene-memory-skip>确认本场无需记录</button></div>';
-    actions.append(more);
+    if(manuscriptScene){
+      const skip=document.createElement('button');skip.type='button';skip.dataset.sceneMemorySkip='';skip.textContent='本场无需记录';skip.title='确认本场没有新进展；发布检查会保留这次决定';actions.append(skip);
+    }else{
+      const more=document.createElement('details');
+      more.className='scene-memory-more';
+      more.innerHTML='<summary title="更多记忆操作" aria-label="更多记忆操作">更多</summary><div><b>本场没有新增信息？</b><p>如果这一场没有新进展，可以跳过。发布检查会保留这次决定。</p><button type="button" data-scene-memory-skip>确认本场无需记录</button></div>';
+      actions.append(more);
+    }
   }
   if(pending){
     if(!sceneSurface.querySelector('.scene-memory-review')){
