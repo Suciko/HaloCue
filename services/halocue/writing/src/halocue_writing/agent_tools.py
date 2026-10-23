@@ -318,6 +318,12 @@ class AgentToolRegistry:
                 }},
             }, "required": ["base_revision_id", "reason", "edits"], "additionalProperties": False,
         }, allowed_scopes=frozenset({"scene"}), required_action="discuss"), self._scene_text_edit)
+        self.register(ToolSpec("propose_scene_draft", "作者明确要求起草尚无正文的当前场景时，提交一份待审正文；只讨论时不要调用。每行使用已确认人物名或旁白加冒号。", {
+            "type": "object", "properties": {
+                "text": {"type": "string", "minLength": 1, "maxLength": 60000},
+                "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
+            }, "required": ["text", "reason"], "additionalProperties": False,
+        }, allowed_scopes=frozenset({"scene"}), required_action="discuss"), self._scene_draft)
         self.register(ToolSpec("search_character_cards", "检索当前作品人物卡", {"type": "object", "properties": {"query": {"type": "string"}}}), self._search_artifact("character_card"))
         self.register(ToolSpec("search_bundled_character_metadata", "检索随包完整人物参考卡；用于人物性格与写作依据，采用前需确认", {
             "type": "object",
@@ -356,6 +362,11 @@ class AgentToolRegistry:
         if context.task_contract_id != "scene.draft.rewrite":
             raise ValueError("当前回合只讨论或尚无正文，不能提交正文修改。")
         return context.service._prepare_scene_text_edit(context.connection, context.work_id, context.scope_id, arguments, selection=context.text_selection)
+
+    def _scene_draft(self, context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        if context.task_contract_id != "scene.draft.generate":
+            raise ValueError("当前回合不允许首次起草；已有正文请提交局部修改。")
+        return context.service._prepare_scene_draft(context.connection, context.work_id, context.scope_id, arguments, context.task_contract)
 
     def _scene_text_window(self, context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
         return context.service._read_scene_text_window(context.connection, context.work_id, context.scope_id, arguments)

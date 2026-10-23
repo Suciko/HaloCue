@@ -1,0 +1,27 @@
+.hc-guidance-controls{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12px;margin-left:auto;color:var(--hc-muted,var(--muted))}
+.hc-guidance-controls label{display:flex;flex-direction:row;align-items:center;gap:5px;margin:0;font-size:12px}
+.hc-guidance-controls select{width:auto;max-width:122px;min-height:30px;padding:3px 22px 3px 7px;border:1px solid var(--hc-line,var(--line));border-radius:7px;background:var(--hc-panel,var(--surface));color:var(--hc-text,var(--ink));font:inherit}
+.hc-guidance-controls button.quiet{min-height:30px;padding:4px 7px!important;font-size:12px!important;white-space:nowrap}
+.hc-guidance-controls button[hidden],.agent-reply-next-step[hidden]{display:none!important}
+.hc-task-guidance{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;margin:8px 0 12px;border:1px solid var(--hc-line,var(--line));border-radius:10px;background:var(--hc-panel,var(--surface));color:var(--hc-text,var(--ink));min-width:0}
+.hc-guidance-copy{min-width:0}
+.hc-guidance-copy>span{font-size:11px;color:var(--hc-muted,var(--muted))}
+.hc-guidance-copy p{margin:3px 0;font-size:13px;line-height:1.6;font-weight:600;overflow-wrap:anywhere}
+.hc-guidance-copy small{font-size:12px;line-height:1.65;color:var(--hc-muted,var(--muted))}
+.hc-guidance-actions{display:flex;align-items:center;flex-wrap:wrap;gap:6px;flex-shrink:0}
+.hc-guidance-actions .agent-reply-next-step{display:inline-flex;margin:0}
+.hc-guidance-actions button.quiet{font-size:12px;min-height:32px;padding:5px 9px;white-space:nowrap}
+.hc-guidance-actions [data-guidance-action]:first-child{color:var(--hc-accent,var(--action));border-color:var(--hc-line,var(--action-line))}
+.hc-task-guidance button:focus-visible,.hc-guidance-controls :is(select,button):focus-visible{outline:2px solid var(--hc-accent,var(--action));outline-offset:2px}
+.chapter-authoring-save{flex-wrap:wrap}
+@media(max-width:760px){.hc-task-guidance{align-items:flex-start;flex-direction:column;gap:8px}.hc-guidance-controls{gap:4px}.hc-guidance-controls label>span{display:none}.hc-guidance-controls select{max-width:108px}.hc-canvas-header .hc-discussion-tools{flex-wrap:wrap;justify-content:flex-end}}
+.hc-first-use-layer{--hc-first-use-accent:var(--hc-accent,var(--action,#5579bc));position:fixed;inset:0;width:100vw;height:100vh;max-width:none;max-height:none;margin:0;padding:0;border:0;overflow:visible;background:transparent;color:white;pointer-events:none;z-index:2147483000}
+.hc-first-use-layer::backdrop{background:transparent;pointer-events:none}
+.hc-first-use-veil{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.hc-first-use-tip{position:absolute;box-sizing:border-box;padding:3px 0;color:#fff;text-shadow:0 1px 3px #0008;pointer-events:auto;font:13px/1.7 var(--font-ui);text-wrap:pretty}
+.hc-first-use-tip span{font-size:11px;color:#e0e8fc;letter-spacing:.04em}.hc-first-use-tip h2{font:600 17px/1.5 var(--font-ui);margin:5px 0 7px;color:#fff}.hc-first-use-tip p{font-size:13px;line-height:1.8;margin:0;color:#f4f6fc}
+.hc-first-use-actions{display:flex;flex-wrap:wrap;gap:5px 10px;margin-top:10px}.hc-first-use-actions button{min-height:30px;white-space:nowrap;font-size:12px;padding:4px 8px;pointer-events:auto}.hc-first-use-actions button.quiet{color:#fff;background:transparent;border-color:#ffffff70}.hc-first-use-actions button.primary{background:var(--hc-first-use-accent);border-color:var(--hc-first-use-accent);color:#fff}.hc-first-use-actions button[hidden]{display:none!important}.hc-first-use-actions button:focus-visible{outline:2px solid #fff;outline-offset:3px}
+.hc-first-use-tip::before{content:'';position:absolute;width:0;height:0;border:7px solid transparent;pointer-events:none}
+.hc-first-use-tip[data-side="right"]::before{left:-19px;top:var(--pointer-y);border-right-color:white}.hc-first-use-tip[data-side="left"]::before{right:-19px;top:var(--pointer-y);border-left-color:white}.hc-first-use-tip[data-side="bottom"]::before{top:-19px;left:var(--pointer-x);border-bottom-color:white}.hc-first-use-tip[data-side="top"]::before{bottom:-19px;left:var(--pointer-x);border-top-color:white}
+.hc-first-use-tip[data-side="dock"]::before{display:none}
+.hc-first-use-active .work-user-status:not(:has([role="alert"],.work-user-status-alert)){display:none}

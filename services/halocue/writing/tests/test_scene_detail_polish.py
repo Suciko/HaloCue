@@ -59,15 +59,15 @@ def test_scene_detail_states(mode,width,theme):
                 # old library navigation duplicated the conversation workflow.
                 expect(page.locator('[data-agent-complete-cards]')).to_be_visible()
                 expect(page.locator('.scene-discussion-mode')).to_contain_text('缺少人物卡：安')
-                expect(page.locator('.scene-discussion-mode')).to_contain_text('手写也是可选路径，不是必经步骤')
+                expect(page.locator('.scene-discussion-mode')).to_contain_text('也可以先自己写')
                 expect(page.locator('.scene-discussion-mode')).not_to_contain_text('可以先在左侧手写')
                 expect(page.locator('[data-start-scene-manual]')).to_have_text('直接手写正文')
                 # Candidate generation is an Agent conversation/tool action, not a
                 # second disabled button in the scene panel.
                 expect(page.locator('[data-generate-scene-proposal]')).to_have_count(0)
                 assert page.locator('#sceneConversationForm').get_attribute('data-discussion-only')=='true'
-                expect(page.locator('.scene-discussion-mode')).to_contain_text('正文候选暂不可生成')
-                expect(page.locator('.scene-discussion-mode')).to_contain_text('消耗模型用量')
+                expect(page.locator('.scene-discussion-mode')).to_contain_text('还不能让助手写正文')
+                expect(page.locator('.scene-discussion-mode')).to_contain_text('使用模型额度')
                 expect(page.locator('#sceneAgentMessage')).to_have_attribute('placeholder',re.compile('不写正文'))
                 if theme=='dark':
                     background=page.locator('.scene-discussion-mode').evaluate('(node)=>getComputedStyle(node).backgroundColor')

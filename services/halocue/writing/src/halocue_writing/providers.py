@@ -1050,6 +1050,7 @@ class LLMWritingProvider(WritingProvider):
                 "input_schema": spec.input_schema,
             }
             for spec in AgentToolRegistry(service=None).specs()
+            if spec.name != "propose_scene_draft" or task_id == "scene.draft.generate"
             if task_id != "scene.draft.rewrite" or spec.name in {
                 "read_scene_text_window", "propose_scene_text_edit", "read_conversation_history",
                 "search_character_cards", "search_bundled_character_metadata", "search_world_bible", "search_work_canon",
@@ -1090,6 +1091,8 @@ class LLMWritingProvider(WritingProvider):
     @staticmethod
     def _result_content(result: dict) -> str:
         output = result.get("output")
+        if isinstance(output, dict) and output.get("kind") == "scene_draft":
+            output = {"kind": "scene_draft", "status": output.get("status"), "reason": output.get("reason")}
         if isinstance(output, dict) and output.get("kind") == "scene_text_edit":
             # The server already owns the full candidate and base. Echoing both
             # through every tool followup needlessly re-bills the whole scene.
@@ -1781,6 +1784,15 @@ class LLMWritingProvider(WritingProvider):
                     "知情边界或伏笔状态。只提取正文能够支持的内容，不把推测写成事实。"
                     "需要沉淀时调用 draft_canon_fact，并把 scene_memory_context.scene.revision_id"
                     " 写入 source_refs；每轮最多形成一份资料讨论草稿，正式写回仍由 Proposal 决定。"
+                )
+            if task_id == "scene.draft.generate":
+                system_prompt += (
+                    "\n当前场景尚无正文。作者明确要求起草、试写或写出本场时，直接调用 propose_scene_draft，"
+                    "把完整正文放在 text 参数里，每行使用本场已确认人物名或旁白加冒号。"
+                    "遵守 scene_conversation_context 中的场景目标、停止边界、人物与作者约束。"
+                    "不要只在聊天里答应起草，也不要要求作者再点一次生成按钮。"
+                    "作者只想讨论、提问或明确说不要生成时，简短回答，不调用起草工具。"
+                    '工具成功后只回复 JSON {"text": "简短说明候选已备好", "questions": []}，不重复正文。'
                 )
             if task_id == "scene.draft.rewrite":
                 system_prompt = self._skill_system_prompt(task_id, work_context, output_mode="edit_patch") + (

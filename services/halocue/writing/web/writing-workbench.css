@@ -1943,7 +1943,15 @@
 .writing-workbench-stage .scene-context-panel {
   border: 1px solid var(--wb-line);
   border-radius: 5px;
-  background: #fff;
+  background: var(--hc-panel, var(--surface));
+}
+
+.writing-workbench-stage :is(.scene-context-summary, .scene-context-form, .context-form-note, .scene-context-form .actions, .context-mode.legacy) {
+  background: var(--hc-panel, var(--surface));
+}
+
+.writing-workbench-stage :is(.scene-context-form legend, .context-form-note, .context-mini-group span, .context-mode) {
+  color: var(--hc-text, var(--ink));
 }
 
 .writing-workbench-stage .scene-context-panel.scene-context-compact {
@@ -2961,9 +2969,9 @@
   align-items: center;
   gap: 12px;
   margin: 14px auto;
-  border: 1px solid #e8c9c5;
+  border: 1px solid var(--hc-line, var(--line));
   border-radius: 6px;
-  background: #fff9f7;
+  background: var(--hc-panel, var(--surface));
   padding: 12px 14px;
 }
 

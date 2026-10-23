@@ -9,9 +9,9 @@
   <link rel="stylesheet" href="/styles.css?v=20260930-reference-fallback1">
   <link rel="stylesheet" href="/tokens.css?v=20260817-1">
   <!-- shell.css?v=20260820-37 and shell.css?v=20260824-44 retained for contract compatibility; the resource version below is current. -->
-  <link rel="stylesheet" href="/shell.css?v=20260927-release-quick1">
+  <link rel="stylesheet" href="/shell.css?v=20261020-recovery-theme1">
   <!-- writing-workbench.css?v=20260821-39 retained for contract compatibility; the resource version below is current. -->
-  <link rel="stylesheet" href="/writing-workbench.css?v=20260929-chapter-toolbar4">
+  <link rel="stylesheet" href="/writing-workbench.css?v=20261020-recovery-theme1">
   <link rel="stylesheet" href="/production-embed.css?v=20261006-host-scroll1">
   <link rel="stylesheet" href="/settings-center.css?v=20261005-full-models1">
   <link rel="stylesheet" href="/external-agents.css?v=20261003-exchange1">
@@ -23,9 +23,10 @@
   <link rel="stylesheet" href="/change-review.css?v=20260924-edge-scroll1">
   <link rel="stylesheet" href="/authoring-ui.css?v=20261005-reference-trash1">
   <link rel="stylesheet" href="/authoring-workspace-ui.css?v=20261005-director-mobile2">
-  <link rel="stylesheet" href="/chapter-authoring-ui.css?v=20261002-compact-chat1">
+  <link rel="stylesheet" href="/chapter-authoring-ui.css?v=20261023-inline-review1">
   <link rel="stylesheet" href="/knowledge-graph-ui.css?v=20260930-graph-fix1">
   <link rel="stylesheet" href="/startup.css?v=20261004-unified1">
+  <link rel="stylesheet" href="/guided-workflow.css?v=20261020-spotlight">
 </head>
 <body class="app-loading">
   <div class="boot-screen" id="bootScreen" role="status" aria-live="polite">
@@ -143,7 +144,7 @@
       <div class="work-dialog-fields">
       <p id="workDialogError" class="work-dialog-error" role="alert" hidden></p>
       <label>作品名称（可选）<input name="title" maxlength="80" placeholder="留空使用“未命名作品”"></label>
-      <label class="new-work-idea">起步想法（可选）<textarea name="idea" maxlength="600" placeholder="说说你想做什么：短篇、长篇、续写、改编，或先做大纲 / 场景。"></textarea><small>先说目标就好，Agent 会按类型引导；想法不会自动变成正式设定。</small></label>
+      <label class="new-work-idea">起步想法（可选）<textarea name="idea" maxlength="600" placeholder="想写谁的故事？从什么地方开始？先记一点想法。"></textarea><small>先写一点，之后慢慢补。助手整理出的内容，由你确认后采用。</small></label>
       <fieldset class="world-seed-picker">
         <legend>世界观底稿</legend>
         <label class="world-seed-option"><input type="radio" name="world_seed" value="blank" checked><span><b>空白世界</b><small>之后自行添加人物、地点、组织与规则。</small></span></label>
@@ -151,7 +152,7 @@
       </fieldset>
       <label class="work-world-draft-select">或复制已有世界底稿<select name="world_draft_id"><option value="">不使用已有底稿</option></select><small>创建作品时复制当前版本，之后各自独立修改。</small></label>
       <fieldset class="work-start-picker"><legend>接下来先做</legend><label><input type="radio" name="start_at" value="ideation" checked> 构思</label><label><input type="radio" name="start_at" value="outline"> 大纲</label><label><input type="radio" name="start_at" value="world"> 世界观</label></fieldset>
-      <p class="form-note">作品、默认卷、第一章和创作主对话会一起保存到本机。BA 底稿不是自动确认的官方设定；Agent 默认采用“审核协作”，不会静默覆盖正式产物。</p>
+      <p class="form-note">作品会保存在本机。助手给出的修改会先交给你确认，BA 底稿里的设定也需要你核对。</p>
       </div>
       <div class="dialog-actions"><button type="button" data-close-work-dialog class="quiet">取消</button><button type="submit" data-submit="work" class="primary">建立作品</button></div>
     </form>
@@ -737,6 +738,8 @@
             <div class="about-help-card"><div><b>让创作顺手一点</b><p>从第一场开始，查看写作、素材绑定与制作检查的操作说明。</p></div><button type="button" class="primary" data-action="help">打开使用手册</button></div>
             <h4 class="settings-section-title">环境与更多设置</h4>
             <div class="settings-shortcut-grid">
+              <button type="button" data-first-task-start><b>重看首次创作教学</b><small>跟着自己的作品学习，完成后退出教学</small></button>
+              <button type="button" data-guidance-enable><b>开启创作陪跑（可选）</b><small>熟悉软件后按需开启，默认不显示持续引导</small></button>
               <button type="button" data-settings-pane="system"><b>运行诊断 <span aria-hidden="true">↗</span></b><small>写作、制作服务与本地密钥保护状态</small></button>
               <button type="button" data-settings-pane="conversations"><b>已归档对话 <span aria-hidden="true">↗</span></b><small>检索并恢复归档的创作对话</small></button>
               <button type="button" data-settings-pane="corpus"><b>资料与素材索引 <span aria-hidden="true">↗</span></b><small>查看官方语料与素材索引状态</small></button>
@@ -928,7 +931,7 @@
 
   <dialog id="helpDialog" class="help-modal" aria-labelledby="helpDialogTitle">
     <div class="help-dialog-shell">
-      <header class="help-dialog-header"><div><p class="eyebrow">HALOCUE / 使用手册</p><h2 id="helpDialogTitle">帮助中心</h2></div><div class="help-dialog-actions"><a class="quiet" id="helpStandaloneLink" href="/help/" target="_blank" rel="noopener noreferrer">独立打开 ↗</a><button type="button" class="icon-button" data-close-help aria-label="关闭帮助中心" title="关闭 (Esc)">×</button></div></header>
+      <header class="help-dialog-header"><div><p class="eyebrow">HALOCUE / 使用手册</p><h2 id="helpDialogTitle">帮助中心</h2></div><div class="help-dialog-actions"><button type="button" class="quiet" data-first-task-start>重看新手教学</button><a class="quiet" id="helpStandaloneLink" href="/help/" target="_blank" rel="noopener noreferrer">独立打开 ↗</a><button type="button" class="icon-button" data-close-help aria-label="关闭帮助中心" title="关闭 (Esc)">×</button></div></header>
       <p id="helpLoadStatus" class="help-load-status" role="status" aria-live="polite">正在载入本机使用手册…</p>
       <div id="helpLoadError" class="help-load-error" role="alert" hidden><b>使用手册暂时无法载入</b><p>你可以先重新载入，或独立打开手册。仍无法读取时，请从「设置 → 关于」查看运行诊断；作品内容不受影响。</p><button type="button" class="quiet" data-help-retry>重新载入</button></div>
       <iframe id="helpFrame" title="HaloCue 使用手册" referrerpolicy="same-origin" hidden></iframe>
@@ -954,16 +957,18 @@
   <script src="/change-review.js?v=20261004-chapter-notes1" defer></script>
   <script src="/activity-refresh.js?v=20260925-activity1" defer></script>
   <script src="/authoring-workspace-ui.js?v=20261004-discussion-outline1" defer></script>
-  <script src="/chapter-authoring-ui.js?v=20260930-inline-rewrite4" defer></script>
+  <script src="/chapter-authoring-ui.js?v=20261023-inline-review1" defer></script>
   <script src="/vendor/echarts/echarts-6.0.0.min.js" defer></script>
   <script src="/knowledge-graph-ui.js?v=20260930-graph-fix1" defer></script>
-  <script src="/app.js?v=20261005-reference-trash1" defer></script>
+  <script src="/app.js?v=20261022-plain-copy1" defer></script>
   <script src="/codex-connection.js?v=20261003-subscription1" defer></script>
   <script src="/external-agents.js?v=20261003-exchange1" defer></script>
   <script src="/mcp-workspace.js?v=20261003-clients1" defer></script>
   <!-- writing-workbench.js?v=20260821-39, writing-workbench.js?v=20260822-65 retained for contract compatibility; the resource version below is current. -->
   <script src="/adaptation-workbench.js?v=20260927-adaptation4" defer></script>
-  <script src="/writing-workbench.js?v=20261003-external-agent1" defer></script>
+  <script src="/writing-workbench.js?v=20261020-first-ai1" defer></script>
+  <script src="/guided-workflow.js?v=20261019-first-use" defer></script>
+  <script src="/first-use-task.js?v=20261023-inline-review1" defer></script>
   <script src="/shell.js?v=20260924-navigation5" defer></script>
   <script src="/production-embed.js?v=20261006-aa-install-review1" defer></script>
   <script src="/app-chrome.js?v=20260925-global1" defer></script>

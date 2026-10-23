@@ -5645,6 +5645,10 @@ class WritingService:
             else "completed"
         )
         scene_edit_requests = [item.output for item in tool_results if item.status == "succeeded" and item.tool == "propose_scene_text_edit" and isinstance(item.output, dict)]
+        scene_draft_requests = [item.output for item in tool_results if item.status == "succeeded" and item.tool == "propose_scene_draft" and isinstance(item.output, dict)]
+        if len(scene_draft_requests) > 1 or (scene_draft_requests and scene_edit_requests):
+            tool_failure = {"code": "conflicting_scene_edits", "message": "本轮只能提交一份首次正文候选。"}
+            run_status = "failed"
         if len(scene_edit_requests) > 1:
             first_edit = scene_edit_requests[0]
             edits = [edit for request in scene_edit_requests for edit in request["edits"]]
@@ -5675,9 +5679,12 @@ class WritingService:
                 raise DomainError("agent_run_missing", "Agent 运行记录不存在。", status=409)
             if current_run["status"] != "running":
                 raise DomainError("agent_run_interrupted", "Agent 运行已被中断，不能覆盖其状态。", status=409)
-            if scene_edit_requests and not provider_failure and not tool_failure:
+            if (scene_edit_requests or scene_draft_requests) and not provider_failure and not tool_failure:
                 try:
-                    scene_edit_proposal_id = self._commit_scene_text_edit(connection, work_id, scene_edit_requests[0], provider_runtime)
+                    scene_edit_proposal_id = (
+                        self._commit_scene_draft(connection, work_id, scene_draft_requests[0], provider_runtime, task_contract, scene_conversation_context)
+                        if scene_draft_requests else self._commit_scene_text_edit(connection, work_id, scene_edit_requests[0], provider_runtime)
+                    )
                     reply["ready_for_proposal"] = True
                     run_status = "waiting_user"
                 except (ValueError, DomainError) as exc:
@@ -5686,7 +5693,7 @@ class WritingService:
                     reply["text"] = "正文已经变化或已有待处理修改，本轮修改没有应用。请核对当前正文后重试。"
                     reply["ready_for_proposal"] = False
                     for item in tool_results:
-                        if item.tool == "propose_scene_text_edit":
+                        if item.tool in {"propose_scene_text_edit", "propose_scene_draft"}:
                             item.status = "failed"
                             item.error = tool_failure
             timestamp = now()
@@ -6068,6 +6075,42 @@ class WritingService:
         return {"base_revision_id": scene["current_revision_id"],
                 "replace_proposal_id": pending["id"] if pending else None,
                 **text_window(blocks, start=arguments.get("start", 1), limit=arguments.get("limit", 40), query=arguments.get("query", ""))}
+
+    def _prepare_scene_draft(self, connection, work_id, scene_id, arguments, task_contract):
+        scene = connection.execute("SELECT current_revision_id FROM scenes WHERE id=? AND work_id=?", (scene_id, work_id)).fetchone()
+        if not scene or scene["current_revision_id"]:
+            raise ValueError("场景已有正文或已被移除，请重新读取后使用局部修改。")
+        if connection.execute("SELECT 1 FROM proposals WHERE work_id=? AND scope_id=? AND kind='scene_script' AND status='pending'", (work_id, scene_id)).fetchone():
+            raise ValueError("本场已有待审候选，请先采用或退回。")
+        context = self._scene_conversation_context(connection, work_id, task_contract)
+        materials = context["confirmed_materials"]
+        cards = [item["content"] for item in materials if item["kind"] == "character_card"]
+        brief = next((item["content"] for item in materials if item["kind"] == "brief"), {})
+        blueprint = next((item["content"] for item in materials if item["kind"] == "story_blueprint"), {})
+        if (context.get("ba_skill") or {}).get("status") != "ready" or not brief or not blueprint or (not cards and not blueprint.get("narrator_only")):
+            raise ValueError("本场写作依据尚未准备好，请先确认方向、人物与规则。")
+        candidate = self._normalize_official_script(arguments["text"], {
+            "runtime_character_cards": cards, "brief": brief, "scene_contract": context["scene"]["contract"],
+        })
+        return {"kind": "scene_draft", "status": "prepared", "scene_id": scene_id,
+                "text": candidate, "reason": arguments["reason"],
+                "source_revision_ids": context["source_revision_ids"], "scene_contract": context["scene"]["contract"]}
+
+    def _commit_scene_draft(self, connection, work_id, prepared, provider_runtime, task_contract, original_context):
+        verified = self._prepare_scene_draft(connection, work_id, prepared["scene_id"], prepared, task_contract)
+        for source in (prepared, {"source_revision_ids": original_context["source_revision_ids"], "scene_contract": original_context["scene"]["contract"]}):
+            if sorted(source["source_revision_ids"]) != sorted(verified["source_revision_ids"]) or source["scene_contract"] != verified["scene_contract"]:
+                raise ValueError("本场写作依据已变化，请按当前设定重新起草。")
+        proposal_id = new_id("proposal")
+        candidate_uri, candidate_hash = self.repo.atomic_write_text(f"artifacts/proposals/{proposal_id}.txt", verified["text"])
+        diff = list(difflib.unified_diff([], verified["text"].splitlines(), fromfile="空白正文", tofile="正文候选", lineterm=""))
+        connection.execute(
+            "INSERT INTO proposals (id,work_id,kind,scope_type,scope_id,base_revision_id,candidate_uri,candidate_hash,diff_json,evidence_json,risk,status,provider_json,created_at,decided_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (proposal_id, work_id, "scene_script", "scene", prepared["scene_id"], None, candidate_uri, candidate_hash, canonical_json(diff), canonical_json(verified["source_revision_ids"]), "medium", "pending", canonical_json(provider_runtime), now(), None),
+        )
+        version = connection.execute("SELECT version FROM works WHERE id=?", (work_id,)).fetchone()[0]
+        self._bump_work(connection, work_id, version)
+        return proposal_id
 
     def _prepare_scene_text_edit(self, connection, work_id, scene_id, arguments, *, selection=None, allow_batch=False):
         scene = connection.execute("SELECT current_revision_id FROM scenes WHERE id=? AND work_id=?", (scene_id, work_id)).fetchone()

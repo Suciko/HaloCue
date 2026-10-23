@@ -378,7 +378,7 @@ def test_continuous_chapter_exposes_scene_memory_maintenance(local_authoring, br
     page.goto(f"{url}/?section=writing&stage=draft&work_id={work['id']}&chapter_id={chapter}&scene_id={made['scene_id']}")
     expect(page.locator(".chapter-authoring-scene")).to_be_visible()
     expect(page.locator("[data-scene-memory]")).to_be_visible()
-    expect(page.get_by_role("button", name="沉淀本场变化", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="记录本场进展", exact=True)).to_be_visible()
     page.close()
 
 

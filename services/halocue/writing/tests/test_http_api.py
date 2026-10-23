@@ -1729,7 +1729,7 @@ def test_blocked_scene_agent_keeps_discussion_composer_but_denies_candidate_gene
     assert "data-discussion-only=\"${discussionOnly?'true':'false'}\"" in script
     assert "discussion_only:form.dataset.discussionOnly==='true'" in script
     assert "说说这一场想怎么写…" in script
-    assert "正文候选暂不可生成" in script
+    assert "还不能让助手写正文" in script
     assert "当前缺少：" in script
     # Labels no longer change semantics by viewport; candidate gating still does.
     assert "canSend&&!discussionOnly&&!proposal" in script

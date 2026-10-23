@@ -22,6 +22,7 @@ TOOL_PRESENTATION = {
     "create_knowledge_proposal": ("提交资料候选", "创作整理"),
     "read_scene_text_window": ("读取目标正文段落", "正文"),
     "propose_scene_text_edit": ("准备正文修改对比", "正文"),
+    "propose_scene_draft": ("准备本场正文候选", "正文"),
     "store_conversation_attachments": ("保存对话附件", "附件"),
     "document.retrieve": ("检索相关文档片段", "文档检索"),
     "provider_call": ("调用写作模型", "模型"),
@@ -65,6 +66,8 @@ def tool_summary(name: str, value: Any) -> str:
         return f"已整理「{value.get('title') or '资料'}」草稿，等待核对"
     if name == "propose_scene_text_edit" and isinstance(value.get("edits"), list):
         return f"准备修改 {len(value['edits'])} 个正文段落，等待核对"
+    if name == "propose_scene_draft":
+        return "本场正文候选已准备，等待核对"
     if name == "read_scene_text_window":
         return f"已读取 {len(value.get('blocks') or [])} 个正文段落"
     if value.get("next") == "user_confirmation":

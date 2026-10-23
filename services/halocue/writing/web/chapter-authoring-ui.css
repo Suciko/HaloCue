@@ -46,7 +46,7 @@
 
 /* 1.0 manuscript: sentence types are legible while controls stay secondary. */
 .chapter-inline-review [hidden]{display:none!important}
-.chapter-inline-change{margin:18px 0 24px 32px;border:1px solid var(--hc-line,var(--line));border-radius:10px;overflow:hidden;scroll-margin-top:100px;background:var(--hc-panel,var(--panel));outline-offset:3px}
+.chapter-inline-change{margin:18px 0 24px 32px;border:1px solid var(--hc-line,var(--line));border-radius:10px;overflow:hidden;scroll-margin-top:160px;background:var(--hc-panel,var(--panel));outline-offset:3px}
 .chapter-inline-change>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;font-size:12px}
 .chapter-inline-location{color:var(--hc-muted,var(--muted));font-weight:600}
 .chapter-inline-change .chapter-inline-choice{display:flex!important;flex-direction:row!important;align-items:center!important;gap:7px;margin:0;font-size:12px;font-weight:500}
@@ -61,12 +61,22 @@
 .chapter-inline-copy p{margin:6px 0 0;font-size:16px;line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere}
 .chapter-inline-before> b{color:#bd6970}.chapter-inline-after> b{color:#509b7d}
 .chapter-inline-change.writing-return-target{box-shadow:none!important;outline:2px solid var(--hc-accent,var(--accent));outline-offset:2px}
-.chapter-inline-change>footer,.chapter-inline-review-summary{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--hc-line,var(--line))}
+.chapter-inline-change>footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--hc-line,var(--line))}
 .chapter-inline-change>footer button{min-height:30px;padding:5px 10px;font-size:12px}
-.chapter-inline-review-summary{margin-left:32px;font-size:12px;color:var(--hc-muted,var(--muted))}
+.chapter-inline-review-toolbar{position:sticky;top:56px;z-index:3;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px 16px;margin:0 0 18px 32px;padding:12px 14px;border:1px solid var(--hc-line,var(--line));border-radius:8px;background:var(--hc-panel,var(--panel))}
+.chapter-inline-review-status{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 12px;font-size:12px}
+.chapter-inline-review-status b{font-weight:600;color:var(--hc-text,var(--ink))}
+.chapter-inline-review-status span{color:var(--hc-muted,var(--muted))}
+.chapter-inline-review-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.chapter-inline-review-actions button{min-height:32px;padding:5px 10px;font-size:12px}
+.chapter-inline-review.is-initial-draft .chapter-inline-change{margin:0 0 0 32px;border:0;border-bottom:1px solid var(--hc-line,var(--line));border-radius:0;background:transparent}
+.chapter-inline-review.is-initial-draft .chapter-inline-change>header{padding:14px 0 8px}
+.chapter-inline-review.is-initial-draft .chapter-inline-pair{display:block;border:0}
+.chapter-inline-review.is-initial-draft .chapter-inline-after{padding:0;border:0;background:transparent}
+.chapter-inline-review.is-initial-draft .chapter-inline-change>footer{padding:6px 0 12px;border:0}
 .chapter-inline-empty{font-size:13px;opacity:.7}
 .chapter-inline-review-unavailable{padding:14px;border:1px solid var(--hc-line,var(--line));font-size:13px}
-@media(max-width:760px){.chapter-inline-change{margin-left:0}.chapter-inline-pair{grid-template-columns:minmax(0,1fr)}.chapter-inline-after{border-left:0;border-top:1px solid var(--hc-line,var(--line))}.chapter-inline-change>header{align-items:flex-start;flex-wrap:wrap}.chapter-inline-copy p{font-size:15px}.chapter-inline-review-summary{margin-left:0}}
+@media(max-width:760px){.chapter-inline-change{margin-left:0}.chapter-inline-pair{grid-template-columns:minmax(0,1fr)}.chapter-inline-after{border-left:0;border-top:1px solid var(--hc-line,var(--line))}.chapter-inline-change>header{align-items:flex-start;flex-wrap:wrap}.chapter-inline-copy p{font-size:15px}.chapter-inline-review-toolbar{top:0;margin-left:0}.chapter-inline-review.is-initial-draft .chapter-inline-change{margin-left:0}}
 .chapter-authoring{width:min(100%,900px);color:var(--hc-text,var(--ink))}
 .chapter-authoring .chapter-continuous-head{padding:20px 0 22px;border-bottom-color:var(--hc-line,var(--line))}
 .chapter-authoring .chapter-continuous-head h2{font-size:clamp(22px,2vw,28px);line-height:1.35}
